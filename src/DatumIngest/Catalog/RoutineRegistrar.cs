@@ -57,31 +57,6 @@ internal sealed class RoutineRegistrar
     private SchemaResolver Resolver() => new(_catalog, _catalog.SearchPath);
 
     /// <summary>
-    /// S7c: catalog search_path extended with the legacy <c>udf</c> and
-    /// <c>proc</c> sentinels so unqualified CREATE FUNCTION / CREATE
-    /// PROCEDURE (which still default to those sentinels) and unqualified
-    /// DROP / CALL referencing them stay findable. S7d drops the
-    /// fallback when the defaults move to a real schema.
-    /// </summary>
-    private IReadOnlyList<string> RoutineSearchPath()
-    {
-        IReadOnlyList<string> sessionPath = _catalog.SearchPath;
-        bool hasUdf = false, hasProc = false;
-        foreach (string s in sessionPath)
-        {
-            if (string.Equals(s, "udf", StringComparison.OrdinalIgnoreCase)) hasUdf = true;
-            if (string.Equals(s, "proc", StringComparison.OrdinalIgnoreCase)) hasProc = true;
-        }
-        if (hasUdf && hasProc) return sessionPath;
-
-        List<string> extended = new(sessionPath.Count + 2);
-        extended.AddRange(sessionPath);
-        if (!hasUdf) extended.Add("udf");
-        if (!hasProc) extended.Add("proc");
-        return extended;
-    }
-
-    /// <summary>
     /// Reconciles every procedural UDF loaded from the catalog file. Two
     /// things happen per descriptor:
     /// <list type="bullet">
@@ -132,13 +107,11 @@ internal sealed class RoutineRegistrar
         // call-site arity stays unambiguous (positional matching only).
         ValidateDefaultsContiguous(create.Parameters, $"CREATE FUNCTION {create.Name}");
 
-        // Pick the target schema. Explicit qualification wins; unqualified
-        // CREATE FUNCTION falls back to the legacy <c>udf</c> sentinel so
-        // existing call sites that write <c>udf.foo(...)</c> still resolve
-        // through the post-S7c qualified registry. S7d switches the default
-        // to the first DDL-capable schema on search_path (typically
-        // <c>public</c>) and migrates the call syntax accordingly.
-        QualifiedName qn = new(create.SchemaName ?? "udf", create.Name);
+        // Resolve the target schema via the same DDL-capable schema rules
+        // that govern CREATE TABLE: explicit schema goes there if it's
+        // mounted and writable; unqualified picks the first DDL-capable
+        // schema on the session search_path (typically <c>public</c>).
+        QualifiedName qn = Resolver().ResolveForCreate(create.SchemaName, create.Name);
 
         if (create.IfNotExists && _udfs.TryGet(qn, out _))
         {
@@ -483,7 +456,7 @@ internal sealed class RoutineRegistrar
         // appended so functions created with the unqualified default
         // (which still lands at "udf" in S7c) are findable. S7d strips
         // this fallback.
-        if (!_udfs.TryResolve(drop.SchemaName, drop.Name, RoutineSearchPath(), out UdfDescriptor? udf))
+        if (!_udfs.TryResolve(drop.SchemaName, drop.Name, _catalog.SearchPath, out UdfDescriptor? udf))
         {
             if (drop.IfExists) return;
             string label = drop.SchemaName is null ? drop.Name : $"{drop.SchemaName}.{drop.Name}";
@@ -646,11 +619,10 @@ internal sealed class RoutineRegistrar
     {
         ValidateDefaultsContiguous(create.Parameters, $"CREATE PROCEDURE {create.Name}");
 
-        // Same legacy-default rule as ApplyCreateFunction — unqualified
-        // CREATE PROCEDURE lands in the legacy <c>proc</c> sentinel
-        // schema; S7d will switch the default to first DDL-capable on
-        // search_path.
-        QualifiedName qn = new(create.SchemaName ?? "proc", create.Name);
+        // Same DDL-capable schema rules as ApplyCreateFunction: explicit
+        // qualification wins; unqualified picks the first DDL-capable
+        // schema on the session search_path.
+        QualifiedName qn = Resolver().ResolveForCreate(create.SchemaName, create.Name);
 
         try
         {
@@ -690,7 +662,7 @@ internal sealed class RoutineRegistrar
     /// </summary>
     public void ApplyDropProcedure(DropProcedureStatement drop)
     {
-        if (!_procedures.TryResolve(drop.SchemaName, drop.Name, RoutineSearchPath(), out ProcedureDescriptor? proc))
+        if (!_procedures.TryResolve(drop.SchemaName, drop.Name, _catalog.SearchPath, out ProcedureDescriptor? proc))
         {
             if (drop.IfExists) return;
             string label = drop.SchemaName is null ? drop.Name : $"{drop.SchemaName}.{drop.Name}";

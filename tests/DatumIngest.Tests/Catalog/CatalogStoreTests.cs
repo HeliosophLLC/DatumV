@@ -158,7 +158,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         // before "outer_macro"), the dependent rehydrates cleanly.
         TableCatalog first = OpenCatalog();
         first.Plan("CREATE FUNCTION inner_macro(@s STRING) AS upper(@s)");
-        first.Plan("CREATE FUNCTION outer_macro(@s STRING) AS udf.inner_macro(@s)");
+        first.Plan("CREATE FUNCTION outer_macro(@s STRING) AS inner_macro(@s)");
 
         TableCatalog second = OpenCatalog();
         Assert.True(second.Udfs.TryGet("inner_macro", out _));

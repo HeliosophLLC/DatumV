@@ -838,7 +838,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             "END");
 
         List<CellPrintBatchEvent> prints = await CollectPrintsAsync(
-            "CALL proc.trace(3)", catalog);
+            "CALL trace(3)", catalog);
 
         Assert.Equal(
             ["enter trace", "1", "2", "3", "exit trace"],
@@ -1008,7 +1008,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
         BatchResult result = await RunAsync(
             "DECLARE @msg STRING = ''; " +
-            "TRY CALL proc.does_not_exist() " +
+            "TRY CALL does_not_exist() " +
             "CATCH @err SET @msg = @err",
             catalog);
 
@@ -1024,7 +1024,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunAsync(
                 "DECLARE @msg STRING = ''; " +
-                "TRY CALL proc.does_not_exist() " +
+                "TRY CALL does_not_exist() " +
                 "CATCH @err SET @msg = @err; " +
                 "SET @msg = @err",  // @err out of scope here
                 catalog));
@@ -1067,7 +1067,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         BatchResult result = await RunAsync(
             "DECLARE @ran_catch BOOLEAN = FALSE; " +
             "DECLARE @ran_finally BOOLEAN = FALSE; " +
-            "TRY CALL proc.does_not_exist() " +
+            "TRY CALL does_not_exist() " +
             "CATCH @e SET @ran_catch = TRUE " +
             "FINALLY SET @ran_finally = TRUE",
             catalog);
@@ -1108,13 +1108,15 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // FINALLY raising its own error should win over the original;
         // matches C# / Java try/finally semantics. Use CALL of a missing
-        // procedure inside FINALLY to provoke a fresh throw.
+        // procedure inside FINALLY to provoke a fresh throw — post-S7d
+        // CALL falls through to scalar dispatch, so the missing-name
+        // error arrives wrapped in <see cref="ExpressionEvaluationException"/>.
         TableCatalog catalog = CreateCatalog();
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => RunAsync(
-                "TRY CALL proc.original_error() " +
-                "CATCH @e CALL proc.catch_error() " +
-                "FINALLY CALL proc.finally_error()",
+                "TRY CALL original_error() " +
+                "CATCH @e CALL catch_error() " +
+                "FINALLY CALL finally_error()",
                 catalog));
         Assert.Contains("finally_error", ex.Message);
     }
@@ -1126,14 +1128,14 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // should propagate after FINALLY runs.
         TableCatalog catalog = CreateCatalog();
         BatchResult? result = null;
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
             // Wrap the executor so we can introspect after-the-fact;
             // FinalBindings inside RunAsync would still be unreachable
             // because the exception escapes — instead verify via the message.
             result = await RunAsync(
-                "TRY CALL proc.original_error() " +
-                "CATCH @e CALL proc.catch_error() " +
+                "TRY CALL original_error() " +
+                "CATCH @e CALL catch_error() " +
                 "FINALLY DECLARE @cleanup BOOLEAN = TRUE",
                 catalog);
         });
@@ -1198,7 +1200,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             "DECLARE @inner_caught BOOLEAN = FALSE; " +
             "DECLARE @outer_caught BOOLEAN = FALSE; " +
             "TRY BEGIN " +
-            "  TRY CALL proc.does_not_exist() " +
+            "  TRY CALL does_not_exist() " +
             "  CATCH @inner SET @inner_caught = TRUE " +
             "END " +
             "CATCH @outer SET @outer_caught = TRUE",
@@ -1218,8 +1220,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
         BatchResult result = await RunAsync(
             "DECLARE @outer_caught BOOLEAN = FALSE; " +
             "TRY BEGIN " +
-            "  TRY CALL proc.first_error() " +
-            "  CATCH @inner CALL proc.second_error() " +
+            "  TRY CALL first_error() " +
+            "  CATCH @inner CALL second_error() " +
             "END " +
             "CATCH @outer SET @outer_caught = TRUE",
             catalog);

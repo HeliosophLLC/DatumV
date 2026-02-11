@@ -54,9 +54,10 @@ public static class UdfInliner
     /// unchanged for the scalar-dispatch path to handle at evaluation time.
     /// </summary>
     public static QueryExpression Inline(
-        QueryExpression query, UdfRegistry registry, IReadOnlyList<string> searchPath)
+        QueryExpression query, UdfRegistry registry, IReadOnlyList<string> searchPath,
+        ProcedureRegistry? procedures = null)
     {
-        Inliner inliner = new(registry, searchPath);
+        Inliner inliner = new(registry, searchPath, procedures);
         return inliner.RewriteQuery(query);
     }
 
@@ -64,53 +65,39 @@ public static class UdfInliner
     /// Inlines macro UDF calls in a single <see cref="Expression"/>.
     /// </summary>
     public static Expression Inline(
-        Expression expression, UdfRegistry registry, IReadOnlyList<string> searchPath)
+        Expression expression, UdfRegistry registry, IReadOnlyList<string> searchPath,
+        ProcedureRegistry? procedures = null)
     {
-        Inliner inliner = new(registry, searchPath);
+        Inliner inliner = new(registry, searchPath, procedures);
         return inliner.Rewrite(expression);
     }
 
-    private static readonly IReadOnlyList<string> DefaultSearchPath = new[] { "public", "system", "udf" };
+    private static readonly IReadOnlyList<string> DefaultSearchPath = new[] { "public", "system" };
 
     /// <summary>
-    /// Back-compat overload that uses the default <c>[public, system, udf]</c>
-    /// search path. Pre-S7c call sites and tests can keep this shape; new
-    /// code should pass the catalog's session search_path explicitly.
-    /// The legacy <c>udf</c> entry on the default path keeps tests that
-    /// construct procedural-UDF descriptors with <c>SchemaName = "udf"</c>
-    /// resolving until they're migrated.
+    /// Convenience overload using the default <c>[public, system]</c>
+    /// search path. New call sites should pass the catalog's session
+    /// search_path explicitly via the 3-arg overload.
     /// </summary>
     public static Expression Inline(Expression expression, UdfRegistry registry)
         => Inline(expression, registry, DefaultSearchPath);
 
-    /// <summary>Back-compat overload; see <see cref="Inline(Expression, UdfRegistry)"/>.</summary>
+    /// <summary>Convenience overload; see <see cref="Inline(Expression, UdfRegistry)"/>.</summary>
     public static QueryExpression Inline(QueryExpression query, UdfRegistry registry)
         => Inline(query, registry, DefaultSearchPath);
 
     private sealed class Inliner
     {
         private readonly UdfRegistry _registry;
+        private readonly ProcedureRegistry? _procedures;
         private readonly IReadOnlyList<string> _searchPath;
         private readonly Stack<QualifiedName> _inliningStack = new();
 
-        public Inliner(UdfRegistry registry, IReadOnlyList<string> searchPath)
+        public Inliner(UdfRegistry registry, IReadOnlyList<string> searchPath, ProcedureRegistry? procedures)
         {
             _registry = registry;
-            // S7c: silently append the legacy "udf" sentinel so unqualified
-            // calls can still resolve UDFs created via the legacy default.
-            // S7d strips this once unqualified CREATE FUNCTION defaults to
-            // a real schema on the user search_path.
-            if (!searchPath.Contains("udf", StringComparer.OrdinalIgnoreCase))
-            {
-                List<string> extended = new(searchPath.Count + 1);
-                extended.AddRange(searchPath);
-                extended.Add("udf");
-                _searchPath = extended;
-            }
-            else
-            {
-                _searchPath = searchPath;
-            }
+            _searchPath = searchPath;
+            _procedures = procedures;
         }
 
         public QueryExpression RewriteQuery(QueryExpression query) => query switch
@@ -205,15 +192,17 @@ public static class UdfInliner
                     return InlineUdfCall(call, udf);
                 }
 
-                // S7c back-compat: an explicit <c>udf.X</c> reference is the
-                // legacy "this is definitely a UDF" tag — surface a clear
-                // diagnostic at plan time when the target doesn't exist.
-                // S7d drops this when the prefix retires.
-                if (string.Equals(call.SchemaName, "udf", StringComparison.OrdinalIgnoreCase))
+                // S7d: procedures REQUIRE CALL. A procedure invocation in
+                // expression position (e.g. inside a SELECT) is a user error
+                // worth surfacing eagerly with a specific diagnostic
+                // instead of falling through to scalar dispatch's opaque
+                // "Unknown function" message.
+                if (_procedures is not null &&
+                    _procedures.TryResolve(call.SchemaName, call.FunctionName, _searchPath, out ProcedureDescriptor? proc))
                 {
                     throw new InvalidOperationException(
-                        $"UDF '{call.CallName}' is not registered. " +
-                        $"Register it via CREATE FUNCTION {call.FunctionName}(...) AS ... before referencing it.");
+                        $"'{proc.QualifiedName}' is a procedure; invoke it via " +
+                        $"CALL {proc.QualifiedName}(...) instead of using it in expression position.");
                 }
             }
 

@@ -161,17 +161,12 @@ public sealed class UdfRegistry
     /// <summary>All registered descriptors. Order is not guaranteed.</summary>
     public IReadOnlyCollection<UdfDescriptor> Entries => (IReadOnlyCollection<UdfDescriptor>)_entries.Values;
 
-    // S7c includes the legacy "udf" sentinel on the back-compat path so
-    // unqualified CREATE FUNCTION (which still lands at the legacy
-    // schema) is still findable from tests and ad-hoc lookups. S7d
-    // removes "udf" from this path once the default lands in "public".
-    private static readonly IReadOnlyList<string> DefaultSearchPath = new[] { "public", "system", "udf" };
+    private static readonly IReadOnlyList<string> DefaultSearchPath = new[] { "public", "system" };
 
     /// <summary>
     /// Back-compat bare-string lookup that walks the default
-    /// <c>[public, system, udf]</c> search path. Useful for tests and
-    /// for the few call sites that don't yet pass an explicit
-    /// search_path.
+    /// <c>[public, system]</c> search path. Useful for tests and for
+    /// the few call sites that don't yet pass an explicit search_path.
     /// </summary>
     public bool TryGet(string name, [NotNullWhen(true)] out UdfDescriptor? descriptor)
         => TryResolve(null, name, DefaultSearchPath, out descriptor);

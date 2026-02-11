@@ -17,8 +17,9 @@ namespace DatumIngest.Tests.Catalog;
 /// </remarks>
 public class UdfsTableProviderTests : ServiceTestBase
 {
-    /// <summary>Plain-CLR snapshot of a system_udfs row.</summary>
+    /// <summary>Plain-CLR snapshot of a system.udfs row.</summary>
     private sealed record SystemUdfRow(
+        string Schema,
         string Name,
         int ParameterCount,
         string Parameters,
@@ -39,33 +40,35 @@ public class UdfsTableProviderTests : ServiceTestBase
             {
                 Row row = batch[i];
                 rows.Add(new SystemUdfRow(
-                    Name: row[0].AsString(arena),
-                    ParameterCount: row[1].AsInt32(),
-                    Parameters: row[2].AsString(arena),
-                    ReturnType: row[3].IsNull ? null : row[3].AsString(arena),
-                    BodyKind: row[4].AsString(arena),
-                    IsPure: row[5].AsBoolean(),
-                    Body: row[6].AsString(arena)));
+                    Schema: row[0].AsString(arena),
+                    Name: row[1].AsString(arena),
+                    ParameterCount: row[2].AsInt32(),
+                    Parameters: row[3].AsString(arena),
+                    ReturnType: row[4].IsNull ? null : row[4].AsString(arena),
+                    BodyKind: row[5].AsString(arena),
+                    IsPure: row[6].AsBoolean(),
+                    Body: row[7].AsString(arena)));
             }
         }
         return rows;
     }
 
     [Fact]
-    public void Schema_HasSevenColumnsInDeclaredOrder()
+    public void Schema_HasEightColumnsInDeclaredOrder()
     {
         TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog[UdfsTableProvider.TableName];
         Schema schema = provider.GetSchema();
 
-        Assert.Equal(7, schema.Columns.Count);
-        Assert.Equal("name", schema.Columns[0].Name);
-        Assert.Equal("parameter_count", schema.Columns[1].Name);
-        Assert.Equal("parameters", schema.Columns[2].Name);
-        Assert.Equal("return_type", schema.Columns[3].Name);
-        Assert.Equal("body_kind", schema.Columns[4].Name);
-        Assert.Equal("is_pure", schema.Columns[5].Name);
-        Assert.Equal("body", schema.Columns[6].Name);
+        Assert.Equal(8, schema.Columns.Count);
+        Assert.Equal("schema", schema.Columns[0].Name);
+        Assert.Equal("name", schema.Columns[1].Name);
+        Assert.Equal("parameter_count", schema.Columns[2].Name);
+        Assert.Equal("parameters", schema.Columns[3].Name);
+        Assert.Equal("return_type", schema.Columns[4].Name);
+        Assert.Equal("body_kind", schema.Columns[5].Name);
+        Assert.Equal("is_pure", schema.Columns[6].Name);
+        Assert.Equal("body", schema.Columns[7].Name);
     }
 
     [Fact]
@@ -78,23 +81,26 @@ public class UdfsTableProviderTests : ServiceTestBase
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
         Assert.False(schema.Columns[0].Nullable);
 
-        Assert.Equal(DataKind.Int32, schema.Columns[1].Kind);
+        Assert.Equal(DataKind.String, schema.Columns[1].Kind);
         Assert.False(schema.Columns[1].Nullable);
 
-        Assert.Equal(DataKind.String, schema.Columns[2].Kind);
+        Assert.Equal(DataKind.Int32, schema.Columns[2].Kind);
         Assert.False(schema.Columns[2].Nullable);
 
         Assert.Equal(DataKind.String, schema.Columns[3].Kind);
-        Assert.True(schema.Columns[3].Nullable);
+        Assert.False(schema.Columns[3].Nullable);
 
         Assert.Equal(DataKind.String, schema.Columns[4].Kind);
-        Assert.False(schema.Columns[4].Nullable);
+        Assert.True(schema.Columns[4].Nullable);
 
-        Assert.Equal(DataKind.Boolean, schema.Columns[5].Kind);
+        Assert.Equal(DataKind.String, schema.Columns[5].Kind);
         Assert.False(schema.Columns[5].Nullable);
 
-        Assert.Equal(DataKind.String, schema.Columns[6].Kind);
+        Assert.Equal(DataKind.Boolean, schema.Columns[6].Kind);
         Assert.False(schema.Columns[6].Nullable);
+
+        Assert.Equal(DataKind.String, schema.Columns[7].Kind);
+        Assert.False(schema.Columns[7].Nullable);
     }
 
     [Fact]

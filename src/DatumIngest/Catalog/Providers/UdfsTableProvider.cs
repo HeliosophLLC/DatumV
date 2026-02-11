@@ -115,21 +115,22 @@ public sealed class UdfsTableProvider : NonSeekableTableProviderBase
 
     private static void FillRow(DataValue[] cells, UdfDescriptor descriptor, Arena arena)
     {
-        cells[0] = DataValue.FromString(descriptor.Name, arena);
-        cells[1] = DataValue.FromInt32(descriptor.Parameters.Count);
-        cells[2] = DataValue.FromString(FormatParameters(descriptor.Parameters), arena);
-        cells[3] = descriptor.ReturnTypeName is null
+        cells[0] = DataValue.FromString(descriptor.SchemaName, arena);
+        cells[1] = DataValue.FromString(descriptor.Name, arena);
+        cells[2] = DataValue.FromInt32(descriptor.Parameters.Count);
+        cells[3] = DataValue.FromString(FormatParameters(descriptor.Parameters), arena);
+        cells[4] = descriptor.ReturnTypeName is null
             ? DataValue.Null(DataKind.String)
             : DataValue.FromString(
                 descriptor.ReturnIsNotNull
                     ? descriptor.ReturnTypeName + " IS NOT NULL"
                     : descriptor.ReturnTypeName,
                 arena);
-        cells[4] = DataValue.FromString(
+        cells[5] = DataValue.FromString(
             descriptor.IsProcedural ? "procedural" : "macro",
             arena);
-        cells[5] = DataValue.FromBoolean(descriptor.IsPure);
-        cells[6] = DataValue.FromString(FormatBody(descriptor), arena);
+        cells[6] = DataValue.FromBoolean(descriptor.IsPure);
+        cells[7] = DataValue.FromString(FormatBody(descriptor), arena);
     }
 
     /// <summary>
@@ -186,6 +187,7 @@ public sealed class UdfsTableProvider : NonSeekableTableProviderBase
 
     private static Schema BuildSchema() => new(
     [
+        new ColumnInfo("schema",          DataKind.String,  nullable: false),
         new ColumnInfo("name",            DataKind.String,  nullable: false),
         new ColumnInfo("parameter_count", DataKind.Int32,   nullable: false),
         new ColumnInfo("parameters",      DataKind.String,  nullable: false),

@@ -111,10 +111,11 @@ public sealed class ProceduresTableProvider : NonSeekableTableProviderBase
 
     private static void FillRow(DataValue[] cells, ProcedureDescriptor descriptor, Arena arena)
     {
-        cells[0] = DataValue.FromString(descriptor.Name, arena);
-        cells[1] = DataValue.FromInt32(descriptor.Parameters.Count);
-        cells[2] = DataValue.FromString(FormatParameters(descriptor.Parameters), arena);
-        cells[3] = DataValue.FromString(descriptor.SourceText, arena);
+        cells[0] = DataValue.FromString(descriptor.SchemaName, arena);
+        cells[1] = DataValue.FromString(descriptor.Name, arena);
+        cells[2] = DataValue.FromInt32(descriptor.Parameters.Count);
+        cells[3] = DataValue.FromString(FormatParameters(descriptor.Parameters), arena);
+        cells[4] = DataValue.FromString(descriptor.SourceText, arena);
     }
 
     private static string FormatParameters(IReadOnlyList<UdfParameter> parameters)
@@ -145,6 +146,7 @@ public sealed class ProceduresTableProvider : NonSeekableTableProviderBase
 
     private static Schema BuildSchema() => new(
     [
+        new ColumnInfo("schema",          DataKind.String, nullable: false),
         new ColumnInfo("name",            DataKind.String, nullable: false),
         new ColumnInfo("parameter_count", DataKind.Int32,  nullable: false),
         new ColumnInfo("parameters",      DataKind.String, nullable: false),

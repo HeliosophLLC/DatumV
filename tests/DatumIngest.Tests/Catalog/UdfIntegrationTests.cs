@@ -127,18 +127,20 @@ public class UdfIntegrationTests : ServiceTestBase
     }
 
     [Fact]
-    public void CreateFunction_DirectSelfReference_RejectedAtRegistration()
+    public void CreateFunction_DirectSelfReference_RejectedAtFirstCall()
     {
+        // Post-S7d the registration-time pre-flight inliner no longer
+        // errors on unresolved references (calls just pass through and
+        // resolve at evaluation time). The cycle is caught the first time
+        // the UDF is referenced from a query: the inliner recurses into
+        // the substituted body, sees itself on the inlining stack, and
+        // throws.
         TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE FUNCTION loop(@x INT32) AS loop(@x)");
 
-        // The body references udf.loop — itself. Should be rejected at
-        // registration time because the body validator runs the inliner
-        // against the (currently empty) registry, where udf.loop is unknown.
-        // Once we attempt to register it, it's not yet in the registry, so
-        // the body's reference can't resolve — caught as "not registered".
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => catalog.Plan("CREATE FUNCTION loop(@x INT32) AS udf.loop(@x)"));
-        Assert.Contains("loop", ex.Message);
+            () => catalog.Plan("SELECT loop(1)"));
+        Assert.Contains("Cyclic UDF reference", ex.Message);
     }
 
     [Fact]
@@ -154,25 +156,34 @@ public class UdfIntegrationTests : ServiceTestBase
         // Plan a query that uses the UDF. After Plan, the operator tree
         // should contain `upper(name)` (the substituted body), not a UDF
         // call.
-        IQueryPlan plan = catalog.Plan("SELECT udf.shout(name) FROM orders");
+        IQueryPlan plan = catalog.Plan("SELECT shout(name) FROM orders");
         ExplainPlanNode tree = plan.ExplainTree;
 
         // The plan's text representation should reference upper(name),
-        // not udf.shout — the inliner ran successfully.
+        // not shout — the inliner ran successfully.
         string text = ExplainToText(tree);
         Assert.Contains("upper", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("udf.", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Plan_QueryReferencingUnknownUdf_Throws()
+    public async Task Execute_QueryReferencingUnknownUdf_Throws()
     {
+        // Post-S7d unknown functions don't fail at plan time — the
+        // inliner only inlines registered macros and lets everything else
+        // pass through. The scalar dispatch path at evaluation time
+        // surfaces "Unknown function" wrapped in ExpressionEvaluationException.
         TableCatalog catalog = CreateCatalog("orders",
             columns: ["id", "name"],
             new object[] { 1, "alice" });
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => catalog.Plan("SELECT udf.never_defined(name) FROM orders"));
+        IQueryPlan plan = catalog.Plan("SELECT never_defined(name) FROM orders");
+
+        Exception ex = await Assert.ThrowsAnyAsync<Exception>(
+            async () =>
+            {
+                await foreach (DatumIngest.Model.RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+            });
         Assert.Contains("never_defined", ex.Message);
     }
 
@@ -207,39 +218,39 @@ public class UdfIntegrationTests : ServiceTestBase
     [Fact]
     public void CreateFunction_DefaultsAtTail_AcceptedAndQueryable()
     {
-        // `udf.add(2)` should fill `@b` from its default of 5 → 7. We can't
+        // `add(2)` should fill `@b` from its default of 5 → 7. We can't
         // execute against an empty catalog, but we can verify a SELECT
         // referencing the partial-arity call plans without complaint.
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION add(@a INT32, @b INT32 = 5) AS @a + @b");
+        catalog.Plan("CREATE FUNCTION addnums(@a INT32, @b INT32 = 5) AS @a + @b");
 
         // Plan a SELECT that calls the UDF with only the required arg.
         // Inlining happens at plan time, so a malformed default would
         // throw here.
-        catalog.Plan("SELECT udf.add(2)");
-        catalog.Plan("SELECT udf.add(2, 10)");
+        catalog.Plan("SELECT addnums(2)");
+        catalog.Plan("SELECT addnums(2, 10)");
     }
 
     [Fact]
     public void CreateFunction_TooFewArgs_BelowMinimum_Throws()
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION add(@a INT32, @b INT32 = 0) AS @a + @b");
+        catalog.Plan("CREATE FUNCTION addnums(@a INT32, @b INT32 = 0) AS @a + @b");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => catalog.Plan("SELECT udf.add()"));
-        Assert.Contains("add", ex.Message);
+            () => catalog.Plan("SELECT addnums()"));
+        Assert.Contains("addnums", ex.Message);
     }
 
     [Fact]
     public void CreateFunction_TooManyArgs_AboveMaximum_Throws()
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION add(@a INT32, @b INT32 = 0) AS @a + @b");
+        catalog.Plan("CREATE FUNCTION addnums(@a INT32, @b INT32 = 0) AS @a + @b");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => catalog.Plan("SELECT udf.add(1, 2, 3)"));
-        Assert.Contains("add", ex.Message);
+            () => catalog.Plan("SELECT addnums(1, 2, 3)"));
+        Assert.Contains("addnums", ex.Message);
     }
 
     private static string ExplainToText(ExplainPlanNode node)

@@ -2159,7 +2159,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
     internal IQueryPlan PlanQuery(QueryExpression query)
     {
-        QueryExpression inlined = UdfInliner.Inline(query, _udfs, SearchPath);
+        QueryExpression inlined = UdfInliner.Inline(query, _udfs, SearchPath, _procedures);
         QueryPlanner planner = new(this, _functions);
         IQueryOperator op = planner.Plan(inlined);
         return new QueryPlan(op, this, _functions, _backing);

@@ -17,10 +17,10 @@ public class UdfInlinerTests : ServiceTestBase
         CreateFunctionStatement create = (CreateFunctionStatement)SqlParser.ParseStatement(sql);
         // Macro-only test helper — ExpressionBody is guaranteed non-null
         // because every CREATE FUNCTION here uses the AS-expression form.
-        // Tests register under the legacy "udf" sentinel schema so the
-        // back-compat default search path can resolve them.
+        // Tests register at <c>public</c> so the inliner's default
+        // <c>[public, system]</c> search path resolves them.
         return new UdfDescriptor(
-            SchemaName: create.SchemaName ?? "udf",
+            SchemaName: create.SchemaName ?? "public",
             Name: create.Name,
             Parameters: create.Parameters,
             ReturnTypeName: create.ReturnTypeName,
@@ -46,7 +46,7 @@ public class UdfInlinerTests : ServiceTestBase
     public void Inline_OneArgUdf_SubstitutesParameter()
     {
         Expression result = Inline(
-            "udf.shout(name)",
+            "shout(name)",
             "CREATE FUNCTION shout(@s STRING) AS upper(@s)");
 
         FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(result);
@@ -59,8 +59,8 @@ public class UdfInlinerTests : ServiceTestBase
     public void Inline_TwoArgUdf_SubstitutesBothParameters()
     {
         Expression result = Inline(
-            "udf.add(x, y)",
-            "CREATE FUNCTION add(@a INT32, @b INT32) AS @a + @b");
+            "addnums(x, y)",
+            "CREATE FUNCTION addnums(@a INT32, @b INT32) AS @a + @b");
 
         BinaryExpression sum = Assert.IsType<BinaryExpression>(result);
         Assert.Equal(BinaryOperator.Add, sum.Operator);
@@ -72,7 +72,7 @@ public class UdfInlinerTests : ServiceTestBase
     public void Inline_ZeroArgUdf_BodyEmittedAsIs()
     {
         Expression result = Inline(
-            "udf.zero()",
+            "zero()",
             "CREATE FUNCTION zero() AS 0");
 
         LiteralExpression literal = Assert.IsType<LiteralExpression>(result);
@@ -83,7 +83,7 @@ public class UdfInlinerTests : ServiceTestBase
     public void Inline_LiteralArg_InlinedDirectly()
     {
         Expression result = Inline(
-            "udf.shout('hello')",
+            "shout('hello')",
             "CREATE FUNCTION shout(@s STRING) AS upper(@s)");
 
         FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(result);
@@ -94,15 +94,16 @@ public class UdfInlinerTests : ServiceTestBase
     [Fact]
     public void Inline_NestedUdfCall_FullyInlines()
     {
-        // udf.b calls udf.a — after inlining, no UDF references remain.
+        // b calls a — after inlining, no UDF references remain.
         Expression result = Inline(
-            "udf.b(name)",
+            "b(name)",
             "CREATE FUNCTION a(@s STRING) AS upper(@s)",
-            "CREATE FUNCTION b(@s STRING) AS udf.a(@s)");
+            "CREATE FUNCTION b(@s STRING) AS a(@s)");
 
         FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(result);
         Assert.Equal("upper", call.FunctionName);
-        Assert.DoesNotContain("udf.", QueryExplainer.FormatExpression(result), StringComparison.OrdinalIgnoreCase);
+        // No UDF references should remain after full inlining — only built-ins.
+        Assert.Null(call.SchemaName);
     }
 
     [Fact]
@@ -111,7 +112,7 @@ public class UdfInlinerTests : ServiceTestBase
         // The argument to the outer UDF is itself a UDF call. The argument is
         // inlined first (children-first), then substituted into the outer body.
         Expression result = Inline(
-            "udf.scale(udf.bump(x))",
+            "scale(bump(x))",
             "CREATE FUNCTION bump(@v INT32) AS @v + 1",
             "CREATE FUNCTION scale(@v INT32) AS @v * 2");
 
@@ -127,7 +128,7 @@ public class UdfInlinerTests : ServiceTestBase
         // A UDF whose body is a backtick template lowers to concat() at parse
         // time; the inliner just substitutes the params inside that concat.
         Expression result = Inline(
-            "udf.greet(name)",
+            "greet(name)",
             "CREATE FUNCTION greet(@n STRING) AS `Hello ${@n}!`");
 
         FunctionCallExpression concat = Assert.IsType<FunctionCallExpression>(result);
@@ -143,8 +144,8 @@ public class UdfInlinerTests : ServiceTestBase
     public void Inline_TooFewArgs_Throws()
     {
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => Inline(
-            "udf.add(x)",
-            "CREATE FUNCTION add(@a INT32, @b INT32) AS @a + @b"));
+            "addnums(x)",
+            "CREATE FUNCTION addnums(@a INT32, @b INT32) AS @a + @b"));
 
         Assert.Contains("expects 2", ex.Message);
         Assert.Contains("got 1", ex.Message);
@@ -154,19 +155,25 @@ public class UdfInlinerTests : ServiceTestBase
     public void Inline_TooManyArgs_Throws()
     {
         Assert.Throws<InvalidOperationException>(() => Inline(
-            "udf.add(x, y, z)",
-            "CREATE FUNCTION add(@a INT32, @b INT32) AS @a + @b"));
+            "addnums(x, y, z)",
+            "CREATE FUNCTION addnums(@a INT32, @b INT32) AS @a + @b"));
     }
 
     [Fact]
-    public void Inline_UnregisteredUdf_Throws()
+    public void Inline_UnregisteredCall_PassesThrough()
     {
-        UdfRegistry empty = new();
-        empty.Register(CreateUdf("CREATE FUNCTION other(@x INT32) AS @x")); // unrelated
+        // Post-S7d the inliner only inlines macro UDFs that resolve through
+        // the registry. Anything else — built-ins, models, or unknown
+        // names — passes through unchanged for the scalar-dispatch path
+        // to handle at evaluation time.
+        UdfRegistry registry = new();
+        registry.Register(CreateUdf("CREATE FUNCTION other(@x INT32) AS @x")); // unrelated
 
-        Expression call = ((SelectQueryExpression)SqlParser.Parse("SELECT udf.missing(x)")).Statement.Columns[0].Expression;
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => UdfInliner.Inline(call, empty));
-        Assert.Contains("missing", ex.Message);
+        Expression call = ((SelectQueryExpression)SqlParser.Parse("SELECT missing(x)")).Statement.Columns[0].Expression;
+        Expression result = UdfInliner.Inline(call, registry);
+
+        FunctionCallExpression fn = Assert.IsType<FunctionCallExpression>(result);
+        Assert.Equal("missing", fn.FunctionName);
     }
 
     [Fact]
@@ -196,16 +203,16 @@ public class UdfInlinerTests : ServiceTestBase
         // bypass that and force-register a self-cycle, the call site detects
         // it.
         registry.Register(new UdfDescriptor(
-            SchemaName: "udf",
+            SchemaName: "public",
             Name: "loop",
             Parameters: new[] { new UdfParameter("x", "INT32") },
             ReturnTypeName: null,
-            // Body is udf.loop(@x) — creates a self-cycle.
+            // Body is loop(@x) — creates a self-cycle.
             ExpressionBody: new FunctionCallExpression("loop",
                 new[] { (Expression)new VariableExpression("x") },
-                SchemaName: "udf")));
+                SchemaName: "public")));
 
-        Expression call = ((SelectQueryExpression)SqlParser.Parse("SELECT udf.loop(y)")).Statement.Columns[0].Expression;
+        Expression call = ((SelectQueryExpression)SqlParser.Parse("SELECT loop(y)")).Statement.Columns[0].Expression;
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => UdfInliner.Inline(call, registry));
         Assert.Contains("Cyclic UDF reference", ex.Message);
@@ -218,23 +225,23 @@ public class UdfInlinerTests : ServiceTestBase
         // a → b → a is detected when the inliner walks back into 'a'.
         UdfRegistry registry = new();
         registry.Register(new UdfDescriptor(
-            SchemaName: "udf",
+            SchemaName: "public",
             Name: "a",
             Parameters: new[] { new UdfParameter("x", "INT32") },
             ReturnTypeName: null,
             ExpressionBody: new FunctionCallExpression("b",
                 new[] { (Expression)new VariableExpression("x") },
-                SchemaName: "udf")));
+                SchemaName: "public")));
         registry.Register(new UdfDescriptor(
-            SchemaName: "udf",
+            SchemaName: "public",
             Name: "b",
             Parameters: new[] { new UdfParameter("x", "INT32") },
             ReturnTypeName: null,
             ExpressionBody: new FunctionCallExpression("a",
                 new[] { (Expression)new VariableExpression("x") },
-                SchemaName: "udf")));
+                SchemaName: "public")));
 
-        Expression call = ((SelectQueryExpression)SqlParser.Parse("SELECT udf.a(z)")).Statement.Columns[0].Expression;
+        Expression call = ((SelectQueryExpression)SqlParser.Parse("SELECT a(z)")).Statement.Columns[0].Expression;
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => UdfInliner.Inline(call, registry));
         Assert.Contains("a", ex.Message);
@@ -249,7 +256,7 @@ public class UdfInlinerTests : ServiceTestBase
         // UDF param '@x' substitution lands at the outer array position; the
         // lambda's bare-name 'y' is unrelated and stays as-is.
         Expression result = Inline(
-            "udf.f(arr)",
+            "f(arr)",
             "CREATE FUNCTION f(@x ARRAY) AS array_transform(@x, y -> y * 2)");
 
         FunctionCallExpression at = Assert.IsType<FunctionCallExpression>(result);
@@ -269,7 +276,7 @@ public class UdfInlinerTests : ServiceTestBase
         // VariableExpression substitution targets only @-prefixed nodes,
         // so the lambda's bare-name `x` stays bare.
         Expression result = Inline(
-            "udf.f(arr)",
+            "f(arr)",
             "CREATE FUNCTION f(@x ARRAY) AS array_transform(@x, x -> x * 2)");
 
         FunctionCallExpression at = Assert.IsType<FunctionCallExpression>(result);
@@ -289,7 +296,7 @@ public class UdfInlinerTests : ServiceTestBase
         // is wrapped with __assert_not_null at the inlining boundary so the
         // body never sees a null value for that parameter.
         Expression result = Inline(
-            "udf.shout(name)",
+            "shout(name)",
             "CREATE FUNCTION shout(@s STRING IS NOT NULL) AS upper(@s)");
 
         // Result: upper(__assert_not_null(name, '...'))
@@ -305,7 +312,7 @@ public class UdfInlinerTests : ServiceTestBase
     {
         // No IS NOT NULL → no wrapper, body sees the raw arg.
         Expression result = Inline(
-            "udf.shout(name)",
+            "shout(name)",
             "CREATE FUNCTION shout(@s STRING) AS upper(@s)");
 
         FunctionCallExpression upper = Assert.IsType<FunctionCallExpression>(result);
@@ -317,7 +324,7 @@ public class UdfInlinerTests : ServiceTestBase
     public void Inline_MixedNullableAndNotNullParams_WrapsOnlyNotNull()
     {
         Expression result = Inline(
-            "udf.combine(a, b)",
+            "combine(a, b)",
             "CREATE FUNCTION combine(@x STRING IS NOT NULL, @y STRING) AS concat(@x, @y)");
 
         FunctionCallExpression concat = Assert.IsType<FunctionCallExpression>(result);
@@ -334,7 +341,7 @@ public class UdfInlinerTests : ServiceTestBase
     public void Inline_ReturnsType_WrapsBodyInCast()
     {
         Expression result = Inline(
-            "udf.parsed(s)",
+            "parsed(s)",
             "CREATE FUNCTION parsed(@s STRING) RETURNS INT32 AS try_cast(@s, INT32)");
 
         // Outer wrapper is a CAST to INT32.
@@ -346,7 +353,7 @@ public class UdfInlinerTests : ServiceTestBase
     public void Inline_ReturnsTypeIsNotNull_WrapsCastInAssertNotNull()
     {
         Expression result = Inline(
-            "udf.parsed(s)",
+            "parsed(s)",
             "CREATE FUNCTION parsed(@s STRING) RETURNS INT32 IS NOT NULL AS try_cast(@s, INT32)");
 
         // Outer is __assert_not_null; its first arg is the CAST.
@@ -360,7 +367,7 @@ public class UdfInlinerTests : ServiceTestBase
     {
         // Default — no RETURNS, no wrap. The body is emitted bare.
         Expression result = Inline(
-            "udf.id(x)",
+            "id(x)",
             "CREATE FUNCTION id(@x INT32) AS @x");
 
         // Substituted to a ColumnReference — no Cast, no AssertNotNull.
@@ -376,7 +383,7 @@ public class UdfInlinerTests : ServiceTestBase
         registry.Register(CreateUdf("CREATE FUNCTION shout(@s STRING) AS upper(@s)"));
 
         QueryExpression q = SqlParser.Parse(
-            "SELECT udf.shout(name) FROM users WHERE udf.shout(role) = 'ADMIN'");
+            "SELECT shout(name) FROM users WHERE shout(role) = 'ADMIN'");
         QueryExpression inlined = UdfInliner.Inline(q, registry);
 
         SelectStatement stmt = ((SelectQueryExpression)inlined).Statement;
@@ -401,7 +408,7 @@ public class UdfInlinerTests : ServiceTestBase
 
         // Same call site twice — both inline to independent random calls.
         QueryExpression q = SqlParser.Parse(
-            "SELECT udf.roll() AS a, udf.roll() AS b FROM dual");
+            "SELECT roll() AS a, roll() AS b FROM dual");
         QueryExpression inlined = UdfInliner.Inline(q, registry);
 
         SelectStatement stmt = ((SelectQueryExpression)inlined).Statement;

@@ -113,15 +113,11 @@ public sealed class ProcedureRegistry
     /// <summary>All registered descriptors. Order is not guaranteed.</summary>
     public IReadOnlyCollection<ProcedureDescriptor> Entries => (IReadOnlyCollection<ProcedureDescriptor>)_entries.Values;
 
-    // S7c includes the legacy "proc" sentinel so unqualified CREATE
-    // PROCEDURE (which still lands at the legacy schema) is findable
-    // from tests and ad-hoc lookups. S7d removes "proc" from this path
-    // once the default lands in "public".
-    private static readonly IReadOnlyList<string> DefaultSearchPath = new[] { "public", "system", "proc" };
+    private static readonly IReadOnlyList<string> DefaultSearchPath = new[] { "public", "system" };
 
     /// <summary>
     /// Back-compat bare-string lookup that walks the default
-    /// <c>[public, system, proc]</c> search path. Useful for tests.
+    /// <c>[public, system]</c> search path. Useful for tests.
     /// </summary>
     public bool TryGet(string name, [NotNullWhen(true)] out ProcedureDescriptor? descriptor)
         => TryResolve(null, name, DefaultSearchPath, out descriptor);

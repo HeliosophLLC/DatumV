@@ -12,8 +12,9 @@ namespace DatumIngest.Tests.Catalog;
 /// </summary>
 public class ProceduresTableProviderTests : ServiceTestBase
 {
-    /// <summary>Plain-CLR snapshot of a system_procedures row.</summary>
+    /// <summary>Plain-CLR snapshot of a system.procedures row.</summary>
     private sealed record SystemProcedureRow(
+        string Schema,
         string Name,
         int ParameterCount,
         string Parameters,
@@ -31,27 +32,29 @@ public class ProceduresTableProviderTests : ServiceTestBase
             {
                 Row row = batch[i];
                 rows.Add(new SystemProcedureRow(
-                    Name: row[0].AsString(arena),
-                    ParameterCount: row[1].AsInt32(),
-                    Parameters: row[2].AsString(arena),
-                    SourceText: row[3].AsString(arena)));
+                    Schema: row[0].AsString(arena),
+                    Name: row[1].AsString(arena),
+                    ParameterCount: row[2].AsInt32(),
+                    Parameters: row[3].AsString(arena),
+                    SourceText: row[4].AsString(arena)));
             }
         }
         return rows;
     }
 
     [Fact]
-    public void Schema_HasFourColumnsInDeclaredOrder()
+    public void Schema_HasFiveColumnsInDeclaredOrder()
     {
         TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog[ProceduresTableProvider.TableName];
         Schema schema = provider.GetSchema();
 
-        Assert.Equal(4, schema.Columns.Count);
-        Assert.Equal("name", schema.Columns[0].Name);
-        Assert.Equal("parameter_count", schema.Columns[1].Name);
-        Assert.Equal("parameters", schema.Columns[2].Name);
-        Assert.Equal("source_text", schema.Columns[3].Name);
+        Assert.Equal(5, schema.Columns.Count);
+        Assert.Equal("schema", schema.Columns[0].Name);
+        Assert.Equal("name", schema.Columns[1].Name);
+        Assert.Equal("parameter_count", schema.Columns[2].Name);
+        Assert.Equal("parameters", schema.Columns[3].Name);
+        Assert.Equal("source_text", schema.Columns[4].Name);
     }
 
     [Fact]

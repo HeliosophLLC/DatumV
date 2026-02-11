@@ -308,10 +308,9 @@ public sealed class BatchExecutor
                 }
                 case CallStatement call:
                 {
-                    // Detect CALL proc.<name>(args) and route to the
-                    // procedure-invocation path. Anything else (UDF or
-                    // built-in scalar) flows through catalog.Plan via
-                    // the unified default arm.
+                    // CALL of a procedure routes through the procedure-
+                    // invocation path; CALL of a function falls through to
+                    // catalog.Plan for the unified scalar-dispatch arm.
                     if (TryGetProcedureCall(call, out ProcedureDescriptor? procDescriptor, out IReadOnlyList<Expression>? args))
                     {
                         await ExecuteProcedureCallAsync(
@@ -620,72 +619,30 @@ public sealed class BatchExecutor
         return min;
     }
 
-    private const string ProcedureNamespacePrefix = "proc.";
-
-    /// <summary>
-    /// The schema name a procedure call sits in on the AST. Post-S7b the
-    /// parser emits <c>FunctionCallExpression.SchemaName == "proc"</c>
-    /// for <c>proc.foo()</c> calls.
-    /// </summary>
-    private const string ProcedureSchema = "proc";
-
     /// <summary>
     /// Detects whether <paramref name="statement"/> is invoking a stored
     /// procedure by resolving the call through the catalog's procedure
-    /// registry (explicit schema is exact-matched; unqualified walks the
-    /// session search_path). Anything else — UDFs, built-in scalars, model
-    /// invocations — is handled by the standard catalog.Plan path and
-    /// returns <see langword="false"/>.
+    /// registry. Procedures require <c>CALL</c>; functions accept either
+    /// <c>SELECT</c> or <c>CALL</c>. So when the target isn't a
+    /// registered procedure, we fall through to the unified
+    /// catalog.Plan path which handles it as a scalar/function call and
+    /// surfaces "Unknown function" at evaluation time if the name
+    /// resolves to nothing.
     /// </summary>
     private bool TryGetProcedureCall(
         CallStatement statement,
         out ProcedureDescriptor? descriptor,
         out IReadOnlyList<Expression>? arguments)
     {
-        if (statement.Call is FunctionCallExpression call)
+        if (statement.Call is FunctionCallExpression call
+            && _catalog.Procedures.TryResolve(call.SchemaName, call.FunctionName, _catalog.SearchPath, out descriptor))
         {
-            if (_catalog.Procedures.TryResolve(call.SchemaName, call.FunctionName, ProcedureSearchPath(), out descriptor))
-            {
-                arguments = call.Arguments;
-                return true;
-            }
-
-            // S7c back-compat: an explicit <c>proc.X</c> reference is the
-            // legacy "this is definitely a procedure" tag — surface a
-            // clear diagnostic eagerly instead of falling through to the
-            // scalar dispatch path (where the error would be an opaque
-            // "Unknown function" wrapped in ExpressionEvaluationException).
-            // S7d drops this when the prefix retires.
-            if (string.Equals(call.SchemaName, ProcedureSchema, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    $"Procedure '{call.CallName}' is not registered. " +
-                    $"Use CREATE PROCEDURE {call.FunctionName}(...) AS BEGIN ... END to define it.");
-            }
+            arguments = call.Arguments;
+            return true;
         }
         descriptor = null;
         arguments = null;
         return false;
-    }
-
-    /// <summary>
-    /// S7c: extends the catalog's session search_path with the legacy
-    /// <c>proc</c> sentinel so unqualified <c>CALL foo()</c> still resolves
-    /// procedures created with the legacy default. S7d removes this
-    /// fallback when unqualified CREATE PROCEDURE defaults to a real
-    /// schema on the user search_path.
-    /// </summary>
-    private IReadOnlyList<string> ProcedureSearchPath()
-    {
-        IReadOnlyList<string> sessionPath = _catalog.SearchPath;
-        if (sessionPath.Contains("proc", StringComparer.OrdinalIgnoreCase))
-        {
-            return sessionPath;
-        }
-        List<string> extended = new(sessionPath.Count + 1);
-        extended.AddRange(sessionPath);
-        extended.Add("proc");
-        return extended;
     }
 
     /// <summary>

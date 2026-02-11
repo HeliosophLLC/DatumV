@@ -9,7 +9,7 @@ namespace DatumIngest.Tests.Catalog;
 /// End-to-end tests for procedure DDL and invocation: registration through
 /// <see cref="TableCatalog.Plan(string)"/>, side effects on the
 /// <see cref="ProcedureRegistry"/>, and full-batch execution that exercises
-/// <c>CALL proc.X(...)</c> through the procedural batch executor.
+/// <c>CALLX(...)</c> through the procedural batch executor.
 /// </summary>
 public class ProcedureIntegrationTests : ServiceTestBase
 {
@@ -126,16 +126,33 @@ public class ProcedureIntegrationTests : ServiceTestBase
     }
 
     [Fact]
-    public void CreateProcedure_BodyReferencingUnknownUdf_Throws()
+    public void Procedure_InSelectPosition_Rejected()
     {
-        // Body validation walks every statement and inlines the expressions
-        // against the current UDF registry — an unresolved udf.X surfaces
-        // at CREATE PROCEDURE time, not at the first CALL.
+        // S7d locks the rule: procedures REQUIRE CALL; using a procedure
+        // name in expression position (SELECT, WHERE, etc.) is a user
+        // error. The planner surfaces a specific diagnostic instead of
+        // falling through to scalar dispatch's opaque "Unknown function".
         TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE PROCEDURE noop() AS BEGIN SELECT 1 END");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => catalog.Plan(
-                "CREATE PROCEDURE foo() AS BEGIN SELECT udf.never_defined(1) END"));
+            () => catalog.Plan("SELECT noop()"));
+        Assert.Contains("procedure", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CALL", ex.Message);
+    }
+
+    [Fact]
+    public async Task CallProcedure_BodyReferencingUnknownFunction_ThrowsAtRuntime()
+    {
+        // Post-S7d the body inliner only inlines registered macros and
+        // lets everything else pass through. Unresolved function calls
+        // in the body surface at CALL time when the body's SELECT
+        // runs through the scalar dispatch path.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE PROCEDURE foo() AS BEGIN SELECT never_defined(1) END");
+
+        Exception ex = await Assert.ThrowsAnyAsync<Exception>(
+            () => RunBatchAsync("CALL foo()", catalog));
         Assert.Contains("never_defined", ex.Message);
     }
 
@@ -155,7 +172,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // We assert that the call doesn't throw and the procedure is
         // registered & callable.
         BatchResult result = await RunBatchAsync(
-            "CALL proc.setone()",
+            "CALL setone()",
             catalog);
 
         // No outer-scope bindings produced; the test confirms invocation
@@ -176,7 +193,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         BatchResult result = await RunBatchAsync(
             "DECLARE @answer INT64 = 0; " +
-            "CALL proc.assign_outer(5)",
+            "CALL assign_outer(5)",
             catalog);
 
         // @answer untouched by the procedure (procedure has its own scope).
@@ -197,7 +214,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         BatchResult result = await RunBatchAsync(
             "DECLARE @counter INT64 = 5; " +
-            "CALL proc.shadow(@counter)",
+            "CALL shadow(@counter)",
             catalog);
 
         // @counter is 5 still — the procedure's SET on its local @v
@@ -215,16 +232,21 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "END");
 
         await Assert.ThrowsAnyAsync<InvalidOperationException>(
-            () => RunBatchAsync("CALL proc.need_two(1)", catalog));
+            () => RunBatchAsync("CALL need_two(1)", catalog));
     }
 
     [Fact]
     public async Task ExecProc_Unregistered_Throws()
     {
+        // Post-S7d CALL falls through to scalar dispatch when the target
+        // isn't a registered procedure, so an unknown name surfaces via
+        // <see cref="ExpressionEvaluationException"/> wrapping
+        // "Unknown function".
         TableCatalog catalog = CreateCatalog();
 
-        await Assert.ThrowsAnyAsync<InvalidOperationException>(
-            () => RunBatchAsync("CALL proc.never_registered()", catalog));
+        Exception ex = await Assert.ThrowsAnyAsync<Exception>(
+            () => RunBatchAsync("CALL never_registered()", catalog));
+        Assert.Contains("never_registered", ex.Message);
     }
 
     [Fact]
@@ -238,7 +260,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => RunBatchAsync(
-                "DECLARE @n STRING = NULL; CALL proc.need_name(@n)",
+                "DECLARE @n STRING = NULL; CALL need_name(@n)",
                 catalog));
 
         string fullMessage = ex.Message + (ex.InnerException?.Message ?? "");
@@ -259,7 +281,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         BatchResult result = await RunBatchAsync(
             "DECLARE @input INT64 = 42; " +
-            "CALL proc.noop(@input + 8)",
+            "CALL noop(@input + 8)",
             catalog);
 
         Assert.Equal(42L, Convert.ToInt64(result.FinalBindings["input"]));
@@ -275,11 +297,11 @@ public class ProcedureIntegrationTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
             "CREATE PROCEDURE recurse() AS BEGIN " +
-            "  CALL proc.recurse() " +
+            "  CALL recurse() " +
             "END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => RunBatchAsync("CALL proc.recurse()", catalog));
+            () => RunBatchAsync("CALL recurse()", catalog));
         Assert.Contains("call depth", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("recurse", ex.Message);
     }
@@ -289,11 +311,11 @@ public class ProcedureIntegrationTests : ServiceTestBase
     {
         // A → B → A → B → … cap-doesn't-care which routine triggers it.
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE PROCEDURE a() AS BEGIN CALL proc.b() END");
-        catalog.Plan("CREATE PROCEDURE b() AS BEGIN CALL proc.a() END");
+        catalog.Plan("CREATE PROCEDURE a() AS BEGIN CALL b() END");
+        catalog.Plan("CREATE PROCEDURE b() AS BEGIN CALL a() END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => RunBatchAsync("CALL proc.a()", catalog));
+            () => RunBatchAsync("CALL a()", catalog));
         Assert.Contains("call depth", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -304,11 +326,11 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // depth is 3 inside `c`; rolls back to 0 when the batch ends.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE PROCEDURE c() AS BEGIN DECLARE @inside INT64 = 99 END");
-        catalog.Plan("CREATE PROCEDURE b() AS BEGIN CALL proc.c() END");
-        catalog.Plan("CREATE PROCEDURE a() AS BEGIN CALL proc.b() END");
+        catalog.Plan("CREATE PROCEDURE b() AS BEGIN CALL c() END");
+        catalog.Plan("CREATE PROCEDURE a() AS BEGIN CALL b() END");
 
         BatchResult result = await RunBatchAsync(
-            "DECLARE @x INT64 = 1; CALL proc.a()",
+            "DECLARE @x INT64 = 1; CALL a()",
             catalog);
 
         // Caller's variable should still be bound — proves the chain
@@ -424,7 +446,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // that the proc completed without an arity error.
         BatchResult result = await RunBatchAsync(
             "DECLARE @ok BOOLEAN = FALSE; " +
-            "CALL proc.add_default(7); " +
+            "CALL add_default(7); " +
             "SET @ok = TRUE",
             catalog);
 
@@ -444,8 +466,8 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         BatchResult result = await RunBatchAsync(
             "DECLARE @done BOOLEAN = FALSE; " +
-            "CALL proc.record(); " +    // omit → default = 0
-            "CALL proc.record(42); " +   // explicit
+            "CALL record(); " +    // omit → default = 0
+            "CALL record(42); " +   // explicit
             "SET @done = TRUE",
             catalog);
 
@@ -460,7 +482,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "CREATE PROCEDURE need_one(@a INT64, @b INT64 = 0) AS BEGIN SELECT @a END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => RunBatchAsync("CALL proc.need_one()", catalog));
+            () => RunBatchAsync("CALL need_one()", catalog));
         Assert.Contains("need_one", ex.Message);
     }
 
@@ -472,7 +494,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "CREATE PROCEDURE one_or_two(@a INT64, @b INT64 = 0) AS BEGIN SELECT @a END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => RunBatchAsync("CALL proc.one_or_two(1, 2, 3)", catalog));
+            () => RunBatchAsync("CALL one_or_two(1, 2, 3)", catalog));
         Assert.Contains("one_or_two", ex.Message);
     }
 
@@ -486,7 +508,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "CREATE PROCEDURE need_one(@a INT64 IS NOT NULL = NULL) AS BEGIN SELECT @a END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => RunBatchAsync("CALL proc.need_one()", catalog));
+            () => RunBatchAsync("CALL need_one()", catalog));
         Assert.Contains("must not be null", ex.Message);
         Assert.Contains("a", ex.Message);
     }
