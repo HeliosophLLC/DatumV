@@ -1,3 +1,4 @@
+using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Models;
@@ -7,7 +8,7 @@ namespace DatumIngest.Functions;
 /// <summary>
 /// Scalar-function adapter that lets <c>models.X(...)</c> dispatch through
 /// the same <see cref="IScalarFunction"/> path as built-in functions and
-/// procedural UDFs. Resolved lazily by <see cref="FunctionRegistry.TryGetScalar"/>
+/// procedural UDFs. Resolved lazily by <see cref="FunctionRegistry.TryGetScalar(QualifiedName)"/>
 /// when the dictionary lookup misses but the name matches a registered
 /// model.
 /// </summary>

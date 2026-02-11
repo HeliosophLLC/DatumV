@@ -3470,7 +3470,7 @@ public sealed class QueryPlanner
                 Expression rewrittenBody = ReplaceLetNameRefs(b.Expression, nameToSynth);
 
                 if (rewrittenBody is FunctionCallExpression fn
-                    && fn.FunctionName.StartsWith("models.", StringComparison.OrdinalIgnoreCase))
+                    && string.Equals(fn.SchemaName, ModelInvocationHoister.ModelSchema, StringComparison.OrdinalIgnoreCase))
                 {
                     if (_catalog.Models is null)
                     {
@@ -3529,14 +3529,13 @@ public sealed class QueryPlanner
         string outputColumn,
         ModelCatalog catalog)
     {
-        const string Prefix = "models.";
-        string modelName = call.FunctionName.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)
-            ? call.FunctionName[Prefix.Length..]
-            : call.FunctionName;
+        // Post-S7b: parser splits schema and function name. The call's
+        // FunctionName is already the bare model name when SchemaName == "models".
+        string modelName = call.FunctionName;
 
         ModelCatalogEntry? entry = catalog.TryGetEntry(modelName)
             ?? throw new InvalidOperationException(
-                $"Model '{modelName}' is not registered in the catalog. Reference '{call.FunctionName}' " +
+                $"Model '{modelName}' is not registered in the catalog. Reference '{call.CallName}' " +
                 $"requires a matching ModelCatalog entry — register it via ModelCatalog.Register before planning.");
 
         int requiredCount = entry.InputKinds.Count;
@@ -3657,7 +3656,7 @@ public sealed class QueryPlanner
     {
         return expression switch
         {
-            FunctionCallExpression func => functionRegistry.TryGetAggregate(func.FunctionName) is not null
+            FunctionCallExpression func => functionRegistry.TryGetAggregate(func.CallName) is not null
                 || func.Arguments.Any(argument => ExpressionContainsAggregate(argument, functionRegistry)),
             BinaryExpression bin => ExpressionContainsAggregate(bin.Left, functionRegistry)
                 || ExpressionContainsAggregate(bin.Right, functionRegistry),
@@ -3757,7 +3756,7 @@ public sealed class QueryPlanner
         if (expression is FunctionCallExpression func)
         {
             IAggregateFunction? aggregateFunction =
-                functionRegistry.TryGetAggregate(func.FunctionName);
+                functionRegistry.TryGetAggregate(func.CallName);
 
             if (aggregateFunction is not null)
             {
@@ -4398,12 +4397,12 @@ public sealed class QueryPlanner
             if (!alreadyRegistered)
             {
                 IWindowFunction? windowFunction =
-                    functionRegistry.TryGetWindowOrAggregate(windowCall.FunctionName);
+                    functionRegistry.TryGetWindowOrAggregate(windowCall.CallName);
 
                 if (windowFunction is null)
                 {
                     throw new InvalidOperationException(
-                        $"Unknown window function: '{windowCall.FunctionName}'.");
+                        $"Unknown window function: '{windowCall.CallName}'.");
                 }
 
                 windowColumns.Add(new WindowColumn(
@@ -4859,12 +4858,12 @@ public sealed class QueryPlanner
 
     private IQueryOperator PlanFunctionSource(FunctionSource functionSource, bool hasJoins)
     {
-        ITableValuedFunction? function = _functionRegistry.TryGetTableValued(functionSource.FunctionName);
+        ITableValuedFunction? function = _functionRegistry.TryGetTableValued(functionSource.CallName);
 
         if (function is null)
         {
             throw new InvalidOperationException(
-                $"Unknown table-valued function: '{functionSource.FunctionName}'.");
+                $"Unknown table-valued function: '{functionSource.CallName}'.");
         }
 
         IQueryOperator sourceOperator = new FunctionSourceOperator(function, functionSource.Arguments);

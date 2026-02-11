@@ -623,6 +623,13 @@ public sealed class BatchExecutor
     private const string ProcedureNamespacePrefix = "proc.";
 
     /// <summary>
+    /// The schema name a procedure call sits in on the AST. Post-S7b the
+    /// parser emits <c>FunctionCallExpression.SchemaName == "proc"</c>
+    /// for <c>proc.foo()</c> calls.
+    /// </summary>
+    private const string ProcedureSchema = "proc";
+
+    /// <summary>
     /// Detects whether <paramref name="statement"/> is invoking a stored
     /// procedure (call name starts with <c>proc.</c>) and, if so, returns
     /// the unqualified procedure name plus the argument expression list.
@@ -636,9 +643,9 @@ public sealed class BatchExecutor
         out IReadOnlyList<Expression>? arguments)
     {
         if (statement.Call is FunctionCallExpression call
-            && call.FunctionName.StartsWith(ProcedureNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+            && string.Equals(call.SchemaName, ProcedureSchema, StringComparison.OrdinalIgnoreCase))
         {
-            procedureName = call.FunctionName[ProcedureNamespacePrefix.Length..];
+            procedureName = call.FunctionName;
             arguments = call.Arguments;
             return true;
         }

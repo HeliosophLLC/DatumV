@@ -624,20 +624,20 @@ public static class SqlParser
             .Try().OptionalOrDefault()
         from windowSpec in WindowSpecificationParser.OptionalOrDefault()
         let name = nameTuple.Name
-        let qualifiedName = nameTuple.Namespace is null
-            ? GetTokenText(nameTuple.Name)
-            : $"{nameTuple.Namespace}.{GetTokenText(nameTuple.Name)}"
+        let bareName = GetTokenText(nameTuple.Name)
+        let schemaName = nameTuple.Namespace
         select withinGroup is not null
             ? (Expression)new FunctionCallExpression(
-                qualifiedName,
+                bareName,
                 args,
                 OrderBy: null,
                 Distinct: distinct.HasValue,
                 Span: ToSpan(name),
-                WithinGroupOrderBy: withinGroup)
+                WithinGroupOrderBy: withinGroup,
+                SchemaName: schemaName)
             : windowSpec is not null
-                ? (Expression)new WindowFunctionCallExpression(qualifiedName, args, windowSpec, Distinct: distinct.HasValue, NullHandling: nullHandling, FromLast: fromLast, Span: ToSpan(name))
-                : (Expression)new FunctionCallExpression(qualifiedName, args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name));
+                ? (Expression)new WindowFunctionCallExpression(bareName, args, windowSpec, Distinct: distinct.HasValue, NullHandling: nullHandling, FromLast: fromLast, Span: ToSpan(name), SchemaName: schemaName)
+                : (Expression)new FunctionCallExpression(bareName, args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name), SchemaName: schemaName);
 
     /// <summary>CAST( expression AS type ) — accepts scalar names, the
     /// <c>Array&lt;T&gt;</c> wrapper, and the <c>T[]</c> sugar via the shared
@@ -1266,7 +1266,8 @@ public static class SqlParser
                 func.OrderBy,
                 func.Distinct,
                 func.Span,
-                func.WithinGroupOrderBy),
+                func.WithinGroupOrderBy,
+                func.SchemaName),
 
             CastExpression cast => new CastExpression(
                 SubstituteBinding(cast.Expression, bindingName, replacement),
@@ -1766,7 +1767,7 @@ public static class SqlParser
     /// Must be tried before table reference because both start with Identifier.
     /// </summary>
     private static readonly TokenListParser<SqlToken, TableSource> FunctionSourceParser =
-        from name in Token.EqualTo(SqlToken.Identifier)
+        from nameTuple in NamespacedFunctionName
         from open in Token.EqualTo(SqlToken.LeftParen)
         from args in SP.Ref(() => ExpressionParser!)
             .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
@@ -1777,7 +1778,12 @@ public static class SqlParser
             select GetTokenText(aliasName)
         ).Try().Or(IdentifierLike.Select(GetTokenText))
         .OptionalOrDefault()
-        select (TableSource)new FunctionSource(GetTokenText(name), args, alias, ToSpan(name));
+        select (TableSource)new FunctionSource(
+            GetTokenText(nameTuple.Name),
+            args,
+            alias,
+            ToSpan(nameTuple.Name),
+            SchemaName: nameTuple.Namespace);
 
     /// <summary>A table source: subquery, function call, or table reference.</summary>
     /// <remarks>
@@ -3286,8 +3292,10 @@ public static class SqlParser
         from ifNotExists in IfNotExistsParser
         // UDF names are permissive: accept any keyword that can serve as an
         // unquoted name (so e.g. CREATE FUNCTION add(...) doesn't trip on
-        // ADD being tokenized as a keyword).
-        from name in IdentifierOrKeywordAsName
+        // ADD being tokenized as a keyword). The QualifiedTableNameParser
+        // accepts both `fn` and `schema.fn` shapes — schema (when present)
+        // lands in CreateFunctionStatement.SchemaName.
+        from qualifiedName in QualifiedTableNameParser
         from open in Token.EqualTo(SqlToken.LeftParen)
         from parameters in UdfParameterParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from close in Token.EqualTo(SqlToken.RightParen)
@@ -3333,7 +3341,7 @@ public static class SqlParser
                 select (Expr: (Expression?)null,
                         Stmts: (IReadOnlyList<Statement>?)((BlockStatement)blk).Statements))
         select (Statement)BuildCreateFunctionStatement(
-            name,
+            qualifiedName.TableName,
             parameters,
             returnAnnotation.TypeName,
             returnAnnotation.IsNotNull,
@@ -3341,7 +3349,8 @@ public static class SqlParser
             statementBody: body.Stmts,
             prefix.IsPure,
             ifNotExists,
-            prefix.OrReplace);
+            prefix.OrReplace,
+            schemaName: qualifiedName.SchemaName);
 
     /// <summary>
     /// Constructs a <see cref="CreateFunctionStatement"/> from the parsed
@@ -3372,7 +3381,8 @@ public static class SqlParser
         IReadOnlyList<Statement>? statementBody,
         bool isPure,
         bool ifNotExists,
-        bool orReplace)
+        bool orReplace,
+        string? schemaName = null)
     {
         if (statementBody is not null)
         {
@@ -3403,7 +3413,8 @@ public static class SqlParser
             IfNotExists: ifNotExists,
             OrReplace: orReplace,
             Span: null,
-            ReturnIsNotNull: returnIsNotNull);
+            ReturnIsNotNull: returnIsNotNull,
+            SchemaName: schemaName);
     }
 
     /// <summary>
@@ -3522,11 +3533,12 @@ public static class SqlParser
         from dropKw in Token.EqualTo(SqlToken.Drop)
         from functionKw in Token.EqualTo(SqlToken.Function)
         from ifExists in IfExistsParser
-        from name in IdentifierOrKeywordAsName
+        from qualifiedName in QualifiedTableNameParser
         select (Statement)new DropFunctionStatement(
-            name,
+            qualifiedName.TableName,
             ifExists,
-            Span: null);
+            Span: null,
+            SchemaName: qualifiedName.SchemaName);
 
     /// <summary>
     /// Parses
@@ -3556,19 +3568,20 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, Statement> CreateProcedureParser =
         from orReplace in CreateProcedurePrefix
         from ifNotExists in IfNotExistsParser
-        from name in IdentifierOrKeywordAsName
+        from qualifiedName in QualifiedTableNameParser
         from open in Token.EqualTo(SqlToken.LeftParen)
         from parameters in UdfParameterParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from close in Token.EqualTo(SqlToken.RightParen)
         from asKw in Token.EqualTo(SqlToken.As)
         from body in SP.Ref(() => BlockStatementParser!)
         select (Statement)new CreateProcedureStatement(
-            name,
+            qualifiedName.TableName,
             parameters,
             (BlockStatement)body,
             ifNotExists,
             orReplace,
-            Span: null);
+            Span: null,
+            SchemaName: qualifiedName.SchemaName);
 
     /// <summary>
     /// Parses <c>DROP PROCEDURE [IF EXISTS] name</c>.
@@ -3577,11 +3590,12 @@ public static class SqlParser
         from dropKw in Token.EqualTo(SqlToken.Drop)
         from procedureKw in Token.EqualTo(SqlToken.Procedure)
         from ifExists in IfExistsParser
-        from name in IdentifierOrKeywordAsName
+        from qualifiedName in QualifiedTableNameParser
         select (Statement)new DropProcedureStatement(
-            name,
+            qualifiedName.TableName,
             ifExists,
-            Span: null);
+            Span: null,
+            SchemaName: qualifiedName.SchemaName);
 
     /// <summary>
     /// Parses <c>CALL namespace.functionname(arg1, arg2, ...)</c>.

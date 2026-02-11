@@ -711,12 +711,12 @@ public sealed class ExpressionEvaluator
     private async ValueTask<ValueRef> EvaluateFunctionAsValueRefAsync(
         FunctionCallExpression function, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        IScalarFunction? scalarFunction = _functions.TryGetScalar(function.FunctionName);
+        IScalarFunction? scalarFunction = _functions.TryGetScalar(function.CallName);
 
         if (scalarFunction is null)
         {
             throw new InvalidOperationException(
-                $"Unknown function: '{function.FunctionName}'.");
+                $"Unknown function: '{function.CallName}'.");
         }
 
         int argumentCount = function.Arguments.Count;

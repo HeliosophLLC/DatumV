@@ -255,7 +255,16 @@ public sealed record SubquerySource(SelectStatement Query, string Alias) : Table
 /// <summary>
 /// A table-valued function call used as a table source in FROM or JOIN.
 /// </summary>
-public sealed record FunctionSource(string FunctionName, IReadOnlyList<Expression> Arguments, string? Alias = null, SourceSpan? Span = null) : TableSource;
+public sealed record FunctionSource(
+    string FunctionName,
+    IReadOnlyList<Expression> Arguments,
+    string? Alias = null,
+    SourceSpan? Span = null,
+    string? SchemaName = null) : TableSource
+{
+    /// <summary>Flat-string call name; see <see cref="FunctionCallExpression.CallName"/>.</summary>
+    public string CallName => SchemaName is null ? FunctionName : $"{SchemaName}.{FunctionName}";
+}
 
 /// <summary>
 /// A CROSS VALIDATE clause that assigns deterministic fold indices to rows
@@ -646,13 +655,29 @@ public enum UnaryOperator
 /// </param>
 /// <param name="Distinct">Whether the DISTINCT modifier is present.</param>
 /// <param name="Span">The source location span of the function call.</param>
+/// <param name="SchemaName">
+/// Optional schema qualifier from <c>schema.fn(...)</c>;
+/// <see langword="null"/> for an unqualified call. Resolution walks the
+/// session search_path when null. See <see cref="CallName"/> for the flat
+/// string form used by back-compat lookups.
+/// </param>
 public sealed record FunctionCallExpression(
     string FunctionName,
     IReadOnlyList<Expression> Arguments,
     IReadOnlyList<OrderByItem>? OrderBy = null,
     bool Distinct = false,
     SourceSpan? Span = null,
-    IReadOnlyList<OrderByItem>? WithinGroupOrderBy = null) : Expression;
+    IReadOnlyList<OrderByItem>? WithinGroupOrderBy = null,
+    string? SchemaName = null) : Expression
+{
+    /// <summary>
+    /// Flat-string form of the call name, <c>"schema.fn"</c> when
+    /// <see cref="SchemaName"/> is set or just <c>FunctionName</c>
+    /// otherwise. Bridges call sites still using the pre-S7b string
+    /// dispatch.
+    /// </summary>
+    public string CallName => SchemaName is null ? FunctionName : $"{SchemaName}.{FunctionName}";
+}
 
 /// <summary>
 /// The IN predicate: <c>expression IN (value1, value2, ...)</c>.
@@ -813,7 +838,12 @@ public sealed record WindowFunctionCallExpression(
     bool Distinct = false,
     NullHandling NullHandling = NullHandling.RespectNulls,
     bool FromLast = false,
-    SourceSpan? Span = null) : Expression;
+    SourceSpan? Span = null,
+    string? SchemaName = null) : Expression
+{
+    /// <summary>Flat-string call name; see <see cref="FunctionCallExpression.CallName"/>.</summary>
+    public string CallName => SchemaName is null ? FunctionName : $"{SchemaName}.{FunctionName}";
+}
 
 /// <summary>
 /// The OVER clause specification containing optional partitioning, ordering, and frame.
@@ -1581,6 +1611,7 @@ public sealed record UdfParameter(
 /// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the UDF already exists.</param>
 /// <param name="OrReplace">When <see langword="true"/>, replaces an existing UDF with the same name.</param>
 /// <param name="Span">Source location of the UDF name for diagnostic reporting.</param>
+/// <param name="SchemaName">Optional schema qualifier from <c>CREATE FUNCTION schema.fn(...)</c>; <see langword="null"/> picks the first DDL-capable schema on search_path.</param>
 public sealed record CreateFunctionStatement(
     string Name,
     IReadOnlyList<UdfParameter> Parameters,
@@ -1591,7 +1622,8 @@ public sealed record CreateFunctionStatement(
     bool IfNotExists = false,
     bool OrReplace = false,
     SourceSpan? Span = null,
-    bool ReturnIsNotNull = false) : Statement;
+    bool ReturnIsNotNull = false,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// <c>DROP FUNCTION [IF EXISTS] name</c> — removes a previously registered UDF.
@@ -1599,10 +1631,12 @@ public sealed record CreateFunctionStatement(
 /// <param name="Name">The UDF name to remove.</param>
 /// <param name="IfExists">When <see langword="true"/>, suppresses errors if the UDF does not exist.</param>
 /// <param name="Span">Source location of the UDF name for diagnostic reporting.</param>
+/// <param name="SchemaName">Optional schema qualifier from <c>DROP FUNCTION schema.fn</c>; <see langword="null"/> walks search_path.</param>
 public sealed record DropFunctionStatement(
     string Name,
     bool IfExists = false,
-    SourceSpan? Span = null) : Statement;
+    SourceSpan? Span = null,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// <c>CREATE [OR REPLACE] PROCEDURE [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL], ...) AS BEGIN ... END</c>
@@ -1626,13 +1660,15 @@ public sealed record DropFunctionStatement(
 /// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the procedure already exists.</param>
 /// <param name="OrReplace">When <see langword="true"/>, replaces an existing procedure with the same name.</param>
 /// <param name="Span">Source location of the procedure name for diagnostic reporting.</param>
+/// <param name="SchemaName">Optional schema qualifier from <c>CREATE PROCEDURE schema.proc(...)</c>; <see langword="null"/> picks the first DDL-capable schema on search_path.</param>
 public sealed record CreateProcedureStatement(
     string Name,
     IReadOnlyList<UdfParameter> Parameters,
     BlockStatement Body,
     bool IfNotExists = false,
     bool OrReplace = false,
-    SourceSpan? Span = null) : Statement;
+    SourceSpan? Span = null,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// <c>DROP PROCEDURE [IF EXISTS] name</c> — removes a previously
@@ -1641,10 +1677,12 @@ public sealed record CreateProcedureStatement(
 /// <param name="Name">The procedure name to remove.</param>
 /// <param name="IfExists">When <see langword="true"/>, suppresses errors if the procedure does not exist.</param>
 /// <param name="Span">Source location of the procedure name for diagnostic reporting.</param>
+/// <param name="SchemaName">Optional schema qualifier from <c>DROP PROCEDURE schema.proc</c>; <see langword="null"/> walks search_path.</param>
 public sealed record DropProcedureStatement(
     string Name,
     bool IfExists = false,
-    SourceSpan? Span = null) : Statement;
+    SourceSpan? Span = null,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// <c>CALL namespace.functionname(arg1, arg2, ...)</c> — directly invokes a function

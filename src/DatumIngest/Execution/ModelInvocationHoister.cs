@@ -36,6 +36,13 @@ public static class ModelInvocationHoister
     public const string ModelNamespacePrefix = "models.";
 
     /// <summary>
+    /// The schema name a model call sits in on the AST. Post-S7b the parser
+    /// emits <c>FunctionCallExpression.SchemaName == "models"</c> for
+    /// <c>models.X()</c> calls.
+    /// </summary>
+    public const string ModelSchema = "models";
+
+    /// <summary>
     /// Hoists every <c>models.*</c> call out of <paramref name="expression"/>
     /// into <see cref="ModelInvocationOperator"/> rungs stacked above
     /// <paramref name="source"/>, returning the new source root and a
@@ -1309,10 +1316,13 @@ public static class ModelInvocationHoister
     }
 
     private static bool IsModelCall(FunctionCallExpression fn)
-        => fn.FunctionName.StartsWith(ModelNamespacePrefix, StringComparison.OrdinalIgnoreCase);
+        => string.Equals(fn.SchemaName, ModelSchema, StringComparison.OrdinalIgnoreCase);
 
-    private static string StripNamespace(string qualifiedName)
-        => qualifiedName.StartsWith(ModelNamespacePrefix, StringComparison.OrdinalIgnoreCase)
-            ? qualifiedName[ModelNamespacePrefix.Length..]
-            : qualifiedName;
+    /// <summary>
+    /// Post-S7b the parser splits <c>models.X(...)</c> into
+    /// <c>SchemaName = "models"</c> + <c>FunctionName = "X"</c>, so the
+    /// bare name is already what we want — this is a single-arg pass-through
+    /// kept so internal call sites read uniformly.
+    /// </summary>
+    private static string StripNamespace(string functionName) => functionName;
 }

@@ -35,17 +35,21 @@ public sealed class ModelInvocationTests : ServiceTestBase
 
     /// <summary>
     /// Parser smoke: <c>models.echo(name)</c> tokenises and parses as a single
-    /// <see cref="FunctionCallExpression"/> whose qualified name is <c>"models.echo"</c>.
-    /// Confirms the namespace lookahead doesn't fire on a bare <c>name</c> column ref.
+    /// <see cref="FunctionCallExpression"/> whose <see cref="FunctionCallExpression.SchemaName"/>
+    /// is <c>"models"</c> and bare <see cref="FunctionCallExpression.FunctionName"/>
+    /// is <c>"echo"</c>. Confirms the namespace lookahead doesn't fire on a
+    /// bare <c>name</c> column ref.
     /// </summary>
     [Fact]
-    public void Parser_NamespacedFunctionName_FoldsIntoFunctionName()
+    public void Parser_NamespacedFunctionName_SplitsSchemaAndName()
     {
         QueryExpression q = SqlParser.Parse("SELECT models.echo(name) FROM t");
         SelectQueryExpression sqe = Assert.IsType<SelectQueryExpression>(q);
         FunctionCallExpression fn = Assert.IsType<FunctionCallExpression>(
             sqe.Statement.Columns[0].Expression);
-        Assert.Equal("models.echo", fn.FunctionName);
+        Assert.Equal("models", fn.SchemaName);
+        Assert.Equal("echo", fn.FunctionName);
+        Assert.Equal("models.echo", fn.CallName);
         Assert.Single(fn.Arguments);
         Assert.IsType<ColumnReference>(fn.Arguments[0]);
     }

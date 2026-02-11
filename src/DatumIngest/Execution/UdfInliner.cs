@@ -49,6 +49,14 @@ public static class UdfInliner
     public const string UdfNamespacePrefix = "udf.";
 
     /// <summary>
+    /// The schema name a UDF call sits in on the AST. Post-S7b the parser
+    /// emits <c>FunctionCallExpression.SchemaName == "udf"</c> for
+    /// <c>udf.foo()</c> calls — the inliner matches on that rather than
+    /// scanning for the legacy dotted prefix in <c>FunctionName</c>.
+    /// </summary>
+    public const string UdfSchema = "udf";
+
+    /// <summary>
     /// Walks <paramref name="query"/> and returns a new <see cref="QueryExpression"/>
     /// in which every UDF call has been replaced with its substituted body.
     /// </summary>
@@ -161,7 +169,7 @@ public static class UdfInliner
             Expression rewritten = RewriteChildren(expression);
 
             if (rewritten is FunctionCallExpression call &&
-                call.FunctionName.StartsWith(UdfNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+                string.Equals(call.SchemaName, UdfSchema, StringComparison.OrdinalIgnoreCase))
             {
                 return InlineUdfCall(call);
             }
@@ -234,7 +242,7 @@ public static class UdfInliner
         /// </summary>
         private Expression InlineUdfCall(FunctionCallExpression call)
         {
-            string name = call.FunctionName[UdfNamespacePrefix.Length..];
+            string name = call.FunctionName;
 
             if (!_registry.TryGet(name, out UdfDescriptor? udf))
             {

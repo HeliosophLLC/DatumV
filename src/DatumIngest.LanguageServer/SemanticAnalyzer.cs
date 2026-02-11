@@ -307,16 +307,18 @@ internal sealed class SemanticAnalyzer
                 break;
 
             case FunctionSource functionSource:
+                // S7b: `FunctionName` is the bare name (post-split); manifest
+                // entries are bare today (S7e will add schema awareness).
                 if (!_functionNames.Contains(functionSource.FunctionName))
                 {
                     EmitWarning(diagnostics, functionSource.Span,
-                        $"Unknown function '{functionSource.FunctionName}'.");
+                        $"Unknown function '{functionSource.CallName}'.");
                 }
 
                 // Function sources are opaque — we cannot know their output columns
-                // statically. Mark the alias (or the function name as a sentinel)
+                // statically. Mark the alias (or the call name as a sentinel)
                 // so that column validation suppresses unknown-column warnings.
-                opaqueAliases.Add(functionSource.Alias ?? functionSource.FunctionName);
+                opaqueAliases.Add(functionSource.Alias ?? functionSource.CallName);
 
                 // Analyze the function's argument expressions.
                 foreach (Expression argument in functionSource.Arguments)

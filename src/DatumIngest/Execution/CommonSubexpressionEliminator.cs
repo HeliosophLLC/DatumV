@@ -974,15 +974,15 @@ public static class CommonSubexpressionEliminator
         FunctionCallExpression fn, HashSet<string> letNames, FunctionRegistry functions)
     {
         // Aggregates aggregate across rows; not CSE-eligible at projection scope.
-        if (functions.TryGetAggregate(fn.FunctionName) is not null) return false;
+        if (functions.TryGetAggregate(fn.CallName) is not null) return false;
 
         // Models are handled by ModelInvocationHoister; by the time CSE runs,
-        // remaining function calls named "models.*" indicate hoisting was
+        // remaining function calls in the "models" schema indicate hoisting was
         // skipped (e.g. catalog absent) — leave them alone.
-        if (fn.FunctionName.StartsWith(ModelInvocationHoister.ModelNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(fn.SchemaName, ModelInvocationHoister.ModelSchema, StringComparison.OrdinalIgnoreCase))
             return false;
 
-        IScalarFunction? scalar = functions.TryGetScalar(fn.FunctionName);
+        IScalarFunction? scalar = functions.TryGetScalar(fn.CallName);
         if (scalar is null || !scalar.IsPure) return false;
 
         foreach (Expression arg in fn.Arguments)

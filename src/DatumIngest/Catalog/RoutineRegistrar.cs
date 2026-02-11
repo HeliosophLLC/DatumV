@@ -287,9 +287,9 @@ internal sealed class RoutineRegistrar
         switch (expression)
         {
             case FunctionCallExpression fn:
-                if (fn.FunctionName.StartsWith(UdfInliner.UdfNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(fn.SchemaName, UdfInliner.UdfSchema, StringComparison.OrdinalIgnoreCase))
                 {
-                    referencedNames.Add(fn.FunctionName[UdfInliner.UdfNamespacePrefix.Length..]);
+                    referencedNames.Add(fn.FunctionName);
                 }
                 foreach (Expression arg in fn.Arguments)
                 {

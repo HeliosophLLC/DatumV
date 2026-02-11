@@ -197,8 +197,9 @@ public class UdfInlinerTests : ServiceTestBase
             new[] { new UdfParameter("x", "INT32") },
             null,
             // Body is udf.loop(@x) — creates a self-cycle.
-            new FunctionCallExpression("udf.loop",
-                new[] { (Expression)new VariableExpression("x") })));
+            new FunctionCallExpression("loop",
+                new[] { (Expression)new VariableExpression("x") },
+                SchemaName: "udf")));
 
         Expression call = ((SelectQueryExpression)SqlParser.Parse("SELECT udf.loop(y)")).Statement.Columns[0].Expression;
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
@@ -216,14 +217,16 @@ public class UdfInlinerTests : ServiceTestBase
             "a",
             new[] { new UdfParameter("x", "INT32") },
             null,
-            new FunctionCallExpression("udf.b",
-                new[] { (Expression)new VariableExpression("x") })));
+            new FunctionCallExpression("b",
+                new[] { (Expression)new VariableExpression("x") },
+                SchemaName: "udf")));
         registry.Register(new UdfDescriptor(
             "b",
             new[] { new UdfParameter("x", "INT32") },
             null,
-            new FunctionCallExpression("udf.a",
-                new[] { (Expression)new VariableExpression("x") })));
+            new FunctionCallExpression("a",
+                new[] { (Expression)new VariableExpression("x") },
+                SchemaName: "udf")));
 
         Expression call = ((SelectQueryExpression)SqlParser.Parse("SELECT udf.a(z)")).Statement.Columns[0].Expression;
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(

@@ -1,37 +1,58 @@
 using System.Collections.Concurrent;
 
+using DatumIngest.Catalog;
 using DatumIngest.Models;
 
 namespace DatumIngest.Functions;
 
 /// <summary>
 /// Registry for looking up scalar, table-valued, aggregate, and window functions
-/// by name. Function names are matched case-insensitively. Scalar registrations
-/// use the static-abstract metadata on <see cref="IScalarFunction"/> to build a
-/// <see cref="FunctionDescriptor"/> at registration time, so catalog tooling can
-/// describe the registered set without instantiating each function.
+/// by name. Entries live under a <see cref="QualifiedName"/> (schema + name);
+/// built-ins register into the <c>system</c> schema. Lookup supports three
+/// shapes:
+/// <list type="bullet">
+///   <item><description>Exact qualified — <see cref="TryGetScalar(QualifiedName)"/>.</description></item>
+///   <item><description>Explicit-or-walk — <see cref="TryGetScalar(string?, string, IReadOnlyList{string})"/>:
+///     an explicit schema goes straight to that schema; an unqualified name
+///     walks the supplied <c>search_path</c> in order, first hit wins.</description></item>
+///   <item><description>Back-compat bare-string — <see cref="TryGetScalar(string)"/>:
+///     names containing a dot split into <c>(schema, name)</c> and exact-match;
+///     bare names walk the default <c>[public, system]</c> path. Preserves
+///     pre-S7 call sites that haven't been migrated to pass an explicit
+///     search_path yet.</description></item>
+/// </list>
 /// </summary>
 public sealed class FunctionRegistry
 {
-    private readonly Dictionary<string, IScalarFunction> _scalarFunctions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, FunctionDescriptor> _scalarDescriptorsByName = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Schema that built-in scalars / aggregates / window functions live in.</summary>
+    public const string SystemSchema = "system";
+
+    /// <summary>
+    /// Default search_path applied by the bare-string lookup overloads.
+    /// Mirrors <c>TableCatalog</c>'s default so unqualified function calls
+    /// resolve the same way unqualified table references do.
+    /// </summary>
+    private static readonly IReadOnlyList<string> DefaultSearchPath = new[] { "public", SystemSchema };
+
+    private readonly Dictionary<QualifiedName, IScalarFunction> _scalarFunctions = new();
+    private readonly Dictionary<QualifiedName, FunctionDescriptor> _scalarDescriptorsByName = new();
     private readonly List<FunctionDescriptor> _scalarDescriptors = new();
-    private readonly Dictionary<string, ITableValuedFunction> _tableValuedFunctions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, IAggregateFunction> _aggregateFunctions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, IWindowFunction> _windowFunctions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, ModelScalarFunction> _resolvedModelFunctions =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<QualifiedName, ITableValuedFunction> _tableValuedFunctions = new();
+    private readonly Dictionary<QualifiedName, IAggregateFunction> _aggregateFunctions = new();
+    private readonly Dictionary<QualifiedName, IWindowFunction> _windowFunctions = new();
+    private readonly ConcurrentDictionary<QualifiedName, ModelScalarFunction> _resolvedModelFunctions = new();
     private Func<ModelCatalog?>? _modelCatalogResolver;
 
     /// <summary>
     /// Registers a scalar function described by <typeparamref name="T"/>'s
-    /// static-abstract metadata. Reads <c>T.Name</c>, <c>T.Category</c>,
-    /// <c>T.Description</c>, and <c>T.Signatures</c> at registration time.
+    /// static-abstract metadata. The function lands in <paramref name="schema"/>
+    /// (defaults to <c>system</c> — every built-in lives there).
     /// </summary>
-    /// <exception cref="ArgumentException">A function with the same name is already registered.</exception>
-    public void RegisterScalar<T>() where T : IFunction, IScalarFunction, new()
+    /// <exception cref="ArgumentException">A function with the same qualified name is already registered.</exception>
+    public void RegisterScalar<T>(string schema = SystemSchema) where T : IFunction, IScalarFunction, new()
     {
         T instance = new();
+        QualifiedName key = new(schema, T.Name);
         FunctionDescriptor descriptor = new(
             PrimaryName: T.Name,
             Aliases: Array.Empty<string>(),
@@ -39,32 +60,35 @@ public sealed class FunctionRegistry
             Description: T.Description,
             Signatures: T.Signatures);
 
-        if (!_scalarFunctions.TryAdd(T.Name, instance))
+        if (!_scalarFunctions.TryAdd(key, instance))
         {
-            throw new ArgumentException($"Scalar function '{T.Name}' is already registered.");
+            throw new ArgumentException($"Scalar function '{key}' is already registered.");
         }
-        _scalarDescriptorsByName[T.Name] = descriptor;
+        _scalarDescriptorsByName[key] = descriptor;
         _scalarDescriptors.Add(descriptor);
     }
 
     /// <summary>
     /// Registers an existing scalar function under an additional alias name.
+    /// The alias lives in the same schema as the primary.
     /// </summary>
-    /// <exception cref="ArgumentException">No primary registration for <typeparamref name="T"/> exists, or the alias is already taken.</exception>
-    public void RegisterScalarAlias<T>(string alias) where T : IFunction, IScalarFunction
+    /// <exception cref="ArgumentException">No primary registration for <typeparamref name="T"/> exists in <paramref name="schema"/>, or the alias is already taken.</exception>
+    public void RegisterScalarAlias<T>(string alias, string schema = SystemSchema) where T : IFunction, IScalarFunction
     {
-        if (!_scalarFunctions.TryGetValue(T.Name, out IScalarFunction? primary))
+        QualifiedName primaryKey = new(schema, T.Name);
+        QualifiedName aliasKey = new(schema, alias);
+        if (!_scalarFunctions.TryGetValue(primaryKey, out IScalarFunction? primary))
         {
             throw new ArgumentException(
-                $"Cannot register alias '{alias}' for {T.Name}: primary registration not found.",
+                $"Cannot register alias '{aliasKey}' for {primaryKey}: primary registration not found.",
                 nameof(alias));
         }
-        if (!_scalarFunctions.TryAdd(alias, primary))
+        if (!_scalarFunctions.TryAdd(aliasKey, primary))
         {
-            throw new ArgumentException($"Scalar function '{alias}' is already registered.");
+            throw new ArgumentException($"Scalar function '{aliasKey}' is already registered.");
         }
 
-        if (_scalarDescriptorsByName.TryGetValue(T.Name, out FunctionDescriptor? primaryDescriptor))
+        if (_scalarDescriptorsByName.TryGetValue(primaryKey, out FunctionDescriptor? primaryDescriptor))
         {
             FunctionDescriptor updated = primaryDescriptor with
             {
@@ -75,10 +99,10 @@ public sealed class FunctionRegistry
             {
                 _scalarDescriptors[idx] = updated;
             }
-            _scalarDescriptorsByName[T.Name] = updated;
+            _scalarDescriptorsByName[primaryKey] = updated;
         }
         // Aliases also map back to the primary descriptor for lookup.
-        _scalarDescriptorsByName[alias] = _scalarDescriptorsByName[T.Name];
+        _scalarDescriptorsByName[aliasKey] = _scalarDescriptorsByName[primaryKey];
     }
 
     /// <summary>
@@ -89,7 +113,13 @@ public sealed class FunctionRegistry
     /// is optional; when supplied, it surfaces in <c>system.functions</c> alongside
     /// the type-registered scalars.
     /// </summary>
-    /// <param name="name">Name to register under. May contain a namespace prefix (<c>udf.X</c>).</param>
+    /// <remarks>
+    /// Accepts either a bare name (lands in <c>public</c>) or a dotted
+    /// <c>schema.name</c> string. The current procedural-UDF adapter passes
+    /// <c>"udf.X"</c> — a vestigial prefix that becomes a real schema slot
+    /// in S7d when the inliner stops adding it.
+    /// </remarks>
+    /// <param name="name">Name to register under. May be qualified (<c>schema.fn</c>).</param>
     /// <param name="instance">The scalar function instance.</param>
     /// <param name="descriptor">Optional catalog descriptor for introspection.</param>
     /// <param name="replace">When <see langword="true"/>, overwrites any existing entry with the same name.</param>
@@ -100,24 +130,25 @@ public sealed class FunctionRegistry
         FunctionDescriptor? descriptor = null,
         bool replace = false)
     {
+        QualifiedName key = QualifiedName.Parse(name, defaultSchema: "public");
         if (replace)
         {
             // When replacing, also drop the old descriptor so introspection
             // doesn't show stale metadata next to the new instance.
-            if (_scalarDescriptorsByName.Remove(name, out FunctionDescriptor? old))
+            if (_scalarDescriptorsByName.Remove(key, out FunctionDescriptor? old))
             {
                 _scalarDescriptors.Remove(old);
             }
-            _scalarFunctions[name] = instance;
+            _scalarFunctions[key] = instance;
         }
-        else if (!_scalarFunctions.TryAdd(name, instance))
+        else if (!_scalarFunctions.TryAdd(key, instance))
         {
-            throw new ArgumentException($"Scalar function '{name}' is already registered.");
+            throw new ArgumentException($"Scalar function '{key}' is already registered.");
         }
 
         if (descriptor is not null)
         {
-            _scalarDescriptorsByName[name] = descriptor;
+            _scalarDescriptorsByName[key] = descriptor;
             _scalarDescriptors.Add(descriptor);
         }
     }
@@ -130,8 +161,9 @@ public sealed class FunctionRegistry
     /// </summary>
     public bool UnregisterScalar(string name)
     {
-        bool removedInstance = _scalarFunctions.Remove(name);
-        if (_scalarDescriptorsByName.Remove(name, out FunctionDescriptor? descriptor))
+        QualifiedName key = QualifiedName.Parse(name, defaultSchema: "public");
+        bool removedInstance = _scalarFunctions.Remove(key);
+        if (_scalarDescriptorsByName.Remove(key, out FunctionDescriptor? descriptor))
         {
             _scalarDescriptors.Remove(descriptor);
         }
@@ -140,52 +172,55 @@ public sealed class FunctionRegistry
 
     /// <summary>
     /// Registers a table-valued function described by <typeparamref name="T"/>'s
-    /// static-abstract metadata. Reads <c>T.Name</c>, <c>T.Category</c>, and
-    /// <c>T.Description</c> at registration time.
+    /// static-abstract metadata into <paramref name="schema"/>.
     /// </summary>
-    /// <exception cref="ArgumentException">A function with the same name is already registered.</exception>
-    public void RegisterTableValued<T>() where T : ITableValuedFunctionMetadata, ITableValuedFunction, new()
+    /// <exception cref="ArgumentException">A function with the same qualified name is already registered.</exception>
+    public void RegisterTableValued<T>(string schema = SystemSchema) where T : ITableValuedFunctionMetadata, ITableValuedFunction, new()
     {
         T instance = new();
-        if (!_tableValuedFunctions.TryAdd(T.Name, instance))
+        QualifiedName key = new(schema, T.Name);
+        if (!_tableValuedFunctions.TryAdd(key, instance))
         {
-            throw new ArgumentException($"Table-valued function '{T.Name}' is already registered.");
+            throw new ArgumentException($"Table-valued function '{key}' is already registered.");
         }
     }
 
     /// <summary>
-    /// Registers a table-valued function instance directly.
+    /// Registers a table-valued function instance directly into <paramref name="schema"/>.
     /// </summary>
-    /// <exception cref="ArgumentException">A function with the same name is already registered.</exception>
-    public void RegisterTableValued(ITableValuedFunction function)
+    /// <exception cref="ArgumentException">A function with the same qualified name is already registered.</exception>
+    public void RegisterTableValued(ITableValuedFunction function, string schema = SystemSchema)
     {
-        if (!_tableValuedFunctions.TryAdd(function.Name, function))
+        QualifiedName key = new(schema, function.Name);
+        if (!_tableValuedFunctions.TryAdd(key, function))
         {
-            throw new ArgumentException($"Table-valued function '{function.Name}' is already registered.");
+            throw new ArgumentException($"Table-valued function '{key}' is already registered.");
         }
     }
 
     /// <summary>
-    /// Registers an aggregate function.
+    /// Registers an aggregate function into <paramref name="schema"/>.
     /// </summary>
-    /// <exception cref="ArgumentException">A function with the same name is already registered.</exception>
-    public void RegisterAggregate(IAggregateFunction function)
+    /// <exception cref="ArgumentException">A function with the same qualified name is already registered.</exception>
+    public void RegisterAggregate(IAggregateFunction function, string schema = SystemSchema)
     {
-        if (!_aggregateFunctions.TryAdd(function.Name, function))
+        QualifiedName key = new(schema, function.Name);
+        if (!_aggregateFunctions.TryAdd(key, function))
         {
-            throw new ArgumentException($"Aggregate function '{function.Name}' is already registered.");
+            throw new ArgumentException($"Aggregate function '{key}' is already registered.");
         }
     }
 
     /// <summary>
-    /// Registers a window function.
+    /// Registers a window function into <paramref name="schema"/>.
     /// </summary>
-    /// <exception cref="ArgumentException">A function with the same name is already registered.</exception>
-    public void RegisterWindow(IWindowFunction function)
+    /// <exception cref="ArgumentException">A function with the same qualified name is already registered.</exception>
+    public void RegisterWindow(IWindowFunction function, string schema = SystemSchema)
     {
-        if (!_windowFunctions.TryAdd(function.Name, function))
+        QualifiedName key = new(schema, function.Name);
+        if (!_windowFunctions.TryAdd(key, function))
         {
-            throw new ArgumentException($"Window function '{function.Name}' is already registered.");
+            throw new ArgumentException($"Window function '{key}' is already registered.");
         }
     }
 
@@ -217,14 +252,14 @@ public sealed class FunctionRegistry
         _resolvedModelFunctions.Clear();
     }
 
+    // ──────────────────── Scalar lookup ────────────────────
+
     /// <summary>
-    /// Looks up a scalar function by name. Falls back to the model catalog
-    /// (when one is configured via <see cref="SetModelCatalogResolver"/>)
-    /// for names in the <c>models.</c> namespace; the resolved
-    /// <see cref="ModelScalarFunction"/> is cached so repeated lookups for
-    /// the same model name don't re-allocate an adapter.
+    /// Exact lookup by qualified name. No search_path walk, no model
+    /// fallback — used by call sites that have already resolved the
+    /// schema or want to assert a specific schema membership.
     /// </summary>
-    public IScalarFunction? TryGetScalar(string name)
+    public IScalarFunction? TryGetScalar(QualifiedName name)
     {
         if (_scalarFunctions.TryGetValue(name, out IScalarFunction? function))
         {
@@ -242,82 +277,212 @@ public sealed class FunctionRegistry
         return null;
     }
 
-    private bool TryResolveModelFunction(string name, out ModelScalarFunction resolved)
+    /// <summary>
+    /// Search-path-aware lookup. An explicit <paramref name="explicitSchema"/>
+    /// goes straight to that schema; an unqualified name walks
+    /// <paramref name="searchPath"/> in order and returns the first hit.
+    /// </summary>
+    public IScalarFunction? TryGetScalar(string? explicitSchema, string name, IReadOnlyList<string> searchPath)
+    {
+        if (explicitSchema is not null)
+        {
+            return TryGetScalar(new QualifiedName(explicitSchema, name));
+        }
+
+        foreach (string schema in searchPath)
+        {
+            IScalarFunction? hit = TryGetScalar(new QualifiedName(schema, name));
+            if (hit is not null) return hit;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Back-compat lookup used by pre-S7 call sites that pass a flat
+    /// name. Strings containing a dot are split into <c>(schema, name)</c>
+    /// and exact-matched (preserves the <c>"udf.X"</c> / <c>"models.X"</c>
+    /// dispatch contract). Bare names walk the default
+    /// <c>[public, system]</c> path. New call sites should pass an
+    /// explicit <c>search_path</c> via the overload above.
+    /// </summary>
+    public IScalarFunction? TryGetScalar(string name)
+    {
+        int dot = name.IndexOf('.');
+        if (dot >= 0)
+        {
+            return TryGetScalar(new QualifiedName(name[..dot], name[(dot + 1)..]));
+        }
+        return TryGetScalar(explicitSchema: null, name, DefaultSearchPath);
+    }
+
+    private bool TryResolveModelFunction(QualifiedName name, out ModelScalarFunction resolved)
     {
         resolved = null!;
         if (_modelCatalogResolver is null) return false;
-        if (!name.StartsWith("models.", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!string.Equals(name.Schema, "models", StringComparison.OrdinalIgnoreCase)) return false;
 
         ModelCatalog? catalog = _modelCatalogResolver();
         if (catalog is null) return false;
 
-        string modelName = name["models.".Length..];
-        if (catalog.TryGetEntry(modelName) is null) return false;
+        if (catalog.TryGetEntry(name.Name) is null) return false;
 
-        resolved = new ModelScalarFunction(modelName, _modelCatalogResolver);
+        resolved = new ModelScalarFunction(name.Name, _modelCatalogResolver);
         return true;
     }
 
     /// <summary>
-    /// Looks up the catalog descriptor for a scalar function by name (or alias).
+    /// Looks up the catalog descriptor for a scalar function by qualified
+    /// name (or alias within the same schema).
     /// </summary>
-    public FunctionDescriptor? TryGetScalarDescriptor(string name)
+    public FunctionDescriptor? TryGetScalarDescriptor(QualifiedName name)
     {
         _scalarDescriptorsByName.TryGetValue(name, out FunctionDescriptor? descriptor);
         return descriptor;
     }
 
     /// <summary>
-    /// Looks up a table-valued function by name.
+    /// Back-compat descriptor lookup. See <see cref="TryGetScalar(string)"/>
+    /// for the resolution rule.
     /// </summary>
-    public ITableValuedFunction? TryGetTableValued(string name)
+    public FunctionDescriptor? TryGetScalarDescriptor(string name)
+    {
+        int dot = name.IndexOf('.');
+        if (dot >= 0)
+        {
+            return TryGetScalarDescriptor(new QualifiedName(name[..dot], name[(dot + 1)..]));
+        }
+        foreach (string schema in DefaultSearchPath)
+        {
+            FunctionDescriptor? hit = TryGetScalarDescriptor(new QualifiedName(schema, name));
+            if (hit is not null) return hit;
+        }
+        return null;
+    }
+
+    // ──────────────────── Other arity lookups ────────────────────
+
+    /// <summary>Exact qualified lookup for a table-valued function.</summary>
+    public ITableValuedFunction? TryGetTableValued(QualifiedName name)
     {
         _tableValuedFunctions.TryGetValue(name, out ITableValuedFunction? function);
         return function;
     }
 
     /// <summary>
-    /// Looks up an aggregate function by name.
+    /// Back-compat bare-string lookup. Split-then-exact when dotted;
+    /// otherwise walks <c>[public, system]</c>.
     /// </summary>
-    public IAggregateFunction? TryGetAggregate(string name)
+    public ITableValuedFunction? TryGetTableValued(string name)
+    {
+        int dot = name.IndexOf('.');
+        if (dot >= 0)
+        {
+            return TryGetTableValued(new QualifiedName(name[..dot], name[(dot + 1)..]));
+        }
+        foreach (string schema in DefaultSearchPath)
+        {
+            ITableValuedFunction? hit = TryGetTableValued(new QualifiedName(schema, name));
+            if (hit is not null) return hit;
+        }
+        return null;
+    }
+
+    /// <summary>Exact qualified lookup for an aggregate function.</summary>
+    public IAggregateFunction? TryGetAggregate(QualifiedName name)
     {
         _aggregateFunctions.TryGetValue(name, out IAggregateFunction? function);
         return function;
     }
 
     /// <summary>
-    /// Looks up a dedicated window function by name.
+    /// Back-compat bare-string lookup. Split-then-exact when dotted;
+    /// otherwise walks <c>[public, system]</c>.
     /// </summary>
-    public IWindowFunction? TryGetWindow(string name)
+    public IAggregateFunction? TryGetAggregate(string name)
+    {
+        int dot = name.IndexOf('.');
+        if (dot >= 0)
+        {
+            return TryGetAggregate(new QualifiedName(name[..dot], name[(dot + 1)..]));
+        }
+        foreach (string schema in DefaultSearchPath)
+        {
+            IAggregateFunction? hit = TryGetAggregate(new QualifiedName(schema, name));
+            if (hit is not null) return hit;
+        }
+        return null;
+    }
+
+    /// <summary>Exact qualified lookup for a dedicated window function.</summary>
+    public IWindowFunction? TryGetWindow(QualifiedName name)
     {
         _windowFunctions.TryGetValue(name, out IWindowFunction? function);
         return function;
     }
 
     /// <summary>
+    /// Back-compat bare-string lookup. Split-then-exact when dotted;
+    /// otherwise walks <c>[public, system]</c>.
+    /// </summary>
+    public IWindowFunction? TryGetWindow(string name)
+    {
+        int dot = name.IndexOf('.');
+        if (dot >= 0)
+        {
+            return TryGetWindow(new QualifiedName(name[..dot], name[(dot + 1)..]));
+        }
+        foreach (string schema in DefaultSearchPath)
+        {
+            IWindowFunction? hit = TryGetWindow(new QualifiedName(schema, name));
+            if (hit is not null) return hit;
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Resolves a window function by name, checking the dedicated window registry
     /// first, then falling back to wrapping an aggregate function with
-    /// <see cref="Window.AggregateWindowAdapter"/> if one exists.
+    /// <see cref="Window.AggregateWindowAdapter"/> if one exists in the same schema.
     /// </summary>
-    public IWindowFunction? TryGetWindowOrAggregate(string name)
+    public IWindowFunction? TryGetWindowOrAggregate(QualifiedName name)
     {
         if (_windowFunctions.TryGetValue(name, out IWindowFunction? windowFunction))
         {
             return windowFunction;
         }
-
         if (_aggregateFunctions.TryGetValue(name, out IAggregateFunction? aggregateFunction))
         {
             return new Window.AggregateWindowAdapter(aggregateFunction);
         }
-
         return null;
     }
 
+    /// <summary>Back-compat bare-string overload. See <see cref="TryGetScalar(string)"/>.</summary>
+    public IWindowFunction? TryGetWindowOrAggregate(string name)
+    {
+        int dot = name.IndexOf('.');
+        if (dot >= 0)
+        {
+            return TryGetWindowOrAggregate(new QualifiedName(name[..dot], name[(dot + 1)..]));
+        }
+        foreach (string schema in DefaultSearchPath)
+        {
+            IWindowFunction? hit = TryGetWindowOrAggregate(new QualifiedName(schema, name));
+            if (hit is not null) return hit;
+        }
+        return null;
+    }
+
+    // ──────────────────── Enumeration ────────────────────
+
+    /// <summary>Every registered scalar function as <c>(schema, name)</c>.</summary>
+    public IEnumerable<QualifiedName> ScalarFunctionQualifiedNames => _scalarFunctions.Keys;
+
     /// <summary>
-    /// Returns all registered scalar function names (including aliases).
+    /// Bare names of every registered scalar (without schema). Preserves the
+    /// pre-S7 enumeration shape for consumers that don't care about schema.
     /// </summary>
-    public IEnumerable<string> ScalarFunctionNames => _scalarFunctions.Keys;
+    public IEnumerable<string> ScalarFunctionNames => _scalarFunctions.Keys.Select(k => k.Name);
 
     /// <summary>
     /// Returns the descriptor for every primary scalar registration.
@@ -325,27 +490,29 @@ public sealed class FunctionRegistry
     /// </summary>
     public IReadOnlyList<FunctionDescriptor> ScalarDescriptors => _scalarDescriptors;
 
-    /// <summary>
-    /// Returns all registered table-valued function names.
-    /// </summary>
-    public IEnumerable<string> TableValuedFunctionNames => _tableValuedFunctions.Keys;
+    /// <summary>Every registered table-valued function as <c>(schema, name)</c>.</summary>
+    public IEnumerable<QualifiedName> TableValuedFunctionQualifiedNames => _tableValuedFunctions.Keys;
+
+    /// <summary>Bare names of every registered table-valued function.</summary>
+    public IEnumerable<string> TableValuedFunctionNames => _tableValuedFunctions.Keys.Select(k => k.Name);
+
+    /// <summary>Every registered aggregate function as <c>(schema, name)</c>.</summary>
+    public IEnumerable<QualifiedName> AggregateFunctionQualifiedNames => _aggregateFunctions.Keys;
+
+    /// <summary>Bare names of every registered aggregate function.</summary>
+    public IEnumerable<string> AggregateFunctionNames => _aggregateFunctions.Keys.Select(k => k.Name);
+
+    /// <summary>Every registered window function as <c>(schema, name)</c>.</summary>
+    public IEnumerable<QualifiedName> WindowFunctionQualifiedNames => _windowFunctions.Keys;
+
+    /// <summary>Bare names of every registered window function.</summary>
+    public IEnumerable<string> WindowFunctionNames => _windowFunctions.Keys.Select(k => k.Name);
 
     /// <summary>
-    /// Returns all registered aggregate function names.
-    /// </summary>
-    public IEnumerable<string> AggregateFunctionNames => _aggregateFunctions.Keys;
-
-    /// <summary>
-    /// Returns all registered window function names.
-    /// </summary>
-    public IEnumerable<string> WindowFunctionNames => _windowFunctions.Keys;
-
-    /// <summary>
-    /// Creates a registry pre-populated with all built-in functions.
-    /// Scalar/math functions are registered demand-pulled — the function
-    /// rebuild deliberately starts with an empty scalar set and adds
-    /// functions back as demos require them. See
-    /// <c>memory/project_function_rebuild.md</c> for the rebuild plan.
+    /// Creates a registry pre-populated with all built-in functions. Every
+    /// built-in lands in the <c>system</c> schema; the default
+    /// <c>search_path</c> of <c>[public, system]</c> keeps unqualified
+    /// calls resolving the same way they did before S7.
     /// </summary>
     public static FunctionRegistry CreateDefault()
     {

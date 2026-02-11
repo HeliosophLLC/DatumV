@@ -356,7 +356,7 @@ public sealed class QuerySchemaResolver
     /// </summary>
     private IReadOnlyList<ResolvedColumn> ResolveFunctionSource(FunctionSource functionSource)
     {
-        ITableValuedFunction? function = _functionRegistry.TryGetTableValued(functionSource.FunctionName);
+        ITableValuedFunction? function = _functionRegistry.TryGetTableValued(functionSource.CallName);
         if (function is null)
         {
             return [];

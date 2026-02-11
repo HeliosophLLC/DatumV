@@ -662,7 +662,7 @@ internal static class SubqueryRewriter
 
         Expression selectExpression = innerQuery.Columns[0].Expression;
         if (selectExpression is not FunctionCallExpression aggregateCall
-            || functionRegistry.TryGetAggregate(aggregateCall.FunctionName) is null)
+            || functionRegistry.TryGetAggregate(aggregateCall.CallName) is null)
         {
             return null;
         }

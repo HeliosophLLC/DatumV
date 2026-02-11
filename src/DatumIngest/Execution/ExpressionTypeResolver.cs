@@ -202,7 +202,7 @@ public static class ExpressionTypeResolver
         // (null = scalar, ArrayOf(...) = array).
         if (indexAccess.Source is FunctionCallExpression arrayFnSource)
         {
-            IAggregateFunction? aggregate = functions.TryGetAggregate(arrayFnSource.FunctionName);
+            IAggregateFunction? aggregate = functions.TryGetAggregate(arrayFnSource.CallName);
             if (aggregate?.ReturnRule?.ProducesArray == true)
             {
                 return sourceKind;
@@ -379,7 +379,7 @@ public static class ExpressionTypeResolver
 
     private static DataKind? ResolveFunction(FunctionCallExpression function, Schema sourceSchema, FunctionRegistry functions)
     {
-        IScalarFunction? scalarFunction = functions.TryGetScalar(function.FunctionName);
+        IScalarFunction? scalarFunction = functions.TryGetScalar(function.CallName);
 
         // If not a scalar function, check whether it is an aggregate. This path is
         // used by QuerySchemaResolver when resolving SELECT expressions that contain
@@ -432,12 +432,12 @@ public static class ExpressionTypeResolver
     private static (DataKind Kind, bool IsArray)? ResolveFunctionShape(
         FunctionCallExpression function, Schema sourceSchema, FunctionRegistry functions)
     {
-        IScalarFunction? scalarFunction = functions.TryGetScalar(function.FunctionName);
+        IScalarFunction? scalarFunction = functions.TryGetScalar(function.CallName);
 
         if (scalarFunction is null)
         {
             // Aggregate fallback — same as ResolveFunction's path.
-            IAggregateFunction? aggregateFunction = functions.TryGetAggregate(function.FunctionName);
+            IAggregateFunction? aggregateFunction = functions.TryGetAggregate(function.CallName);
             if (aggregateFunction is null) return null;
 
             DataKind[] aggArgs = new DataKind[function.Arguments.Count];
@@ -518,7 +518,7 @@ public static class ExpressionTypeResolver
     /// </summary>
     private static DataKind? ResolveAggregate(FunctionCallExpression function, Schema sourceSchema, FunctionRegistry functions)
     {
-        IAggregateFunction? aggregateFunction = functions.TryGetAggregate(function.FunctionName);
+        IAggregateFunction? aggregateFunction = functions.TryGetAggregate(function.CallName);
         if (aggregateFunction is null)
         {
             return null;
@@ -668,7 +668,7 @@ public static class ExpressionTypeResolver
         Schema sourceSchema,
         FunctionRegistry functions)
     {
-        IWindowFunction? windowFunction = functions.TryGetWindowOrAggregate(window.FunctionName);
+        IWindowFunction? windowFunction = functions.TryGetWindowOrAggregate(window.CallName);
         if (windowFunction is null)
         {
             return null;
