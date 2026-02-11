@@ -25,37 +25,60 @@ namespace DatumIngest.Catalog;
 /// </remarks>
 internal sealed class RoutineRegistrar
 {
+    private readonly TableCatalog _catalog;
     private readonly UdfRegistry _udfs;
     private readonly ProcedureRegistry _procedures;
     private readonly FunctionRegistry _functions;
     private readonly CatalogStore? _catalogStore;
 
     /// <summary>
-    /// Wires the registrar to the registries and (optional) persistent store
-    /// it operates on. The instances are held by reference — every mutation
-    /// goes through the same UDF / procedure / function registries the
-    /// catalog exposes publicly, and every save targets the same file.
+    /// Wires the registrar to the catalog, registries, and (optional)
+    /// persistent store it operates on. The instances are held by reference —
+    /// every mutation goes through the same UDF / procedure / function
+    /// registries the catalog exposes publicly, and every save targets the
+    /// same file. The catalog reference exists so the registrar can build
+    /// per-call <see cref="SchemaResolver"/> instances against the current
+    /// session search_path.
     /// </summary>
-    /// <param name="udfs">The catalog's UDF registry — descriptors for both macros and procedurals.</param>
-    /// <param name="procedures">The catalog's procedure registry.</param>
-    /// <param name="functions">
-    /// The catalog's scalar-function registry. Procedural UDFs are mirrored
-    /// here as <see cref="ProceduralUdfFunction"/> adapters under their
-    /// <c>udf.X</c> name so the standard scalar dispatch path can resolve
-    /// them at evaluation time without a separate code path. Macros stay out
-    /// of this registry — they're inlined before evaluation.
-    /// </param>
-    /// <param name="catalogStore">Optional persistent catalog file.</param>
     public RoutineRegistrar(
+        TableCatalog catalog,
         UdfRegistry udfs,
         ProcedureRegistry procedures,
         FunctionRegistry functions,
         CatalogStore? catalogStore)
     {
+        _catalog = catalog;
         _udfs = udfs;
         _procedures = procedures;
         _functions = functions;
         _catalogStore = catalogStore;
+    }
+
+    private SchemaResolver Resolver() => new(_catalog, _catalog.SearchPath);
+
+    /// <summary>
+    /// S7c: catalog search_path extended with the legacy <c>udf</c> and
+    /// <c>proc</c> sentinels so unqualified CREATE FUNCTION / CREATE
+    /// PROCEDURE (which still default to those sentinels) and unqualified
+    /// DROP / CALL referencing them stay findable. S7d drops the
+    /// fallback when the defaults move to a real schema.
+    /// </summary>
+    private IReadOnlyList<string> RoutineSearchPath()
+    {
+        IReadOnlyList<string> sessionPath = _catalog.SearchPath;
+        bool hasUdf = false, hasProc = false;
+        foreach (string s in sessionPath)
+        {
+            if (string.Equals(s, "udf", StringComparison.OrdinalIgnoreCase)) hasUdf = true;
+            if (string.Equals(s, "proc", StringComparison.OrdinalIgnoreCase)) hasProc = true;
+        }
+        if (hasUdf && hasProc) return sessionPath;
+
+        List<string> extended = new(sessionPath.Count + 2);
+        extended.AddRange(sessionPath);
+        if (!hasUdf) extended.Add("udf");
+        if (!hasProc) extended.Add("proc");
+        return extended;
     }
 
     /// <summary>
@@ -78,7 +101,7 @@ internal sealed class RoutineRegistrar
     {
         // Snapshot before mutating so we don't iterate a collection that
         // we replace entries in.
-        UdfDescriptor[] proceduralEntries = _udfs.Entries.Values
+        UdfDescriptor[] proceduralEntries = _udfs.Entries
             .Where(d => d.IsProcedural)
             .ToArray();
 
@@ -109,30 +132,38 @@ internal sealed class RoutineRegistrar
         // call-site arity stays unambiguous (positional matching only).
         ValidateDefaultsContiguous(create.Parameters, $"CREATE FUNCTION {create.Name}");
 
-        if (create.IfNotExists && _udfs.TryGet(create.Name, out _))
+        // Pick the target schema. Explicit qualification wins; unqualified
+        // CREATE FUNCTION falls back to the legacy <c>udf</c> sentinel so
+        // existing call sites that write <c>udf.foo(...)</c> still resolve
+        // through the post-S7c qualified registry. S7d switches the default
+        // to the first DDL-capable schema on search_path (typically
+        // <c>public</c>) and migrates the call syntax accordingly.
+        QualifiedName qn = new(create.SchemaName ?? "udf", create.Name);
+
+        if (create.IfNotExists && _udfs.TryGet(qn, out _))
         {
             return;
         }
 
         if (create.StatementBody is not null)
         {
-            ApplyCreateProceduralFunction(create, sourceText);
+            ApplyCreateProceduralFunction(create, qn, sourceText);
         }
         else
         {
-            ApplyCreateMacroFunction(create);
+            ApplyCreateMacroFunction(create, qn);
         }
 
         _catalogStore?.Save(_udfs, _procedures);
     }
 
-    private void ApplyCreateMacroFunction(CreateFunctionStatement create)
+    private void ApplyCreateMacroFunction(CreateFunctionStatement create, QualifiedName qn)
     {
-        UdfDescriptor descriptor = BuildMacroDescriptor(create);
+        UdfDescriptor descriptor = BuildMacroDescriptor(create, qn);
         _udfs.Register(descriptor, replace: create.OrReplace);
         // OR REPLACE may have swapped a previous procedural for this macro;
         // drop any stale adapter so dispatch falls through to the inliner.
-        UnregisterProceduralAdapter(descriptor.Name);
+        UnregisterProceduralAdapter(qn);
     }
 
     /// <summary>
@@ -153,26 +184,27 @@ internal sealed class RoutineRegistrar
     /// registration is rolled back so the catalog can't observe the broken
     /// intermediate state.
     /// </summary>
-    private void ApplyCreateProceduralFunction(CreateFunctionStatement create, string? sourceText)
+    private void ApplyCreateProceduralFunction(
+        CreateFunctionStatement create, QualifiedName qn, string? sourceText)
     {
-        UdfDescriptor initial = BuildProceduralDescriptor(create, sourceText);
+        UdfDescriptor initial = BuildProceduralDescriptor(create, qn, sourceText);
 
         _udfs.Register(initial, replace: create.OrReplace);
 
         UdfDescriptor finalDescriptor;
-        // Procedural UDFs allow forward references — `a` can call `udf.b`
+        // Procedural UDFs allow forward references — `a` can call `b`
         // even before `b` is registered, since the call dispatches at
         // runtime through the FunctionRegistry adapter. To make the inliner
         // treat unresolved names as "leave alone" (rather than throwing
         // "not registered"), pre-register a stub procedural descriptor for
-        // each missing referenced name. The stubs satisfy the inliner's
-        // lookup; we remove them immediately after the rewrite so the
-        // catalog only commits to the final state.
-        List<string> stubNames = RegisterStubsForUnresolvedReferences(create.StatementBody!, create.Name);
+        // each missing referenced name. Stubs land in the same schema as
+        // the containing function — that's the natural assumption when a
+        // body of one UDF references another.
+        List<QualifiedName> stubNames = RegisterStubsForUnresolvedReferences(create.StatementBody!, qn);
         try
         {
             IReadOnlyList<Statement> rewrittenBody = RewriteBodyWithInlinedMacros(
-                create.StatementBody!);
+                create.StatementBody!, qn.Schema);
             finalDescriptor = initial with { StatementBody = rewrittenBody };
             _udfs.Register(finalDescriptor, replace: true);
         }
@@ -181,20 +213,21 @@ internal sealed class RoutineRegistrar
             // Roll the partial registration back so a failed rewrite leaves
             // the catalog in the same state the caller observed before
             // CREATE FUNCTION started.
-            _udfs.Unregister(create.Name);
-            UnregisterProceduralAdapter(create.Name);
+            _udfs.Unregister(qn);
+            UnregisterProceduralAdapter(qn);
             throw;
         }
         finally
         {
-            foreach (string stubName in stubNames)
+            foreach (QualifiedName stubName in stubNames)
             {
                 _udfs.Unregister(stubName);
             }
         }
 
         // Mirror the (final) descriptor into the scalar registry so the
-        // standard scalar dispatch path can resolve udf.X at evaluation time.
+        // standard scalar dispatch path can resolve the UDF at evaluation
+        // time. The adapter lands at the function's real qualified name.
         RegisterProceduralAdapter(finalDescriptor, replace: create.OrReplace);
     }
 
@@ -209,23 +242,30 @@ internal sealed class RoutineRegistrar
     /// rewrite is done.
     /// </summary>
     /// <param name="body">The procedural body whose expressions are about to be rewritten.</param>
-    /// <param name="selfName">The UDF currently being defined; the stub for self is unnecessary because the caller has already registered the real descriptor.</param>
-    private List<string> RegisterStubsForUnresolvedReferences(IReadOnlyList<Statement> body, string selfName)
+    /// <param name="self">The UDF currently being defined; the stub for self is unnecessary because the caller has already registered the real descriptor.</param>
+    private List<QualifiedName> RegisterStubsForUnresolvedReferences(
+        IReadOnlyList<Statement> body, QualifiedName self)
     {
-        HashSet<string> referencedNames = new(StringComparer.OrdinalIgnoreCase);
+        // Collect referenced UDF names from the body. We capture both
+        // qualified (SchemaName != null) and unqualified call shapes.
+        // Unqualified references stub into the containing function's
+        // schema — i.e. <c>foo()</c> inside <c>myapp.parent()</c> stubs
+        // as <c>(myapp, foo)</c>.
+        HashSet<QualifiedName> referencedNames = new();
         foreach (Statement stmt in body)
         {
-            CollectUdfReferences(stmt, referencedNames);
+            CollectUdfReferences(stmt, referencedNames, defaultSchema: self.Schema);
         }
 
-        List<string> stubsRegistered = new();
-        foreach (string name in referencedNames)
+        List<QualifiedName> stubsRegistered = new();
+        foreach (QualifiedName name in referencedNames)
         {
-            if (string.Equals(name, selfName, StringComparison.OrdinalIgnoreCase)) continue;
+            if (name == self) continue;
             if (_udfs.TryGet(name, out _)) continue;
 
             UdfDescriptor stub = new(
-                name,
+                SchemaName: name.Schema,
+                Name: name.Name,
                 Parameters: Array.Empty<UdfParameter>(),
                 ReturnTypeName: null,
                 ExpressionBody: null,
@@ -248,103 +288,127 @@ internal sealed class RoutineRegistrar
         return stubsRegistered;
     }
 
-    private static void CollectUdfReferences(Statement stmt, HashSet<string> referencedNames)
+    private void CollectUdfReferences(
+        Statement stmt, HashSet<QualifiedName> referencedNames, string defaultSchema)
     {
         switch (stmt)
         {
             case ReturnStatement ret:
-                CollectUdfReferencesInExpression(ret.Value, referencedNames);
+                CollectUdfReferencesInExpression(ret.Value, referencedNames, defaultSchema);
                 break;
             case DeclareStatement decl:
                 if (decl.Initializer is not null)
                 {
-                    CollectUdfReferencesInExpression(decl.Initializer, referencedNames);
+                    CollectUdfReferencesInExpression(decl.Initializer, referencedNames, defaultSchema);
                 }
                 break;
             case SetStatement set:
-                CollectUdfReferencesInExpression(set.Value, referencedNames);
+                CollectUdfReferencesInExpression(set.Value, referencedNames, defaultSchema);
                 break;
             case IfStatement ifStmt:
-                CollectUdfReferencesInExpression(ifStmt.Predicate, referencedNames);
-                CollectUdfReferences(ifStmt.Then, referencedNames);
-                if (ifStmt.Else is not null) CollectUdfReferences(ifStmt.Else, referencedNames);
+                CollectUdfReferencesInExpression(ifStmt.Predicate, referencedNames, defaultSchema);
+                CollectUdfReferences(ifStmt.Then, referencedNames, defaultSchema);
+                if (ifStmt.Else is not null) CollectUdfReferences(ifStmt.Else, referencedNames, defaultSchema);
                 break;
             case WhileStatement whileStmt:
-                CollectUdfReferencesInExpression(whileStmt.Predicate, referencedNames);
-                CollectUdfReferences(whileStmt.Body, referencedNames);
+                CollectUdfReferencesInExpression(whileStmt.Predicate, referencedNames, defaultSchema);
+                CollectUdfReferences(whileStmt.Body, referencedNames, defaultSchema);
                 break;
             case BlockStatement block:
                 foreach (Statement inner in block.Statements)
                 {
-                    CollectUdfReferences(inner, referencedNames);
+                    CollectUdfReferences(inner, referencedNames, defaultSchema);
                 }
                 break;
         }
     }
 
-    private static void CollectUdfReferencesInExpression(Expression expression, HashSet<string> referencedNames)
+    private void CollectUdfReferencesInExpression(
+        Expression expression, HashSet<QualifiedName> referencedNames, string defaultSchema)
     {
         switch (expression)
         {
             case FunctionCallExpression fn:
-                if (string.Equals(fn.SchemaName, UdfInliner.UdfSchema, StringComparison.OrdinalIgnoreCase))
+                // Match any call that resolves through the UDF registry —
+                // qualified or unqualified. The stub mechanism only cares
+                // about names that aren't already registered as built-ins
+                // (those don't need stubs). Capture the call's resolved
+                // qualified name so the stub lands where the inliner will
+                // look for it.
+                if (fn.SchemaName is not null)
                 {
-                    referencedNames.Add(fn.FunctionName);
+                    // Explicit schema. The user wrote `myapp.x()` — stub
+                    // exactly there if it doesn't exist.
+                    referencedNames.Add(new QualifiedName(fn.SchemaName, fn.FunctionName));
+                }
+                else
+                {
+                    // Unqualified. Walk search_path to find the actual
+                    // registration if one exists; otherwise stub into the
+                    // containing function's schema (best-effort).
+                    if (_udfs.TryResolve(null, fn.FunctionName, _catalog.SearchPath, out UdfDescriptor? resolved))
+                    {
+                        referencedNames.Add(resolved.QualifiedName);
+                    }
+                    else
+                    {
+                        referencedNames.Add(new QualifiedName(defaultSchema, fn.FunctionName));
+                    }
                 }
                 foreach (Expression arg in fn.Arguments)
                 {
-                    CollectUdfReferencesInExpression(arg, referencedNames);
+                    CollectUdfReferencesInExpression(arg, referencedNames, defaultSchema);
                 }
                 break;
             case BinaryExpression b:
-                CollectUdfReferencesInExpression(b.Left, referencedNames);
-                CollectUdfReferencesInExpression(b.Right, referencedNames);
+                CollectUdfReferencesInExpression(b.Left, referencedNames, defaultSchema);
+                CollectUdfReferencesInExpression(b.Right, referencedNames, defaultSchema);
                 break;
             case UnaryExpression u:
-                CollectUdfReferencesInExpression(u.Operand, referencedNames);
+                CollectUdfReferencesInExpression(u.Operand, referencedNames, defaultSchema);
                 break;
             case CastExpression c:
-                CollectUdfReferencesInExpression(c.Expression, referencedNames);
+                CollectUdfReferencesInExpression(c.Expression, referencedNames, defaultSchema);
                 break;
             case CaseExpression ce:
-                if (ce.Operand is not null) CollectUdfReferencesInExpression(ce.Operand, referencedNames);
+                if (ce.Operand is not null) CollectUdfReferencesInExpression(ce.Operand, referencedNames, defaultSchema);
                 foreach (WhenClause w in ce.WhenClauses)
                 {
-                    CollectUdfReferencesInExpression(w.Condition, referencedNames);
-                    CollectUdfReferencesInExpression(w.Result, referencedNames);
+                    CollectUdfReferencesInExpression(w.Condition, referencedNames, defaultSchema);
+                    CollectUdfReferencesInExpression(w.Result, referencedNames, defaultSchema);
                 }
-                if (ce.ElseResult is not null) CollectUdfReferencesInExpression(ce.ElseResult, referencedNames);
+                if (ce.ElseResult is not null) CollectUdfReferencesInExpression(ce.ElseResult, referencedNames, defaultSchema);
                 break;
             case InExpression ie:
-                CollectUdfReferencesInExpression(ie.Expression, referencedNames);
-                foreach (Expression v in ie.Values) CollectUdfReferencesInExpression(v, referencedNames);
+                CollectUdfReferencesInExpression(ie.Expression, referencedNames, defaultSchema);
+                foreach (Expression v in ie.Values) CollectUdfReferencesInExpression(v, referencedNames, defaultSchema);
                 break;
             case BetweenExpression be:
-                CollectUdfReferencesInExpression(be.Expression, referencedNames);
-                CollectUdfReferencesInExpression(be.Low, referencedNames);
-                CollectUdfReferencesInExpression(be.High, referencedNames);
+                CollectUdfReferencesInExpression(be.Expression, referencedNames, defaultSchema);
+                CollectUdfReferencesInExpression(be.Low, referencedNames, defaultSchema);
+                CollectUdfReferencesInExpression(be.High, referencedNames, defaultSchema);
                 break;
             case IsNullExpression isn:
-                CollectUdfReferencesInExpression(isn.Expression, referencedNames);
+                CollectUdfReferencesInExpression(isn.Expression, referencedNames, defaultSchema);
                 break;
             case LikeExpression lk:
-                CollectUdfReferencesInExpression(lk.Expression, referencedNames);
-                CollectUdfReferencesInExpression(lk.Pattern, referencedNames);
-                CollectUdfReferencesInExpression(lk.EscapeCharacter, referencedNames);
+                CollectUdfReferencesInExpression(lk.Expression, referencedNames, defaultSchema);
+                CollectUdfReferencesInExpression(lk.Pattern, referencedNames, defaultSchema);
+                CollectUdfReferencesInExpression(lk.EscapeCharacter, referencedNames, defaultSchema);
                 break;
             case AtTimeZoneExpression atz:
-                CollectUdfReferencesInExpression(atz.Expression, referencedNames);
-                CollectUdfReferencesInExpression(atz.TimeZone, referencedNames);
+                CollectUdfReferencesInExpression(atz.Expression, referencedNames, defaultSchema);
+                CollectUdfReferencesInExpression(atz.TimeZone, referencedNames, defaultSchema);
                 break;
             case StructLiteralExpression sl:
                 foreach (StructField f in sl.Fields)
                 {
-                    CollectUdfReferencesInExpression(f.Value, referencedNames);
+                    CollectUdfReferencesInExpression(f.Value, referencedNames, defaultSchema);
                 }
                 break;
             case IndexAccessExpression ix:
-                CollectUdfReferencesInExpression(ix.Source, referencedNames);
-                CollectUdfReferencesInExpression(ix.Index, referencedNames);
+                CollectUdfReferencesInExpression(ix.Source, referencedNames, defaultSchema);
+                CollectUdfReferencesInExpression(ix.Index, referencedNames, defaultSchema);
                 break;
             // Leaves: column references, literals, parameters, variables.
         }
@@ -358,6 +422,22 @@ internal sealed class RoutineRegistrar
     /// Returns a new statement list with the rewritten expressions; the
     /// original AST is untouched.
     /// </summary>
+    private IReadOnlyList<Statement> RewriteBodyWithInlinedMacros(
+        IReadOnlyList<Statement> body, string defaultSchema)
+    {
+        // The 2-arg overload kept for SyncProceduralAdaptersFromRegistry — the
+        // schema parameter isn't used inside the inliner today (search_path
+        // is captured at the registrar level), but we keep it for symmetry
+        // with the registration-time signature.
+        _ = defaultSchema;
+        Statement[] rewritten = new Statement[body.Count];
+        for (int i = 0; i < body.Count; i++)
+        {
+            rewritten[i] = RewriteStatement(body[i]);
+        }
+        return rewritten;
+    }
+
     private IReadOnlyList<Statement> RewriteBodyWithInlinedMacros(IReadOnlyList<Statement> body)
     {
         Statement[] rewritten = new Statement[body.Count];
@@ -370,18 +450,18 @@ internal sealed class RoutineRegistrar
 
     private Statement RewriteStatement(Statement stmt) => stmt switch
     {
-        ReturnStatement ret => new ReturnStatement(UdfInliner.Inline(ret.Value, _udfs), ret.Span),
+        ReturnStatement ret => new ReturnStatement(UdfInliner.Inline(ret.Value, _udfs, _catalog.SearchPath), ret.Span),
         DeclareStatement decl => decl.Initializer is null
             ? decl
-            : new DeclareStatement(decl.VariableName, decl.TypeName, UdfInliner.Inline(decl.Initializer, _udfs), decl.Span),
-        SetStatement set => new SetStatement(set.VariableName, UdfInliner.Inline(set.Value, _udfs), set.Span),
+            : new DeclareStatement(decl.VariableName, decl.TypeName, UdfInliner.Inline(decl.Initializer, _udfs, _catalog.SearchPath), decl.Span),
+        SetStatement set => new SetStatement(set.VariableName, UdfInliner.Inline(set.Value, _udfs, _catalog.SearchPath), set.Span),
         IfStatement ifStmt => new IfStatement(
-            UdfInliner.Inline(ifStmt.Predicate, _udfs),
+            UdfInliner.Inline(ifStmt.Predicate, _udfs, _catalog.SearchPath),
             RewriteStatement(ifStmt.Then),
             ifStmt.Else is null ? null : RewriteStatement(ifStmt.Else),
             ifStmt.Span),
         WhileStatement whileStmt => new WhileStatement(
-            UdfInliner.Inline(whileStmt.Predicate, _udfs),
+            UdfInliner.Inline(whileStmt.Predicate, _udfs, _catalog.SearchPath),
             RewriteStatement(whileStmt.Body),
             whileStmt.Span),
         BlockStatement block => new BlockStatement(
@@ -398,21 +478,25 @@ internal sealed class RoutineRegistrar
     /// </summary>
     public void ApplyDropFunction(DropFunctionStatement drop)
     {
-        bool removed = _udfs.Unregister(drop.Name);
-        if (!removed && !drop.IfExists)
+        // Resolve through the registry: explicit schema = exact match;
+        // unqualified = walk search_path. The legacy "udf" sentinel is
+        // appended so functions created with the unqualified default
+        // (which still lands at "udf" in S7c) are findable. S7d strips
+        // this fallback.
+        if (!_udfs.TryResolve(drop.SchemaName, drop.Name, RoutineSearchPath(), out UdfDescriptor? udf))
         {
+            if (drop.IfExists) return;
+            string label = drop.SchemaName is null ? drop.Name : $"{drop.SchemaName}.{drop.Name}";
             throw new InvalidOperationException(
-                $"UDF '{drop.Name}' is not registered. Use DROP FUNCTION IF EXISTS to make this a no-op.");
+                $"UDF '{label}' is not registered. Use DROP FUNCTION IF EXISTS to make this a no-op.");
         }
 
-        if (removed)
-        {
-            // Drop the procedural adapter too, if one was registered. The
-            // call is idempotent for macro UDFs (no adapter ever existed) so
-            // we don't need to gate it on IsProcedural.
-            UnregisterProceduralAdapter(drop.Name);
-            _catalogStore?.Save(_udfs, _procedures);
-        }
+        _udfs.Unregister(udf.QualifiedName);
+        // Drop the procedural adapter too, if one was registered. The
+        // call is idempotent for macro UDFs (no adapter ever existed) so
+        // we don't need to gate it on IsProcedural.
+        UnregisterProceduralAdapter(udf.QualifiedName);
+        _catalogStore?.Save(_udfs, _procedures);
     }
 
     /// <summary>
@@ -425,8 +509,12 @@ internal sealed class RoutineRegistrar
     {
         ProceduralUdfFunction adapter = new(descriptor, _functions);
         FunctionDescriptor catalogDescriptor = BuildProceduralDescriptor(descriptor);
+        // Register at the UDF's real qualified name so the scalar
+        // dispatcher finds it via schema lookup, not the legacy "udf."
+        // prefix. RegisterScalarInstance parses dotted names back into
+        // a QualifiedName key.
         _functions.RegisterScalarInstance(
-            UdfNameForFunctionRegistry(descriptor.Name),
+            descriptor.QualifiedName.ToString(),
             adapter,
             descriptor: catalogDescriptor,
             replace: replace);
@@ -461,10 +549,10 @@ internal sealed class RoutineRegistrar
         }
 
         return new FunctionDescriptor(
-            PrimaryName: UdfNameForFunctionRegistry(udf.Name),
+            PrimaryName: udf.Name,
             Aliases: Array.Empty<string>(),
             Category: FunctionCategory.Utility,
-            Description: $"User-defined procedural function {udf.Name}.",
+            Description: $"User-defined procedural function {udf.QualifiedName}.",
             Signatures:
             [
                 new FunctionSignatureVariant(parameters, VariadicTrailing: null, ReturnType: returnRule),
@@ -476,18 +564,10 @@ internal sealed class RoutineRegistrar
     /// scalar registry. Idempotent — returns silently when no adapter is
     /// registered (the common case for macro UDFs and DROP IF EXISTS misses).
     /// </summary>
-    private void UnregisterProceduralAdapter(string udfName)
+    private void UnregisterProceduralAdapter(QualifiedName udfName)
     {
-        _functions.UnregisterScalar(UdfNameForFunctionRegistry(udfName));
+        _functions.UnregisterScalar(udfName.ToString());
     }
-
-    /// <summary>
-    /// Builds the <c>udf.NAME</c> key the scalar registry stores procedural
-    /// adapters under. Centralised so any future tweak (e.g. case
-    /// canonicalisation) lives in one place.
-    /// </summary>
-    private static string UdfNameForFunctionRegistry(string udfName)
-        => UdfInliner.UdfNamespacePrefix + udfName;
 
     /// <summary>
     /// Builds the descriptor for a macro UDF (<c>AS expression</c> body). Runs
@@ -497,7 +577,7 @@ internal sealed class RoutineRegistrar
     /// registration are caught at the call site that closes the loop because
     /// the visibility needed to detect them isn't available here.
     /// </summary>
-    private UdfDescriptor BuildMacroDescriptor(CreateFunctionStatement create)
+    private UdfDescriptor BuildMacroDescriptor(CreateFunctionStatement create, QualifiedName qn)
     {
         if (create.ExpressionBody is null)
         {
@@ -505,25 +585,26 @@ internal sealed class RoutineRegistrar
             // StatementBody is non-null. Reachable only via a programmatically
             // constructed CreateFunctionStatement that violates that invariant.
             throw new InvalidOperationException(
-                $"CREATE FUNCTION {create.Name}: function body is missing.");
+                $"CREATE FUNCTION {qn}: function body is missing.");
         }
 
         try
         {
-            UdfInliner.Inline(create.ExpressionBody, _udfs);
+            UdfInliner.Inline(create.ExpressionBody, _udfs, _catalog.SearchPath);
         }
         catch (InvalidOperationException ex)
         {
             throw new InvalidOperationException(
-                $"CREATE FUNCTION {create.Name}: {ex.Message}", ex);
+                $"CREATE FUNCTION {qn}: {ex.Message}", ex);
         }
 
         return new UdfDescriptor(
-            create.Name,
-            create.Parameters,
-            create.ReturnTypeName,
-            create.ExpressionBody,
-            create.ReturnIsNotNull);
+            SchemaName: qn.Schema,
+            Name: qn.Name,
+            Parameters: create.Parameters,
+            ReturnTypeName: create.ReturnTypeName,
+            ExpressionBody: create.ExpressionBody,
+            ReturnIsNotNull: create.ReturnIsNotNull);
     }
 
     /// <summary>
@@ -534,23 +615,18 @@ internal sealed class RoutineRegistrar
     /// <see cref="ApplyCreateProceduralFunction"/>) so self-references can
     /// resolve to the UDF being defined without bootstrap headaches.
     /// </summary>
-    private static UdfDescriptor BuildProceduralDescriptor(CreateFunctionStatement create, string? sourceText)
+    private static UdfDescriptor BuildProceduralDescriptor(
+        CreateFunctionStatement create, QualifiedName qn, string? sourceText)
     {
-        // Source text fallback: when the descriptor is built from an AST-only
-        // path (e.g. a programmatic catalog mutation), synthesise a minimal
-        // CREATE FUNCTION header so introspection and persistence still work.
-        // Round-tripping a synthesised text through the parser would lose the
-        // body's formatting, so we accept that the system_udfs.body column may
-        // show a placeholder for those entries until an explicit source text
-        // is supplied.
-        string text = sourceText ?? $"CREATE FUNCTION {create.Name}";
+        string text = sourceText ?? $"CREATE FUNCTION {qn}";
 
         return new UdfDescriptor(
-            create.Name,
-            create.Parameters,
-            create.ReturnTypeName,
+            SchemaName: qn.Schema,
+            Name: qn.Name,
+            Parameters: create.Parameters,
+            ReturnTypeName: create.ReturnTypeName,
             ExpressionBody: null,
-            create.ReturnIsNotNull,
+            ReturnIsNotNull: create.ReturnIsNotNull,
             StatementBody: create.StatementBody,
             IsPure: create.IsPure,
             SourceText: text);
@@ -570,6 +646,12 @@ internal sealed class RoutineRegistrar
     {
         ValidateDefaultsContiguous(create.Parameters, $"CREATE PROCEDURE {create.Name}");
 
+        // Same legacy-default rule as ApplyCreateFunction — unqualified
+        // CREATE PROCEDURE lands in the legacy <c>proc</c> sentinel
+        // schema; S7d will switch the default to first DDL-capable on
+        // search_path.
+        QualifiedName qn = new(create.SchemaName ?? "proc", create.Name);
+
         try
         {
             ValidateProcedureBody(create.Body);
@@ -577,22 +659,23 @@ internal sealed class RoutineRegistrar
         catch (InvalidOperationException ex)
         {
             throw new InvalidOperationException(
-                $"CREATE PROCEDURE {create.Name}: {ex.Message}", ex);
+                $"CREATE PROCEDURE {qn}: {ex.Message}", ex);
         }
 
         // When the source text isn't available (e.g. registered via the AST-only
         // BatchExecutor path), store a placeholder so the procedure can still run
         // and persist. The display in system_procedures.source_text will show this
         // synthetic text rather than the user's original formatting.
-        string text = sourceText ?? $"CREATE PROCEDURE {create.Name}";
+        string text = sourceText ?? $"CREATE PROCEDURE {qn}";
 
         ProcedureDescriptor descriptor = new(
-            create.Name,
-            create.Parameters,
-            create.Body,
-            text);
+            SchemaName: qn.Schema,
+            Name: qn.Name,
+            Parameters: create.Parameters,
+            Body: create.Body,
+            SourceText: text);
 
-        if (create.IfNotExists && _procedures.TryGet(create.Name, out _))
+        if (create.IfNotExists && _procedures.TryGet(qn, out _))
         {
             return;
         }
@@ -607,15 +690,17 @@ internal sealed class RoutineRegistrar
     /// </summary>
     public void ApplyDropProcedure(DropProcedureStatement drop)
     {
-        bool removed = _procedures.Unregister(drop.Name);
-        if (!removed && !drop.IfExists)
+        if (!_procedures.TryResolve(drop.SchemaName, drop.Name, RoutineSearchPath(), out ProcedureDescriptor? proc))
         {
+            if (drop.IfExists) return;
+            string label = drop.SchemaName is null ? drop.Name : $"{drop.SchemaName}.{drop.Name}";
             throw new InvalidOperationException(
-                $"Procedure '{drop.Name}' is not registered. " +
+                $"Procedure '{label}' is not registered. " +
                 "Use DROP PROCEDURE IF EXISTS to make this a no-op.");
         }
 
-        if (removed) _catalogStore?.Save(_udfs, _procedures);
+        _procedures.Unregister(proc.QualifiedName);
+        _catalogStore?.Save(_udfs, _procedures);
     }
 
     /// <summary>
@@ -633,35 +718,35 @@ internal sealed class RoutineRegistrar
                 foreach (Statement child in block.Statements) ValidateProcedureBody(child);
                 break;
             case IfStatement ifs:
-                _ = UdfInliner.Inline(ifs.Predicate, _udfs);
+                _ = UdfInliner.Inline(ifs.Predicate, _udfs, _catalog.SearchPath);
                 ValidateProcedureBody(ifs.Then);
                 if (ifs.Else is not null) ValidateProcedureBody(ifs.Else);
                 break;
             case WhileStatement loop:
-                _ = UdfInliner.Inline(loop.Predicate, _udfs);
+                _ = UdfInliner.Inline(loop.Predicate, _udfs, _catalog.SearchPath);
                 ValidateProcedureBody(loop.Body);
                 break;
             case ForCounterStatement forC:
-                _ = UdfInliner.Inline(forC.Start, _udfs);
-                _ = UdfInliner.Inline(forC.End, _udfs);
-                if (forC.Step is not null) _ = UdfInliner.Inline(forC.Step, _udfs);
+                _ = UdfInliner.Inline(forC.Start, _udfs, _catalog.SearchPath);
+                _ = UdfInliner.Inline(forC.End, _udfs, _catalog.SearchPath);
+                if (forC.Step is not null) _ = UdfInliner.Inline(forC.Step, _udfs, _catalog.SearchPath);
                 ValidateProcedureBody(forC.Body);
                 break;
             case ForInStatement forIn:
-                _ = UdfInliner.Inline(forIn.Source, _udfs);
+                _ = UdfInliner.Inline(forIn.Source, _udfs, _catalog.SearchPath);
                 ValidateProcedureBody(forIn.Body);
                 break;
             case DeclareStatement decl:
-                if (decl.Initializer is not null) _ = UdfInliner.Inline(decl.Initializer, _udfs);
+                if (decl.Initializer is not null) _ = UdfInliner.Inline(decl.Initializer, _udfs, _catalog.SearchPath);
                 break;
             case SetStatement set:
-                _ = UdfInliner.Inline(set.Value, _udfs);
+                _ = UdfInliner.Inline(set.Value, _udfs, _catalog.SearchPath);
                 break;
             case QueryStatement q:
-                _ = UdfInliner.Inline(q.Query, _udfs);
+                _ = UdfInliner.Inline(q.Query, _udfs, _catalog.SearchPath);
                 break;
             case CallStatement call:
-                _ = UdfInliner.Inline(call.Call, _udfs);
+                _ = UdfInliner.Inline(call.Call, _udfs, _catalog.SearchPath);
                 break;
             case BreakStatement:
             case ContinueStatement:

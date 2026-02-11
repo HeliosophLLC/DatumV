@@ -18,10 +18,17 @@ namespace DatumIngest.Catalog;
 /// </list>
 /// Exactly one of <see cref="ExpressionBody"/> / <see cref="StatementBody"/> is non-null.
 /// </summary>
+/// <param name="SchemaName">
+/// The schema this UDF lives in. Post-S7c every descriptor carries a real
+/// schema membership — <c>CREATE FUNCTION myapp.foo()</c> lands at
+/// <c>(myapp, foo)</c>; unqualified <c>CREATE FUNCTION foo()</c> lands at
+/// the first DDL-capable schema on the session search_path (typically
+/// <c>public</c>).
+/// </param>
 /// <param name="Name">
-/// The unqualified UDF name (case-insensitive). SQL call sites use the
-/// <c>udf.</c> prefix — <c>udf.foo(...)</c> — but the registry keys are
-/// stored without the prefix.
+/// The unqualified UDF name (case-insensitive). Combine with
+/// <see cref="SchemaName"/> via <see cref="QualifiedName"/> for the
+/// canonical identity.
 /// </param>
 /// <param name="Parameters">
 /// The declared parameters in order. Each parameter's <see cref="UdfParameter.IsNotNull"/>
@@ -37,36 +44,25 @@ namespace DatumIngest.Catalog;
 /// </param>
 /// <param name="ExpressionBody">
 /// Macro form: the parsed scalar expression evaluated at every call site with
-/// parameter references in scope. Substitution at inlining time replaces
-/// <see cref="VariableExpression"/> nodes whose name matches a parameter with
-/// the corresponding call-site argument expression. <see langword="null"/> for
-/// procedural UDFs. Named to parallel <see cref="StatementBody"/> so the body-
-/// shape duality is obvious at the call site.
+/// parameter references in scope. <see langword="null"/> for procedural UDFs.
 /// </param>
 /// <param name="ReturnIsNotNull">
 /// When <see langword="true"/>, a runtime null assertion is applied to the
-/// returned value (the inliner adds it for macros; the executor adds it for
-/// procedural bodies).
+/// returned value.
 /// </param>
 /// <param name="StatementBody">
 /// Procedural form: the body of <c>BEGIN…END</c> as a flat statement sequence.
-/// Every control-flow path through the body must end with <c>RETURN expr</c>.
 /// <see langword="null"/> for macro UDFs.
 /// </param>
 /// <param name="IsPure">
-/// Asserts referential transparency (same arguments always produce the same
-/// result, no observable side effects). Honoured by the planner's CSE / content-
-/// addressed cache when those passes land; otherwise stored and surfaced via
-/// <c>system_udfs</c>. Meaningful primarily for procedural UDFs — macros are
-/// already inlined and CSE operates on the substituted expression.
+/// Asserts referential transparency. Honoured by the planner's CSE / content-
+/// addressed cache when those passes land.
 /// </param>
 /// <param name="SourceText">
-/// The original <c>CREATE FUNCTION</c> SQL text, captured verbatim. Always
-/// set for procedural UDFs (so the catalog can round-trip the body without
-/// a Statement formatter); optional for macros (where the body expression
-/// already round-trips through <c>QueryExplainer.FormatExpression</c>).
+/// The original <c>CREATE FUNCTION</c> SQL text, captured verbatim.
 /// </param>
 public sealed record UdfDescriptor(
+    string SchemaName,
     string Name,
     IReadOnlyList<UdfParameter> Parameters,
     string? ReturnTypeName,
@@ -79,61 +75,104 @@ public sealed record UdfDescriptor(
     /// <summary>
     /// <see langword="true"/> when this descriptor is a procedural UDF
     /// (<see cref="StatementBody"/> is non-null), <see langword="false"/> for
-    /// macro UDFs. Centralises the body-shape check so callers don't have to
-    /// remember which slot is the discriminator.
+    /// macro UDFs.
     /// </summary>
     public bool IsProcedural => StatementBody is not null;
+
+    /// <summary>Canonical <c>(schema, name)</c> identity.</summary>
+    public QualifiedName QualifiedName => new(SchemaName, Name);
 }
 
 /// <summary>
 /// Process-scoped registry of user-defined scalar functions for a single
-/// <see cref="TableCatalog"/>. Lookups are case-insensitive on the
-/// unqualified UDF name. The planner consults this registry during
-/// <c>Plan(...)</c> to inline every <c>udf.X(...)</c> call site.
+/// <see cref="TableCatalog"/>. Entries are keyed on
+/// <see cref="QualifiedName"/> (case-insensitive). The planner consults this
+/// registry during <c>Plan(...)</c> to inline every UDF call site —
+/// unqualified calls walk the session search_path, qualified calls do an
+/// exact lookup.
 /// </summary>
 public sealed class UdfRegistry
 {
-    private readonly ConcurrentDictionary<string, UdfDescriptor> _entries =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<QualifiedName, UdfDescriptor> _entries = new();
 
     /// <summary>
-    /// Registers <paramref name="descriptor"/>. By default, throws if a UDF
-    /// with the same name already exists. Pass <paramref name="replace"/> to
-    /// overwrite — used by <c>CREATE OR REPLACE FUNCTION</c> and the T-SQL
-    /// synonym <c>CREATE OR ALTER FUNCTION</c>.
+    /// Registers <paramref name="descriptor"/> under its
+    /// <see cref="UdfDescriptor.QualifiedName"/>. By default, throws if a UDF
+    /// with the same qualified name already exists. Pass <paramref name="replace"/>
+    /// to overwrite — used by <c>CREATE OR REPLACE FUNCTION</c>.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// A UDF with the same name is already registered and <paramref name="replace"/> is <see langword="false"/>.
+    /// A UDF with the same qualified name is already registered and
+    /// <paramref name="replace"/> is <see langword="false"/>.
     /// </exception>
     public void Register(UdfDescriptor descriptor, bool replace = false)
     {
+        QualifiedName key = descriptor.QualifiedName;
         if (replace)
         {
-            _entries[descriptor.Name] = descriptor;
+            _entries[key] = descriptor;
             return;
         }
 
-        if (!_entries.TryAdd(descriptor.Name, descriptor))
+        if (!_entries.TryAdd(key, descriptor))
         {
             throw new InvalidOperationException(
-                $"UDF '{descriptor.Name}' is already registered. Use CREATE OR REPLACE FUNCTION (or CREATE OR ALTER FUNCTION) to overwrite.");
+                $"UDF '{key}' is already registered. Use CREATE OR REPLACE FUNCTION (or CREATE OR ALTER FUNCTION) to overwrite.");
         }
     }
 
     /// <summary>
-    /// Removes the UDF named <paramref name="name"/>. Returns <see langword="true"/>
-    /// when an entry was removed, <see langword="false"/> when no entry existed.
+    /// Removes the UDF at <paramref name="name"/>. Returns <see langword="true"/>
+    /// when an entry was removed.
     /// </summary>
-    public bool Unregister(string name) => _entries.TryRemove(name, out _);
+    public bool Unregister(QualifiedName name) => _entries.TryRemove(name, out _);
 
-    /// <summary>
-    /// Looks up <paramref name="name"/>. Case-insensitive.
-    /// </summary>
-    public bool TryGet(string name, [NotNullWhen(true)] out UdfDescriptor? descriptor)
+    /// <summary>Exact qualified lookup.</summary>
+    public bool TryGet(QualifiedName name, [NotNullWhen(true)] out UdfDescriptor? descriptor)
         => _entries.TryGetValue(name, out descriptor);
 
     /// <summary>
-    /// Snapshot of all registered UDFs, keyed by name.
+    /// Search-path-aware lookup. An explicit <paramref name="explicitSchema"/>
+    /// goes straight to that schema; an unqualified name walks
+    /// <paramref name="searchPath"/> in order, first hit wins.
     /// </summary>
-    public IReadOnlyDictionary<string, UdfDescriptor> Entries => _entries;
+    public bool TryResolve(
+        string? explicitSchema,
+        string name,
+        IReadOnlyList<string> searchPath,
+        [NotNullWhen(true)] out UdfDescriptor? descriptor)
+    {
+        if (explicitSchema is not null)
+        {
+            return _entries.TryGetValue(new QualifiedName(explicitSchema, name), out descriptor);
+        }
+
+        foreach (string schema in searchPath)
+        {
+            if (_entries.TryGetValue(new QualifiedName(schema, name), out descriptor))
+            {
+                return true;
+            }
+        }
+        descriptor = null;
+        return false;
+    }
+
+    /// <summary>All registered descriptors. Order is not guaranteed.</summary>
+    public IReadOnlyCollection<UdfDescriptor> Entries => (IReadOnlyCollection<UdfDescriptor>)_entries.Values;
+
+    // S7c includes the legacy "udf" sentinel on the back-compat path so
+    // unqualified CREATE FUNCTION (which still lands at the legacy
+    // schema) is still findable from tests and ad-hoc lookups. S7d
+    // removes "udf" from this path once the default lands in "public".
+    private static readonly IReadOnlyList<string> DefaultSearchPath = new[] { "public", "system", "udf" };
+
+    /// <summary>
+    /// Back-compat bare-string lookup that walks the default
+    /// <c>[public, system, udf]</c> search path. Useful for tests and
+    /// for the few call sites that don't yet pass an explicit
+    /// search_path.
+    /// </summary>
+    public bool TryGet(string name, [NotNullWhen(true)] out UdfDescriptor? descriptor)
+        => TryResolve(null, name, DefaultSearchPath, out descriptor);
 }

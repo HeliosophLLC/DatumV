@@ -133,9 +133,9 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
 
         Assert.True(File.Exists(CatalogPath));
         string json = File.ReadAllText(CatalogPath);
-        // v3 manifest: schema-aware. Persistent table state lives under
+        // v4 manifest: schema-aware. Persistent table state lives under
         // backends.flat_file.tables[*], with (schema, name) split.
-        Assert.Contains("\"version\": 3", json);
+        Assert.Contains("\"version\": 4", json);
         Assert.Contains("\"flat_file\":", json);
         Assert.Contains("\"schema\": \"public\"", json);
         Assert.Contains("\"name\": \"users\"", json);

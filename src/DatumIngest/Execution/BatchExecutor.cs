@@ -312,10 +312,10 @@ public sealed class BatchExecutor
                     // procedure-invocation path. Anything else (UDF or
                     // built-in scalar) flows through catalog.Plan via
                     // the unified default arm.
-                    if (TryGetProcedureCall(call, out string? procName, out IReadOnlyList<Expression>? args))
+                    if (TryGetProcedureCall(call, out ProcedureDescriptor? procDescriptor, out IReadOnlyList<Expression>? args))
                     {
                         await ExecuteProcedureCallAsync(
-                            procName, args, batchContext, onEvent, nextCellId, ct)
+                            procDescriptor, args, batchContext, onEvent, nextCellId, ct)
                             .ConfigureAwait(false);
                         break;
                     }
@@ -631,27 +631,61 @@ public sealed class BatchExecutor
 
     /// <summary>
     /// Detects whether <paramref name="statement"/> is invoking a stored
-    /// procedure (call name starts with <c>proc.</c>) and, if so, returns
-    /// the unqualified procedure name plus the argument expression list.
-    /// Anything else — UDFs, built-in scalars, model invocations — is
-    /// handled by the standard catalog.Plan path and returns
-    /// <see langword="false"/>.
+    /// procedure by resolving the call through the catalog's procedure
+    /// registry (explicit schema is exact-matched; unqualified walks the
+    /// session search_path). Anything else — UDFs, built-in scalars, model
+    /// invocations — is handled by the standard catalog.Plan path and
+    /// returns <see langword="false"/>.
     /// </summary>
-    private static bool TryGetProcedureCall(
+    private bool TryGetProcedureCall(
         CallStatement statement,
-        out string? procedureName,
+        out ProcedureDescriptor? descriptor,
         out IReadOnlyList<Expression>? arguments)
     {
-        if (statement.Call is FunctionCallExpression call
-            && string.Equals(call.SchemaName, ProcedureSchema, StringComparison.OrdinalIgnoreCase))
+        if (statement.Call is FunctionCallExpression call)
         {
-            procedureName = call.FunctionName;
-            arguments = call.Arguments;
-            return true;
+            if (_catalog.Procedures.TryResolve(call.SchemaName, call.FunctionName, ProcedureSearchPath(), out descriptor))
+            {
+                arguments = call.Arguments;
+                return true;
+            }
+
+            // S7c back-compat: an explicit <c>proc.X</c> reference is the
+            // legacy "this is definitely a procedure" tag — surface a
+            // clear diagnostic eagerly instead of falling through to the
+            // scalar dispatch path (where the error would be an opaque
+            // "Unknown function" wrapped in ExpressionEvaluationException).
+            // S7d drops this when the prefix retires.
+            if (string.Equals(call.SchemaName, ProcedureSchema, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Procedure '{call.CallName}' is not registered. " +
+                    $"Use CREATE PROCEDURE {call.FunctionName}(...) AS BEGIN ... END to define it.");
+            }
         }
-        procedureName = null;
+        descriptor = null;
         arguments = null;
         return false;
+    }
+
+    /// <summary>
+    /// S7c: extends the catalog's session search_path with the legacy
+    /// <c>proc</c> sentinel so unqualified <c>CALL foo()</c> still resolves
+    /// procedures created with the legacy default. S7d removes this
+    /// fallback when unqualified CREATE PROCEDURE defaults to a real
+    /// schema on the user search_path.
+    /// </summary>
+    private IReadOnlyList<string> ProcedureSearchPath()
+    {
+        IReadOnlyList<string> sessionPath = _catalog.SearchPath;
+        if (sessionPath.Contains("proc", StringComparer.OrdinalIgnoreCase))
+        {
+            return sessionPath;
+        }
+        List<string> extended = new(sessionPath.Count + 1);
+        extended.AddRange(sessionPath);
+        extended.Add("proc");
+        return extended;
     }
 
     /// <summary>
@@ -674,25 +708,20 @@ public sealed class BatchExecutor
     /// the new context's variable store before the parameter is declared.
     /// </remarks>
     private async Task ExecuteProcedureCallAsync(
-        string? procedureName,
+        ProcedureDescriptor? descriptor,
         IReadOnlyList<Expression>? arguments,
         BatchContext callerContext,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
         CancellationToken ct)
     {
-        if (procedureName is null || arguments is null)
+        if (descriptor is null || arguments is null)
         {
             throw new InvalidOperationException(
-                "Internal error: TryGetProcedureCall yielded a null procedure name or argument list.");
+                "Internal error: TryGetProcedureCall yielded a null procedure descriptor or argument list.");
         }
 
-        if (!_catalog.Procedures.TryGet(procedureName, out ProcedureDescriptor? descriptor))
-        {
-            throw new InvalidOperationException(
-                $"Procedure 'proc.{procedureName}' is not registered. " +
-                $"Use CREATE PROCEDURE {procedureName}(...) AS BEGIN ... END to define it.");
-        }
+        QualifiedName qn = descriptor.QualifiedName;
 
         // Trailing arguments may be omitted when the matching parameters
         // carry defaults; fill them in below from each parameter's Default
@@ -702,8 +731,8 @@ public sealed class BatchExecutor
         {
             throw new InvalidOperationException(
                 minRequired == descriptor.Parameters.Count
-                    ? $"Procedure 'proc.{procedureName}' expects {descriptor.Parameters.Count} argument(s), got {arguments.Count}."
-                    : $"Procedure 'proc.{procedureName}' expects {minRequired}–{descriptor.Parameters.Count} argument(s), got {arguments.Count}.");
+                    ? $"Procedure '{qn}' expects {descriptor.Parameters.Count} argument(s), got {arguments.Count}."
+                    : $"Procedure '{qn}' expects {minRequired}–{descriptor.Parameters.Count} argument(s), got {arguments.Count}.");
         }
 
         // Cap nested-call depth before opening the new frame. Catches direct
@@ -714,7 +743,7 @@ public sealed class BatchExecutor
         {
             throw new InvalidOperationException(
                 $"Procedure call depth exceeded {MaxProcedureCallDepth} levels at " +
-                $"'proc.{procedureName}'. Procedural recursion is not supported — " +
+                $"'{qn}'. Procedural recursion is not supported — " +
                 "rewrite as a recursive CTE or an iterative loop.");
         }
 
@@ -738,7 +767,7 @@ public sealed class BatchExecutor
             if (param.IsNotNull && v.IsNull)
             {
                 throw new InvalidOperationException(
-                    $"Procedure 'proc.{procedureName}' parameter '@{param.Name}' must not be null.");
+                    $"Procedure '{qn}' parameter '@{param.Name}' must not be null.");
             }
 
             argValues[i] = v;
@@ -778,12 +807,12 @@ public sealed class BatchExecutor
         catch (LoopBreakSignal)
         {
             throw new InvalidOperationException(
-                $"BREAK in procedure 'proc.{procedureName}' is only valid inside a WHILE or FOR loop.");
+                $"BREAK in procedure '{qn}' is only valid inside a WHILE or FOR loop.");
         }
         catch (LoopContinueSignal)
         {
             throw new InvalidOperationException(
-                $"CONTINUE in procedure 'proc.{procedureName}' is only valid inside a WHILE or FOR loop.");
+                $"CONTINUE in procedure '{qn}' is only valid inside a WHILE or FOR loop.");
         }
     }
 

@@ -75,8 +75,9 @@ public sealed class UdfsTableProvider : NonSeekableTableProviderBase
 
         // Snapshot the registry at scan start so concurrent registrations
         // during a long iteration don't produce inconsistent rows.
-        UdfDescriptor[] entries = _registry.Entries.Values
-            .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+        UdfDescriptor[] entries = _registry.Entries
+            .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
         // requiredColumns / filterHint are advisory; we materialise the full

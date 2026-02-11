@@ -45,53 +45,72 @@ namespace DatumIngest.Execution;
 /// </remarks>
 public static class UdfInliner
 {
-    /// <summary>The namespace prefix that flags a function call as a UDF invocation.</summary>
-    public const string UdfNamespacePrefix = "udf.";
-
-    /// <summary>
-    /// The schema name a UDF call sits in on the AST. Post-S7b the parser
-    /// emits <c>FunctionCallExpression.SchemaName == "udf"</c> for
-    /// <c>udf.foo()</c> calls — the inliner matches on that rather than
-    /// scanning for the legacy dotted prefix in <c>FunctionName</c>.
-    /// </summary>
-    public const string UdfSchema = "udf";
-
     /// <summary>
     /// Walks <paramref name="query"/> and returns a new <see cref="QueryExpression"/>
-    /// in which every UDF call has been replaced with its substituted body.
+    /// in which every macro UDF call has been replaced with its substituted body.
+    /// Unqualified calls walk <paramref name="searchPath"/>; explicit
+    /// <c>schema.fn(...)</c> calls do an exact lookup. Calls that don't
+    /// resolve to a UDF (built-ins, models, unknown names) pass through
+    /// unchanged for the scalar-dispatch path to handle at evaluation time.
     /// </summary>
-    /// <remarks>
-    /// Walks even when the registry is empty so a query that references a
-    /// UDF the catalog doesn't know about surfaces a clear "not registered"
-    /// error rather than passing through unchanged and failing later in the
-    /// planner with a less obvious message.
-    /// </remarks>
-    public static QueryExpression Inline(QueryExpression query, UdfRegistry registry)
+    public static QueryExpression Inline(
+        QueryExpression query, UdfRegistry registry, IReadOnlyList<string> searchPath)
     {
-        Inliner inliner = new(registry);
+        Inliner inliner = new(registry, searchPath);
         return inliner.RewriteQuery(query);
     }
 
     /// <summary>
-    /// Inlines UDF calls in a single <see cref="Expression"/>. Useful for
-    /// validating a UDF body at registration time (so cycles and unknown
-    /// references surface there rather than at the first call site) and
-    /// for tests.
+    /// Inlines macro UDF calls in a single <see cref="Expression"/>.
     /// </summary>
-    public static Expression Inline(Expression expression, UdfRegistry registry)
+    public static Expression Inline(
+        Expression expression, UdfRegistry registry, IReadOnlyList<string> searchPath)
     {
-        Inliner inliner = new(registry);
+        Inliner inliner = new(registry, searchPath);
         return inliner.Rewrite(expression);
     }
+
+    private static readonly IReadOnlyList<string> DefaultSearchPath = new[] { "public", "system", "udf" };
+
+    /// <summary>
+    /// Back-compat overload that uses the default <c>[public, system, udf]</c>
+    /// search path. Pre-S7c call sites and tests can keep this shape; new
+    /// code should pass the catalog's session search_path explicitly.
+    /// The legacy <c>udf</c> entry on the default path keeps tests that
+    /// construct procedural-UDF descriptors with <c>SchemaName = "udf"</c>
+    /// resolving until they're migrated.
+    /// </summary>
+    public static Expression Inline(Expression expression, UdfRegistry registry)
+        => Inline(expression, registry, DefaultSearchPath);
+
+    /// <summary>Back-compat overload; see <see cref="Inline(Expression, UdfRegistry)"/>.</summary>
+    public static QueryExpression Inline(QueryExpression query, UdfRegistry registry)
+        => Inline(query, registry, DefaultSearchPath);
 
     private sealed class Inliner
     {
         private readonly UdfRegistry _registry;
-        private readonly Stack<string> _inliningStack = new();
+        private readonly IReadOnlyList<string> _searchPath;
+        private readonly Stack<QualifiedName> _inliningStack = new();
 
-        public Inliner(UdfRegistry registry)
+        public Inliner(UdfRegistry registry, IReadOnlyList<string> searchPath)
         {
             _registry = registry;
+            // S7c: silently append the legacy "udf" sentinel so unqualified
+            // calls can still resolve UDFs created via the legacy default.
+            // S7d strips this once unqualified CREATE FUNCTION defaults to
+            // a real schema on the user search_path.
+            if (!searchPath.Contains("udf", StringComparer.OrdinalIgnoreCase))
+            {
+                List<string> extended = new(searchPath.Count + 1);
+                extended.AddRange(searchPath);
+                extended.Add("udf");
+                _searchPath = extended;
+            }
+            else
+            {
+                _searchPath = searchPath;
+            }
         }
 
         public QueryExpression RewriteQuery(QueryExpression query) => query switch
@@ -147,7 +166,11 @@ public static class UdfInliner
         {
             SubquerySource sub => new SubquerySource(RewriteSelect(sub.Query), sub.Alias),
             FunctionSource fn => new FunctionSource(
-                fn.FunctionName, fn.Arguments.Select(Rewrite).ToList(), fn.Alias, fn.Span),
+                fn.FunctionName,
+                fn.Arguments.Select(Rewrite).ToList(),
+                fn.Alias,
+                fn.Span,
+                fn.SchemaName),
             _ => source,
         };
 
@@ -162,16 +185,36 @@ public static class UdfInliner
 
         /// <summary>
         /// Recursively rewrites <paramref name="expression"/>: children first,
-        /// then UDF inlining at this node.
+        /// then macro UDF inlining at this node. The inliner tries to
+        /// resolve every function call through the UDF registry — explicit
+        /// schema goes straight to <c>(schema, name)</c>, unqualified
+        /// walks <c>search_path</c>. Calls that resolve to a macro UDF are
+        /// inlined; procedural UDFs are left for runtime dispatch; calls
+        /// that don't resolve through the UDF registry pass through (they
+        /// may be built-ins, models, or unknown names — resolution happens
+        /// at evaluation time).
         /// </summary>
         public Expression Rewrite(Expression expression)
         {
             Expression rewritten = RewriteChildren(expression);
 
-            if (rewritten is FunctionCallExpression call &&
-                string.Equals(call.SchemaName, UdfSchema, StringComparison.OrdinalIgnoreCase))
+            if (rewritten is FunctionCallExpression call)
             {
-                return InlineUdfCall(call);
+                if (_registry.TryResolve(call.SchemaName, call.FunctionName, _searchPath, out UdfDescriptor? udf))
+                {
+                    return InlineUdfCall(call, udf);
+                }
+
+                // S7c back-compat: an explicit <c>udf.X</c> reference is the
+                // legacy "this is definitely a UDF" tag — surface a clear
+                // diagnostic at plan time when the target doesn't exist.
+                // S7d drops this when the prefix retires.
+                if (string.Equals(call.SchemaName, "udf", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"UDF '{call.CallName}' is not registered. " +
+                        $"Register it via CREATE FUNCTION {call.FunctionName}(...) AS ... before referencing it.");
+                }
             }
 
             return rewritten;
@@ -236,36 +279,21 @@ public static class UdfInliner
             window.Frame);
 
         /// <summary>
-        /// Replaces a <c>udf.X(args)</c> call with the substituted body of UDF
-        /// <c>X</c>. Validates arity, detects cycles, and recursively inlines
-        /// any nested UDF calls in the substituted body.
+        /// Replaces a <c>schema.fn(args)</c> macro-UDF call with the
+        /// substituted body. Validates arity, detects cycles, and
+        /// recursively inlines any nested UDF calls in the substituted body.
         /// </summary>
-        private Expression InlineUdfCall(FunctionCallExpression call)
+        private Expression InlineUdfCall(FunctionCallExpression call, UdfDescriptor udf)
         {
-            string name = call.FunctionName;
+            QualifiedName name = udf.QualifiedName;
 
-            if (!_registry.TryGet(name, out UdfDescriptor? udf))
-            {
-                throw new InvalidOperationException(
-                    $"UDF '{call.FunctionName}' is not registered. " +
-                    $"Register it via CREATE FUNCTION {name}(...) AS ... before referencing it.");
-            }
-
-            // Procedural UDFs aren't macro-substituted — the planner is meant to
-            // dispatch them at runtime via the per-call execution adapter. That
-            // adapter ships in a follow-up; until it lands, fail loudly here so
-            // callers get a clear "not yet wired" message instead of an opaque
-            // NRE deeper in the substitution path.
+            // Procedural UDFs aren't macro-substituted. The catalog has
+            // registered a runtime-dispatched IScalarFunction adapter
+            // under the same name in the FunctionRegistry; leaving the
+            // call expression untouched lets the standard scalar dispatch
+            // path resolve and invoke that adapter at evaluation time.
             if (udf.IsProcedural)
             {
-                // Procedural UDFs aren't macro-substituted. The catalog has
-                // registered a runtime-dispatched IScalarFunction adapter
-                // under the same name in the FunctionRegistry; leaving the
-                // call expression untouched lets the standard scalar dispatch
-                // path resolve and invoke that adapter at evaluation time.
-                // Argument rewriting has already happened (Rewrite visits
-                // children before delegating here), and recursion / cycle
-                // detection runs in the adapter's per-call stack, not here.
                 return call;
             }
 
@@ -277,16 +305,16 @@ public static class UdfInliner
             {
                 throw new InvalidOperationException(
                     minRequired == udf.Parameters.Count
-                        ? $"UDF '{call.FunctionName}' expects {udf.Parameters.Count} argument(s), got {call.Arguments.Count}."
-                        : $"UDF '{call.FunctionName}' expects {minRequired}–{udf.Parameters.Count} argument(s), got {call.Arguments.Count}.");
+                        ? $"UDF '{call.CallName}' expects {udf.Parameters.Count} argument(s), got {call.Arguments.Count}."
+                        : $"UDF '{call.CallName}' expects {minRequired}–{udf.Parameters.Count} argument(s), got {call.Arguments.Count}.");
             }
 
-            // Cycle detection — case-insensitive on UDF names.
-            foreach (string active in _inliningStack)
+            // Cycle detection — case-insensitive on qualified UDF names.
+            foreach (QualifiedName active in _inliningStack)
             {
-                if (string.Equals(active, name, StringComparison.OrdinalIgnoreCase))
+                if (active == name)
                 {
-                    string chain = string.Join(" → ", _inliningStack.Reverse().Append(name));
+                    string chain = string.Join(" → ", _inliningStack.Reverse().Append(name).Select(q => q.ToString()));
                     throw new InvalidOperationException(
                         $"Cyclic UDF reference detected: {chain}. " +
                         "UDFs cannot reference themselves directly or transitively.");
@@ -313,7 +341,7 @@ public static class UdfInliner
                 {
                     arg = WrapNotNull(
                         arg,
-                        $"UDF '{call.FunctionName}' parameter '@{param.Name}' must not be null.");
+                        $"UDF '{call.CallName}' parameter '@{param.Name}' must not be null.");
                 }
                 paramToArg[param.Name] = arg;
             }
@@ -337,7 +365,7 @@ public static class UdfInliner
             {
                 substituted = WrapNotNull(
                     substituted,
-                    $"UDF '{call.FunctionName}' return value must not be null.");
+                    $"UDF '{call.CallName}' return value must not be null.");
             }
 
             _inliningStack.Push(name);

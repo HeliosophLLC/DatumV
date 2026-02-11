@@ -119,9 +119,8 @@ public static class CatalogManifestBuilder
         // catalog (UdfRegistry exists from construction); empty list when no
         // UDFs are registered.
         List<UdfEntry> udfEntries = new(catalog.Udfs.Entries.Count);
-        foreach (KeyValuePair<string, UdfDescriptor> entry in catalog.Udfs.Entries)
+        foreach (UdfDescriptor descriptor in catalog.Udfs.Entries)
         {
-            UdfDescriptor descriptor = entry.Value;
             udfEntries.Add(new UdfEntry
             {
                 Name = descriptor.Name,

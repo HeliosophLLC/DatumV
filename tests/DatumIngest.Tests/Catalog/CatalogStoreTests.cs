@@ -356,7 +356,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 3,
+              "version": 4,
               "udfs": [
                 {"name": "shout", "parameters": [{"name": "s", "type": "STRING"}], "body": "upper(s)"}
               ]
@@ -404,8 +404,9 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     [Fact]
     public void OlderVersion_ThrowsLoadException()
     {
-        // No v1/v2 reader — schemas require v3. v1 manifests from before
-        // schema support are explicitly rejected.
+        // No v1/v2/v3 reader — schemas require v4 (post-S7c). Older
+        // manifests are explicitly rejected; the user is expected to
+        // delete the catalog directory and start fresh.
         File.WriteAllText(_catalogPath,
             """
             {
@@ -460,7 +461,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 3,
+              "version": 4,
               "udfs": [
                 {
                   "name": "good",
@@ -492,7 +493,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 3,
+              "version": 4,
               "udfs": [
                 {"name": "", "parameters": [], "body": "1"},
                 {"name": "good", "parameters": [], "body": "1"}

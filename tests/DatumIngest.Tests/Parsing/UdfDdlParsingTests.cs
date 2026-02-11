@@ -218,12 +218,15 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_BodyIsModelCall_ParsesAsFunctionCall()
     {
         // The body can reference models.X — the planner's hoist pass handles
-        // it after UDF inlining. Just confirm it parses.
+        // it after UDF inlining. Post-S7b the parser splits schema and bare
+        // name; FunctionName carries the bare model name and SchemaName == "models".
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
             "CREATE FUNCTION classify(@img IMAGE) AS models.mobilenetv2(@img)");
 
         FunctionCallExpression body = Assert.IsType<FunctionCallExpression>(create.ExpressionBody);
-        Assert.Equal("models.mobilenetv2", body.FunctionName);
+        Assert.Equal("models", body.SchemaName);
+        Assert.Equal("mobilenetv2", body.FunctionName);
+        Assert.Equal("models.mobilenetv2", body.CallName);
     }
 
     [Fact]
@@ -537,7 +540,8 @@ public class UdfDdlParsingTests : ServiceTestBase
         CallStatement stmt = Parse<CallStatement>("CALL udf.shout('hello')");
 
         FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(stmt.Call);
-        Assert.Equal("udf.shout", call.FunctionName);
+        Assert.Equal("udf", call.SchemaName);
+        Assert.Equal("shout", call.FunctionName);
         Assert.Single(call.Arguments);
     }
 
@@ -556,7 +560,8 @@ public class UdfDdlParsingTests : ServiceTestBase
         CallStatement stmt = Parse<CallStatement>("CALL udf.add3(1, 2, 3)");
 
         FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(stmt.Call);
-        Assert.Equal("udf.add3", call.FunctionName);
+        Assert.Equal("udf", call.SchemaName);
+        Assert.Equal("add3", call.FunctionName);
         Assert.Equal(3, call.Arguments.Count);
     }
 
@@ -566,7 +571,8 @@ public class UdfDdlParsingTests : ServiceTestBase
         CallStatement stmt = Parse<CallStatement>("CALL udf.nullary()");
 
         FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(stmt.Call);
-        Assert.Equal("udf.nullary", call.FunctionName);
+        Assert.Equal("udf", call.SchemaName);
+        Assert.Equal("nullary", call.FunctionName);
         Assert.Empty(call.Arguments);
     }
 

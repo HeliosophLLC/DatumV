@@ -79,7 +79,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this._udfs = new UdfRegistry();
         this._procedures = new ProcedureRegistry();
         this._catalogStore = catalogPath is null ? null : new CatalogStore(catalogPath);
-        this._routines = new RoutineRegistrar(_udfs, _procedures, _functions, _catalogStore);
+        this._routines = new RoutineRegistrar(this, _udfs, _procedures, _functions, _catalogStore);
 
         // Construct the user-data (FlatFile) backend. The persist callback
         // wraps CatalogStore.Save with the facade's UDF / Procedure
@@ -2159,7 +2159,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
     internal IQueryPlan PlanQuery(QueryExpression query)
     {
-        QueryExpression inlined = UdfInliner.Inline(query, _udfs);
+        QueryExpression inlined = UdfInliner.Inline(query, _udfs, SearchPath);
         QueryPlanner planner = new(this, _functions);
         IQueryOperator op = planner.Plan(inlined);
         return new QueryPlan(op, this, _functions, _backing);

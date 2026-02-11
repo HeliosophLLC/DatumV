@@ -42,9 +42,10 @@ namespace DatumIngest.Catalog;
 /// </para>
 /// <para>
 /// <strong>No backward compatibility.</strong> A manifest whose version
-/// is not <c>3</c> is rejected with <see cref="CatalogStoreLoadException"/>
+/// is not <c>4</c> is rejected with <see cref="CatalogStoreLoadException"/>
 /// — the caller must delete the catalog directory and start fresh.
-/// Schema support requires v3.
+/// Schema support requires v3; real schema membership for UDFs /
+/// procedures requires v4.
 /// </para>
 /// <para>
 /// Failure handling at load:
@@ -72,13 +73,17 @@ public sealed class CatalogStore
     ///   <item><description><c>1</c>: udfs + procedures only.</description></item>
     ///   <item><description><c>2</c>: adds top-level <c>tables</c> section.</description></item>
     ///   <item><description><c>3</c>: schema-aware. UDF / procedure entries
-    ///     gain <c>schema</c>. Persistent table state moves under
-    ///     <c>backends.flat_file</c> so future backends can plug in
-    ///     without breaking the file shape.</description></item>
+    ///     gain a placeholder <c>schema</c> field that is persisted-but-ignored.
+    ///     Persistent table state moves under <c>backends.flat_file</c>.</description></item>
+    ///   <item><description><c>4</c>: UDF / procedure entries gain real schema
+    ///     membership — the <c>schema</c> field becomes load-bearing and
+    ///     determines the <see cref="QualifiedName"/> the registry stores
+    ///     the entry under. The <c>udf</c> / <c>proc</c> placeholder schemas
+    ///     are abandoned.</description></item>
     /// </list>
-    /// Only v3 is accepted; older and newer versions both throw at load.
+    /// Only v4 is accepted; older and newer versions both throw at load.
     /// </summary>
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     private readonly string _path;
     private readonly object _writeLock = new();
@@ -304,11 +309,16 @@ public sealed class CatalogStore
             return null;
         }
 
+        // v4: the entry carries a real schema. Use it as the descriptor's
+        // SchemaName (the parser-resolved Schema on `create` is whatever
+        // the user wrote at original CREATE time; the manifest is the
+        // canonical record of where the procedure lives).
         return new ProcedureDescriptor(
-            create.Name,
-            create.Parameters,
-            create.Body,
-            entry.SourceText!);
+            SchemaName: entry.Schema ?? "public",
+            Name: create.Name,
+            Parameters: create.Parameters,
+            Body: create.Body,
+            SourceText: entry.SourceText!);
     }
 
     /// <summary>
@@ -375,17 +385,20 @@ public sealed class CatalogStore
         if (parameters is null) return null;
 
         UdfDescriptor descriptor = new(
-            entry.Name!,
-            parameters,
-            entry.ReturnType,
-            body,
-            entry.ReturnIsNotNull);
+            SchemaName: entry.Schema ?? "public",
+            Name: entry.Name!,
+            Parameters: parameters,
+            ReturnTypeName: entry.ReturnType,
+            ExpressionBody: body,
+            ReturnIsNotNull: entry.ReturnIsNotNull);
 
         // Validate against the partially-loaded registry. This catches
-        // unresolved UDF references in the body and direct cycles.
+        // unresolved UDF references in the body and direct cycles. The
+        // walk uses the default search_path; richer search_path-aware
+        // load-time validation can come later.
         try
         {
-            UdfInliner.Inline(body, udfs);
+            UdfInliner.Inline(body, udfs, new[] { "public", "system" });
         }
         catch (InvalidOperationException ex)
         {
@@ -433,11 +446,12 @@ public sealed class CatalogStore
         }
 
         return new UdfDescriptor(
-            create.Name,
-            create.Parameters,
-            create.ReturnTypeName,
+            SchemaName: entry.Schema ?? "public",
+            Name: create.Name,
+            Parameters: create.Parameters,
+            ReturnTypeName: create.ReturnTypeName,
             ExpressionBody: null,
-            create.ReturnIsNotNull,
+            ReturnIsNotNull: create.ReturnIsNotNull,
             StatementBody: create.StatementBody,
             IsPure: create.IsPure,
             SourceText: entry.SourceText);
@@ -503,14 +517,14 @@ public sealed class CatalogStore
             file = new CatalogFile
             {
                 Version = CurrentVersion,
-                Udfs = udfs.Entries.Values
-                    .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                Udfs = udfs.Entries
+                    .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
                     .Select(e => new CatalogFileUdfEntry
                     {
-                        // v3 placeholder: UDFs aren't schema-scoped today but
-                        // they live in the `udf.X(...)` call namespace. S7
-                        // will lift this to real schema membership.
-                        Schema = "udf",
+                        // v4: real schema membership. The descriptor's
+                        // SchemaName is the canonical record.
+                        Schema = e.SchemaName,
                         Name = e.Name,
                         Parameters = e.Parameters
                             .Select(p => new CatalogFileUdfParameterEntry
@@ -536,13 +550,13 @@ public sealed class CatalogStore
                         IsPure = e.IsPure,
                     })
                     .ToList(),
-                Procedures = procedures.Entries.Values
-                    .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                Procedures = procedures.Entries
+                    .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
                     .Select(e => new CatalogFileProcedureEntry
                     {
-                        // v3 placeholder: procedures live in the `proc.X(...)`
-                        // call namespace; real schema membership is S7.
-                        Schema = "proc",
+                        // v4: real schema membership.
+                        Schema = e.SchemaName,
                         Name = e.Name,
                         SourceText = e.SourceText,
                     })

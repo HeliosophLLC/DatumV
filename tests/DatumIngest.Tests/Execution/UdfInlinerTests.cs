@@ -17,12 +17,15 @@ public class UdfInlinerTests : ServiceTestBase
         CreateFunctionStatement create = (CreateFunctionStatement)SqlParser.ParseStatement(sql);
         // Macro-only test helper — ExpressionBody is guaranteed non-null
         // because every CREATE FUNCTION here uses the AS-expression form.
+        // Tests register under the legacy "udf" sentinel schema so the
+        // back-compat default search path can resolve them.
         return new UdfDescriptor(
-            create.Name,
-            create.Parameters,
-            create.ReturnTypeName,
-            create.ExpressionBody!,
-            create.ReturnIsNotNull);
+            SchemaName: create.SchemaName ?? "udf",
+            Name: create.Name,
+            Parameters: create.Parameters,
+            ReturnTypeName: create.ReturnTypeName,
+            ExpressionBody: create.ExpressionBody!,
+            ReturnIsNotNull: create.ReturnIsNotNull);
     }
 
     private static Expression Inline(string callSql, params string[] udfDdl)
@@ -193,11 +196,12 @@ public class UdfInlinerTests : ServiceTestBase
         // bypass that and force-register a self-cycle, the call site detects
         // it.
         registry.Register(new UdfDescriptor(
-            "loop",
-            new[] { new UdfParameter("x", "INT32") },
-            null,
+            SchemaName: "udf",
+            Name: "loop",
+            Parameters: new[] { new UdfParameter("x", "INT32") },
+            ReturnTypeName: null,
             // Body is udf.loop(@x) — creates a self-cycle.
-            new FunctionCallExpression("loop",
+            ExpressionBody: new FunctionCallExpression("loop",
                 new[] { (Expression)new VariableExpression("x") },
                 SchemaName: "udf")));
 
@@ -214,17 +218,19 @@ public class UdfInlinerTests : ServiceTestBase
         // a → b → a is detected when the inliner walks back into 'a'.
         UdfRegistry registry = new();
         registry.Register(new UdfDescriptor(
-            "a",
-            new[] { new UdfParameter("x", "INT32") },
-            null,
-            new FunctionCallExpression("b",
+            SchemaName: "udf",
+            Name: "a",
+            Parameters: new[] { new UdfParameter("x", "INT32") },
+            ReturnTypeName: null,
+            ExpressionBody: new FunctionCallExpression("b",
                 new[] { (Expression)new VariableExpression("x") },
                 SchemaName: "udf")));
         registry.Register(new UdfDescriptor(
-            "b",
-            new[] { new UdfParameter("x", "INT32") },
-            null,
-            new FunctionCallExpression("a",
+            SchemaName: "udf",
+            Name: "b",
+            Parameters: new[] { new UdfParameter("x", "INT32") },
+            ReturnTypeName: null,
+            ExpressionBody: new FunctionCallExpression("a",
                 new[] { (Expression)new VariableExpression("x") },
                 SchemaName: "udf")));
 

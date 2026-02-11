@@ -8,90 +8,121 @@ namespace DatumIngest.Catalog;
 /// A registered procedural-batch macro. Unlike <see cref="UdfDescriptor"/>,
 /// procedures are not inlined at plan time — the body is stored as a
 /// <see cref="BlockStatement"/> AST plus the original source text, and
-/// <c>CALL proc.&lt;name&gt;(...)</c> resolves the descriptor at runtime,
+/// <c>CALL schema.name(...)</c> resolves the descriptor at runtime,
 /// pushes a fresh batch context with the parameters auto-declared, and
 /// runs the body.
 /// </summary>
-/// <param name="Name">
-/// The unqualified procedure name (case-insensitive). SQL call sites use
-/// the <c>proc.</c> prefix — <c>proc.compute_cohort(...)</c> — but the
-/// registry keys are stored without the prefix.
+/// <param name="SchemaName">
+/// The schema this procedure lives in. Post-S7c every descriptor carries
+/// real schema membership.
 /// </param>
+/// <param name="Name">The unqualified procedure name (case-insensitive).</param>
 /// <param name="Parameters">
 /// The declared parameters in order. Each parameter's
 /// <see cref="UdfParameter.IsNotNull"/> flag controls whether the
-/// invocation wraps the supplied argument with a runtime null check
-/// before declaring the variable.
+/// invocation wraps the supplied argument with a runtime null check.
 /// </param>
-/// <param name="Body">
-/// The procedural batch the procedure runs on invocation.
-/// </param>
+/// <param name="Body">The procedural batch the procedure runs on invocation.</param>
 /// <param name="SourceText">
 /// The original <c>CREATE PROCEDURE</c> SQL text the descriptor was
 /// registered from. Stored so persistence can write the user's exact
-/// formatting back to the catalog file and so introspection tables can
-/// surface a faithful rendition.
+/// formatting back to the catalog file.
 /// </param>
 public sealed record ProcedureDescriptor(
+    string SchemaName,
     string Name,
     IReadOnlyList<UdfParameter> Parameters,
     BlockStatement Body,
-    string SourceText);
+    string SourceText)
+{
+    /// <summary>Canonical <c>(schema, name)</c> identity.</summary>
+    public QualifiedName QualifiedName => new(SchemaName, Name);
+}
 
 /// <summary>
 /// Process-scoped registry of named procedures for a single
-/// <see cref="TableCatalog"/>. Lookups are case-insensitive on the
-/// unqualified procedure name. The procedural batch executor consults
-/// this registry on every <c>CALL proc.X(...)</c> call site to find the
-/// descriptor whose body should run.
+/// <see cref="TableCatalog"/>. Entries are keyed on
+/// <see cref="QualifiedName"/> (case-insensitive). The procedural batch
+/// executor consults this registry on every <c>CALL</c> call site —
+/// unqualified calls walk search_path, qualified calls exact-match.
 /// </summary>
 public sealed class ProcedureRegistry
 {
-    private readonly ConcurrentDictionary<string, ProcedureDescriptor> _entries =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<QualifiedName, ProcedureDescriptor> _entries = new();
 
     /// <summary>
-    /// Registers <paramref name="descriptor"/>. By default, throws if a
-    /// procedure with the same name already exists. Pass
-    /// <paramref name="replace"/> to overwrite — used by
-    /// <c>CREATE OR REPLACE PROCEDURE</c> and the T-SQL synonym
-    /// <c>CREATE OR ALTER PROCEDURE</c>.
+    /// Registers <paramref name="descriptor"/> under its
+    /// <see cref="ProcedureDescriptor.QualifiedName"/>. By default, throws
+    /// if a procedure with the same qualified name already exists.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// A procedure with the same name is already registered and
+    /// A procedure with the same qualified name is already registered and
     /// <paramref name="replace"/> is <see langword="false"/>.
     /// </exception>
     public void Register(ProcedureDescriptor descriptor, bool replace = false)
     {
+        QualifiedName key = descriptor.QualifiedName;
         if (replace)
         {
-            _entries[descriptor.Name] = descriptor;
+            _entries[key] = descriptor;
             return;
         }
 
-        if (!_entries.TryAdd(descriptor.Name, descriptor))
+        if (!_entries.TryAdd(key, descriptor))
         {
             throw new InvalidOperationException(
-                $"Procedure '{descriptor.Name}' is already registered. " +
+                $"Procedure '{key}' is already registered. " +
                 "Use CREATE OR REPLACE PROCEDURE (or CREATE OR ALTER PROCEDURE) to overwrite.");
         }
     }
 
-    /// <summary>
-    /// Removes the procedure named <paramref name="name"/>. Returns
-    /// <see langword="true"/> when an entry was removed,
-    /// <see langword="false"/> when no entry existed.
-    /// </summary>
-    public bool Unregister(string name) => _entries.TryRemove(name, out _);
+    /// <summary>Removes the procedure at <paramref name="name"/>.</summary>
+    public bool Unregister(QualifiedName name) => _entries.TryRemove(name, out _);
 
-    /// <summary>
-    /// Looks up <paramref name="name"/>. Case-insensitive.
-    /// </summary>
-    public bool TryGet(string name, [NotNullWhen(true)] out ProcedureDescriptor? descriptor)
+    /// <summary>Exact qualified lookup.</summary>
+    public bool TryGet(QualifiedName name, [NotNullWhen(true)] out ProcedureDescriptor? descriptor)
         => _entries.TryGetValue(name, out descriptor);
 
     /// <summary>
-    /// Snapshot of all registered procedures, keyed by name.
+    /// Search-path-aware lookup. An explicit <paramref name="explicitSchema"/>
+    /// goes straight to that schema; an unqualified name walks
+    /// <paramref name="searchPath"/> in order, first hit wins.
     /// </summary>
-    public IReadOnlyDictionary<string, ProcedureDescriptor> Entries => _entries;
+    public bool TryResolve(
+        string? explicitSchema,
+        string name,
+        IReadOnlyList<string> searchPath,
+        [NotNullWhen(true)] out ProcedureDescriptor? descriptor)
+    {
+        if (explicitSchema is not null)
+        {
+            return _entries.TryGetValue(new QualifiedName(explicitSchema, name), out descriptor);
+        }
+
+        foreach (string schema in searchPath)
+        {
+            if (_entries.TryGetValue(new QualifiedName(schema, name), out descriptor))
+            {
+                return true;
+            }
+        }
+        descriptor = null;
+        return false;
+    }
+
+    /// <summary>All registered descriptors. Order is not guaranteed.</summary>
+    public IReadOnlyCollection<ProcedureDescriptor> Entries => (IReadOnlyCollection<ProcedureDescriptor>)_entries.Values;
+
+    // S7c includes the legacy "proc" sentinel so unqualified CREATE
+    // PROCEDURE (which still lands at the legacy schema) is findable
+    // from tests and ad-hoc lookups. S7d removes "proc" from this path
+    // once the default lands in "public".
+    private static readonly IReadOnlyList<string> DefaultSearchPath = new[] { "public", "system", "proc" };
+
+    /// <summary>
+    /// Back-compat bare-string lookup that walks the default
+    /// <c>[public, system, proc]</c> search path. Useful for tests.
+    /// </summary>
+    public bool TryGet(string name, [NotNullWhen(true)] out ProcedureDescriptor? descriptor)
+        => TryResolve(null, name, DefaultSearchPath, out descriptor);
 }
