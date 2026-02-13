@@ -356,14 +356,24 @@ internal sealed class SemanticAnalyzer
                 break;
 
             case FunctionCallExpression functionCall:
-                if (!_functionNames.Contains(functionCall.FunctionName))
+                if (TryResolveProcedureCall(functionCall) is { } procedureInExpr)
                 {
+                    // S7d locks the rule: procedures REQUIRE CALL. Surface
+                    // a specific diagnostic here so the user sees the
+                    // CALL nudge instead of falling through to the
+                    // "unknown function" branch.
                     EmitWarning(diagnostics, functionCall.Span,
-                        $"Unknown function '{functionCall.FunctionName}'.");
+                        $"'{procedureInExpr.SchemaName}.{procedureInExpr.Name}' is a procedure; " +
+                        $"invoke it via CALL {procedureInExpr.SchemaName}.{procedureInExpr.Name}(...).");
+                }
+                else if (ResolvesToFunction(functionCall))
+                {
+                    ValidateFunctionArgTypes(functionCall, aliasToTable, opaqueAliases, diagnostics);
                 }
                 else
                 {
-                    ValidateFunctionArgTypes(functionCall, aliasToTable, opaqueAliases, diagnostics);
+                    EmitWarning(diagnostics, functionCall.Span,
+                        $"Unknown function '{functionCall.CallName}'.");
                 }
 
                 foreach (Expression argument in functionCall.Arguments)
@@ -558,6 +568,83 @@ internal sealed class SemanticAnalyzer
 
             // LiteralExpression — nothing to validate.
         }
+    }
+
+    /// <summary>
+    /// Checks whether a function call resolves to a registered function:
+    /// either a built-in (in <c>system</c>) or a UDF on the session
+    /// search_path. Explicit qualification narrows the lookup to the
+    /// named schema. Unqualified names walk the search_path.
+    /// </summary>
+    private bool ResolvesToFunction(FunctionCallExpression call)
+    {
+        // Built-in functions live in system. An explicit non-system
+        // qualifier should not match a built-in.
+        if (call.SchemaName is null
+            || string.Equals(call.SchemaName, "system", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_functionNames.Contains(call.FunctionName)) return true;
+        }
+        if (_manifest.Udfs is null) return false;
+        if (call.SchemaName is not null)
+        {
+            foreach (UdfEntry udf in _manifest.Udfs)
+            {
+                if (string.Equals(udf.SchemaName, call.SchemaName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(udf.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+        foreach (string schema in _manifest.SearchPath)
+        {
+            foreach (UdfEntry udf in _manifest.Udfs)
+            {
+                if (string.Equals(udf.SchemaName, schema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(udf.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Returns the matching procedure entry when <paramref name="call"/>
+    /// resolves to a procedure (explicit-schema exact-match, or
+    /// search_path walk for unqualified names). Used by the
+    /// procedure-in-expression diagnostic.
+    /// </summary>
+    private ProcedureEntry? TryResolveProcedureCall(FunctionCallExpression call)
+    {
+        if (_manifest.Procedures is null) return null;
+        if (call.SchemaName is not null)
+        {
+            foreach (ProcedureEntry proc in _manifest.Procedures)
+            {
+                if (string.Equals(proc.SchemaName, call.SchemaName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(proc.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return proc;
+                }
+            }
+            return null;
+        }
+        foreach (string schema in _manifest.SearchPath)
+        {
+            foreach (ProcedureEntry proc in _manifest.Procedures)
+            {
+                if (string.Equals(proc.SchemaName, schema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(proc.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return proc;
+                }
+            }
+        }
+        return null;
     }
 
     /// <summary>

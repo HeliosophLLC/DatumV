@@ -113,21 +113,34 @@ public static class CatalogManifestBuilder
             models = modelEntries;
         }
 
-        // UDFs registered in the catalog flow into the manifest so the
-        // language server can offer `udf.<name>(...)` completions and surface
-        // signature info in hover tooltips. Always non-null on a live
-        // catalog (UdfRegistry exists from construction); empty list when no
-        // UDFs are registered.
+        // UDFs and procedures registered in the catalog flow into the
+        // manifest so the language server can resolve `schema.fn(...)` /
+        // `CALL schema.proc(...)` qualified call sites, walk search_path
+        // for unqualified calls, and surface signature info in hover
+        // tooltips. Always non-null on a live catalog (registries exist
+        // from construction); empty lists when nothing is registered.
         List<UdfEntry> udfEntries = new(catalog.Udfs.Entries.Count);
         foreach (UdfDescriptor descriptor in catalog.Udfs.Entries)
         {
             udfEntries.Add(new UdfEntry
             {
+                SchemaName = descriptor.SchemaName,
                 Name = descriptor.Name,
                 ReturnType = descriptor.ReturnTypeName,
                 BodyKind = descriptor.IsProcedural ? "procedural" : "macro",
                 IsPure = descriptor.IsPure,
                 Parameters = BuildUdfParameters(descriptor),
+            });
+        }
+
+        List<ProcedureEntry> procedureEntries = new(catalog.Procedures.Entries.Count);
+        foreach (ProcedureDescriptor descriptor in catalog.Procedures.Entries)
+        {
+            procedureEntries.Add(new ProcedureEntry
+            {
+                SchemaName = descriptor.SchemaName,
+                Name = descriptor.Name,
+                Parameters = BuildProcedureParameters(descriptor),
             });
         }
 
@@ -138,6 +151,7 @@ public static class CatalogManifestBuilder
             Keywords = keywords,
             Models = models,
             Udfs = udfEntries,
+            Procedures = procedureEntries,
             // Capture the catalog's current search_path so the LSP can
             // resolve unqualified names against the same precedence the
             // engine uses at execution time. Snapshot — subsequent
@@ -145,6 +159,28 @@ public static class CatalogManifestBuilder
             // re-build for an updated view.
             SearchPath = catalog.SearchPath,
         };
+    }
+
+    /// <summary>
+    /// Builds the positional parameter list for a procedure entry. Mirrors
+    /// <see cref="BuildUdfParameters"/> — procedures and UDFs share the
+    /// same <see cref="UdfParameter"/> parameter shape.
+    /// </summary>
+    private static IReadOnlyList<ParameterSignature> BuildProcedureParameters(ProcedureDescriptor descriptor)
+    {
+        if (descriptor.Parameters.Count == 0) return Array.Empty<ParameterSignature>();
+        ParameterSignature[] sigs = new ParameterSignature[descriptor.Parameters.Count];
+        for (int i = 0; i < descriptor.Parameters.Count; i++)
+        {
+            UdfParameter p = descriptor.Parameters[i];
+            sigs[i] = new ParameterSignature
+            {
+                Name = p.Name,
+                Kind = p.TypeName,
+                IsOptional = p.Default is not null,
+            };
+        }
+        return sigs;
     }
 
     /// <summary>

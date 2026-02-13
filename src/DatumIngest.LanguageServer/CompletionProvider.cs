@@ -145,21 +145,20 @@ public sealed class CompletionProvider
             case CompletionZoneKind.AfterDot:
                 if (zone.TableQualifier is not null)
                 {
-                    // Reserved namespaces (`models.X`, `udf.X`, future
-                    // `proc.X` / `tasks.X`) are dispatched ahead of the
-                    // table-column lookup. The qualifier match is
-                    // case-insensitive to mirror SQL's keyword conventions.
+                    // The <c>models.</c> call namespace is still a special
+                    // bucket pre-S9 (model registry doesn't surface in the
+                    // schema router yet). Everything else treats the
+                    // qualifier as a schema and offers what's registered
+                    // there: columns on a table alias, UDFs / procedures
+                    // in that schema, and built-in functions when
+                    // qualifier == "system".
                     if (string.Equals(zone.TableQualifier, "models", StringComparison.OrdinalIgnoreCase))
                     {
                         AddModels(items);
                         break;
                     }
-                    if (string.Equals(zone.TableQualifier, "udf", StringComparison.OrdinalIgnoreCase))
-                    {
-                        AddUdfs(items);
-                        break;
-                    }
                     AddQualifiedColumns(items, zone.TableQualifier);
+                    AddSchemaRoutines(items, zone.TableQualifier);
                 }
                 break;
 
@@ -490,41 +489,100 @@ public sealed class CompletionProvider
     }
 
     /// <summary>
-    /// Surfaces every catalog UDF after the user types <c>udf.</c> Mirrors
-    /// <see cref="AddModels"/> in shape; <see cref="UdfEntry.BodyKind"/> and
-    /// <see cref="UdfEntry.IsPure"/> become hint text in the popup detail
-    /// line so users can see at a glance whether they're invoking a macro
-    /// (inlined) or a procedural body (per-row).
+    /// Surfaces UDFs, procedures, and (when <paramref name="schema"/> is
+    /// <c>system</c>) built-in functions registered in
+    /// <paramref name="schema"/> after the user types
+    /// <c>{schema}.</c>. Procedures get a <c>[procedure]</c> tag so users
+    /// see them as CALL-only targets distinct from regular functions.
     /// </summary>
-    private void AddUdfs(List<CompletionItem> items)
+    private void AddSchemaRoutines(List<CompletionItem> items, string schema)
     {
-        if (_manifest.Udfs is null) return;
-
-        foreach (UdfEntry udf in _manifest.Udfs)
+        if (_manifest.Udfs is not null)
         {
-            string parameters = udf.Parameters is null
-                ? ""
-                : string.Join(", ", udf.Parameters.Select(FormatParameter));
-            string signature = $"udf.{udf.Name}({parameters})";
-            string returnInfo = udf.ReturnType is not null ? $" → {udf.ReturnType}" : "";
-
-            // Detail line: "[procedural pure] udf.foo(@x INT32) → STRING"
-            // Body kind comes first so the eye lands on the most important
-            // operational hint (per-row vs inlined). Empty when no kind.
-            List<string> tags = new(2);
-            if (udf.BodyKind is not null) tags.Add(udf.BodyKind);
-            if (udf.IsPure) tags.Add("pure");
-            string tagPrefix = tags.Count > 0 ? $"[{string.Join(' ', tags)}] " : "";
-
-            items.Add(new CompletionItem
+            foreach (UdfEntry udf in _manifest.Udfs)
             {
-                Label = udf.Name,
-                Kind = CompletionItemKind.Function,
-                Detail = $"{tagPrefix}{signature}{returnInfo}",
-                InsertText = $"{udf.Name}(",
-                SortOrder = 1,
-            });
+                if (!string.Equals(udf.SchemaName, schema, StringComparison.OrdinalIgnoreCase)) continue;
+                items.Add(BuildUdfCompletion(udf));
+            }
         }
+
+        if (_manifest.Procedures is not null)
+        {
+            foreach (ProcedureEntry proc in _manifest.Procedures)
+            {
+                if (!string.Equals(proc.SchemaName, schema, StringComparison.OrdinalIgnoreCase)) continue;
+                items.Add(BuildProcedureCompletion(proc));
+            }
+        }
+
+        // Built-in scalar / aggregate / window / table-valued functions
+        // all live in the system schema. Only offer them when the user
+        // explicitly qualified with system — bare typing already goes
+        // through the regular function completion path.
+        if (string.Equals(schema, "system", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (FunctionSignature function in _manifest.Functions)
+            {
+                if (IsInternalFunction(function)) continue;
+                items.Add(BuildBuiltinCompletion(function));
+            }
+        }
+    }
+
+    private static CompletionItem BuildUdfCompletion(UdfEntry udf)
+    {
+        string parameters = udf.Parameters is null
+            ? ""
+            : string.Join(", ", udf.Parameters.Select(FormatParameter));
+        string returnInfo = udf.ReturnType is not null ? $" → {udf.ReturnType}" : "";
+
+        // Detail line: "[procedural pure] schema.foo(@x INT32) → STRING"
+        // Body kind comes first so the eye lands on the operational hint.
+        List<string> tags = new(2);
+        if (udf.BodyKind is not null) tags.Add(udf.BodyKind);
+        if (udf.IsPure) tags.Add("pure");
+        string tagPrefix = tags.Count > 0 ? $"[{string.Join(' ', tags)}] " : "";
+
+        return new CompletionItem
+        {
+            Label = udf.Name,
+            Kind = CompletionItemKind.Function,
+            Detail = $"{tagPrefix}{udf.SchemaName}.{udf.Name}({parameters}){returnInfo}",
+            InsertText = $"{udf.Name}(",
+            SortOrder = 1,
+        };
+    }
+
+    private static CompletionItem BuildProcedureCompletion(ProcedureEntry proc)
+    {
+        string parameters = proc.Parameters is null
+            ? ""
+            : string.Join(", ", proc.Parameters.Select(FormatParameter));
+
+        // Procedures require CALL, surfaced via the [procedure] tag so
+        // users don't mistake them for SELECT-callable functions.
+        return new CompletionItem
+        {
+            Label = proc.Name,
+            Kind = CompletionItemKind.Function,
+            Detail = $"[procedure] {proc.SchemaName}.{proc.Name}({parameters})",
+            InsertText = $"{proc.Name}(",
+            SortOrder = 1,
+        };
+    }
+
+    private static CompletionItem BuildBuiltinCompletion(FunctionSignature function)
+    {
+        string parameters = string.Join(", ", function.Parameters.Select(FormatParameter));
+        string returnInfo = function.ReturnType is not null ? $" → {function.ReturnType}" : "";
+        return new CompletionItem
+        {
+            Label = function.Name,
+            Kind = CompletionItemKind.Function,
+            Detail = $"system.{function.Name}({parameters}){returnInfo}",
+            InsertText = $"{function.Name}(",
+            SortOrder = 1,
+        };
     }
 
     private void AddAggregateFunctions(List<CompletionItem> items)

@@ -57,6 +57,7 @@ public sealed class SignatureHelpProviderTests
             [
                 new UdfEntry
                 {
+                    SchemaName = "public",
                     Name = "RewriteCaption",
                     ReturnType = "STRING",
                     BodyKind = "procedural",
@@ -123,16 +124,31 @@ public sealed class SignatureHelpProviderTests
     // ───────────────────── UDF dispatch ─────────────────────
 
     [Fact]
-    public void Udf_AfterOpenParen_PicksFromUdfNamespace()
+    public void Udf_AfterOpenParen_PicksFromSchema()
     {
+        // Post-S7d UDFs live in real schemas (typically `public`); the
+        // signature popup uses the qualified name as the label.
         SignatureHelp? sig = NewProvider().GetSignatureHelp(
-            "SELECT udf.RewriteCaption(", 26);
+            "SELECT public.RewriteCaption(", 29);
 
         Assert.NotNull(sig);
-        Assert.Contains("udf.RewriteCaption", sig!.Signatures[0].Label);
+        Assert.Contains("public.RewriteCaption", sig!.Signatures[0].Label);
         Assert.Contains("caption: STRING", sig.Signatures[0].Label);
         Assert.Contains("tone: STRING?", sig.Signatures[0].Label);
         Assert.Equal(0, sig.ActiveParameter);
+    }
+
+    [Fact]
+    public void Udf_Unqualified_ResolvesThroughSearchPath()
+    {
+        // Bare names walk search_path — `RewriteCaption` resolves to
+        // (public, RewriteCaption) because `public` is on the default
+        // path.
+        SignatureHelp? sig = NewProvider().GetSignatureHelp(
+            "SELECT RewriteCaption(", 22);
+
+        Assert.NotNull(sig);
+        Assert.Contains("public.RewriteCaption", sig!.Signatures[0].Label);
     }
 
     [Fact]
@@ -141,7 +157,7 @@ public sealed class SignatureHelpProviderTests
         // Procedural + pure UDF should surface both flags so the popup tells
         // the user what call shape they're invoking.
         SignatureHelp? sig = NewProvider().GetSignatureHelp(
-            "SELECT udf.RewriteCaption(", 26);
+            "SELECT public.RewriteCaption(", 29);
 
         Assert.NotNull(sig);
         string? doc = sig!.Signatures[0].Documentation;

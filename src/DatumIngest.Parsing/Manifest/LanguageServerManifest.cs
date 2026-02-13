@@ -38,12 +38,24 @@ public sealed class LanguageServerManifest
     public IReadOnlyList<ModelEntry>? Models { get; init; }
 
     /// <summary>
-    /// User-defined functions registered in the catalog's <c>UdfRegistry</c>,
-    /// surfaced for the <c>udf.&lt;name&gt;(...)</c> completion namespace.
-    /// May be <see langword="null"/> when the manifest is built without a
-    /// live catalog (offline JSON workflow).
+    /// User-defined functions registered in the catalog's <c>UdfRegistry</c>.
+    /// Each entry carries a <see cref="UdfEntry.SchemaName"/> — post-S7
+    /// UDFs live in real schemas (typically <c>public</c>), and the
+    /// completion / hover paths qualify call sites via the session
+    /// <see cref="SearchPath"/>. May be <see langword="null"/> when the
+    /// manifest is built without a live catalog (offline JSON workflow).
     /// </summary>
     public IReadOnlyList<UdfEntry>? Udfs { get; init; }
+
+    /// <summary>
+    /// Stored procedures registered in the catalog's <c>ProcedureRegistry</c>.
+    /// Each entry carries a <see cref="ProcedureEntry.SchemaName"/>; calls
+    /// resolve through the same search_path walk as UDFs. Procedures
+    /// REQUIRE <c>CALL</c> — the language server flags them in expression
+    /// position. May be <see langword="null"/> when the manifest is built
+    /// without a live catalog.
+    /// </summary>
+    public IReadOnlyList<ProcedureEntry>? Procedures { get; init; }
 }
 
 /// <summary>
@@ -52,7 +64,10 @@ public sealed class LanguageServerManifest
 /// </summary>
 public sealed class UdfEntry
 {
-    /// <summary>Unqualified UDF name as it appears after <c>udf.</c>.</summary>
+    /// <summary>The schema this UDF lives in. Typically <c>public</c> for user-defined functions.</summary>
+    public required string SchemaName { get; init; }
+
+    /// <summary>Unqualified UDF name (combine with <see cref="SchemaName"/> for the canonical identity).</summary>
     public required string Name { get; init; }
 
     /// <summary>Return type name (e.g. <c>"String"</c>, <c>"Int32"</c>), or <see langword="null"/> when none was declared.</summary>
@@ -173,6 +188,27 @@ public sealed class FunctionSignature
 
     /// <summary>The base query-unit cost per invocation, as reported by the function implementation.</summary>
     public int QueryUnitCost { get; init; }
+}
+
+/// <summary>
+/// Lightweight description of a registered procedure for completion /
+/// hover. Procedures REQUIRE <c>CALL</c> — the language server uses
+/// these entries to surface signature info on CALL statements and to
+/// flag procedures in expression position.
+/// </summary>
+public sealed class ProcedureEntry
+{
+    /// <summary>The schema this procedure lives in.</summary>
+    public required string SchemaName { get; init; }
+
+    /// <summary>Unqualified procedure name (combine with <see cref="SchemaName"/> for the canonical identity).</summary>
+    public required string Name { get; init; }
+
+    /// <summary>
+    /// Positional parameter shape — name, declared type, and whether a
+    /// default makes the parameter optional at the call site.
+    /// </summary>
+    public IReadOnlyList<ParameterSignature>? Parameters { get; init; }
 }
 
 /// <summary>

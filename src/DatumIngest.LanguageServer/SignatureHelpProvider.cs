@@ -192,33 +192,119 @@ public sealed class SignatureHelpProvider
 
     /// <summary>
     /// Looks up <paramref name="functionName"/> in the manifest and builds
-    /// the matching signature. Resolution order: namespaced UDF, namespaced
-    /// model, scalar / aggregate / window / table-valued. Returns
-    /// <see langword="null"/> when nothing matches — the editor then hides
-    /// the tooltip.
+    /// the matching signature. Resolution order:
+    /// <list type="number">
+    ///   <item><description>The <c>models.</c> call namespace (pre-S9; the
+    ///     model registry isn't a real schema yet).</description></item>
+    ///   <item><description>UDFs / procedures in an explicit schema, or walked
+    ///     across the session search_path for unqualified names.</description></item>
+    ///   <item><description>Built-in scalar / aggregate / window / table-valued
+    ///     functions.</description></item>
+    /// </list>
+    /// Returns <see langword="null"/> when nothing matches — the editor then
+    /// hides the tooltip.
     /// </summary>
     private SignatureHelp? ResolveSignature(string functionName, int activeParameter)
     {
-        if (functionName.StartsWith("udf.", StringComparison.OrdinalIgnoreCase))
-        {
-            return BuildUdfSignature(functionName["udf.".Length..], activeParameter);
-        }
         if (functionName.StartsWith("models.", StringComparison.OrdinalIgnoreCase))
         {
             return BuildModelSignature(functionName["models.".Length..], activeParameter);
         }
-        return BuildBuiltinSignature(functionName, activeParameter);
+
+        // Split dotted form into (schema, name); bare name leaves schema null.
+        int dot = functionName.IndexOf('.');
+        string? explicitSchema = dot > 0 ? functionName[..dot] : null;
+        string bareName = dot > 0 ? functionName[(dot + 1)..] : functionName;
+
+        // UDF / procedure resolution mirrors the engine's runtime: explicit
+        // schema does an exact match; unqualified walks search_path.
+        SignatureHelp? routine = BuildRoutineSignature(explicitSchema, bareName, activeParameter);
+        if (routine is not null) return routine;
+
+        // Built-ins live in `system`; an explicit non-system qualifier should
+        // not resolve to one. Unqualified or explicit `system` falls through.
+        if (explicitSchema is null
+            || string.Equals(explicitSchema, "system", StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildBuiltinSignature(bareName, activeParameter);
+        }
+        return null;
     }
 
-    private SignatureHelp? BuildUdfSignature(string name, int activeParameter)
+    private SignatureHelp? BuildRoutineSignature(string? explicitSchema, string name, int activeParameter)
+    {
+        UdfEntry? udf = ResolveUdf(explicitSchema, name);
+        if (udf is not null) return BuildUdfSignature(udf, activeParameter);
+
+        ProcedureEntry? proc = ResolveProcedure(explicitSchema, name);
+        if (proc is not null) return BuildProcedureSignature(proc, activeParameter);
+
+        return null;
+    }
+
+    private UdfEntry? ResolveUdf(string? explicitSchema, string name)
     {
         if (_manifest.Udfs is null) return null;
-        UdfEntry? entry = FindByName(_manifest.Udfs, name, e => e.Name);
-        if (entry is null) return null;
+        if (explicitSchema is not null)
+        {
+            foreach (UdfEntry e in _manifest.Udfs)
+            {
+                if (string.Equals(e.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return e;
+                }
+            }
+            return null;
+        }
+        foreach (string schema in _manifest.SearchPath)
+        {
+            foreach (UdfEntry e in _manifest.Udfs)
+            {
+                if (string.Equals(e.SchemaName, schema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return e;
+                }
+            }
+        }
+        return null;
+    }
 
+    private ProcedureEntry? ResolveProcedure(string? explicitSchema, string name)
+    {
+        if (_manifest.Procedures is null) return null;
+        if (explicitSchema is not null)
+        {
+            foreach (ProcedureEntry e in _manifest.Procedures)
+            {
+                if (string.Equals(e.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return e;
+                }
+            }
+            return null;
+        }
+        foreach (string schema in _manifest.SearchPath)
+        {
+            foreach (ProcedureEntry e in _manifest.Procedures)
+            {
+                if (string.Equals(e.SchemaName, schema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return e;
+                }
+            }
+        }
+        return null;
+    }
+
+    private SignatureHelp BuildUdfSignature(UdfEntry entry, int activeParameter)
+    {
         IReadOnlyList<ParameterSignature> parameters = entry.Parameters ?? Array.Empty<ParameterSignature>();
         (string label, IReadOnlyList<ParameterInfo> paramInfos) = BuildLabel(
-            $"udf.{entry.Name}", parameters, entry.ReturnType);
+            $"{entry.SchemaName}.{entry.Name}", parameters, entry.ReturnType);
 
         List<string> tags = new(2);
         if (entry.BodyKind is not null) tags.Add(entry.BodyKind);
@@ -233,6 +319,27 @@ public sealed class SignatureHelpProvider
                 {
                     Label = label,
                     Documentation = doc,
+                    Parameters = paramInfos,
+                },
+            ],
+            ActiveSignature = 0,
+            ActiveParameter = ClampActiveParameter(activeParameter, parameters.Count),
+        };
+    }
+
+    private SignatureHelp BuildProcedureSignature(ProcedureEntry entry, int activeParameter)
+    {
+        IReadOnlyList<ParameterSignature> parameters = entry.Parameters ?? Array.Empty<ParameterSignature>();
+        (string label, IReadOnlyList<ParameterInfo> paramInfos) = BuildLabel(
+            $"{entry.SchemaName}.{entry.Name}", parameters, returnType: null);
+        return new SignatureHelp
+        {
+            Signatures =
+            [
+                new SignatureInfo
+                {
+                    Label = label,
+                    Documentation = "procedure · invoke via CALL",
                     Parameters = paramInfos,
                 },
             ],

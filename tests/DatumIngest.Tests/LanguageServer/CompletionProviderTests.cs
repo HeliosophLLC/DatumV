@@ -786,6 +786,7 @@ public sealed class CompletionProviderTests : ServiceTestBase
             [
                 new UdfEntry
                 {
+                    SchemaName = "public",
                     Name = "shout",
                     ReturnType = "STRING",
                     BodyKind = "macro",
@@ -794,6 +795,7 @@ public sealed class CompletionProviderTests : ServiceTestBase
                 },
                 new UdfEntry
                 {
+                    SchemaName = "public",
                     Name = "RewriteCaption",
                     ReturnType = "STRING",
                     BodyKind = "procedural",
@@ -805,36 +807,38 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     [Fact]
-    public void GetCompletions_AfterUdfDot_OffersUdfNames()
+    public void GetCompletions_AfterSchemaDot_OffersUdfsInThatSchema()
     {
+        // Post-S7d UDFs live in real schemas (typically `public`); typing
+        // `public.` surfaces every UDF registered under that schema.
         CompletionProvider provider = new(CreateManifestWithUdfs());
 
-        CompletionItem[] items = provider.GetCompletions("SELECT udf.", 11);
+        CompletionItem[] items = provider.GetCompletions("SELECT public.", 14);
 
         Assert.Contains(items, item => item.Label == "shout" && item.Kind == CompletionItemKind.Function);
         Assert.Contains(items, item => item.Label == "RewriteCaption" && item.Kind == CompletionItemKind.Function);
     }
 
     [Fact]
-    public void GetCompletions_AfterUdfDotWithPrefix_FiltersByPrefix()
+    public void GetCompletions_AfterSchemaDotWithPrefix_FiltersByPrefix()
     {
         CompletionProvider provider = new(CreateManifestWithUdfs());
 
-        CompletionItem[] items = provider.GetCompletions("SELECT udf.Re", 13);
+        CompletionItem[] items = provider.GetCompletions("SELECT public.Re", 16);
 
         Assert.Contains(items, item => item.Label == "RewriteCaption");
         Assert.DoesNotContain(items, item => item.Label == "shout");
     }
 
     [Fact]
-    public void GetCompletions_AfterUdfDot_DetailCarriesBodyKindAndPurity()
+    public void GetCompletions_AfterSchemaDot_DetailCarriesBodyKindAndPurity()
     {
         // Procedural + pure UDFs should surface both flags in Detail so users
         // see at a glance whether they're invoking an inlined macro or a
         // per-row procedural body, and whether CSE will fold call sites.
         CompletionProvider provider = new(CreateManifestWithUdfs());
 
-        CompletionItem[] items = provider.GetCompletions("SELECT udf.", 11);
+        CompletionItem[] items = provider.GetCompletions("SELECT public.", 14);
         CompletionItem rewrite = Assert.Single(items, i => i.Label == "RewriteCaption");
         CompletionItem shout = Assert.Single(items, i => i.Label == "shout");
 
@@ -846,16 +850,17 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     [Fact]
-    public void GetCompletions_AfterUdfDot_NoUdfsRegistered_ReturnsEmpty()
+    public void GetCompletions_AfterSchemaDot_NoUdfsInSchema_ReturnsEmpty()
     {
-        // Empty UDF list should return no items rather than throwing.
+        // Schema-qualified completion is filtered by SchemaName — a schema
+        // that owns no UDFs returns no items.
         LanguageServerManifest manifest = new()
         {
             Tables = [], Functions = [], Keywords = [], Udfs = [],
         };
         CompletionProvider provider = new(manifest);
 
-        CompletionItem[] items = provider.GetCompletions("SELECT udf.", 11);
+        CompletionItem[] items = provider.GetCompletions("SELECT public.", 14);
 
         Assert.Empty(items);
     }

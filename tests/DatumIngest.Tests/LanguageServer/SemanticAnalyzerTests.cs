@@ -942,4 +942,77 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
             d.Message.Contains("'total'") &&
             d.Message.Contains("Unknown column"));
     }
+
+    // ───────────────────── S7e — procedure-in-expression ─────────────────────
+
+    [Fact]
+    public void Procedure_InSelectExpression_EmitsWarning()
+    {
+        // S7d locks the rule: procedures REQUIRE CALL. The semantic analyzer
+        // surfaces this at edit time so the user sees the diagnostic in
+        // their editor before running the query.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [Table("t", "id")],
+            Functions = [],
+            Keywords = [],
+            Procedures =
+            [
+                new ProcedureEntry { SchemaName = "public", Name = "tally" },
+            ],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT tally(id) FROM t", manifest);
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("procedure", StringComparison.OrdinalIgnoreCase) &&
+            d.Message.Contains("CALL"));
+    }
+
+    [Fact]
+    public void Procedure_QualifiedInSelectExpression_EmitsWarning()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [Table("t", "id")],
+            Functions = [],
+            Keywords = [],
+            Procedures =
+            [
+                new ProcedureEntry { SchemaName = "myapp", Name = "tally" },
+            ],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT myapp.tally(id) FROM t", manifest);
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("myapp.tally") &&
+            d.Message.Contains("CALL"));
+    }
+
+    [Fact]
+    public void Udf_QualifiedInSelect_ResolvesWithoutWarning()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [Table("t", "id")],
+            Functions = [],
+            Keywords = [],
+            Udfs =
+            [
+                new UdfEntry { SchemaName = "myapp", Name = "shout" },
+            ],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT myapp.shout(id) FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("Unknown function"));
+    }
 }
