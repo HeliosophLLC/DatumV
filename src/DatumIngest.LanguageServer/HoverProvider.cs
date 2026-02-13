@@ -95,8 +95,35 @@ public sealed class HoverProvider
         if (currentIndex >= 0 && currentIndex + 1 < tokens.Count &&
             tokens[currentIndex + 1].Kind == SqlToken.LeftParen)
         {
-            docKey = DocumentationIndex.Instance.FindFunctionSection(name);
-            return GetFunctionHover(name);
+            // Detect a schema qualifier (`schema.fn(`) so we can route the
+            // hover to UDFs / procedures registered in that schema before
+            // falling back to built-ins.
+            string? callQualifier = null;
+            if (currentIndex >= 2
+                && tokens[currentIndex - 1].Kind == SqlToken.Dot
+                && (tokens[currentIndex - 2].Kind == SqlToken.Identifier || IsKeywordToken(tokens[currentIndex - 2].Kind)))
+            {
+                callQualifier = tokens[currentIndex - 2].Text;
+            }
+
+            // UDFs first — qualified exact match, then search_path walk.
+            string? udfHover = GetUdfHover(callQualifier, name);
+            if (udfHover is not null) return udfHover;
+
+            // Procedures — surface a "use CALL" hint so users see the
+            // semantic difference even from hover.
+            string? procedureHover = GetProcedureHover(callQualifier, name);
+            if (procedureHover is not null) return procedureHover;
+
+            // Built-ins live in `system`; an explicit non-system qualifier
+            // shouldn't surface a built-in hover.
+            if (callQualifier is null
+                || string.Equals(callQualifier, "system", StringComparison.OrdinalIgnoreCase))
+            {
+                docKey = DocumentationIndex.Instance.FindFunctionSection(name);
+                return GetFunctionHover(name);
+            }
+            return null;
         }
 
         // If preceded by a dot, it could be a qualified column (table.column)
@@ -149,6 +176,114 @@ public sealed class HoverProvider
         }
 
         return GetColumnHover(name);
+    }
+
+    /// <summary>
+    /// Resolves UDF hover via explicit schema (exact match) or, when
+    /// <paramref name="explicitSchema"/> is <see langword="null"/>, walks
+    /// the manifest's <see cref="LanguageServerManifest.SearchPath"/>.
+    /// </summary>
+    private string? GetUdfHover(string? explicitSchema, string name)
+    {
+        if (_manifest.Udfs is null) return null;
+        UdfEntry? entry = ResolveUdfEntry(explicitSchema, name);
+        if (entry is null) return null;
+
+        string parameters = entry.Parameters is null
+            ? ""
+            : string.Join(", ", entry.Parameters.Select(p =>
+            {
+                string optional = p.IsOptional ? "?" : "";
+                return $"{p.Name}: {p.Kind}{optional}";
+            }));
+        string returnInfo = entry.ReturnType is not null ? $" → {entry.ReturnType}" : "";
+        string signature = $"**{entry.SchemaName}.{entry.Name}**({parameters}){returnInfo}";
+
+        List<string> tags = new(2);
+        if (entry.BodyKind is not null) tags.Add(entry.BodyKind);
+        if (entry.IsPure) tags.Add("pure");
+        string detail = tags.Count > 0 ? $"\n\n*{string.Join(" · ", tags)}*" : "";
+
+        return signature + detail;
+    }
+
+    /// <summary>
+    /// Resolves procedure hover, returning a "procedure · use CALL" hint
+    /// so the user sees the semantic difference at edit time.
+    /// </summary>
+    private string? GetProcedureHover(string? explicitSchema, string name)
+    {
+        if (_manifest.Procedures is null) return null;
+        ProcedureEntry? entry = ResolveProcedureEntry(explicitSchema, name);
+        if (entry is null) return null;
+
+        string parameters = entry.Parameters is null
+            ? ""
+            : string.Join(", ", entry.Parameters.Select(p =>
+            {
+                string optional = p.IsOptional ? "?" : "";
+                return $"{p.Name}: {p.Kind}{optional}";
+            }));
+        return $"**{entry.SchemaName}.{entry.Name}**({parameters})\n\n" +
+            $"*procedure · invoke via* `CALL {entry.SchemaName}.{entry.Name}(...)`";
+    }
+
+    private UdfEntry? ResolveUdfEntry(string? explicitSchema, string name)
+    {
+        if (_manifest.Udfs is null) return null;
+        if (explicitSchema is not null)
+        {
+            foreach (UdfEntry e in _manifest.Udfs)
+            {
+                if (string.Equals(e.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return e;
+                }
+            }
+            return null;
+        }
+        foreach (string schema in _manifest.SearchPath)
+        {
+            foreach (UdfEntry e in _manifest.Udfs)
+            {
+                if (string.Equals(e.SchemaName, schema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return e;
+                }
+            }
+        }
+        return null;
+    }
+
+    private ProcedureEntry? ResolveProcedureEntry(string? explicitSchema, string name)
+    {
+        if (_manifest.Procedures is null) return null;
+        if (explicitSchema is not null)
+        {
+            foreach (ProcedureEntry e in _manifest.Procedures)
+            {
+                if (string.Equals(e.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return e;
+                }
+            }
+            return null;
+        }
+        foreach (string schema in _manifest.SearchPath)
+        {
+            foreach (ProcedureEntry e in _manifest.Procedures)
+            {
+                if (string.Equals(e.SchemaName, schema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return e;
+                }
+            }
+        }
+        return null;
     }
 
     private string? GetFunctionHover(string name)
