@@ -3,8 +3,11 @@ title: User-Defined Functions
 ---
 
 User-defined functions (UDFs) allow you to name a reusable computation and
-call it through the `udf.` namespace. DatumIngest supports two UDF body
-shapes with different trade-offs:
+call it like any other function. UDFs live in [schemas](schema-introspection.md) — by
+default `public` — and are callable by either their bare name (when the
+schema is on the session `search_path`) or a schema-qualified name
+(`analytics.shout(...)`). DatumIngest supports two UDF body shapes with
+different trade-offs:
 
 - **Macro UDFs** (`AS expression`) — the body is a scalar expression inlined
   at plan time. The call site sees the substituted body; no UDF boundary
@@ -25,12 +28,12 @@ The two shapes coexist in the same catalog and are called identically from SQL.
 
 ```sql
 -- Macro UDF
-CREATE [OR REPLACE] [PURE] FUNCTION [IF NOT EXISTS] name(
+CREATE [OR REPLACE] [PURE] FUNCTION [IF NOT EXISTS] [schema.]name(
     @param TYPE [IS NOT NULL] [= default] [, ...]
 ) [RETURNS TYPE [IS NOT NULL]] AS expression;
 
 -- Procedural UDF
-CREATE [OR REPLACE] [PURE] FUNCTION [IF NOT EXISTS] name(
+CREATE [OR REPLACE] [PURE] FUNCTION [IF NOT EXISTS] [schema.]name(
     @param TYPE [IS NOT NULL] [= default] [, ...]
 ) RETURNS TYPE [IS NOT NULL]
 BEGIN
@@ -41,23 +44,30 @@ BEGIN
     RETURN expr
 END
 
-DROP FUNCTION [IF EXISTS] name;
+DROP FUNCTION [IF EXISTS] [schema.]name;
 
-SELECT udf.name(arg1, arg2) FROM ...;
+SELECT name(arg1, arg2) FROM ...;
+SELECT schema.name(arg1, arg2) FROM ...;
 
-CALL udf.name(arg1, arg2);
+CALL name(arg1, arg2);
 ```
+
+An unqualified `CREATE FUNCTION name(...)` lands in the first writable
+schema on the session `search_path` — `public` in a default session.
+Qualifying the name (`CREATE FUNCTION analytics.shout(...)`) targets that
+schema directly. Call sites follow the same rule: bare names resolve
+against `search_path`; qualifying picks an exact schema.
 
 ## Macro UDFs
 
 A macro UDF's body is a scalar expression that is spliced in at every call
-site by the planner. By the time the operator tree is built, no `udf.`
-references remain.
+site by the planner. By the time the operator tree is built, no UDF call
+nodes remain — the substituted body is what the planner sees.
 
 ```sql
 CREATE FUNCTION shout(@name STRING) AS upper(@name);
 
-SELECT udf.shout(first_name) FROM users;
+SELECT shout(first_name) FROM users;
 -- equivalent to: SELECT upper(first_name) FROM users
 ```
 
@@ -68,7 +78,7 @@ corresponding call-site argument expression at plan time:
 ```sql
 CREATE FUNCTION add(@a INT32, @b INT32) AS @a + @b;
 
-SELECT udf.add(price, tax) FROM orders;
+SELECT add(price, tax) FROM orders;
 -- equivalent to: SELECT price + tax FROM orders
 ```
 
@@ -136,9 +146,9 @@ Procedural UDFs execute per row via a runtime adapter. Each call:
 
 1. Binds the call-site arguments to parameter names in a fresh `VariableScope`.
 2. Walks the statement body in order, evaluating expressions against the same
-   `FunctionRegistry` the outer query uses. Nested `udf.X(...)` calls
-   dispatch through the registry — macros were already inlined into the body
-   at registration time; procedural-to-procedural calls dispatch at runtime.
+   `FunctionRegistry` the outer query uses. Nested UDF calls dispatch
+   through the registry — macros were already inlined into the body at
+   registration time; procedural-to-procedural calls dispatch at runtime.
 3. Returns the value produced by the first `RETURN` reached.
 
 Because the body runs at runtime, procedural UDFs carry per-row execution
@@ -155,21 +165,21 @@ CREATE FUNCTION dbl(@x INT32) AS @x * 2;   -- macro
 
 CREATE FUNCTION quad(@x INT32) RETURNS INT32
 BEGIN
-    RETURN udf.dbl(udf.dbl(@x))
+    RETURN dbl(dbl(@x))
 END
 ```
 
-The reference to `udf.dbl` is inlined into the body at registration time,
+The reference to `dbl` is inlined into the body at registration time,
 so the runtime adapter sees `@x * 2` substituted in. Procedural-to-procedural
 calls are resolved through the registry at evaluation time.
 
 ### Forward References
 
 Two procedural UDFs can reference each other. Registering `a` before `b` is
-valid even when `a`'s body calls `udf.b`:
+valid even when `a`'s body calls `b`:
 
 ```sql
-CREATE FUNCTION a(@x INT32) RETURNS INT32 BEGIN RETURN udf.b(@x) END
+CREATE FUNCTION a(@x INT32) RETURNS INT32 BEGIN RETURN b(@x) END
 CREATE FUNCTION b(@x INT32) RETURNS INT32 BEGIN RETURN @x + 1 END
 ```
 
@@ -191,19 +201,19 @@ evaluates once per site. With it, the CSE pass can consolidate identical
 call sites into a single evaluation:
 
 ```sql
-SELECT udf.square(v), udf.square(v) + 1
+SELECT square(v), square(v) + 1
 FROM data
 ```
 
-With `PURE`, a single call to `udf.square(v)` is hoisted; both references
-read the cached result. Without `PURE`, `udf.square(v)` evaluates twice per
+With `PURE`, a single call to `square(v)` is hoisted; both references
+read the cached result. Without `PURE`, `square(v)` evaluates twice per
 row.
 
 For macro UDFs, `PURE` is stored in the catalog and surfaces in
-`system_udfs.is_pure`, but it has no CSE effect — the macro is already
+`system.udfs.is_pure`, but it has no CSE effect — the macro is already
 inlined at plan time, so CSE sees the expanded expression rather than a
-`udf.` call. Mark macro UDFs `PURE` only if you also want downstream tools
-to know the UDF is deterministic.
+function-call node. Mark macro UDFs `PURE` only if you also want downstream
+tools to know the UDF is deterministic.
 
 **Correctness note:** Declaring a UDF `PURE` when its body calls
 `random`, `now()`, `models.*`, or any other impure function silently
@@ -246,11 +256,11 @@ NULL at the call site throws an error naming the parameter.
 ```sql
 CREATE FUNCTION shout(@name STRING IS NOT NULL) AS upper(@name);
 
-SELECT udf.shout(first_name) FROM users WHERE first_name IS NOT NULL;
+SELECT shout(first_name) FROM users WHERE first_name IS NOT NULL;
 -- works fine
 
-SELECT udf.shout(NULL) FROM dual;
--- error: UDF 'udf.shout' parameter '@name' must not be null.
+SELECT shout(NULL) FROM dual;
+-- error: UDF 'public.shout' parameter '@name' must not be null.
 ```
 
 For procedural UDFs the null check fires before any body statement runs.
@@ -264,8 +274,8 @@ the tail of the parameter list.
 ```sql
 CREATE FUNCTION add(@a INT32, @b INT32 = 5) AS @a + @b;
 
-SELECT udf.add(2);     -- 7
-SELECT udf.add(2, 10); -- 12
+SELECT add(2);     -- 7
+SELECT add(2, 10); -- 12
 ```
 
 `IS NOT NULL` precedes `=`:
@@ -283,7 +293,7 @@ required — the parser rejects a `BEGIN … END` body without it.
 ```sql
 CREATE FUNCTION truncated(@x FLOAT64) RETURNS INT32 AS @x;
 
-SELECT udf.truncated(3.7) FROM dual;  -- yields 3
+SELECT truncated(3.7) FROM dual;  -- yields 3
 ```
 
 Add `IS NOT NULL` to the return type to assert the body never returns NULL:
@@ -305,16 +315,18 @@ DROP FUNCTION IF EXISTS shout;
 
 ### Calling a UDF
 
-UDFs are called through the `udf.` namespace. The argument count must match
-the declared arity (or fall within the `min–max` range when defaults are
-present).
+UDFs are called like any other function — bare names resolve against the
+session `search_path`, schema-qualified names target an exact schema. The
+argument count must match the declared arity (or fall within the `min–max`
+range when defaults are present).
 
 ```sql
-SELECT udf.add(1, 2) FROM dual;
-CALL udf.shout('hello');
+SELECT add(1, 2) FROM dual;
+SELECT analytics.add(1, 2) FROM dual;   -- explicit schema
+CALL shout('hello');
 ```
 
-UDF names are case-insensitive.
+UDF names — and schema names — are case-insensitive.
 
 ### Direct invocation with CALL
 
@@ -322,13 +334,13 @@ UDF names are case-insensitive.
 its result as a single-row, single-column result set.
 
 ```sql
-CALL udf.shout('hello');               -- yields 'HELLO'
-CALL udf.dnd_rewrite_caption(caption); -- yields the LLM-rewritten string
+CALL shout('hello');               -- yields 'HELLO'
+CALL dnd_rewrite_caption(caption); -- yields the LLM-rewritten string
 ```
 
 When the call resolves to a streaming LLM, `CALL` forwards tokens to the
 terminal as the model produces them. Non-streaming calls behave identically
-to `SELECT udf.name(arg)`.
+to `SELECT name(arg)`.
 
 ## Composing UDFs
 
@@ -338,18 +350,20 @@ through the function registry.
 
 ```sql
 CREATE FUNCTION first_token(@s STRING)  AS split(@s, ' ')[0];
-CREATE FUNCTION shout_first(@s STRING)  AS upper(udf.first_token(@s));
+CREATE FUNCTION shout_first(@s STRING)  AS upper(first_token(@s));
 
-SELECT udf.shout_first(headline) FROM articles;
+SELECT shout_first(headline) FROM articles;
 -- expanded plan: upper(split(headline, ' ')[0])
 ```
 
-UDFs may wrap model invocations:
+UDFs may wrap model invocations. The `models` schema is a built-in
+read-only schema that hosts every registered ONNX / LLM model — calls
+look like any other schema-qualified function call:
 
 ```sql
 CREATE FUNCTION dnd_rewrite_caption(@caption STRING) AS
     models.llama31_8b(
-        udf.dnd_rewrite_prompt(
+        dnd_rewrite_prompt(
             @caption,
             random_choice(array('gothic', 'folk horror', 'cosmic horror')),
             random_choice(array('possession', 'curse', 'time loop'))
@@ -362,24 +376,27 @@ CREATE FUNCTION dnd_rewrite_caption(@caption STRING) AS
 A UDF must not call itself directly or transitively. Detection differs by
 body shape:
 
-- **Macro UDFs** — direct self-reference (`udf.A` in `A`'s body) is caught
-  at registration time. Indirect cycles surface at the first call site that
-  closes the loop, because `B` may not exist when `A` is created.
-- **Procedural UDFs** — caught at runtime via a per-async-context invocation
-  stack. Re-entering a procedural UDF whose name is already on the stack
-  throws immediately.
+- **Macro UDFs** — direct self-reference (`A`'s body calling `A`) is
+  caught at registration time, because the inliner runs against the
+  partially-built registry and sees the self-cycle while substituting.
+  Indirect cycles (`A → B → A`) surface at the first call site that
+  closes the loop, since `B` may not yet exist when `A` is created.
+- **Procedural UDFs** — caught at runtime via a per-async-context
+  invocation stack. Re-entering a procedural UDF whose qualified name
+  is already on the stack throws immediately. This catches both direct
+  recursion and any transitive `A → B → A` chain uniformly.
 
 ```sql
 -- Macro cycle (indirect, caught at call site)
-CREATE FUNCTION a(@x INT32) AS udf.b(@x);
-CREATE FUNCTION b(@x INT32) AS udf.a(@x);
-SELECT udf.a(1) FROM dual;
+CREATE FUNCTION a(@x INT32) AS b(@x);
+CREATE FUNCTION b(@x INT32) AS a(@x);
+SELECT a(1) FROM dual;
 -- error: Cyclic UDF reference detected: a → b → a.
 
 -- Procedural cycle (direct, caught at runtime)
-CREATE FUNCTION recurse(@x INT32) RETURNS INT32 BEGIN RETURN udf.recurse(@x) END
-SELECT udf.recurse(1) FROM dual;
--- error: Cyclic procedural UDF call detected: recurse.
+CREATE FUNCTION recurse(@x INT32) RETURNS INT32 BEGIN RETURN recurse(@x) END
+SELECT recurse(1) FROM dual;
+-- error: Cyclic procedural UDF call detected: public.recurse.
 ```
 
 ## Scoping Rules
@@ -395,7 +412,7 @@ UDF parameters and column references live in different namespaces:
 CREATE FUNCTION boost(@score FLOAT32) AS @score * weight;
 --                                                 ^ resolves at call site
 
-SELECT udf.boost(raw_score) FROM models WHERE weight IS NOT NULL;
+SELECT boost(raw_score) FROM scores WHERE weight IS NOT NULL;
 ```
 
 Procedural bodies don't support bare column references — parameters and
@@ -415,25 +432,26 @@ CREATE FUNCTION sum_doubled(@arr ARRAY) AS
 
 ## Introspection
 
-The `system_udfs` virtual table surfaces every registered UDF:
+The `system.udfs` virtual table surfaces every registered UDF:
 
 ```sql
-SELECT name, body_kind, is_pure, parameter_count, parameters, return_type, body
-FROM system_udfs
-ORDER BY name;
+SELECT schema, name, body_kind, is_pure, parameter_count, parameters, return_type, body
+FROM system.udfs
+ORDER BY schema, name;
 ```
 
 Schema:
 
 | Column            | Type    | Nullable | Description |
 |-------------------|---------|----------|-------------|
-| `name`            | String  | no       | Unqualified UDF name. Call sites use the `udf.` prefix. |
+| `schema`          | String  | no       | Schema the UDF lives in (e.g. `public`, `analytics`). |
+| `name`            | String  | no       | Unqualified UDF name. The full call site is `[schema.]name(...)`. |
 | `parameter_count` | Int32   | no       | Number of declared parameters. |
 | `parameters`      | String  | no       | Comma-separated `"@name TYPE [IS NOT NULL]"` rendition. |
 | `return_type`     | String  | yes      | The `RETURNS` annotation (with any `IS NOT NULL` suffix), or NULL when omitted. |
 | `body_kind`       | String  | no       | `"macro"` or `"procedural"`. |
 | `is_pure`         | Boolean | no       | Whether the UDF was declared `PURE`. |
-| `body`            | String  | no       | For macros, the body expression formatted from the AST. For procedurals, the original source text of the `BEGIN … END` block. |
+| `body`            | String  | no       | For macros, the body expression formatted from the AST. For procedurals, the original source text of the `CREATE FUNCTION` statement. |
 
 ## Persistence
 
@@ -455,13 +473,15 @@ When the path is supplied:
 - A catalog file written by a newer binary (higher `version`) is treated as
   opaque; the registry stays empty.
 
-The on-disk format stores the body shape in `body_kind`:
+The on-disk format is manifest version 4 and stores each UDF's owning
+schema alongside the body shape:
 
 ```json
 {
-  "version": 1,
+  "version": 4,
   "udfs": [
     {
+      "schema": "public",
       "name": "shout",
       "parameters": [{"name": "name", "type": "STRING", "isNotNull": false}],
       "returnType": null,
@@ -470,20 +490,27 @@ The on-disk format stores the body shape in `body_kind`:
       "body": "upper(@name)"
     },
     {
+      "schema": "analytics",
       "name": "twin",
       "parameters": [],
       "returnType": "STRING",
       "returnIsNotNull": false,
       "body_kind": "procedural",
       "is_pure": false,
-      "source_text": "BEGIN\n    DECLARE @x FLOAT32 = random(0.0, 1.0);\n    RETURN concat(CAST(@x AS STRING), '/', CAST(@x AS STRING))\nEND"
+      "source_text": "CREATE FUNCTION analytics.twin() RETURNS STRING BEGIN\n    DECLARE @x FLOAT32 = random(0.0, 1.0);\n    RETURN concat(CAST(@x AS STRING), '/', CAST(@x AS STRING))\nEND"
     }
   ]
 }
 ```
 
-Procedural entries store the verbatim source text. The catalog re-runs macro
-inlining when loading them, so the stored form is always the as-written body.
+The `schema` field determines the `QualifiedName` the registry stores
+the entry under at load time. Procedural entries store the verbatim
+`CREATE FUNCTION` source text. The catalog re-runs macro inlining when
+loading them, so the stored form is always the as-written body.
+
+Manifest versions other than 4 are rejected at load — the file format is
+not backward compatible. A catalog directory written by an older binary
+must be discarded and recreated.
 
 ## Limitations
 
@@ -500,8 +527,8 @@ inlining when loading them, so the stored form is always the as-written body.
   Pass columns through parameters.
 - **No scalar subqueries in procedural bodies.** `RETURN (SELECT ...)` parses
   but fails at execution because the body evaluator doesn't drive a query
-  plan — only direct expressions, function calls (including `udf.X` and
-  `models.X`), and variable references are resolvable inside the body.
+  plan — only direct expressions, function calls (including UDFs and
+  `models.X(...)`), and variable references are resolvable inside the body.
 - **No BREAK/CONTINUE in procedural bodies.** These are parsed but rejected
   at runtime; use `IF`/`RETURN` to short-circuit.
 - **Subquery bodies don't see macro parameters.** A `@param` inside
@@ -512,10 +539,11 @@ inlining when loading them, so the stored form is always the as-written body.
 
 ## See Also
 
+- [Schema Introspection](schema-introspection.md) — how `search_path` resolves bare function names and how to list available schemas
 - [Functions](../functions/utility.md) — built-in scalar functions usable in UDF bodies
-- [Models](../models.md) — `models.X(...)` invocations that UDFs commonly wrap
+- [Models](../models.md) — the `models` schema, whose entries UDFs commonly wrap
 - [Lambda Expressions](lambda-expressions.md) — how scope shadowing interacts with UDF parameters
 - [Common Table Expressions](cte.md) — for recursive logic that UDFs cannot express
 - [Common Subexpression Elimination](../common-subexpression-elimination.md) — how `PURE` interacts with the CSE pass
-- [system_udfs](#introspection) — querying registered UDFs from SQL
-- [CREATE PROCEDURE](procedural.md#create-procedure) — the multi-statement equivalent for orchestration that returns rows rather than a scalar
+- [system.udfs](#introspection) — querying registered UDFs from SQL
+- [CREATE PROCEDURE](procedural.md#create-procedure) — the multi-statement equivalent, invoked via `CALL`, that produces rows rather than a scalar

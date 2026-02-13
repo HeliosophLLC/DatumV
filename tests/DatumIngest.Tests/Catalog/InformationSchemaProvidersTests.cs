@@ -276,6 +276,8 @@ public sealed class InformationSchemaProvidersTests : ServiceTestBase
         Assert.Contains("public",             names);
         Assert.Contains("information_schema", names);
         Assert.Contains("datum_catalog",      names);
+        // S9: `models` is a real built-in schema visible to discovery.
+        Assert.Contains("models",             names);
     }
 
     [Fact]
@@ -283,7 +285,7 @@ public sealed class InformationSchemaProvidersTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog[InformationSchemaSchemataProvider.TableName];
-        Assert.Equal(3, provider.GetRowCount());
+        Assert.Equal(4, provider.GetRowCount());
     }
 
     [Fact]

@@ -549,8 +549,12 @@ internal sealed class InformationSchemaSchemataProvider : NonSeekableTableProvid
 
     private static readonly string[] ColumnNames = ["catalog_name", "schema_name"];
 
+    // S9: `models` is a real built-in schema and gets listed alongside
+    // the other user-visible ones. `system` stays hidden — it holds
+    // built-in scalars that users rarely qualify by hand (mirrors PG's
+    // pg_catalog convention).
     private static readonly string[] SchemaNames =
-        ["public", "information_schema", "datum_catalog"];
+        ["public", "information_schema", "datum_catalog", "models"];
 
     /// <param name="pool">Buffer pool for renting row batches.</param>
     public InformationSchemaSchemataProvider(Pool pool) : base(pool, QualifiedName.Parse(TableName)) { }

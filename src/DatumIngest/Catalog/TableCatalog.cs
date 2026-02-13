@@ -101,15 +101,26 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this._system = new ReadOnlyTableCatalog(new[] { "system" });
         this._virtual = new ReadOnlyTableCatalog(new[] { "information_schema", "datum_catalog" });
 
+        // Models is a real, non-droppable schema mounted alongside the
+        // other built-ins (S9). The schema is empty as a table namespace —
+        // <c>models.X(...)</c> resolves lazily through
+        // <see cref="FunctionRegistry.TryResolveModelFunction"/> against
+        // the host-attached <see cref="ModelCatalog"/>, not via table
+        // lookups. Mounting it as a backend makes the schema visible to
+        // <c>SET search_path</c>, <c>information_schema.schemata</c>, and
+        // diagnostics without changing the call-resolution path.
+        this._models = new ReadOnlyTableCatalog(new[] { "models" });
+
         // Schema → backend map. Lookups, DDL, and Add() route through this.
-        // Public is the home for user data; system/info_schema/datum_catalog
-        // are read-only projections.
+        // Public is the home for user data; system/info_schema/datum_catalog/
+        // models are read-only projections.
         this._backends = new Dictionary<string, ITableCatalog>(StringComparer.OrdinalIgnoreCase)
         {
             ["public"] = _flatFile,
             ["system"] = _system,
             ["information_schema"] = _virtual,
             ["datum_catalog"] = _virtual,
+            ["models"] = _models,
         };
 
         // Auto-register intrinsic system + virtual tables. information_schema
@@ -241,6 +252,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// constructed alongside the catalog at startup.
     /// </summary>
     private readonly ReadOnlyTableCatalog _virtual;
+
+    /// <summary>
+    /// Models-namespace backend (S9). The schema is empty as a table
+    /// namespace — <c>models.X(...)</c> resolves through the function
+    /// registry's lazy <c>ModelCatalog</c> resolver, not via table
+    /// lookups. Mounting it as a backend makes the schema visible to
+    /// <c>SET search_path</c>, <c>information_schema.schemata</c>, and
+    /// DROP-rejection without coupling the model dispatch to the
+    /// schema router.
+    /// </summary>
+    private readonly ReadOnlyTableCatalog _models;
 
     /// <summary>
     /// Schema-to-backend routing table. The facade consults this for
@@ -738,7 +760,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         => string.Equals(schema, "public", StringComparison.OrdinalIgnoreCase)
         || string.Equals(schema, "system", StringComparison.OrdinalIgnoreCase)
         || string.Equals(schema, "information_schema", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(schema, "datum_catalog", StringComparison.OrdinalIgnoreCase);
+        || string.Equals(schema, "datum_catalog", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(schema, "models", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Applies a <c>CREATE INDEX</c> statement: validates the target table /

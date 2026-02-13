@@ -159,7 +159,7 @@ ORDER BY ordinal_position
 | Column | Type | Description |
 |--------|------|-------------|
 | `catalog_name` | String | Always `'datum'` |
-| `schema_name` | String | `'public'`, `'temp'`, `'information_schema'`, or `'datum_catalog'` |
+| `schema_name` | String | `'public'`, `'information_schema'`, `'datum_catalog'`, or `'models'`. The `'system'` schema (built-in scalars and `system.udfs` / `system.procedures` views) follows the PG `pg_catalog` convention and is hidden from this listing. |
 
 ```sql
 SELECT schema_name FROM information_schema.schemata

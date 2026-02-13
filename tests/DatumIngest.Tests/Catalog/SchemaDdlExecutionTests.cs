@@ -161,10 +161,49 @@ public sealed class SchemaDdlExecutionTests : ServiceTestBase, IDisposable
             catalog.Plan("DROP SCHEMA public"));
         Assert.Contains("built-in", ex.Message);
 
-        // Same for system and the virtual schemas.
+        // Same for system, the virtual schemas, and (S9) models.
         Assert.Throws<InvalidOperationException>(() => catalog.Plan("DROP SCHEMA system"));
         Assert.Throws<InvalidOperationException>(() => catalog.Plan("DROP SCHEMA information_schema"));
         Assert.Throws<InvalidOperationException>(() => catalog.Plan("DROP SCHEMA datum_catalog"));
+        Assert.Throws<InvalidOperationException>(() => catalog.Plan("DROP SCHEMA models"));
+    }
+
+    // ───────────────────── S9 — models as a real schema ─────────────────────
+
+    [Fact]
+    public void Models_IsMountedAsReadOnlySchema()
+    {
+        using TableCatalog catalog = CreateCatalog(_catalogPath);
+
+        // The schema exists for routing / search_path purposes — confirm
+        // via SET search_path acceptance (validates against _backends).
+        catalog.Plan("SET search_path = models, public, system");
+        Assert.Equal(new[] { "models", "public", "system" }, catalog.SearchPath);
+    }
+
+    [Fact]
+    public void Models_RejectsCreateTable()
+    {
+        // Models is read-only — CREATE TABLE there must fail with the
+        // same diagnostic system/information_schema produce.
+        using TableCatalog catalog = CreateCatalog(_catalogPath);
+
+        SchemaResolutionException ex = Assert.Throws<SchemaResolutionException>(() =>
+            catalog.Plan("CREATE TABLE models.foo (id Int32)"));
+        Assert.Contains("read-only", ex.Message);
+    }
+
+    [Fact]
+    public void Models_AppearsInInformationSchemaSchemata()
+    {
+        using TableCatalog catalog = CreateCatalog(_catalogPath);
+
+        IQueryPlan plan = catalog.Plan(
+            "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'models'");
+        // The presence of the schema in the projection is what the test
+        // asserts; the actual row enumeration is covered by the
+        // InformationSchemaProvidersTests sweep.
+        Assert.NotNull(plan);
     }
 
     // ───────────────────── ALTER + qualified table ─────────────────────

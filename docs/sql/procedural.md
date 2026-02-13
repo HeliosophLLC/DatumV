@@ -416,9 +416,11 @@ next batch.
 ## CREATE PROCEDURE
 
 A *procedure* is a named, parameterised procedural batch — the multi-
-statement equivalent of a UDF. Bodies live in the catalog and survive
-process restarts when the catalog is opened with a path (same persistence
-contract as UDFs). Invocation is `CALL proc.<name>(args)`.
+statement equivalent of a UDF. Procedures live in [schemas](schema-introspection.md)
+(default `public`), and bodies survive process restarts when the catalog
+is opened with a path (same persistence contract as UDFs). Invocation is
+`CALL <name>(args)` (statement-only — unlike UDFs, procedures cannot be
+used in scalar position).
 
 ```sql
 CREATE PROCEDURE compute_cohort(@threshold FLOAT64) AS BEGIN
@@ -435,23 +437,29 @@ CREATE PROCEDURE compute_cohort(@threshold FLOAT64) AS BEGIN
     SELECT @kept AS rows_kept, @sum_score / @kept AS mean_score
 END
 
-CALL proc.compute_cohort(0.5)
+CALL compute_cohort(0.5)
 ```
 
 ### Syntax
 
 ```sql
-CREATE [OR REPLACE | OR ALTER] PROCEDURE [IF NOT EXISTS] name(
+CREATE [OR REPLACE | OR ALTER] PROCEDURE [IF NOT EXISTS] [schema.]name(
     @param1 TYPE [IS NOT NULL] [= default-expr]
     [, @param2 TYPE [IS NOT NULL] [= default-expr] ...]
 ) AS BEGIN
     ...statements...
 END;
 
-DROP PROCEDURE [IF EXISTS] name;
+DROP PROCEDURE [IF EXISTS] [schema.]name;
 
-CALL proc.name(arg1, arg2);
+CALL name(arg1, arg2);
+CALL schema.name(arg1, arg2);
 ```
+
+An unqualified `CREATE PROCEDURE name(...)` lands in the first writable
+schema on the session `search_path` (typically `public`). Qualifying the
+name (`CREATE PROCEDURE analytics.compute_cohort(...)`) targets that
+schema directly; call sites follow the same resolution rule.
 
 `OR REPLACE` (PostgreSQL convention) and `OR ALTER` (T-SQL convention)
 are accepted as synonyms — both overwrite an existing procedure with the
@@ -464,12 +472,12 @@ collapses to a single statement is a UDF, not a procedure.
 
 | | UDF | Procedure |
 | --- | --- | --- |
-| Body shape | Scalar expression | `BEGIN ... END` block |
-| Plan-time treatment | Inlined into call site | **Not inlined.** Invocation resolves the descriptor at runtime, runs the body in a fresh batch context. |
+| Body shape | Scalar expression or `BEGIN ... END` (procedural UDF) | `BEGIN ... END` block (required) |
+| Plan-time treatment | Macro inlined into call site; procedural dispatched at runtime | **Not inlined.** Invocation resolves the descriptor at runtime, runs the body in a fresh batch context. |
 | Returns | A single scalar value | Whatever rows the body's `SELECT`s produce |
-| Call site | `udf.X(...)` (anywhere a scalar is valid) | `CALL proc.X(...)` (statement only) |
-| Persistence | Body formatted from AST (whitespace canonicalised) | **Original source text** stored verbatim |
-| Variable scope | Sees call-site columns as bare identifiers | Isolated — parameters are the only bridge from the caller |
+| Call site | `name(...)` or `schema.name(...)` — anywhere a scalar is valid, or as `CALL` for direct invocation | `CALL name(...)` or `CALL schema.name(...)` — statement only |
+| Persistence | Macro body formatted from AST (whitespace canonicalised); procedural body stored as `CREATE FUNCTION` source text | **Original `CREATE PROCEDURE` source text** stored verbatim |
+| Variable scope | Macros see call-site columns as bare identifiers; procedural UDFs are isolated like procedures | Isolated — parameters are the only bridge from the caller |
 
 ### Parameter binding and scoping
 
@@ -483,9 +491,9 @@ CREATE PROCEDURE need_name(@name STRING IS NOT NULL) AS BEGIN
     SELECT upper(@name)
 END
 
-CALL proc.need_name('alice')   -- yields 'ALICE'
-CALL proc.need_name(NULL)
--- error: Procedure 'proc.need_name' parameter '@name' must not be null.
+CALL need_name('alice')   -- yields 'ALICE'
+CALL need_name(NULL)
+-- error: Procedure 'public.need_name' parameter '@name' must not be null.
 ```
 
 **Default parameter values** behave the same as on UDFs: declare with
@@ -499,8 +507,8 @@ AS BEGIN
     -- ...
 END
 
-CALL proc.summarize('orders')          -- @limit takes 100
-CALL proc.summarize('orders', 1000)    -- @limit explicit
+CALL summarize('orders')          -- @limit takes 100
+CALL summarize('orders', 1000)    -- @limit explicit
 ```
 
 The default expression evaluates in the caller's scope, so it can
@@ -517,7 +525,7 @@ CREATE PROCEDURE shadow(@v INT64) AS BEGIN
 END
 
 DECLARE @counter INT64 = 5
-CALL proc.shadow(@counter)
+CALL shadow(@counter)
 SELECT @counter             -- still 5; the procedure can't see or
                             -- modify the caller's @counter
 ```
@@ -540,39 +548,41 @@ CREATE PROCEDURE summarize() AS BEGIN
     SELECT count(*) FROM data
 END
 
-CALL proc.summarize()
+CALL summarize()
 ```
 
 produces two cells in the host (terminal table or DevWeb pane), just as
 if the user had written the two `SELECT`s inline.
 
-### Introspection — `system_procedures`
+### Introspection — `system.procedures`
 
-The `system_procedures` virtual table surfaces every registered
+The `system.procedures` virtual table surfaces every registered
 procedure as queryable rows:
 
 ```sql
-SELECT name, parameter_count, parameters, source_text
-FROM system_procedures
-ORDER BY name
+SELECT schema, name, parameter_count, parameters, source_text
+FROM system.procedures
+ORDER BY schema, name
 ```
 
 Schema:
 
 | Column            | Type   | Nullable | Description                                                              |
 |-------------------|--------|----------|--------------------------------------------------------------------------|
-| `name`            | String | no       | Unqualified procedure name. Call sites use the `proc.` prefix.           |
+| `schema`          | String | no       | Schema the procedure lives in (e.g. `public`, `analytics`).              |
+| `name`            | String | no       | Unqualified procedure name. The full call site is `CALL [schema.]name(...)`. |
 | `parameter_count` | Int32  | no       | Number of declared parameters. `0` for nullary procedures.               |
 | `parameters`      | String | no       | Comma-separated `"@name TYPE [IS NOT NULL], @name TYPE"` rendition.      |
-| `source_text`     | String | no       | Original CREATE PROCEDURE source as registered. Whitespace preserved.    |
+| `source_text`     | String | no       | Original `CREATE PROCEDURE` source as registered. Whitespace preserved.  |
 
 ### Persistence
 
 Procedures persist exactly like UDFs: when the `TableCatalog` is opened
 with a catalog file path, registered procedures are written to the same
-JSON file atomically and rehydrated on the next session. The persisted
-form stores the original `CREATE PROCEDURE` source text verbatim, so
-formatting and comments survive a round-trip. See
+manifest v4 JSON file atomically and rehydrated on the next session. Each
+entry carries its owning `schema` alongside the verbatim
+`CREATE PROCEDURE` source text, so both schema membership and the user's
+original formatting and comments survive a round-trip. See
 [User-Defined Functions — Persistence](udf.md#persistence) for the file
 layout.
 
