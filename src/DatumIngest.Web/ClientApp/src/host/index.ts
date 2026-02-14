@@ -54,6 +54,7 @@ declare global {
         >;
         filters?: ReadonlyArray<{ name: string; extensions: string[] }>;
       }): Promise<{ canceled: boolean; filePaths: string[] }>;
+      openExternal(url: string): Promise<void>;
     };
   }
 }

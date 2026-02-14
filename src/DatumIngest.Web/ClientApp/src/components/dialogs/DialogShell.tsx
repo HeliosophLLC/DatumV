@@ -76,6 +76,9 @@ function renderDialogBody({ kind, requestId, params }: ParsedHash): React.ReactN
           requestId={requestId}
           licenseId={params.licenseId ?? ''}
           modelDisplayName={params.modelDisplayName}
+          // `informational` arrives as the string 'true' from URL-encoded
+          // params (main.ts JSON.stringifies non-string payload values).
+          informational={params.informational === 'true'}
         />
       );
     default:

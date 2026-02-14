@@ -39,4 +39,8 @@ contextBridge.exposeInMainWorld('electronHost', {
   // Native file/folder picker. Returns Electron's OpenDialogReturnValue
   // shape: { canceled: boolean, filePaths: string[] }.
   showOpenDialog: (options: unknown) => ipcRenderer.invoke('fs.showOpenDialog', options),
+
+  // Open an http(s) URL in the user's default browser. Main-side validates
+  // protocol and silently drops anything else — see main.ts.
+  openExternal: (url: string) => ipcRenderer.invoke('shell.openExternal', url),
 });

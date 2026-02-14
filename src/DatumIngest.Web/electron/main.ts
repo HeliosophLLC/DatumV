@@ -4,6 +4,7 @@ import {
   ipcMain,
   Menu,
   Notification,
+  shell,
   dialog as electronDialog,
 } from 'electron';
 import type { IpcMainEvent } from 'electron';
@@ -285,6 +286,24 @@ ipcMain.handle('fs.showOpenDialog', async (event, options: Electron.OpenDialogOp
   const parentWin = BrowserWindow.fromWebContents(event.sender);
   if (!parentWin) return { canceled: true, filePaths: [] };
   return await electronDialog.showOpenDialog(parentWin, options);
+});
+
+// Open a URL in the user's default OS browser. Restricted to http(s) —
+// renderer code shouldn't be able to launch arbitrary protocol handlers
+// (file://, mailto:, custom-scheme:) that the user didn't initiate. This
+// is the documented Electron guard against compromised-renderer link
+// injection; consumers (e.g. LicenseDialog) only ever pass URLs that
+// originated in trusted markdown bundled with the app.
+ipcMain.handle('shell.openExternal', async (_event, url: string) => {
+  if (typeof url !== 'string') return;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+  await shell.openExternal(url);
 });
 
 app.whenReady().then(async () => {
