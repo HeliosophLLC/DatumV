@@ -27,6 +27,8 @@
     "downloadingFile": "Downloading file {index} of {count} · {file}",
     "downloadingStarting": "Starting download…",
     "downloadingHint": "Downloading… you can leave this view; it will keep running.",
+    "elapsed": "{duration} elapsed",
+    "remaining": "~{duration} remaining",
     "licenseRequired": "Requires accepting the {license} license.",
     "acceptAndDownload": "Accept & download"
   },

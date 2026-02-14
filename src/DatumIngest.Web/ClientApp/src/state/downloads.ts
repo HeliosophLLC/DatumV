@@ -33,6 +33,12 @@ void acquireStreamHub().catch(() => {
 // OnModelDownloadFailed. Views render a progress bar for any model
 // that has an entry here, regardless of `state`.
 
+export interface ProgressSample {
+  // performance.now() timestamp in ms.
+  t: number;
+  bytes: number;
+}
+
 export interface ActiveDownload {
   modelId: string;
   bytesReadTotal: number;
@@ -40,6 +46,28 @@ export interface ActiveDownload {
   fileIndex: number;
   fileCount: number;
   currentFile: string;
+  // ms since epoch (Date.now()) — used for elapsed display.
+  startedAt: number;
+  // Sliding window of recent progress events. The renderer derives the
+  // instantaneous rate from (last - first) of this window, which tracks
+  // current speed instead of the lifetime average. Capped at SAMPLE_CAP.
+  // Readonly so the type lines up with valtio's deeply-readonly snapshot;
+  // we replace the array wholesale on each progress event (pushSample
+  // returns a new one), never mutating in place.
+  samples: readonly ProgressSample[];
+}
+
+const SAMPLE_CAP = 12;
+// Drop samples older than this so a long pause (e.g. file open / hash
+// verify between files) doesn't pollute the rate window with stale data.
+const SAMPLE_MAX_AGE_MS = 8_000;
+
+function pushSample(prev: readonly ProgressSample[] | undefined, bytes: number): ProgressSample[] {
+  const now = performance.now();
+  const fresh = (prev ?? []).filter((s) => now - s.t < SAMPLE_MAX_AGE_MS);
+  fresh.push({ t: now, bytes });
+  if (fresh.length > SAMPLE_CAP) fresh.splice(0, fresh.length - SAMPLE_CAP);
+  return fresh;
 }
 
 interface DownloadsState {
@@ -94,6 +122,8 @@ export async function installModel(
     fileIndex: 0,
     fileCount: 0,
     currentFile: '',
+    startedAt: Date.now(),
+    samples: [],
   };
 
   try {
@@ -226,6 +256,7 @@ function readLicenseRequired(err: unknown): string | null {
 // ───────────────────────── Hub event wiring ─────────────────────────
 
 onModelDownloadStarted((event) => {
+  const existing = downloadsState.active[event.modelId];
   downloadsState.active[event.modelId] = {
     modelId: event.modelId,
     bytesReadTotal: 0,
@@ -233,6 +264,12 @@ onModelDownloadStarted((event) => {
     fileIndex: 0,
     fileCount: event.fileCount ?? 0,
     currentFile: '',
+    // Keep the optimistic startedAt if installModel set one — the user
+    // perceives "the download started when I clicked", not when the server
+    // bound a file handle. Only synthesise one if we somehow missed the
+    // optimistic create (e.g. SignalR landed before installModel returned).
+    startedAt: existing?.startedAt ?? Date.now(),
+    samples: existing?.samples ?? [],
   };
 });
 
@@ -240,13 +277,16 @@ onModelDownloadProgress((event) => {
   // Server may emit progress for a model we don't have an `active` entry
   // for if our state was reset (e.g. hot reload). Add it.
   const existing = downloadsState.active[event.modelId];
+  const nextBytes = event.bytesReadTotal ?? existing?.bytesReadTotal ?? 0;
   downloadsState.active[event.modelId] = {
     modelId: event.modelId,
-    bytesReadTotal: event.bytesReadTotal ?? existing?.bytesReadTotal ?? 0,
+    bytesReadTotal: nextBytes,
     bytesTotalAcrossModel: event.bytesTotalAcrossModel ?? existing?.bytesTotalAcrossModel ?? 0,
     fileIndex: event.fileIndex ?? existing?.fileIndex ?? 0,
     fileCount: event.fileCount ?? existing?.fileCount ?? 0,
     currentFile: event.currentFile ?? existing?.currentFile ?? '',
+    startedAt: existing?.startedAt ?? Date.now(),
+    samples: pushSample(existing?.samples, nextBytes),
   };
 });
 
@@ -270,3 +310,29 @@ onModelDownloadFailed((event) => {
   delete downloadsState.active[event.modelId];
   downloadsState.errors[event.modelId] = event.error ?? 'Download failed';
 });
+
+// ───────────────────────── Derived stats helpers ─────────────────────────
+
+// Instantaneous transfer rate in bytes/sec, derived from the sliding
+// progress sample window. Returns null when there isn't enough data (one
+// sample or all samples within the same ~tick) so callers can render a
+// placeholder instead of "0 B/s" or "Infinity".
+export function computeRateBytesPerSec(samples: readonly ProgressSample[]): number | null {
+  if (samples.length < 2) return null;
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  const dtSec = (last.t - first.t) / 1000;
+  if (dtSec <= 0) return null;
+  const dBytes = last.bytes - first.bytes;
+  if (dBytes <= 0) return null;
+  return dBytes / dtSec;
+}
+
+// Seconds remaining at the current rate, or null when unknown
+// (no total, no rate, or already complete).
+export function computeEtaSeconds(d: ActiveDownload, nowRate: number | null): number | null {
+  if (nowRate == null || nowRate <= 0) return null;
+  const remaining = d.bytesTotalAcrossModel - d.bytesReadTotal;
+  if (remaining <= 0) return null;
+  return remaining / nowRate;
+}

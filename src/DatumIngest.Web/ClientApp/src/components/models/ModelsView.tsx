@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { Download, Loader2, Trash2 } from 'lucide-react';
@@ -16,12 +16,15 @@ import {
 } from '@/state/models';
 import type { CatalogModelSnapshot } from '@/state/models';
 import {
+  computeEtaSeconds,
+  computeRateBytesPerSec,
   downloadsState,
   installModel,
   refreshDownloads,
   uninstallModel,
   type ActiveDownload,
 } from '@/state/downloads';
+import { localeState } from '@/state/locale';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -264,17 +267,61 @@ function ModelCard({ model }: { model: CatalogModelSnapshot }) {
   );
 }
 
+// 3-second moving-average window. Long enough to absorb single-event
+// jitter (file-boundary stalls, TCP buffer flushes) without making the
+// display feel laggy when the actual speed shifts.
+const RATE_SMOOTHING_MS = 3_000;
+
 function DownloadProgress({ download }: { download: ActiveDownload }) {
   const { t } = useTranslation('models');
+  const { resolved: locale } = useSnapshot(localeState);
   const total = download.bytesTotalAcrossModel;
   const read = download.bytesReadTotal;
   const percent = total > 0 ? (read / total) * 100 : 0;
 
+  // Tick every second so elapsed / ETA refresh even when progress events
+  // pause (e.g. between files). The ticker drives only this component's
+  // re-render; the underlying samples/startedAt come from valtio state.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // Smooth the rate over the last RATE_SMOOTHING_MS so the displayed speed
+  // and ETA don't snap with every progress event. Raw rate (from the
+  // sliding sample window) is fed in once per render; the buffer holds
+  // recent readings and we display their mean.
+  const rateBuffer = useRef<{ t: number; rate: number }[]>([]);
+  const rawRate = computeRateBytesPerSec(download.samples);
+  const now = performance.now();
+  if (rawRate != null) {
+    rateBuffer.current.push({ t: now, rate: rawRate });
+  }
+  // Drop readings older than the smoothing window. Empty buffer → null.
+  rateBuffer.current = rateBuffer.current.filter((s) => now - s.t < RATE_SMOOTHING_MS);
+  const rate = rateBuffer.current.length > 0
+    ? rateBuffer.current.reduce((sum, s) => sum + s.rate, 0) / rateBuffer.current.length
+    : null;
+
+  const etaSec = computeEtaSeconds(download, rate);
+  const elapsedSec = Math.max(0, Math.round((Date.now() - download.startedAt) / 1000));
+
+  // Each stat cell has a fixed minimum width so that as the rate digits
+  // shift (e.g. "1.6 MB/s" → "980 KB/s"), the elapsed/remaining values
+  // don't bounce horizontally. `tabular-nums` keeps the digits themselves
+  // aligned within a cell. Empty cells render a non-breaking space so the
+  // grid layout stays stable across the "no rate yet" and "no ETA" states.
+  const rateText = rate != null ? formatBytesPerSec(rate) : '';
+  const elapsedText = t('card.elapsed', { duration: formatDuration(elapsedSec, locale) });
+  const remainingText =
+    etaSec != null ? t('card.remaining', { duration: formatDuration(Math.round(etaSec), locale) }) : '';
+
   return (
     <div className="mt-1 flex flex-col gap-1">
       <Progress value={percent} />
-      <div className="text-muted-foreground flex justify-between text-xs">
-        <span>
+      <div className="text-muted-foreground flex justify-between gap-2 text-xs">
+        <span className="truncate">
           {download.fileCount > 0
             ? t('card.downloadingFile', {
                 index: download.fileIndex,
@@ -283,10 +330,63 @@ function DownloadProgress({ download }: { download: ActiveDownload }) {
               })
             : t('card.downloadingStarting')}
         </span>
-        <span>{total > 0 ? `${Math.round(percent)}%` : ''}</span>
+        <span className="shrink-0">{total > 0 ? `${Math.round(percent)}%` : ''}</span>
+      </div>
+      <div className="text-muted-foreground flex gap-3 text-xs tabular-nums">
+        <span className="inline-block min-w-[5.5rem]">{rateText || ' '}</span>
+        <span className="inline-block min-w-[8rem]">{elapsedText}</span>
+        <span className="inline-block min-w-[9rem]">{remainingText || ' '}</span>
       </div>
     </div>
   );
+}
+
+function formatBytesPerSec(bps: number): string {
+  // Binary units — matches Windows Explorer + most download UIs people
+  // see daily. KB/MB labels (not KiB/MiB) for the same reason.
+  const KB = 1024;
+  const MB = KB * 1024;
+  const GB = MB * 1024;
+  if (bps >= GB) return `${(bps / GB).toFixed(2)} GB/s`;
+  if (bps >= MB) return `${(bps / MB).toFixed(1)} MB/s`;
+  if (bps >= KB) return `${(bps / KB).toFixed(0)} KB/s`;
+  return `${Math.round(bps)} B/s`;
+}
+
+// Cache one Intl.DurationFormat per locale. Constructing a formatter is
+// non-trivial (locale data lookup, options resolution) and we call this
+// once per render tick per active download — so memoise by locale tag.
+const durationFormatterCache = new Map<string, Intl.DurationFormat>();
+
+function getDurationFormatter(locale: string): Intl.DurationFormat {
+  let f = durationFormatterCache.get(locale);
+  if (!f) {
+    // 'narrow' style → "1h 23m" shape across locales; matches the column
+    // widths we sized for and stays compact in non-English locales where
+    // 'short' / 'long' can balloon.
+    f = new Intl.DurationFormat(locale, { style: 'narrow' });
+    durationFormatterCache.set(locale, f);
+  }
+  return f;
+}
+
+function formatDuration(totalSec: number, locale: string): string {
+  // Decompose into the largest units the format will surface. Hours/min/sec
+  // covers everything up to a sensible download duration; days+ falls back
+  // to many-hours which is the right tradeoff for our domain.
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+
+  // Trim zero-leading fields so the formatter doesn't emit "0h 38s" —
+  // Intl.DurationFormat happily renders zero components literally.
+  const duration: Intl.DurationInput = {};
+  if (h > 0) duration.hours = h;
+  if (h > 0 || m > 0) duration.minutes = m;
+  // Drop seconds once we're at the hour scale; "1h 23m 5s" is noise.
+  if (h === 0) duration.seconds = s;
+
+  return getDurationFormatter(locale).format(duration);
 }
 
 function CardActions({
