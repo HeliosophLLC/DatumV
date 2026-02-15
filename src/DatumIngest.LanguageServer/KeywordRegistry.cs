@@ -207,10 +207,10 @@ internal static class KeywordRegistry
             ["ALL", "SELECT"],
 
         [CompletionZoneKind.AfterCreate] =
-            ["TEMP", "TEMPORARY", "TABLE", "INDEX", "UNIQUE INDEX", "FUNCTION", "PROCEDURE", "OR REPLACE"],
+            ["TEMP", "TEMPORARY", "TABLE", "INDEX", "UNIQUE INDEX", "FUNCTION", "PROCEDURE", "MODEL", "OR REPLACE"],
 
         [CompletionZoneKind.AfterDrop] =
-            ["TABLE", "INDEX", "FUNCTION", "PROCEDURE", "IF EXISTS"],
+            ["TABLE", "INDEX", "FUNCTION", "PROCEDURE", "MODEL", "IF EXISTS"],
 
         [CompletionZoneKind.AfterCreateTableColumns] =
             [.. ColumnTypeKeywords,
@@ -422,6 +422,7 @@ internal static class KeywordRegistry
         [SqlToken.If] = ["IF EXISTS"],
         [SqlToken.Function] = ["FUNCTION"],
         [SqlToken.Procedure] = ["PROCEDURE"],
+        [SqlToken.Model] = ["MODEL"],
         [SqlToken.Returns] = [],        // Component: part of CREATE FUNCTION ... RETURNS
         [SqlToken.Returning] = [],      // Component: part of INSERT ... RETURNING (surface as standalone completion is a follow-up)
         [SqlToken.Call] = ["CALL"],

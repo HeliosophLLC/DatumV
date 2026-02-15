@@ -1,3 +1,4 @@
+using DatumIngest.Catalog;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Model;
 
@@ -78,6 +79,22 @@ public readonly struct EvaluationFrame
     public TypeIdTranslationTable? TypeIdTranslations { get; }
 
     /// <summary>
+    /// The currently-executing model body, when evaluation is inside a
+    /// CREATE-MODEL UDF. The <c>infer()</c> scalar function reads this to
+    /// find the bound <c>IInferenceSession</c>(s) it dispatches to —
+    /// without a current model, <c>infer()</c> is a parse/runtime error
+    /// because no session binding is in scope.
+    /// </summary>
+    /// <remarks>
+    /// Set by the procedural-body executor when it enters a model body
+    /// and cleared (back to <see langword="null"/>) when control returns
+    /// to the surrounding scope. Nested model calls would push/pop a
+    /// stack — for v1, model bodies are leaf (no model invokes another
+    /// MODEL from inside its body), so the single field is sufficient.
+    /// </remarks>
+    public ModelDescriptor? CurrentModel { get; }
+
+    /// <summary>
     /// Creates an evaluation frame. Pass the same store for <paramref name="source"/>
     /// and <paramref name="target"/> when the distinction doesn't matter (e.g. predicates
     /// that produce only inline boolean results and don't allocate strings). Pass
@@ -86,7 +103,9 @@ public readonly struct EvaluationFrame
     /// <paramref name="types"/> when struct-consuming scalar functions need to
     /// resolve field names via the per-query <see cref="TypeRegistry"/>. Pass
     /// <paramref name="typeIdTranslations"/> when struct values may originate
-    /// from <c>.datum</c> files whose on-disk type-ids need translation.
+    /// from <c>.datum</c> files whose on-disk type-ids need translation. Pass
+    /// <paramref name="currentModel"/> when evaluating inside a CREATE-MODEL
+    /// procedural body so <c>infer()</c> can resolve its session binding.
     /// </summary>
     public EvaluationFrame(
         Row row,
@@ -95,7 +114,8 @@ public readonly struct EvaluationFrame
         Row? outerRow = null,
         SidecarRegistry? sidecarRegistry = null,
         TypeRegistry? types = null,
-        TypeIdTranslationTable? typeIdTranslations = null)
+        TypeIdTranslationTable? typeIdTranslations = null,
+        ModelDescriptor? currentModel = null)
     {
         Row = row;
         Source = source;
@@ -104,14 +124,24 @@ public readonly struct EvaluationFrame
         SidecarRegistry = sidecarRegistry;
         Types = types;
         TypeIdTranslations = typeIdTranslations;
+        CurrentModel = currentModel;
     }
 
     /// <summary>
     /// Returns a new frame with a different <see cref="Row"/>, preserving the arenas,
-    /// outer-row context, sidecar registry, type registry, and translation table.
-    /// Used when the evaluator descends into a derived row (e.g. a lambda body's
-    /// augmented row).
+    /// outer-row context, sidecar registry, type registry, translation table, and
+    /// current-model binding. Used when the evaluator descends into a derived row
+    /// (e.g. a lambda body's augmented row).
     /// </summary>
     public EvaluationFrame WithRow(Row row) =>
-        new(row, Source, Target, OuterRow, SidecarRegistry, Types, TypeIdTranslations);
+        new(row, Source, Target, OuterRow, SidecarRegistry, Types, TypeIdTranslations, CurrentModel);
+
+    /// <summary>
+    /// Returns a new frame with a <see cref="CurrentModel"/> binding,
+    /// preserving everything else. Called by the procedural-body executor
+    /// when entering a CREATE-MODEL body and (with <see langword="null"/>)
+    /// when leaving it.
+    /// </summary>
+    public EvaluationFrame WithCurrentModel(ModelDescriptor? currentModel) =>
+        new(Row, Source, Target, OuterRow, SidecarRegistry, Types, TypeIdTranslations, currentModel);
 }

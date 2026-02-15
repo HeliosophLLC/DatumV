@@ -3598,6 +3598,126 @@ public static class SqlParser
             SchemaName: qualifiedName.SchemaName);
 
     /// <summary>
+    /// <c>CREATE [OR REPLACE] MODEL</c> prefix. Mirrors
+    /// <see cref="CreateProcedurePrefix"/> with the MODEL keyword; the
+    /// <c>.Try()</c> wrapper backs off when the input is actually a
+    /// different CREATE statement so the dispatcher's <c>.Or()</c> chain
+    /// can route correctly.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, bool> CreateModelPrefix =
+        (from createKw in Token.EqualTo(SqlToken.Create)
+         from orReplace in OrReplaceParser
+         from modelKw in Token.EqualTo(SqlToken.Model)
+         select orReplace)
+        .Try();
+
+    /// <summary>
+    /// Parses <c>CREATE [OR REPLACE] MODEL [IF NOT EXISTS] name(args)
+    /// RETURNS T USING 'path' [AS] BEGIN ... END</c>. The body shape is
+    /// always procedural — there's no expression-body form because the
+    /// only valid use of a model body is to call <c>infer()</c>, which
+    /// requires a procedural context to bind to.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> CreateModelParser =
+        from orReplace in CreateModelPrefix
+        from ifNotExists in IfNotExistsParser
+        from qualifiedName in QualifiedTableNameParser
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from parameters in UdfParameterParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from close in Token.EqualTo(SqlToken.RightParen)
+        // RETURNS is required for models — the planner needs a known
+        // scalar shape, and a model body without a return type couldn't
+        // dispatch through `infer()` meaningfully.
+        from returnsKw in Token.EqualTo(SqlToken.Returns)
+        from returnTypeName in TypeNameParser
+        from returnIsNotNull in (
+            from isKw in Token.EqualTo(SqlToken.Is)
+            from notKw in Token.EqualTo(SqlToken.Not)
+            from nullKw in Token.EqualTo(SqlToken.Null)
+            select true
+        ).OptionalOrDefault()
+        // USING is a contextual identifier (matches existing
+        // CREATE INDEX USING pattern), followed by a single-quoted
+        // string literal naming the path.
+        from usingKw in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => GetTokenText(t).Equals("USING", StringComparison.OrdinalIgnoreCase), "USING")
+        from usingPathToken in Token.EqualTo(SqlToken.StringLiteral)
+        // Body: optionally preceded by AS, always a BEGIN…END block.
+        from body in
+            (from asKw in Token.EqualTo(SqlToken.As)
+             from blk in SP.Ref(() => BlockStatementParser!)
+             select ((BlockStatement)blk).Statements)
+            .Or(from blk in SP.Ref(() => BlockStatementParser!)
+                select ((BlockStatement)blk).Statements)
+        select (Statement)BuildCreateModelStatement(
+            qualifiedName.TableName,
+            parameters,
+            returnTypeName,
+            UnquoteString(usingPathToken),
+            body,
+            ifNotExists,
+            orReplace,
+            returnIsNotNull,
+            qualifiedName.SchemaName);
+
+    /// <summary>
+    /// Constructs a <see cref="CreateModelStatement"/>, applying the same
+    /// procedural-body validation as procedural UDFs (must end with
+    /// <c>RETURN</c>, no top-level result-emitting statements). Throws
+    /// <see cref="FormatException"/> on validation failure so the bad
+    /// statement surfaces as a clean parse error rather than a runtime
+    /// crash.
+    /// </summary>
+    private static CreateModelStatement BuildCreateModelStatement(
+        string name,
+        IReadOnlyList<UdfParameter> parameters,
+        string returnTypeName,
+        string usingPath,
+        IReadOnlyList<Statement> body,
+        bool ifNotExists,
+        bool orReplace,
+        bool returnIsNotNull,
+        string? schemaName)
+    {
+        if (string.IsNullOrWhiteSpace(usingPath))
+        {
+            throw new FormatException(
+                $"CREATE MODEL {name}: USING clause must specify a non-empty path.");
+        }
+
+        ValidateProceduralBody(name, body);
+
+        return new CreateModelStatement(
+            Name: name,
+            Parameters: parameters,
+            ReturnTypeName: returnTypeName,
+            UsingPath: usingPath,
+            StatementBody: body,
+            IfNotExists: ifNotExists,
+            OrReplace: orReplace,
+            Span: null,
+            ReturnIsNotNull: returnIsNotNull,
+            SchemaName: schemaName);
+    }
+
+    /// <summary>
+    /// Parses <c>DROP MODEL [IF EXISTS] name</c>. Deferred for v1 — the
+    /// parser is wired but DROP-MODEL execution lands later. Including
+    /// the grammar now means existing scripts can use it without a
+    /// parser change later.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> DropModelParser =
+        from dropKw in Token.EqualTo(SqlToken.Drop)
+        from modelKw in Token.EqualTo(SqlToken.Model)
+        from ifExists in IfExistsParser
+        from qualifiedName in QualifiedTableNameParser
+        select (Statement)new DropModelStatement(
+            qualifiedName.TableName,
+            ifExists,
+            Span: null,
+            SchemaName: qualifiedName.SchemaName);
+
+    /// <summary>
     /// Parses <c>CALL namespace.functionname(arg1, arg2, ...)</c>.
     /// The function call expression after CALL is parsed by the same
     /// <see cref="FunctionCall"/> combinator used for inline expressions,
@@ -4202,6 +4322,8 @@ public static class SqlParser
             .Or(DropFunctionParser.Try())
             .Or(CreateProcedureParser)
             .Or(DropProcedureParser.Try())
+            .Or(CreateModelParser)
+            .Or(DropModelParser.Try())
             .Or(CallStatementParser.Try())
             // Procedural-flow statements: keyword-dispatched, all share the
             // SP.Ref() lazy-recursion pattern so bodies can themselves be any

@@ -1626,6 +1626,81 @@ public sealed record CreateFunctionStatement(
     string? SchemaName = null) : Statement;
 
 /// <summary>
+/// <c>CREATE [OR REPLACE] MODEL [IF NOT EXISTS] name(arg TYPE, ...) RETURNS T USING 'path' AS BEGIN ... END</c>
+/// — registers a SQL-bodied function bound to one or more ONNX sessions
+/// loaded from the path specified by <c>USING</c>. The body is procedural
+/// (always <c>BEGIN…END</c>; never an inlined expression), must end with
+/// <c>RETURN</c>, and may call the contextual <c>infer()</c> scalar to
+/// dispatch tensors through the bound sessions.
+/// </summary>
+/// <remarks>
+/// <para>
+/// MODEL is structurally a procedural UDF with two extra concerns:
+/// <list type="bullet">
+///   <item><description>
+///     The USING clause names a filesystem path (relative to the host's
+///     <c>modelDirectory</c>, or absolute when the path is
+///     <c>file://</c>-prefixed). At registration time the engine resolves
+///     the path, asks the dispatcher to load the bundle, and binds the
+///     resulting <c>IInferenceSession</c>(s) to this descriptor.
+///   </description></item>
+///   <item><description>
+///     Registration lands in <c>ModelRegistry</c> (surfaced via
+///     <c>system.models</c>), not <c>UdfRegistry</c>. The two have the
+///     same shape under the hood but are deliberately kept separate so
+///     queries like <c>SELECT * FROM system.udfs</c> stay focused on
+///     SQL-only routines.
+///   </description></item>
+/// </list>
+/// </para>
+/// <para>
+/// Unlike <see cref="CreateFunctionStatement"/>, the body shape is
+/// always procedural and <see cref="ReturnTypeName"/> is required — a
+/// model body without a return type has no scalar shape the planner can
+/// validate against.
+/// </para>
+/// </remarks>
+/// <param name="Name">Unqualified model name; combined with <see cref="SchemaName"/>.</param>
+/// <param name="Parameters">Declared call-site parameters.</param>
+/// <param name="ReturnTypeName">Required return-type annotation.</param>
+/// <param name="UsingPath">
+/// Path to the ONNX file or bundle directory. Relative paths resolve
+/// against the host's models directory; <c>file://</c>-prefixed paths
+/// are treated as absolute (useful for testing).
+/// </param>
+/// <param name="StatementBody">Procedural body. Always non-null on a valid model.</param>
+/// <param name="IfNotExists">When <see langword="true"/>, no-op on conflict.</param>
+/// <param name="OrReplace">When <see langword="true"/>, replaces an existing descriptor; previous bound sessions are disposed.</param>
+/// <param name="Span">Source location for diagnostics.</param>
+/// <param name="ReturnIsNotNull">Adds a runtime null-assertion to <c>RETURN</c>ed values when true.</param>
+/// <param name="SchemaName">Optional schema qualifier; <see langword="null"/> walks search_path.</param>
+public sealed record CreateModelStatement(
+    string Name,
+    IReadOnlyList<UdfParameter> Parameters,
+    string ReturnTypeName,
+    string UsingPath,
+    IReadOnlyList<Statement> StatementBody,
+    bool IfNotExists = false,
+    bool OrReplace = false,
+    SourceSpan? Span = null,
+    bool ReturnIsNotNull = false,
+    string? SchemaName = null) : Statement;
+
+/// <summary>
+/// <c>DROP MODEL [IF EXISTS] name</c> — removes a previously registered
+/// model. Disposing the descriptor releases any bound ONNX sessions.
+/// </summary>
+/// <param name="Name">The model name to remove.</param>
+/// <param name="IfExists">When <see langword="true"/>, suppresses errors if no such model exists.</param>
+/// <param name="Span">Source location for diagnostic reporting.</param>
+/// <param name="SchemaName">Optional schema qualifier; <see langword="null"/> walks search_path.</param>
+public sealed record DropModelStatement(
+    string Name,
+    bool IfExists = false,
+    SourceSpan? Span = null,
+    string? SchemaName = null) : Statement;
+
+/// <summary>
 /// <c>DROP FUNCTION [IF EXISTS] name</c> — removes a previously registered UDF.
 /// </summary>
 /// <param name="Name">The UDF name to remove.</param>
