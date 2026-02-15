@@ -85,13 +85,13 @@ public sealed class StandardDeviationFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             WelfordStandardDeviationAccumulator otherAccumulator = (WelfordStandardDeviationAccumulator)other;
 
             if (otherAccumulator._count == 0)
             {
-                return;
+                return ValueTask.CompletedTask;
             }
 
             if (_count == 0)
@@ -99,7 +99,7 @@ public sealed class StandardDeviationFunction : IAggregateFunction
                 _count = otherAccumulator._count;
                 _mean = otherAccumulator._mean;
                 _m2 = otherAccumulator._m2;
-                return;
+                return ValueTask.CompletedTask;
             }
 
             long combinedCount = _count + otherAccumulator._count;
@@ -107,21 +107,22 @@ public sealed class StandardDeviationFunction : IAggregateFunction
             _m2 += otherAccumulator._m2 + delta * delta * _count * otherAccumulator._count / combinedCount;
             _mean += delta * otherAccumulator._count / combinedCount;
             _count = combinedCount;
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (_usePopulation)
             {
-                return _count > 0
+                return new(_count > 0
                     ? DataValue.FromFloat64(System.Math.Sqrt(_m2 / _count))
-                    : DataValue.Null(DataKind.Float64);
+                    : DataValue.Null(DataKind.Float64));
             }
 
             // Sample stddev requires at least 2 values (N-1 denominator).
-            return _count > 1
+            return new(_count > 1
                 ? DataValue.FromFloat64(System.Math.Sqrt(_m2 / (_count - 1)))
-                : DataValue.Null(DataKind.Float64);
+                : DataValue.Null(DataKind.Float64));
         }
 
         /// <inheritdoc />

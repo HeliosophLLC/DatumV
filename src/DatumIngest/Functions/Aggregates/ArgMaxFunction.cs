@@ -98,12 +98,12 @@ public sealed class ArgMaxFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             ArgMaxAccumulator otherAccumulator = (ArgMaxAccumulator)other;
 
             if (!otherAccumulator._hasValue)
-                return;
+                return ValueTask.CompletedTask;
 
             // Both sides' captured keys/values were Stabilized into the same Target
             // store during their Accumulate calls (per the parallel-aggregate contract:
@@ -115,16 +115,17 @@ public sealed class ArgMaxFunction : IAggregateFunction
                 _valueKind = otherAccumulator._valueKind;
                 _hasValue = true;
             }
+            return ValueTask.CompletedTask;
         }
 
         /// <inheritdoc/>
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
-            if (!_hasValue) return DataValue.Null(_valueKind);
+            if (!_hasValue) return new(DataValue.Null(_valueKind));
             // _bestValue lives in the Target arena passed during Accumulate (typically
             // context.Store). Restabilise into the emit Target so result-batch readers
             // resolve against the right arena.
-            return DataValueRetention.Stabilize(_bestValue, frame.Source, frame.Target);
+            return new(DataValueRetention.Stabilize(_bestValue, frame.Source, frame.Target));
         }
 
         /// <inheritdoc/>

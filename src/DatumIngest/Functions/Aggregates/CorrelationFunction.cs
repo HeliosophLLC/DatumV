@@ -89,13 +89,13 @@ public sealed class CorrelationFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             CorrelationAccumulator otherAccumulator = (CorrelationAccumulator)other;
 
             if (otherAccumulator._count == 0)
             {
-                return;
+                return ValueTask.CompletedTask;
             }
 
             if (_count == 0)
@@ -106,7 +106,7 @@ public sealed class CorrelationFunction : IAggregateFunction
                 _m2Y = otherAccumulator._m2Y;
                 _m2X = otherAccumulator._m2X;
                 _coMoment = otherAccumulator._coMoment;
-                return;
+                return ValueTask.CompletedTask;
             }
 
             long combinedCount = _count + otherAccumulator._count;
@@ -118,23 +118,24 @@ public sealed class CorrelationFunction : IAggregateFunction
             _meanY += deltaY * otherAccumulator._count / combinedCount;
             _meanX += deltaX * otherAccumulator._count / combinedCount;
             _count = combinedCount;
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (_count < 2)
             {
-                return DataValue.Null(DataKind.Float64);
+                return new(DataValue.Null(DataKind.Float64));
             }
 
             double denominator = System.Math.Sqrt(_m2Y * _m2X);
 
             if (denominator == 0.0)
             {
-                return DataValue.Null(DataKind.Float64);
+                return new(DataValue.Null(DataKind.Float64));
             }
 
-            return DataValue.FromFloat64(_coMoment / denominator);
+            return new(DataValue.FromFloat64(_coMoment / denominator));
         }
 
         /// <inheritdoc />

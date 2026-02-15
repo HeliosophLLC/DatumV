@@ -45,16 +45,17 @@ public sealed class AvgFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             AvgAccumulator otherAccumulator = (AvgAccumulator)other;
             _sum += otherAccumulator._sum;
             _count += otherAccumulator._count;
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame) => _count > 0
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame) => new(_count > 0
             ? DataValue.FromFloat64(_sum / _count)
-            : DataValue.Null(DataKind.Float64);
+            : DataValue.Null(DataKind.Float64));
 
         /// <inheritdoc />
         public void Reset()

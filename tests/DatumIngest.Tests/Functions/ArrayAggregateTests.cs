@@ -1,4 +1,4 @@
-using DatumIngest.Functions;
+﻿using DatumIngest.Functions;
 using DatumIngest.Functions.Aggregates;
 using DatumIngest.Model;
 
@@ -14,7 +14,7 @@ public class ArrayAggregateTests : ServiceTestBase
     // ─────────────── VALIDATION ───────────────
 
     [Fact]
-    public void ValidateArguments_SingleArgument_ReturnsElementKind()
+    public async Task ValidateArguments_SingleArgument_ReturnsElementKind()
     {
         ArrayAggregateFunction function = new();
 
@@ -27,7 +27,7 @@ public class ArrayAggregateTests : ServiceTestBase
     }
 
     [Fact]
-    public void ValidateArguments_AcceptsAnyKind_PerElementKindEqualsArgumentKind()
+    public async Task ValidateArguments_AcceptsAnyKind_PerElementKindEqualsArgumentKind()
     {
         ArrayAggregateFunction function = new();
 
@@ -43,7 +43,7 @@ public class ArrayAggregateTests : ServiceTestBase
     }
 
     [Fact]
-    public void ValidateArguments_NoArguments_Throws()
+    public async Task ValidateArguments_NoArguments_Throws()
     {
         ArrayAggregateFunction function = new();
 
@@ -52,7 +52,7 @@ public class ArrayAggregateTests : ServiceTestBase
     }
 
     [Fact]
-    public void ValidateArguments_TwoArguments_Throws()
+    public async Task ValidateArguments_TwoArguments_Throws()
     {
         ArrayAggregateFunction function = new();
 
@@ -63,7 +63,7 @@ public class ArrayAggregateTests : ServiceTestBase
     // ─────────────── NAME ───────────────
 
     [Fact]
-    public void Name_ReturnsArrayAgg()
+    public async Task Name_ReturnsArrayAgg()
     {
         ArrayAggregateFunction function = new();
 
@@ -73,7 +73,7 @@ public class ArrayAggregateTests : ServiceTestBase
     // ─────────────── REGISTRY ───────────────
 
     [Fact]
-    public void Registry_ContainsArrayAgg()
+    public async Task Registry_ContainsArrayAgg()
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
         IAggregateFunction? function = registry.TryGetAggregate("ARRAY_AGG");
@@ -85,7 +85,7 @@ public class ArrayAggregateTests : ServiceTestBase
     // ─────────────── SCALAR VALUES ───────────────
 
     [Fact]
-    public void Accumulate_ScalarValues_CollectsAll()
+    public async Task Accumulate_ScalarValues_CollectsAll()
     {
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -94,7 +94,7 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.FromFloat32(20f)], in _testFrame);
         accumulator.Accumulate([DataValue.FromFloat32(30f)], in _testFrame);
 
-        DataValue result = accumulator.Result(in _testFrame);
+        DataValue result = (await accumulator.ResultAsync(_testFrame));
         // Typed-array shape: Kind = element kind, IsArray flag set.
         Assert.Equal(DataKind.Float32, result.Kind);
         Assert.True(result.IsArray);
@@ -110,7 +110,7 @@ public class ArrayAggregateTests : ServiceTestBase
     // ─────────────── STRING VALUES ───────────────
 
     [Fact]
-    public void Accumulate_StringValues_CollectsAll()
+    public async Task Accumulate_StringValues_CollectsAll()
     {
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -119,7 +119,7 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.FromString("banana")], in _testFrame);
         accumulator.Accumulate([DataValue.FromString("cherry")], in _testFrame);
 
-        DataValue result = accumulator.Result(in _testFrame);
+        DataValue result = (await accumulator.ResultAsync(_testFrame));
         Assert.Equal(DataKind.String, result.Kind);
         Assert.True(result.IsArray);
         Assert.Equal(DataKind.String, result.ArrayElementKind);
@@ -134,7 +134,7 @@ public class ArrayAggregateTests : ServiceTestBase
     // ─────────────── DATE VALUES ───────────────
 
     [Fact]
-    public void Accumulate_DateValues_CollectsAll()
+    public async Task Accumulate_DateValues_CollectsAll()
     {
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -145,7 +145,7 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.FromDate(date1)], in _testFrame);
         accumulator.Accumulate([DataValue.FromDate(date2)], in _testFrame);
 
-        DataValue result = accumulator.Result(in _testFrame);
+        DataValue result = (await accumulator.ResultAsync(_testFrame));
         Assert.Equal(DataKind.Date, result.Kind);
         Assert.True(result.IsArray);
         Assert.Equal(DataKind.Date, result.ArrayElementKind);
@@ -160,7 +160,7 @@ public class ArrayAggregateTests : ServiceTestBase
     // ─────────────── NULL HANDLING ───────────────
 
     [Fact]
-    public void Accumulate_SkipsNulls()
+    public async Task Accumulate_SkipsNulls()
     {
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -169,7 +169,7 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.Null(DataKind.Float32)], in _testFrame);
         accumulator.Accumulate([DataValue.FromFloat32(3f)], in _testFrame);
 
-        DataValue result = accumulator.Result(in _testFrame);
+        DataValue result = (await accumulator.ResultAsync(_testFrame));
         ReadOnlySpan<float> elements = result.AsArraySpan<float>(_testFrame.Target);
         Assert.Equal(2, elements.Length);
         Assert.Equal(1f, elements[0]);
@@ -177,7 +177,7 @@ public class ArrayAggregateTests : ServiceTestBase
     }
 
     [Fact]
-    public void Accumulate_AllNulls_ReturnsNull()
+    public async Task Accumulate_AllNulls_ReturnsNull()
     {
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -185,7 +185,7 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.Null(DataKind.Float32)], in _testFrame);
         accumulator.Accumulate([DataValue.Null(DataKind.Float32)], in _testFrame);
 
-        DataValue result = accumulator.Result(in _testFrame);
+        DataValue result = (await accumulator.ResultAsync(_testFrame));
         Assert.True(result.IsNull);
         // Typed null array: Kind = element kind, IsArray flag set.
         Assert.Equal(DataKind.Float32, result.Kind);
@@ -193,12 +193,12 @@ public class ArrayAggregateTests : ServiceTestBase
     }
 
     [Fact]
-    public void Accumulate_Empty_ReturnsNull()
+    public async Task Accumulate_Empty_ReturnsNull()
     {
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue result = accumulator.Result(in _testFrame);
+        DataValue result = (await accumulator.ResultAsync(_testFrame));
         Assert.True(result.IsNull);
         // Empty fallback element kind is Float32 (per ARRAY_AGG convention).
         Assert.Equal(DataKind.Float32, result.Kind);
@@ -208,14 +208,14 @@ public class ArrayAggregateTests : ServiceTestBase
     // ─────────────── SINGLE ELEMENT ───────────────
 
     [Fact]
-    public void Accumulate_SingleValue_ReturnsSingleElementArray()
+    public async Task Accumulate_SingleValue_ReturnsSingleElementArray()
     {
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         accumulator.Accumulate([DataValue.FromFloat32(42f)], in _testFrame);
 
-        DataValue result = accumulator.Result(in _testFrame);
+        DataValue result = (await accumulator.ResultAsync(_testFrame));
         ReadOnlySpan<float> elements = result.AsArraySpan<float>(_testFrame.Target);
         Assert.Equal(1, elements.Length);
         Assert.Equal(42f, elements[0]);
@@ -224,7 +224,7 @@ public class ArrayAggregateTests : ServiceTestBase
     // ─────────────── PRESERVES INSERTION ORDER ───────────────
 
     [Fact]
-    public void Accumulate_PreservesInsertionOrder()
+    public async Task Accumulate_PreservesInsertionOrder()
     {
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -233,7 +233,7 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.FromString("a")], in _testFrame);
         accumulator.Accumulate([DataValue.FromString("b")], in _testFrame);
 
-        string[] elements = accumulator.Result(in _testFrame).AsStringArray(_testFrame.Target);
+        string[] elements = (await accumulator.ResultAsync(_testFrame)).AsStringArray(_testFrame.Target);
         Assert.Equal("c", elements[0]);
         Assert.Equal("a", elements[1]);
         Assert.Equal("b", elements[2]);

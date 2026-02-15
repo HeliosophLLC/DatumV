@@ -20,7 +20,7 @@ namespace DatumIngest.Functions.Aggregates;
 /// When a memory budget is provided, the decorator spills to a hash-partitioned
 /// <see cref="SpillReaderWriter"/> once estimated memory exceeds the budget. Values are
 /// partitioned by their hash code so each partition contains a non-overlapping subset
-/// of distinct values. During the drain phase (triggered by <see cref="Result"/>),
+/// of distinct values. During the drain phase (triggered by <see cref="ResultAsync"/>),
 /// partitions are processed sequentially with fresh accumulators and merged into the
 /// final result, keeping peak memory proportional to the largest partition rather than
 /// the total distinct count.
@@ -196,7 +196,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     /// The other decorator's inner accumulator is not merged directly — its state
     /// is redundant because all distinct values are replayed through this inner.
     /// </remarks>
-    public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+    public async ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
     {
         DistinctAccumulatorDecorator otherDecorator = (DistinctAccumulatorDecorator)other;
 
@@ -204,7 +204,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
         // and inner accumulators represent the complete state.
         if (otherDecorator._spilling && !otherDecorator._drained)
         {
-            otherDecorator.DrainSpilledPartitionsAsync().GetAwaiter().GetResult();
+            await otherDecorator.DrainSpilledPartitionsAsync().ConfigureAwait(false);
         }
 
         if (_singleArgumentSet is not null && otherDecorator._singleArgumentSet is not null)
@@ -230,13 +230,13 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     }
 
     /// <inheritdoc />
-    public DataValue Result(in InvocationFrame frame)
+    public async ValueTask<DataValue> ResultAsync(InvocationFrame frame)
     {
         if (_spilling && !_drained)
         {
-            DrainSpilledPartitionsAsync().GetAwaiter().GetResult();
+            await DrainSpilledPartitionsAsync().ConfigureAwait(false);
         }
-        return _inner.Result(in frame);
+        return await _inner.ResultAsync(frame).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -465,7 +465,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
 
             // Merge the partition's inner accumulator into the main inner.
             // Since partitions are hash-disjoint, no cross-partition dedup is needed.
-            _inner.Merge(partitionAccumulator, in drainFrame);
+            await _inner.MergeAsync(partitionAccumulator, drainFrame).ConfigureAwait(false);
         }
 
         if (ExecutionTracer.IsEnabled)

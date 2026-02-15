@@ -102,7 +102,7 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             PercentileDiscreteAccumulator otherAccumulator = (PercentileDiscreteAccumulator)other;
             _values.AddRange(otherAccumulator._values);
@@ -112,13 +112,14 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
                 _fraction = otherAccumulator._fraction;
                 _fractionCaptured = true;
             }
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (_values.Count == 0)
             {
-                return DataValue.Null(DataKind.Float64);
+                return new(DataValue.Null(DataKind.Float64));
             }
 
             _values.Sort();
@@ -127,7 +128,7 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
             int index = (int)System.Math.Ceiling(_fraction * _values.Count) - 1;
             index = System.Math.Clamp(index, 0, _values.Count - 1);
 
-            return DataValue.FromFloat64(_values[index]);
+            return new(DataValue.FromFloat64(_values[index]));
         }
 
         /// <inheritdoc />

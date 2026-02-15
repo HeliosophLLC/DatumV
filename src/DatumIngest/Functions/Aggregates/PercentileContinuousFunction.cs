@@ -89,7 +89,7 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             PercentileContinuousAccumulator otherAccumulator = (PercentileContinuousAccumulator)other;
             _values.AddRange(otherAccumulator._values);
@@ -99,13 +99,14 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
                 _fraction = otherAccumulator._fraction;
                 _fractionCaptured = true;
             }
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (_values.Count == 0)
             {
-                return DataValue.Null(DataKind.Float64);
+                return new(DataValue.Null(DataKind.Float64));
             }
 
             _values.Sort();
@@ -117,11 +118,11 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
 
             if (lower == upper)
             {
-                return DataValue.FromFloat64(_values[lower]);
+                return new(DataValue.FromFloat64(_values[lower]));
             }
 
             double interpolated = _values[lower] + (_values[upper] - _values[lower]) * (row - lower);
-            return DataValue.FromFloat64(interpolated);
+            return new(DataValue.FromFloat64(interpolated));
         }
 
         /// <inheritdoc />

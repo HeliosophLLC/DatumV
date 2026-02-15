@@ -137,12 +137,18 @@ public interface IAggregateAccumulator
     /// <c>DataValueComparer.Compare</c> overload when comparing captured values
     /// across the merge.
     /// </para>
+    /// <para>
+    /// Returns <see cref="ValueTask"/> so accumulators that drain spilled state
+    /// (e.g. <c>DistinctAccumulatorDecorator</c>) can do so without sync-over-async
+    /// bridging. Most accumulators complete synchronously and return
+    /// <see cref="ValueTask.CompletedTask"/>.
+    /// </para>
     /// </summary>
     /// <param name="other">
     /// The accumulator to merge into this one. Must be the same concrete type.
     /// </param>
     /// <param name="frame">Per-call invocation context.</param>
-    void Merge(IAggregateAccumulator other, in InvocationFrame frame);
+    ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame);
 
     /// <summary>
     /// Computes the current aggregate result. The <paramref name="frame"/>'s
@@ -150,9 +156,14 @@ public interface IAggregateAccumulator
     /// payloads in the returned <see cref="DataValue"/> — string concatenations,
     /// array constructions, etc. Inline-result accumulators (Sum, Count, Avg)
     /// may ignore the frame.
+    /// <para>
+    /// Returns <see cref="ValueTask{DataValue}"/> so accumulators that drain
+    /// spilled state can do so without sync-over-async bridging. Most accumulators
+    /// complete synchronously and return <c>new ValueTask&lt;DataValue&gt;(...)</c>.
+    /// </para>
     /// </summary>
     /// <param name="frame">Per-emit invocation context.</param>
-    DataValue Result(in InvocationFrame frame);
+    ValueTask<DataValue> ResultAsync(InvocationFrame frame);
 
     /// <summary>
     /// Resets the accumulator to its initial (empty) state so it can be reused

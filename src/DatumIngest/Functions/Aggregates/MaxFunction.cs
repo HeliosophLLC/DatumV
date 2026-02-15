@@ -59,13 +59,13 @@ public sealed class MaxFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             MaxAccumulator otherAccumulator = (MaxAccumulator)other;
 
             if (otherAccumulator._maximum is null)
             {
-                return;
+                return ValueTask.CompletedTask;
             }
 
             _inputKind = otherAccumulator._inputKind;
@@ -77,15 +77,16 @@ public sealed class MaxFunction : IAggregateFunction
             {
                 _maximum = otherAccumulator._maximum;
             }
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
-            if (_maximum is null) return DataValue.Null(_inputKind);
+            if (_maximum is null) return new(DataValue.Null(_inputKind));
             // _maximum lives in the Target arena passed during Accumulate (typically
             // context.Store). Restabilise into the emit Target so result-batch readers
             // resolve against the right arena.
-            return DataValueRetention.Stabilize(_maximum.Value, frame.Source, frame.Target);
+            return new(DataValueRetention.Stabilize(_maximum.Value, frame.Source, frame.Target));
         }
 
         /// <inheritdoc />

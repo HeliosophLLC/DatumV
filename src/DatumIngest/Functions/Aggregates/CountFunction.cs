@@ -46,13 +46,14 @@ public sealed class CountFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             CountAccumulator otherAccumulator = (CountAccumulator)other;
             _count += otherAccumulator._count;
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame) => DataValue.FromInt64(_count);
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame) => new(DataValue.FromInt64(_count));
 
         /// <inheritdoc />
         public void Reset()

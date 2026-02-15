@@ -56,17 +56,18 @@ public sealed class MedianFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             MedianAccumulator otherAccumulator = (MedianAccumulator)other;
             _values.AddRange(otherAccumulator._values);
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (_values.Count == 0)
             {
-                return DataValue.Null(DataKind.Float64);
+                return new(DataValue.Null(DataKind.Float64));
             }
 
             _values.Sort();
@@ -75,12 +76,12 @@ public sealed class MedianFunction : IAggregateFunction
 
             if (count % 2 == 1)
             {
-                return DataValue.FromFloat64(_values[mid]);
+                return new(DataValue.FromFloat64(_values[mid]));
             }
 
             // Even count: average of the two middle values.
             double median = (_values[mid - 1] + _values[mid]) / 2.0;
-            return DataValue.FromFloat64(median);
+            return new(DataValue.FromFloat64(median));
         }
 
         /// <inheritdoc />

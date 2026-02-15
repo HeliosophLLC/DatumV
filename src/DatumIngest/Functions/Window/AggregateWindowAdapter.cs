@@ -108,7 +108,7 @@ public sealed class AggregateWindowAdapter : IWindowFunction
                     wholeAccumulator.Accumulate(argumentBuffer, in frameInv);
                 }
 
-                DataValue wholeResult = wholeAccumulator.Result(in frameInv);
+                DataValue wholeResult = await wholeAccumulator.ResultAsync(frameInv).ConfigureAwait(false);
                 for (int i = 0; i < partitionRows.Count; i++)
                 {
                     results[i] = wholeResult;
@@ -134,7 +134,7 @@ public sealed class AggregateWindowAdapter : IWindowFunction
                 // If end < i, the frame has shrunk past the accumulator — fall back to recompute.
                 if (end >= i)
                 {
-                    results[i] = accumulator.Result(in frameInv);
+                    results[i] = await accumulator.ResultAsync(frameInv).ConfigureAwait(false);
                 }
                 else
                 {
@@ -182,7 +182,7 @@ public sealed class AggregateWindowAdapter : IWindowFunction
                 accumulator.Accumulate(arguments, in frameInv);
             }
 
-            return accumulator.Result(in frameInv);
+            return await accumulator.ResultAsync(frameInv).ConfigureAwait(false);
         }
 
         private static async ValueTask EvaluateArgumentsAsync(

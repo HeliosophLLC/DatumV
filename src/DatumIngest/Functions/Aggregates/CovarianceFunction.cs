@@ -105,13 +105,13 @@ public sealed class CovarianceFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             CovarianceAccumulator otherAccumulator = (CovarianceAccumulator)other;
 
             if (otherAccumulator._count == 0)
             {
-                return;
+                return ValueTask.CompletedTask;
             }
 
             if (_count == 0)
@@ -120,7 +120,7 @@ public sealed class CovarianceFunction : IAggregateFunction
                 _meanY = otherAccumulator._meanY;
                 _meanX = otherAccumulator._meanX;
                 _coMoment = otherAccumulator._coMoment;
-                return;
+                return ValueTask.CompletedTask;
             }
 
             long combinedCount = _count + otherAccumulator._count;
@@ -130,20 +130,21 @@ public sealed class CovarianceFunction : IAggregateFunction
             _meanY += deltaY * otherAccumulator._count / combinedCount;
             _meanX += deltaX * otherAccumulator._count / combinedCount;
             _count = combinedCount;
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (_usePopulation)
             {
-                return _count > 0
+                return new(_count > 0
                     ? DataValue.FromFloat64(_coMoment / _count)
-                    : DataValue.Null(DataKind.Float64);
+                    : DataValue.Null(DataKind.Float64));
             }
 
-            return _count > 1
+            return new(_count > 1
                 ? DataValue.FromFloat64(_coMoment / (_count - 1))
-                : DataValue.Null(DataKind.Float64);
+                : DataValue.Null(DataKind.Float64));
         }
 
         /// <inheritdoc />

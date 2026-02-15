@@ -214,8 +214,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             if (currentGroup is not null && !key.Equals(currentSingleKey!))
                             {
                                 FlushOrderedBuffersForGroup(currentGroup, context, in frame);
-                                Row emitted = EmitGroupRow(currentGroup, isGlobalAggregation: false,
-                                    pool, ref outputLookup, in frame);
+                                (Row emitted, outputLookup) = await EmitGroupRowAsync(currentGroup, isGlobalAggregation: false,
+                                    pool, outputLookup, frame).ConfigureAwait(false);
                                 outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena!);
                                 outputBatch.Add(emitted.RawValues);
                                 pool.Backing.Return(currentGroup);
@@ -245,8 +245,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             if (currentGroup is not null && !CompositeKeysEqual(currentKeyValues!, compositeKeyScratch!))
                             {
                                 FlushOrderedBuffersForGroup(currentGroup, context, in frame);
-                                Row emitted = EmitGroupRow(currentGroup, isGlobalAggregation: false,
-                                    pool, ref outputLookup, in frame);
+                                (Row emitted, outputLookup) = await EmitGroupRowAsync(currentGroup, isGlobalAggregation: false,
+                                    pool, outputLookup, frame).ConfigureAwait(false);
                                 outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena!);
                                 outputBatch.Add(emitted.RawValues);
                                 pool.Backing.Return(currentGroup);
@@ -286,8 +286,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 operatorArena ??= pool.RentArena();
                 InvocationFrame trailingFrame = new(operatorArena, operatorArena, context.SidecarRegistry);
                 FlushOrderedBuffersForGroup(currentGroup, context, in trailingFrame);
-                Row emitted = EmitGroupRow(currentGroup, isGlobalAggregation: false,
-                    pool, ref outputLookup, in trailingFrame);
+                (Row emitted, outputLookup) = await EmitGroupRowAsync(currentGroup, isGlobalAggregation: false,
+                    pool, outputLookup, trailingFrame).ConfigureAwait(false);
                 outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
                 outputBatch.Add(emitted.RawValues);
                 pool.Backing.Return(currentGroup);
@@ -504,7 +504,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                 for (int i = 1; i < workerCount; i++)
                 {
-                    MergeGroupState(workerGlobalGroups[0], workerGlobalGroups[i], in workerAccumFrame);
+                    await MergeGroupStateAsync(workerGlobalGroups[0], workerGlobalGroups[i], workerAccumFrame).ConfigureAwait(false);
                 }
 
                 ColumnLookup? globalOutputLookup = null;
@@ -521,9 +521,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     FlushOrderedBuffers([workerGlobalGroups[0]], context, in globalEmitFrame);
                 }
 
-                Row globalEmitted = EmitGroupRow(
+                (Row globalEmitted, globalOutputLookup) = await EmitGroupRowAsync(
                     workerGlobalGroups[0], isGlobalAggregation: true,
-                    pool, ref globalOutputLookup, in globalEmitFrame);
+                    pool, globalOutputLookup, globalEmitFrame).ConfigureAwait(false);
                 RowBatch globalOutputBatch = pool.RentRowBatch(globalOutputLookup!, context.BatchSize, operatorArena);
                 globalOutputBatch.Add(globalEmitted.RawValues);
                 yield return globalOutputBatch;
@@ -805,7 +805,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 if (hasOrderedAggregates)
                     FlushOrderedBuffers([globalGroup!], context, in emitFrame);
 
-                Row globalEmitted = EmitGroupRow(globalGroup!, isGlobalAggregation: true, pool, ref outputLookup, in emitFrame);
+                (Row globalEmitted, outputLookup) = await EmitGroupRowAsync(globalGroup!, isGlobalAggregation: true, pool, outputLookup, emitFrame).ConfigureAwait(false);
                 outputBatch = pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
                 outputBatch.Add(globalEmitted.RawValues);
                 RowBatch globalToYield = outputBatch;
@@ -823,7 +823,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
             foreach (GroupState g in inMemoryGroups)
             {
-                Row emitted = EmitGroupRow(g, isGlobalAggregation: false, pool, ref outputLookup, in emitFrame);
+                (Row emitted, outputLookup) = await EmitGroupRowAsync(g, isGlobalAggregation: false, pool, outputLookup, emitFrame).ConfigureAwait(false);
                 outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
                 outputBatch.Add(emitted.RawValues);
                 if (outputBatch.IsFull)
@@ -933,7 +933,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                     foreach (GroupState pg in partGroups)
                     {
-                        Row emitted = EmitGroupRow(pg, isGlobalAggregation: false, pool, ref outputLookup, in emitFrame);
+                        (Row emitted, outputLookup) = await EmitGroupRowAsync(pg, isGlobalAggregation: false, pool, outputLookup, emitFrame).ConfigureAwait(false);
                         outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
                         outputBatch.Add(emitted.RawValues);
                         if (outputBatch.IsFull)
@@ -978,10 +978,10 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
     /// <summary>
     /// Merges a source group's accumulators and ordered buffers into a target group.
-    /// For non-ordered aggregates, calls <see cref="IAggregateAccumulator.Merge"/>.
+    /// For non-ordered aggregates, calls <see cref="IAggregateAccumulator.MergeAsync"/>.
     /// For ordered aggregates, concatenates the ordered buffers (sorted at flush time).
     /// </summary>
-    private void MergeGroupState(GroupState target, GroupState source, in InvocationFrame frame)
+    private async ValueTask MergeGroupStateAsync(GroupState target, GroupState source, InvocationFrame frame)
     {
         for (int i = 0; i < _aggregateColumns.Count; i++)
         {
@@ -995,7 +995,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             }
             else
             {
-                target.Accumulators[i].Merge(source.Accumulators[i], in frame);
+                await target.Accumulators[i].MergeAsync(source.Accumulators[i], frame).ConfigureAwait(false);
             }
         }
     }
@@ -1382,14 +1382,17 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     }
 
     /// <summary>
-    /// Emits a single output row from a completed group state.
+    /// Emits a single output row from a completed group state. Returns the row and
+    /// the (potentially newly-built) <see cref="ColumnLookup"/> so callers can carry
+    /// it across emit calls — async methods can't take <c>ref</c> parameters, so the
+    /// previous <c>ref outputLookup</c> pattern is replaced by tuple return.
     /// </summary>
-    private Row EmitGroupRow(
+    private async ValueTask<(Row Row, ColumnLookup Lookup)> EmitGroupRowAsync(
         GroupState group,
         bool isGlobalAggregation,
         Pool pool,
-        ref ColumnLookup? outputLookup,
-        in InvocationFrame frame)
+        ColumnLookup? outputLookup,
+        InvocationFrame frame)
     {
         int outputFieldCount = _groupByExpressions.Count + _aggregateColumns.Count;
 
@@ -1422,10 +1425,10 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
         for (int index = 0; index < _aggregateColumns.Count; index++)
         {
-            values[_groupByExpressions.Count + index] = group.Accumulators[index].Result(in frame);
+            values[_groupByExpressions.Count + index] = await group.Accumulators[index].ResultAsync(frame).ConfigureAwait(false);
         }
 
-        return new Row(outputLookup, values);
+        return (new Row(outputLookup, values), outputLookup);
     }
 
 

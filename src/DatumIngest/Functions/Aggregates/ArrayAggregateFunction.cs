@@ -69,28 +69,29 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             ArrayAggregateAccumulator otherAccumulator = (ArrayAggregateAccumulator)other;
             _elementKind ??= otherAccumulator._elementKind;
             _elements.AddRange(otherAccumulator._elements);
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (_elements.Count == 0)
             {
                 // Typed null array: Kind = element kind, IsNull + IsArray flags
                 // set. Falls back to Float32 when no values were ever observed.
-                return DataValue.NullArrayOf(_elementKind ?? DataKind.Float32);
+                return new(DataValue.NullArrayOf(_elementKind ?? DataKind.Float32));
             }
 
-            return DataValue.FromTypedArray(
+            return new(DataValue.FromTypedArray(
                 _elementKind!.Value,
                 System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_elements),
                 frame.Source,
                 frame.Target,
-                frame.SidecarRegistry);
+                frame.SidecarRegistry));
         }
 
         /// <inheritdoc />

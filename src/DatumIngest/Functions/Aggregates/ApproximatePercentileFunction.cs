@@ -109,7 +109,7 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             ReservoirPercentileAccumulator otherAccumulator = (ReservoirPercentileAccumulator)other;
             _totalCount += otherAccumulator._totalCount;
@@ -132,13 +132,14 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
 
                 _samples.RemoveRange(MaxSamples, _samples.Count - MaxSamples);
             }
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (_samples.Count == 0)
             {
-                return DataValue.Null(DataKind.Float64);
+                return new(DataValue.Null(DataKind.Float64));
             }
 
             _samples.Sort();
@@ -149,11 +150,11 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
 
             if (lower == upper)
             {
-                return DataValue.FromFloat64(_samples[lower]);
+                return new(DataValue.FromFloat64(_samples[lower]));
             }
 
             double interpolated = _samples[lower] + (_samples[upper] - _samples[lower]) * (row - lower);
-            return DataValue.FromFloat64(interpolated);
+            return new(DataValue.FromFloat64(interpolated));
         }
 
         /// <inheritdoc />

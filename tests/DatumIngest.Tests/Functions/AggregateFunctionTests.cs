@@ -1,4 +1,4 @@
-using DatumIngest.Functions;
+﻿using DatumIngest.Functions;
 using DatumIngest.Functions.Aggregates;
 using DatumIngest.Model;
 
@@ -15,7 +15,7 @@ public class AggregateFunctionTests : ServiceTestBase
     // ─────────────── COUNT ───────────────
 
     [Fact]
-    public void Count_Star_CountsAllRows()
+    public async Task Count_Star_CountsAllRows()
     {
         CountFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -24,11 +24,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty, in _testFrame);
         accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty, in _testFrame);
 
-        Assert.Equal(3L, accumulator.Result(in _testFrame).AsInt64());
+        Assert.Equal(3L, (await accumulator.ResultAsync(_testFrame)).AsInt64());
     }
 
     [Fact]
-    public void Count_Expression_SkipsNulls()
+    public async Task Count_Expression_SkipsNulls()
     {
         CountFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -40,22 +40,22 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(nullValue, in _testFrame);
         accumulator.Accumulate(nonNull, in _testFrame);
 
-        Assert.Equal(2L, accumulator.Result(in _testFrame).AsInt64());
+        Assert.Equal(2L, (await accumulator.ResultAsync(_testFrame)).AsInt64());
     }
 
     [Fact]
-    public void Count_Empty_ReturnsZero()
+    public async Task Count_Empty_ReturnsZero()
     {
         CountFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        Assert.Equal(0L, accumulator.Result(in _testFrame).AsInt64());
+        Assert.Equal(0L, (await accumulator.ResultAsync(_testFrame)).AsInt64());
     }
 
     // ─────────────── SUM ───────────────
 
     [Fact]
-    public void Sum_OfScalarValues()
+    public async Task Sum_OfScalarValues()
     {
         SumFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -68,11 +68,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val2, in _testFrame);
         accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal(60f, accumulator.Result(in _testFrame).AsFloat32());
+        Assert.Equal(60f, (await accumulator.ResultAsync(_testFrame)).AsFloat32());
     }
 
     [Fact]
-    public void Sum_SkipsNulls()
+    public async Task Sum_SkipsNulls()
     {
         SumFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -84,11 +84,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(nullVal, in _testFrame);
         accumulator.Accumulate(val1, in _testFrame);
 
-        Assert.Equal(10f, accumulator.Result(in _testFrame).AsFloat32());
+        Assert.Equal(10f, (await accumulator.ResultAsync(_testFrame)).AsFloat32());
     }
 
     [Fact]
-    public void Sum_AllNulls_ReturnsNull()
+    public async Task Sum_AllNulls_ReturnsNull()
     {
         SumFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -97,13 +97,13 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(nullVal, in _testFrame);
         accumulator.Accumulate(nullVal, in _testFrame);
 
-        Assert.True(accumulator.Result(in _testFrame).IsNull);
+        Assert.True((await accumulator.ResultAsync(_testFrame)).IsNull);
     }
 
     // ─────────────── AVG ───────────────
 
     [Fact]
-    public void Avg_OfScalarValues()
+    public async Task Avg_OfScalarValues()
     {
         AvgFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -116,11 +116,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val2, in _testFrame);
         accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal(20.0, accumulator.Result(in _testFrame).AsFloat64());
+        Assert.Equal(20.0, (await accumulator.ResultAsync(_testFrame)).AsFloat64());
     }
 
     [Fact]
-    public void Avg_SkipsNullsInDenominator()
+    public async Task Avg_SkipsNullsInDenominator()
     {
         AvgFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -134,11 +134,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val2, in _testFrame);
 
         // AVG of 10 and 30, ignoring NULL = 20
-        Assert.Equal(20.0, accumulator.Result(in _testFrame).AsFloat64());
+        Assert.Equal(20.0, (await accumulator.ResultAsync(_testFrame)).AsFloat64());
     }
 
     [Fact]
-    public void Avg_AllNulls_ReturnsNull()
+    public async Task Avg_AllNulls_ReturnsNull()
     {
         AvgFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -146,14 +146,14 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
         accumulator.Accumulate(nullVal, in _testFrame);
 
-        Assert.True(accumulator.Result(in _testFrame).IsNull);
-        Assert.Equal(DataKind.Float64, accumulator.Result(in _testFrame).Kind);
+        Assert.True((await accumulator.ResultAsync(_testFrame)).IsNull);
+        Assert.Equal(DataKind.Float64, (await accumulator.ResultAsync(_testFrame)).Kind);
     }
 
     // ─────────────── MIN ───────────────
 
     [Fact]
-    public void Min_OfScalarValues()
+    public async Task Min_OfScalarValues()
     {
         MinFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -166,11 +166,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val2, in _testFrame);
         accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal(10f, accumulator.Result(in _testFrame).AsFloat32());
+        Assert.Equal(10f, (await accumulator.ResultAsync(_testFrame)).AsFloat32());
     }
 
     [Fact]
-    public void Min_OfStringValues()
+    public async Task Min_OfStringValues()
     {
         MinFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -183,11 +183,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val2, in _testFrame);
         accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal("apple", accumulator.Result(in _testFrame).AsString(_testFrame.Target));
+        Assert.Equal("apple", (await accumulator.ResultAsync(_testFrame)).AsString(_testFrame.Target));
     }
 
     [Fact]
-    public void Min_SkipsNulls()
+    public async Task Min_SkipsNulls()
     {
         MinFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -198,11 +198,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(nullVal, in _testFrame);
         accumulator.Accumulate(val1, in _testFrame);
 
-        Assert.Equal(5f, accumulator.Result(in _testFrame).AsFloat32());
+        Assert.Equal(5f, (await accumulator.ResultAsync(_testFrame)).AsFloat32());
     }
 
     [Fact]
-    public void Min_AllNulls_ReturnsNull()
+    public async Task Min_AllNulls_ReturnsNull()
     {
         MinFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -210,13 +210,13 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
         accumulator.Accumulate(nullVal, in _testFrame);
 
-        Assert.True(accumulator.Result(in _testFrame).IsNull);
+        Assert.True((await accumulator.ResultAsync(_testFrame)).IsNull);
     }
 
     // ─────────────── MAX ───────────────
 
     [Fact]
-    public void Max_OfScalarValues()
+    public async Task Max_OfScalarValues()
     {
         MaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -229,11 +229,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val2, in _testFrame);
         accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal(30f, accumulator.Result(in _testFrame).AsFloat32());
+        Assert.Equal(30f, (await accumulator.ResultAsync(_testFrame)).AsFloat32());
     }
 
     [Fact]
-    public void Max_OfStringValues()
+    public async Task Max_OfStringValues()
     {
         MaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -246,11 +246,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val2, in _testFrame);
         accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal("cherry", accumulator.Result(in _testFrame).AsString(_testFrame.Target));
+        Assert.Equal("cherry", (await accumulator.ResultAsync(_testFrame)).AsString(_testFrame.Target));
     }
 
     [Fact]
-    public void Max_SkipsNulls()
+    public async Task Max_SkipsNulls()
     {
         MaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -261,13 +261,13 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(nullVal, in _testFrame);
         accumulator.Accumulate(val1, in _testFrame);
 
-        Assert.Equal(5f, accumulator.Result(in _testFrame).AsFloat32());
+        Assert.Equal(5f, (await accumulator.ResultAsync(_testFrame)).AsFloat32());
     }
 
     // ─────────────── FunctionRegistry ───────────────
 
     [Fact]
-    public void Registry_ContainsAllAggregateFunctions()
+    public async Task Registry_ContainsAllAggregateFunctions()
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
@@ -279,7 +279,7 @@ public class AggregateFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void Registry_AggregateLookupIsCaseInsensitive()
+    public async Task Registry_AggregateLookupIsCaseInsensitive()
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
@@ -290,7 +290,7 @@ public class AggregateFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void Registry_AggregateFunctionNames_ListsAll()
+    public async Task Registry_AggregateFunctionNames_ListsAll()
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
@@ -306,7 +306,7 @@ public class AggregateFunctionTests : ServiceTestBase
     // ─────────────── Extended numeric kinds ───────────────
 
     [Fact]
-    public void Sum_Int32Input_ReturnsInt64()
+    public async Task Sum_Int32Input_ReturnsInt64()
     {
         SumFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Int32]);
@@ -321,11 +321,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val3, in _testFrame);
 
         Assert.Equal(DataKind.Int64, outputKind);
-        Assert.Equal(600L, accumulator.Result(in _testFrame).AsInt64());
+        Assert.Equal(600L, (await accumulator.ResultAsync(_testFrame)).AsInt64());
     }
 
     [Fact]
-    public void Sum_Int64Input_ReturnsInt64()
+    public async Task Sum_Int64Input_ReturnsInt64()
     {
         SumFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Int64]);
@@ -338,11 +338,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val2, in _testFrame);
 
         Assert.Equal(DataKind.Int64, outputKind);
-        Assert.Equal(3_000_000_000L, accumulator.Result(in _testFrame).AsInt64());
+        Assert.Equal(3_000_000_000L, (await accumulator.ResultAsync(_testFrame)).AsInt64());
     }
 
     [Fact]
-    public void Sum_Float64Input_ReturnsFloat64()
+    public async Task Sum_Float64Input_ReturnsFloat64()
     {
         SumFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Float64]);
@@ -355,11 +355,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val2, in _testFrame);
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(4.0, accumulator.Result(in _testFrame).AsFloat64());
+        Assert.Equal(4.0, (await accumulator.ResultAsync(_testFrame)).AsFloat64());
     }
 
     [Fact]
-    public void Sum_IntegerAllNulls_ReturnsNull()
+    public async Task Sum_IntegerAllNulls_ReturnsNull()
     {
         SumFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -367,11 +367,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] nullVal = [DataValue.Null(DataKind.Int32)];
         accumulator.Accumulate(nullVal, in _testFrame);
 
-        Assert.True(accumulator.Result(in _testFrame).IsNull);
+        Assert.True((await accumulator.ResultAsync(_testFrame)).IsNull);
     }
 
     [Fact]
-    public void Avg_Int32Input_ReturnsFloat64()
+    public async Task Avg_Int32Input_ReturnsFloat64()
     {
         AvgFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Int32]);
@@ -386,11 +386,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val3, in _testFrame);
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(20.0, accumulator.Result(in _testFrame).AsFloat64());
+        Assert.Equal(20.0, (await accumulator.ResultAsync(_testFrame)).AsFloat64());
     }
 
     [Fact]
-    public void Avg_Float64Input_ReturnsFloat64()
+    public async Task Avg_Float64Input_ReturnsFloat64()
     {
         AvgFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Float64]);
@@ -403,11 +403,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val2, in _testFrame);
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(2.0, accumulator.Result(in _testFrame).AsFloat64());
+        Assert.Equal(2.0, (await accumulator.ResultAsync(_testFrame)).AsFloat64());
     }
 
     [Fact]
-    public void Min_Int32Input_PreservesKind()
+    public async Task Min_Int32Input_PreservesKind()
     {
         MinFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Int32]);
@@ -422,11 +422,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val3, in _testFrame);
 
         Assert.Equal(DataKind.Int32, outputKind);
-        Assert.Equal(10, accumulator.Result(in _testFrame).AsInt32());
+        Assert.Equal(10, (await accumulator.ResultAsync(_testFrame)).AsInt32());
     }
 
     [Fact]
-    public void Max_Int64Input_PreservesKind()
+    public async Task Max_Int64Input_PreservesKind()
     {
         MaxFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Int64]);
@@ -441,11 +441,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val3, in _testFrame);
 
         Assert.Equal(DataKind.Int64, outputKind);
-        Assert.Equal(300L, accumulator.Result(in _testFrame).AsInt64());
+        Assert.Equal(300L, (await accumulator.ResultAsync(_testFrame)).AsInt64());
     }
 
     [Fact]
-    public void Max_AllNulls_NullKindMatchesInput()
+    public async Task Max_AllNulls_NullKindMatchesInput()
     {
         MaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -453,11 +453,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] nullVal = [DataValue.Null(DataKind.Int32)];
         accumulator.Accumulate(nullVal, in _testFrame);
 
-        Assert.True(accumulator.Result(in _testFrame).IsNull);
+        Assert.True((await accumulator.ResultAsync(_testFrame)).IsNull);
     }
 
     [Fact]
-    public void Median_Int32Input_ReturnsFloat64()
+    public async Task Median_Int32Input_ReturnsFloat64()
     {
         MedianFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Int32]);
@@ -472,11 +472,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val3, in _testFrame);
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(2.0, accumulator.Result(in _testFrame).AsFloat64());
+        Assert.Equal(2.0, (await accumulator.ResultAsync(_testFrame)).AsFloat64());
     }
 
     [Fact]
-    public void Median_EvenCount_AveragesMiddlePair()
+    public async Task Median_EvenCount_AveragesMiddlePair()
     {
         MedianFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
@@ -491,11 +491,11 @@ public class AggregateFunctionTests : ServiceTestBase
         accumulator.Accumulate(val3, in _testFrame);
         accumulator.Accumulate(val4, in _testFrame);
 
-        Assert.Equal(2.5, accumulator.Result(in _testFrame).AsFloat64());
+        Assert.Equal(2.5, (await accumulator.ResultAsync(_testFrame)).AsFloat64());
     }
 
     [Fact]
-    public void Stddev_Int32Input_ReturnsFloat64()
+    public async Task Stddev_Int32Input_ReturnsFloat64()
     {
         StandardDeviationFunction function = new(usePopulation: true, name: "STDDEV_POP");
         DataKind outputKind = function.ValidateArguments([DataKind.Int32]);
@@ -508,11 +508,11 @@ public class AggregateFunctionTests : ServiceTestBase
         }
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(2.0, accumulator.Result(in _testFrame).AsFloat64(), precision: 10);
+        Assert.Equal(2.0, (await accumulator.ResultAsync(_testFrame)).AsFloat64(), precision: 10);
     }
 
     [Fact]
-    public void Variance_Float64Input_ReturnsFloat64()
+    public async Task Variance_Float64Input_ReturnsFloat64()
     {
         VarianceFunction function = new(usePopulation: false, name: "VAR_SAMP");
         DataKind outputKind = function.ValidateArguments([DataKind.Float64]);
@@ -528,11 +528,11 @@ public class AggregateFunctionTests : ServiceTestBase
 
         // Sample variance of {2, 4, 6} = 4.0
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(4.0, accumulator.Result(in _testFrame).AsFloat64(), precision: 10);
+        Assert.Equal(4.0, (await accumulator.ResultAsync(_testFrame)).AsFloat64(), precision: 10);
     }
 
     [Fact]
-    public void Corr_Int32Inputs_ReturnsFloat64()
+    public async Task Corr_Int32Inputs_ReturnsFloat64()
     {
         CorrelationFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Int32, DataKind.Int32]);
@@ -545,11 +545,11 @@ public class AggregateFunctionTests : ServiceTestBase
         }
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(1.0, accumulator.Result(in _testFrame).AsFloat64(), precision: 10);
+        Assert.Equal(1.0, (await accumulator.ResultAsync(_testFrame)).AsFloat64(), precision: 10);
     }
 
     [Fact]
-    public void Covar_Int32Inputs_ReturnsFloat64()
+    public async Task Covar_Int32Inputs_ReturnsFloat64()
     {
         CovarianceFunction function = new(usePopulation: false, name: "COVAR_SAMP");
         DataKind outputKind = function.ValidateArguments([DataKind.Int32, DataKind.Int32]);
@@ -562,6 +562,6 @@ public class AggregateFunctionTests : ServiceTestBase
         }
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(1.0, accumulator.Result(in _testFrame).AsFloat64(), precision: 10);
+        Assert.Equal(1.0, (await accumulator.ResultAsync(_testFrame)).AsFloat64(), precision: 10);
     }
 }

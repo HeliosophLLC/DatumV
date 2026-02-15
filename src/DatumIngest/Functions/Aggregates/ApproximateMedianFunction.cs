@@ -79,7 +79,7 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             ReservoirMedianAccumulator otherAccumulator = (ReservoirMedianAccumulator)other;
             _totalCount += otherAccumulator._totalCount;
@@ -96,13 +96,14 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
 
                 _samples.RemoveRange(MaxSamples, _samples.Count - MaxSamples);
             }
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (_samples.Count == 0)
             {
-                return DataValue.Null(DataKind.Float64);
+                return new(DataValue.Null(DataKind.Float64));
             }
 
             _samples.Sort();
@@ -112,11 +113,11 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
 
             if (count % 2 == 1)
             {
-                return DataValue.FromFloat64(_samples[mid]);
+                return new(DataValue.FromFloat64(_samples[mid]));
             }
 
             double median = (_samples[mid - 1] + _samples[mid]) / 2.0;
-            return DataValue.FromFloat64(median);
+            return new(DataValue.FromFloat64(median));
         }
 
         /// <inheritdoc />

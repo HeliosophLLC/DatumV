@@ -77,7 +77,7 @@ public sealed class SumFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             SumAccumulator otherAccumulator = (SumAccumulator)other;
             _longSum += otherAccumulator._longSum;
@@ -90,23 +90,24 @@ public sealed class SumFunction : IAggregateFunction
             }
 
             _hasValue |= otherAccumulator._hasValue;
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (!_hasValue)
             {
-                return DataValue.Null(DataKind.Float64);
+                return new(DataValue.Null(DataKind.Float64));
             }
 
             if (_isIntegerKind)
             {
-                return DataValue.FromInt64(_longSum);
+                return new(DataValue.FromInt64(_longSum));
             }
 
-            return _isFloat64Kind
+            return new(_isFloat64Kind
                 ? DataValue.FromFloat64(_doubleSum)
-                : DataValue.FromFloat32((float)_doubleSum);
+                : DataValue.FromFloat32((float)_doubleSum));
         }
 
         /// <inheritdoc />

@@ -81,7 +81,7 @@ public sealed class StringAggregateFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             StringAggregateAccumulator otherAccumulator = (StringAggregateAccumulator)other;
             _values.AddRange(otherAccumulator._values);
@@ -91,16 +91,17 @@ public sealed class StringAggregateFunction : IAggregateFunction
                 _separator = otherAccumulator._separator;
                 _separatorCaptured = true;
             }
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (_values.Count == 0)
             {
-                return DataValue.Null(DataKind.String);
+                return new(DataValue.Null(DataKind.String));
             }
 
-            return DataValue.FromString(string.Join(_separator, _values), frame.Target);
+            return new(DataValue.FromString(string.Join(_separator, _values), frame.Target));
         }
 
         /// <inheritdoc />

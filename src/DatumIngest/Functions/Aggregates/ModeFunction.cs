@@ -76,7 +76,7 @@ public sealed class ModeFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
+        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
         {
             ModeAccumulator otherAccumulator = (ModeAccumulator)other;
 
@@ -99,13 +99,14 @@ public sealed class ModeFunction : IAggregateFunction
             {
                 _kind = otherAccumulator._kind;
             }
+            return ValueTask.CompletedTask;
         }
 
-        public DataValue Result(in InvocationFrame frame)
+        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
         {
             if (_frequencies.Count == 0)
             {
-                return DataValue.Null(_kind);
+                return new(DataValue.Null(_kind));
             }
 
             DataValue modeValue = _insertionOrder[0];
@@ -123,7 +124,7 @@ public sealed class ModeFunction : IAggregateFunction
                 }
             }
 
-            return modeValue;
+            return new(modeValue);
         }
 
         /// <inheritdoc />
