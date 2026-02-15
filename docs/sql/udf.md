@@ -547,3 +547,4 @@ must be discarded and recreated.
 - [Common Subexpression Elimination](../common-subexpression-elimination.md) — how `PURE` interacts with the CSE pass
 - [system.udfs](#introspection) — querying registered UDFs from SQL
 - [CREATE PROCEDURE](procedural.md#create-procedure) — the multi-statement equivalent, invoked via `CALL`, that produces rows rather than a scalar
+- [CREATE MODEL](create-model.md) — sibling DDL surface for binding ONNX inference sessions to a SQL-callable name. Same procedural body shape; adds the `USING '...'` clause and the body-scoped `infer()` function.

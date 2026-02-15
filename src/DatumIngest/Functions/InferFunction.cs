@@ -75,6 +75,9 @@ public sealed class InferFunction : IFunction, IScalarFunction
     ];
 
     /// <inheritdoc />
+    public static BodyScopeRequirement BodyScope => BodyScopeRequirement.ModelBody;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<InferFunction>(argumentKinds);
 

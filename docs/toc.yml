@@ -153,6 +153,23 @@
           href: sql/udf.md#introspection
         - name: Persistence
           href: sql/udf.md#persistence
+    - name: CREATE MODEL
+      href: sql/create-model.md
+      items:
+        - name: A complete example
+          href: sql/create-model.md#a-complete-example
+        - name: USING clause
+          href: sql/create-model.md#the-using-clause
+        - name: Schema lockdown
+          href: sql/create-model.md#schema-lockdown
+        - name: infer()
+          href: sql/create-model.md#infer
+        - name: Calling a model
+          href: sql/create-model.md#calling-a-model
+        - name: Introspection (system.models)
+          href: sql/create-model.md#introspection
+        - name: Limitations
+          href: sql/create-model.md#limitations
     - name: Procedural Statements
       href: sql/procedural.md
       items:

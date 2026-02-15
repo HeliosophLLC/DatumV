@@ -14,9 +14,15 @@ namespace DatumIngest.Catalog.Providers;
 /// Query with <c>SELECT * FROM datum_catalog.functions</c>.
 /// </summary>
 /// <remarks>
-/// Schema (7 columns): function_name, function_type, category, return_type,
-/// description, parameter_count, query_unit_cost.
+/// Schema (8 columns): function_name, function_type, category, return_type,
+/// description, parameter_count, query_unit_cost, body_scope.
 /// One row per function name, including aliases as separate rows.
+/// <c>body_scope</c> is the schema-stable discriminator for procedural-context
+/// requirements (<c>none</c> for the vast majority; <c>modelbody</c> for
+/// <c>infer()</c>). Annotate-not-hide: body-scoped functions still appear in
+/// this view so users can discover them via
+/// <c>WHERE body_scope = 'modelbody'</c>; the plan-time gate refuses
+/// out-of-context call sites separately.
 /// </remarks>
 internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBase
 {
@@ -128,6 +134,7 @@ internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBa
         cells[4] = DataValue.FromString(descriptor.Description, arena);
         cells[5] = parameterCount.HasValue ? DataValue.FromInt32(parameterCount.Value) : DataValue.Null(DataKind.Int32);
         cells[6] = DataValue.Null(DataKind.Int32);
+        cells[7] = DataValue.FromString(descriptor.BodyScope.ToString().ToLowerInvariant(), arena);
     }
 
     private static void FillMinimalRow(DataValue[] cells, string name, string functionType, Arena arena)
@@ -139,6 +146,10 @@ internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBa
         cells[4] = DataValue.Null(DataKind.String);
         cells[5] = DataValue.Null(DataKind.Int32);
         cells[6] = DataValue.Null(DataKind.Int32);
+        // Aggregates / TVFs / windows have no body-scope concept today (no
+        // body-scoped functions in those families). Default to "none" rather
+        // than null so the column stays NOT NULL and consistent across rows.
+        cells[7] = DataValue.FromString("none", arena);
     }
 
     private static Schema BuildSchema() => new(
@@ -150,6 +161,7 @@ internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBa
         new ColumnInfo("description",     DataKind.String, nullable: true),
         new ColumnInfo("parameter_count", DataKind.Int32,  nullable: true),
         new ColumnInfo("query_unit_cost", DataKind.Int32,  nullable: true),
+        new ColumnInfo("body_scope",      DataKind.String, nullable: false),
     ]);
 }
 

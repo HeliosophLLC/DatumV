@@ -16,6 +16,12 @@ role-header / turn-end primitives so a prompt can be assembled in
 plain SQL alongside `string_agg`, with a `templated` opt-arg on the
 model that bypasses the built-in single-message wrapper.
 
+To register your own ONNX file as a model — without writing C# — see
+[CREATE MODEL](sql/create-model.md). User-registered models surface in
+the same `models.X` namespace as the built-ins documented here; the
+`kind` column on `system.models` distinguishes the two (`builtin` for
+entries on this page, `declared` for `CREATE MODEL` registrations).
+
 For an introspectable view of the same information, query the
 `system_models` virtual table:
 

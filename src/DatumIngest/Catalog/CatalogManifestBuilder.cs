@@ -55,8 +55,23 @@ public static class CatalogManifestBuilder
         // functions still surface the most common form, enough for the
         // completion popup's first hint. Aliases get their own entry so
         // the editor offers them under their typed name.
+        //
+        // Body-scoped functions (today: `infer()`) are excluded from the
+        // language-server manifest. They're only callable inside a CREATE
+        // MODEL body — surfacing them in a regular query's completion
+        // dropdown would mislead. Users discover them via
+        // `SELECT * FROM datum_catalog.functions WHERE body_scope = 'modelbody'`,
+        // and the plan-time gate refuses out-of-context call sites with a
+        // CREATE-MODEL-pointing error if anyone types them by hand.
+        // A future Tier 2 could re-include them when the editor zone is
+        // detected to be inside a model body; until then, omit.
         foreach (FunctionDescriptor descriptor in functions.ScalarDescriptors)
         {
+            if (descriptor.BodyScope != BodyScopeRequirement.None)
+            {
+                continue;
+            }
+
             FunctionSignature primary = BuildSignatureFromDescriptor(descriptor.PrimaryName, descriptor);
             functionSigs.Add(primary);
 

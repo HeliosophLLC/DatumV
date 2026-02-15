@@ -58,7 +58,8 @@ public sealed class FunctionRegistry
             Aliases: Array.Empty<string>(),
             Category: T.Category,
             Description: T.Description,
-            Signatures: T.Signatures);
+            Signatures: T.Signatures,
+            BodyScope: T.BodyScope);
 
         if (!_scalarFunctions.TryAdd(key, instance))
         {

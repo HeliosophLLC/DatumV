@@ -44,6 +44,15 @@ public sealed class QueryPlanner
     /// <returns>The root operator of the execution plan.</returns>
     public IQueryOperator Plan(QueryExpression query)
     {
+        // Body-scope gate. The planner is only entered for top-level queries —
+        // procedural UDF / model bodies are interpreted by their respective
+        // adapters (`ProceduralUdfFunction`, `ProceduralModelFunction`) and
+        // never reach here. So any function call we find with a non-`None`
+        // body-scope requirement is unambiguously out of context: refuse it
+        // with a clear, source-pointing error before any operator is built
+        // (and before any rows are scanned).
+        BodyScopeGate.EnforceForQuery(query, _functionRegistry);
+
         IQueryOperator op = query switch
         {
             SelectQueryExpression select => Plan(select.Statement),

@@ -85,6 +85,31 @@ public sealed class CatalogManifestBuilderTests : ServiceTestBase
     }
 
     [Fact]
+    public void Build_BodyScopedFunction_ExcludedFromManifest()
+    {
+        // infer() is body-scoped (only callable inside CREATE MODEL bodies).
+        // It must NOT appear in the language-server manifest — surfacing it
+        // in completion outside a model body would mislead. Discoverability
+        // stays via datum_catalog.functions.body_scope; the plan-time gate
+        // refuses out-of-context call sites if anyone types it by hand.
+        TableCatalog catalog = CreateCatalog();
+        FunctionRegistry functions = new();
+        functions.RegisterScalar<UpperFunction>();
+        functions.RegisterScalar<DatumIngest.Functions.InferFunction>();
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, functions);
+
+        Assert.DoesNotContain(
+            manifest.Functions,
+            f => f.Name.Equals("infer", StringComparison.OrdinalIgnoreCase));
+        // upper() (BodyScope = None) still surfaces — sanity check that
+        // the filter only excludes body-scoped entries.
+        Assert.Contains(
+            manifest.Functions,
+            f => f.Name.Equals("upper", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Build_NoModelCatalog_ModelsIsNull()
     {
         // Plain catalog with no ModelCatalog attached → manifest carries no

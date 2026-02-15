@@ -314,6 +314,38 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     // ───────────────────── infer() runtime bridge (Phase 3b) ─────────────────────
 
     [Fact]
+    public void Infer_OutsideModelBody_ThrowsAtPlanTime()
+    {
+        // The plan-time gate should refuse infer() in any non-CREATE-MODEL
+        // context — the runtime "no CurrentModel frame" guard stays as a
+        // backstop, but users should hit the friendly error before any
+        // rows are scanned.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"], [new object?[] { 1.0f }]));
+
+        Exception ex = Assert.ThrowsAny<Exception>(
+            () => catalog.Plan("SELECT infer(v) FROM data"));
+        Assert.Contains("CREATE", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MODEL", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Infer_InNestedSubquery_ThrowsAtPlanTime()
+    {
+        // Lock that the gate isn't tricked by nesting — a subquery's
+        // expression resolver still walks function calls.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"], [new object?[] { 1.0f }]));
+
+        Assert.ThrowsAny<Exception>(
+            () => catalog.Plan("SELECT (SELECT infer(v) FROM data) FROM data"));
+    }
+
+    [Fact]
     public async Task Infer_FromModelBody_RoundTripsThroughBoundSession()
     {
         // The smallest viable infer() shape: single Float32 input, single

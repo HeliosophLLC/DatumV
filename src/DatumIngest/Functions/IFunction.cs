@@ -35,4 +35,13 @@ public interface IFunction
     /// matching variant and resolve the result kind.
     /// </summary>
     static abstract IReadOnlyList<FunctionSignatureVariant> Signatures { get; }
+
+    /// <summary>
+    /// Procedural context required for the function to be callable.
+    /// Defaults to <see cref="BodyScopeRequirement.None"/> (callable
+    /// anywhere); body-scoped functions like <c>infer()</c> override to
+    /// <see cref="BodyScopeRequirement.ModelBody"/> so the plan-time gate
+    /// can refuse out-of-context call sites.
+    /// </summary>
+    static virtual BodyScopeRequirement BodyScope => BodyScopeRequirement.None;
 }
