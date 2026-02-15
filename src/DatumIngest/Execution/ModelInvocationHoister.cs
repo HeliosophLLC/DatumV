@@ -57,7 +57,7 @@ public static class ModelInvocationHoister
         Expression expression,
         ModelCatalog catalog)
     {
-        ModelHoistCollector collector = new();
+        ModelHoistCollector collector = new(catalog);
         collector.Visit(expression);
 
         if (collector.HoistedOrder.Count == 0)
@@ -169,7 +169,7 @@ public static class ModelInvocationHoister
         ModelHoistCollector[] perOpCollectors = new ModelHoistCollector[chain.Count];
         for (int i = 0; i < chain.Count; i++)
         {
-            ModelHoistCollector c = new();
+            ModelHoistCollector c = new(catalog);
             VisitChainOperator(chain[i], c);
             perOpCollectors[i] = c;
         }
@@ -473,7 +473,7 @@ public static class ModelInvocationHoister
     private static IQueryOperator HoistProject(
         ProjectOperator project, IQueryOperator hoistedSource, ModelCatalog catalog)
     {
-        ModelHoistCollector collector = new();
+        ModelHoistCollector collector = new(catalog);
 
         // Walk LET binding bodies first — they evaluate before projection columns,
         // and a model call inside a LET body is just as valid a hoist target as
@@ -883,7 +883,7 @@ public static class ModelInvocationHoister
     private static IQueryOperator HoistFilter(
         FilterOperator filter, IQueryOperator hoistedSource, ModelCatalog catalog)
     {
-        ModelHoistCollector collector = new();
+        ModelHoistCollector collector = new(catalog);
         collector.Visit(filter.Predicate);
 
         if (collector.HoistedOrder.Count == 0)
@@ -908,7 +908,7 @@ public static class ModelInvocationHoister
     private static IQueryOperator HoistGroupBy(
         GroupByOperator group, IQueryOperator hoistedSource, ModelCatalog catalog)
     {
-        ModelHoistCollector collector = new();
+        ModelHoistCollector collector = new(catalog);
         foreach (Expression key in group.GroupByExpressions)
         {
             collector.Visit(key);
@@ -956,7 +956,7 @@ public static class ModelInvocationHoister
     private static IQueryOperator HoistWindow(
         WindowOperator window, IQueryOperator hoistedSource, ModelCatalog catalog)
     {
-        ModelHoistCollector collector = new();
+        ModelHoistCollector collector = new(catalog);
         foreach (WindowColumn wc in window.WindowColumns)
         {
             foreach (Expression arg in wc.ArgumentExpressions) collector.Visit(arg);
@@ -1009,7 +1009,7 @@ public static class ModelInvocationHoister
     private static IQueryOperator HoistOrderBy(
         OrderByOperator orderBy, IQueryOperator hoistedSource, ModelCatalog catalog)
     {
-        ModelHoistCollector collector = new();
+        ModelHoistCollector collector = new(catalog);
         foreach (OrderByItem item in orderBy.OrderByItems)
         {
             collector.Visit(item.Expression);
@@ -1048,6 +1048,7 @@ public static class ModelInvocationHoister
     /// </summary>
     private sealed class ModelHoistCollector
     {
+        private readonly ModelCatalog _catalog;
         private readonly Dictionary<string, string> _fingerprintToColumn =
             new(StringComparer.Ordinal);
 
@@ -1056,11 +1057,16 @@ public static class ModelInvocationHoister
 
         public List<FunctionCallExpression> HoistedOrder { get; } = new();
 
+        public ModelHoistCollector(ModelCatalog catalog)
+        {
+            _catalog = catalog;
+        }
+
         public void Visit(Expression expr)
         {
             switch (expr)
             {
-                case FunctionCallExpression fn when IsModelCall(fn):
+                case FunctionCallExpression fn when IsHoistableModelCall(fn, _catalog):
                     // Post-order: visit children FIRST so any nested model calls
                     // get appended to HoistedOrder before this one. The order in
                     // HoistedOrder dictates operator stacking — the first entry
@@ -1317,6 +1323,24 @@ public static class ModelInvocationHoister
 
     private static bool IsModelCall(FunctionCallExpression fn)
         => string.Equals(fn.SchemaName, ModelSchema, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A <c>models.*</c> call is hoistable only when the named model is in
+    /// the built-in <see cref="ModelCatalog"/>. SQL-defined models
+    /// (registered via <c>CREATE MODEL</c> into <c>TableCatalog.DeclaredModels</c>)
+    /// don't satisfy <see cref="ModelInvocationOperator"/>'s contract — it
+    /// expects an <c>IModel</c> with batched <c>InferBatchAsync</c>,
+    /// residency leases, and an <c>OutputFields</c> shape; SQL-defined
+    /// models are per-row <c>IScalarFunction</c>s whose bound sessions
+    /// live on the descriptor. Treating them as non-hoistable lets the
+    /// scalar pipeline route <c>SELECT models.&lt;sql_defined&gt;(...)</c>
+    /// through the registered <c>ProceduralModelFunction</c> adapter
+    /// (Phase 3a). The trade-off is that we lose CSE + batched dispatch
+    /// for SQL-defined models — see the project memo's follow-up for
+    /// when batching here becomes a measured need.
+    /// </summary>
+    private static bool IsHoistableModelCall(FunctionCallExpression fn, ModelCatalog catalog)
+        => IsModelCall(fn) && catalog.TryGetEntry(StripNamespace(fn.FunctionName)) is not null;
 
     /// <summary>
     /// Post-S7b the parser splits <c>models.X(...)</c> into

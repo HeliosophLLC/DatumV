@@ -3607,7 +3607,11 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, bool> CreateModelPrefix =
         (from createKw in Token.EqualTo(SqlToken.Create)
          from orReplace in OrReplaceParser
-         from modelKw in Token.EqualTo(SqlToken.Model)
+         // MODEL is a contextual identifier (mirrors USING) — keeping it
+         // as a regular identifier outside this position lets tables,
+         // columns, and aliases named `model` continue to parse.
+         from modelKw in Token.EqualTo(SqlToken.Identifier)
+             .Where(t => GetTokenText(t).Equals("MODEL", StringComparison.OrdinalIgnoreCase), "MODEL")
          select orReplace)
         .Try();
 
@@ -3708,7 +3712,10 @@ public static class SqlParser
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> DropModelParser =
         from dropKw in Token.EqualTo(SqlToken.Drop)
-        from modelKw in Token.EqualTo(SqlToken.Model)
+        // MODEL is a contextual identifier here for the same reason as
+        // CreateModelPrefix — see the comment there.
+        from modelKw in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => GetTokenText(t).Equals("MODEL", StringComparison.OrdinalIgnoreCase), "MODEL")
         from ifExists in IfExistsParser
         from qualifiedName in QualifiedTableNameParser
         select (Statement)new DropModelStatement(

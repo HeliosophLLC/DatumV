@@ -331,15 +331,6 @@ public enum SqlToken
     /// <summary>The PROCEDURE keyword (CREATE/DROP PROCEDURE DDL).</summary>
     Procedure,
 
-    /// <summary>
-    /// The MODEL keyword (CREATE/DROP MODEL DDL — declares a SQL-bodied
-    /// ONNX-bound function). Distinct from FUNCTION because the engine
-    /// loads ONNX sessions at CREATE-time and binds them to the body's
-    /// <c>infer()</c> calls, and because MODEL declarations land in the
-    /// <c>system.models</c> registry rather than <c>system.udfs</c>.
-    /// </summary>
-    Model,
-
     /// <summary>The RETURNS keyword (CREATE FUNCTION return-type annotation).</summary>
     Returns,
 

@@ -395,7 +395,14 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("IF"), SqlToken.If, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("FUNCTION"), SqlToken.Function, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("PROCEDURE"), SqlToken.Procedure, requireDelimiters: true)
-            .Match(Span.EqualToIgnoreCase("MODEL"), SqlToken.Model, requireDelimiters: true)
+            // MODEL is intentionally NOT a hard keyword — it's recognized
+            // contextually inside CreateModelPrefix / DropModelParser via the
+            // same Identifier+Where pattern used for USING. Keeping `model`
+            // as a usable identifier matters: existing tests and user
+            // schemas freely use it as a column or table name (e.g.
+            // `CREATE TABLE model (...)`, `JOIN model AS m`). A hard
+            // keyword here was a regression — see the failing
+            // UpdateValidationTests / DdlParsingTests that surfaced it.
             .Match(Span.EqualToIgnoreCase("RETURNS"), SqlToken.Returns, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("RETURN"), SqlToken.Return, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("PURE"), SqlToken.Pure, requireDelimiters: true)

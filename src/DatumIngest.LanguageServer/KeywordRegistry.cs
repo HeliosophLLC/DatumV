@@ -422,7 +422,6 @@ internal static class KeywordRegistry
         [SqlToken.If] = ["IF EXISTS"],
         [SqlToken.Function] = ["FUNCTION"],
         [SqlToken.Procedure] = ["PROCEDURE"],
-        [SqlToken.Model] = ["MODEL"],
         [SqlToken.Returns] = [],        // Component: part of CREATE FUNCTION ... RETURNS
         [SqlToken.Returning] = [],      // Component: part of INSERT ... RETURNING (surface as standalone completion is a follow-up)
         [SqlToken.Call] = ["CALL"],

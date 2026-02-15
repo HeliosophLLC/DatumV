@@ -726,6 +726,12 @@ internal sealed class RoutineRegistrar
         ModelDescriptor? displaced = _catalog.DeclaredModels.Register(
             descriptor, replace: create.OrReplace);
 
+        // Wire the scalar dispatcher so `SELECT models.softmax_test(...)`
+        // resolves to this model's body. Same pattern as the UDF adapter
+        // path: the function registry holds the adapter under the model's
+        // qualified name; OR REPLACE flips the entry atomically.
+        RegisterModelAdapter(descriptor, replace: create.OrReplace);
+
         // OR REPLACE: dispose the previous descriptor's sessions after the
         // new one is in place. In-flight queries holding a reference to the
         // displaced descriptor will keep running on the now-disposed
@@ -769,6 +775,11 @@ internal sealed class RoutineRegistrar
             }
             return;
         }
+
+        // Drop the scalar adapter so subsequent SELECT calls fail with a
+        // clean "not registered" error rather than dispatching into a
+        // descriptor whose sessions are about to be disposed.
+        _functions.UnregisterScalar(qn.ToString());
 
         DisposeSessions(removed);
     }
@@ -815,6 +826,65 @@ internal sealed class RoutineRegistrar
                     $"Failed to dispose session for model '{descriptor.QualifiedName}': {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// Registers (or replaces) the <see cref="ProceduralModelFunction"/>
+    /// adapter for <paramref name="descriptor"/> in the scalar function
+    /// registry under the model's qualified name (always
+    /// <c>models.NAME</c>). Once registered, <c>SELECT models.X(...)</c>
+    /// dispatches into the body via the standard scalar pipeline.
+    /// </summary>
+    private void RegisterModelAdapter(ModelDescriptor descriptor, bool replace)
+    {
+        ProceduralModelFunction adapter = new(descriptor, _functions);
+        FunctionDescriptor catalogDescriptor = BuildModelFunctionDescriptor(descriptor);
+        _functions.RegisterScalarInstance(
+            descriptor.QualifiedName.ToString(),
+            adapter,
+            descriptor: catalogDescriptor,
+            replace: replace);
+    }
+
+    /// <summary>
+    /// Synthesises a <see cref="FunctionDescriptor"/> for a SQL-defined
+    /// model so the type resolver can read its return shape (including
+    /// <c>Array&lt;T&gt;</c> returns) via the standard per-signature
+    /// path. Mirrors the UDF analog
+    /// (<see cref="BuildProceduralDescriptor(UdfDescriptor)"/>): parameter
+    /// kinds use <see cref="DataKindMatcher.Any"/> because the adapter
+    /// does its own arity check; the synthesised signature carries the
+    /// return rule, not gating logic.
+    /// </summary>
+    private static FunctionDescriptor BuildModelFunctionDescriptor(ModelDescriptor model)
+    {
+        DataKind returnKind = DataKind.String;
+        bool returnIsArray = false;
+        if (model.ReturnTypeName is not null)
+        {
+            TypeAnnotationResolver.TryParse(model.ReturnTypeName, out returnKind, out returnIsArray);
+        }
+
+        ReturnTypeRule returnRule = returnIsArray
+            ? ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(returnKind))
+            : ReturnTypeRule.Constant(returnKind);
+
+        ParameterSpec[] parameters = new ParameterSpec[model.Parameters.Count];
+        for (int i = 0; i < model.Parameters.Count; i++)
+        {
+            UdfParameter p = model.Parameters[i];
+            parameters[i] = new ParameterSpec(p.Name, DataKindMatcher.Any, IsOptional: p.Default is not null);
+        }
+
+        return new FunctionDescriptor(
+            PrimaryName: model.Name,
+            Aliases: Array.Empty<string>(),
+            Category: FunctionCategory.Utility,
+            Description: $"SQL-defined model {model.QualifiedName}.",
+            Signatures:
+            [
+                new FunctionSignatureVariant(parameters, VariadicTrailing: null, ReturnType: returnRule),
+            ]);
     }
 
     // ───────────────────── Procedures ─────────────────────
