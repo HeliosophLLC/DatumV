@@ -500,6 +500,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 _routines.ApplyDropProcedure(drop);
                 return EmptyQueryPlan.Instance;
 
+            case CreateModelStatement createModel:
+                await _routines.ApplyCreateModelAsync(createModel, sourceText).ConfigureAwait(false);
+                return EmptyQueryPlan.Instance;
+
+            case DropModelStatement dropModel:
+                _routines.ApplyDropModel(dropModel);
+                return EmptyQueryPlan.Instance;
+
             case CallStatement call:
                 return PlanCall(call);
 
@@ -2222,6 +2230,38 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
     }
     private Models.ModelCatalog? _modelCatalog;
+
+    /// <summary>
+    /// Process-scoped registry of SQL-defined models — entries created by
+    /// <c>CREATE MODEL</c>. Parallel to <see cref="UdfRegistry"/>; surfaced
+    /// separately so <c>system.models</c> stays distinct from
+    /// <c>system.udfs</c>. Inherited from a parent catalog when nested so
+    /// child catalogs see the same registrations without duplicating them.
+    /// </summary>
+    public ModelRegistry DeclaredModels => Parent?.DeclaredModels ?? _declaredModels;
+    private readonly ModelRegistry _declaredModels = new();
+
+    /// <summary>
+    /// The inference dispatcher used by <c>CREATE MODEL</c> to load ONNX
+    /// sessions at registration time. <see langword="null"/> when the host
+    /// has not wired an inference backend — in that case <c>CREATE MODEL</c>
+    /// throws a clear error rather than silently failing later. Inherited
+    /// from a parent catalog when nested.
+    /// </summary>
+    public Inference.IInferenceDispatcher? InferenceDispatcher
+    {
+        get => _inferenceDispatcher ?? Parent?.InferenceDispatcher;
+        set
+        {
+            if (Parent is not null && value is not null)
+            {
+                throw new InvalidOperationException(
+                    "InferenceDispatcher cannot be set on a nested table catalog — set it on the root.");
+            }
+            _inferenceDispatcher = value;
+        }
+    }
+    private Inference.IInferenceDispatcher? _inferenceDispatcher;
 
     /// <summary>
     /// Optional tracer for <c>models.X(...)</c> invocations. Set by hosts

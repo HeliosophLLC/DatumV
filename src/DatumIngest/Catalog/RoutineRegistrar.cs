@@ -605,6 +605,218 @@ internal sealed class RoutineRegistrar
             SourceText: text);
     }
 
+    // ───────────────────── Models ─────────────────────
+
+    /// <summary>
+    /// Applies a <c>CREATE MODEL</c> statement: resolves the
+    /// <c>USING</c> path, asks the inference dispatcher to load the
+    /// bundle (eagerly — failures surface at CREATE-time rather than at
+    /// the first call site), builds a <see cref="ModelDescriptor"/>, and
+    /// registers it under the catalog's <see cref="TableCatalog.DeclaredModels"/>.
+    /// Disposes any sessions previously bound under the same name when
+    /// <c>OR REPLACE</c> is in effect.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>USING path resolution.</strong>
+    /// <list type="bullet">
+    ///   <item><description>Paths prefixed <c>file://</c> are treated as
+    ///   absolute (the prefix is stripped). Useful for tests and
+    ///   developer workflows where the ONNX file lives outside the
+    ///   host's models directory.</description></item>
+    ///   <item><description>All other paths are resolved against the
+    ///   host's model directory (taken from
+    ///   <c>TableCatalog.Models.ModelDirectory</c>). Throws when no
+    ///   <see cref="DatumIngest.Models.ModelCatalog"/> is configured —
+    ///   either supply <c>file://</c> or wire the model catalog before
+    ///   issuing <c>CREATE MODEL</c>.</description></item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// <strong>Persistence.</strong> SQL-defined models are not
+    /// persisted across process restarts in v1. The bound inference
+    /// sessions hold native handles that would need a re-load on
+    /// rehydrate; rather than carry that complexity now, models stay
+    /// process-scoped. Users re-issue <c>CREATE MODEL</c> after a
+    /// restart.
+    /// </para>
+    /// </remarks>
+    /// <summary>
+    /// The fixed schema all SQL-defined models live under. Built-in
+    /// (ONNX / LlamaSharp / etc.) models also surface from this schema in
+    /// <c>system.models</c>, so models are always addressable as
+    /// <c>models.X</c> regardless of origin. CREATE MODEL refuses any other
+    /// schema qualifier.
+    /// </summary>
+    private const string ModelsSchema = "models";
+
+    public async Task ApplyCreateModelAsync(
+        CreateModelStatement create, string? sourceText = null)
+    {
+        ValidateDefaultsContiguous(create.Parameters, $"CREATE MODEL {create.Name}");
+
+        // Schema lockdown. CREATE MODEL always lands in `models`; explicit
+        // qualifiers must match (case-insensitively) or be absent. This
+        // mirrors how built-in models register — every model in the
+        // catalog lives at `models.X`, and CREATE MODEL inherits that
+        // namespacing rather than letting users scatter declarations
+        // across `public`, custom schemas, etc.
+        if (create.SchemaName is not null &&
+            !string.Equals(create.SchemaName, ModelsSchema, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"CREATE MODEL {create.SchemaName}.{create.Name}: models must live in the " +
+                $"'{ModelsSchema}' schema. Use 'CREATE MODEL {create.Name}' (lands in " +
+                $"'{ModelsSchema}' implicitly) or 'CREATE MODEL {ModelsSchema}.{create.Name}' " +
+                "(equivalent explicit form).");
+        }
+
+        if (_catalog.InferenceDispatcher is not Inference.IInferenceDispatcher dispatcher)
+        {
+            throw new InvalidOperationException(
+                $"CREATE MODEL {create.Name}: no inference dispatcher is configured for this host. " +
+                "Wire an IInferenceDispatcher via TableCatalog.InferenceDispatcher before issuing CREATE MODEL.");
+        }
+
+        QualifiedName qn = new(ModelsSchema, create.Name);
+
+        if (create.IfNotExists && _catalog.DeclaredModels.TryGet(qn, out _))
+        {
+            return;
+        }
+
+        string resolvedPath = ResolveUsingPath(create.UsingPath, create.Name);
+        if (!File.Exists(resolvedPath))
+        {
+            throw new FileNotFoundException(
+                $"CREATE MODEL {create.Name}: ONNX file not found at '{resolvedPath}' " +
+                $"(USING '{create.UsingPath}'). " +
+                "Verify the path is correct relative to the host's model directory, " +
+                "or prefix with 'file://' for an absolute path.",
+                resolvedPath);
+        }
+
+        // Single-session bundle for v1. Multi-session (Florence-2 etc.) lands
+        // when USING points at a directory + bundle.json.
+        Inference.BundleManifest bundle = new(
+            BundleId: $"{qn} (USING '{create.UsingPath}')",
+            Sessions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["default"] = resolvedPath,
+            },
+            PreferredBackends: Array.Empty<Inference.InferenceBackendId>());
+
+        IReadOnlyDictionary<string, Inference.IInferenceSession> sessions =
+            await dispatcher.LoadBundleAsync(
+                bundle,
+                new Inference.InferencePreferences(),
+                CancellationToken.None).ConfigureAwait(false);
+
+        ModelDescriptor descriptor = new(
+            SchemaName: qn.Schema,
+            Name: qn.Name,
+            Parameters: create.Parameters,
+            ReturnTypeName: create.ReturnTypeName,
+            UsingPath: create.UsingPath,
+            StatementBody: create.StatementBody,
+            BoundSessions: sessions,
+            ReturnIsNotNull: create.ReturnIsNotNull,
+            SourceText: sourceText ?? $"CREATE MODEL {qn}");
+
+        ModelDescriptor? displaced = _catalog.DeclaredModels.Register(
+            descriptor, replace: create.OrReplace);
+
+        // OR REPLACE: dispose the previous descriptor's sessions after the
+        // new one is in place. In-flight queries holding a reference to the
+        // displaced descriptor will keep running on the now-disposed
+        // sessions until they finish — same behaviour as OR REPLACE for
+        // UDF macros where in-flight inlined references keep the old AST
+        // alive until the query completes.
+        if (displaced is not null)
+        {
+            DisposeSessions(displaced);
+        }
+    }
+
+    /// <summary>
+    /// Applies a <c>DROP MODEL</c> statement: removes the descriptor from
+    /// the registry and disposes its bound inference sessions.
+    /// </summary>
+    public void ApplyDropModel(DropModelStatement drop)
+    {
+        // Same schema lockdown as CREATE MODEL: explicit qualifiers must
+        // be the `models` schema or absent. Lookups always go straight to
+        // `models` — there's no point walking search_path when models
+        // can only exist in one place.
+        if (drop.SchemaName is not null &&
+            !string.Equals(drop.SchemaName, ModelsSchema, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"DROP MODEL {drop.SchemaName}.{drop.Name}: models live exclusively in the " +
+                $"'{ModelsSchema}' schema. Use 'DROP MODEL {drop.Name}' or " +
+                $"'DROP MODEL {ModelsSchema}.{drop.Name}'.");
+        }
+
+        QualifiedName qn = new(ModelsSchema, drop.Name);
+
+        ModelDescriptor? removed = _catalog.DeclaredModels.Unregister(qn);
+        if (removed is null)
+        {
+            if (!drop.IfExists)
+            {
+                throw new InvalidOperationException(
+                    $"Model '{qn}' is not registered. Use DROP MODEL IF EXISTS to make this a no-op.");
+            }
+            return;
+        }
+
+        DisposeSessions(removed);
+    }
+
+    /// <summary>
+    /// Resolves a <c>USING</c> path supplied to a <c>CREATE MODEL</c>
+    /// statement against the host's model directory, honouring the
+    /// <c>file://</c> escape for absolute paths.
+    /// </summary>
+    private string ResolveUsingPath(string usingPath, string modelName)
+    {
+        if (usingPath.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            return usingPath["file://".Length..];
+        }
+
+        // Relative path: resolve against ModelCatalog.ModelDirectory.
+        if (_catalog.Models is null)
+        {
+            throw new InvalidOperationException(
+                $"CREATE MODEL {modelName}: USING '{usingPath}' is a relative path but no " +
+                "ModelCatalog is configured on this host. Use a 'file://'-prefixed absolute " +
+                "path, or wire TableCatalog.Models before issuing CREATE MODEL.");
+        }
+
+        return Path.GetFullPath(Path.Combine(_catalog.Models.ModelDirectory, usingPath));
+    }
+
+    /// <summary>
+    /// Best-effort disposal of every bound session in a descriptor.
+    /// Disposal failures are logged via <see cref="Console.Error"/>
+    /// rather than rethrown — the descriptor is already out of the
+    /// registry and a thrown exception here would mask the real reason
+    /// the descriptor was being released.
+    /// </summary>
+    private static void DisposeSessions(ModelDescriptor descriptor)
+    {
+        foreach (Inference.IInferenceSession session in descriptor.BoundSessions.Values)
+        {
+            try { session.Dispose(); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Failed to dispose session for model '{descriptor.QualifiedName}': {ex.Message}");
+            }
+        }
+    }
+
     // ───────────────────── Procedures ─────────────────────
 
     /// <summary>
