@@ -4,6 +4,7 @@
   },
   "nav": {
     "chat": "Chat",
+    "query": "Query editor",
     "models": "Models",
     "settings": "Settings"
   },

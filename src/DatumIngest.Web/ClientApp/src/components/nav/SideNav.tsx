@@ -1,5 +1,5 @@
 import { useSnapshot } from 'valtio';
-import { MessageSquare, Boxes, Settings as SettingsIcon } from 'lucide-react';
+import { MessageSquare, SquareTerminal, Boxes, Settings as SettingsIcon } from 'lucide-react';
 import { navState, setView, type ActiveView } from '@/state/nav';
 import { cn } from '@/lib/utils';
 
@@ -21,6 +21,7 @@ interface NavItem {
 
 const PRIMARY: readonly NavItem[] = [
   { id: 'chat', icon: MessageSquare, labelKey: 'nav.chat' },
+  { id: 'query', icon: SquareTerminal, labelKey: 'nav.query' },
   { id: 'models', icon: Boxes, labelKey: 'nav.models' },
 ];
 

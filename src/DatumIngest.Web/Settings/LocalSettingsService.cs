@@ -22,7 +22,8 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
         Theme: ThemePreference.System,
         ChromeStyle: ChromeStyle.Auto,
         Locale: "system",
-        ModelsDirectory: "");
+        ModelsDirectory: "",
+        Animations: true);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -52,7 +53,8 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
             Theme: patch.Theme ?? current.Theme,
             ChromeStyle: patch.ChromeStyle ?? current.ChromeStyle,
             Locale: patch.Locale ?? current.Locale,
-            ModelsDirectory: patch.ModelsDirectory ?? current.ModelsDirectory);
+            ModelsDirectory: patch.ModelsDirectory ?? current.ModelsDirectory,
+            Animations: patch.Animations ?? current.Animations);
 
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
 

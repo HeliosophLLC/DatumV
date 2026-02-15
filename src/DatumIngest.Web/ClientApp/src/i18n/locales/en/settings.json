@@ -10,7 +10,10 @@
     "chromeAuto": "Auto",
     "chromeWindows": "Windows",
     "chromeMacos": "macOS",
-    "chromeLinux": "Linux"
+    "chromeLinux": "Linux",
+    "animations": "Animations",
+    "animationsOn": "On",
+    "animationsOff": "Off"
   },
   "language": {
     "title": "Language",

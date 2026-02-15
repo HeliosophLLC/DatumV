@@ -3,6 +3,7 @@ import type enCommon from './locales/en/common.json';
 import type enDialogs from './locales/en/dialogs.json';
 import type enHome from './locales/en/home.json';
 import type enModels from './locales/en/models.json';
+import type enQuery from './locales/en/query.json';
 import type enSettings from './locales/en/settings.json';
 
 // Module augmentation: makes `t('window.close')` etc. type-checked and
@@ -17,6 +18,7 @@ declare module 'i18next' {
       home: typeof enHome;
       chat: typeof enChat;
       models: typeof enModels;
+      query: typeof enQuery;
       settings: typeof enSettings;
       dialogs: typeof enDialogs;
     };

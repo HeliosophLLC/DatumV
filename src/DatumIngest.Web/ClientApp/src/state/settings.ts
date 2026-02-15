@@ -21,6 +21,10 @@ interface SettingsState {
   // cascade" ($DATUM_MODELS env → %LOCALAPPDATA%/DatumIngest/models). Read
   // once at startup; runtime changes require a restart to take effect.
   modelsDirectory: string;
+  // When false, the shell suppresses transition animations (chat dock
+  // slide, future page transitions). Honours a user who prefers reduced
+  // motion or just dislikes the movement.
+  animations: boolean;
 }
 
 export const settingsState = proxy<SettingsState>({
@@ -28,6 +32,7 @@ export const settingsState = proxy<SettingsState>({
   chromeStyle: 'auto',
   locale: 'system',
   modelsDirectory: '',
+  animations: true,
 });
 
 export async function refreshSettings(): Promise<void> {
@@ -50,6 +55,10 @@ export async function updateSettings(patch: SettingsPatchDto): Promise<void> {
 
 export function setChromeStyle(chromeStyle: ChromeStyle): Promise<void> {
   return updateSettings({ chromeStyle });
+}
+
+export function setAnimations(animations: boolean): Promise<void> {
+  return updateSettings({ animations });
 }
 
 export function setModelsDirectory(modelsDirectory: string): Promise<void> {

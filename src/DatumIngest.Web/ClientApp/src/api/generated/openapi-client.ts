@@ -534,6 +534,7 @@ export interface SettingsDto {
     chromeStyle?: ChromeStyle;
     locale?: string;
     modelsDirectory?: string;
+    animations?: boolean;
 }
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -545,6 +546,7 @@ export interface SettingsPatchDto {
     chromeStyle?: ChromeStyle | undefined;
     locale?: string | undefined;
     modelsDirectory?: string | undefined;
+    animations?: boolean | undefined;
 }
 
 export interface FileResponse {

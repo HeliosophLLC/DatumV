@@ -10,7 +10,7 @@ import { proxy } from 'valtio';
 // becomes a derived value of `location` and the actions go away. Until
 // then, this is the source of truth.
 
-export type ActiveView = 'chat' | 'models' | 'settings';
+export type ActiveView = 'chat' | 'query' | 'models' | 'settings';
 
 interface NavState {
   view: ActiveView;

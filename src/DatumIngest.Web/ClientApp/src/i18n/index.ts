@@ -6,6 +6,7 @@ import enCommon from './locales/en/common.json';
 import enDialogs from './locales/en/dialogs.json';
 import enHome from './locales/en/home.json';
 import enModels from './locales/en/models.json';
+import enQuery from './locales/en/query.json';
 import enSettings from './locales/en/settings.json';
 
 // Adding a locale = (1) ship a folder under locales/<tag>/, (2) add an entry
@@ -21,6 +22,7 @@ const resources = {
     home: enHome,
     chat: enChat,
     models: enModels,
+    query: enQuery,
     settings: enSettings,
     dialogs: enDialogs,
   },
@@ -34,7 +36,7 @@ i18next
     lng: FallbackLocale,
     fallbackLng: FallbackLocale,
     defaultNS: 'common',
-    ns: ['common', 'home', 'chat', 'models', 'settings', 'dialogs'],
+    ns: ['common', 'home', 'chat', 'models', 'query', 'settings', 'dialogs'],
     // React already escapes interpolated values.
     interpolation: { escapeValue: false },
     returnNull: false,

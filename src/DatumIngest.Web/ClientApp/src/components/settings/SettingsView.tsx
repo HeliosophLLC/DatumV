@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import {
   settingsState,
+  setAnimations,
   setChromeStyle,
   setModelsDirectory,
   type ChromeStyle,
@@ -16,6 +17,7 @@ import { cn } from '@/lib/utils';
 const THEMES: readonly ThemePreference[] = ['system', 'light', 'dark'];
 const CHROMES: readonly ChromeStyle[] = ['auto', 'windows', 'macos', 'linux'];
 const LOCALES: readonly string[] = ['system', 'en'];
+const ANIMATIONS: readonly ('on' | 'off')[] = ['on', 'off'];
 
 // Settings page. Sections: Appearance, Language, Models, About. Each
 // section is a labeled row + control. Models directory is the one
@@ -56,6 +58,16 @@ export function SettingsView() {
               onChange={(v) => void setChromeStyle(v)}
               labelFor={(v) =>
                 t(`appearance.chrome${capitalize(v)}` as 'appearance.chromeAuto')
+              }
+            />
+          </Field>
+          <Field label={t('appearance.animations')}>
+            <ChipGroup
+              options={ANIMATIONS}
+              value={settings.animations ? 'on' : 'off'}
+              onChange={(v) => void setAnimations(v === 'on')}
+              labelFor={(v) =>
+                t(`appearance.animations${capitalize(v)}` as 'appearance.animationsOn')
               }
             />
           </Field>

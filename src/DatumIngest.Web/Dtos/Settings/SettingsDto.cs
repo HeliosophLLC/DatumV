@@ -11,7 +11,8 @@ public sealed record SettingsDto(
     // cascade ($DATUM_MODELS env var → %LOCALAPPDATA%/DatumIngest/models).
     // When non-empty, takes precedence over both. Read once at startup by
     // StartupSettingsLoader; runtime changes require a restart to apply.
-    string ModelsDirectory);
+    string ModelsDirectory,
+    bool Animations);
 
 // Partial document for PATCH /api/settings. All fields nullable; null means
 // "don't change this field." Server merges with the current document and
@@ -20,4 +21,5 @@ public sealed record SettingsPatchDto(
     ThemePreference? Theme = null,
     ChromeStyle? ChromeStyle = null,
     string? Locale = null,
-    string? ModelsDirectory = null);
+    string? ModelsDirectory = null,
+    bool? Animations = null);
