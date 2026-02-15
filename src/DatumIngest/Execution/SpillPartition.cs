@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 
@@ -21,9 +22,9 @@ namespace DatumIngest.Execution;
 /// land in the same arena, so equality comparison "just works" without per-side copies.
 /// </para>
 /// <para>
-/// Reading spilled rows back via <see cref="ReadSpilledBuildRows"/> /
-/// <see cref="ReadSpilledProbeRows"/> drives the spiller's async replay synchronously
-/// and retains the yielded batches until <see cref="Dispose"/> — the consumer
+/// Reading spilled rows back via <see cref="ReadSpilledBuildRowsAsync"/> /
+/// <see cref="ReadSpilledProbeRowsAsync"/> drives the spiller's async replay and
+/// retains the yielded batches until <see cref="Dispose"/> — the consumer
 /// (Grace hash join) holds <see cref="Row"/> references into those batches throughout
 /// the join phase.
 /// </para>
@@ -358,20 +359,20 @@ internal sealed class SpillPartition : IDisposable
     /// Reads all spilled build-side rows. Only valid when <see cref="IsBuildSpilled"/> is true.
     /// Yielded rows reference batches retained by this partition until <see cref="Dispose"/>.
     /// </summary>
-    internal IEnumerable<Row> ReadSpilledBuildRows()
+    internal IAsyncEnumerable<Row> ReadSpilledBuildRowsAsync(CancellationToken cancellationToken)
     {
         FlushStagingToSpill(ref _buildStaging, BuildSlot);
-        return ReplaySlot(BuildSlot, _buildSchema!);
+        return ReplaySlotAsync(BuildSlot, _buildSchema!, cancellationToken);
     }
 
     /// <summary>
     /// Reads all spilled probe-side rows. Only valid when <see cref="IsProbeSpilled"/> is true.
     /// Yielded rows reference batches retained by this partition until <see cref="Dispose"/>.
     /// </summary>
-    internal IEnumerable<Row> ReadSpilledProbeRows()
+    internal IAsyncEnumerable<Row> ReadSpilledProbeRowsAsync(CancellationToken cancellationToken)
     {
         FlushStagingToSpill(ref _probeStaging, ProbeSlot);
-        return ReplaySlot(ProbeSlot, _probeSchema!);
+        return ReplaySlotAsync(ProbeSlot, _probeSchema!, cancellationToken);
     }
 
     private void FlushStagingToSpill(ref RowBatch? staging, int spillSlot)
@@ -393,7 +394,10 @@ internal sealed class SpillPartition : IDisposable
         staging = null;
     }
 
-    private IEnumerable<Row> ReplaySlot(int spillSlot, ColumnLookup outputLookup)
+    private async IAsyncEnumerable<Row> ReplaySlotAsync(
+        int spillSlot,
+        ColumnLookup outputLookup,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (_spiller is null)
         {
@@ -402,25 +406,16 @@ internal sealed class SpillPartition : IDisposable
 
         _replayBatches ??= new List<RowBatch>();
 
-        IAsyncEnumerator<RowBatch> enumerator = _spiller
+        await foreach (RowBatch batch in _spiller
             .ReplayPartitionAsync(_context, outputLookup, spillSlot)
-            .GetAsyncEnumerator(_context.CancellationToken);
-
-        try
+            .WithCancellation(cancellationToken)
+            .ConfigureAwait(false))
         {
-            while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+            _replayBatches.Add(batch);
+            for (int i = 0; i < batch.Count; i++)
             {
-                RowBatch batch = enumerator.Current;
-                _replayBatches.Add(batch);
-                for (int i = 0; i < batch.Count; i++)
-                {
-                    yield return batch[i];
-                }
+                yield return batch[i];
             }
-        }
-        finally
-        {
-            enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 

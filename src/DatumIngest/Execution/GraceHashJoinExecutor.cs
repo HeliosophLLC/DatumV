@@ -637,15 +637,15 @@ internal sealed class GraceHashJoinExecutor
                 continue;
             }
 
-            // Get build rows (from memory or disk).
-            IEnumerable<Row> buildRows = partition.IsBuildSpilled
-                ? partition.ReadSpilledBuildRows()
-                : partition.GetInMemoryBuildRows();
+            // Get build/probe rows (from memory or disk) as a unified async stream
+            // so the spilled path can replay without sync-over-async bridges.
+            IAsyncEnumerable<Row> buildRows = partition.IsBuildSpilled
+                ? partition.ReadSpilledBuildRowsAsync(context.CancellationToken)
+                : ListAsAsyncEnumerable(partition.GetInMemoryBuildRows());
 
-            // Get probe rows (from memory or disk).
-            IEnumerable<Row> probeRows = partition.IsProbeSpilled
-                ? partition.ReadSpilledProbeRows()
-                : partition.GetInMemoryProbeRows();
+            IAsyncEnumerable<Row> probeRows = partition.IsProbeSpilled
+                ? partition.ReadSpilledProbeRowsAsync(context.CancellationToken)
+                : ListAsAsyncEnumerable(partition.GetInMemoryProbeRows());
 
             // Materialize build side into a hash table for this partition.
             int buildRowEstimate = partition.IsBuildSpilled
@@ -671,7 +671,7 @@ internal sealed class GraceHashJoinExecutor
             // This avoids doubling the partition footprint with a hash table that
             // would immediately be discarded on re-partition, cutting peak memory
             // roughly in half compared to the previous post-loop check.
-            foreach (Row buildRow in buildRows)
+            await foreach (Row buildRow in buildRows.ConfigureAwait(false))
             {
                 int buildIndex = buildRowList.Count;
                 buildRowList.Add(buildRow);
@@ -770,7 +770,7 @@ internal sealed class GraceHashJoinExecutor
             DataValue[]? residualScratch = null;
             Row residualScratchRow = default;
 
-            foreach (Row probeRow in probeRows)
+            await foreach (Row probeRow in probeRows.ConfigureAwait(false))
             {
                 bool hasMatch = false;
                 List<(int Index, Row Row)>? matches = null;
@@ -951,7 +951,7 @@ internal sealed class GraceHashJoinExecutor
 
     private async IAsyncEnumerable<RowBatch> RecursivelyRepartitionAsync(
         List<Row> buildRows,
-        IEnumerable<Row> probeRows,
+        IAsyncEnumerable<Row> probeRows,
         Arena? sourceArena,
         bool useSingleKey,
         int recursionDepth,
@@ -996,7 +996,7 @@ internal sealed class GraceHashJoinExecutor
             }
 
             // Re-partition probe rows.
-            foreach (Row probeRow in probeRows)
+            await foreach (Row probeRow in probeRows.ConfigureAwait(false))
             {
                 int partitionIndex = await AssignPartitionAsync(probeRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: !buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
                 SpillPartition partition = subPartitions[partitionIndex];
@@ -1113,6 +1113,22 @@ internal sealed class GraceHashJoinExecutor
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// Wraps an in-memory row list as an <see cref="IAsyncEnumerable{Row}"/> so the
+    /// spilled and in-memory join paths can share a single <c>await foreach</c>. The
+    /// in-memory case never suspends — the iterator yields synchronously — so the
+    /// only cost is the async-iterator state-machine dispatch, which is dwarfed by
+    /// per-row key evaluation and hash insertion in the consuming loop.
+    /// </summary>
+    private static async IAsyncEnumerable<Row> ListAsAsyncEnumerable(IReadOnlyList<Row> rows)
+    {
+        for (int i = 0; i < rows.Count; i++)
+        {
+            yield return rows[i];
+        }
+        await Task.CompletedTask.ConfigureAwait(false);
     }
 
     private SpillPartition[] CreatePartitions(int count, Pool arenaPool, ExecutionContext context)

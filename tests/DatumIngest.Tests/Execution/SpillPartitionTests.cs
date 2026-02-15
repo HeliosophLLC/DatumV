@@ -79,7 +79,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     /// Verifies that spilling build rows to disk clears in-memory rows and allows round-trip reading.
     /// </summary>
     [Fact]
-    public void SpillBuildToDisk_ClearsMemoryAndSurvivesRoundTrip()
+    public async Task SpillBuildToDisk_ClearsMemoryAndSurvivesRoundTrip()
     {
         using SpillPartition partition = new(_spillDirectory, 0, CreatePool(), _ctx);
 
@@ -94,7 +94,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
         Assert.Equal(0, partition.InMemoryBuildRowCount);
         Assert.Equal(2, partition.TotalBuildRowCount);
 
-        List<Row> readBack = partition.ReadSpilledBuildRows().ToList();
+        List<Row> readBack = await ToListAsync(partition.ReadSpilledBuildRowsAsync(CancellationToken.None));
         Assert.Equal(2, readBack.Count);
         Assert.Equal(10.0f, readBack[0]["value"].AsFloat32());
         Assert.Equal(20.0f, readBack[1]["value"].AsFloat32());
@@ -104,7 +104,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     /// Verifies that rows added after spilling are written directly to disk.
     /// </summary>
     [Fact]
-    public void AddBuildRow_AfterSpill_WritesDirectlyToDisk()
+    public async Task AddBuildRow_AfterSpill_WritesDirectlyToDisk()
     {
         using SpillPartition partition = new(_spillDirectory, 0, CreatePool(), _ctx);
 
@@ -117,7 +117,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
         Assert.Equal(0, partition.InMemoryBuildRowCount);
         Assert.Equal(2, partition.TotalBuildRowCount);
 
-        List<Row> readBack = partition.ReadSpilledBuildRows().ToList();
+        List<Row> readBack = await ToListAsync(partition.ReadSpilledBuildRowsAsync(CancellationToken.None));
         Assert.Equal(2, readBack.Count);
         Assert.Equal(1.0f, readBack[0]["id"].AsFloat32());
         Assert.Equal(2.0f, readBack[1]["id"].AsFloat32());
@@ -127,7 +127,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     /// Verifies that spilling probe rows to disk clears memory and allows reading.
     /// </summary>
     [Fact]
-    public void SpillProbeToDisk_ClearsMemoryAndSurvivesRoundTrip()
+    public async Task SpillProbeToDisk_ClearsMemoryAndSurvivesRoundTrip()
     {
         using SpillPartition partition = new(_spillDirectory, 0, CreatePool(), _ctx);
 
@@ -140,7 +140,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
         Assert.Equal(0, partition.InMemoryProbeRowCount);
         Assert.Equal(2, partition.TotalProbeRowCount);
 
-        List<Row> readBack = partition.ReadSpilledProbeRows().ToList();
+        List<Row> readBack = await ToListAsync(partition.ReadSpilledProbeRowsAsync(CancellationToken.None));
         Assert.Equal(2, readBack.Count);
         Assert.Equal("alpha", readBack[0]["label"].AsString());
         Assert.Equal("beta", readBack[1]["label"].AsString());
@@ -150,7 +150,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     /// Verifies that calling SpillBuildToDisk twice is a no-op (idempotent).
     /// </summary>
     [Fact]
-    public void SpillBuildToDisk_CalledTwice_IsIdempotent()
+    public async Task SpillBuildToDisk_CalledTwice_IsIdempotent()
     {
         using SpillPartition partition = new(_spillDirectory, 0, CreatePool(), _ctx);
 
@@ -160,7 +160,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
 
         Assert.Equal(1, partition.TotalBuildRowCount);
 
-        List<Row> readBack = partition.ReadSpilledBuildRows().ToList();
+        List<Row> readBack = await ToListAsync(partition.ReadSpilledBuildRowsAsync(CancellationToken.None));
         Assert.Single(readBack);
         Assert.Equal(42.0f, readBack[0]["x"].AsFloat32());
     }
@@ -212,7 +212,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     /// Verifies that spilling an empty partition then reading back yields no rows.
     /// </summary>
     [Fact]
-    public void SpillEmptyPartition_ReadBackYieldsNoRows()
+    public async Task SpillEmptyPartition_ReadBackYieldsNoRows()
     {
         using SpillPartition partition = new(_spillDirectory, 0, CreatePool(), _ctx);
 
@@ -221,7 +221,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
         Assert.True(partition.IsBuildSpilled);
         Assert.Equal(0, partition.TotalBuildRowCount);
 
-        List<Row> readBack = partition.ReadSpilledBuildRows().ToList();
+        List<Row> readBack = await ToListAsync(partition.ReadSpilledBuildRowsAsync(CancellationToken.None));
         Assert.Empty(readBack);
     }
 
@@ -229,7 +229,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     /// Verifies that multi-column rows survive the spill round-trip with all values intact.
     /// </summary>
     [Fact]
-    public void SpillRoundTrip_MultiColumnRow_PreservesAllValues()
+    public async Task SpillRoundTrip_MultiColumnRow_PreservesAllValues()
     {
         using SpillPartition partition = new(_spillDirectory, 0, CreatePool(), _ctx);
 
@@ -240,7 +240,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
         partition.AddBuildRow(row, sourceArena: null);
         partition.SpillBuildToDisk();
 
-        List<Row> readBack = partition.ReadSpilledBuildRows().ToList();
+        List<Row> readBack = await ToListAsync(partition.ReadSpilledBuildRowsAsync(CancellationToken.None));
         Assert.Single(readBack);
         Assert.Equal(42.0f, readBack[0]["id"].AsFloat32());
         Assert.Equal("hello", readBack[0]["name"].AsString());
@@ -251,7 +251,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     /// Verifies that null values survive the spill round-trip.
     /// </summary>
     [Fact]
-    public void SpillRoundTrip_NullValues_PreservesNulls()
+    public async Task SpillRoundTrip_NullValues_PreservesNulls()
     {
         using SpillPartition partition = new(_spillDirectory, 0, CreatePool(), _ctx);
 
@@ -262,7 +262,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
         partition.AddBuildRow(row, sourceArena: null);
         partition.SpillBuildToDisk();
 
-        List<Row> readBack = partition.ReadSpilledBuildRows().ToList();
+        List<Row> readBack = await ToListAsync(partition.ReadSpilledBuildRowsAsync(CancellationToken.None));
         Assert.Single(readBack);
         Assert.True(readBack[0]["value"].IsNull);
     }
@@ -271,7 +271,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     /// Verifies that multiple partitions with different indices create separate spill files.
     /// </summary>
     [Fact]
-    public void MultiplePartitions_CreateSeparateSpillFiles()
+    public async Task MultiplePartitions_CreateSeparateSpillFiles()
     {
         Pool pool = CreatePool();
         using SpillPartition partition0 = new(_spillDirectory, 0, pool, _ctx);
@@ -283,12 +283,22 @@ public sealed class SpillPartitionTests : ServiceTestBase
         partition0.SpillBuildToDisk();
         partition1.SpillBuildToDisk();
 
-        List<Row> rows0 = partition0.ReadSpilledBuildRows().ToList();
-        List<Row> rows1 = partition1.ReadSpilledBuildRows().ToList();
+        List<Row> rows0 = await ToListAsync(partition0.ReadSpilledBuildRowsAsync(CancellationToken.None));
+        List<Row> rows1 = await ToListAsync(partition1.ReadSpilledBuildRowsAsync(CancellationToken.None));
 
         Assert.Single(rows0);
         Assert.Equal(1.0f, rows0[0]["id"].AsFloat32());
         Assert.Single(rows1);
         Assert.Equal(2.0f, rows1[0]["id"].AsFloat32());
+    }
+
+    private static async Task<List<Row>> ToListAsync(IAsyncEnumerable<Row> source)
+    {
+        List<Row> list = new();
+        await foreach (Row row in source.ConfigureAwait(false))
+        {
+            list.Add(row);
+        }
+        return list;
     }
 }
