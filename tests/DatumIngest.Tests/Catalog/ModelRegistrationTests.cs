@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Inference;
@@ -309,6 +311,44 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Contains("'models' schema", ex.Message);
     }
 
+    // ───────────────────── infer() runtime bridge (Phase 3b) ─────────────────────
+
+    [Fact]
+    public async Task Infer_FromModelBody_RoundTripsThroughBoundSession()
+    {
+        // The smallest viable infer() shape: single Float32 input, single
+        // Float32 output. Stub session doubles its input. The model body
+        // is `RETURN infer(@x)`, so calling the model with 3.0 should
+        // surface 6.0 — proving infer() resolved frame.CurrentModel,
+        // pulled the bound session, marshalled the scalar into a tensor,
+        // and unwrapped the output back to a scalar ValueRef.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        dispatcher.NextSession = StubSession.Float32Doubler();
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"], [new object?[] { 3.0f }]));
+
+        catalog.Plan(
+            $"CREATE MODEL doubler(@x Float32) RETURNS Float32 USING '{_absoluteUsingPath}' " +
+            $"AS BEGIN RETURN infer(@x) END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.doubler(v) FROM data");
+
+        List<DataValue> values = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][0]);
+            }
+        }
+        Assert.Single(values);
+        Assert.Equal(DataKind.Float32, values[0].Kind);
+        Assert.Equal(6.0f, values[0].AsFloat32());
+    }
+
     // ───────────────────── Stubs ─────────────────────
 
     /// <summary>
@@ -321,6 +361,14 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         public int LoadCallCount { get; private set; }
         public StubSession? LastSession { get; private set; }
 
+        /// <summary>
+        /// Pre-built session to hand out on the next <see cref="LoadBundleAsync"/>
+        /// call. Tests that exercise infer() set this to a <see cref="StubSession"/>
+        /// configured with a real run delegate; tests that only exercise the
+        /// registrar leave it null and get the no-op default.
+        /// </summary>
+        public StubSession? NextSession { get; set; }
+
         public IReadOnlyList<IInferenceBackend> Backends => Array.Empty<IInferenceBackend>();
 
         public ValueTask<IReadOnlyDictionary<string, IInferenceSession>> LoadBundleAsync(
@@ -329,7 +377,8 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             CancellationToken cancellationToken)
         {
             LoadCallCount++;
-            StubSession session = new();
+            StubSession session = NextSession ?? new StubSession();
+            NextSession = null;
             LastSession = session;
             IReadOnlyDictionary<string, IInferenceSession> sessions =
                 new Dictionary<string, IInferenceSession>(StringComparer.Ordinal)
@@ -347,20 +396,133 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     /// </summary>
     private sealed class StubSession : IInferenceSession
     {
+        private readonly Func<TensorBag, TensorBag>? _run;
+
+        public StubSession()
+            : this(Array.Empty<TensorSpec>(), Array.Empty<TensorSpec>(), run: null)
+        {
+        }
+
+        public StubSession(
+            IReadOnlyList<TensorSpec> inputs,
+            IReadOnlyList<TensorSpec> outputs,
+            Func<TensorBag, TensorBag>? run)
+        {
+            Inputs = inputs;
+            Outputs = outputs;
+            _run = run;
+        }
+
         public bool Disposed { get; private set; }
 
-        public IReadOnlyList<TensorSpec> Inputs => Array.Empty<TensorSpec>();
-        public IReadOnlyList<TensorSpec> Outputs => Array.Empty<TensorSpec>();
+        public IReadOnlyList<TensorSpec> Inputs { get; }
+        public IReadOnlyList<TensorSpec> Outputs { get; }
         public InferenceBackendId Backend => InferenceBackendId.OnnxRuntime;
         public InferenceDevice Device => InferenceDevice.OnnxRuntimeCpu;
         public long EstimatedResidentBytes => 0;
 
-        public TensorBag CreateInputBag()
-            => throw new NotSupportedException("Stub session does not support tensor bags.");
+        public TensorBag CreateInputBag() => new StubTensorBag();
 
         public ValueTask<TensorBag> RunAsync(TensorBag inputs, CancellationToken cancellationToken)
-            => throw new NotSupportedException("Stub session does not support inference.");
+        {
+            if (_run is null)
+            {
+                throw new NotSupportedException(
+                    "Stub session does not support inference. Configure a run delegate via the parameterised constructor.");
+            }
+            return ValueTask.FromResult(_run(inputs));
+        }
 
         public void Dispose() => Disposed = true;
+
+        /// <summary>
+        /// Single Float32-input, single Float32-output stub that doubles its
+        /// scalar input. Smallest viable shape for exercising
+        /// <c>infer()</c>'s scalar marshalling path.
+        /// </summary>
+        public static StubSession Float32Doubler() => new(
+            inputs: [new TensorSpec("input", DataKind.Float32, [1])],
+            outputs: [new TensorSpec("output", DataKind.Float32, [1])],
+            run: bag =>
+            {
+                ReadOnlySpan<float> incoming = bag["input"].AsSpan<float>();
+                float[] doubled = new float[incoming.Length];
+                for (int i = 0; i < incoming.Length; i++)
+                {
+                    doubled[i] = incoming[i] * 2f;
+                }
+                StubTensorBag output = new();
+                output.Add<float>("output", DataKind.Float32, [doubled.Length], doubled.AsSpan());
+                return output;
+            });
+    }
+
+    /// <summary>
+    /// Managed-only <see cref="TensorBag"/> for tests that exercise the
+    /// inference layer without ONNX Runtime. Stores tensor bytes in heap
+    /// arrays; <see cref="StubTensor.AsSpan{T}"/> casts them via
+    /// <see cref="MemoryMarshal"/>.
+    /// </summary>
+    private sealed class StubTensorBag : TensorBag
+    {
+        private readonly Dictionary<string, StubTensor> _tensors =
+            new(StringComparer.Ordinal);
+        private readonly List<string> _names = new();
+
+        public override int Count => _tensors.Count;
+        public override IReadOnlyList<string> Names => _names;
+        public override IInferenceTensor this[string name] => _tensors[name];
+
+        public override bool TryGet(string name, out IInferenceTensor tensor)
+        {
+            if (_tensors.TryGetValue(name, out StubTensor? hit))
+            {
+                tensor = hit;
+                return true;
+            }
+            tensor = null!;
+            return false;
+        }
+
+        public override IInferenceTensor Add<T>(
+            string name, DataKind elementKind, ReadOnlySpan<int> shape, ReadOnlySpan<T> data)
+        {
+            byte[] bytes = MemoryMarshal.AsBytes(data).ToArray();
+            StubTensor tensor = new(name, elementKind, shape.ToArray(), bytes);
+            _tensors[name] = tensor;
+            _names.Add(name);
+            return tensor;
+        }
+
+        public override void Dispose()
+        {
+            // Heap arrays — nothing to release.
+        }
+    }
+
+    private sealed class StubTensor : IInferenceTensor
+    {
+        private readonly byte[] _bytes;
+
+        public StubTensor(string name, DataKind elementKind, int[] shape, byte[] bytes)
+        {
+            Name = name;
+            ElementKind = elementKind;
+            Shape = shape;
+            _bytes = bytes;
+        }
+
+        public string Name { get; }
+        public DataKind ElementKind { get; }
+        public IReadOnlyList<int> Shape { get; }
+        public bool IsResidentOnCpu => true;
+
+        public ReadOnlySpan<T> AsSpan<T>() where T : unmanaged
+            => MemoryMarshal.Cast<byte, T>(_bytes);
+
+        public void Dispose()
+        {
+            // Heap-backed; nothing to release.
+        }
     }
 }

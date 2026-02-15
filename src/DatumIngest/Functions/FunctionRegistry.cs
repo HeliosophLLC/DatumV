@@ -536,6 +536,10 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.TypeofFunction>();
         registry.RegisterScalar<Scalar.AssertNotNullFunction>();
         registry.RegisterScalar<Scalar.CoalesceFunction>();
+        // Phase 3b: infer() bridges a CREATE MODEL body to its bound
+        // IInferenceSession. Lives in `system` so model bodies can call
+        // it as the unqualified `infer(...)`.
+        registry.RegisterScalar<InferFunction>();
         registry.RegisterScalar<Scalar.Math.AbsFunction>();
         registry.RegisterScalar<Scalar.Math.RoundFunction>();
         registry.RegisterScalar<Scalar.Math.FloorFunction>();
