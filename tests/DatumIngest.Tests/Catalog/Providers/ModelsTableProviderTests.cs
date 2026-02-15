@@ -1,4 +1,6 @@
+using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Inference;
 using DatumIngest.Model;
 using DatumIngest.Models;
 using DatumIngest.Pooling;
@@ -45,7 +47,7 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
 
         Schema schema = provider.GetSchema();
 
-        Assert.Equal(13, schema.Columns.Count);
+        Assert.Equal(14, schema.Columns.Count);
 
         Assert.Equal("name", schema.Columns[0].Name);
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
@@ -72,6 +74,9 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
         Assert.Equal("license_holder", schema.Columns[10].Name);
         Assert.Equal("source_url", schema.Columns[11].Name);
         Assert.Equal("status", schema.Columns[12].Name);
+        Assert.Equal("kind", schema.Columns[13].Name);
+        Assert.Equal(DataKind.String, schema.Columns[13].Kind);
+        Assert.False(schema.Columns[13].Nullable);
     }
 
     /// <summary>
@@ -134,6 +139,7 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
         Assert.Equal("Nobody", row[10].AsString(arena));
         Assert.Equal("https://example.com/fake", row[11].AsString(arena));
         Assert.Equal("available", row[12].AsString(arena));
+        Assert.Equal("builtin", row[13].AsString(arena));
     }
 
     /// <summary>
@@ -199,6 +205,103 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
 
         Assert.Equal(["apple", "mango", "zebra"], names);
     }
+
+    /// <summary>
+    /// SQL-defined models (registered via <c>CREATE MODEL</c> into
+    /// <c>TableCatalog.DeclaredModels</c>) surface alongside built-ins.
+    /// Most metadata columns are NULL — declared models don't carry
+    /// license / category / modalities — but <c>kind = "declared"</c>
+    /// and <c>file_name</c> reflects the user's <c>USING</c> path.
+    /// </summary>
+    [Fact]
+    public async Task ScanAsync_DeclaredModel_ReportsKindDeclaredAndUsingPath()
+    {
+        const string filename = "decl-model.onnx";
+        string filePath = Path.Combine(_tempModelDir, filename);
+        byte[] payload = new byte[42];
+        await File.WriteAllBytesAsync(filePath, payload);
+
+        Pool pool = CreatePool();
+        ModelCatalog catalog = new(_tempModelDir);
+        ModelRegistry declared = new();
+        declared.Register(MakeDescriptor("my_declared", $"file://{filePath}"));
+
+        using ModelsTableProvider provider = new(pool, catalog, declared);
+        (Row row, Arena arena) = await ReadOnlyRowAsync(provider);
+
+        Assert.Equal("my_declared", row[0].AsString(arena));
+        // Most metadata columns null for declared models — they don't have
+        // upstream catalog metadata to surface.
+        Assert.True(row[1].IsNull); // display_name
+        Assert.True(row[2].IsNull); // category
+        Assert.True(row[3].IsNull); // modalities
+        Assert.Equal("sql", row[4].AsString(arena)); // backend (synthetic discriminator inside the row)
+        Assert.True(row[5].IsNull); // parameters
+        Assert.Equal($"file://{filePath}", row[6].AsString(arena)); // file_name = raw USING path
+        Assert.True(row[7].IsNull); // file_names
+        Assert.Equal(payload.Length, row[8].AsInt64()); // file_size_bytes
+        Assert.True(row[9].IsNull);  // license
+        Assert.True(row[10].IsNull); // license_holder
+        Assert.True(row[11].IsNull); // source_url
+        Assert.Equal("available", row[12].AsString(arena));
+        Assert.Equal("declared", row[13].AsString(arena));
+    }
+
+    /// <summary>
+    /// Built-ins and SQL-defined models share <c>system.models</c>, sorted
+    /// by name. The <c>kind</c> column is the only schema-stable
+    /// discriminator users can filter on.
+    /// </summary>
+    [Fact]
+    public async Task ScanAsync_BuiltinAndDeclared_BothScanWithKindDiscriminator()
+    {
+        // Built-in named "alpha" — file present so it reports available.
+        string builtinFile = Path.Combine(_tempModelDir, "alpha.bin");
+        await File.WriteAllBytesAsync(builtinFile, new byte[10]);
+
+        // Declared named "zeta" — file present.
+        string declaredFile = Path.Combine(_tempModelDir, "zeta.onnx");
+        await File.WriteAllBytesAsync(declaredFile, new byte[20]);
+
+        Pool pool = CreatePool();
+        ModelCatalog catalog = new(_tempModelDir);
+        catalog.Register(MakeEntry("alpha"));
+
+        ModelRegistry declared = new();
+        declared.Register(MakeDescriptor("zeta", $"file://{declaredFile}"));
+
+        using ModelsTableProvider provider = new(pool, catalog, declared);
+
+        List<(string Name, string Kind)> rows = new();
+        await foreach (RowBatch batch in provider.ScanAsync(
+            requiredColumns: null,
+            filterHint: null,
+            targetArena: null,
+            cancellationToken: CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add((
+                    batch[i][0].AsString(batch.Arena),
+                    batch[i][13].AsString(batch.Arena)));
+            }
+        }
+
+        Assert.Equal(
+            [("alpha", "builtin"), ("zeta", "declared")],
+            rows);
+    }
+
+    private static ModelDescriptor MakeDescriptor(string name, string usingPath) => new(
+        SchemaName: "models",
+        Name: name,
+        Parameters: Array.Empty<DatumIngest.Parsing.Ast.UdfParameter>(),
+        ReturnTypeName: "Float32",
+        UsingPath: usingPath,
+        StatementBody: Array.Empty<DatumIngest.Parsing.Ast.Statement>(),
+        BoundSessions: new Dictionary<string, IInferenceSession>(StringComparer.Ordinal),
+        ReturnIsNotNull: false,
+        SourceText: $"CREATE MODEL {name}");
 
     private static ModelCatalogEntry MakeEntry(string name) => new(
         Name: name,

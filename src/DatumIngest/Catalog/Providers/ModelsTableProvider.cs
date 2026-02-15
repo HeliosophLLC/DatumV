@@ -8,6 +8,19 @@ using DatumIngest.Pooling;
 namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
+/// Origin-of-definition discriminator for <see cref="ModelsTableProvider"/>'s
+/// <c>kind</c> column. <c>builtin</c> = engine-baked entry in
+/// <see cref="ModelCatalog"/>; <c>declared</c> = user-written
+/// <c>CREATE MODEL</c> registered in <see cref="ModelRegistry"/>. Mirrors
+/// the codebase's <c>Models</c> vs <c>DeclaredModels</c> internal naming.
+/// </summary>
+internal static class ModelKind
+{
+    public const string Builtin = "builtin";
+    public const string Declared = "declared";
+}
+
+/// <summary>
 /// Virtual table that surfaces the contents of a <see cref="ModelCatalog"/> as
 /// a SQL-queryable view. Users introspect the registered model zoo with
 /// <c>SELECT * FROM system_models</c> — what's available, what's missing, what
@@ -29,7 +42,7 @@ namespace DatumIngest.Catalog.Providers;
 /// single snapshot would defeat the diagnostic.
 /// </para>
 /// <para>
-/// Schema (13 columns):
+/// Schema (14 columns):
 /// <list type="table">
 ///   <item><term>name</term><description>SQL identifier (the <c>X</c> in <c>models.X(...)</c>).</description></item>
 ///   <item><term>display_name</term><description>Human-readable model name.</description></item>
@@ -44,6 +57,7 @@ namespace DatumIngest.Catalog.Providers;
 ///   <item><term>license_holder</term><description>Entity granting the license (Meta, Microsoft, etc.).</description></item>
 ///   <item><term>source_url</term><description>Repo / model-zoo URL for re-downloading.</description></item>
 ///   <item><term>status</term><description><c>available</c> / <c>missing</c> / <c>bridge</c>. See class remarks for semantics.</description></item>
+///   <item><term>kind</term><description><c>builtin</c> (engine-baked entry in <see cref="ModelCatalog"/>) or <c>declared</c> (user-written <c>CREATE MODEL</c> in <see cref="ModelRegistry"/>). The schema-stable origin discriminator.</description></item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -58,21 +72,32 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     private static readonly Schema _schema = BuildSchema();
 
     private readonly ModelCatalog _modelCatalog;
+    private readonly ModelRegistry? _declaredModels;
 
     /// <summary>
-    /// Creates a provider that surfaces <paramref name="modelCatalog"/> as a
-    /// virtual table. The catalog is held by reference — entries registered
-    /// after construction are visible to subsequent scans.
+    /// Creates a provider that surfaces <paramref name="modelCatalog"/>
+    /// (engine-baked built-ins) and, optionally, <paramref name="declaredModels"/>
+    /// (SQL-defined models registered via <c>CREATE MODEL</c>) as a single
+    /// virtual table. Both registries are held by reference — entries
+    /// registered after construction are visible to subsequent scans. Pass
+    /// <see langword="null"/> for <paramref name="declaredModels"/> when
+    /// the host has no SQL-DDL surface (rare; the standard wiring at
+    /// <c>BuiltinModels.WireDefaults</c> always passes the catalog's
+    /// <see cref="TableCatalog.DeclaredModels"/>).
     /// </summary>
     /// <param name="pool">Buffer pool for renting row batches.</param>
-    /// <param name="modelCatalog">The catalog whose entries become rows.</param>
-    public ModelsTableProvider(Pool pool, ModelCatalog modelCatalog) : base(pool, QualifiedTableName)
+    /// <param name="modelCatalog">The built-in registry whose entries become <c>kind = "builtin"</c> rows.</param>
+    /// <param name="declaredModels">Optional SQL-defined registry whose descriptors become <c>kind = "declared"</c> rows.</param>
+    public ModelsTableProvider(Pool pool, ModelCatalog modelCatalog, ModelRegistry? declaredModels = null)
+        : base(pool, QualifiedTableName)
     {
         _modelCatalog = modelCatalog;
+        _declaredModels = declaredModels;
     }
 
     /// <inheritdoc/>
-    public override long GetRowCount() => _modelCatalog.Entries.Count;
+    public override long GetRowCount()
+        => _modelCatalog.Entries.Count + (_declaredModels?.Entries.Count ?? 0);
 
     /// <inheritdoc/>
     public override Schema GetSchema() => _schema;
@@ -87,12 +112,27 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
 
-        // Snapshot the catalog at scan start so concurrent registrations during a
-        // long iteration don't produce inconsistent rows. The snapshot is cheap:
-        // a list of references, no value materialisation.
-        ModelCatalogEntry[] entries = _modelCatalog.Entries.Values
-            .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        // Snapshot both registries at scan start so concurrent registrations
+        // during a long iteration don't produce inconsistent rows. The
+        // snapshot is cheap: a list of references, no value materialisation.
+        // Builtins and declared rows are merged into one name-sorted stream
+        // so `SELECT * FROM system.models` reads alphabetically regardless
+        // of which registry an entry came from — the user filters by `kind`
+        // when they want to scope to one.
+        var rows = new List<(string Name, bool IsBuiltin, ModelCatalogEntry? Entry, ModelDescriptor? Descriptor)>(
+            _modelCatalog.Entries.Count + (_declaredModels?.Entries.Count ?? 0));
+        foreach (ModelCatalogEntry entry in _modelCatalog.Entries.Values)
+        {
+            rows.Add((entry.Name, IsBuiltin: true, entry, null));
+        }
+        if (_declaredModels is not null)
+        {
+            foreach (ModelDescriptor descriptor in _declaredModels.Entries)
+            {
+                rows.Add((descriptor.Name, IsBuiltin: false, null, descriptor));
+            }
+        }
+        rows.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
 
         string modelDirectory = _modelCatalog.ModelDirectory;
 
@@ -104,14 +144,21 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         ColumnLookup lookup = new(_schema.Columns.Select(c => c.Name).ToArray());
         RowBatch? batch = null;
 
-        for (int i = 0; i < entries.Length; i++)
+        foreach (var entry in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
 
             DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-            FillRow(values, entries[i], modelDirectory, batch.Arena);
+            if (entry.IsBuiltin)
+            {
+                FillRow(values, entry.Entry!, modelDirectory, batch.Arena);
+            }
+            else
+            {
+                FillRowFromDescriptor(values, entry.Descriptor!, modelDirectory, batch.Arena);
+            }
             batch.Add(values);
 
             if (batch.IsFull)
@@ -191,6 +238,64 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         cells[10] = WriteOptionalString(entry.LicenseHolder, arena);
         cells[11] = WriteOptionalString(entry.SourceUrl, arena);
         cells[12] = DataValue.FromString(status, arena);
+        cells[13] = DataValue.FromString(ModelKind.Builtin, arena);
+    }
+
+    /// <summary>
+    /// Materialises one row from a SQL-defined <see cref="ModelDescriptor"/>.
+    /// The descriptor doesn't carry upstream catalog metadata (license,
+    /// modalities, source URL, etc.) so most columns surface as NULL; the
+    /// shape that matters is the discriminator (<c>kind = "declared"</c>),
+    /// the user-written <c>USING</c> path, and the file size + status
+    /// derived from stat-ing the resolved path. Status is always
+    /// <c>"available"</c> because the descriptor is only in the registry
+    /// after <c>ApplyCreateModelAsync</c> succeeded — the file existed +
+    /// the session loaded. If the file vanished post-load,
+    /// <c>file_size_bytes</c> goes null but the bound session in memory
+    /// is still callable.
+    /// </summary>
+    private static void FillRowFromDescriptor(
+        DataValue[] cells, ModelDescriptor descriptor, string modelDirectory, Arena arena)
+    {
+        long? fileSize = TryStatUsingPath(descriptor.UsingPath, modelDirectory);
+
+        cells[0]  = DataValue.FromString(descriptor.Name, arena);
+        cells[1]  = DataValue.Null(DataKind.String);          // display_name
+        cells[2]  = DataValue.Null(DataKind.String);          // category
+        cells[3]  = DataValue.NullArrayOf(DataKind.String);   // modalities
+        cells[4]  = DataValue.FromString("sql", arena);       // backend — discriminator inside the row; the `kind` column is the schema-stable signal
+        cells[5]  = DataValue.Null(DataKind.String);          // parameters
+        cells[6]  = DataValue.FromString(descriptor.UsingPath, arena);
+        cells[7]  = DataValue.NullArrayOf(DataKind.String);   // file_names — single-session bundles; multi-file lands when multi-session arrives
+        cells[8]  = fileSize.HasValue ? DataValue.FromInt64(fileSize.Value) : DataValue.Null(DataKind.Int64);
+        cells[9]  = DataValue.Null(DataKind.String);          // license
+        cells[10] = DataValue.Null(DataKind.String);          // license_holder
+        cells[11] = DataValue.Null(DataKind.String);          // source_url
+        cells[12] = DataValue.FromString("available", arena); // session is loaded; see method remarks
+        cells[13] = DataValue.FromString(ModelKind.Declared, arena);
+    }
+
+    /// <summary>
+    /// Resolves a descriptor's <c>USING</c> path the same way
+    /// <see cref="RoutineRegistrar"/> does at CREATE-MODEL time
+    /// (<c>file://</c> stripped to absolute; otherwise relative to the
+    /// model directory) and stat-s the result. Returns <see langword="null"/>
+    /// when the file is gone or the path can't be resolved.
+    /// </summary>
+    private static long? TryStatUsingPath(string usingPath, string modelDirectory)
+    {
+        string resolved;
+        if (usingPath.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            resolved = usingPath["file://".Length..];
+        }
+        else
+        {
+            resolved = Path.GetFullPath(Path.Combine(modelDirectory, usingPath));
+        }
+
+        FileInfo info = new(resolved);
+        return info.Exists ? info.Length : null;
     }
 
     private static DataValue WriteOptionalString(string? value, Arena arena) =>
@@ -223,5 +328,6 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         new ColumnInfo("license_holder",  DataKind.String, nullable: true),
         new ColumnInfo("source_url",      DataKind.String, nullable: true),
         new ColumnInfo("status",          DataKind.String, nullable: false),
+        new ColumnInfo("kind",            DataKind.String, nullable: false),
     ]);
 }

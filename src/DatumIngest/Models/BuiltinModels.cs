@@ -168,7 +168,8 @@ public static class BuiltinModels
         RegisterKokoro82M(modelCatalog);
 
         tableCatalog.Models = modelCatalog;
-        tableCatalog.Add(new ModelsTableProvider(tableCatalog.Pool, modelCatalog));
+        tableCatalog.Add(new ModelsTableProvider(
+            tableCatalog.Pool, modelCatalog, tableCatalog.DeclaredModels));
         return modelCatalog;
     }
 
