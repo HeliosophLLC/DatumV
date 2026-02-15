@@ -325,6 +325,39 @@
       "approxSizeMb": 244,
       "placeholder": true
     },
+    {
+      "id": "rtdetr-r18",
+      "displayName": "RT-DETR-R18 (NMS-free Detection)",
+      "description": "Baidu's real-time DEtection TRansformer with ResNet-18 backbone. 80 COCO classes, ~46 mAP, no NMS post-processing.",
+      "task": "object-detection",
+      "tags": ["detection", "coco", "transformer", "nms-free"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "main", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] },
+      "approxSizeMb": 80
+    },
+    {
+      "id": "rtdetr-r18-fp16",
+      "displayName": "RT-DETR-R18 (fp16)",
+      "description": "Half-precision RT-DETR-R18. Same architecture, ~half the disk. Quality near-identical to fp32 on GPUs with native fp16; on CPU runtimes that upcast, expect no quality change but no speed win.",
+      "task": "object-detection",
+      "tags": ["detection", "coco", "transformer", "nms-free", "fp16"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "main", "include": ["onnx/model_fp16.onnx", "config.json", "preprocessor_config.json"] },
+      "approxSizeMb": 41
+    },
+    {
+      "id": "rtdetr-r18-int8",
+      "displayName": "RT-DETR-R18 (INT8)",
+      "description": "INT8 dynamic-quantized RT-DETR-R18. ~quarter the disk of fp32 and CPU-friendly on most runtimes (ORT, OpenVINO NPU). Modest mAP drop vs fp32 on small/crowded scenes.",
+      "task": "object-detection",
+      "tags": ["detection", "coco", "transformer", "nms-free", "int8", "edge"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "main", "include": ["onnx/model_quantized.onnx", "config.json", "preprocessor_config.json"] },
+      "approxSizeMb": 22
+    },
 
     {
       "id": "kokoro-v1.0",
@@ -334,7 +367,7 @@
       "tags": ["tts", "speech", "english"],
       "licenseIds": ["apache-2.0"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/kokoro-v1.0-onnx", "revision": "main", "include": ["kokoro-v1.0.onnx", "kokoro-voices/*"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/kokoro-v1.0-onnx", "revision": "413d859a109549500d460132fe0f5c3917b66deb", "include": ["kokoro-v1.0.onnx", "kokoro-voices/*"] },
       "approxSizeMb": 320,
       "placeholder": true
     },
