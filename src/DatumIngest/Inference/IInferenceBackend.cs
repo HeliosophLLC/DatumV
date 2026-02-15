@@ -1,0 +1,62 @@
+namespace DatumIngest.Inference;
+
+/// <summary>
+/// One concrete inference runtime — ONNX Runtime, OpenVINO, etc. Backends
+/// are registered with the <see cref="IInferenceDispatcher"/> at host
+/// startup; the dispatcher's policy layer picks which one handles each
+/// load request.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Hardware discovery is lazy.</strong> Backends should not probe
+/// their device list at construction; that work is expensive (CUDA driver
+/// init, OpenVINO core construction) and many process lifetimes never need
+/// it. <see cref="AvailableDevices"/> is allowed to do the discovery on
+/// first access and cache.
+/// </para>
+/// <para>
+/// <strong>Backends do not own model files.</strong> The dispatcher passes
+/// a fully-resolved path in the <see cref="InferenceLoadRequest"/>. Bundle
+/// discovery, download, and license-acceptance gating happen above this
+/// layer — by the time <see cref="LoadAsync"/> is called, the bytes are
+/// on disk and the user has agreed to the terms.
+/// </para>
+/// </remarks>
+public interface IInferenceBackend
+{
+    /// <summary>Identity of this backend.</summary>
+    InferenceBackendId Id { get; }
+
+    /// <summary>
+    /// Devices this backend can dispatch to on the current machine. May
+    /// trigger driver / runtime probing on first access; subsequent
+    /// accesses return cached results. An empty list means the backend
+    /// loaded but has no usable hardware (e.g. ONNX Runtime built without
+    /// the CUDA provider on a machine with only an NVIDIA GPU).
+    /// </summary>
+    IReadOnlyList<InferenceDevice> AvailableDevices { get; }
+
+    /// <summary>
+    /// Pre-load check: can this backend load the bundle described by
+    /// <paramref name="bundle"/> on any of its available devices? Allows
+    /// the dispatcher to rank candidates and skip backends that would
+    /// reject the bundle at load time anyway.
+    /// </summary>
+    /// <param name="bundle">
+    /// Bundle-level metadata the backend can consult — preferred-backend
+    /// list, opset version, required ops, expected element types. Backends
+    /// that don't care about the bundle metadata may return
+    /// <see cref="BackendCompatibility.Supported"/> unconditionally; the
+    /// real failure surfaces at load time.
+    /// </param>
+    BackendCompatibility Inspect(BundleManifest bundle);
+
+    /// <summary>
+    /// Construct a session for one model file on the requested device.
+    /// Throws if the device is unsupported, the file is unreadable, or
+    /// the graph has ops this backend doesn't implement.
+    /// </summary>
+    ValueTask<IInferenceSession> LoadAsync(
+        InferenceLoadRequest request,
+        CancellationToken cancellationToken);
+}
