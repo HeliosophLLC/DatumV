@@ -220,7 +220,6 @@ public sealed class Phi35VisionModel : IModel, IDisposable
             using NamedTensors processed = processor.ProcessImages(formattedPrompt, images);
 
             using GeneratorParams generatorParams = new(_model);
-            generatorParams.SetInputs(processed);
             // ORT GenAI's `max_length` caps total sequence length (input
             // tokens + generated tokens), not new-tokens budget. Phi-3.5-
             // vision in high-resolution mode emits up to ~2500 image
@@ -230,12 +229,16 @@ public sealed class Phi35VisionModel : IModel, IDisposable
             generatorParams.SetSearchOption("max_length", InputTokenBudget + _maxTokens);
 
             using Generator generator = new(_model, generatorParams);
+            // GenAI 0.6.x moved processed-input binding from GeneratorParams
+            // to Generator. The processor's NamedTensors are now applied
+            // after the generator is constructed.
+            generator.SetInputs(processed);
 
             // Stream new tokens through TokenizerStream so byte-level BPE
             // (Unicode pieces split across token boundaries) decodes
-            // cleanly without manual reassembly. 0.5.x requires the
-            // explicit ComputeLogits() before GenerateNextToken();
-            // 0.6.x unified them.
+            // cleanly without manual reassembly. 0.6.x unified the
+            // previously-separate ComputeLogits() step into
+            // GenerateNextToken().
             //
             // Decode only the newest token (sequence[^1]) per step. The
             // sequence at iteration 1 already contains every prompt
@@ -258,7 +261,6 @@ public sealed class Phi35VisionModel : IModel, IDisposable
             while (!generator.IsDone())
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                generator.ComputeLogits();
                 generator.GenerateNextToken();
                 int newToken = generator.GetSequence(0)[^1];
                 if (newToken == EndOfTextTokenId || newToken == EndOfTurnTokenId)
