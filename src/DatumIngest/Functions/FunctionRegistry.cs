@@ -611,6 +611,11 @@ public sealed class FunctionRegistry
         // rebuilt on the new typed-array surface when a demand actually requires it.
         registry.RegisterTableValued<TableValued.RangeFunction>();
 
+        // Inference toolkit. Lives in its own `inference` schema so the
+        // introspection surface (onnx_inspect, devices, ...) doesn't
+        // crowd `system`. Users call qualified: inference.onnx_inspect(...).
+        registry.RegisterTableValued<TableValued.OnnxInspectFunction>("inference");
+
         // ── Aggregate ─────────────────────────────────────────────────────
         registry.RegisterAggregate(new Aggregates.CountFunction());
         registry.RegisterAggregate(new Aggregates.SumFunction());

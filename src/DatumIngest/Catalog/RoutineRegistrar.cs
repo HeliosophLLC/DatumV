@@ -2,6 +2,7 @@ using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.Models;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Catalog;
@@ -787,26 +788,13 @@ internal sealed class RoutineRegistrar
     /// <summary>
     /// Resolves a <c>USING</c> path supplied to a <c>CREATE MODEL</c>
     /// statement against the host's model directory, honouring the
-    /// <c>file://</c> escape for absolute paths.
+    /// <c>file://</c> escape for absolute paths. Thin wrapper around
+    /// <see cref="ModelCatalog.ResolveFilePath"/> that adds the CREATE MODEL
+    /// caller label.
     /// </summary>
     private string ResolveUsingPath(string usingPath, string modelName)
-    {
-        if (usingPath.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
-        {
-            return usingPath["file://".Length..];
-        }
-
-        // Relative path: resolve against ModelCatalog.ModelDirectory.
-        if (_catalog.Models is null)
-        {
-            throw new InvalidOperationException(
-                $"CREATE MODEL {modelName}: USING '{usingPath}' is a relative path but no " +
-                "ModelCatalog is configured on this host. Use a 'file://'-prefixed absolute " +
-                "path, or wire TableCatalog.Models before issuing CREATE MODEL.");
-        }
-
-        return Path.GetFullPath(Path.Combine(_catalog.Models.ModelDirectory, usingPath));
-    }
+        => ModelCatalog.ResolveFilePath(
+            usingPath, _catalog.Models, $"CREATE MODEL {modelName}");
 
     /// <summary>
     /// Best-effort disposal of every bound session in a descriptor.

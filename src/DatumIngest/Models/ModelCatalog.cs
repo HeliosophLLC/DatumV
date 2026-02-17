@@ -75,6 +75,44 @@ public sealed class ModelCatalog : IDisposable
     /// </summary>
     public long VramBudgetBytes => ResidencyManager.VramBudgetBytes;
 
+    /// <summary>
+    /// Resolves a user-supplied model path against the host's model directory,
+    /// honouring the <c>file://</c> escape for absolute paths. Shared by
+    /// <c>CREATE MODEL USING</c> and any introspection surface (e.g.
+    /// <c>inference.onnx_inspect</c>) that takes a model path argument.
+    /// </summary>
+    /// <param name="path">
+    /// The user-supplied path. A leading <c>file://</c> marks an absolute path
+    /// (anywhere on disk); without that prefix the path is treated as relative
+    /// to <paramref name="models"/>' <see cref="ModelDirectory"/>.
+    /// </param>
+    /// <param name="models">
+    /// The host's model catalog, or <see langword="null"/> when none is wired.
+    /// Only consulted for relative paths.
+    /// </param>
+    /// <param name="callerContext">
+    /// Short human-readable label of the caller (e.g. <c>"CREATE MODEL foo"</c>,
+    /// <c>"inference.onnx_inspect"</c>) used in the "no ModelCatalog wired"
+    /// error so users can tell which surface tripped the check.
+    /// </param>
+    public static string ResolveFilePath(string path, ModelCatalog? models, string callerContext)
+    {
+        if (path.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            return path["file://".Length..];
+        }
+
+        if (models is null)
+        {
+            throw new InvalidOperationException(
+                $"{callerContext}: '{path}' is a relative path but no ModelCatalog is " +
+                "configured on this host. Use a 'file://'-prefixed absolute path, or wire " +
+                "TableCatalog.Models before invoking.");
+        }
+
+        return Path.GetFullPath(Path.Combine(models.ModelDirectory, path));
+    }
+
     /// <summary>Creates a catalog rooted at <paramref name="modelDirectory"/>.</summary>
     /// <param name="modelDirectory">
     /// Absolute path to the models directory. <see langword="null"/> uses
