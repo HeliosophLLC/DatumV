@@ -28,6 +28,7 @@ namespace DatumIngest.Inference.OnnxRuntime;
 /// </remarks>
 public sealed class OnnxRuntimeBackend : IInferenceBackend
 {
+    private IReadOnlyList<DeviceProbeResult>? _probedDevices;
     private IReadOnlyList<InferenceDevice>? _availableDevices;
     private readonly object _probeLock = new();
 
@@ -39,12 +40,32 @@ public sealed class OnnxRuntimeBackend : IInferenceBackend
     {
         get
         {
-            if (_availableDevices is not null) return _availableDevices;
-            lock (_probeLock)
+            EnsureProbed();
+            return _availableDevices!;
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<DeviceProbeResult> ProbeAllDevices()
+    {
+        EnsureProbed();
+        return _probedDevices!;
+    }
+
+    private void EnsureProbed()
+    {
+        if (_probedDevices is not null) return;
+        lock (_probeLock)
+        {
+            if (_probedDevices is not null) return;
+            IReadOnlyList<DeviceProbeResult> probed = ProbeAllDevicesCore();
+            List<InferenceDevice> available = new(probed.Count);
+            foreach (DeviceProbeResult r in probed)
             {
-                _availableDevices ??= ProbeDevices();
+                if (r.Available) available.Add(r.Device);
             }
-            return _availableDevices;
+            _probedDevices = probed;
+            _availableDevices = available;
         }
     }
 
@@ -154,54 +175,71 @@ public sealed class OnnxRuntimeBackend : IInferenceBackend
         }
     }
 
-    private static IReadOnlyList<InferenceDevice> ProbeDevices()
+    /// <summary>
+    /// Probes every device kind this backend recognises and records the
+    /// outcome with a human-readable reason on failure. CPU is unconditionally
+    /// available — ORT registers it by default when no other EP is appended.
+    /// DirectML and CoreML carry platform constraints (Windows / macOS) that
+    /// surface as <c>reason</c> rather than a thrown probe.
+    /// </summary>
+    private static IReadOnlyList<DeviceProbeResult> ProbeAllDevicesCore()
     {
-        // CPU is always available — it's the EP ORT registers by default
-        // when no others are appended.
-        List<InferenceDevice> devices = new() { InferenceDevice.OnnxRuntimeCpu };
-
-        if (TryRegister(opts =>
-            {
-                CudaRuntimeProbe.EnsureOnPath();
-                opts.AppendExecutionProvider_CUDA(0);
-            }))
+        List<DeviceProbeResult> results = new(4)
         {
-            devices.Add(InferenceDevice.OnnxRuntimeCuda);
+            new(InferenceDevice.OnnxRuntimeCpu, Available: true, Reason: ""),
+        };
+
+        results.Add(ProbeOne(InferenceDevice.OnnxRuntimeCuda, opts =>
+        {
+            CudaRuntimeProbe.EnsureOnPath();
+            opts.AppendExecutionProvider_CUDA(0);
+        }));
+
+        if (OperatingSystem.IsWindows())
+        {
+            results.Add(ProbeOne(InferenceDevice.OnnxRuntimeDirectMl,
+                opts => opts.AppendExecutionProvider_DML(0)));
+        }
+        else
+        {
+            results.Add(new(InferenceDevice.OnnxRuntimeDirectMl,
+                Available: false, Reason: "DirectML is Windows-only."));
         }
 
-        if (OperatingSystem.IsWindows() &&
-            TryRegister(opts => opts.AppendExecutionProvider_DML(0)))
+        if (OperatingSystem.IsMacOS())
         {
-            devices.Add(InferenceDevice.OnnxRuntimeDirectMl);
+            results.Add(ProbeOne(InferenceDevice.OnnxRuntimeCoreMl,
+                opts => opts.AppendExecutionProvider("CoreML")));
+        }
+        else
+        {
+            results.Add(new(InferenceDevice.OnnxRuntimeCoreMl,
+                Available: false, Reason: "CoreML is macOS-only."));
         }
 
-        if (OperatingSystem.IsMacOS() &&
-            TryRegister(opts => opts.AppendExecutionProvider("CoreML")))
-        {
-            devices.Add(InferenceDevice.OnnxRuntimeCoreMl);
-        }
-
-        return devices;
+        return results;
     }
 
     /// <summary>
     /// Attempts to register an execution provider on a throwaway
-    /// <see cref="SessionOptions"/>. Returns <see langword="true"/> on
-    /// success, <see langword="false"/> on any expected failure mode
-    /// (DLL missing, provider not built into this ORT binary, device
-    /// unavailable). Unexpected exceptions are NOT swallowed.
+    /// <see cref="SessionOptions"/>. Returns a successful
+    /// <see cref="DeviceProbeResult"/> on attach success; on any expected
+    /// failure mode (DLL missing, provider not built into this ORT binary,
+    /// device unavailable) returns the result tagged unavailable with the
+    /// exception's message. Unexpected exceptions are NOT swallowed.
     /// </summary>
-    private static bool TryRegister(Action<SessionOptions> register)
+    private static DeviceProbeResult ProbeOne(
+        InferenceDevice device, Action<SessionOptions> register)
     {
         using SessionOptions probe = new();
         try
         {
             register(probe);
-            return true;
+            return new(device, Available: true, Reason: "");
         }
-        catch (OnnxRuntimeException)        { return false; }
-        catch (DllNotFoundException)        { return false; }
-        catch (EntryPointNotFoundException) { return false; }
-        catch (PlatformNotSupportedException) { return false; }
+        catch (OnnxRuntimeException ex)        { return new(device, Available: false, Reason: ex.Message); }
+        catch (DllNotFoundException ex)        { return new(device, Available: false, Reason: ex.Message); }
+        catch (EntryPointNotFoundException ex) { return new(device, Available: false, Reason: ex.Message); }
+        catch (PlatformNotSupportedException ex) { return new(device, Available: false, Reason: ex.Message); }
     }
 }

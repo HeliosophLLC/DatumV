@@ -37,6 +37,23 @@ public interface IInferenceBackend
     IReadOnlyList<InferenceDevice> AvailableDevices { get; }
 
     /// <summary>
+    /// Full probe picture: one entry per device kind this backend recognises,
+    /// regardless of whether it actually loaded on this machine. The
+    /// <see cref="DeviceProbeResult.Reason"/> on unavailable entries explains
+    /// why (platform mismatch, missing driver, EP not built). Powers the
+    /// <c>inference.devices()</c> TVF so users see "DirectML — unavailable,
+    /// Linux not supported" instead of a silently-truncated list.
+    /// </summary>
+    /// <remarks>
+    /// Backends should cache the probe results between calls — the
+    /// expectation is one probe pass per process. <see cref="AvailableDevices"/>
+    /// is naturally derivable from this list (filter where
+    /// <see cref="DeviceProbeResult.Available"/>) but kept as a separate
+    /// property so the hot dispatch path doesn't allocate.
+    /// </remarks>
+    IReadOnlyList<DeviceProbeResult> ProbeAllDevices();
+
+    /// <summary>
     /// Pre-load check: can this backend load the bundle described by
     /// <paramref name="bundle"/> on any of its available devices? Allows
     /// the dispatcher to rank candidates and skip backends that would
