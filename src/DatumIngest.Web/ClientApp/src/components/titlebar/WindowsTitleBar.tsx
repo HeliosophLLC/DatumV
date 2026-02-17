@@ -18,7 +18,7 @@ export function WindowsTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
   const MaxIcon = maximized ? Copy : Square;
 
   return (
-    <header className="app-drag relative flex h-8 items-center bg-background select-none">
+    <header className="app-drag relative flex h-8 items-center border-b bg-background select-none">
       <div className="relative z-10 px-3 text-xs text-muted-foreground">{t('app.name')}</div>
       <div className="app-no-drag relative z-10 ml-auto flex">
         {!dialog && (

@@ -32,7 +32,7 @@ const UTILITY: readonly NavItem[] = [
 export function SideNav() {
   const { view } = useSnapshot(navState);
   return (
-    <nav className="bg-background flex w-12 shrink-0 flex-col items-center py-2">
+    <nav className="bg-background border-r flex w-12 shrink-0 flex-col items-center py-2">
       <div className="flex flex-col items-center gap-1">
         {PRIMARY.map((item) => (
           <SideNavButton

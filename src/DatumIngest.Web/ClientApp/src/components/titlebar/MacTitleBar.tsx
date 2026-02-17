@@ -12,7 +12,7 @@ import { minimize, toggleMaximize, close } from '@/state/window';
 export function MacTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
   const { t } = useTranslation();
   return (
-    <header className="app-drag relative flex h-7 items-center bg-background px-3 select-none">
+    <header className="app-drag relative flex h-7 items-center border-b bg-background px-3 select-none">
       <div className="app-no-drag relative z-10 flex items-center gap-2">
         <button
           type="button"

@@ -16,7 +16,7 @@ export function LinuxTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
   const MaxIcon = maximized ? Copy : Square;
 
   return (
-    <header className="app-drag relative flex h-9 items-center bg-background select-none">
+    <header className="app-drag relative flex h-9 items-center border-b bg-background select-none">
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
         {t('app.name')}
       </div>
