@@ -584,6 +584,16 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ClipMeanFunction>();
         registry.RegisterScalar<Scalar.Image.ClipStdFunction>();
 
+        // Tokenization helpers live in their own `tokenizer` schema (sibling
+        // to `inference` and `templates`) so the namespace is self-describing
+        // and `decode` doesn't collide with the existing byte-encoding
+        // system.decode. Two pairs: tokenizer.json form + classic
+        // vocab.json+merges.txt form. See Functions/Tokenization/.
+        registry.RegisterScalar<Tokenization.TokenizerEncodeFunction>("tokenizer");
+        registry.RegisterScalar<Tokenization.TokenizerEncodeBpeFunction>("tokenizer");
+        registry.RegisterScalar<Tokenization.TokenizerDecodeFunction>("tokenizer");
+        registry.RegisterScalar<Tokenization.TokenizerDecodeBpeFunction>("tokenizer");
+
         // Temporal — current time, date/time arithmetic, extraction.
         registry.RegisterScalar<Scalar.Temporal.NowFunction>();
 
