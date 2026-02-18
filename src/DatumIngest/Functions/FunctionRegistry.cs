@@ -578,6 +578,11 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ImageCutoutFunction>();
         registry.RegisterScalar<Scalar.Image.ImageDrawBoundingBoxesFunction>();
         registry.RegisterScalar<Scalar.Image.ApplyColormapFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageToTensorFunction>();
+        registry.RegisterScalar<Scalar.Image.ImagenetMeanFunction>();
+        registry.RegisterScalar<Scalar.Image.ImagenetStdFunction>();
+        registry.RegisterScalar<Scalar.Image.ClipMeanFunction>();
+        registry.RegisterScalar<Scalar.Image.ClipStdFunction>();
 
         // Temporal — current time, date/time arithmetic, extraction.
         registry.RegisterScalar<Scalar.Temporal.NowFunction>();
