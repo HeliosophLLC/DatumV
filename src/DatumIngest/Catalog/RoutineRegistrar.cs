@@ -119,6 +119,11 @@ internal sealed class RoutineRegistrar
             return;
         }
 
+        // Snapshot pre-state at the resolved key so the event fire at the
+        // bottom can pick Created vs Altered. Captured after IfNotExists
+        // exits so it never observes a stale `before` for a no-op path.
+        _udfs.TryGet(qn, out UdfDescriptor? before);
+
         if (create.StatementBody is not null)
         {
             ApplyCreateProceduralFunction(create, qn, sourceText);
@@ -129,6 +134,18 @@ internal sealed class RoutineRegistrar
         }
 
         _catalogStore?.Save(_udfs, _procedures);
+
+        if (_udfs.TryGet(qn, out UdfDescriptor? after))
+        {
+            if (before is null)
+            {
+                _catalog.Events.Raise(new FunctionCreatedEvent(qn, after, sourceText));
+            }
+            else
+            {
+                _catalog.Events.Raise(new FunctionAlteredEvent(qn, before, after, sourceText));
+            }
+        }
     }
 
     private void ApplyCreateMacroFunction(CreateFunctionStatement create, QualifiedName qn)
@@ -450,7 +467,7 @@ internal sealed class RoutineRegistrar
     /// Applies a <c>DROP FUNCTION</c> statement. Throws when the named UDF
     /// isn't registered unless the statement carries <c>IF EXISTS</c>.
     /// </summary>
-    public void ApplyDropFunction(DropFunctionStatement drop)
+    public void ApplyDropFunction(DropFunctionStatement drop, string? sourceText = null)
     {
         // Resolve through the registry: explicit schema = exact match;
         // unqualified = walk search_path. The legacy "udf" sentinel is
@@ -471,6 +488,8 @@ internal sealed class RoutineRegistrar
         // we don't need to gate it on IsProcedural.
         UnregisterProceduralAdapter(udf.QualifiedName);
         _catalogStore?.Save(_udfs, _procedures);
+
+        _catalog.Events.Raise(new FunctionDroppedEvent(udf.QualifiedName, udf, sourceText));
     }
 
     /// <summary>
@@ -733,6 +752,15 @@ internal sealed class RoutineRegistrar
         // qualified name; OR REPLACE flips the entry atomically.
         RegisterModelAdapter(descriptor, replace: create.OrReplace);
 
+        if (displaced is null)
+        {
+            _catalog.Events.Raise(new ModelCreatedEvent(qn, descriptor, sourceText));
+        }
+        else
+        {
+            _catalog.Events.Raise(new ModelAlteredEvent(qn, displaced, descriptor, sourceText));
+        }
+
         // OR REPLACE: dispose the previous descriptor's sessions after the
         // new one is in place. In-flight queries holding a reference to the
         // displaced descriptor will keep running on the now-disposed
@@ -749,7 +777,7 @@ internal sealed class RoutineRegistrar
     /// Applies a <c>DROP MODEL</c> statement: removes the descriptor from
     /// the registry and disposes its bound inference sessions.
     /// </summary>
-    public void ApplyDropModel(DropModelStatement drop)
+    public void ApplyDropModel(DropModelStatement drop, string? sourceText = null)
     {
         // Same schema lockdown as CREATE MODEL: explicit qualifiers must
         // be the `models` schema or absent. Lookups always go straight to
@@ -781,6 +809,8 @@ internal sealed class RoutineRegistrar
         // clean "not registered" error rather than dispatching into a
         // descriptor whose sessions are about to be disposed.
         _functions.UnregisterScalar(qn.ToString());
+
+        _catalog.Events.Raise(new ModelDroppedEvent(qn, removed, sourceText));
 
         DisposeSessions(removed);
     }
@@ -922,15 +952,28 @@ internal sealed class RoutineRegistrar
             return;
         }
 
+        // Capture pre-state for the event below — Created vs Altered turns
+        // on whether the key already had a descriptor.
+        _procedures.TryGet(qn, out ProcedureDescriptor? before);
+
         _procedures.Register(descriptor, replace: create.OrReplace);
         _catalogStore?.Save(_udfs, _procedures);
+
+        if (before is null)
+        {
+            _catalog.Events.Raise(new ProcedureCreatedEvent(qn, descriptor, sourceText));
+        }
+        else
+        {
+            _catalog.Events.Raise(new ProcedureAlteredEvent(qn, before, descriptor, sourceText));
+        }
     }
 
     /// <summary>
     /// Applies a <c>DROP PROCEDURE</c> statement. Throws when the named
     /// procedure isn't registered unless the statement carries <c>IF EXISTS</c>.
     /// </summary>
-    public void ApplyDropProcedure(DropProcedureStatement drop)
+    public void ApplyDropProcedure(DropProcedureStatement drop, string? sourceText = null)
     {
         if (!_procedures.TryResolve(drop.SchemaName, drop.Name, _catalog.SearchPath, out ProcedureDescriptor? proc))
         {
@@ -943,6 +986,8 @@ internal sealed class RoutineRegistrar
 
         _procedures.Unregister(proc.QualifiedName);
         _catalogStore?.Save(_udfs, _procedures);
+
+        _catalog.Events.Raise(new ProcedureDroppedEvent(proc.QualifiedName, proc, sourceText));
     }
 
     /// <summary>

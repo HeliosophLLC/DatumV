@@ -68,6 +68,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public TableCatalog(Pool pool, string? catalogPath, bool allowExplicitTablePaths = false)
     {
         this.AllowExplicitTablePaths = allowExplicitTablePaths;
+        this.Events = new CatalogEvents();
         this.Pool = pool;
         this._backing = pool.Backing;
         this._functions = FunctionRegistry.CreateDefault();
@@ -221,6 +222,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// the catalog's working directory.
     /// </summary>
     public bool AllowExplicitTablePaths { get; }
+
+    /// <summary>
+    /// Catalog-change event bus. Subscribers attach to typed events
+    /// (<c>FunctionCreated</c>, <c>TableDropped</c>, etc.) and are invoked
+    /// after the underlying DDL commit. See <see cref="CatalogEvents"/>
+    /// for subscriber discipline and the parent-drop cascade rule.
+    /// </summary>
+    public CatalogEvents Events { get; }
+
     private readonly PoolBacking _backing;
     private readonly FunctionRegistry _functions;
     private readonly UdfRegistry _udfs;
@@ -489,7 +499,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return EmptyQueryPlan.Instance;
 
             case DropFunctionStatement drop:
-                _routines.ApplyDropFunction(drop);
+                _routines.ApplyDropFunction(drop, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case CreateProcedureStatement create:
@@ -497,7 +507,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return EmptyQueryPlan.Instance;
 
             case DropProcedureStatement drop:
-                _routines.ApplyDropProcedure(drop);
+                _routines.ApplyDropProcedure(drop, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case CreateModelStatement createModel:
@@ -505,26 +515,26 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return EmptyQueryPlan.Instance;
 
             case DropModelStatement dropModel:
-                _routines.ApplyDropModel(dropModel);
+                _routines.ApplyDropModel(dropModel, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case CallStatement call:
                 return PlanCall(call);
 
             case CreateTableStatement createTable:
-                await ApplyCreateTableAsync(createTable).ConfigureAwait(false);
+                await ApplyCreateTableAsync(createTable, sourceText).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
             case DropTableStatement dropTable:
-                ApplyDropTable(dropTable);
+                ApplyDropTable(dropTable, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case CreateSchemaStatement createSchema:
-                ApplyCreateSchema(createSchema);
+                ApplyCreateSchema(createSchema, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case DropSchemaStatement dropSchema:
-                ApplyDropSchema(dropSchema);
+                ApplyDropSchema(dropSchema, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case SetSearchPathStatement setSearchPath:
@@ -532,11 +542,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return EmptyQueryPlan.Instance;
 
             case CreateIndexStatement createIndex:
-                await ApplyCreateIndexAsync(createIndex).ConfigureAwait(false);
+                await ApplyCreateIndexAsync(createIndex, sourceText).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
             case DropIndexStatement dropIndex:
-                ApplyDropIndex(dropIndex);
+                ApplyDropIndex(dropIndex, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case ReindexTableStatement reindex:
@@ -549,22 +559,22 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
             case AlterTableAddColumnStatement alterAdd:
                 if (alterAdd.TableIfExists && !TryGetTable(ResolveDdlName(alterAdd.SchemaName, alterAdd.TableName).ToString(), out _)) return EmptyQueryPlan.Instance;
-                await ApplyAlterTableAddColumnAsync(alterAdd).ConfigureAwait(false);
+                await ApplyAlterTableAddColumnAsync(alterAdd, sourceText).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
             case AlterTableDropColumnStatement alterDrop:
                 if (alterDrop.TableIfExists && !TryGetTable(ResolveDdlName(alterDrop.SchemaName, alterDrop.TableName).ToString(), out _)) return EmptyQueryPlan.Instance;
-                ApplyAlterTableDropColumn(alterDrop);
+                ApplyAlterTableDropColumn(alterDrop, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case AlterTableDropConstraintStatement alterDropConstraint:
                 if (alterDropConstraint.TableIfExists && !TryGetTable(ResolveDdlName(alterDropConstraint.SchemaName, alterDropConstraint.TableName).ToString(), out _)) return EmptyQueryPlan.Instance;
-                await ApplyAlterTableDropConstraintAsync(alterDropConstraint).ConfigureAwait(false);
+                await ApplyAlterTableDropConstraintAsync(alterDropConstraint, sourceText).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
             case AlterTableAlterColumnDropStatement alterColumnDrop:
                 if (alterColumnDrop.TableIfExists && !TryGetTable(ResolveDdlName(alterColumnDrop.SchemaName, alterColumnDrop.TableName).ToString(), out _)) return EmptyQueryPlan.Instance;
-                await ApplyAlterTableAlterColumnDropAsync(alterColumnDrop).ConfigureAwait(false);
+                await ApplyAlterTableAlterColumnDropAsync(alterColumnDrop, sourceText).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
             case InsertStatement insert:
@@ -606,7 +616,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// and the INSERT layer scans existing rows to reject duplicate /
     /// null PK values.
     /// </remarks>
-    private async Task ApplyCreateTableAsync(CreateTableStatement create)
+    private async Task ApplyCreateTableAsync(CreateTableStatement create, string? sourceText = null)
     {
         // Existence check is against the explicit target location (after
         // ResolveForCreate picks the schema for unqualified names below)
@@ -644,6 +654,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                     "TEMP tables are always session-scoped in the public schema.");
             }
             Add(new InMemoryTableProvider(Pool, create.TableName, schema));
+            Events.Raise(new TableCreatedEvent(
+                new QualifiedName("public", create.TableName), schema, sourceText));
             return;
         }
 
@@ -668,6 +680,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             schema,
             create.StoragePath,
             create.PrimaryKeyConstraintName);
+
+        Events.Raise(new TableCreatedEvent(qn, schema, sourceText));
     }
 
     /// <summary>
@@ -676,15 +690,30 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <c>.datum</c> file (and companion sidecars), and updates the
     /// catalog json. <c>IF EXISTS</c> suppresses the not-found error.
     /// </summary>
-    private void ApplyDropTable(DropTableStatement drop)
+    private void ApplyDropTable(DropTableStatement drop, string? sourceText = null)
     {
         QualifiedName qn = ResolveDdlName(drop.SchemaName, drop.TableName);
+
+        // Capture the column schema before the provider is unregistered so
+        // the TableDropped event can carry it for subscribers that diff
+        // against a prior snapshot. TryGetTable goes through the backend
+        // resolver; if the table isn't there we'll fall through to the
+        // existing "not registered" branch and never raise.
+        Schema? beforeSchema = null;
+        if (TryResolveBackend(qn.Schema, out ITableCatalog? lookupBackend)
+            && lookupBackend.TryGetTable(qn, out ITableProvider? provider))
+        {
+            beforeSchema = provider.GetSchema();
+        }
+
         if (!TryResolveBackend(qn.Schema, out ITableCatalog? backend) || !backend.DropTable(qn))
         {
             if (drop.IfExists) return;
             throw new InvalidOperationException(
                 $"Table '{drop.TableName}' is not registered in the catalog.");
         }
+
+        Events.Raise(new TableDroppedEvent(qn, beforeSchema, sourceText));
     }
 
     /// <summary>
@@ -694,7 +723,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// schemas (public / system / information_schema / datum_catalog)
     /// cannot be re-created.
     /// </summary>
-    private void ApplyCreateSchema(CreateSchemaStatement create)
+    private void ApplyCreateSchema(CreateSchemaStatement create, string? sourceText = null)
     {
         if (_backends.ContainsKey(create.SchemaName))
         {
@@ -703,6 +732,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 $"Schema '{create.SchemaName}' already exists.");
         }
         _backends[create.SchemaName] = _flatFile;
+        Events.Raise(new SchemaCreatedEvent(create.SchemaName, sourceText));
     }
 
     /// <summary>
@@ -711,7 +741,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// CASCADE drops every table in the schema first. Built-in schemas
     /// are protected.
     /// </summary>
-    private void ApplyDropSchema(DropSchemaStatement drop)
+    private void ApplyDropSchema(DropSchemaStatement drop, string? sourceText = null)
     {
         if (!_backends.TryGetValue(drop.SchemaName, out ITableCatalog? backend))
         {
@@ -751,6 +781,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
         // Finally remove the routing entry so subsequent lookups fail.
         _backends.Remove(drop.SchemaName);
+
+        // CASCADE-dropped child tables intentionally do NOT fire their own
+        // TableDropped events — subscribers treat SchemaDropped as "blow
+        // away the entire subtree" (see CatalogEvents class remarks).
+        Events.Raise(new SchemaDroppedEvent(drop.SchemaName, sourceText));
     }
 
     /// <summary>
@@ -777,7 +812,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <c>.datum-cindex-{name}</c> sidecar (and backfill it from existing
     /// rows), records the index in the catalog descriptor, and persists.
     /// </summary>
-    private async Task ApplyCreateIndexAsync(CreateIndexStatement create)
+    private async Task ApplyCreateIndexAsync(CreateIndexStatement create, string? sourceText = null)
     {
         // Validate the target table exists and is owned by this catalog.
         // Resolution honours the new SchemaName (S8): explicit schema →
@@ -844,6 +879,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // Routes through the schema's backend; read-only backends would
         // throw, but we already rejected non-.datum providers above.
         backend.RegisterIndex(tableQn, descriptor);
+
+        Events.Raise(new IndexCreatedEvent(tableQn, descriptor, sourceText));
     }
 
     private static IndexKind ResolveCreateIndexKind(CreateIndexStatement create)
@@ -987,7 +1024,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <c>.datum-cindex-{name}</c> sidecar, removes the catalog entry, and
     /// persists.
     /// </summary>
-    private void ApplyDropIndex(DropIndexStatement drop)
+    private void ApplyDropIndex(DropIndexStatement drop, string? sourceText = null)
     {
         // Persistent indexes only live in FlatFile; only it can resolve
         // index-name-to-owning-table.
@@ -1028,6 +1065,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         _flatFile.UnregisterIndex(drop.IndexName, out _);
+
+        Events.Raise(new IndexDroppedEvent(tableName, descriptor, sourceText));
     }
 
     /// <summary>
@@ -1604,13 +1643,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// later-PR concern), and computed columns (<c>AS expr</c>) are
     /// reserved for a future PR.
     /// </summary>
-    private async Task ApplyAlterTableAddColumnAsync(AlterTableAddColumnStatement alter)
+    private async Task ApplyAlterTableAddColumnAsync(AlterTableAddColumnStatement alter, string? sourceText = null)
     {
         // Resolve the schema once. Subsequent lookups go through the
         // string indexer with this qualified form so the router picks the
         // right backend regardless of whether the user wrote
         // `ALTER TABLE t` or `ALTER TABLE myapp.t`.
-        string qualifiedTableName = ResolveDdlName(alter.SchemaName, alter.TableName).ToString();
+        QualifiedName qn = ResolveDdlName(alter.SchemaName, alter.TableName);
+        string qualifiedTableName = qn.ToString();
+        Schema? beforeSchema = TryGetTable(qualifiedTableName, out ITableProvider? beforeProvider)
+            ? beforeProvider.GetSchema()
+            : null;
 
         // PRIMARY KEY columns implicitly take !Nullable from the parser
         // (matches CREATE TABLE). The general NOT-NULL-on-ALTER restriction
@@ -1818,6 +1861,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 throw;
             }
         }
+
+        if (TryGetTable(qualifiedTableName, out ITableProvider? afterProvider))
+        {
+            Events.Raise(new TableAlteredEvent(qn, beforeSchema, afterProvider.GetSchema(), sourceText));
+        }
     }
 
     /// <summary>
@@ -1938,14 +1986,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// is soft-dropped (tombstoned) on the underlying provider; the
     /// data block stays on disk for compaction-time reclamation.
     /// </summary>
-    private void ApplyAlterTableDropColumn(AlterTableDropColumnStatement alter)
+    private void ApplyAlterTableDropColumn(AlterTableDropColumnStatement alter, string? sourceText = null)
     {
-        string qualifiedTableName = ResolveDdlName(alter.SchemaName, alter.TableName).ToString();
+        QualifiedName qn = ResolveDdlName(alter.SchemaName, alter.TableName);
+        string qualifiedTableName = qn.ToString();
         if (!TryGetTable(qualifiedTableName, out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"Table '{alter.TableName}' is not registered in the catalog.");
         }
+        Schema beforeSchema = provider.GetSchema();
 
         // Honor IF EXISTS — schema lookup is the cheapest way to ask
         // "does this column exist?" without poking at provider internals.
@@ -2060,6 +2110,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         this[qualifiedTableName].DropColumn(alter.ColumnName);
+
+        if (TryGetTable(qualifiedTableName, out ITableProvider? afterProvider))
+        {
+            Events.Raise(new TableAlteredEvent(qn, beforeSchema, afterProvider.GetSchema(), sourceText));
+        }
     }
 
     /// <summary>
@@ -2069,14 +2124,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// names produce a PG-flavored "does not exist" error (suppressed by
     /// <c>IF EXISTS</c>).
     /// </summary>
-    private async Task ApplyAlterTableDropConstraintAsync(AlterTableDropConstraintStatement alter)
+    private async Task ApplyAlterTableDropConstraintAsync(AlterTableDropConstraintStatement alter, string? sourceText = null)
     {
-        string qualifiedTableName = ResolveDdlName(alter.SchemaName, alter.TableName).ToString();
+        QualifiedName qn = ResolveDdlName(alter.SchemaName, alter.TableName);
+        string qualifiedTableName = qn.ToString();
         if (!TryGetTable(qualifiedTableName, out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"Table '{alter.TableName}' is not registered in the catalog.");
         }
+        Schema beforeSchema = provider.GetSchema();
 
         // The PK constraint name might be user-supplied (stored in
         // _persistentTablePkNames) or derived from the table name
@@ -2102,6 +2159,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             // name for a non-existent constraint.
             // Only FlatFile tracks custom PK constraint names today.
             _flatFile.RemoveCustomPrimaryKeyConstraintName(ResolveDdlName(alter.SchemaName, alter.TableName));
+
+            if (TryGetTable(qualifiedTableName, out ITableProvider? afterProvider))
+            {
+                Events.Raise(new TableAlteredEvent(qn, beforeSchema, afterProvider.GetSchema(), sourceText));
+            }
             return;
         }
 
@@ -2117,9 +2179,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// Validates that the column exists and (for DROP IDENTITY without
     /// IF EXISTS) that the attribute being dropped is actually present.
     /// </summary>
-    private async Task ApplyAlterTableAlterColumnDropAsync(AlterTableAlterColumnDropStatement alter)
+    private async Task ApplyAlterTableAlterColumnDropAsync(AlterTableAlterColumnDropStatement alter, string? sourceText = null)
     {
-        string qualifiedTableName = ResolveDdlName(alter.SchemaName, alter.TableName).ToString();
+        QualifiedName qn = ResolveDdlName(alter.SchemaName, alter.TableName);
+        string qualifiedTableName = qn.ToString();
         if (!TryGetTable(qualifiedTableName, out ITableProvider? provider))
         {
             throw new InvalidOperationException(
@@ -2154,18 +2217,23 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                         $"column \"{alter.ColumnName}\" of relation \"{alter.TableName}\" is not an IDENTITY column");
                 }
                 await provider.DropColumnIdentityAsync(columnIndex).ConfigureAwait(false);
-                return;
+                break;
 
             case AlterColumnDropTarget.Default:
                 // PG treats DROP DEFAULT as idempotent — no error when the
                 // column has no default. Match that behavior whether or
                 // not IF EXISTS is supplied.
                 await provider.DropColumnDefaultAsync(columnIndex).ConfigureAwait(false);
-                return;
+                break;
 
             default:
                 throw new InvalidOperationException(
                     $"ALTER COLUMN DROP target {alter.Target} is not implemented.");
+        }
+
+        if (TryGetTable(qualifiedTableName, out ITableProvider? afterProvider))
+        {
+            Events.Raise(new TableAlteredEvent(qn, schema, afterProvider.GetSchema(), sourceText));
         }
     }
 
