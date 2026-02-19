@@ -1,3 +1,4 @@
+using DatumIngest.Catalog.Executors;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;

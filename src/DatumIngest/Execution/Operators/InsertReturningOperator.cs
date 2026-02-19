@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Executors;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 

@@ -2,7 +2,7 @@ using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
-namespace DatumIngest.Catalog;
+namespace DatumIngest.Catalog.Executors;
 
 /// <summary>
 /// Owns the <c>DELETE FROM …</c> pipeline for

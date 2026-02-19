@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using DatumIngest.Catalog.Executors;
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.BTree.MutableBytes;
 using DatumIngest.Model;

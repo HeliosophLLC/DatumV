@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
+using DatumIngest.Catalog.Executors;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.DatumFile.V2;
@@ -246,6 +247,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// where <see cref="ITableCatalog.SupportsDdl"/> is true.
     /// </summary>
     private readonly FlatFileCatalog _flatFile;
+
+    /// <summary>
+    /// Internal accessor for the user-data backend so per-statement
+    /// executors (see <see cref="IndexExecutor"/>) can reach the same
+    /// FlatFile-only operations the old in-class apply methods used.
+    /// </summary>
+    internal FlatFileCatalog FlatFile => _flatFile;
 
     /// <summary>
     /// System-projection backend: owns the <c>system</c> schema
@@ -546,7 +554,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return EmptyQueryPlan.Instance;
 
             case DropIndexStatement dropIndex:
-                ApplyDropIndex(dropIndex, sourceText);
+                IndexExecutor.DropIndex(this, dropIndex, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case ReindexTableStatement reindex:
@@ -1016,57 +1024,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         return create.Options["analyzer"];
-    }
-
-    /// <summary>
-    /// Applies a <c>DROP INDEX</c> statement: locates the owning table,
-    /// asks the provider to dispose the tree and delete the
-    /// <c>.datum-cindex-{name}</c> sidecar, removes the catalog entry, and
-    /// persists.
-    /// </summary>
-    private void ApplyDropIndex(DropIndexStatement drop, string? sourceText = null)
-    {
-        // Persistent indexes only live in FlatFile; only it can resolve
-        // index-name-to-owning-table.
-        if (!_flatFile.TryGetIndexOwner(drop.IndexName, out QualifiedName tableName))
-        {
-            if (drop.IfExists) return;
-            throw new InvalidOperationException(
-                $"Index '{drop.IndexName}' is not registered in the catalog.");
-        }
-
-        if (!_flatFile.TryGetTable(tableName, out ITableProvider? provider))
-        {
-            // Catalog state is inconsistent — the table got dropped without
-            // cleaning up the index map. Defensively remove the stale entry
-            // and persist.
-            _flatFile.UnregisterIndex(drop.IndexName, out _);
-            if (drop.IfExists) return;
-            throw new InvalidOperationException(
-                $"Index '{drop.IndexName}' references missing table '{tableName}'.");
-        }
-
-        // Find the descriptor so we can dispatch the per-kind drop.
-        IndexDescriptor? descriptor = _flatFile.GetTableIndexes(tableName)?.FirstOrDefault(idx =>
-            string.Equals(idx.Name, drop.IndexName, StringComparison.OrdinalIgnoreCase));
-
-        if (provider is Providers.DatumFileTableProviderV2 datumProvider)
-        {
-            IndexKind kind = descriptor?.Kind ?? IndexKind.Composite;
-            switch (kind)
-            {
-                case IndexKind.Composite:
-                    datumProvider.DropCompositeIndex(drop.IndexName);
-                    break;
-                case IndexKind.FullText:
-                    datumProvider.DropFtsIndex(drop.IndexName);
-                    break;
-            }
-        }
-
-        _flatFile.UnregisterIndex(drop.IndexName, out _);
-
-        Events.Raise(new IndexDroppedEvent(tableName, descriptor, sourceText));
     }
 
     /// <summary>

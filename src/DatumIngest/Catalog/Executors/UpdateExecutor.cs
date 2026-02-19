@@ -4,7 +4,7 @@ using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
 
-namespace DatumIngest.Catalog;
+namespace DatumIngest.Catalog.Executors;
 
 /// <summary>
 /// Owns the <c>UPDATE</c>-statement pipeline for
