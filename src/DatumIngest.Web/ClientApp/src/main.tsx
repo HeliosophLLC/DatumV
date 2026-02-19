@@ -14,6 +14,12 @@ import './state/theme';
 // Loads the dialog-message subscriber so openDialog promises resolve.
 // Side-effect only; safe to import in both roots.
 import './state/dialogs';
+// Wires Monaco's worker + loader to the bundled instance. Idempotent;
+// safe to import in both roots (dialog windows never mount Monaco
+// today, but the cost of the early init is a single function call).
+import { initMonaco } from './monaco/setup';
+
+initMonaco();
 
 // Dual-root mount: the same SPA bundle serves both the main app and
 // dialog windows. The coordinator (server-side) loads dialog windows at

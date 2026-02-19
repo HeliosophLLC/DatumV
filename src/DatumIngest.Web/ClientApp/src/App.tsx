@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSnapshot } from 'valtio';
+import { usePanelRef } from 'react-resizable-panels';
 import { refreshHealth } from './state/health';
-import { refreshSettings } from './state/settings';
+import { refreshSettings, settingsState } from './state/settings';
 import { conversationState } from './state/conversation';
-import { navState } from './state/nav';
+import { navState, type ActiveView } from './state/nav';
 import { WindowChrome } from '@/components/window/WindowChrome';
 import { SideNav } from '@/components/nav/SideNav';
 import { HomePage } from '@/components/home/HomePage';
@@ -16,10 +17,20 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from '@/components/ui/resizable';
+import { cn } from '@/lib/utils';
+
+type SecondaryView = Exclude<ActiveView, 'chat'>;
+
+// Default split when chat is docked next to a secondary view.
+const DEFAULT_SECONDARY_SIZE = '65%';
+const DEFAULT_CHAT_SIZE = '35%';
+const PANEL_MIN_SIZE = '20%';
+const COLLAPSE_ANIMATION_MS = 300;
 
 export default function App() {
   const { messages, status } = useSnapshot(conversationState);
   const { view } = useSnapshot(navState);
+  const { animations } = useSnapshot(settingsState);
 
   useEffect(() => {
     refreshHealth();
@@ -27,38 +38,91 @@ export default function App() {
   }, []);
 
   const showConversation = messages.length > 0 || status !== 'idle';
-  const isChat = view === 'chat';
+
+  // Keep the most recently active non-chat view mounted across the slide
+  // back to chat — without this, the secondary content unmounts at click
+  // time and only chat animates, which looks like a flash rather than a
+  // slide.
+  const [secondaryView, setSecondaryView] = useState<SecondaryView | null>(
+    view === 'chat' ? null : view,
+  );
+  useEffect(() => {
+    if (view !== 'chat') setSecondaryView(view);
+  }, [view]);
+
+  // Imperative collapse/expand on nav change. The library sets panel sizes
+  // via inline `flex-grow`; we apply a CSS transition on that property
+  // only while a programmatic resize is in flight, then strip it. The
+  // class isn't present during user drag, so drag stays instant.
+  const secondaryRef = usePanelRef();
+  const [animating, setAnimating] = useState(false);
+  const hasInitialized = useRef(false);
+
+  useEffect(() => {
+    const panel = secondaryRef.current;
+    if (!panel) return;
+
+    const wantCollapsed = view === 'chat';
+    if (panel.isCollapsed() === wantCollapsed) {
+      hasInitialized.current = true;
+      return;
+    }
+
+    // First run snaps without animation so chat starts at full width on
+    // app boot rather than flashing the default 65/35 split.
+    const isFirstRun = !hasInitialized.current;
+    hasInitialized.current = true;
+
+    if (animations && !isFirstRun) {
+      setAnimating(true);
+      const t = window.setTimeout(
+        () => setAnimating(false),
+        COLLAPSE_ANIMATION_MS + 20,
+      );
+      if (wantCollapsed) panel.collapse();
+      else panel.expand();
+      return () => window.clearTimeout(t);
+    }
+    if (wantCollapsed) panel.collapse();
+    else panel.expand();
+  }, [view, animations, secondaryRef]);
+
+  const transitionClass = animating
+    ? 'transition-[flex-grow] duration-300 ease-in-out'
+    : '';
 
   return (
     <WindowChrome>
       <SideNav />
-      {isChat ? (
-        <main className="flex flex-1 flex-col overflow-hidden">
+      <ResizablePanelGroup orientation="horizontal" className="flex-1">
+        <ResizablePanel
+          panelRef={secondaryRef}
+          id="secondary"
+          collapsible
+          collapsedSize="0%"
+          defaultSize={DEFAULT_SECONDARY_SIZE}
+          minSize={PANEL_MIN_SIZE}
+          className={cn('flex flex-col overflow-hidden', transitionClass)}
+        >
+          {secondaryView === 'query' && <QueryEditorView />}
+          {secondaryView === 'models' && <ModelsView />}
+          {secondaryView === 'settings' && <SettingsView />}
+        </ResizablePanel>
+        <ResizableHandle
+          className={cn(
+            'transition-opacity duration-300',
+            view === 'chat' && 'pointer-events-none opacity-0',
+          )}
+        />
+        <ResizablePanel
+          id="chat"
+          defaultSize={DEFAULT_CHAT_SIZE}
+          minSize={PANEL_MIN_SIZE}
+          className={cn('flex flex-col overflow-hidden', transitionClass)}
+        >
           {showConversation ? <ConversationView /> : <HomePage />}
-        </main>
-      ) : (
-        <ResizablePanelGroup orientation="horizontal" className="flex-1">
-          <ResizablePanel
-            id="secondary"
-            defaultSize="65%"
-            minSize="20%"
-            className="flex flex-col overflow-hidden"
-          >
-            {view === 'query' && <QueryEditorView />}
-            {view === 'models' && <ModelsView />}
-            {view === 'settings' && <SettingsView />}
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel
-            id="chat"
-            defaultSize="35%"
-            minSize="20%"
-            className="flex flex-col overflow-hidden"
-          >
-            {showConversation ? <ConversationView /> : <HomePage />}
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      )}
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </WindowChrome>
   );
 }

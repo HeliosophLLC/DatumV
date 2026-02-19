@@ -1,4 +1,7 @@
 {
   "title": "Query editor",
-  "placeholder": "Query editor — coming soon"
+  "newTab": "New tab",
+  "closeTab": "Close",
+  "renameTab": "Rename",
+  "renamePrompt": "Tab name:"
 }
