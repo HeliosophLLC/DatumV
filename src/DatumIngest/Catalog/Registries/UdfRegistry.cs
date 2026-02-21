@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Parsing.Ast;
 
-namespace DatumIngest.Catalog;
+namespace DatumIngest.Catalog.Registries;
 
 /// <summary>
 /// A registered user-defined scalar function. Two body shapes are supported:

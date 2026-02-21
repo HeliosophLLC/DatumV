@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 
 using DatumIngest.Catalog;
-using DatumIngest.Execution;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Inference;
 using DatumIngest.Model;
 using DatumIngest.Models;

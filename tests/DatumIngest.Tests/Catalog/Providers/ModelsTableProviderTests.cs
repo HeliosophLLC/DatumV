@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Inference;
 using DatumIngest.Model;

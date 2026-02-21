@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Catalog.Executors;
 using DatumIngest.Catalog.Plans;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;
 using DatumIngest.Functions;

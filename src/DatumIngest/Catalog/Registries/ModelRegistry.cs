@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Inference;
 using DatumIngest.Parsing.Ast;
 
-namespace DatumIngest.Catalog;
+namespace DatumIngest.Catalog.Registries;
 
 /// <summary>
 /// A registered SQL-bodied model — a procedural function with an additional

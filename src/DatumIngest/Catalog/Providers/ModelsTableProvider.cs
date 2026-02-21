@@ -1,5 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Model;
 using DatumIngest.Models;
 using DatumIngest.Parsing.Ast;

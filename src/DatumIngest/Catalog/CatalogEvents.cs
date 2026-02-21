@@ -1,5 +1,5 @@
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Catalog;
 

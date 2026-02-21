@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Execution;
 
 namespace DatumIngest.Tests.Catalog;

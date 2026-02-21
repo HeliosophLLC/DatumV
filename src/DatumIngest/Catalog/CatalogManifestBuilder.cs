@@ -1,3 +1,4 @@
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
 using DatumIngest.Model;

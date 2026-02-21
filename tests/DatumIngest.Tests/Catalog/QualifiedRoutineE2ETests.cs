@@ -1,10 +1,8 @@
 using DatumIngest.Catalog;
-using DatumIngest.Execution;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.LanguageServer;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Tests.Catalog;
 

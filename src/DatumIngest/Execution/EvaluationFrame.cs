@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Model;
 

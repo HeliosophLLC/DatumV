@@ -3,6 +3,7 @@ using System.Runtime.ExceptionServices;
 
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Plans;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
