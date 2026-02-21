@@ -49,10 +49,14 @@ function ResizableHandle({
         'hover:bg-primary data-[separator=active]:bg-primary',
         'after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 after:bg-transparent after:transition-colors after:duration-150',
         'hover:after:bg-primary data-[separator=active]:after:bg-primary',
-        // Inverse layout for vertical panel groups (when those land).
+        // Inverse layout for vertical panel groups. `translate-x-0`
+        // clears the base's `-translate-x-1/2` (kept for the vertical-
+        // line case) so the hit zone isn't shifted half off-screen
+        // horizontally; `-translate-y-1/2` then centers it vertically
+        // on the 1px line.
         'aria-[orientation=horizontal]:h-px aria-[orientation=horizontal]:w-full',
         'aria-[orientation=horizontal]:after:left-0 aria-[orientation=horizontal]:after:h-1',
-        'aria-[orientation=horizontal]:after:w-full aria-[orientation=horizontal]:after:-translate-y-1/2',
+        'aria-[orientation=horizontal]:after:w-full aria-[orientation=horizontal]:after:translate-x-0 aria-[orientation=horizontal]:after:-translate-y-1/2',
         'focus-visible:ring-1 focus-visible:outline-none',
         className,
       )}

@@ -4,7 +4,16 @@ import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import { tabsState, setTabSql } from '@/state/tabs';
 import { settingsState } from '@/state/settings';
+import { disposeTabExecution, runTab } from '@/state/execution';
+import { setActiveEditor, resolveRunSql } from '@/state/activeEditor';
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '@/components/ui/resizable';
 import { TabStrip } from './TabStrip';
+import { QueryToolbar } from './QueryToolbar';
+import { ResultsPane } from './ResultsPane';
 
 // Single Monaco instance per active panel; per-tab `ITextModel` instances
 // preserve cursor / scroll / undo across tab switches. The editor's
@@ -26,12 +35,15 @@ export function QueryEditorView() {
 
   // Garbage-collect models for tabs that have been closed. Runs whenever
   // the tab set changes; this is the only time a model needs disposing.
+  // Also tears down any in-flight execution for closed tabs so the
+  // AbortController + state slot don't leak.
   useEffect(() => {
     const liveIds = new Set(tabs.map((t) => t.id));
     for (const [id, model] of modelsRef.current) {
       if (!liveIds.has(id)) {
         model.dispose();
         modelsRef.current.delete(id);
+        disposeTabExecution(id);
       }
     }
   }, [tabs]);
@@ -81,8 +93,9 @@ export function QueryEditorView() {
     };
   }, []);
 
-  const onMount: OnMount = (editor) => {
+  const onMount: OnMount = (editor, monacoNs) => {
     editorRef.current = editor;
+    setActiveEditor(editor);
     // Clear the ref when Monaco disposes itself — happens when the
     // editor unmounts (e.g. user closes the last tab). Without this,
     // the next mount's active-tab effect could fire with a stale
@@ -91,7 +104,24 @@ export function QueryEditorView() {
       if (editorRef.current === editor) {
         editorRef.current = null;
       }
+      setActiveEditor(null);
     });
+
+    // F5 + Ctrl/Cmd+Enter run the active tab's SQL. Both read state
+    // directly from the proxy so the callback never closes over a
+    // stale `activeTabId` / `sql` snapshot. `resolveRunSql` reads
+    // the editor's current selection and runs that text only when
+    // non-empty — full tab text otherwise.
+    const runActive = () => {
+      const id = tabsState.activeTabId;
+      if (id === null) return;
+      const tab = tabsState.tabs.find((x) => x.id === id);
+      if (!tab) return;
+      void runTab(id, resolveRunSql(tab.sql));
+    };
+    editor.addCommand(monacoNs.KeyCode.F5, runActive);
+    editor.addCommand(monacoNs.KeyMod.CtrlCmd | monacoNs.KeyCode.Enter, runActive);
+
     // Bind the active tab's model immediately. The active-tab effect
     // has already run (with editorRef still null) and won't re-run
     // until activeTabId/tabs changes, so we must do the first swap
@@ -108,36 +138,49 @@ export function QueryEditorView() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <TabStrip />
-      <div className="flex-1 overflow-hidden">
-        {/* `key` reset isn't needed — we swap models imperatively.
-            When all tabs are closed we drop the editor from the tree
-            entirely, both to release Monaco state and to leave a clean
-            blank surface (the empty TabStrip with just the `+` button
-            stays above). Remounting on next openTab() is cheap because
-            Monaco is already initialised. */}
-        {activeTabId !== null && (
-          <Editor
-            onMount={onMount}
-            theme={monacoTheme}
-            defaultLanguage="sql"
-            defaultValue={tabs.find((t) => t.id === activeTabId)?.sql ?? ''}
-            options={{
-              automaticLayout: true,
-              fontFamily: 'var(--font-mono)',
-              fontSize: 13,
-              minimap: { enabled: false },
-              scrollBeyondLastLine: false,
-              wordWrap: 'on',
-              renderLineHighlight: 'all',
-            }}
-            onChange={(value) => {
-              if (activeTabId !== null && value !== undefined) {
-                setTabSql(activeTabId, value);
-              }
-            }}
-          />
-        )}
-      </div>
+      <QueryToolbar />
+      {/* Vertical split: editor on top, results below. The split persists
+          across tab switches because the panel group is structural,
+          not per-tab. Per-tab Monaco models + per-tab execution state
+          stay live regardless of where the user drags the divider. */}
+      {activeTabId !== null ? (
+        <ResizablePanelGroup orientation="vertical" className="flex-1">
+          <ResizablePanel id="query-editor" defaultSize="65%" minSize="20%" className="flex flex-col overflow-hidden">
+            {/* `key` reset isn't needed — we swap models imperatively.
+                When all tabs are closed we drop the editor from the tree
+                entirely, both to release Monaco state and to leave a clean
+                blank surface (the empty TabStrip stays above).
+                Remounting on next openTab() is cheap because Monaco is
+                already initialised. */}
+            <Editor
+              onMount={onMount}
+              theme={monacoTheme}
+              defaultLanguage="sql"
+              defaultValue={tabs.find((t) => t.id === activeTabId)?.sql ?? ''}
+              options={{
+                automaticLayout: true,
+                fontFamily: 'var(--font-mono)',
+                fontSize: 13,
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                renderLineHighlight: 'all',
+              }}
+              onChange={(value) => {
+                if (activeTabId !== null && value !== undefined) {
+                  setTabSql(activeTabId, value);
+                }
+              }}
+            />
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel id="query-results" defaultSize="35%" minSize="10%" className="flex flex-col overflow-hidden">
+            <ResultsPane />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        <div className="flex-1 overflow-hidden" />
+      )}
     </div>
   );
 }

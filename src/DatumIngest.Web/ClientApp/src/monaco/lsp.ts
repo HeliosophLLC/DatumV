@@ -67,27 +67,6 @@ function registerCompletionProvider(): void {
       const offset = model.getOffsetAt(position);
       const items = await api.language.complete({ sql, offset });
 
-      // Temporary diagnostics — remove once context-aware completions
-      // are confirmed working end-to-end. The counts-by-kind summary
-      // tells us at a glance whether the server's zone classifier
-      // produced columns for this offset; the `aroundCursor` slice
-      // exposes what the server was actually asked to classify.
-      const byKind = items.reduce<Record<string, number>>((acc, it) => {
-        const k = it.kind ?? 'unknown';
-        acc[k] = (acc[k] ?? 0) + 1;
-        return acc;
-      }, {});
-      const around = sql.slice(Math.max(0, offset - 30), offset)
-        + '⟨▎⟩'
-        + sql.slice(offset, Math.min(sql.length, offset + 30));
-      console.log('[lsp] complete', {
-        offset,
-        byKind,
-        totalItems: items.length,
-        aroundCursor: around,
-        sample: items.slice(0, 6),
-      });
-
       // Build a one-position range — Monaco computes the actual replace
       // range from the user's typed prefix.
       const word = model.getWordUntilPosition(position);
@@ -148,10 +127,6 @@ function registerHoverProvider(): void {
       const sql = model.getValue();
       const offset = model.getOffsetAt(position);
       const hover = await api.language.hover({ sql, offset });
-      const around = sql.slice(Math.max(0, offset - 30), offset)
-        + '⟨▎⟩'
-        + sql.slice(offset, Math.min(sql.length, offset + 30));
-      console.log('[lsp] hover', { offset, aroundCursor: around, hover });
       if (!hover) return null;
 
       return {

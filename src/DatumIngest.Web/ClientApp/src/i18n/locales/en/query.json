@@ -3,5 +3,18 @@
   "newTab": "New tab",
   "closeTab": "Close",
   "renameTab": "Rename",
-  "renamePrompt": "Tab name:"
+  "renamePrompt": "Tab name:",
+  "run": "Run",
+  "cancel": "Cancel",
+  "statusRunning": "Running… {rows} {rows, plural, one {row} other {rows}}",
+  "statusDone": "{rows} {rows, plural, one {row} other {rows}} · {ms}ms",
+  "statusCancelled": "Cancelled",
+  "statusError": "Error",
+  "resultsEmpty": "Run a query to see results.",
+  "cellRowCount": "{rows} {rows, plural, one {row} other {rows}}",
+  "cellTruncated": "truncated",
+  "statusBarRunning": "Executing…",
+  "statusBarSuccess": "Query executed successfully",
+  "statusBarError": "One or more errors occurred",
+  "statusBarCancelled": "Cancelled"
 }

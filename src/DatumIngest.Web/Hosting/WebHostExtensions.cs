@@ -3,6 +3,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Models;
 using DatumIngest.Pooling;
 using DatumIngest.Web.Compute;
+using DatumIngest.Web.Execution;
 using DatumIngest.Web.Hubs;
 using DatumIngest.Web.Llm;
 using DatumIngest.Web.Lsp;
@@ -80,6 +81,14 @@ public static class WebHostExtensions
             // any DDL that ran during startup migrations.
             services.AddSingleton<LanguageManifestService>();
             services.AddHostedService<LanguageManifestStartupService>();
+
+            // Streaming SQL execution. Scoped so each request gets its own
+            // service instance — its only mutable state today is the
+            // catalog reference, which is itself a singleton, but keeping
+            // the service scoped leaves room for per-request state (e.g.
+            // a request-bound tracer / principal) without churning the
+            // surface.
+            services.AddScoped<QueryStreamService>();
 
             // Chat LLM wiring. Holder is the singleton consumers depend on;
             // the hosted service sets it during StartAsync after the model is
