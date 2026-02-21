@@ -337,7 +337,10 @@ public sealed class CompletionProvider
 
         foreach (TableSchemaEntry table in _manifest.Tables)
         {
-            if (tablesInScope is not null && !ContainsIgnoreCase(tablesInScope, table.Name))
+            // The manifest stores fully-qualified names (`public.users`)
+            // but the parser's scoped list usually carries the typed
+            // form, which may be unqualified (`users`). Match either way.
+            if (tablesInScope is not null && !MatchesAnyScopedName(tablesInScope, table.Name))
             {
                 continue;
             }
@@ -367,10 +370,51 @@ public sealed class CompletionProvider
         return false;
     }
 
+    // Matches a manifest table's fully-qualified name (e.g. "public.users")
+    // against any name in a parser-extracted scoped list. A scoped entry
+    // matches exactly OR — when unqualified (no dot) — when it equals the
+    // suffix after the schema separator. Returns true on the first match.
+    private static bool MatchesAnyScopedName(IReadOnlyList<string> scopedNames, string qualifiedTableName)
+    {
+        int dotIndex = qualifiedTableName.IndexOf('.');
+        string unqualified = dotIndex >= 0
+            ? qualifiedTableName[(dotIndex + 1)..]
+            : qualifiedTableName;
+
+        for (int i = 0; i < scopedNames.Count; i++)
+        {
+            string scoped = scopedNames[i];
+            if (string.Equals(scoped, qualifiedTableName, StringComparison.OrdinalIgnoreCase))
+                return true;
+            // Treat a scoped name with no dot as matching the manifest
+            // entry's unqualified portion. The user typing `FROM users`
+            // matches every schema's `users` until FROM-scope extraction
+            // gains its own search-path awareness.
+            if (!scoped.Contains('.') &&
+                string.Equals(scoped, unqualified, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
     private void AddQualifiedColumns(List<CompletionItem> items, string tableQualifier)
     {
+        // tableQualifier is what the user typed before the dot — could be
+        // a schema-qualified name or just an unqualified table name.
+        // Manifest stores tables fully-qualified, so accept either.
         TableSchemaEntry? table = _manifest.Tables.FirstOrDefault(
             entry => string.Equals(entry.Name, tableQualifier, StringComparison.OrdinalIgnoreCase));
+
+        if (table is null && !tableQualifier.Contains('.'))
+        {
+            foreach (string schema in _manifest.SearchPath)
+            {
+                string qualified = $"{schema}.{tableQualifier}";
+                table = _manifest.Tables.FirstOrDefault(
+                    entry => string.Equals(entry.Name, qualified, StringComparison.OrdinalIgnoreCase));
+                if (table is not null) break;
+            }
+        }
 
         if (table is null)
         {

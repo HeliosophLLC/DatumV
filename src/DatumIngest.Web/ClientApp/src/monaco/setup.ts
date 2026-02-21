@@ -7,6 +7,7 @@
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import { loader } from '@monaco-editor/react';
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+import { initLsp } from './lsp';
 // Register the generic SQL Monarch contribution. This is the only
 // language we ship today; PR 3 will swap our DatumIngest grammar in via
 // `monaco.languages.setMonarchTokensProvider('sql', …)` and replace the
@@ -51,4 +52,12 @@ export function initMonaco(): void {
   // the CDN-load step entirely. Must be called before any <Editor />
   // mounts.
   loader.config({ monaco });
+
+  // Fire-and-forget LSP wiring: fetches the Monarch grammar and
+  // registers completion / hover / signature / diagnostics providers
+  // against the SQL language. Async because the initial grammar fetch
+  // is over HTTP, but we don't block app boot — providers register
+  // synchronously and the editor uses the built-in tokenizer until
+  // the fetched grammar lands a moment later.
+  void initLsp();
 }

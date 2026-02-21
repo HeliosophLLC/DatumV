@@ -319,8 +319,25 @@ public sealed class HoverProvider
 
     private string? GetTableHover(string name)
     {
+        // Manifest stores tables as their fully-qualified name
+        // (`public.users`, `system.functions`, etc.). Accept either form:
+        // the user's hover might be over `public.users` or just `users`.
+        // For the unqualified form we walk the search_path so a `users`
+        // hover prefers the first matching schema rather than picking
+        // arbitrarily across schemas.
         TableSchemaEntry? table = _manifest.Tables.FirstOrDefault(
             entry => string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        if (table is null && !name.Contains('.'))
+        {
+            foreach (string schema in _manifest.SearchPath)
+            {
+                string qualified = $"{schema}.{name}";
+                table = _manifest.Tables.FirstOrDefault(
+                    entry => string.Equals(entry.Name, qualified, StringComparison.OrdinalIgnoreCase));
+                if (table is not null) break;
+            }
+        }
 
         if (table is null)
         {
@@ -356,8 +373,23 @@ public sealed class HoverProvider
 
     private string? GetQualifiedColumnHover(string tableQualifier, string columnName)
     {
+        // Same regression as GetTableHover: manifest holds tables as
+        // "schema.name" but the qualifier the user typed may be just the
+        // unqualified table portion. Try exact first, then walk
+        // search_path with `{schema}.{tableQualifier}`.
         TableSchemaEntry? table = _manifest.Tables.FirstOrDefault(
             entry => string.Equals(entry.Name, tableQualifier, StringComparison.OrdinalIgnoreCase));
+
+        if (table is null && !tableQualifier.Contains('.'))
+        {
+            foreach (string schema in _manifest.SearchPath)
+            {
+                string qualified = $"{schema}.{tableQualifier}";
+                table = _manifest.Tables.FirstOrDefault(
+                    entry => string.Equals(entry.Name, qualified, StringComparison.OrdinalIgnoreCase));
+                if (table is not null) break;
+            }
+        }
 
         if (table is null)
         {

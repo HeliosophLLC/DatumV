@@ -5,6 +5,7 @@ using DatumIngest.Pooling;
 using DatumIngest.Web.Compute;
 using DatumIngest.Web.Hubs;
 using DatumIngest.Web.Llm;
+using DatumIngest.Web.Lsp;
 using DatumIngest.Web.ModelLibrary;
 using DatumIngest.Web.Settings;
 
@@ -69,6 +70,16 @@ public static class WebHostExtensions
             });
 
             services.AddHostedService<CatalogInitializationService>();
+
+            // Language-intelligence host. Singleton because it owns one
+            // LanguageService instance + the catalog-event subscriptions.
+            // Hosted-service shim eagerly resolves it at startup so the
+            // initial manifest build + event subscription happen before
+            // any DDL or LSP request can fire — without this, the first
+            // resolve happens on the first /api/lang/* call and misses
+            // any DDL that ran during startup migrations.
+            services.AddSingleton<LanguageManifestService>();
+            services.AddHostedService<LanguageManifestStartupService>();
 
             // Chat LLM wiring. Holder is the singleton consumers depend on;
             // the hosted service sets it during StartAsync after the model is

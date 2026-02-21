@@ -53,6 +53,208 @@ export class HealthClient {
     }
 }
 
+export class LanguageClient {
+    private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
+    private baseUrl: string;
+    protected jsonParseReviver: ((key: string, value: any) => any) | undefined = undefined;
+
+    constructor(baseUrl?: string, http?: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> }) {
+        this.http = http ? http : window as any;
+        this.baseUrl = baseUrl ?? "";
+    }
+
+    complete(req: LangPositionRequest, signal?: AbortSignal): Promise<CompletionItem[]> {
+        let url_ = this.baseUrl + "/api/lang/complete";
+        url_ = url_.replace(/[?&]$/, "");
+
+        const content_ = JSON.stringify(req);
+
+        let options_: RequestInit = {
+            body: content_,
+            method: "POST",
+            signal,
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processComplete(_response);
+        });
+    }
+
+    protected processComplete(response: Response): Promise<CompletionItem[]> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as CompletionItem[];
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<CompletionItem[]>(null as any);
+    }
+
+    hover(req: LangPositionRequest, signal?: AbortSignal): Promise<HoverResult | null> {
+        let url_ = this.baseUrl + "/api/lang/hover";
+        url_ = url_.replace(/[?&]$/, "");
+
+        const content_ = JSON.stringify(req);
+
+        let options_: RequestInit = {
+            body: content_,
+            method: "POST",
+            signal,
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processHover(_response);
+        });
+    }
+
+    protected processHover(response: Response): Promise<HoverResult | null> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as HoverResult;
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<HoverResult | null>(null as any);
+    }
+
+    signature(req: LangPositionRequest, signal?: AbortSignal): Promise<SignatureHelp | null> {
+        let url_ = this.baseUrl + "/api/lang/signature";
+        url_ = url_.replace(/[?&]$/, "");
+
+        const content_ = JSON.stringify(req);
+
+        let options_: RequestInit = {
+            body: content_,
+            method: "POST",
+            signal,
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processSignature(_response);
+        });
+    }
+
+    protected processSignature(response: Response): Promise<SignatureHelp | null> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as SignatureHelp;
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<SignatureHelp | null>(null as any);
+    }
+
+    diagnose(req: LangSqlRequest, signal?: AbortSignal): Promise<Diagnostic[]> {
+        let url_ = this.baseUrl + "/api/lang/diagnose";
+        url_ = url_.replace(/[?&]$/, "");
+
+        const content_ = JSON.stringify(req);
+
+        let options_: RequestInit = {
+            body: content_,
+            method: "POST",
+            signal,
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processDiagnose(_response);
+        });
+    }
+
+    protected processDiagnose(response: Response): Promise<Diagnostic[]> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as Diagnostic[];
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<Diagnostic[]>(null as any);
+    }
+
+    grammar(signal?: AbortSignal): Promise<FileResponse> {
+        let url_ = this.baseUrl + "/api/lang/grammar";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/octet-stream"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processGrammar(_response);
+        });
+    }
+
+    protected processGrammar(response: Response): Promise<FileResponse> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200 || status === 206) {
+            const contentDisposition = response.headers ? response.headers.get("content-disposition") : undefined;
+            let fileNameMatch = contentDisposition ? /filename\*=(?:(\\?['"])(.*?)\1|(?:[^\s]+'.*?')?([^;\n]*))/g.exec(contentDisposition) : undefined;
+            let fileName = fileNameMatch && fileNameMatch.length > 1 ? fileNameMatch[3] || fileNameMatch[2] : undefined;
+            if (fileName) {
+                fileName = decodeURIComponent(fileName);
+            } else {
+                fileNameMatch = contentDisposition ? /filename="?([^"]*?)"?(;|$)/g.exec(contentDisposition) : undefined;
+                fileName = fileNameMatch && fileNameMatch.length > 1 ? fileNameMatch[1] : undefined;
+            }
+            return response.blob().then(blob => { return { fileName: fileName, data: blob, status: status, headers: _headers }; });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<FileResponse>(null as any);
+    }
+}
+
 export class ModelCatalogClient {
     private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
     private baseUrl: string;
@@ -467,6 +669,105 @@ export interface HealthDto {
     catalogPath?: string;
     nodeId?: string;
     modelsDirectory?: string | undefined;
+}
+
+/** A completion suggestion returned to the editor. Field names align with the LSP CompletionItem specification for minimal mapping in a future VS Code extension. */
+export interface CompletionItem {
+    /** The display text for this completion. */
+    label?: string;
+    /** The kind of completion (keyword, table, column, function). */
+    kind?: CompletionItemKind;
+    /** A short detail string shown alongside the label (e.g. type information). */
+    detail?: string | undefined;
+    /** The text to insert when the completion is accepted. Defaults to Label if null. */
+    insertText?: string | undefined;
+    /** Extended documentation or signature shown in a secondary panel. */
+    documentation?: string | undefined;
+    /** Sort order hint; lower values sort first. Used to prioritize context-relevant items. */
+    sortOrder?: number;
+}
+
+/** Classification of a completion item, aligned with LSP CompletionItemKind values. */
+export type CompletionItemKind = "function" | "column" | "variable" | "keyword" | "table" | "typeParameter";
+
+export interface LangPositionRequest {
+    sql?: string;
+    offset?: number;
+}
+
+/** Hover information returned to the editor when the user hovers over a token. Field names align with the LSP Hover specification. */
+export interface HoverResult {
+    /** The hover content formatted as Markdown. */
+    contents?: string;
+    /** The 0-based line of the hovered token start. */
+    startLine?: number;
+    /** The 0-based column of the hovered token start. */
+    startColumn?: number;
+    /** The 0-based line of the hovered token end. */
+    endLine?: number;
+    /** The 0-based column of the hovered token end (exclusive). */
+    endColumn?: number;
+    /** Optional documentation section key for "See more" navigation (e.g. "sql/select",
+"functions/string/upper"). The host application can use this to open the full
+documentation page. Null when no matching documentation section exists. */
+    documentationUri?: string | undefined;
+}
+
+/** Signature-help payload returned to the editor when the cursor is inside a function call's argument list. Field names align with the LSP SignatureHelp specification so a future VS Code extension can map 1:1. */
+export interface SignatureHelp {
+    /** The signatures available at the cursor's call site. Always at least one entry. */
+    signatures?: SignatureInfo[];
+    /** Zero-based index into Signatures. 0 when no overload selection is needed. */
+    activeSignature?: number;
+    /** Zero-based index of the parameter the cursor is currently filling in.
+Computed from comma count at the call's brace depth — clamps to the
+last parameter when the user has typed past the declared arity (so
+the popup keeps something sensible visible). */
+    activeParameter?: number;
+}
+
+/** One signature variant: the full call shape the editor prints in the tooltip, plus per-parameter sub-ranges that highlight the current parameter. */
+export interface SignatureInfo {
+    /** The full signature string — e.g. "udf.RewriteCaption(@caption: STRING) → STRING".
+Renders as the header of the floating tooltip. */
+    label?: string;
+    /** Optional documentation shown below the signature: model description,
+function category, etc. null when no doc text is
+available. */
+    documentation?: string | undefined;
+    /** Per-parameter info matching the order of arguments in the signature. */
+    parameters?: ParameterInfo[];
+}
+
+/** One parameter within a signature. The label is the substring of the enclosing Label that the editor highlights when this parameter is active. */
+export interface ParameterInfo {
+    /** The parameter's display substring (e.g. "@caption: STRING"). */
+    label?: string;
+    /** Optional per-parameter documentation. Currently always null; reserved for future hover-over-parameter tooltips. */
+    documentation?: string | undefined;
+}
+
+/** A diagnostic message representing a parse error or warning in the SQL text. Field names align with the LSP Diagnostic specification. */
+export interface Diagnostic {
+    /** The human-readable error message. */
+    message?: string;
+    /** The severity of the diagnostic. */
+    severity?: DiagnosticSeverity;
+    /** The 0-based line number where the error starts. */
+    startLine?: number;
+    /** The 0-based column number where the error starts. */
+    startColumn?: number;
+    /** The 0-based line number where the error ends (inclusive). */
+    endLine?: number;
+    /** The 0-based column number where the error ends (exclusive). */
+    endColumn?: number;
+}
+
+/** Diagnostic severity levels, aligned with LSP DiagnosticSeverity values. */
+export type DiagnosticSeverity = "error" | "warning" | "information";
+
+export interface LangSqlRequest {
+    sql?: string;
 }
 
 export interface CatalogManifest {
