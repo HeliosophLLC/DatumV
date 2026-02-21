@@ -230,6 +230,36 @@ internal static class IndexExecutor
     }
 
     /// <summary>
+    /// Applies a <c>REINDEX</c> statement: rebuilds the table's
+    /// <c>.datum-index</c> sidecar from current data. Indexed queries
+    /// run after this see acceleration restored. In-memory tables have
+    /// no acceleration sidecar, so REINDEX rejects them.
+    /// </summary>
+    public static async Task<IQueryPlan> ReindexAsync(TableCatalog catalog, ReindexTableStatement reindex)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(reindex);
+
+        QualifiedName reindexQn = catalog.ResolveDdlName(reindex.SchemaName, reindex.TableName);
+        if (!catalog.TryResolveBackend(reindexQn.Schema, out ITableCatalog? reindexBackend)
+            || !reindexBackend.TryGetTable(reindexQn, out ITableProvider? provider))
+        {
+            throw new InvalidOperationException(
+                $"Table '{reindex.TableName}' is not registered in the catalog.");
+        }
+
+        if (!provider.CanRebuildIndex)
+        {
+            throw new InvalidOperationException(
+                $"Table '{reindex.TableName}' does not support REINDEX " +
+                $"(provider type '{provider.GetType().Name}' has no .datum-index sidecar).");
+        }
+
+        await provider.RebuildIndexAsync().ConfigureAwait(false);
+        return EmptyQueryPlan.Instance;
+    }
+
+    /// <summary>
     /// Applies a <c>DROP INDEX</c> statement: locates the owning table,
     /// asks the provider to dispose the tree and delete the
     /// <c>.datum-cindex-{name}</c> sidecar, removes the catalog entry, and

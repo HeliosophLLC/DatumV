@@ -1,15 +1,10 @@
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using System.IO.Compression;
 using DatumIngest.Catalog.Executors;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.DatumFile.V2;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
-using DatumIngest.Indexing;
-using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
@@ -556,8 +551,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return IndexExecutor.DropIndex(this, dropIndex, sourceText);
 
             case ReindexTableStatement reindex:
-                await ApplyReindexTableAsync(reindex).ConfigureAwait(false);
-                return EmptyQueryPlan.Instance;
+                return await IndexExecutor.ReindexAsync(this, reindex).ConfigureAwait(false);
 
             case AnalyzeTableStatement analyze:
                 await ApplyAnalyzeTableAsync(analyze).ConfigureAwait(false);
@@ -811,32 +805,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         || string.Equals(schema, "information_schema", StringComparison.OrdinalIgnoreCase)
         || string.Equals(schema, "datum_catalog", StringComparison.OrdinalIgnoreCase)
         || string.Equals(schema, "models", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Applies a <c>REINDEX</c> statement: rebuilds the table's
-    /// <c>.datum-index</c> sidecar from current data. Indexed queries
-    /// run after this see acceleration restored. In-memory tables have
-    /// no acceleration sidecar, so REINDEX rejects them.
-    /// </summary>
-    private async Task ApplyReindexTableAsync(ReindexTableStatement reindex)
-    {
-        QualifiedName reindexQn = ResolveDdlName(reindex.SchemaName, reindex.TableName);
-        if (!TryResolveBackend(reindexQn.Schema, out ITableCatalog? reindexBackend)
-            || !reindexBackend.TryGetTable(reindexQn, out ITableProvider? provider))
-        {
-            throw new InvalidOperationException(
-                $"Table '{reindex.TableName}' is not registered in the catalog.");
-        }
-
-        if (!provider.CanRebuildIndex)
-        {
-            throw new InvalidOperationException(
-                $"Table '{reindex.TableName}' does not support REINDEX " +
-                $"(provider type '{provider.GetType().Name}' has no .datum-index sidecar).");
-        }
-
-        await provider.RebuildIndexAsync().ConfigureAwait(false);
-    }
 
     /// <summary>
     /// Applies an <c>ANALYZE</c> statement: refreshes the cached half of the
