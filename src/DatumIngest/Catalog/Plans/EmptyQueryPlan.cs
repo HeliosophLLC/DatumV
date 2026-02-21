@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 
-namespace DatumIngest.Catalog;
+namespace DatumIngest.Catalog.Plans;
 
 /// <summary>
 /// A no-op <see cref="IQueryPlan"/> used by DDL execution paths (e.g. <c>CREATE

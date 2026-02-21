@@ -151,7 +151,7 @@ public sealed class QueryPlanner
     /// </list>
     /// <remarks>
     /// <see cref="LiteralHoister"/> is intentionally <em>not</em> here — it's a per-plan-
-    /// instance optimisation that lives in <see cref="DatumIngest.Catalog.QueryPlan"/>
+    /// instance optimisation that lives in <see cref="DatumIngest.Catalog.Plans.QueryPlan"/>
     /// because the hoist arena's lifetime is tied to that instance, not to the planner.
     /// </remarks>
     private IQueryOperator Finalize(IQueryOperator op)

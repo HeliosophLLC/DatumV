@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Catalog.Executors;
+using DatumIngest.Catalog.Plans;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;

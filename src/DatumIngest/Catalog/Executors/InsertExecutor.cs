@@ -1,9 +1,9 @@
+using DatumIngest.Catalog.Plans;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Catalog.Executors;
 

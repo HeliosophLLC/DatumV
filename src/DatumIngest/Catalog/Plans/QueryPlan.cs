@@ -5,7 +5,7 @@ using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 
-namespace DatumIngest.Catalog;
+namespace DatumIngest.Catalog.Plans;
 
 /// <summary>
 /// Default <see cref="IQueryPlan"/> implementation. Hoists literals once

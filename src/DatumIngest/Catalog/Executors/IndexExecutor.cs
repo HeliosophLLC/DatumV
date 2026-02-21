@@ -1,4 +1,4 @@
-using DatumIngest.Indexing;
+using DatumIngest.Catalog.Plans;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 

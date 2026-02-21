@@ -4,9 +4,8 @@ using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
 
-namespace DatumIngest.Catalog;
+namespace DatumIngest.Catalog.Plans;
 
 /// <summary>
 /// <see cref="IQueryPlan"/> produced by <see cref="InsertExecutor.ExecuteAsync"/>
