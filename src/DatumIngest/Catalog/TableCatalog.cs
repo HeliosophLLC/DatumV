@@ -287,6 +287,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private readonly Dictionary<string, ITableCatalog> _backends;
 
     /// <summary>
+    /// Internal mutable access to the schema-to-backend routing table for
+    /// per-statement executors that own the CREATE / DROP SCHEMA lifecycle
+    /// (see <see cref="SchemaExecutor"/>).
+    /// </summary>
+    internal Dictionary<string, ITableCatalog> Backends => _backends;
+
+    /// <summary>
     /// Session-scoped <c>search_path</c> for resolving unqualified table
     /// references. Defaults to <c>["public", "system"]</c> — so
     /// <c>SELECT * FROM udfs</c> walks to <c>system.udfs</c>. Mutated
@@ -301,7 +308,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// The current session <c>search_path</c>. Reads atomically; the
     /// returned list is immutable, so callers can capture a stable
     /// snapshot for the rest of their query. Mutated only by
-    /// <see cref="ApplySetSearchPath"/>.
+    /// <see cref="SchemaExecutor.SetSearchPath"/>.
     /// </summary>
     public IReadOnlyList<string> SearchPath => _searchPath;
 
@@ -535,16 +542,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return EmptyQueryPlan.Instance;
 
             case CreateSchemaStatement createSchema:
-                ApplyCreateSchema(createSchema, sourceText);
-                return EmptyQueryPlan.Instance;
+                return SchemaExecutor.CreateSchema(this, createSchema, sourceText);
 
             case DropSchemaStatement dropSchema:
-                ApplyDropSchema(dropSchema, sourceText);
-                return EmptyQueryPlan.Instance;
+                return SchemaExecutor.DropSchema(this, dropSchema, sourceText);
 
             case SetSearchPathStatement setSearchPath:
-                ApplySetSearchPath(setSearchPath);
-                return EmptyQueryPlan.Instance;
+                return SchemaExecutor.SetSearchPath(this, setSearchPath);
 
             case CreateIndexStatement createIndex:
                 return await IndexExecutor.CreateIndexAsync(this, createIndex, sourceText).ConfigureAwait(false);
@@ -717,90 +721,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         Events.Raise(new TableDroppedEvent(qn, beforeSchema, sourceText));
     }
 
-    /// <summary>
-    /// Applies <c>CREATE SCHEMA [IF NOT EXISTS] name</c>. The new schema
-    /// is mounted on the user-data backend (FlatFile); user tables
-    /// created with <c>CREATE TABLE name.t</c> land under it. Built-in
-    /// schemas (public / system / information_schema / datum_catalog)
-    /// cannot be re-created.
-    /// </summary>
-    private void ApplyCreateSchema(CreateSchemaStatement create, string? sourceText = null)
-    {
-        if (_backends.ContainsKey(create.SchemaName))
-        {
-            if (create.IfNotExists) return;
-            throw new InvalidOperationException(
-                $"Schema '{create.SchemaName}' already exists.");
-        }
-        _backends[create.SchemaName] = _flatFile;
-        Events.Raise(new SchemaCreatedEvent(create.SchemaName, sourceText));
-    }
-
-    /// <summary>
-    /// Applies <c>DROP SCHEMA [IF EXISTS] name [CASCADE | RESTRICT]</c>.
-    /// RESTRICT (default) errors if the schema still contains tables;
-    /// CASCADE drops every table in the schema first. Built-in schemas
-    /// are protected.
-    /// </summary>
-    private void ApplyDropSchema(DropSchemaStatement drop, string? sourceText = null)
-    {
-        if (!_backends.TryGetValue(drop.SchemaName, out ITableCatalog? backend))
-        {
-            if (drop.IfExists) return;
-            throw new InvalidOperationException(
-                $"Schema '{drop.SchemaName}' does not exist.");
-        }
-
-        // Protect built-in schemas. The public schema is special — it's
-        // the default home for user tables and tests rely on it being
-        // present. system / information_schema / datum_catalog are also
-        // engine-managed.
-        if (IsBuiltinSchema(drop.SchemaName))
-        {
-            throw new InvalidOperationException(
-                $"Schema '{drop.SchemaName}' is built-in and cannot be dropped.");
-        }
-
-        // Enumerate tables in this schema. Use the backend's listing
-        // filtered by schema (case-insensitive).
-        List<ITableProvider> tablesInSchema = backend.ListTables()
-            .Where(p => string.Equals(p.QualifiedName.Schema, drop.SchemaName, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        if (tablesInSchema.Count > 0 && !drop.Cascade)
-        {
-            throw new InvalidOperationException(
-                $"Cannot drop schema '{drop.SchemaName}' because it contains {tablesInSchema.Count} table(s). " +
-                "Use DROP SCHEMA … CASCADE to drop the schema and its tables together.");
-        }
-
-        // CASCADE: drop every table in the schema first.
-        foreach (ITableProvider provider in tablesInSchema)
-        {
-            backend.DropTable(provider.QualifiedName);
-        }
-
-        // Finally remove the routing entry so subsequent lookups fail.
-        _backends.Remove(drop.SchemaName);
-
-        // CASCADE-dropped child tables intentionally do NOT fire their own
-        // TableDropped events — subscribers treat SchemaDropped as "blow
-        // away the entire subtree" (see CatalogEvents class remarks).
-        Events.Raise(new SchemaDroppedEvent(drop.SchemaName, sourceText));
-    }
-
-    /// <summary>
-    /// Applies <c>SET search_path = a, b, c</c>. Replaces the session
-    /// <see cref="SearchPath"/> after validating that every named schema
-    /// is mounted. In-flight queries that captured the prior path are
-    /// unaffected — they keep their snapshot.
-    /// </summary>
-    private void ApplySetSearchPath(SetSearchPathStatement setSearchPath)
-    {
-        SetSearchPath(setSearchPath.Schemas);
-    }
-
-    private static bool IsBuiltinSchema(string schema)
+    internal static bool IsBuiltinSchema(string schema)
         => string.Equals(schema, "public", StringComparison.OrdinalIgnoreCase)
         || string.Equals(schema, "system", StringComparison.OrdinalIgnoreCase)
         || string.Equals(schema, "information_schema", StringComparison.OrdinalIgnoreCase)
@@ -1047,27 +968,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             or DataKind.Date or DataKind.Time or DataKind.DateTime or DataKind.Duration
             or DataKind.Uuid
             or DataKind.String;
-
-
-    /// <summary>
-    /// Returns the byte size for a fixed-size scalar <paramref name="kind"/>.
-    /// Used by the PRIMARY KEY size check; <see langword="false"/> for
-    /// variable-size kinds (String, byte arrays, struct, image / audio).
-    /// </summary>
-    private static bool TryGetFixedKindSizeBytes(DataKind kind, out int size)
-    {
-        size = kind switch
-        {
-            DataKind.Boolean or DataKind.Int8 or DataKind.UInt8 => 1,
-            DataKind.Int16 or DataKind.UInt16 or DataKind.Float16 => 2,
-            DataKind.Int32 or DataKind.UInt32 or DataKind.Float32 or DataKind.Date => 4,
-            DataKind.Int64 or DataKind.UInt64 or DataKind.Float64 or
-                DataKind.Time or DataKind.DateTime or DataKind.Duration => 8,
-            DataKind.Int128 or DataKind.UInt128 or DataKind.Decimal or DataKind.Uuid => 16,
-            _ => 0,
-        };
-        return size > 0;
-    }
 
     /// <summary>
     /// Shared validation for an <see cref="IdentitySpec"/> attached to a
