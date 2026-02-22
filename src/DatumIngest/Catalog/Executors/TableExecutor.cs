@@ -61,7 +61,7 @@ internal static class TableExecutor
         }
 
         // Build ColumnInfo[] from the AST's ColumnDefinition list.
-        Schema schema = await catalog.BuildSchemaFromColumnDefinitionsAsync(create.Columns, create.PrimaryKeyColumns)
+        Schema schema = await ColumnDefinitionResolver.BuildSchemaAsync(catalog, create.Columns, create.PrimaryKeyColumns)
             .ConfigureAwait(false);
 
         if (create.IsTemp)

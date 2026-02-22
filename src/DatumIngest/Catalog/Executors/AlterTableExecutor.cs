@@ -64,8 +64,8 @@ internal static class AlterTableExecutor
         Expression? defaultExpr = alter.DefaultValue;
         if (defaultExpr is not null)
         {
-            TableCatalog.ValidateDefaultExpression(defaultExpr, alter.ColumnName);
-            await catalog.ValidateDefaultExpressionFitsColumnAsync(defaultExpr, alter.ColumnName, kind, isArray)
+            ColumnDefinitionResolver.ValidateDefaultExpression(defaultExpr, alter.ColumnName);
+            await ColumnDefinitionResolver.ValidateDefaultExpressionFitsColumnAsync(catalog, defaultExpr, alter.ColumnName, kind, isArray)
                 .ConfigureAwait(false);
         }
 
@@ -94,7 +94,7 @@ internal static class AlterTableExecutor
                     $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}': IDENTITY " +
                     "cannot combine with DEFAULT or GENERATED ALWAYS AS — pick one.");
             }
-            TableCatalog.ValidateIdentitySpecForColumn(identity, alter.ColumnName, kind, isArray);
+            ColumnDefinitionResolver.ValidateIdentitySpecForColumn(identity, alter.ColumnName, kind, isArray);
             if (catalog.TryGetTable(qualifiedTableName, out ITableProvider? existingForIdentity))
             {
                 Schema existingSchema = existingForIdentity.GetSchema();
