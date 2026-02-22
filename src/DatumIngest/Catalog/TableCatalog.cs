@@ -24,6 +24,50 @@ namespace DatumIngest.Catalog;
 public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 {
     /// <summary>
+    /// Opens a new catalog containing a single <c>.datum</c> file. Owns its own pool
+    /// and disposes everything when <see cref="Dispose"/> is called. The table name
+    /// defaults to <see cref="PathDetector.DeriveTableName(string)"/> if not supplied.
+    /// </summary>
+    /// <param name="path">Path to the <c>.datum</c> file.</param>
+    /// <param name="name">Optional override for the SQL table name.</param>
+    public static TableCatalog FromFile(string path, string? name = null)
+    {
+        PoolBacking poolBacking = new();
+        Pool pool = new(poolBacking);
+        TableCatalog catalog = new(pool);
+        catalog.AddFile(path, name);
+        return catalog;
+    }
+
+    /// <summary>
+    /// Opens a new catalog populated with every <c>.datum</c> file in the given
+    /// directory. Each file is registered using its derived table name. Owns its
+    /// own pool. A <see cref="CatalogStore.DefaultFileName"/> file in the directory
+    /// is loaded automatically if present; UDFs created during the session are
+    /// written back to the same file.
+    /// </summary>
+    /// <param name="path">Path to a directory containing <c>.datum</c> files.</param>
+    /// <param name="recursive">When <see langword="true"/>, recursively scans subdirectories.</param>
+    public static TableCatalog FromDirectory(string path, bool recursive = false)
+    {
+        string catalogPath = Path.Combine(path, CatalogStore.DefaultFileName);
+        PoolBacking poolBacking = new();
+        Pool pool = new(poolBacking);
+        TableCatalog catalog = new(pool, catalogPath);
+        SearchOption searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        foreach (string file in Directory.EnumerateFiles(path, "*.datum", searchOption))
+        {
+            // Skip files the catalog already registered from its persisted
+            // table list — otherwise CREATE TABLE'd tables get re-added by
+            // directory enumeration and Add() throws on the duplicate name.
+            string derivedName = PathDetector.DeriveTableName(file);
+            if (catalog.HasTable(derivedName)) continue;
+            catalog.AddFile(file);
+        }
+        return catalog;
+    }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="TableCatalog"/> class with an optional parent catalog and a resource pool.
      /// If a parent catalog is provided, this catalog will fall through to the parent for any table names that are not found locally.
      /// The resource pool is used for managing provider resources such as buffers and file handles.
@@ -171,47 +215,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
     private TableCatalog? Parent { get; }
     internal Pool Pool { get; }
-
-    // Table-name canonicalisation now lives on QualifiedName.Parse(...).
-    // The facade parses on the way in; the backend dict stores
-    // QualifiedName directly.
-
-    /// <summary>
-    /// Builds a <see cref="QualifiedName"/> from a DDL statement that
-    /// carries both an explicit <c>SchemaName</c> (the parsed
-    /// <c>schema.table</c> qualifier) and a <c>TableName</c>. When the
-    /// schema is supplied explicitly it wins; otherwise the
-    /// <see cref="SchemaResolver"/> walks the current
-    /// <see cref="SearchPath"/> for an existing table. If no match is
-    /// found, the first search_path entry is returned as a best-guess
-    /// so the subsequent backend lookup fails consistently (callers'
-    /// IF EXISTS branches handle that uniformly).
-    /// </summary>
-    internal QualifiedName ResolveDdlName(string? explicitSchema, string tableName)
-    {
-        SchemaResolver resolver = new(this, _searchPath);
-        resolver.TryResolve(explicitSchema, tableName, out QualifiedName resolved);
-        return resolved;
-    }
-
-    /// <summary>
-    /// Picks the first DDL-capable schema on the current search_path,
-    /// or <see langword="null"/> when none qualifies. Used for the
-    /// existence pre-check inside <see cref="ApplyCreateTableAsync"/> —
-    /// it has to know the prospective target schema before
-    /// <c>ResolveForCreate</c> is invoked.
-    /// </summary>
-    private string? PickFirstWritableSchema()
-    {
-        foreach (string schema in _searchPath)
-        {
-            if (_backends.TryGetValue(schema, out ITableCatalog? backend) && backend.SupportsDdl)
-            {
-                return schema;
-            }
-        }
-        return null;
-    }
 
     /// <summary>
     /// When <see langword="true"/>, <c>CREATE TABLE … AT 'path'</c>
@@ -382,47 +385,41 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public ProcedureRegistry Procedures => _procedures;
 
     /// <summary>
-    /// Opens a new catalog containing a single <c>.datum</c> file. Owns its own pool
-    /// and disposes everything when <see cref="Dispose"/> is called. The table name
-    /// defaults to <see cref="PathDetector.DeriveTableName(string)"/> if not supplied.
+    /// Builds a <see cref="QualifiedName"/> from a DDL statement that
+    /// carries both an explicit <c>SchemaName</c> (the parsed
+    /// <c>schema.table</c> qualifier) and a <c>TableName</c>. When the
+    /// schema is supplied explicitly it wins; otherwise the
+    /// <see cref="SchemaResolver"/> walks the current
+    /// <see cref="SearchPath"/> for an existing table. If no match is
+    /// found, the first search_path entry is returned as a best-guess
+    /// so the subsequent backend lookup fails consistently (callers'
+    /// IF EXISTS branches handle that uniformly).
     /// </summary>
-    /// <param name="path">Path to the <c>.datum</c> file.</param>
-    /// <param name="name">Optional override for the SQL table name.</param>
-    public static TableCatalog FromFile(string path, string? name = null)
+    internal QualifiedName ResolveDdlName(string? explicitSchema, string tableName)
     {
-        PoolBacking poolBacking = new();
-        Pool pool = new(poolBacking);
-        TableCatalog catalog = new(pool);
-        catalog.AddFile(path, name);
-        return catalog;
+        SchemaResolver resolver = new(this, _searchPath);
+        resolver.TryResolve(explicitSchema, tableName, out QualifiedName resolved);
+        return resolved;
     }
 
     /// <summary>
-    /// Opens a new catalog populated with every <c>.datum</c> file in the given
-    /// directory. Each file is registered using its derived table name. Owns its
-    /// own pool. A <see cref="CatalogStore.DefaultFileName"/> file in the directory
-    /// is loaded automatically if present; UDFs created during the session are
-    /// written back to the same file.
+    /// Picks the first DDL-capable schema on the current search_path,
+    /// or <see langword="null"/> when none qualifies. Used for the
+    /// existence pre-check inside <see cref="TableExecutor.CreateTableAsync"/> —
+    /// it has to know the prospective target schema before
+    /// <c>ResolveForCreate</c> is invoked.
     /// </summary>
-    /// <param name="path">Path to a directory containing <c>.datum</c> files.</param>
-    /// <param name="recursive">When <see langword="true"/>, recursively scans subdirectories.</param>
-    public static TableCatalog FromDirectory(string path, bool recursive = false)
+    public string? FirstWritableSchema()
     {
-        string catalogPath = Path.Combine(path, CatalogStore.DefaultFileName);
-        PoolBacking poolBacking = new();
-        Pool pool = new(poolBacking);
-        TableCatalog catalog = new(pool, catalogPath);
-        SearchOption searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-        foreach (string file in Directory.EnumerateFiles(path, "*.datum", searchOption))
+        foreach (string schema in _searchPath)
         {
-            // Skip files the catalog already registered from its persisted
-            // table list — otherwise CREATE TABLE'd tables get re-added by
-            // directory enumeration and Add() throws on the duplicate name.
-            string derivedName = PathDetector.DeriveTableName(file);
-            if (catalog.HasTable(derivedName)) continue;
-            catalog.AddFile(file);
+            if (_backends.TryGetValue(schema, out ITableCatalog? backend) && backend.SupportsDdl)
+            {
+                return schema;
+            }
         }
-        return catalog;
+
+        return null;
     }
 
     /// <summary>
@@ -534,12 +531,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return PlanCall(call);
 
             case CreateTableStatement createTable:
-                await ApplyCreateTableAsync(createTable, sourceText).ConfigureAwait(false);
-                return EmptyQueryPlan.Instance;
+                return await TableExecutor.CreateTableAsync(this, createTable, sourceText).ConfigureAwait(false);
 
             case DropTableStatement dropTable:
-                ApplyDropTable(dropTable, sourceText);
-                return EmptyQueryPlan.Instance;
+                return TableExecutor.DropTable(this, dropTable, sourceText);
 
             case CreateSchemaStatement createSchema:
                 return SchemaExecutor.CreateSchema(this, createSchema, sourceText);
@@ -600,127 +595,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
     }
 
-    /// <summary>
-    /// Applies a <c>CREATE TABLE</c> statement: validates the
-    /// <c>AT 'path'</c> clause against <see cref="AllowExplicitTablePaths"/>,
-    /// resolves the storage location, materialises the table (in-memory
-    /// for TEMP, an empty <c>.datum</c> file for persistent), registers
-    /// it with the catalog, and persists the entry in the catalog json
-    /// (persistent only).
-    /// </summary>
-    /// <remarks>
-    /// PR10a covers shape only — column kinds, NULL/NOT NULL,
-    /// <c>IF NOT EXISTS</c>, optional <c>AT 'path'</c>. PR10b adds
-    /// <c>DEFAULT &lt;literal&gt;</c> persisted in the footer prologue;
-    /// PR10c/PR10c' adds INSERT VALUES/SELECT auto-fill from those
-    /// defaults. PR10e adds <c>IDENTITY</c> with a per-table counter
-    /// in the prologue and <c>IAppendSession.ReserveNextIdentityValue</c>
-    /// auto-fill at INSERT time. PR10f adds <c>PRIMARY KEY</c>
-    /// enforcement: the prologue carries the ordered PK column-index
-    /// list, the catalog rejects tables whose key exceeds 16 bytes,
-    /// and the INSERT layer scans existing rows to reject duplicate /
-    /// null PK values.
-    /// </remarks>
-    private async Task ApplyCreateTableAsync(CreateTableStatement create, string? sourceText = null)
-    {
-        // Existence check is against the explicit target location (after
-        // ResolveForCreate picks the schema for unqualified names below)
-        // — checking via the search-path walker would let a same-named
-        // table on a later path entry mask the new-table location.
-        // For TEMP, the target is always public.{name}.
-        string existenceCheckName = create.SchemaName is not null
-            ? new QualifiedName(create.SchemaName, create.TableName).ToString()
-            : create.IsTemp
-                ? new QualifiedName("public", create.TableName).ToString()
-                : new QualifiedName(
-                    PickFirstWritableSchema() ?? "public",
-                    create.TableName).ToString();
-
-        if (HasTable(existenceCheckName))
-        {
-            if (create.IfNotExists) return;
-            throw new InvalidOperationException(
-                $"Table '{create.TableName}' already exists.");
-        }
-
-        // Build ColumnInfo[] from the AST's ColumnDefinition list.
-        Schema schema = await BuildSchemaFromColumnDefinitionsAsync(create.Columns, create.PrimaryKeyColumns)
-            .ConfigureAwait(false);
-
-        if (create.IsTemp)
-        {
-            // TEMP tables always live in `public`; the parser allows
-            // CREATE TEMP TABLE schema.t in principle but the semantics
-            // are nonsensical. Reject explicit qualification.
-            if (create.SchemaName is not null)
-            {
-                throw new InvalidOperationException(
-                    $"CREATE TEMP TABLE cannot specify a schema (got '{create.SchemaName}'). " +
-                    "TEMP tables are always session-scoped in the public schema.");
-            }
-            Add(new InMemoryTableProvider(Pool, create.TableName, schema));
-            Events.Raise(new TableCreatedEvent(
-                new QualifiedName("public", create.TableName), schema, sourceText));
-            return;
-        }
-
-        // Persistent: ResolveForCreate picks the first DDL-capable schema
-        // on the search_path when the user didn't supply an explicit
-        // qualifier; explicit qualifiers are validated DDL-capable
-        // (system / information_schema / datum_catalog throw cleanly).
-        SchemaResolver resolver = new(this, _searchPath);
-        QualifiedName qn = resolver.ResolveForCreate(create.SchemaName, create.TableName);
-
-        // Route to the schema's backend. AT-clause / no-catalog-file /
-        // file-already-exists validation lives in the backend so it stays
-        // with the storage concerns it depends on.
-        if (!TryResolveBackend(qn.Schema, out ITableCatalog? backend))
-        {
-            throw new InvalidOperationException(
-                $"CREATE TABLE '{create.TableName}': no catalog backend is " +
-                $"mounted for schema '{qn.Schema}'.");
-        }
-        backend.CreatePersistentTable(
-            qn,
-            schema,
-            create.StoragePath,
-            create.PrimaryKeyConstraintName);
-
-        Events.Raise(new TableCreatedEvent(qn, schema, sourceText));
-    }
-
-    /// <summary>
-    /// Applies a <c>DROP TABLE</c> statement: removes the table from
-    /// the catalog, disposes its provider, deletes the underlying
-    /// <c>.datum</c> file (and companion sidecars), and updates the
-    /// catalog json. <c>IF EXISTS</c> suppresses the not-found error.
-    /// </summary>
-    private void ApplyDropTable(DropTableStatement drop, string? sourceText = null)
-    {
-        QualifiedName qn = ResolveDdlName(drop.SchemaName, drop.TableName);
-
-        // Capture the column schema before the provider is unregistered so
-        // the TableDropped event can carry it for subscribers that diff
-        // against a prior snapshot. TryGetTable goes through the backend
-        // resolver; if the table isn't there we'll fall through to the
-        // existing "not registered" branch and never raise.
-        Schema? beforeSchema = null;
-        if (TryResolveBackend(qn.Schema, out ITableCatalog? lookupBackend)
-            && lookupBackend.TryGetTable(qn, out ITableProvider? provider))
-        {
-            beforeSchema = provider.GetSchema();
-        }
-
-        if (!TryResolveBackend(qn.Schema, out ITableCatalog? backend) || !backend.DropTable(qn))
-        {
-            if (drop.IfExists) return;
-            throw new InvalidOperationException(
-                $"Table '{drop.TableName}' is not registered in the catalog.");
-        }
-
-        Events.Raise(new TableDroppedEvent(qn, beforeSchema, sourceText));
-    }
-
     internal static bool IsBuiltinSchema(string schema)
         => string.Equals(schema, "public", StringComparison.OrdinalIgnoreCase)
         || string.Equals(schema, "system", StringComparison.OrdinalIgnoreCase)
@@ -728,7 +602,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         || string.Equals(schema, "datum_catalog", StringComparison.OrdinalIgnoreCase)
         || string.Equals(schema, "models", StringComparison.OrdinalIgnoreCase);
 
-    private async Task<Schema> BuildSchemaFromColumnDefinitionsAsync(
+    internal async Task<Schema> BuildSchemaFromColumnDefinitionsAsync(
         IReadOnlyList<ColumnDefinition> definitions,
         IReadOnlyList<string>? primaryKeyColumnNames)
     {
@@ -937,14 +811,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 // specific error.
                 continue;
             }
-            if (isArray)
+            else if (isArray)
             {
                 throw new InvalidOperationException(
                     $"PRIMARY KEY column '{d.Name}' is an array (kind {kind}[]); array kinds " +
                     "are not supported in PRIMARY KEY columns. Consider an inverted index for " +
                     "array contents or a hash projection for unique constraints.");
             }
-            if (!IsAcceptedPrimaryKeyKind(kind))
+            else if (!IsAcceptedPrimaryKeyKind(kind))
             {
                 throw new InvalidOperationException(
                     $"PRIMARY KEY column '{d.Name}' has unsupported kind {kind}. Supported PK " +
@@ -2141,7 +2015,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// Removes a previously registered table from the catalog. Delegates
     /// to <see cref="FlatFileCatalog.DropTable"/>, which also deletes the
     /// backing <c>.datum</c> file and sidecars when the table is
-    /// persistent. Use <see cref="ApplyDropTable"/> for full DROP TABLE
+    /// persistent. Use <see cref="TableExecutor.DropTable"/> for full DROP TABLE
     /// semantics (IF EXISTS, error reporting, manifest persistence).
     /// </summary>
     public void Remove(string tableName)
