@@ -436,7 +436,7 @@ internal static class AlterTableExecutor
             // a clean slate, and so the catalog file doesn't carry a stale
             // name for a non-existent constraint.
             // Only FlatFile tracks custom PK constraint names today.
-            catalog.FlatFile.RemoveCustomPrimaryKeyConstraintName(catalog.ResolveDdlName(alter.SchemaName, alter.TableName));
+            catalog.FlatFileCatalog.RemoveCustomPrimaryKeyConstraintName(catalog.ResolveDdlName(alter.SchemaName, alter.TableName));
 
             if (catalog.TryGetTable(qualifiedTableName, out ITableProvider? afterProvider))
             {

@@ -39,7 +39,7 @@ internal static class IndexExecutor
 
         // Index names are catalog-globally unique (Postgres semantics).
         // Persistent indexes live only on FlatFile, so checking there is enough.
-        if (catalog.FlatFile.TryGetIndexOwner(create.IndexName, out QualifiedName existingOwner))
+        if (catalog.FlatFileCatalog.TryGetIndexOwner(create.IndexName, out QualifiedName existingOwner))
         {
             if (create.IfNotExists && existingOwner.Equals(tableQn))
             {
@@ -270,7 +270,7 @@ internal static class IndexExecutor
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(drop);
 
-        FlatFileCatalog flatFile = catalog.FlatFile;
+        FlatFileCatalog flatFile = catalog.FlatFileCatalog;
 
         // Persistent indexes only live in FlatFile; only it can resolve
         // index-name-to-owning-table.

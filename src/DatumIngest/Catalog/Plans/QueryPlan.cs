@@ -16,15 +16,13 @@ internal sealed class QueryPlan : IQueryPlan
 {
     private readonly TableCatalog _catalog;
     private readonly FunctionRegistry _functions;
-    private readonly PoolBacking _backing;
     private readonly IQueryOperator _operator;
     private readonly Arena _hoistStore;
 
-    public QueryPlan(IQueryOperator op, TableCatalog catalog, FunctionRegistry functions, PoolBacking backing)
+    public QueryPlan(IQueryOperator op, TableCatalog catalog, FunctionRegistry functions)
     {
         _catalog = catalog;
         _functions = functions;
-        _backing = backing;
 
         // Hoist once into a plan-scoped store so the resulting LiteralValueExpression
         // payloads outlive any individual ExecuteAsync / AnalyzeAsync call. Otherwise

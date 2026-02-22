@@ -28,7 +28,7 @@ internal static class SchemaExecutor
             throw new InvalidOperationException(
                 $"Schema '{create.SchemaName}' already exists.");
         }
-        catalog.Backends[create.SchemaName] = catalog.FlatFile;
+        catalog.Backends[create.SchemaName] = catalog.FlatFileCatalog;
         catalog.Events.Raise(new SchemaCreatedEvent(create.SchemaName, sourceText));
         return EmptyQueryPlan.Instance;
     }

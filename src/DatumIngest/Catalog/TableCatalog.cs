@@ -68,15 +68,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="TableCatalog"/> class with an optional parent catalog and a resource pool.
-     /// If a parent catalog is provided, this catalog will fall through to the parent for any table names that are not found locally.
-     /// The resource pool is used for managing provider resources such as buffers and file handles.
+    /// Session-scoped <c>search_path</c> for resolving unqualified table
+    /// references. Defaults to <c>["public", "system"]</c> — so
+    /// <c>SELECT * FROM udfs</c> walks to <c>system.udfs</c>. Mutated
+    /// atomically by <c>SET search_path = …</c>; reads return the
+    /// immutable list captured at the point of read so in-flight queries
+    /// that captured an earlier snapshot aren't affected by a concurrent
+    /// SET. PG semantics.
     /// </summary>
-    /// <param name="parent">The optional parent catalog to fall through to for unresolved table names.</param>
-    public TableCatalog(TableCatalog parent) : this(parent.Pool)
-    {
-        this.Parent = parent;
-    }
+    private volatile IReadOnlyList<string> _searchPath = new[] { "public", "system" };
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TableCatalog"/> class with the given resource pool.
@@ -112,37 +112,38 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this.AllowExplicitTablePaths = allowExplicitTablePaths;
         this.Events = new CatalogEvents();
         this.Pool = pool;
-        this._backing = pool.Backing;
-        this._functions = FunctionRegistry.CreateDefault();
+        this.SidecarRegistry = new();
+        this.DeclaredModels = new();
+        this.Functions = FunctionRegistry.CreateDefault();
         // Wire the model-catalog fallback so unhoisted models.X(...) calls
         // (procedural UDF bodies, CALL, etc.) resolve through this catalog.
         // The closure follows the parent-chain getter so child catalogs
         // inherit the root's models without duplicating registrations.
-        this._functions.SetModelCatalogResolver(() => Models);
-        this._udfs = new UdfRegistry();
-        this._procedures = new ProcedureRegistry();
-        this._catalogStore = catalogPath is null ? null : new CatalogStore(catalogPath);
-        this._routines = new RoutineRegistrar(this, _udfs, _procedures, _functions, _catalogStore);
+        this.Functions.SetModelCatalogResolver(() => Models);
+        this.Udfs = new UdfRegistry();
+        this.Procedures = new ProcedureRegistry();
+        this.CatalogStore = catalogPath is null ? null : new CatalogStore(catalogPath);
+        this.Routines = new RoutineRegistrar(this, Udfs, Procedures, Functions, CatalogStore);
 
         // Construct the user-data (FlatFile) backend. The persist callback
         // wraps CatalogStore.Save with the facade's UDF / Procedure
         // registries — the backend doesn't need to know about those.
-        string? catalogDirectory = _catalogStore is null
+        string? catalogDirectory = CatalogStore is null
             ? null
-            : System.IO.Path.GetDirectoryName(_catalogStore.Path) ?? Environment.CurrentDirectory;
-        this._flatFile = new FlatFileCatalog(
+            : global::System.IO.Path.GetDirectoryName(CatalogStore.Path) ?? Environment.CurrentDirectory;
+        this.FlatFileCatalog = new FlatFileCatalog(
             pool,
-            _sidecarRegistry,
+            SidecarRegistry,
             catalogDirectory,
             allowExplicitTablePaths,
-            persistManifest: () => _catalogStore?.Save(_udfs, _procedures));
+            persistManifest: () => CatalogStore?.Save(Udfs, Procedures));
 
         // Construct the read-only backends. System holds host-attached
         // projections; Virtual holds the SQL-standard / engine-introspection
         // views. They reject CREATE / DROP / CREATE INDEX but accept Add()
         // so the host can attach providers (e.g. ModelsTableProvider).
-        this._system = new ReadOnlyTableCatalog(new[] { "system" });
-        this._virtual = new ReadOnlyTableCatalog(new[] { "information_schema", "datum_catalog" });
+        this.SystemCatalog = new ReadOnlyTableCatalog(new[] { "system" });
+        this.VirtualCatalog = new ReadOnlyTableCatalog(new[] { "information_schema", "datum_catalog" });
 
         // Models is a real, non-droppable schema mounted alongside the
         // other built-ins (S9). The schema is empty as a table namespace —
@@ -152,47 +153,47 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // lookups. Mounting it as a backend makes the schema visible to
         // <c>SET search_path</c>, <c>information_schema.schemata</c>, and
         // diagnostics without changing the call-resolution path.
-        this._models = new ReadOnlyTableCatalog(new[] { "models" });
+        this.ModelCatalog = new ReadOnlyTableCatalog(new[] { "models" });
 
         // Schema → backend map. Lookups, DDL, and Add() route through this.
         // Public is the home for user data; system/info_schema/datum_catalog/
         // models are read-only projections.
-        this._backends = new Dictionary<string, ITableCatalog>(StringComparer.OrdinalIgnoreCase)
+        this.Backends = new Dictionary<string, ITableCatalog>(StringComparer.OrdinalIgnoreCase)
         {
-            ["public"] = _flatFile,
-            ["system"] = _system,
-            ["information_schema"] = _virtual,
-            ["datum_catalog"] = _virtual,
-            ["models"] = _models,
+            ["public"] = FlatFileCatalog,
+            ["system"] = SystemCatalog,
+            ["information_schema"] = VirtualCatalog,
+            ["datum_catalog"] = VirtualCatalog,
+            ["models"] = ModelCatalog,
         };
 
         // Auto-register intrinsic system + virtual tables. information_schema
         // providers take `this` because they enumerate the catalog at scan
         // time; construction is safe because no scan occurs here.
-        _system.Add(new Providers.UdfsTableProvider(pool, _udfs));
-        _system.Add(new Providers.ProceduresTableProvider(pool, _procedures));
-        _virtual.Add(new Providers.InformationSchemaTablesProvider(pool, this));
-        _virtual.Add(new Providers.InformationSchemaColumnsProvider(pool, this));
-        _virtual.Add(new Providers.InformationSchemaSchemataProvider(pool));
-        _virtual.Add(new Providers.InformationSchemaTableConstraintsProvider(pool, this));
-        _virtual.Add(new Providers.InformationSchemaKeyColumnUsageProvider(pool, this));
-        _virtual.Add(new Providers.DatumCatalogFunctionsProvider(pool, _functions));
-        _virtual.Add(new Providers.DatumCatalogFunctionParametersProvider(pool, _functions));
-        _virtual.Add(new Providers.DatumCatalogStatisticsProvider(pool, this));
-        _virtual.Add(new Providers.DatumCatalogIndexesProvider(pool, this));
-        _virtual.Add(new Providers.DatumCatalogInteractionsProvider(pool, this));
+        SystemCatalog.Add(new Providers.UdfsTableProvider(pool, Udfs));
+        SystemCatalog.Add(new Providers.ProceduresTableProvider(pool, Procedures));
+        VirtualCatalog.Add(new Providers.InformationSchemaTablesProvider(pool, this));
+        VirtualCatalog.Add(new Providers.InformationSchemaColumnsProvider(pool, this));
+        VirtualCatalog.Add(new Providers.InformationSchemaSchemataProvider(pool));
+        VirtualCatalog.Add(new Providers.InformationSchemaTableConstraintsProvider(pool, this));
+        VirtualCatalog.Add(new Providers.InformationSchemaKeyColumnUsageProvider(pool, this));
+        VirtualCatalog.Add(new Providers.DatumCatalogFunctionsProvider(pool, Functions));
+        VirtualCatalog.Add(new Providers.DatumCatalogFunctionParametersProvider(pool, Functions));
+        VirtualCatalog.Add(new Providers.DatumCatalogStatisticsProvider(pool, this));
+        VirtualCatalog.Add(new Providers.DatumCatalogIndexesProvider(pool, this));
+        VirtualCatalog.Add(new Providers.DatumCatalogInteractionsProvider(pool, this));
 
         // Replay any persisted UDFs / procedures into the registries.
         // Done after the system table registrations so the rehydrated
         // entries are immediately visible to introspection.
-        if (_catalogStore is not null)
+        if (CatalogStore is not null)
         {
             // Wire the tables provider before any save fires so the
             // file-write path always sees the catalog's current table
             // set (PR10a). The backend snapshots its own state.
-            _catalogStore.SetFlatFileBackendStateProvider(_flatFile.SnapshotBackendState);
+            CatalogStore.SetFlatFileBackendStateProvider(FlatFileCatalog.SnapshotBackendState);
 
-            CatalogStoreLoadReport report = _catalogStore.Load(_udfs, _procedures);
+            CatalogStoreLoadReport report = CatalogStore.Load(Udfs, Procedures);
             CatalogLoadReport = report;
 
             // The Load() call writes straight into _udfs without going
@@ -200,20 +201,18 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             // scalar registry haven't been wired yet. Reconcile them here so
             // a freshly opened catalog can immediately invoke any persisted
             // procedural UDF.
-            _routines.SyncProceduralAdaptersFromRegistry();
+            Routines.SyncProceduralAdaptersFromRegistry();
 
             // Replay persisted tables. The FlatFile backend owns its own
             // state shape; it handles file resolution, provider
             // construction, and per-table tracking dicts.
-            if (_catalogStore.LoadedFlatFileBackendState is { } flatFileState)
+            if (CatalogStore.LoadedFlatFileBackendState is { } flatFileState)
             {
-                _flatFile.LoadBackendState(flatFileState);
+                FlatFileCatalog.LoadBackendState(flatFileState);
             }
         }
     }
 
-
-    private TableCatalog? Parent { get; }
     internal Pool Pool { get; }
 
     /// <summary>
@@ -232,31 +231,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     public CatalogEvents Events { get; }
 
-    private readonly PoolBacking _backing;
-    private readonly FunctionRegistry _functions;
-    private readonly UdfRegistry _udfs;
-    private readonly ProcedureRegistry _procedures;
-    private readonly CatalogStore? _catalogStore;
-    private readonly RoutineRegistrar _routines;
-    private readonly SidecarRegistry _sidecarRegistry = new();
-    private Models.ModelCatalog? _modelCatalog;
-    private readonly ModelRegistry _declaredModels = new();
-    private Inference.IInferenceDispatcher? _inferenceDispatcher;
-    private DatumIngest.Execution.IModelInvocationTracer? _modelTracer;
-    /// <summary>
-    /// User-data backend: holds <c>public</c> + any user-created schemas.
-    /// Owns persistent state, path resolution, and the file-touching half
-    /// of CREATE / DROP / CREATE INDEX / DROP INDEX. The only backend
-    /// where <see cref="ITableCatalog.SupportsDdl"/> is true.
-    /// </summary>
-    private readonly FlatFileCatalog _flatFile;
+    private CatalogStore? CatalogStore { get; }
+
+    private RoutineRegistrar Routines { get; }
 
     /// <summary>
     /// Internal accessor for the user-data backend so per-statement
     /// executors (see <see cref="IndexExecutor"/>) can reach the same
     /// FlatFile-only operations the old in-class apply methods used.
     /// </summary>
-    internal FlatFileCatalog FlatFile => _flatFile;
+    internal FlatFileCatalog FlatFileCatalog { get; }
 
     /// <summary>
     /// System-projection backend: owns the <c>system</c> schema
@@ -264,7 +248,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <c>system.models</c> when the host attaches it). Read-only for DDL;
     /// providers are host-attached.
     /// </summary>
-    private readonly ReadOnlyTableCatalog _system;
+    private ReadOnlyTableCatalog SystemCatalog { get; }
 
     /// <summary>
     /// Virtual-projection backend: owns the SQL-standard
@@ -272,7 +256,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <c>datum_catalog</c> schemas. Read-only for DDL; providers are
     /// constructed alongside the catalog at startup.
     /// </summary>
-    private readonly ReadOnlyTableCatalog _virtual;
+    private ReadOnlyTableCatalog VirtualCatalog { get; }
 
     /// <summary>
     /// Models-namespace backend (S9). The schema is empty as a table
@@ -283,32 +267,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// DROP-rejection without coupling the model dispatch to the
     /// schema router.
     /// </summary>
-    private readonly ReadOnlyTableCatalog _models;
+    private ReadOnlyTableCatalog ModelCatalog { get; }
 
     /// <summary>
     /// Schema-to-backend routing table. The facade consults this for
     /// every <see cref="TryGetTable(string, out ITableProvider?)"/> /
     /// <see cref="Add(ITableProvider)"/> / DDL apply call.
     /// </summary>
-    private readonly Dictionary<string, ITableCatalog> _backends;
-
-    /// <summary>
-    /// Internal mutable access to the schema-to-backend routing table for
-    /// per-statement executors that own the CREATE / DROP SCHEMA lifecycle
-    /// (see <see cref="SchemaExecutor"/>).
-    /// </summary>
-    internal Dictionary<string, ITableCatalog> Backends => _backends;
-
-    /// <summary>
-    /// Session-scoped <c>search_path</c> for resolving unqualified table
-    /// references. Defaults to <c>["public", "system"]</c> — so
-    /// <c>SELECT * FROM udfs</c> walks to <c>system.udfs</c>. Mutated
-    /// atomically by <c>SET search_path = …</c>; reads return the
-    /// immutable list captured at the point of read so in-flight queries
-    /// that captured an earlier snapshot aren't affected by a concurrent
-    /// SET. PG semantics.
-    /// </summary>
-    private volatile IReadOnlyList<string> _searchPath = new[] { "public", "system" };
+    internal Dictionary<string, ITableCatalog> Backends { get; }
 
     /// <summary>
     /// The current session <c>search_path</c>. Reads atomically; the
@@ -317,42 +283,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <see cref="SchemaExecutor.SetSearchPath"/>.
     /// </summary>
     public IReadOnlyList<string> SearchPath => _searchPath;
-
-    /// <summary>
-    /// Returns the user-created index descriptors for <paramref name="tableName"/>,
-    /// or <see langword="null"/> when the table has no indexes (or doesn't exist).
-    /// Used by the <c>information_schema.table_constraints</c> /
-    /// <c>information_schema.key_column_usage</c> views to surface UNIQUE
-    /// constraints alongside PRIMARY KEY constraints.
-    /// </summary>
-    internal IReadOnlyList<IndexDescriptor>? GetTableIndexes(string tableName)
-    {
-        QualifiedName qn = QualifiedName.Parse(tableName);
-        return TryResolveBackend(qn.Schema, out ITableCatalog? backend)
-            ? backend.GetTableIndexes(qn)
-            : null;
-    }
-
-    /// <summary>
-    /// Returns the user-supplied PRIMARY KEY constraint name for
-    /// <paramref name="tableName"/>, or the derived default
-    /// (<c>&lt;table&gt;_pkey</c>) when no custom name was supplied.
-    /// Used by <c>information_schema.table_constraints</c> and by
-    /// <c>DROP CONSTRAINT</c> name-matching.
-    /// </summary>
-    internal string GetPrimaryKeyConstraintName(string tableName)
-    {
-        QualifiedName qn = QualifiedName.Parse(tableName);
-        if (TryResolveBackend(qn.Schema, out ITableCatalog? backend)
-            && backend.GetCustomPrimaryKeyConstraintName(qn) is { } custom)
-        {
-            return custom;
-        }
-        // Derive PG-default `<unqualified-table>_pkey`. Strip the schema
-        // so the constraint name reads as users_pkey, not public.users_pkey.
-        return Providers.InformationSchemaTableConstraintsProvider
-            .PrimaryKeyConstraintName(qn.Name);
-    }
 
     /// <summary>
     /// Report from the catalog file's load on construction. <see langword="null"/>
@@ -368,7 +298,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// for tooling that needs to enumerate registered functions (e.g. building a
     /// language-server manifest).
     /// </summary>
-    public FunctionRegistry Functions => _functions;
+    public FunctionRegistry Functions { get; }
 
     /// <summary>
     /// Registry of user-defined scalar functions (macros) registered against
@@ -377,7 +307,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// to the parent catalog when nested, so a session-level catalog inherits
     /// global UDFs registered on its root.
     /// </summary>
-    public UdfRegistry Udfs => _udfs;
+    public UdfRegistry Udfs { get; }
 
     /// <summary>
     /// Registry of named procedural blocks registered against this catalog
@@ -385,64 +315,64 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// executor on every <c>CALL proc.X(...)</c> call site to find the
     /// descriptor whose body should run.
     /// </summary>
-    public ProcedureRegistry Procedures => _procedures;
+    public ProcedureRegistry Procedures { get; }
 
     /// <summary>
-    /// Builds a <see cref="QualifiedName"/> from a DDL statement that
-    /// carries both an explicit <c>SchemaName</c> (the parsed
-    /// <c>schema.table</c> qualifier) and a <c>TableName</c>. When the
-    /// schema is supplied explicitly it wins; otherwise the
-    /// <see cref="SchemaResolver"/> walks the current
-    /// <see cref="SearchPath"/> for an existing table. If no match is
-    /// found, the first search_path entry is returned as a best-guess
-    /// so the subsequent backend lookup fails consistently (callers'
-    /// IF EXISTS branches handle that uniformly).
+    /// Per-catalog map from <c>storeId</c> byte to <see cref="IBlobSource"/>. Each
+    /// <see cref="DatumFileTableProviderV2"/> with a <c>.datum-blob</c> sidecar registers
+    /// its source here at <see cref="Add(TableDescriptor)"/> time and gets back a byte;
+    /// the decoder stamps that byte onto every sidecar-flagged
+    /// <see cref="DataValue"/>; image accessors resolve through the registry at access
+    /// time. Catalog-scoped (not query-scoped) so storeId assignments stay stable
+    /// across queries against the same provider. A nested child catalog falls through
+    /// to its parent's registry so providers added via either layer share one byte
+    /// space.
     /// </summary>
-    internal QualifiedName ResolveDdlName(string? explicitSchema, string tableName)
-    {
-        SchemaResolver resolver = new(this, _searchPath);
-        resolver.TryResolve(explicitSchema, tableName, out QualifiedName resolved);
-        return resolved;
-    }
+    public SidecarRegistry SidecarRegistry { get; }
 
     /// <summary>
-    /// Picks the first DDL-capable schema on the current search_path,
-    /// or <see langword="null"/> when none qualifies. Used for the
-    /// existence pre-check inside <see cref="TableExecutor.CreateTableAsync"/> —
-    /// it has to know the prospective target schema before
-    /// <c>ResolveForCreate</c> is invoked.
+    /// Server-wide model catalog. <see langword="null"/> until set by the host
+    /// (typically at startup via <c>BuiltinModels.Register</c>); inherited from a
+    /// parent catalog when nested. Held on the table catalog so query planning
+    /// has uniform access to it without threading a separate parameter through
+    /// every entry point.
     /// </summary>
-    public string? FirstWritableSchema()
-    {
-        foreach (string schema in _searchPath)
-        {
-            if (_backends.TryGetValue(schema, out ITableCatalog? backend) && backend.SupportsDdl)
-            {
-                return schema;
-            }
-        }
-
-        return null;
-    }
-
-    internal static bool IsBuiltinSchema(string schema)
-        => string.Equals(schema, "public", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(schema, "system", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(schema, "information_schema", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(schema, "datum_catalog", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(schema, "models", StringComparison.OrdinalIgnoreCase);
+    public Models.ModelCatalog? Models { get; set; }
 
     /// <summary>
-    /// Registers a <c>.datum</c> file as a queryable table. Returns this catalog
-    /// for fluent chaining.
+    /// Process-scoped registry of SQL-defined models — entries created by
+    /// <c>CREATE MODEL</c>. Parallel to <see cref="UdfRegistry"/>; surfaced
+    /// separately so <c>system.models</c> stays distinct from
+    /// <c>system.udfs</c>. Inherited from a parent catalog when nested so
+    /// child catalogs see the same registrations without duplicating them.
     /// </summary>
-    /// <param name="path">Path to the <c>.datum</c> file.</param>
-    /// <param name="name">Optional override for the SQL table name. Defaults to <see cref="PathDetector.DeriveTableName(string)"/>.</param>
-    public TableCatalog AddFile(string path, string? name = null)
-    {
-        Add(new TableDescriptor(Name: name ?? PathDetector.DeriveTableName(path), FilePath: path));
-        return this;
-    }
+    public ModelRegistry DeclaredModels { get; }
+
+    /// <summary>
+    /// The inference dispatcher used by <c>CREATE MODEL</c> to load ONNX
+    /// sessions at registration time. <see langword="null"/> when the host
+    /// has not wired an inference backend — in that case <c>CREATE MODEL</c>
+    /// throws a clear error rather than silently failing later. Inherited
+    /// from a parent catalog when nested.
+    /// </summary>
+    public Inference.IInferenceDispatcher? InferenceDispatcher { get; set; }
+
+    /// <summary>
+    /// Optional tracer for <c>models.X(...)</c> invocations. Set by hosts
+    /// that want to observe per-dispatch shape + timing — the interactive
+    /// shell wires this up via <c>.trace on</c>; production deployments
+    /// can attach metric-emitting or structured-logging implementations.
+    /// <see cref="QueryPlan"/> reads this value when constructing each
+    /// query's <see cref="DatumIngest.Execution.ExecutionContext"/>, so
+    /// toggling at runtime affects subsequently planned queries.
+    /// </summary>
+    public DatumIngest.Execution.IModelInvocationTracer? ModelTracer { get; set; }
+
+    /// <summary>
+    /// Gets the total number of tables registered in this catalog, including
+    /// those inherited from the parent catalog if present.
+    /// </summary>
+    public int Count => FlatFileCatalog.Count + SystemCatalog.Count + VirtualCatalog.Count;
 
     /// <summary>
     /// Parses and plans <paramref name="sql"/> against this catalog, returning an
@@ -514,27 +444,27 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return PlanQuery(queryStatement.Query);
 
             case CreateFunctionStatement create:
-                _routines.ApplyCreateFunction(create, sourceText);
+                Routines.ApplyCreateFunction(create, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case DropFunctionStatement drop:
-                _routines.ApplyDropFunction(drop, sourceText);
+                Routines.ApplyDropFunction(drop, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case CreateProcedureStatement create:
-                _routines.ApplyCreateProcedure(create, sourceText);
+                Routines.ApplyCreateProcedure(create, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case DropProcedureStatement drop:
-                _routines.ApplyDropProcedure(drop, sourceText);
+                Routines.ApplyDropProcedure(drop, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case CreateModelStatement createModel:
-                await _routines.ApplyCreateModelAsync(createModel, sourceText).ConfigureAwait(false);
+                await Routines.ApplyCreateModelAsync(createModel, sourceText).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
             case DropModelStatement dropModel:
-                _routines.ApplyDropModel(dropModel, sourceText);
+                Routines.ApplyDropModel(dropModel, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case CallStatement call:
@@ -615,142 +545,85 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
     internal IQueryPlan PlanQuery(QueryExpression query)
     {
-        QueryExpression inlined = UdfInliner.Inline(query, _udfs, SearchPath, _procedures);
-        QueryPlanner planner = new(this, _functions);
+        QueryExpression inlined = UdfInliner.Inline(query, Udfs, SearchPath, Procedures);
+        QueryPlanner planner = new(this, Functions);
         IQueryOperator op = planner.Plan(inlined);
-        return new QueryPlan(op, this, _functions, _backing);
+        return new QueryPlan(op, this, Functions);
     }
 
     /// <summary>
-    /// Per-catalog map from <c>storeId</c> byte to <see cref="IBlobSource"/>. Each
-    /// <see cref="DatumFileTableProviderV2"/> with a <c>.datum-blob</c> sidecar registers
-    /// its source here at <see cref="Add(TableDescriptor)"/> time and gets back a byte;
-    /// the decoder stamps that byte onto every sidecar-flagged
-    /// <see cref="DataValue"/>; image accessors resolve through the registry at access
-    /// time. Catalog-scoped (not query-scoped) so storeId assignments stay stable
-    /// across queries against the same provider. A nested child catalog falls through
-    /// to its parent's registry so providers added via either layer share one byte
-    /// space.
+    /// Returns the user-created index descriptors for <paramref name="tableName"/>,
+    /// or <see langword="null"/> when the table has no indexes (or doesn't exist).
+    /// Used by the <c>information_schema.table_constraints</c> /
+    /// <c>information_schema.key_column_usage</c> views to surface UNIQUE
+    /// constraints alongside PRIMARY KEY constraints.
     /// </summary>
-    public SidecarRegistry SidecarRegistry => Parent?.SidecarRegistry ?? _sidecarRegistry;
+    internal IReadOnlyList<IndexDescriptor>? GetTableIndexes(string tableName)
+    {
+        QualifiedName qn = QualifiedName.Parse(tableName);
+        return TryResolveBackend(qn.Schema, out ITableCatalog? backend)
+            ? backend.GetTableIndexes(qn)
+            : null;
+    }
 
     /// <summary>
-    /// Server-wide model catalog. <see langword="null"/> until set by the host
-    /// (typically at startup via <c>BuiltinModels.Register</c>); inherited from a
-    /// parent catalog when nested. Held on the table catalog so query planning
-    /// has uniform access to it without threading a separate parameter through
-    /// every entry point.
+    /// Returns the user-supplied PRIMARY KEY constraint name for
+    /// <paramref name="tableName"/>, or the derived default
+    /// (<c>&lt;table&gt;_pkey</c>) when no custom name was supplied.
+    /// Used by <c>information_schema.table_constraints</c> and by
+    /// <c>DROP CONSTRAINT</c> name-matching.
     /// </summary>
-    public Models.ModelCatalog? Models
+    internal string GetPrimaryKeyConstraintName(string tableName)
     {
-        get => _modelCatalog ?? Parent?.Models;
-        set
+        QualifiedName qn = QualifiedName.Parse(tableName);
+        if (TryResolveBackend(qn.Schema, out ITableCatalog? backend)
+            && backend.GetCustomPrimaryKeyConstraintName(qn) is { } custom)
         {
-            if (Parent is not null && value is not null)
+            return custom;
+        }
+        // Derive PG-default `<unqualified-table>_pkey`. Strip the schema
+        // so the constraint name reads as users_pkey, not public.users_pkey.
+        return Providers.InformationSchemaTableConstraintsProvider
+            .PrimaryKeyConstraintName(qn.Name);
+    }
+
+    /// <summary>
+    /// Builds a <see cref="QualifiedName"/> from a DDL statement that
+    /// carries both an explicit <c>SchemaName</c> (the parsed
+    /// <c>schema.table</c> qualifier) and a <c>TableName</c>. When the
+    /// schema is supplied explicitly it wins; otherwise the
+    /// <see cref="SchemaResolver"/> walks the current
+    /// <see cref="SearchPath"/> for an existing table. If no match is
+    /// found, the first search_path entry is returned as a best-guess
+    /// so the subsequent backend lookup fails consistently (callers'
+    /// IF EXISTS branches handle that uniformly).
+    /// </summary>
+    internal QualifiedName ResolveDdlName(string? explicitSchema, string tableName)
+    {
+        SchemaResolver resolver = new(this, _searchPath);
+        resolver.TryResolve(explicitSchema, tableName, out QualifiedName resolved);
+        return resolved;
+    }
+
+    /// <summary>
+    /// Picks the first DDL-capable schema on the current search_path,
+    /// or <see langword="null"/> when none qualifies. Used for the
+    /// existence pre-check inside <see cref="TableExecutor.CreateTableAsync"/> —
+    /// it has to know the prospective target schema before
+    /// <c>ResolveForCreate</c> is invoked.
+    /// </summary>
+    public string? FirstWritableSchema()
+    {
+        foreach (string schema in _searchPath)
+        {
+            if (Backends.TryGetValue(schema, out ITableCatalog? backend) && backend.SupportsDdl)
             {
-                throw new InvalidOperationException(
-                    "Models cannot be set on a nested table catalog — set it on the root.");
+                return schema;
             }
-            _modelCatalog = value;
         }
+
+        return null;
     }
-
-    /// <summary>
-    /// Process-scoped registry of SQL-defined models — entries created by
-    /// <c>CREATE MODEL</c>. Parallel to <see cref="UdfRegistry"/>; surfaced
-    /// separately so <c>system.models</c> stays distinct from
-    /// <c>system.udfs</c>. Inherited from a parent catalog when nested so
-    /// child catalogs see the same registrations without duplicating them.
-    /// </summary>
-    public ModelRegistry DeclaredModels => Parent?.DeclaredModels ?? _declaredModels;
-
-    /// <summary>
-    /// The inference dispatcher used by <c>CREATE MODEL</c> to load ONNX
-    /// sessions at registration time. <see langword="null"/> when the host
-    /// has not wired an inference backend — in that case <c>CREATE MODEL</c>
-    /// throws a clear error rather than silently failing later. Inherited
-    /// from a parent catalog when nested.
-    /// </summary>
-    public Inference.IInferenceDispatcher? InferenceDispatcher
-    {
-        get => _inferenceDispatcher ?? Parent?.InferenceDispatcher;
-        set
-        {
-            if (Parent is not null && value is not null)
-            {
-                throw new InvalidOperationException(
-                    "InferenceDispatcher cannot be set on a nested table catalog — set it on the root.");
-            }
-            _inferenceDispatcher = value;
-        }
-    }
-
-    /// <summary>
-    /// Optional tracer for <c>models.X(...)</c> invocations. Set by hosts
-    /// that want to observe per-dispatch shape + timing — the interactive
-    /// shell wires this up via <c>.trace on</c>; production deployments
-    /// can attach metric-emitting or structured-logging implementations.
-    /// <see cref="QueryPlan"/> reads this value when constructing each
-    /// query's <see cref="DatumIngest.Execution.ExecutionContext"/>, so
-    /// toggling at runtime affects subsequently planned queries.
-    /// </summary>
-    public DatumIngest.Execution.IModelInvocationTracer? ModelTracer
-    {
-        get => _modelTracer ?? Parent?.ModelTracer;
-        set
-        {
-            if (Parent is not null && value is not null)
-            {
-                throw new InvalidOperationException(
-                    "ModelTracer cannot be set on a nested table catalog — set it on the root.");
-            }
-            _modelTracer = value;
-        }
-    }
-
-    /// <summary>
-    /// Gets the total number of tables registered in this catalog, including
-    /// those inherited from the parent catalog if present.
-    /// </summary>
-    public int Count => _flatFile.Count + _system.Count + _virtual.Count + (Parent?.Count ?? 0);
-
-    /// <summary>
-    /// Routes <paramref name="schema"/> to its owning backend, or returns
-    /// <see langword="false"/> when no backend is mounted for that schema.
-    /// Used by lookup / Add / DDL paths so the facade can dispatch
-    /// uniformly.
-    /// </summary>
-    internal bool TryResolveBackend(string schema, [NotNullWhen(true)] out ITableCatalog? backend)
-        => _backends.TryGetValue(schema, out backend);
-
-    /// <summary>
-    /// Schema-aware lookup using a pre-built <see cref="QualifiedName"/>.
-    /// Bypasses the string indexer's parse step. Used by
-    /// <see cref="SchemaResolver"/> in the hot path.
-    /// </summary>
-    internal bool TryGetTable(QualifiedName name, [NotNullWhen(true)] out ITableProvider? provider)
-    {
-        if (TryResolveBackend(name.Schema, out ITableCatalog? backend)
-            && backend.TryGetTable(name, out provider))
-        {
-            return true;
-        }
-        if (Parent is not null)
-        {
-            return Parent.TryGetTable(name, out provider);
-        }
-        provider = null;
-        return false;
-    }
-
-    /// <summary>
-    /// Returns the backend that owns <paramref name="schema"/>, or
-    /// <see langword="false"/> when no backend is mounted there. Exposed
-    /// to <see cref="SchemaResolver"/> so it can pick DDL-capable
-    /// schemas during <c>CREATE TABLE</c> resolution.
-    /// </summary>
-    internal bool TryFindBackend(string schema, [NotNullWhen(true)] out ITableCatalog? backend)
-        => _backends.TryGetValue(schema, out backend);
 
     /// <summary>
     /// Replaces the session <c>search_path</c>. Used by
@@ -766,7 +639,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         ArgumentNullException.ThrowIfNull(schemas);
         foreach (string schema in schemas)
         {
-            if (!_backends.ContainsKey(schema))
+            if (!Backends.ContainsKey(schema))
             {
                 throw new InvalidOperationException(
                     $"SET search_path: schema '{schema}' does not exist.");
@@ -777,28 +650,54 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         _searchPath = schemas.ToArray();
     }
 
+    internal static bool IsBuiltinSchema(string schema)
+        => string.Equals(schema, "public", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(schema, "system", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(schema, "information_schema", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(schema, "datum_catalog", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(schema, "models", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Routes <paramref name="schema"/> to its owning backend, or returns
+    /// <see langword="false"/> when no backend is mounted for that schema.
+    /// Used by lookup / Add / DDL paths so the facade can dispatch
+    /// uniformly.
+    /// </summary>
+    internal bool TryResolveBackend(string schema, [NotNullWhen(true)] out ITableCatalog? backend)
+        => Backends.TryGetValue(schema, out backend);
+
+    /// <summary>
+    /// Returns the backend that owns <paramref name="schema"/>, or
+    /// <see langword="false"/> when no backend is mounted there. Exposed
+    /// to <see cref="SchemaResolver"/> so it can pick DDL-capable
+    /// schemas during <c>CREATE TABLE</c> resolution.
+    /// </summary>
+    internal bool TryFindBackend(string schema, [NotNullWhen(true)] out ITableCatalog? backend)
+        => Backends.TryGetValue(schema, out backend);
+
     /// <summary>
     /// Returns <see langword="true"/> if a table with the given name is registered
     /// in this catalog or its parent; otherwise <see langword="false"/>.
     /// </summary>
-    /// <param name="name">The name of the table to check.</param>
+    /// <param name="fullyQualifiedName">The qualified name of the table to check.</param>
     /// <returns><see langword="true"/> if the table exists; otherwise <see langword="false"/>.</returns>
-    public bool HasTable(string name)
+    public bool HasTable(string fullyQualifiedName) => HasTable(QualifiedName.Parse(fullyQualifiedName));
+
+    /// <summary>
+    /// Returns <see langword="true"/> if a table with the given name is registered
+    /// in this catalog or its parent; otherwise <see langword="false"/>.
+    /// </summary>
+    /// <param name="qn">The schema and name pair of the table to check.</param>
+    /// <returns><see langword="true"/> if the table exists; otherwise <see langword="false"/>.</returns>
+    public bool HasTable(QualifiedName qn)
     {
-        QualifiedName qn = QualifiedName.Parse(name);
         if (TryResolveBackend(qn.Schema, out ITableCatalog? backend)
             && backend.TryGetTable(qn, out _))
         {
             return true;
         }
-        else if (Parent is not null)
-        {
-            return Parent.HasTable(name);
-        }
-        else
-        {
-            return false;
-        }
+
+        return false;
     }
 
     /// <summary>
@@ -808,22 +707,23 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <param name="provider">When this method returns, contains the table provider associated with the given name, if found; otherwise, <c>null</c>.</param>
     /// <returns><see langword="true"/> if the table provider was found; otherwise, <see langword="false"/>.</returns>
     public bool TryGetTable(string name, [NotNullWhen(true)] out ITableProvider? provider)
+        => TryGetTable(QualifiedName.Parse(name), out provider);
+
+    /// <summary>
+    /// Schema-aware lookup using a pre-built <see cref="QualifiedName"/>.
+    /// Bypasses the string indexer's parse step. Used by
+    /// <see cref="SchemaResolver"/> in the hot path.
+    /// </summary>
+    public bool TryGetTable(QualifiedName name, [NotNullWhen(true)] out ITableProvider? provider)
     {
-        QualifiedName qn = QualifiedName.Parse(name);
-        if (TryResolveBackend(qn.Schema, out ITableCatalog? backend)
-            && backend.TryGetTable(qn, out provider))
+        if (TryResolveBackend(name.Schema, out ITableCatalog? backend)
+            && backend.TryGetTable(name, out provider))
         {
             return true;
         }
-        else if (Parent is not null)
-        {
-            return Parent.TryGetTable(name, out provider);
-        }
-        else
-        {
-            provider = null;
-            return false;
-        }
+
+        provider = null;
+        return false;
     }
 
     /// <summary>
@@ -834,25 +734,40 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <param name="name">The logical name of the table.</param>
     /// <returns>The table provider associated with the given name.</returns>
     /// <exception cref="KeyNotFoundException">Thrown if the table name is not found in this catalog or its parent.</exception>
-    public ITableProvider this[string name]
+    public ITableProvider this[string name] => this[QualifiedName.Parse(name)];
+
+    /// <summary>
+    /// Gets the table provider associated with the given logical table name.
+    /// If the name is not found in this catalog, the parent catalog is consulted
+    /// if it exists.
+    /// </summary>
+    /// <param name="qn">The schema and name pair of the table.</param>
+    /// <returns>The table provider associated with the given name.</returns>
+    /// <exception cref="KeyNotFoundException">Thrown if the table name is not found in this catalog or its parent.</exception>
+    public ITableProvider this[QualifiedName qn]
     {
         get
         {
-            QualifiedName qn = QualifiedName.Parse(name);
             if (TryResolveBackend(qn.Schema, out ITableCatalog? backend)
                 && backend.TryGetTable(qn, out ITableProvider? provider))
             {
                 return provider;
             }
-            else if (Parent is not null)
-            {
-                return Parent[name];
-            }
-            else
-            {
-                throw new KeyNotFoundException($"Table '{name}' is not registered in the catalog.");
-            }
+            
+            throw new KeyNotFoundException($"Table '{qn}' is not registered in the catalog.");
         }
+    }
+
+    /// <summary>
+    /// Registers a <c>.datum</c> file as a queryable table. Returns this catalog
+    /// for fluent chaining.
+    /// </summary>
+    /// <param name="path">Path to the <c>.datum</c> file.</param>
+    /// <param name="name">Optional override for the SQL table name. Defaults to <see cref="PathDetector.DeriveTableName(string)"/>.</param>
+    public TableCatalog AddFile(string path, string? name = null)
+    {
+        Add(new TableDescriptor(Name: name ?? PathDetector.DeriveTableName(path), FilePath: path));
+        return this;
     }
 
     /// <summary>
@@ -865,10 +780,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public ITableProvider Add(TableDescriptor tableDescriptor)
     {
         QualifiedName qn = QualifiedName.Parse(tableDescriptor.Name);
-        if (Parent is TableCatalog parent && parent.HasTable(tableDescriptor.Name))
-        {
-            throw new ArgumentException($"A table with the name '{tableDescriptor.Name}' is already registered in the parent catalog.");
-        }
+
         if (!TryResolveBackend(qn.Schema, out ITableCatalog? backend))
         {
             throw new ArgumentException(
@@ -879,6 +791,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // DatumFileReaderV2.Open. Files written by older format versions
         // throw InvalidDataException at open time.
         DatumFileTableProviderV2 provider = new(tableDescriptor, Pool);
+
         try
         {
             return backend.Add(provider);
@@ -901,87 +814,45 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     {
         ArgumentNullException.ThrowIfNull(tableProvider);
         QualifiedName qn = tableProvider.QualifiedName;
-        if (Parent is TableCatalog parent
-            && parent.TryResolveBackend(qn.Schema, out ITableCatalog? parentBackend)
-            && parentBackend.TryGetTable(qn, out _))
-        {
-            throw new ArgumentException($"A table with the name '{qn}' is already registered in the parent catalog.");
-        }
+
         if (!TryResolveBackend(qn.Schema, out ITableCatalog? backend))
         {
             throw new ArgumentException(
                 $"No catalog backend is mounted for schema '{qn.Schema}' " +
                 $"(provider '{qn}').");
         }
+
         return backend.Add(tableProvider);
     }
-
-    /// <summary>
-    /// Removes a previously registered table from the catalog. Delegates
-    /// to <see cref="FlatFileCatalog.DropTable"/>, which also deletes the
-    /// backing <c>.datum</c> file and sidecars when the table is
-    /// persistent. Use <see cref="TableExecutor.DropTable"/> for full DROP TABLE
-    /// semantics (IF EXISTS, error reporting, manifest persistence).
-    /// </summary>
-    public void Remove(string tableName)
-    {
-        // NOTE: you can't drop from the parent catalog.
-        QualifiedName qn = QualifiedName.Parse(tableName);
-        if (TryResolveBackend(qn.Schema, out ITableCatalog? backend) && backend.SupportsDdl)
-        {
-            backend.DropTable(qn);
-        }
-        // Read-only backends silently ignore Remove — matches the old
-        // permissive behaviour of the public API.
-    }
-
 
     /// <inheritdoc />
     public IEnumerator<ITableProvider> GetEnumerator()
     {
-        HashSet<QualifiedName> seen = new();
-        foreach (ITableProvider provider in _flatFile.ListTables())
+        foreach (ITableProvider provider in FlatFileCatalog.ListTables())
         {
-            seen.Add(provider.QualifiedName);
-            yield return provider;
-        }
-        foreach (ITableProvider provider in _system.ListTables())
-        {
-            seen.Add(provider.QualifiedName);
-            yield return provider;
-        }
-        foreach (ITableProvider provider in _virtual.ListTables())
-        {
-            seen.Add(provider.QualifiedName);
             yield return provider;
         }
 
-        if (Parent is not null)
+        foreach (ITableProvider provider in SystemCatalog.ListTables())
         {
-            foreach (ITableProvider provider in Parent)
-            {
-                if (!seen.Contains(provider.QualifiedName))
-                {
-                    yield return provider;
-                }
-            }
+            yield return provider;
+        }
+
+        foreach (ITableProvider provider in VirtualCatalog.ListTables())
+        {
+            yield return provider;
         }
     }
 
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     /// <inheritdoc />
     public void Dispose()
     {
         // Disposes all locally-registered providers via each backend.
         // Parent-catalog providers remain owned by the parent.
-        _flatFile.Dispose();
-        _system.Dispose();
-        _virtual.Dispose();
+        FlatFileCatalog.Dispose();
+        SystemCatalog.Dispose();
+        VirtualCatalog.Dispose();
     }
-
-
 }
