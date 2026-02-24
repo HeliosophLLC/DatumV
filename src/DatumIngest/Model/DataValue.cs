@@ -2329,10 +2329,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     /// <param name="store">
     /// Optional value store used to resolve reference kinds. When supplied,
-    /// <see cref="DataKind.String"/> returns the real <see cref="string"/> payload
-    /// from the store. When <see langword="null"/>, reference kinds fall back to
+    /// <see cref="DataKind.String"/> returns the real <see cref="string"/> payload.
+    /// When <see langword="null"/>, reference kinds fall back to
     /// <see cref="ToString"/>'s summary form. Inline kinds (integers, floats,
     /// booleans, dates, etc.) never need a store.
+    /// </param>
+    /// <param name="registry">
+    /// Optional sidecar registry for resolving sidecar-backed reference values
+    /// (long strings spilled to a <c>.datum-blob</c> sidecar). Required whenever
+    /// the value's <see cref="IsInSidecar"/> flag is set; callers that work
+    /// against arena-only batches may pass <see langword="null"/>.
     /// </param>
     /// <returns>
     /// The boxed primitive (<see cref="float"/>, <see cref="int"/>, <see cref="bool"/>, etc.),
@@ -2342,7 +2348,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// kinds (Image / Audio / Video / Json) return the <see cref="ToString"/> summary;
     /// callers that need recursive conversion should handle those kinds explicitly.
     /// </returns>
-    public object? ToObject(IValueStore? store = null)
+    public object? ToObject(IValueStore? store = null, SidecarRegistry? registry = null)
     {
         if (IsNull) return null;
 
@@ -2370,9 +2376,10 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Uuid      => AsUuid(),
             DataKind.Point2D   => AsPoint2D(),
             DataKind.Point3D   => AsPoint3D(),
-            // String resolves through the store when supplied; otherwise the
-            // summary form keeps the no-store call sites working unchanged.
-            DataKind.String when store is not null => AsString(store),
+            // String resolves uniformly across inline / arena / sidecar tiers
+            // via the (store, registry) overload — the store-only AsString
+            // throws on sidecar-backed values.
+            DataKind.String when store is not null => AsString(store, registry),
             // Other reference kinds (Image / Audio / Video / Json, byte[],
             // typed arrays, structs) — return the ToString() summary without
             // content. Callers that need the payload should branch on
@@ -2543,8 +2550,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <remarks>
     /// Works for inline strings (whose bytes are self-contained in the struct) without a store.
     /// For non-inline strings (reference-store or arena-backed), use
-    /// <see cref="AsString(IValueStore)"/> or <see cref="AsString(Arena)"/> — those require an
-    /// explicit store to resolve the payload.
+    /// <see cref="AsString(IValueStore, SidecarRegistry?)"/> or <see cref="AsString(Arena)"/> —
+    /// those require an explicit store to resolve the payload.
     /// </remarks>
     public string AsString()
     {
@@ -2552,28 +2559,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
         throw new InvalidOperationException(
             "AsString() without a store only supports inline strings. For non-inline strings, " +
-            "use AsString(IValueStore) or AsString(Arena).");
-    }
-
-    /// <summary>Returns the text string payload from an explicit <see cref="IValueStore"/>.</summary>
-    /// <remarks>
-    /// Does not handle sidecar-backed values — for those use the
-    /// <see cref="AsString(IValueStore, SidecarRegistry)"/> overload that
-    /// accepts a registry. This method throws with a helpful pointer when
-    /// it encounters one.
-    /// </remarks>
-    public string AsString(IValueStore store)
-    {
-        ThrowIfNullOrWrongKind(DataKind.String);
-        if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
-        if (IsInSidecar)
-        {
-            throw new InvalidOperationException(
-                "AsString(store) cannot resolve a sidecar-backed String. Use the " +
-                "AsString(store, registry) overload — it routes sidecar values through " +
-                "the SidecarRegistry and inline / arena values through the store.");
-        }
-        return store.RetrieveString(_p0, _p1);
+            "use AsString(IValueStore, SidecarRegistry?) or AsString(Arena).");
     }
 
     /// <summary>
@@ -2584,8 +2570,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// value's recorded <c>storeId</c>.
     /// </summary>
     /// <param name="store">Used for arena-backed values; ignored for inline / sidecar.</param>
-    /// <param name="registry">Required for sidecar-backed values; ignored for inline / arena.</param>
-    public string AsString(IValueStore store, SidecarRegistry? registry)
+    /// <param name="registry">
+    /// Required for sidecar-backed values; ignored for inline / arena. Callers
+    /// that work only against arena-backed batches may omit this — a
+    /// sidecar-backed value will then throw with a clear "no SidecarRegistry
+    /// was provided" message via <see cref="ReadSidecarBytes"/>.
+    /// </param>
+    public string AsString(IValueStore store, SidecarRegistry? registry = null)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
         if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
@@ -2733,61 +2724,24 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
-    /// Returns the raw UTF-8 bytes for a string value without allocating a managed
-    /// <see cref="string"/>. For <see cref="Arena"/>-backed stores this is a zero-copy
-    /// slice of the backing buffer. Ideal for hashing, equality checks, serialization,
-    /// and byte-level operations.
-    /// </summary>
-    /// <param name="store">The value store that owns the string data.</param>
-    /// <returns>A span of UTF-8 bytes. Valid only while the store is alive.</returns>
-    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    public ReadOnlySpan<byte> AsUtf8Span(IValueStore store)
-    {
-        ThrowIfNullOrWrongKind(DataKind.String);
-        if (IsInline) return InlineUtf8Span;
-        if (IsInSidecar)
-        {
-            throw new InvalidOperationException(
-                "AsUtf8Span(store) cannot resolve a sidecar-backed String. Use the " +
-                "AsUtf8Span(store, registry) overload that routes through the SidecarRegistry.");
-        }
-        return store.RetrieveUtf8Span(_p0, _p1);
-    }
-
-    /// <summary>
     /// Returns the UTF-8 byte span, resolving inline / arena / sidecar
     /// storage tiers uniformly. Inline values come from the struct,
     /// arena-backed values come from <paramref name="store"/>, and
     /// sidecar-backed values come from <paramref name="registry"/>.
     /// </summary>
-    public ReadOnlySpan<byte> AsUtf8Span(IValueStore store, SidecarRegistry? registry)
+    /// <param name="store">Used for arena-backed values; ignored for inline / sidecar.</param>
+    /// <param name="registry">
+    /// Required for sidecar-backed values; ignored for inline / arena. Callers
+    /// that work only against arena-backed batches may omit this — a
+    /// sidecar-backed value will then throw with a clear "no SidecarRegistry
+    /// was provided" message via <see cref="ReadSidecarBytes"/>.
+    /// </param>
+    public ReadOnlySpan<byte> AsUtf8Span(IValueStore store, SidecarRegistry? registry = null)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
         if (IsInline) return InlineUtf8Span;
         if (IsInSidecar) return ReadSidecarBytes(registry);
         return store.RetrieveUtf8Span(_p0, _p1);
-    }
-
-    /// <summary>
-    /// Decodes the string value into a <see cref="ReadOnlySpan{T}"/> of <see cref="char"/>
-    /// without allocating a managed <see cref="string"/>. The caller must return the
-    /// rented buffer to <see cref="System.Buffers.ArrayPool{T}.Shared"/> after use.
-    /// </summary>
-    /// <param name="store">The value store that owns the string data.</param>
-    /// <param name="rentedBuffer">
-    /// Receives the rented char buffer. The caller must return it via
-    /// <c>ArrayPool&lt;char&gt;.Shared.Return(rentedBuffer)</c> after consuming the span.
-    /// </param>
-    /// <returns>A span of chars backed by <paramref name="rentedBuffer"/>.</returns>
-    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    public ReadOnlySpan<char> AsStringSpan(IValueStore store, out char[] rentedBuffer)
-    {
-        ThrowIfNullOrWrongKind(DataKind.String);
-        ReadOnlySpan<byte> utf8 = AsUtf8Span(store);
-        int maxChars = System.Text.Encoding.UTF8.GetMaxCharCount(utf8.Length);
-        rentedBuffer = System.Buffers.ArrayPool<char>.Shared.Rent(maxChars);
-        int charCount = System.Text.Encoding.UTF8.GetChars(utf8, rentedBuffer);
-        return rentedBuffer.AsSpan(0, charCount);
     }
 
     /// <summary>

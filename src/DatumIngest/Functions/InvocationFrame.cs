@@ -15,7 +15,7 @@ namespace DatumIngest.Functions;
 /// <remarks>
 /// <para>
 /// <see cref="Source"/> backs <em>input</em> values: arena-backed payloads in
-/// argument <see cref="DataValue"/>s resolve via <see cref="DataValue.AsString(IValueStore)"/>
+/// argument <see cref="DataValue"/>s resolve via <see cref="DataValue.AsString(IValueStore, DatumFile.Sidecar.SidecarRegistry?)"/>
 /// and friends against this store. For aggregate <c>Accumulate</c> calls,
 /// <see cref="Source"/> is typically the input batch's arena.
 /// </para>

@@ -525,12 +525,13 @@ internal static class InsertExecutor
                 "Struct-typed manifest support lands with the Value Type Registry.");
         }
 
-        // Inline / String kinds: route to DataValue.ToObject(store) which
-        // boxes the scalar (and resolves String through the store). Composite
-        // and blob kinds are gated above; anything that survives to here is
-        // safe for LiteralCoercion.Coerce — if the target.Kind can't accept
-        // the source kind, LiteralCoercion throws with the canonical message.
-        object? scalar = source.ToObject(sourceStore);
+        // Inline / String kinds: route to DataValue.ToObject(store, registry)
+        // which boxes the scalar (and resolves String across inline / arena /
+        // sidecar tiers). Composite and blob kinds are gated above; anything
+        // that survives to here is safe for LiteralCoercion.Coerce — if the
+        // target.Kind can't accept the source kind, LiteralCoercion throws
+        // with the canonical message.
+        object? scalar = source.ToObject(sourceStore, sidecarRegistry);
         return LiteralCoercion.Coerce(scalar, target, targetArena, columnName);
     }
 

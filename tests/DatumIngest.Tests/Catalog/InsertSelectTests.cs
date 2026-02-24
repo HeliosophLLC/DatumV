@@ -368,6 +368,45 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal([(1, "alice"), (2, "bob")], rows);
     }
 
+    [Fact]
+    public async Task InsertSelect_FromSelf_WithSidecarBackedString_Roundtrips()
+    {
+        // Regression: long String column on a persistent table round-trips
+        // through the .datum sidecar on read, so the scan yields
+        // IsInSidecar=true DataValues. The INSERT…SELECT path must resolve
+        // them through the SidecarRegistry rather than calling AsString(store)
+        // (which throws with a "Use the AsString(store, registry) overload"
+        // message).
+        string longText = new('x', 200);
+
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE test (id Int32 GENERATED ALWAYS AS IDENTITY, content String)");
+            catalog.Plan($"INSERT INTO test (content) VALUES ('{longText}')");
+
+            // Self-INSERT…SELECT: source rows scan back from the persistent
+            // .datum file as sidecar-backed Strings.
+            catalog.Plan("INSERT INTO test (content) SELECT content FROM test");
+
+            Assert.Equal(2, catalog["test"].GetRowCount());
+
+            // Scan with the registry-aware AsString overload — the no-store
+            // helper can't resolve sidecar-backed values.
+            List<string> readBack = new();
+            await foreach (RowBatch batch in catalog["test"].ScanAsync(
+                requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+            {
+                for (int r = 0; r < batch.Count; r++)
+                {
+                    Row row = batch[r];
+                    readBack.Add(row[1].AsString(batch.Arena, catalog.SidecarRegistry));
+                }
+                batch.Dispose();
+            }
+            Assert.Equal([longText, longText], readBack);
+        }
+    }
+
     // ──────────────────── Helpers ────────────────────
 
     private static async Task<List<(int id, string name)>> ScanAsTuples(ITableProvider provider)

@@ -687,7 +687,7 @@ public readonly struct ValueRef
 
     /// <summary>
     /// Returns the value as its natural boxed CLR type — the mirror of
-    /// <see cref="DataValue.ToObject(IValueStore?)"/> for the ValueRef
+    /// <see cref="DataValue.ToObject(IValueStore?, DatumFile.Sidecar.SidecarRegistry?)"/> for the ValueRef
     /// shape. Reference kinds (<see cref="DataKind.String"/>) read from the
     /// in-struct materialized payload, so no store is needed at this
     /// boundary. Null values return <see langword="null"/>.

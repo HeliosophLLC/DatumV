@@ -1,3 +1,4 @@
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
@@ -136,7 +137,7 @@ internal static class UpdateExecutor
 
                         ColumnInfo target = schema.Columns[columnIndex];
                         DataValue coerced = CoerceForUpdate(
-                            raw, sourceArena, workArena, target, update.TableName);
+                            raw, sourceArena, workArena, target, update.TableName, catalog.SidecarRegistry);
 
                         // No-op detection: when the new value matches the
                         // existing cell, drop it from the per-row map.
@@ -399,7 +400,7 @@ internal static class UpdateExecutor
 
                             ColumnInfo target = targetSchema.Columns[columnIndex];
                             DataValue coerced = CoerceForUpdate(
-                                raw, targetArena, workArena, target, update.TableName);
+                                raw, targetArena, workArena, target, update.TableName, catalog.SidecarRegistry);
 
                             // Last-match-wins with no-op detection: if the
                             // final value matches the existing cell, drop
@@ -481,7 +482,8 @@ internal static class UpdateExecutor
         IValueStore sourceStore,
         Arena targetArena,
         ColumnInfo target,
-        string tableName)
+        string tableName,
+        SidecarRegistry? sidecarRegistry)
     {
         if (source.IsNull)
         {
@@ -519,7 +521,7 @@ internal static class UpdateExecutor
                 "Struct, typed arrays, Image / Audio / ByteArray — land in a follow-up).");
         }
 
-        object scalar = source.ToObject(sourceStore)!;
+        object scalar = source.ToObject(sourceStore, sidecarRegistry)!;
         return LiteralCoercion.Coerce(scalar, target, targetArena, target.Name);
     }
 
