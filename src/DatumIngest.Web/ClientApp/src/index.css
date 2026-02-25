@@ -53,6 +53,8 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --color-status-bar: var(--status-bar);
   --color-status-bar-foreground: var(--status-bar-foreground);
+  --color-table-row: var(--table-row);
+  --color-table-pane: var(--table-pane);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
@@ -113,6 +115,16 @@
   --status-bar: oklch(0.90 0.13 95);
   --status-bar-foreground: oklch(0.25 0.05 95);
 
+  /* Data-grid surface tokens. The table cells sit as an "elevated"
+     surface above the pane that surrounds them. In light mode the
+     cells go pure white against the standard page-bg pane; in dark
+     mode (see `.dark`) the cells keep the page bg and the pane
+     around them drops a notch darker. Either way the cells end up
+     lighter than the surrounding pane, so the eye locks onto data
+     instead of chrome. */
+  --table-row: oklch(1 0 0);
+  --table-pane: var(--background);
+
   --font-sans: 'Source Code Pro', 'Geist', 'Geist Fallback', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   --font-serif: 'Source Serif 4', 'Geist', 'Geist Fallback', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
   --font-mono: 'Source Code Pro', 'Geist Mono', 'Geist Mono Fallback', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
@@ -141,7 +153,7 @@
   --primary-foreground: oklch(0.94 0.03 232.39);
   --secondary: oklch(0.28 0.03 270.91);
   --secondary-foreground: oklch(0.90 0.01 238.47);
-  --muted: oklch(0.28 0.03 270.91);
+  --muted: oklch(38.661% 0.00889 268.448);
   --muted-foreground: oklch(0.60 0.03 269.46);
   --accent: oklch(0.28 0.03 270.91);
   --accent-foreground: oklch(0.90 0.01 238.47);
@@ -165,6 +177,13 @@
 
   --status-bar: oklch(86.246% 0.12504 96.878);
   --status-bar-foreground: oklch(25.338% 0.04298 94.672);
+
+  /* Dark-mode counterpart of the data-grid surface tokens. Cells stay
+     at the page bg; pane drops ~0.06 lightness so the table reads as
+     elevated. Chroma + hue kept aligned with --background so it
+     doesn't introduce a competing tint. */
+  --table-row: oklch(0% 0 0);
+  --table-pane: oklch(--background);
 
   --shadow-2xs: 0px 1px 2px 0px oklch(0 0 0 / 0.01);
   --shadow-xs: 0px 1px 2px 0px oklch(0 0 0 / 0.01);

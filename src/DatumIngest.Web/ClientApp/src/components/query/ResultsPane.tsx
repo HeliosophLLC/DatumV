@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { AlertCircle, Ban, Check, Loader2 } from 'lucide-react';
+import { AlertCircle, Ban, Check, Film, Loader2, Music } from 'lucide-react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { MediaPreview } from './MediaPreview';
 import {
   executionsState,
   type CellResult,
@@ -67,8 +69,11 @@ export function ResultsPane() {
     <div className="flex h-full flex-col overflow-hidden">
       {/* Outer scroll container. Each table cell becomes its own scroll
           context (for sticky headers + the cap rule) so this container
-          only ever scrolls *between* tables, never *within* one. */}
-      <div className="flex-1 overflow-auto">
+          only ever scrolls *between* tables, never *within* one. The
+          `bg-table-pane` is the surface visible around / behind the
+          grids — slightly darker than the rows in dark mode, the
+          regular page bg in light mode. */}
+      <div className="bg-table-pane flex-1 overflow-auto">
         {exec.error !== null && (
           <div className="text-destructive border-destructive/40 bg-destructive/10 border-b px-3 py-2 font-mono text-xs whitespace-pre-wrap">
             {exec.error}
@@ -260,69 +265,244 @@ function CellBlock({
           {cell.chunks.map((c) => c.text).join('')}
         </pre>
       )}
-      {hasTable && (
-        // Per-cell scroll container. Sticky `<th>`s pin against this
-        // element's top, not the outer pane — so each grid keeps its
-        // header glued in place independently as the outer scrolls
-        // between grids.
-        <div className="min-h-0 flex-1 overflow-auto">
-          <CellTable cell={cell} />
-        </div>
-      )}
+      {hasTable && <CellTable cell={cell} />}
     </section>
   );
 }
 
+// Per-row pixel height for the virtualiser. Matches the rendered row's
+// content + padding (text-xs line-height ~16px, py-1 = 4+4) so estimated
+// and actual size agree and `virtualRow.size` is correct without a
+// measureElement round-trip.
+const ROW_HEIGHT = 28;
+// Bounds for content-based column sizing. Narrow integer columns can
+// shrink to 60 px (room for ~6 digits); pathologically wide columns
+// (long strings, JSON blobs) cap at 400 px so they don't push every
+// other column off-screen. User-resize is a follow-up.
+const COL_MIN_WIDTH = 60;
+const COL_MAX_WIDTH = 400;
+// Width of the leading row-number gutter, styled like the header. Tight
+// on purpose — fits ~4 digits comfortably, longer counts truncate with
+// an ellipsis. Sticky-left so it stays visible during horizontal scroll.
+const ROW_NUMBER_WIDTH = 30;
+// Padding allowance baked into each measured column: `px-2` left + right
+// = 16 px, plus 1 px for the right border so the text doesn't kiss the
+// divider.
+const COL_PADDING = 18;
+// How many rows we sample when measuring content widths. Streaming
+// queries can produce 1000s of rows; measuring all of them every chunk
+// gets expensive. 200 is enough to catch outliers without the cost.
+const SAMPLE_ROWS = 200;
+// Extra width budget for the column-name + type-badge pair in the
+// header. The badge text itself varies (`STRING` vs `FLOAT32[]`) but
+// rarely exceeds ~10 chars; a flat allowance keeps measurement cheap
+// and avoids re-measuring on theme / font swaps.
+const HEADER_BADGE_BUDGET = 60;
+
+// Module-level canvas reused across column measurements. Recreating the
+// canvas + context per call is the slow part of `measureText`; reusing
+// keeps per-cell measurement to a single call into the rasteriser.
+let measureCanvas: HTMLCanvasElement | null = null;
+let measureCtx: CanvasRenderingContext2D | null = null;
+
+function getMeasureCtx(): CanvasRenderingContext2D | null {
+  if (typeof document === 'undefined') return null;
+  if (measureCtx) return measureCtx;
+  measureCanvas = document.createElement('canvas');
+  const ctx = measureCanvas.getContext('2d');
+  if (!ctx) return null;
+  // Matches the rendered cell font: `font-mono` at `text-xs` (12 px).
+  // Canvas can't resolve CSS variables, so we go with the literal
+  // generic family — the few pixels of width drift from the real
+  // bundled font are absorbed by COL_PADDING.
+  ctx.font = '12px ui-monospace, monospace';
+  measureCtx = ctx;
+  return ctx;
+}
+
+function textWidth(text: string): number {
+  const ctx = getMeasureCtx();
+  if (!ctx) return text.length * 7;
+  return ctx.measureText(text).width;
+}
+
+function cellTextForMeasure(cell: JsonCell): string {
+  if (cell.kind === 'null') return 'null';
+  // Media cells render as a small icon / thumbnail + size label. We
+  // don't need to measure precisely — a flat allowance covers the
+  // visual width without recomputing per-blob.
+  if (
+    cell.kind === 'media' ||
+    cell.kind === 'image' ||
+    cell.kind === 'audio' ||
+    cell.kind === 'video'
+  ) {
+    return '[media, 9999 KB]';
+  }
+  if (cell.kind === 'media_array' && cell.items) {
+    return `[${cell.items.length} items]`;
+  }
+  return cell.text ?? '';
+}
+
+function measureColumnWidth(
+  columnName: string,
+  rows: readonly JsonCell[][],
+  colIdx: number,
+): number {
+  // Header: column name + space for the type badge (rendered next to
+  // the name; flat allowance below).
+  let widest = textWidth(columnName) + HEADER_BADGE_BUDGET;
+
+  const sampleCount = Math.min(rows.length, SAMPLE_ROWS);
+  for (let i = 0; i < sampleCount; i++) {
+    const c = rows[i][colIdx];
+    if (!c) continue;
+    const w = textWidth(cellTextForMeasure(c));
+    if (w > widest) widest = w;
+  }
+  return Math.max(COL_MIN_WIDTH, Math.min(COL_MAX_WIDTH, Math.ceil(widest + COL_PADDING)));
+}
+
+function cellTooltip(cell: JsonCell): string | undefined {
+  // Tooltip mirrors the rendered text, so the user can hover a
+  // truncated cell to read the full value. Returning undefined for
+  // null cells suppresses the "null" hover (the italic-rendered cell
+  // already labels itself). Media cells have their own per-element
+  // titles set inside the renderers; the cell-wrapper title here is
+  // a fallback only — undefined so it doesn't shadow the inner one.
+  if (cell.kind === 'null') return undefined;
+  if (
+    cell.kind === 'media' ||
+    cell.kind === 'image' ||
+    cell.kind === 'audio' ||
+    cell.kind === 'video' ||
+    cell.kind === 'media_array'
+  ) {
+    return undefined;
+  }
+  return cell.text ?? undefined;
+}
+
 function CellTable({ cell }: { cell: CellResult }) {
+  // Per-cell scroll container that also drives the virtualiser. Sticky
+  // `<header>` and absolutely-positioned virtualised rows both live
+  // inside it, so vertical scroll moves rows past the pinned header
+  // and horizontal scroll moves header + rows together (their grid
+  // templates match, so columns stay aligned).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: cell.rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 12,
+  });
+
+  // Content-based column widths. Memoised on the schema + row-count so
+  // a streaming query that's still appending rows re-measures each
+  // chunk; once the stream completes, the dep stops changing and we
+  // hold a stable width set. Re-measurement is O(rows * cols) up to
+  // SAMPLE_ROWS, capped — single-digit ms even for wide schemas.
+  const colWidths = useMemo(() => {
+    if (cell.schema === null) return [] as number[];
+    return cell.schema.map((col, idx) =>
+      measureColumnWidth(col.name, cell.rows, idx),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cell.schema, cell.rows.length]);
+
   if (cell.schema === null) return null;
-  // No outer wrapper: the parent ResultsPane scroll container owns both
-  // axes, and sticky `<th>` elements pin against it. `border-collapse:
-  // collapse` would lose the header's bottom-border once it scrolls
-  // past, so we use `box-shadow:inset 0 -1px 0` via the `shadow-…`
-  // arbitrary class on the header — that stays glued to the cell even
-  // when sticky. Per-row borders + alternating bg give the grid feel.
+
+  // Leading row-number gutter + data columns. Sticky-left only on the
+  // gutter; data columns scroll freely.
+  const gridTemplateColumns = [
+    `${ROW_NUMBER_WIDTH}px`,
+    ...colWidths.map((w) => `${w}px`),
+  ].join(' ');
+  const totalWidth = ROW_NUMBER_WIDTH + colWidths.reduce((s, w) => s + w, 0);
+  const virtualRows = rowVirtualizer.getVirtualItems();
+
   return (
-    <table className="w-full border-collapse text-xs">
-      <thead>
-        <tr>
-          {cell.schema.map((col) => (
-            <th
-              key={col.name}
-              className="border-border bg-muted sticky top-0 z-10 border-r px-2 py-1 text-left text-xs font-medium last:border-r-0 [box-shadow:inset_0_-1px_0_var(--border)]"
-              title={`${col.kind}${col.isArray ? '[]' : ''}`}
-            >
-              <div className="flex items-center gap-1.5">
-                <span>{col.name}</span>
-                <Badge variant="muted" className="font-mono text-[10px] leading-none">
-                  {col.kind}
-                  {col.isArray ? '[]' : ''}
-                </Badge>
-              </div>
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {cell.rows.map((row, rowIdx) => (
-          <tr
-            key={rowIdx}
-            className={cn(
-              'border-border border-b last:border-b-0',
-              rowIdx % 2 === 1 && 'bg-muted/10',
-            )}
+    <div
+      ref={scrollRef}
+      className="bg-table-pane min-h-0 flex-1 overflow-auto text-xs"
+    >
+      {/* Sticky header. Sits at top of scroll container; a real
+          `border-b` draws the bottom rule (each header cell's bg-muted
+          would paint over the previous inset-box-shadow trick). The
+          leading corner cell (above the row-number gutter) is also
+          sticky-left + bumped z so it stays pinned through both axes. */}
+      <div
+        className="bg-muted border-border sticky top-0 z-20 grid border-b font-medium"
+        style={{ gridTemplateColumns, minWidth: totalWidth }}
+      >
+        {/* Corner cell over the row-number gutter — empty. */}
+        <div
+          className="border-border bg-muted sticky left-0 z-30 border-r"
+          aria-hidden="true"
+        />
+        {cell.schema.map((col) => (
+          <div
+            key={col.name}
+            className="border-border bg-muted flex min-w-0 cursor-default items-center gap-1.5 border-r px-2 py-1 select-none last:border-r-0"
+            title={`${col.kind}${col.isArray ? '[]' : ''}`}
           >
-            {row.map((c, colIdx) => (
-              <td
-                key={colIdx}
-                className="border-border border-r px-2 py-1 align-top font-mono last:border-r-0"
-              >
-                <CellValue cell={c} />
-              </td>
-            ))}
-          </tr>
+            <span className="truncate">{col.name}</span>
+            <Badge variant="muted" className="shrink-0 font-mono text-[10px] leading-none">
+              {col.kind}
+              {col.isArray ? '[]' : ''}
+            </Badge>
+          </div>
         ))}
-      </tbody>
-    </table>
+      </div>
+
+      {/* Virtual rows container — total scroll height comes from the
+          virtualiser; each row is absolutely positioned via translateY.
+          minWidth matches the header so horizontal scroll lines up. */}
+      <div
+        className="relative"
+        style={{
+          height: rowVirtualizer.getTotalSize(),
+          minWidth: totalWidth,
+        }}
+      >
+        {virtualRows.map((virtualRow) => {
+          const row = cell.rows[virtualRow.index];
+          const rowNumber = virtualRow.index + 1;
+          return (
+            <div
+              key={virtualRow.key}
+              data-index={virtualRow.index}
+              className="border-border bg-table-row absolute inset-x-0 grid border-b"
+              style={{
+                gridTemplateColumns,
+                height: virtualRow.size,
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              {/* Row-number gutter. Styled like a header cell
+                  (bg-muted + font-medium) and sticky-left so it acts as
+                  the row's identity column during horizontal scroll. */}
+              <div
+                className="border-border bg-muted text-muted-foreground sticky left-0 z-10 flex min-w-0 items-center justify-end border-r px-1.5 font-medium tabular-nums select-none"
+                title={String(rowNumber)}
+              >
+                <span className="truncate">{rowNumber}</span>
+              </div>
+              {row.map((c, colIdx) => (
+                <div
+                  key={colIdx}
+                  title={cellTooltip(c)}
+                  className="border-border min-w-0 truncate border-r px-2 py-1 align-top font-mono last:border-r-0"
+                >
+                  <CellValue cell={c} />
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -330,14 +510,177 @@ function CellValue({ cell }: { cell: JsonCell }) {
   if (cell.kind === 'null') {
     return <span className="text-muted-foreground italic">null</span>;
   }
-  // Typed-media renderers land in PR 5 — for now show a compact hint so
-  // the user knows there's a blob there.
-  if (cell.kind === 'image' || cell.kind === 'audio' || cell.kind === 'video') {
-    const bytes = cell.dataB64 ? Math.floor((cell.dataB64.length * 3) / 4) : 0;
-    return <span className="text-muted-foreground">[{cell.kind}, {bytes} bytes]</span>;
+  // The server lumps every single-blob media value into `kind: "media"`
+  // and discriminates by the `mime` prefix. The legacy `image` /
+  // `audio` / `video` kind names aren't emitted today — left in the
+  // dispatch as a forward-compat hook in case the server ever splits
+  // them out.
+  if (cell.kind === 'media' || cell.kind === 'image' || cell.kind === 'audio' || cell.kind === 'video') {
+    const mime = cell.mime ?? '';
+    if (mime.startsWith('image/') || cell.kind === 'image') return <ImageCell cell={cell} />;
+    if (mime.startsWith('audio/') || cell.kind === 'audio') return <AudioCell cell={cell} />;
+    if (mime.startsWith('video/') || cell.kind === 'video') return <VideoCell cell={cell} />;
+    // Unknown mime → still surface that it's a blob the user could
+    // download rather than rendering empty.
+    return <BinaryCell cell={cell} />;
   }
-  if (cell.kind === 'media_array' && cell.items) {
-    return <span className="text-muted-foreground">[{cell.items.length} items]</span>;
-  }
+  if (cell.kind === 'media_array' && cell.items) return <MediaArrayCell cell={cell} />;
   return <span>{cell.text ?? ''}</span>;
+}
+
+function BinaryCell({ cell }: { cell: JsonCell }) {
+  const bytes = bytesFromBase64(cell.dataB64);
+  return (
+    <span className="text-muted-foreground" title={`${cell.mime ?? 'binary'} · ${formatBytes(bytes)}`}>
+      [{cell.mime ?? 'binary'}, {formatBytes(bytes)}]
+    </span>
+  );
+}
+
+// ────────── Typed-media renderers ──────────
+//
+// All four use base64 data URIs (`data:${mime};base64,${dataB64}`) sourced
+// from the server's WebCellFormatter. Each cell shows a compact inline
+// preview (image thumbnail, audio/video glyph) and a click handler that
+// opens the full media in a centered <MediaPreview> portal. The 28 px
+// row height stays intact — the inline form fits in `h-6`. Per-cell
+// `useState` for `open` is fine even at scale because virtualisation
+// only mounts visible cells.
+
+function bytesFromBase64(dataB64: string | undefined): number {
+  return dataB64 ? Math.floor((dataB64.length * 3) / 4) : 0;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function dataUriOf(cell: JsonCell): string {
+  return `data:${cell.mime ?? 'application/octet-stream'};base64,${cell.dataB64 ?? ''}`;
+}
+
+function ImageCell({ cell }: { cell: JsonCell }) {
+  const [open, setOpen] = useState(false);
+  const src = dataUriOf(cell);
+  const bytes = bytesFromBase64(cell.dataB64);
+  return (
+    <>
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        onClick={() => setOpen(true)}
+        title={`image · ${formatBytes(bytes)}`}
+        className="hover:ring-primary inline-block h-5 max-w-full cursor-zoom-in rounded-xs object-contain hover:ring-1"
+      />
+      <MediaPreview
+        open={open}
+        onClose={() => setOpen(false)}
+        title={`image · ${cell.mime ?? 'unknown'} · ${formatBytes(bytes)}`}
+      >
+        <img src={src} alt="" className="max-h-[80vh] max-w-[80vw] object-contain" />
+      </MediaPreview>
+    </>
+  );
+}
+
+function AudioCell({ cell }: { cell: JsonCell }) {
+  const [open, setOpen] = useState(false);
+  const src = dataUriOf(cell);
+  const bytes = bytesFromBase64(cell.dataB64);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={`audio · ${cell.mime ?? 'unknown'} · ${formatBytes(bytes)}`}
+        className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer items-center gap-1"
+      >
+        <Music className="size-3.5" />
+        <span>{formatBytes(bytes)}</span>
+      </button>
+      <MediaPreview
+        open={open}
+        onClose={() => setOpen(false)}
+        title={`audio · ${cell.mime ?? 'unknown'} · ${formatBytes(bytes)}`}
+      >
+        <audio src={src} controls className="w-[40vw] min-w-[320px]" />
+      </MediaPreview>
+    </>
+  );
+}
+
+function VideoCell({ cell }: { cell: JsonCell }) {
+  const [open, setOpen] = useState(false);
+  const src = dataUriOf(cell);
+  const bytes = bytesFromBase64(cell.dataB64);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={`video · ${cell.mime ?? 'unknown'} · ${formatBytes(bytes)}`}
+        className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer items-center gap-1"
+      >
+        <Film className="size-3.5" />
+        <span>{formatBytes(bytes)}</span>
+      </button>
+      <MediaPreview
+        open={open}
+        onClose={() => setOpen(false)}
+        title={`video · ${cell.mime ?? 'unknown'} · ${formatBytes(bytes)}`}
+      >
+        <video src={src} controls className="max-h-[80vh] max-w-[80vw]" />
+      </MediaPreview>
+    </>
+  );
+}
+
+function MediaArrayCell({ cell }: { cell: JsonCell }) {
+  const [open, setOpen] = useState(false);
+  const items = cell.items ?? [];
+  // Render the first up-to-3 thumbnails inline; click any to open the
+  // full grid in the preview. Falls back to a count badge when items
+  // aren't image-like (audio/video arrays are theoretical today).
+  const previewItems = items.slice(0, 3);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={`${items.length} items`}
+        className="hover:text-foreground inline-flex cursor-pointer items-center gap-1"
+      >
+        {previewItems.map((it, i) => (
+          <img
+            key={i}
+            src={`data:${it.mime};base64,${it.dataB64}`}
+            alt=""
+            loading="lazy"
+            className="inline-block h-5 w-5 rounded-xs object-cover"
+          />
+        ))}
+        <span className="text-muted-foreground">{items.length}</span>
+      </button>
+      <MediaPreview
+        open={open}
+        onClose={() => setOpen(false)}
+        title={`${items.length} items`}
+      >
+        <div className="grid max-h-[80vh] grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2 overflow-auto">
+          {items.map((it, i) => (
+            <img
+              key={i}
+              src={`data:${it.mime};base64,${it.dataB64}`}
+              alt=""
+              loading="lazy"
+              className="bg-muted/40 h-32 w-full rounded-xs object-contain"
+            />
+          ))}
+        </div>
+      </MediaPreview>
+    </>
+  );
 }
