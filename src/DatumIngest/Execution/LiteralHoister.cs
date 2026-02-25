@@ -30,7 +30,6 @@ public static class LiteralHoister
                 or ColumnReference
                 or CurrentTimestampExpression
                 or ParameterExpression
-                or VariableExpression
                 or TypeLiteralExpression
                 or ScanExpression
                 or ErrorExpression => expression,

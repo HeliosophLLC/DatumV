@@ -83,45 +83,37 @@ public class SqlTokenizerTests : ServiceTestBase
         AssertSingleToken(input, expected);
     }
 
-    // ───────────────────── Procedural variable references (@var) ─────────────────────
+    // ───────────────────── Procedural variable references ─────────────────────
 
     [Fact]
-    public void VariableReferenceIsRecognized()
+    public void BareVariableNameTokenizesAsIdentifier()
     {
-        Token<SqlToken>[] tokens = Tokenize("@count");
+        // Procedural variables are bare PG-style identifiers (no sigil).
+        // The tokenizer can't distinguish a variable reference from a column
+        // reference — that's the evaluator's job via VariableScope.
+        Token<SqlToken>[] tokens = Tokenize("count");
         Assert.Single(tokens);
-        Assert.Equal(SqlToken.Variable, tokens[0].Kind);
-        Assert.Equal("@count", tokens[0].ToStringValue());
+        Assert.Equal(SqlToken.Identifier, tokens[0].Kind);
+        Assert.Equal("count", tokens[0].ToStringValue());
     }
 
     [Fact]
-    public void VariableReferenceWithUnderscoreAndDigitsIsRecognized()
+    public void LeadingAtSigil_IsRejected()
     {
-        Token<SqlToken>[] tokens = Tokenize("@row_index_2");
-        Assert.Single(tokens);
-        Assert.Equal(SqlToken.Variable, tokens[0].Kind);
-        Assert.Equal("@row_index_2", tokens[0].ToStringValue());
+        // Post-PG-alignment, the leading `@` is no longer a valid lexeme:
+        // tokenizing `@count` errors out. Variables are bare identifiers.
+        Assert.ThrowsAny<Exception>(() => Tokenize("@count"));
     }
 
     [Fact]
-    public void VariableReferenceLeadingUnderscoreIsRecognized()
+    public void ColonEquals_TokenizesAsAssignmentOperator()
     {
-        Token<SqlToken>[] tokens = Tokenize("@_private");
+        // `:=` is the PL/pgSQL assignment operator, used in SELECT-list
+        // assignments (`SELECT x := expr`). The multi-char matcher pulls
+        // it as one token rather than `:` followed by `=`.
+        Token<SqlToken>[] tokens = Tokenize(":=");
         Assert.Single(tokens);
-        Assert.Equal(SqlToken.Variable, tokens[0].Kind);
-    }
-
-    [Fact]
-    public void VariableReferenceDistinctFromParameter()
-    {
-        // $name and @name share lexical structure but resolve to different
-        // token kinds. This is the foundation for the AST split between
-        // ParameterExpression (immutable, bound from outside) and
-        // VariableExpression (mutable, scoped to BEGIN/END).
-        Token<SqlToken>[] paramTokens = Tokenize("$x");
-        Token<SqlToken>[] varTokens = Tokenize("@x");
-        Assert.Equal(SqlToken.Parameter, paramTokens[0].Kind);
-        Assert.Equal(SqlToken.Variable, varTokens[0].Kind);
+        Assert.Equal(SqlToken.ColonEquals, tokens[0].Kind);
     }
 
     // ───────────────────── Identifiers ─────────────────────

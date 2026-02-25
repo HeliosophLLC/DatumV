@@ -601,7 +601,7 @@ public sealed class CompletionProviderTests : ServiceTestBase
     {
         CompletionProvider provider = CreateProvider();
 
-        CompletionItem[] items = provider.GetCompletions("DECLARE @x ", 11);
+        CompletionItem[] items = provider.GetCompletions("DECLARE x ", 11);
 
         // Coverage of the runtime DataKind enum: classic scalars + Array
         // wrapper + extended numerics that came in after the original list.
@@ -632,7 +632,7 @@ public sealed class CompletionProviderTests : ServiceTestBase
         // CREATE FUNCTION foo() RETURNS | — type position.
         CompletionProvider provider = CreateProvider();
 
-        CompletionItem[] items = provider.GetCompletions("CREATE FUNCTION sq(@x INT32) RETURNS ", 37);
+        CompletionItem[] items = provider.GetCompletions("CREATE FUNCTION sq(x INT32) RETURNS ", 37);
 
         Assert.Contains(items, item => item.Label == "Int32");
         Assert.Contains(items, item => item.Label == "Float64");

@@ -180,8 +180,8 @@ public class SchemaDdlParsingTests : ServiceTestBase
     public void SetVariable_StillParsesAsSetStatement_NotSearchPath()
     {
         // Ensures the new SET search_path parser doesn't shadow the
-        // existing SET @var = ... variable-assignment statement.
-        Statement statement = SqlParser.ParseStatement("SET @x = 42");
+        // existing SET var = ... variable-assignment statement.
+        Statement statement = SqlParser.ParseStatement("SET x = 42");
 
         Assert.IsType<SetStatement>(statement);
     }

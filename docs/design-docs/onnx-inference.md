@@ -58,7 +58,7 @@ The legacy factory still exists; every existing built-in `OnnxModel` subclass (M
 The DDL surface lets users register a model from SQL:
 
 ```sql
-CREATE [OR REPLACE] MODEL [IF NOT EXISTS] name(@arg TYPE [, ...])
+CREATE [OR REPLACE] MODEL [IF NOT EXISTS] name(arg TYPE [, ...])
     RETURNS T [IS NOT NULL]
     USING 'file://...path.onnx'
     [AS] BEGIN
@@ -144,7 +144,7 @@ The trade-off is captured in the [batched-SQL-defined-models follow-up memo](../
 
 **Location**: `src/DatumIngest/Functions/InferFunction.cs`
 
-Once the body is executing, the user's `RETURN infer(@x)` needs to actually dispatch to the bound session. `infer()` is the bridge:
+Once the body is executing, the user's `RETURN infer(x)` needs to actually dispatch to the bound session. `infer()` is the bridge:
 
 1. Pull `frame.CurrentModel` (set by `ProceduralModelFunction`'s body frame). Throw if absent — the runtime guard.
 2. Resolve `model.BoundSessions["default"]`. Multi-session lookup (`infer('session-name', struct)`) is deferred.

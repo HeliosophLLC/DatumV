@@ -58,9 +58,9 @@ public interface IQueryPlan
     /// sink and an optional procedural batch context. When
     /// <paramref name="batchContext"/> is non-<see langword="null"/>, the
     /// per-query <c>ExecutionContext</c> is plumbed with the batch's
-    /// variable store and scope chain so <c>VariableExpression</c>
-    /// references in this query resolve against the enclosing batch's
-    /// procedural variables.
+    /// variable store and scope chain so bare-name references in this
+    /// query resolve against the enclosing batch's procedural variables
+    /// (variable-first precedence over the row schema).
     /// </summary>
     /// <remarks>
     /// Used by the procedural batch executor when running a child

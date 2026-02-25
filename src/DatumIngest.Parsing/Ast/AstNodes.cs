@@ -124,14 +124,13 @@ public enum MaterializationHint
 /// <para>
 /// <see cref="AssignedVariableName"/> is non-<see langword="null"/> when this
 /// column is a procedural-variable assignment of the form
-/// <c>@var = expression</c> at the top level of a SELECT list (with no
-/// alias). The parser rewrites the matching shape so <see cref="Expression"/>
-/// holds the right-hand-side value and <see cref="AssignedVariableName"/>
-/// holds the bare variable name (no <c>@</c> prefix). The procedural batch
-/// executor uses this to route the SELECT into the variable-assignment
-/// path instead of yielding rows; comparing <c>@var</c> to a value
-/// remains expressible by adding an alias (<c>SELECT @a = 5 AS isFive</c>)
-/// or wrapping it (<c>SELECT (@a = 5) AS isFive</c>).
+/// <c>name := expression</c> at the top level of a SELECT list. The
+/// <c>:=</c> operator is the PG-native PL/pgSQL assignment marker (PG's
+/// SELECT lists don't carry assignments natively, but this is the
+/// closest-to-PG syntax for the procedural batch executor's needs). The
+/// RHS becomes <see cref="Expression"/>; the bare variable name lands on
+/// <see cref="AssignedVariableName"/>. Booleans of the form <c>name = 1</c>
+/// continue to be plain projections.
 /// </para>
 /// </summary>
 public record SelectColumn(
@@ -529,17 +528,6 @@ public sealed record DefaultValueExpression(SourceSpan? Span = null) : Expressio
 /// by the parameter binder before query planning.
 /// </summary>
 public sealed record ParameterExpression(string Name, SourceSpan? Span = null) : Expression;
-
-/// <summary>
-/// A reference to a procedural variable: <c>@name</c>. The leading <c>@</c>
-/// is stripped at parse time; <see cref="Name"/> holds the bare identifier.
-/// Resolved at evaluation time against the active variable scope on
-/// <c>ExecutionContext</c> (introduced by <c>DECLARE</c>; mutated by
-/// <c>SET</c>; pushed/popped on <c>BEGIN</c>/<c>END</c> block boundaries).
-/// </summary>
-/// <param name="Name">Variable name without the <c>@</c> prefix.</param>
-/// <param name="Span">Source location of the <c>@name</c> token.</param>
-public sealed record VariableExpression(string Name, SourceSpan? Span = null) : Expression;
 
 /// <summary>
 /// A binary operation between two expressions (arithmetic or comparison).
@@ -1524,14 +1512,14 @@ public sealed record ReindexTableStatement(string TableName, string? SchemaName 
 
 /// <summary>
 /// A single declared parameter of a user-defined function:
-/// <c>@name TYPE [IS NOT NULL]</c>. Parameter names use the <c>@</c>-
-/// prefix at the call site declaration but are stored without it on
-/// this record (so the <c>Name</c> field is the bare identifier —
-/// matching <see cref="VariableExpression.Name"/> in the body). The
-/// type is referenced by SQL type name (e.g. <c>String</c>,
-/// <c>Int32</c>) and resolved to a <c>DataKind</c> at registration time.
+/// <c>name TYPE [IS NOT NULL]</c>. Bare PG-style identifiers — the
+/// <c>Name</c> field is the identifier as parsed. Inside the body, a
+/// bare reference to that name resolves against the procedural variable
+/// scope before the row schema (variable-first precedence). The type is
+/// referenced by SQL type name (e.g. <c>String</c>, <c>Int32</c>) and
+/// resolved to a <c>DataKind</c> at registration time.
 /// </summary>
-/// <param name="Name">The parameter name without the <c>@</c> prefix, used inside the body.</param>
+/// <param name="Name">The parameter name, used inside the body.</param>
 /// <param name="TypeName">The SQL type name for the parameter.</param>
 /// <param name="IsNotNull">
 /// When <see langword="true"/>, the inliner wraps the substituted

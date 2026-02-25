@@ -22,7 +22,7 @@ public class UdfIntegrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
 
-        catalog.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
+        catalog.Plan("CREATE FUNCTION shout(name STRING) AS upper(name)");
 
         Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
         Assert.Equal("shout", udf!.Name);
@@ -35,7 +35,7 @@ public class UdfIntegrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
 
-        catalog.Plan("CREATE FUNCTION Shout(@name STRING) AS upper(@name)");
+        catalog.Plan("CREATE FUNCTION Shout(name STRING) AS upper(name)");
 
         Assert.True(catalog.Udfs.TryGet("SHOUT", out _));
         Assert.True(catalog.Udfs.TryGet("shout", out _));
@@ -46,10 +46,10 @@ public class UdfIntegrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
 
-        catalog.Plan("CREATE FUNCTION shout(@s STRING) AS upper(@s)");
+        catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => catalog.Plan("CREATE FUNCTION shout(@s STRING) AS lower(@s)"));
+            () => catalog.Plan("CREATE FUNCTION shout(s STRING) AS lower(s)"));
         Assert.Contains("already registered", ex.Message);
     }
 
@@ -58,8 +58,8 @@ public class UdfIntegrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
 
-        catalog.Plan("CREATE FUNCTION shout(@s STRING) AS upper(@s)");
-        catalog.Plan("CREATE OR REPLACE FUNCTION shout(@s STRING) AS lower(@s)");
+        catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
+        catalog.Plan("CREATE OR REPLACE FUNCTION shout(s STRING) AS lower(s)");
 
         Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
         // Body changed from upper to lower — verify by formatting.
@@ -73,8 +73,8 @@ public class UdfIntegrationTests : ServiceTestBase
         // OR ALTER is a T-SQL synonym for OR REPLACE — should behave identically.
         TableCatalog catalog = CreateCatalog();
 
-        catalog.Plan("CREATE FUNCTION shout(@s STRING) AS upper(@s)");
-        catalog.Plan("CREATE OR ALTER FUNCTION shout(@s STRING) AS lower(@s)");
+        catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
+        catalog.Plan("CREATE OR ALTER FUNCTION shout(s STRING) AS lower(s)");
 
         Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
         string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
@@ -86,9 +86,9 @@ public class UdfIntegrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
 
-        catalog.Plan("CREATE FUNCTION shout(@s STRING) AS upper(@s)");
+        catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
         // Second registration is a no-op; original definition wins.
-        catalog.Plan("CREATE FUNCTION IF NOT EXISTS shout(@s STRING) AS lower(@s)");
+        catalog.Plan("CREATE FUNCTION IF NOT EXISTS shout(s STRING) AS lower(s)");
 
         Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
         string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
@@ -100,7 +100,7 @@ public class UdfIntegrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
 
-        catalog.Plan("CREATE FUNCTION shout(@s STRING) AS upper(@s)");
+        catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
         catalog.Plan("DROP FUNCTION shout");
 
         Assert.False(catalog.Udfs.TryGet("shout", out _));
@@ -137,7 +137,7 @@ public class UdfIntegrationTests : ServiceTestBase
         // the substituted body, sees itself on the inlining stack, and
         // throws.
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION loop(@x INT32) AS loop(@x)");
+        catalog.Plan("CREATE FUNCTION loop(x INT32) AS loop(x)");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan("SELECT loop(1)"));
@@ -152,7 +152,7 @@ public class UdfIntegrationTests : ServiceTestBase
             new object[] { 1, "alice" },
             new object[] { 2, "bob" });
 
-        catalog.Plan("CREATE FUNCTION shout(@s STRING) AS upper(@s)");
+        catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
 
         // Plan a query that uses the UDF. After Plan, the operator tree
         // should contain `upper(name)` (the substituted body), not a UDF
@@ -197,7 +197,7 @@ public class UdfIntegrationTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
 
         Assert.ThrowsAny<Exception>(() => catalog.Plan(
-            "CREATE FUNCTION a(@x INT32) AS @x; CREATE FUNCTION b(@y INT32) AS @y"));
+            "CREATE FUNCTION a(x INT32) AS x; CREATE FUNCTION b(y INT32) AS y"));
     }
 
     // ───────────────────── Default parameters ─────────────────────
@@ -211,7 +211,7 @@ public class UdfIntegrationTests : ServiceTestBase
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan(
-                "CREATE FUNCTION mid(@a INT32, @b INT32 = 0, @c INT32) AS @a + @b + @c"));
+                "CREATE FUNCTION mid(a INT32, b INT32 = 0, c INT32) AS a + b + c"));
         Assert.Contains("contiguous", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("c", ex.Message);
     }
@@ -219,11 +219,11 @@ public class UdfIntegrationTests : ServiceTestBase
     [Fact]
     public void CreateFunction_DefaultsAtTail_AcceptedAndQueryable()
     {
-        // `add(2)` should fill `@b` from its default of 5 → 7. We can't
+        // `add(2)` should fill `b` from its default of 5 → 7. We can't
         // execute against an empty catalog, but we can verify a SELECT
         // referencing the partial-arity call plans without complaint.
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION addnums(@a INT32, @b INT32 = 5) AS @a + @b");
+        catalog.Plan("CREATE FUNCTION addnums(a INT32, b INT32 = 5) AS a + b");
 
         // Plan a SELECT that calls the UDF with only the required arg.
         // Inlining happens at plan time, so a malformed default would
@@ -236,7 +236,7 @@ public class UdfIntegrationTests : ServiceTestBase
     public void CreateFunction_TooFewArgs_BelowMinimum_Throws()
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION addnums(@a INT32, @b INT32 = 0) AS @a + @b");
+        catalog.Plan("CREATE FUNCTION addnums(a INT32, b INT32 = 0) AS a + b");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan("SELECT addnums()"));
@@ -247,7 +247,7 @@ public class UdfIntegrationTests : ServiceTestBase
     public void CreateFunction_TooManyArgs_AboveMaximum_Throws()
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION addnums(@a INT32, @b INT32 = 0) AS @a + @b");
+        catalog.Plan("CREATE FUNCTION addnums(a INT32, b INT32 = 0) AS a + b");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan("SELECT addnums(1, 2, 3)"));

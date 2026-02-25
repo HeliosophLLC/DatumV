@@ -53,9 +53,9 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         // infer() which marshals the array into a 1-d tensor, dispatches,
         // and unwraps the output array.
         catalog.Plan(
-            $"CREATE MODEL softmax(@x Float32[]) RETURNS Float32[] " +
+            $"CREATE MODEL softmax(x Float32[]) RETURNS Float32[] " +
             $"USING 'file://{fixturePath}' " +
-            $"AS BEGIN RETURN infer(@x) END");
+            $"AS BEGIN RETURN infer(x) END");
 
         // CAST the literal so the planner sees Float32[] on the call site —
         // bare numeric-literal arrays default to a wider kind.

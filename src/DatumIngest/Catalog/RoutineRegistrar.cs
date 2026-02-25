@@ -1088,7 +1088,7 @@ internal sealed class RoutineRegistrar
             else if (sawDefault)
             {
                 throw new InvalidOperationException(
-                    $"{contextLabel}: parameter '@{p.Name}' has no default but follows a parameter " +
+                    $"{contextLabel}: parameter '{p.Name}' has no default but follows a parameter " +
                     "with a default. Defaults must be contiguous at the end of the parameter list.");
             }
         }

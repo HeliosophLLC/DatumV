@@ -83,7 +83,7 @@ public sealed class QualifiedRoutineParsingTests : ServiceTestBase
     public void CreateFunction_SchemaQualified_PopulatesSchema()
     {
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE FUNCTION myapp.classify(@img IMAGE) RETURNS INT32 AS BEGIN RETURN 1 END");
+            "CREATE FUNCTION myapp.classify(img IMAGE) RETURNS INT32 AS BEGIN RETURN 1 END");
 
         CreateFunctionStatement create = Assert.IsType<CreateFunctionStatement>(stmt);
         Assert.Equal("myapp", create.SchemaName);
@@ -94,7 +94,7 @@ public sealed class QualifiedRoutineParsingTests : ServiceTestBase
     public void CreateFunction_Bare_LeavesSchemaNull()
     {
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE FUNCTION classify(@img IMAGE) RETURNS INT32 AS BEGIN RETURN 1 END");
+            "CREATE FUNCTION classify(img IMAGE) RETURNS INT32 AS BEGIN RETURN 1 END");
 
         CreateFunctionStatement create = Assert.IsType<CreateFunctionStatement>(stmt);
         Assert.Null(create.SchemaName);
@@ -115,7 +115,7 @@ public sealed class QualifiedRoutineParsingTests : ServiceTestBase
     public void CreateProcedure_SchemaQualified_PopulatesSchema()
     {
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE PROCEDURE myapp.tally(@n INT32) AS BEGIN SELECT @n END");
+            "CREATE PROCEDURE myapp.tally(n INT32) AS BEGIN SELECT n END");
 
         CreateProcedureStatement create = Assert.IsType<CreateProcedureStatement>(stmt);
         Assert.Equal("myapp", create.SchemaName);

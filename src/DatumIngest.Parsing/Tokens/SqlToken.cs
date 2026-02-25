@@ -466,15 +466,6 @@ public enum SqlToken
     /// <summary>A named parameter placeholder such as <c>$threshold</c>.</summary>
     Parameter,
 
-    /// <summary>
-    /// A procedural variable reference such as <c>@count</c>. Distinguished
-    /// from <see cref="Parameter"/> by the <c>@</c> prefix: parameters bind
-    /// from outside the query (immutable for the duration), variables live
-    /// in the procedural scope (mutable via <c>SET</c>, scoped to their
-    /// enclosing <c>BEGIN</c>/<c>END</c> block).
-    /// </summary>
-    Variable,
-
     /// <summary>The ; (semicolon) statement terminator.</summary>
     Semicolon,
 
@@ -495,6 +486,14 @@ public enum SqlToken
 
     /// <summary>The : (colon) separator for struct field key–value pairs.</summary>
     Colon,
+
+    /// <summary>
+    /// The <c>:=</c> assignment operator. Used in <c>SELECT name := expr</c>
+    /// to designate a procedural-variable assignment column. PG-native
+    /// PL/pgSQL assignment operator; unambiguous against the comparison
+    /// <c>=</c>.
+    /// </summary>
+    ColonEquals,
 
     /// <summary>The <c>ASSERT</c> keyword for row-level invariant checks.</summary>
     Assert,

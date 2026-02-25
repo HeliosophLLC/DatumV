@@ -403,18 +403,6 @@ public static class SqlParser
                 ToSpan(token)));
 
     /// <summary>
-    /// Procedural variable reference: <c>@count</c>. The leading <c>@</c> is
-    /// stripped so the AST holds the bare name. Resolved at evaluation time
-    /// against the active variable scope; mirrors <see cref="ParameterReference"/>'s
-    /// shape but binds to a different runtime store.
-    /// </summary>
-    private static readonly TokenListParser<SqlToken, Expression> VariableReference =
-        Token.EqualTo(SqlToken.Variable)
-            .Select(token => (Expression)new VariableExpression(
-                token.ToStringValue()[1..],
-                ToSpan(token)));
-
-    /// <summary>
     /// Type literal: a bare type name (<c>Int32</c>, <c>Float64</c>, <c>String</c>, etc.)
     /// in expression position. Produces a <see cref="TypeLiteralExpression"/> for use with
     /// <c>typeof()</c> comparisons. Also accepts <c>Time</c> which is tokenized as
@@ -931,7 +919,6 @@ public static class SqlParser
             .Or(TrueLiteral)
             .Or(FalseLiteral)
             .Or(ParameterReference)
-            .Or(VariableReference)
             .Or(NegationExpression)
             .Or(ParenExpression)
             .Or(StructLiteral.Try())
@@ -1413,48 +1400,39 @@ public static class SqlParser
         select (SelectColumn)new SelectTableColumns(GetTokenText(table), ToSpan(table, star), excluded, replaced);
 
     /// <summary>
-    /// A single expression column with optional <c>AS</c> alias. After
-    /// parsing, the result is post-processed: a no-alias column whose
-    /// expression is <c>@var = rhs</c> at the top level is rewritten into
-    /// an assignment-form <see cref="SelectColumn"/> (the RHS becomes the
-    /// projected expression, the variable name is lifted onto
-    /// <see cref="SelectColumn.AssignedVariableName"/>). Adding an alias
-    /// or extra parens disables the lift, so the comparison form remains
-    /// reachable when the user actually wants it.
+    /// Procedural-variable assignment column: <c>name := expr</c> at the top
+    /// level of a SELECT list (no alias). The <c>:=</c> operator is the
+    /// PG-native PL/pgSQL assignment marker, unambiguous against the
+    /// comparison <c>=</c>. The RHS becomes the projected expression; the
+    /// variable name is lifted onto
+    /// <see cref="SelectColumn.AssignedVariableName"/> so the procedural
+    /// batch executor routes the SELECT into the variable-assignment path
+    /// instead of yielding rows.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, SelectColumn> AssignmentColumn =
+        from name in SP.Ref(() => IdentifierOrKeywordAsName!)
+        from assign in Token.EqualTo(SqlToken.ColonEquals)
+        from rhs in SP.Ref(() => ExpressionParser!)
+        select new SelectColumn(rhs, Alias: null, AssignedVariableName: name);
+
+    /// <summary>
+    /// A single expression column with optional <c>AS</c> alias.
     /// </summary>
     private static readonly TokenListParser<SqlToken, SelectColumn> ExpressionColumn =
-        from expression in ExpressionParser
+        from expression in SP.Ref(() => ExpressionParser!)
         from alias in (
             from asKw in Token.EqualTo(SqlToken.As)
             from name in IdentifierLike
             select GetTokenText(name)
         ).Try().Or(IdentifierLike.Select(GetTokenText))
         .OptionalOrDefault()
-        select MakeSelectColumn(expression, alias);
-
-    /// <summary>
-    /// Lifts a bare <c>@var = rhs</c> shape (no alias) into the assignment
-    /// form. Anything else passes through unchanged.
-    /// </summary>
-    private static SelectColumn MakeSelectColumn(Expression expression, string? alias)
-    {
-        if (alias is null
-            && expression is BinaryExpression
-            {
-                Operator: BinaryOperator.Equal,
-                Left: VariableExpression v,
-                Right: Expression rhs,
-            })
-        {
-            return new SelectColumn(rhs, Alias: null, AssignedVariableName: v.Name);
-        }
-        return new SelectColumn(expression, alias);
-    }
+        select new SelectColumn(expression, alias);
 
     /// <summary>A single column in the SELECT list.</summary>
     private static readonly TokenListParser<SqlToken, SelectColumn> ColumnItem =
         TableStarColumn.Try()
             .Or(StarColumn.Try())
+            .Or(AssignmentColumn.Try())
             .Or(ExpressionColumn);
 
     // ───────────────────── SCAN (fold/prefix-scan) expressions ─────────────────────
@@ -3210,7 +3188,7 @@ public static class SqlParser
     /// be null" or "default to the literal predicate <c>0 IS NOT NULL</c>"?).
     /// </summary>
     private static readonly TokenListParser<SqlToken, UdfParameter> UdfParameterParser =
-        from variable in Token.EqualTo(SqlToken.Variable)
+        from name in IdentifierOrKeywordAsName
         from typeName in TypeNameParser
         from isNotNull in (
             from isKw in Token.EqualTo(SqlToken.Is)
@@ -3224,7 +3202,7 @@ public static class SqlParser
             select expr
         ).AsNullable().OptionalOrDefault()
         select new UdfParameter(
-            variable.ToStringValue()[1..],
+            name,
             typeName,
             isNotNull,
             defaultValue);
@@ -3754,11 +3732,11 @@ public static class SqlParser
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> SetStatementParser =
         from setKw in Token.EqualTo(SqlToken.Set)
-        from variable in Token.EqualTo(SqlToken.Variable)
+        from name in IdentifierOrKeywordAsName
         from eq in Token.EqualTo(SqlToken.Equals)
         from value in SP.Ref(() => ExpressionParser!)
         select (Statement)new SetStatement(
-            variable.ToStringValue()[1..],
+            name,
             value,
             ToSpan(setKw));
 
@@ -3768,7 +3746,7 @@ public static class SqlParser
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> DeclareStatementParser =
         from declareKw in Token.EqualTo(SqlToken.Declare)
-        from variable in Token.EqualTo(SqlToken.Variable)
+        from name in IdentifierOrKeywordAsName
         from typeName in TypeNameParser
         from initializer in (
             from eq in Token.EqualTo(SqlToken.Equals)
@@ -3776,7 +3754,7 @@ public static class SqlParser
             select expr
         ).AsNullable().OptionalOrDefault()
         select (Statement)new DeclareStatement(
-            variable.ToStringValue()[1..],
+            name,
             typeName,
             initializer,
             ToSpan(declareKw));
@@ -3843,14 +3821,14 @@ public static class SqlParser
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> ForCounterStatementParser =
         from forKw in Token.EqualTo(SqlToken.For)
-        from variable in Token.EqualTo(SqlToken.Variable)
+        from name in IdentifierOrKeywordAsName
         from eq in Token.EqualTo(SqlToken.Equals)
         from start in SP.Ref(() => ExpressionParser!)
         from toKw in Token.EqualTo(SqlToken.To)
         from end in SP.Ref(() => ExpressionParser!)
         from body in SP.Ref(() => SingleStatementParser!)
         select (Statement)new ForCounterStatement(
-            variable.ToStringValue()[1..],
+            name,
             start,
             end,
             Step: null,
@@ -3864,14 +3842,14 @@ public static class SqlParser
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> ForInStatementParser =
         from forKw in Token.EqualTo(SqlToken.For)
-        from variable in Token.EqualTo(SqlToken.Variable)
+        from name in IdentifierOrKeywordAsName
         from inKw in Token.EqualTo(SqlToken.In)
         from open in Token.EqualTo(SqlToken.LeftParen)
         from source in SP.Ref(() => QueryExpressionParser!)
         from close in Token.EqualTo(SqlToken.RightParen)
         from body in SP.Ref(() => SingleStatementParser!)
         select (Statement)new ForInStatement(
-            variable.ToStringValue()[1..],
+            name,
             source,
             body,
             ToSpan(forKw));
@@ -3955,15 +3933,15 @@ public static class SqlParser
     /// <summary>
     /// <c>TRY stmt CATCH @err stmt [FINALLY stmt]</c> — procedural exception
     /// handling, IF-flavored. Each body is a single statement; pair with
-    /// <c>BEGIN ... END</c> for multi-statement bodies. The <c>@err</c>
-    /// variable is auto-declared in the catch body's scope and holds the
-    /// caught exception's message.
+    /// <c>BEGIN ... END</c> for multi-statement bodies. The error variable
+    /// is auto-declared in the catch body's scope and holds the caught
+    /// exception's message.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> TryStatementParser =
         from tryKw in Token.EqualTo(SqlToken.Try)
         from tryBody in SP.Ref(() => SingleStatementParser!)
         from catchKw in Token.EqualTo(SqlToken.Catch)
-        from errorVar in Token.EqualTo(SqlToken.Variable)
+        from errorVarName in IdentifierOrKeywordAsName
         from catchBody in SP.Ref(() => SingleStatementParser!)
         from finallyBody in (
             from finallyKw in Token.EqualTo(SqlToken.Finally)
@@ -3972,7 +3950,7 @@ public static class SqlParser
         ).AsNullable().OptionalOrDefault()
         select (Statement)new TryStatement(
             tryBody,
-            errorVar.ToStringValue()[1..],
+            errorVarName,
             catchBody,
             finallyBody,
             ToSpan(tryKw));
@@ -4434,6 +4412,25 @@ public static class SqlParser
     // ───────────────────── Public API ─────────────────────
 
     /// <summary>
+    /// Tokenizes <paramref name="sql"/> through Superpower and wraps any
+    /// tokenizer-level failure (incomplete quoted identifier, illegal lexeme
+    /// like a stray <c>@</c>, etc.) in the DatumIngest-flavoured
+    /// <see cref="ParseException"/> so the public entry points throw a single
+    /// consistent type regardless of which Superpower layer rejected the input.
+    /// </summary>
+    private static TokenList<SqlToken> TokenizeOrWrap(string sql)
+    {
+        try
+        {
+            return SqlTokenizer.Instance.Tokenize(sql);
+        }
+        catch (Superpower.ParseException ex)
+        {
+            throw new ParseException(ex.Message, ex.ErrorPosition);
+        }
+    }
+
+    /// <summary>
     /// Parses a SQL string into a <see cref="QueryExpression"/> AST.
     /// </summary>
     /// <param name="sql">The SQL query text.</param>
@@ -4441,7 +4438,7 @@ public static class SqlParser
     /// <exception cref="ParseException">Thrown when the input cannot be parsed.</exception>
     public static QueryExpression Parse(string sql)
     {
-        TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
+        TokenList<SqlToken> tokens = TokenizeOrWrap(sql);
         TokenListParserResult<SqlToken, QueryExpression> result = FullParser.TryParse(tokens);
 
         if (!result.HasValue)
@@ -4463,7 +4460,7 @@ public static class SqlParser
     /// <exception cref="ParseException">Thrown when the input cannot be parsed.</exception>
     public static Statement ParseStatement(string sql)
     {
-        TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
+        TokenList<SqlToken> tokens = TokenizeOrWrap(sql);
         TokenListParserResult<SqlToken, Statement> result = SingleStatementParser.AtEnd().TryParse(tokens);
 
         if (!result.HasValue)
@@ -4486,7 +4483,7 @@ public static class SqlParser
     /// <exception cref="ParseException">Thrown when the input cannot be parsed.</exception>
     public static IReadOnlyList<Statement> ParseBatch(string sql)
     {
-        TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
+        TokenList<SqlToken> tokens = TokenizeOrWrap(sql);
         TokenListParserResult<SqlToken, IReadOnlyList<Statement>> result = FullBatchParser.TryParse(tokens);
 
         if (!result.HasValue)
@@ -4518,7 +4515,7 @@ public static class SqlParser
     /// <exception cref="ParseException">Thrown when the input cannot be parsed.</exception>
     public static IReadOnlyList<(Statement Statement, string SourceText)> ParseBatchWithText(string sql)
     {
-        TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
+        TokenList<SqlToken> tokens = TokenizeOrWrap(sql);
         List<(Statement, string)> result = new();
         TokenListParser<SqlToken, Token<SqlToken>[]> semis =
             Token.EqualTo(SqlToken.Semicolon).Many();

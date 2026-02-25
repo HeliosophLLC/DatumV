@@ -52,10 +52,11 @@ public sealed class ExpressionEvaluator
 
     /// <summary>
     /// Procedural variable scope chain — the visibility side of the variable
-    /// substrate. Walked innermost-first when resolving a
-    /// <c>VariableExpression</c> at evaluation time. <see langword="null"/>
-    /// when the evaluator runs outside a procedural batch (every existing
-    /// query path); referencing <c>@var</c> in that case throws.
+    /// substrate. Walked innermost-first when resolving an unqualified
+    /// <see cref="ColumnReference"/> at evaluation time (variable-first
+    /// precedence). <see langword="null"/> when the evaluator runs outside
+    /// a procedural batch (every existing query path); a name that doesn't
+    /// match a column then falls through to the column-not-found error.
     /// </summary>
     private readonly VariableScope? _variableScope;
 
@@ -164,8 +165,8 @@ public sealed class ExpressionEvaluator
     /// </param>
     /// <param name="variableScope">
     /// Optional procedural variable scope chain. When non-<see langword="null"/>,
-    /// <see cref="VariableExpression"/> references resolve via this chain;
-    /// otherwise referencing <c>@var</c> throws.
+    /// unqualified <see cref="ColumnReference"/> nodes are resolved against
+    /// this chain before the row schema (variable-first precedence).
     /// </param>
     /// <param name="variableStore">
     /// Optional procedure-lifetime store paired with <paramref name="variableScope"/>:
@@ -316,7 +317,6 @@ public sealed class ExpressionEvaluator
                 CurrentTimestampExpression ct => EvaluateTemporalConstant(ct),
                 ParameterExpression parameter => throw new InvalidOperationException(
                     $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation."),
-                VariableExpression variable => EvaluateVariable(variable, frame),
                 LambdaExpression => throw new InvalidOperationException(
                     "Lambda expressions cannot be evaluated as standalone values. " +
                     "They must appear as arguments to higher-order functions such as array_transform or array_filter."),
@@ -484,39 +484,23 @@ public sealed class ExpressionEvaluator
         };
     }
 
-    /// <summary>
-    /// Resolves a <c>VariableExpression</c> against the procedural variable
-    /// scope chain. Walks innermost-first, then stabilises the bound value
-    /// from <see cref="_variableStore"/> into <see cref="EvaluationFrame.Target"/>
-    /// so downstream operations read it the same way they read any other
-    /// arena-backed value. Throws if the evaluator wasn't constructed with
-    /// a scope (i.e. the query is running outside a procedural batch) or
-    /// if the variable isn't bound in any enclosing frame.
-    /// </summary>
-    private DataValue EvaluateVariable(VariableExpression variable, EvaluationFrame frame)
+    private DataValue EvaluateColumn(ColumnReference column, EvaluationFrame frame)
     {
-        if (_variableScope is null || _variableStore is null)
+        // Variable-first precedence (PG PL/pgSQL `use_variable` semantics): an
+        // unqualified reference is resolved against the procedural variable
+        // scope before the row schema. Qualified `t.col` references skip
+        // this — variables are never schema-qualified.
+        if (column.TableName is null
+            && _variableScope is not null
+            && _variableStore is not null
+            && _variableScope.TryGet(column.ColumnName, out DataValue variableValue))
         {
-            throw new InvalidOperationException(
-                $"Variable '@{variable.Name}' referenced outside a procedural batch — only DECLARE / SET / IF / WHILE / FOR statements (and the queries inside them) can resolve variables.");
+            // Stabilise from the procedure-lifetime variable store into the
+            // frame's target arena so downstream code reads the value like
+            // any other arena-backed datum.
+            return DataValueRetention.Stabilize(variableValue, _variableStore, frame.Target);
         }
 
-        if (!_variableScope.TryGet(variable.Name, out DataValue value))
-        {
-            throw new InvalidOperationException(
-                $"Variable '@{variable.Name}' is not declared in any enclosing scope.");
-        }
-
-        // Stabilise from the procedure-lifetime variable store into the
-        // frame's target arena. The variable scope holds a value with
-        // offsets in _variableStore; downstream code reads against
-        // frame.Source (or frame.Target when a result is expected). One
-        // copy per read isolates the multi-store concern to this branch.
-        return DataValueRetention.Stabilize(value, _variableStore, frame.Target);
-    }
-
-    private static DataValue EvaluateColumn(ColumnReference column, EvaluationFrame frame)
-    {
         Row row = frame.Row;
 
         // For qualified references (table.column), try the full qualified name first,
@@ -549,9 +533,17 @@ public sealed class ExpressionEvaluator
             }
         }
 
+        if (column.TableName is not null)
+        {
+            throw new InvalidOperationException(
+                $"Column '{column.TableName}.{column.ColumnName}' not found in row.");
+        }
+
+        // Unqualified miss: when running inside a procedural batch, mention
+        // both possibilities (a typo'd column or an undeclared variable).
         throw new InvalidOperationException(
-            column.TableName is not null
-                ? $"Column '{column.TableName}.{column.ColumnName}' not found in row."
+            _variableScope is not null
+                ? $"Name '{column.ColumnName}' is not a declared variable in scope and is not a column in the current row."
                 : $"Column '{column.ColumnName}' not found in row.");
     }
 
@@ -2227,13 +2219,13 @@ public sealed class ExpressionEvaluator
 
         // Procedural variable bound to a struct via FOR-IN — field names live
         // alongside the binding on the variable scope, so we can resolve named
-        // access without scanning a schema or AST. Forward-compatible with the
-        // planned per-query type registry: when that lands, the variable scope
-        // will surface the registry's TypeDescriptor here instead of a raw
-        // string list, and this branch collapses into a registry lookup.
-        if (indexAccess.Source is VariableExpression varExpr
+        // access without scanning a schema or AST. Variable-first precedence:
+        // an unqualified ColumnReference is treated as a variable if its name
+        // is bound in scope, before consulting the row schema.
+        if (indexAccess.Source is ColumnReference unqualifiedSource
+            && unqualifiedSource.TableName is null
             && _variableScope is not null
-            && _variableScope.TryGetFieldNames(varExpr.Name, out IReadOnlyList<string>? variableFieldNames)
+            && _variableScope.TryGetFieldNames(unqualifiedSource.ColumnName, out IReadOnlyList<string>? variableFieldNames)
             && variableFieldNames is not null)
         {
             for (int i = 0; i < variableFieldNames.Count; i++)

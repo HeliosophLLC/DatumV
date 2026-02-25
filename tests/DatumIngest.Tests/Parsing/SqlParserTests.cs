@@ -2492,7 +2492,7 @@ public class SqlParserTests : ServiceTestBase
     [Fact]
     public void OffsetWithVariable_InsideSubquery_ParsesSuccessfully()
     {
-        // Regression for the originally-reported user issue: `OFFSET @var`
+        // Regression for the originally-reported user issue: `OFFSET var`
         // inside a subquery used to fail to parse (OFFSET only accepted
         // NumberLiteral) and the error surfaced at `FROM (` rather than at
         // the OFFSET. Now `OFFSET expression` is supported end-to-end and
@@ -2500,7 +2500,7 @@ public class SqlParserTests : ServiceTestBase
         // BatchExecutorTests verify the variable resolves correctly.
         const string sql =
             "SELECT * FROM (\n" +
-            "  SELECT * FROM t LIMIT 5 OFFSET @offset\n" +
+            "  SELECT * FROM t LIMIT 5 OFFSET skip_n\n" +
             ") T";
 
         QueryExpression q = SqlParser.Parse(sql);
@@ -2539,23 +2539,22 @@ public class SqlParserTests : ServiceTestBase
     }
 
     [Fact]
-    public void DeclareMissingAtSign_InsideCreateFunctionBody_ErrorPointsAtBadDeclare()
+    public void DeclareWithLegacyAtSign_InsideCreateFunctionBody_ErrorPointsAtBadDeclare()
     {
-        // Regression for the user-reported issue: `DECLARE x String` (no @)
-        // inside a CREATE FUNCTION body produced a misleading "unexpected
-        // CREATE at line 1" error. Stock Superpower .Try() discards
-        // committed-failure metadata when backtracking; we work around that
-        // by factoring CreateFunctionParser into a `.Try()`-protected
-        // prefix (CreateFunctionPrefix matches CREATE…FUNCTION and commits)
-        // and an unprotected body. Once the prefix matches, body failures
-        // propagate with deep Remainder.Position and Superpower's `.Or()`
-        // alternation picks the deepest-Remainder branch — surfacing the
-        // real failure at the bad DECLARE.
+        // Regression test for Superpower's deep-error positioning: a parse
+        // failure inside a CREATE FUNCTION body must surface at the bad
+        // statement, not at the outer CREATE. Stock Superpower .Try()
+        // discards committed-failure metadata when backtracking; the parser
+        // works around that by factoring CreateFunctionParser into a
+        // `.Try()`-protected prefix and an unprotected body. Post-PG
+        // alignment, the leading `@` on a variable is no longer a valid
+        // lexeme — using `DECLARE @x ...` triggers a tokenizer/parser error
+        // that exercises the same deep-error path the original report did.
         const string sql =
             "CREATE FUNCTION Test()\n" +
             "RETURNS String\n" +
             "AS BEGIN\n" +
-            "  DECLARE x String\n" + // missing @ on x
+            "  DECLARE @x String\n" + // illegal @ sigil on x
             "  RETURN 'test'\n" +
             "END";
 
@@ -2575,20 +2574,20 @@ public class SqlParserTests : ServiceTestBase
         // and dropping the outer .Try() must not break the happy path.
         Statement stmt = SqlParser.ParseStatement(
             "CREATE FUNCTION Test() RETURNS String AS BEGIN " +
-            "DECLARE @x String = 'hi'; RETURN @x END");
+            "DECLARE x String = 'hi'; RETURN x END");
 
         Assert.IsType<CreateFunctionStatement>(stmt);
     }
 
     [Fact]
-    public void DeclareMissingAtSign_InsideCreateProcedureBody_ErrorPointsAtBadDeclare()
+    public void DeclareWithLegacyAtSign_InsideCreateProcedureBody_ErrorPointsAtBadDeclare()
     {
         // Symmetric to the CREATE FUNCTION case: CREATE PROCEDURE has the
         // same prefix-factored shape so a parse error in its BEGIN…END body
         // surfaces at the bad statement, not at the outer CREATE.
         const string sql =
             "CREATE PROCEDURE Test() AS BEGIN\n" +
-            "  DECLARE x String\n" + // missing @ on x — line 2
+            "  DECLARE @x String\n" + // illegal @ sigil on x — line 2
             "  RETURN\n" +
             "END";
 
@@ -2602,7 +2601,7 @@ public class SqlParserTests : ServiceTestBase
     public void ValidCreateProcedure_StillParsesAfterPrefixRestructure()
     {
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE PROCEDURE Test() AS BEGIN DECLARE @x String = 'hi' END");
+            "CREATE PROCEDURE Test() AS BEGIN DECLARE x String = 'hi' END");
 
         Assert.IsType<CreateProcedureStatement>(stmt);
     }

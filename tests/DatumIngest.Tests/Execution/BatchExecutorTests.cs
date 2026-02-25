@@ -28,14 +28,14 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Declare_LiteralInitializer_BindsValue()
     {
-        BatchResult result = await RunAsync("DECLARE @x INT32 = 5");
+        BatchResult result = await RunAsync("DECLARE x INT32 = 5");
         Assert.Equal(5, Convert.ToInt32(result.FinalBindings["x"]));
     }
 
     [Fact]
     public async Task Declare_StringInitializer_BindsValue()
     {
-        BatchResult result = await RunAsync("DECLARE @greeting STRING = 'hello world from a long-enough literal that lives in an arena'");
+        BatchResult result = await RunAsync("DECLARE greeting STRING = 'hello world from a long-enough literal that lives in an arena'");
         Assert.Equal(
             "hello world from a long-enough literal that lives in an arena",
             result.FinalBindings["greeting"]);
@@ -44,21 +44,21 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Declare_BooleanInitializer_BindsValue()
     {
-        BatchResult result = await RunAsync("DECLARE @flag BOOLEAN = TRUE");
+        BatchResult result = await RunAsync("DECLARE flag BOOLEAN = TRUE");
         Assert.Equal(true, result.FinalBindings["flag"]);
     }
 
     [Fact]
     public async Task Declare_ExpressionInitializer_EvaluatesAndBinds()
     {
-        BatchResult result = await RunAsync("DECLARE @sum INT32 = 2 + 3 * 4");
+        BatchResult result = await RunAsync("DECLARE sum INT32 = 2 + 3 * 4");
         Assert.Equal(14, Convert.ToInt32(result.FinalBindings["sum"]));
     }
 
     [Fact]
     public async Task Declare_NoInitializer_BindsNull()
     {
-        BatchResult result = await RunAsync("DECLARE @x INT32");
+        BatchResult result = await RunAsync("DECLARE x INT32");
         Assert.True(result.FinalBindings.ContainsKey("x"));
         Assert.Null(result.FinalBindings["x"]);
     }
@@ -70,7 +70,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // IsArray=true. Materialize() returns null for any IsNull value, so
         // surface verification is "did not throw"; the parser + resolver +
         // DataValue.NullArrayOf wiring is what we're pinning.
-        BatchResult result = await RunAsync("DECLARE @players Array<STRING>");
+        BatchResult result = await RunAsync("DECLARE players Array<STRING>");
         Assert.True(result.FinalBindings.ContainsKey("players"));
         Assert.Null(result.FinalBindings["players"]);
     }
@@ -78,7 +78,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Declare_PostfixBracketSugar_NoInitializer_BindsTypedNullArray()
     {
-        BatchResult result = await RunAsync("DECLARE @scores FLOAT32[]");
+        BatchResult result = await RunAsync("DECLARE scores FLOAT32[]");
         Assert.True(result.FinalBindings.ContainsKey("scores"));
         Assert.Null(result.FinalBindings["scores"]);
     }
@@ -87,7 +87,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Declare_NestedArrayAnnotation_Throws()
     {
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => RunAsync("DECLARE @bad Array<Array<INT32>>"));
+            () => RunAsync("DECLARE bad Array<Array<INT32>>"));
         Assert.Contains("cannot resolve type name", ex.Message);
     }
 
@@ -99,8 +99,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // array" because the IsArray flag wasn't preserved through the path
         // (DECLARE → variable scope → variable read → function arg).
         BatchResult result = await RunAsync(
-            "DECLARE @players Array<String> = ['Fighter', 'Wizard', 'Healer']; " +
-            "DECLARE @player_count INT32 = ARRAY_LENGTH(@players)");
+            "DECLARE players Array<String> = ['Fighter', 'Wizard', 'Healer']; " +
+            "DECLARE player_count INT32 = ARRAY_LENGTH(players)");
 
         Assert.Equal(3, Convert.ToInt32(result.FinalBindings["player_count"]));
     }
@@ -111,7 +111,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Offset_WithProceduralVariable_SkipsCorrectRows()
     {
         // Regression for the user-reported issue: OFFSET (and LIMIT) used to
-        // accept only NumberLiteral. With expression support, `OFFSET @var`
+        // accept only NumberLiteral. With expression support, `OFFSET var`
         // now resolves the variable at execute time against the procedural
         // scope and skips the right rows.
         TableCatalog catalog = CreateCatalog("orders",
@@ -119,12 +119,12 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [1], [2], [3], [4], [5]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @offset INT32 = 2; " +
-            "DECLARE @sum INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT 2 OFFSET @offset) s)",
+            "DECLARE skip_n INT32 = 2; " +
+            "DECLARE total INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT 2 OFFSET skip_n) s)",
             catalog);
 
         // ORDER BY id, OFFSET 2, LIMIT 2 → ids 3, 4 → sum = 7.
-        Assert.Equal(7L, Convert.ToInt64(result.FinalBindings["sum"]));
+        Assert.Equal(7L, Convert.ToInt64(result.FinalBindings["total"]));
     }
 
     [Fact]
@@ -136,8 +136,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [1], [2], [3], [4], [5]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @top INT32 = 3; " +
-            "DECLARE @sum INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT @top) s)",
+            "DECLARE top INT32 = 3; " +
+            "DECLARE sum INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT top) s)",
             catalog);
 
         // ORDER BY id, LIMIT 3 → ids 1, 2, 3 → sum = 6.
@@ -155,8 +155,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [1], [2], [3], [4], [5]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @half INT32 = 1; " +
-            "DECLARE @sum INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT @half + 2) s)",
+            "DECLARE half INT32 = 1; " +
+            "DECLARE sum INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT half + 2) s)",
             catalog);
 
         // ORDER BY id, LIMIT 3 → ids 1, 2, 3 → sum = 6.
@@ -173,7 +173,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [1], [2], [3], [4], [5]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @count INT64 = (SELECT count(*) FROM orders)",
+            "DECLARE count INT64 = (SELECT count(*) FROM orders)",
             catalog);
 
         Assert.Equal(5L, Convert.ToInt64(result.FinalBindings["count"]));
@@ -187,7 +187,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [10], [20], [30], [40], [50]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @total INT64 = (SELECT sum(amount) FROM orders WHERE amount > 20)",
+            "DECLARE total INT64 = (SELECT sum(amount) FROM orders WHERE amount > 20)",
             catalog);
 
         // 30 + 40 + 50 = 120
@@ -204,7 +204,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [10], [20], [30]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @max_seq INT64 = (SELECT max(seq) FROM events)",
+            "DECLARE max_seq INT64 = (SELECT max(seq) FROM events)",
             catalog);
 
         Assert.Equal(30L, Convert.ToInt64(result.FinalBindings["max_seq"]));
@@ -213,15 +213,15 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Declare_SubqueryInitializer_ReferencesOuterVariable()
     {
-        // The subquery's WHERE references an earlier-declared @cap; resolves
+        // The subquery's WHERE references an earlier-declared cap; resolves
         // through the same variable scope.
         TableCatalog catalog = CreateCatalog("amounts",
             columns: ["v"],
             [1], [2], [3], [4], [5]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @cap INT64 = 3; " +
-            "DECLARE @kept INT64 = (SELECT count(*) FROM amounts WHERE v <= @cap)",
+            "DECLARE cap INT64 = 3; " +
+            "DECLARE kept INT64 = (SELECT count(*) FROM amounts WHERE v <= cap)",
             catalog);
 
         Assert.Equal(3L, Convert.ToInt64(result.FinalBindings["kept"]));
@@ -237,7 +237,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [1], [2], [3]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @max_big INT64 = (SELECT max(v) FROM amounts WHERE v > 100)",
+            "DECLARE max_big INT64 = (SELECT max(v) FROM amounts WHERE v > 100)",
             catalog);
 
         Assert.Null(result.FinalBindings["max_big"]);
@@ -254,7 +254,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [10], [20], [30]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @total INT64 = (SELECT sum(v) FROM amounts) + 100",
+            "DECLARE total INT64 = (SELECT sum(v) FROM amounts) + 100",
             catalog);
 
         // 60 + 100
@@ -271,36 +271,36 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [1], [2], [3]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @count INT64 = 0; " +
-            "SET @count = (SELECT count(*) FROM orders)",
+            "DECLARE count INT64 = 0; " +
+            "SET count = (SELECT count(*) FROM orders)",
             catalog);
 
         Assert.Equal(3L, Convert.ToInt64(result.FinalBindings["count"]));
     }
 
-    // ───────────────────── @var resolution ─────────────────────
+    // ───────────────────── var resolution ─────────────────────
 
     [Fact]
     public async Task DeclareThenSelect_QueryReadsVariable()
     {
-        // The SELECT references @x; resolution walks the variable scope
-        // chain. End state: @x stays at 7. (We can't observe the SELECT's
+        // The SELECT references x; resolution walks the variable scope
+        // chain. End state: x stays at 7. (We can't observe the SELECT's
         // rows in slice 4, so the assertion is on the binding.)
         BatchResult result = await RunAsync(
-            "DECLARE @x INT32 = 7; " +
-            "SELECT @x + 1");
+            "DECLARE x INT32 = 7; " +
+            "SELECT x + 1");
         Assert.Equal(7, Convert.ToInt32(result.FinalBindings["x"]));
     }
 
     [Fact]
     public async Task DeclareTwoVariables_LaterReferencesFormer()
     {
-        // @b's initialiser references @a; substrate plumbing must allow a
+        // b's initialiser references a; substrate plumbing must allow a
         // child query (the synthetic SELECT inside DECLARE) to resolve
-        // @a from the variable scope.
+        // a from the variable scope.
         BatchResult result = await RunAsync(
-            "DECLARE @a INT32 = 10; " +
-            "DECLARE @b INT32 = @a * 2");
+            "DECLARE a INT32 = 10; " +
+            "DECLARE b INT32 = a * 2");
         Assert.Equal(10, Convert.ToInt32(result.FinalBindings["a"]));
         Assert.Equal(20, Convert.ToInt32(result.FinalBindings["b"]));
     }
@@ -311,8 +311,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Set_OverwritesPriorValue()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @x INT32 = 1; " +
-            "SET @x = 99");
+            "DECLARE x INT32 = 1; " +
+            "SET x = 99");
         Assert.Equal(99, Convert.ToInt32(result.FinalBindings["x"]));
     }
 
@@ -320,8 +320,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Set_ExpressionReferencesVariableItself()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @x INT32 = 5; " +
-            "SET @x = @x + 100");
+            "DECLARE x INT32 = 5; " +
+            "SET x = x + 100");
         Assert.Equal(105, Convert.ToInt32(result.FinalBindings["x"]));
     }
 
@@ -329,7 +329,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Set_UndeclaredVariable_Throws()
     {
         await Assert.ThrowsAnyAsync<InvalidOperationException>(
-            () => RunAsync("SET @missing = 1"));
+            () => RunAsync("SET missing = 1"));
     }
 
     // ───────────────────── BEGIN/END block scoping ─────────────────────
@@ -337,31 +337,31 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Block_InnerDeclaration_DoesNotLeakOutside()
     {
-        // @inner is declared in the block; after END it's gone. @outer
+        // inner is declared in the block; after END it's gone. outer
         // remains accessible. This is the block-scope guarantee.
         BatchResult result = await RunAsync(
-            "DECLARE @outer INT32 = 1; " +
+            "DECLARE outer_var INT32 = 1; " +
             "BEGIN " +
-            "  DECLARE @inner INT32 = 2; " +
-            "  SET @outer = @inner + 10; " +
+            "  DECLARE inner_var INT32 = 2; " +
+            "  SET outer_var = inner_var + 10; " +
             "END");
 
-        Assert.Equal(12, Convert.ToInt32(result.FinalBindings["outer"]));
-        Assert.False(result.FinalBindings.ContainsKey("inner"),
-            "@inner should not be visible after the block ends");
+        Assert.Equal(12, Convert.ToInt32(result.FinalBindings["outer_var"]));
+        Assert.False(result.FinalBindings.ContainsKey("inner_var"),
+            "inner_var should not be visible after the block ends");
     }
 
     [Fact]
     public async Task Block_Nested_BothFramesPushAndPop()
     {
-        // Inner declares @z=3; SET @x mutates the outer-most binding via
-        // scope-walk. After both blocks pop, only @x survives, value 3.
+        // Inner declares z=3; SET x mutates the outer-most binding via
+        // scope-walk. After both blocks pop, only x survives, value 3.
         BatchResult result = await RunAsync(
-            "DECLARE @x INT32 = 0; " +
+            "DECLARE x INT32 = 0; " +
             "BEGIN " +
             "  BEGIN " +
-            "    DECLARE @z INT32 = 3; " +
-            "    SET @x = @z; " +
+            "    DECLARE z INT32 = 3; " +
+            "    SET x = z; " +
             "  END " +
             "END");
 
@@ -375,8 +375,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task If_TrueBranch_RunsThen()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @taken INT32 = 0; " +
-            "IF TRUE SET @taken = 1");
+            "DECLARE taken INT32 = 0; " +
+            "IF TRUE SET taken = 1");
 
         Assert.Equal(1, Convert.ToInt32(result.FinalBindings["taken"]));
     }
@@ -385,8 +385,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task If_FalseBranchWithElse_RunsElse()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @path INT32 = 0; " +
-            "IF FALSE SET @path = 1 ELSE SET @path = 2");
+            "DECLARE path INT32 = 0; " +
+            "IF FALSE SET path = 1 ELSE SET path = 2");
 
         Assert.Equal(2, Convert.ToInt32(result.FinalBindings["path"]));
     }
@@ -395,9 +395,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task If_PredicateUsesVariable_BranchesOnRuntimeValue()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @x INT32 = 5; " +
-            "DECLARE @result INT32 = 0; " +
-            "IF @x > 0 SET @result = 1 ELSE SET @result = -1");
+            "DECLARE x INT32 = 5; " +
+            "DECLARE result INT32 = 0; " +
+            "IF x > 0 SET result = 1 ELSE SET result = -1");
 
         Assert.Equal(1, Convert.ToInt32(result.FinalBindings["result"]));
     }
@@ -408,11 +408,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // ELSE IF parses as ELSE { IF ... }. The chain finds the first
         // matching branch and runs only that one's body.
         BatchResult result = await RunAsync(
-            "DECLARE @x INT32 = 0; " +
-            "DECLARE @label INT32 = 0; " +
-            "IF @x > 0 SET @label = 1 " +
-            "ELSE IF @x < 0 SET @label = -1 " +
-            "ELSE SET @label = 999");
+            "DECLARE x INT32 = 0; " +
+            "DECLARE label INT32 = 0; " +
+            "IF x > 0 SET label = 1 " +
+            "ELSE IF x < 0 SET label = -1 " +
+            "ELSE SET label = 999");
 
         Assert.Equal(999, Convert.ToInt32(result.FinalBindings["label"]));
     }
@@ -421,11 +421,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task If_BlockBody_RunsAllChildren()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @a INT32 = 0; " +
-            "DECLARE @b INT32 = 0; " +
+            "DECLARE a INT32 = 0; " +
+            "DECLARE b INT32 = 0; " +
             "IF TRUE BEGIN " +
-            "  SET @a = 10; " +
-            "  SET @b = 20; " +
+            "  SET a = 10; " +
+            "  SET b = 20; " +
             "END");
 
         Assert.Equal(10, Convert.ToInt32(result.FinalBindings["a"]));
@@ -438,11 +438,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task While_LoopsUntilPredicateFalse()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @i INT32 = 0; " +
-            "DECLARE @sum INT32 = 0; " +
-            "WHILE @i < 5 BEGIN " +
-            "  SET @sum = @sum + @i; " +
-            "  SET @i = @i + 1; " +
+            "DECLARE i INT32 = 0; " +
+            "DECLARE sum INT32 = 0; " +
+            "WHILE i < 5 BEGIN " +
+            "  SET sum = sum + i; " +
+            "  SET i = i + 1; " +
             "END");
 
         // 0 + 1 + 2 + 3 + 4 = 10
@@ -454,8 +454,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task While_PredicateFalseAtStart_BodyNeverRuns()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @ran INT32 = 0; " +
-            "WHILE FALSE SET @ran = 1");
+            "DECLARE ran INT32 = 0; " +
+            "WHILE FALSE SET ran = 1");
 
         Assert.Equal(0, Convert.ToInt32(result.FinalBindings["ran"]));
     }
@@ -470,8 +470,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // The batch only verifies the execution didn't throw; result rows
         // aren't surfaced in slice 4.
         BatchResult result = await RunAsync(
-            "DECLARE @msg STRING = 'hello world from a long-enough literal'; " +
-            "CALL upper(@msg)");
+            "DECLARE msg STRING = 'hello world from a long-enough literal'; " +
+            "CALL upper(msg)");
 
         // The variable's still bound at end-of-batch.
         Assert.Equal(
@@ -485,15 +485,15 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task FullProcedure_DeclareIfWhileSet_AccumulatesCorrectly()
     {
         // A small composite: classic counter + conditional accumulator.
-        // Builds up @sum across a WHILE loop, but only adds when @i is
+        // Builds up sum across a WHILE loop, but only adds when i is
         // even (using IF inside the body).
         BatchResult result = await RunAsync(
-            "DECLARE @i INT32 = 0; " +
-            "DECLARE @sum INT32 = 0; " +
-            "WHILE @i < 10 BEGIN " +
-            "  IF @i = 0 OR @i = 2 OR @i = 4 OR @i = 6 OR @i = 8 " +
-            "    SET @sum = @sum + @i; " +
-            "  SET @i = @i + 1; " +
+            "DECLARE i INT32 = 0; " +
+            "DECLARE sum INT32 = 0; " +
+            "WHILE i < 10 BEGIN " +
+            "  IF i = 0 OR i = 2 OR i = 4 OR i = 6 OR i = 8 " +
+            "    SET sum = sum + i; " +
+            "  SET i = i + 1; " +
             "END");
 
         // 0 + 2 + 4 + 6 + 8 = 20
@@ -506,25 +506,25 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task ForCounter_LoopsInclusivelyFromStartToEnd()
     {
-        // Auto-declares @i, runs body 5 times (i = 1..5 inclusive), accumulates
-        // the loop var into @sum. Confirms the auto-declare + per-iter SET +
+        // Auto-declares i, runs body 5 times (i = 1..5 inclusive), accumulates
+        // the loop var into sum. Confirms the auto-declare + per-iter SET +
         // body evaluation wiring all hang together.
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT32 = 0; " +
-            "FOR @i = 1 TO 5 SET @sum = @sum + @i");
+            "DECLARE sum INT32 = 0; " +
+            "FOR i = 1 TO 5 SET sum = sum + i");
 
         Assert.Equal(15, Convert.ToInt32(result.FinalBindings["sum"]));
-        // @i went out of scope when the loop's frame popped — must not survive.
+        // i went out of scope when the loop's frame popped — must not survive.
         Assert.False(result.FinalBindings.ContainsKey("i"),
-            "@i should not be visible after the FOR loop ends");
+            "i should not be visible after the FOR loop ends");
     }
 
     [Fact]
     public async Task ForCounter_StartGreaterThanEnd_BodyNeverRuns()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @ran INT32 = 0; " +
-            "FOR @i = 5 TO 1 SET @ran = @ran + 1");
+            "DECLARE ran INT32 = 0; " +
+            "FOR i = 5 TO 1 SET ran = ran + 1");
 
         Assert.Equal(0, Convert.ToInt32(result.FinalBindings["ran"]));
     }
@@ -535,10 +535,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // The bounds expressions are evaluated once via the synthesise-SELECT
         // path, so they can reference enclosing variables.
         BatchResult result = await RunAsync(
-            "DECLARE @lo INT32 = 2; " +
-            "DECLARE @hi INT32 = 4; " +
-            "DECLARE @count INT32 = 0; " +
-            "FOR @i = @lo TO @hi SET @count = @count + 1");
+            "DECLARE lo INT32 = 2; " +
+            "DECLARE hi INT32 = 4; " +
+            "DECLARE count INT32 = 0; " +
+            "FOR i = lo TO hi SET count = count + 1");
 
         Assert.Equal(3, Convert.ToInt32(result.FinalBindings["count"]));
     }
@@ -547,11 +547,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task ForCounter_BodyBlock_RunsAllChildren()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @a INT32 = 0; " +
-            "DECLARE @b INT32 = 0; " +
-            "FOR @i = 1 TO 3 BEGIN " +
-            "  SET @a = @a + 1; " +
-            "  SET @b = @b + @i; " +
+            "DECLARE a INT32 = 0; " +
+            "DECLARE b INT32 = 0; " +
+            "FOR i = 1 TO 3 BEGIN " +
+            "  SET a = a + 1; " +
+            "  SET b = b + i; " +
             "END");
 
         Assert.Equal(3, Convert.ToInt32(result.FinalBindings["a"]));
@@ -563,9 +563,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task ForCounter_NestedLoops_CartesianAccumulator()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @total INT32 = 0; " +
-            "FOR @i = 1 TO 3 BEGIN " +
-            "  FOR @j = 1 TO 4 SET @total = @total + 1; " +
+            "DECLARE total INT32 = 0; " +
+            "FOR i = 1 TO 3 BEGIN " +
+            "  FOR j = 1 TO 4 SET total = total + 1; " +
             "END");
 
         // 3 outer × 4 inner = 12 increments.
@@ -584,14 +584,14 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [3, 30]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT32 = 0; " +
-            "FOR @row IN (SELECT id, amount FROM orders) " +
-            "  SET @sum = @sum + @row[1]",
+            "DECLARE sum INT32 = 0; " +
+            "FOR row IN (SELECT id, amount FROM orders) " +
+            "  SET sum = sum + row[1]",
             catalog);
 
         // 10 + 20 + 30 — positional access via ordinal index 1 picks `amount`.
         Assert.Equal(60, Convert.ToInt32(result.FinalBindings["sum"]));
-        // @row went out of scope.
+        // row went out of scope.
         Assert.False(result.FinalBindings.ContainsKey("row"));
     }
 
@@ -600,7 +600,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // Same table, but resolve fields by name. Exercises the field-name
         // tracking path: the FOR-IN's source query columns flow into the
-        // binding so @row['amount'] resolves at evaluation time.
+        // binding so row['amount'] resolves at evaluation time.
         TableCatalog catalog = CreateCatalog("orders",
             columns: ["id", "amount"],
             [1, 10],
@@ -608,9 +608,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [3, 30]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT32 = 0; " +
-            "FOR @row IN (SELECT id, amount FROM orders) " +
-            "  SET @sum = @sum + @row['amount']",
+            "DECLARE sum INT32 = 0; " +
+            "FOR row IN (SELECT id, amount FROM orders) " +
+            "  SET sum = sum + row['amount']",
             catalog);
 
         Assert.Equal(60, Convert.ToInt32(result.FinalBindings["sum"]));
@@ -623,9 +623,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["id", "amount"]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @ran INT32 = 0; " +
-            "FOR @row IN (SELECT id, amount FROM orders) " +
-            "  SET @ran = @ran + 1",
+            "DECLARE ran INT32 = 0; " +
+            "FOR row IN (SELECT id, amount FROM orders) " +
+            "  SET ran = ran + 1",
             catalog);
 
         Assert.Equal(0, Convert.ToInt32(result.FinalBindings["ran"]));
@@ -640,11 +640,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [2, 20]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @ids INT32 = 0; " +
-            "DECLARE @amts INT32 = 0; " +
-            "FOR @row IN (SELECT id, amount FROM orders) BEGIN " +
-            "  SET @ids = @ids + @row['id']; " +
-            "  SET @amts = @amts + @row['amount']; " +
+            "DECLARE ids INT32 = 0; " +
+            "DECLARE amts INT32 = 0; " +
+            "FOR row IN (SELECT id, amount FROM orders) BEGIN " +
+            "  SET ids = ids + row['id']; " +
+            "  SET amts = amts + row['amount']; " +
             "END",
             catalog);
 
@@ -655,7 +655,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task ForIn_RowVariable_StampsTypeIdWithSourceColumnNames()
     {
-        // The struct DataValue assigned to @row must carry a TypeId that resolves to
+        // The struct DataValue assigned to row must carry a TypeId that resolves to
         // a TypeDescriptor with the source query's column names. Without this, downstream
         // renderers (DevWeb formatter, anywhere a Struct value is displayed) fall back to
         // "f0..fN" because they have no schema to consult. Pins the registry-stamping
@@ -666,7 +666,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [2, 20]);
 
         IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
-            "FOR @row IN (SELECT id, amount FROM orders) SELECT @row");
+            "FOR row IN (SELECT id, amount FROM orders) SELECT row");
         BatchExecutor exec = new(catalog);
 
         // Snapshot inside the callback because the RowBatch is disposed once the
@@ -690,7 +690,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             },
             CancellationToken.None);
 
-        // One non-empty SELECT @row batch per source row.
+        // One non-empty SELECT row batch per source row.
         Assert.Equal(2, capturedDescriptors.Count);
         foreach (TypeDescriptor? desc in capturedDescriptors)
         {
@@ -712,14 +712,14 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [2]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @offset INT32 = 100; " +
-            "DECLARE @sum INT32 = 0; " +
-            "FOR @row IN (SELECT id FROM orders) " +
-            "  SET @sum = @sum + @row['id'] + @offset",
+            "DECLARE bias INT32 = 100; " +
+            "DECLARE total INT32 = 0; " +
+            "FOR r IN (SELECT id FROM orders) " +
+            "  SET total = total + r['id'] + bias",
             catalog);
 
         // (1 + 100) + (2 + 100) = 203
-        Assert.Equal(203, Convert.ToInt32(result.FinalBindings["sum"]));
+        Assert.Equal(203, Convert.ToInt32(result.FinalBindings["total"]));
     }
 
     // ───────────────────── PRINT ─────────────────────
@@ -772,8 +772,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Print_VariableReference_EmitsBoundValue()
     {
         List<CellPrintBatchEvent> prints = await CollectPrintsAsync(
-            "DECLARE @msg STRING = 'hello world from a long-enough literal'; " +
-            "PRINT @msg");
+            "DECLARE msg STRING = 'hello world from a long-enough literal'; " +
+            "PRINT msg");
         Assert.Single(prints);
         Assert.Equal("hello world from a long-enough literal", prints[0].Text);
     }
@@ -785,7 +785,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // like. Distinct from the literal string "null" so accidental NULL
         // exposure stays observably different from the rendered literal.
         List<CellPrintBatchEvent> prints = await CollectPrintsAsync(
-            "DECLARE @x INT32; PRINT @x");
+            "DECLARE x INT32; PRINT x");
         Assert.Single(prints);
         Assert.Null(prints[0].Text);
     }
@@ -794,7 +794,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Print_InsideLoop_EmitsOneEventPerIteration()
     {
         List<CellPrintBatchEvent> prints = await CollectPrintsAsync(
-            "FOR @i = 1 TO 5 PRINT @i");
+            "FOR i = 1 TO 5 PRINT i");
         Assert.Equal(["1", "2", "3", "4", "5"], prints.Select(p => p.Text));
     }
 
@@ -831,9 +831,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // the CALL cell drives.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE trace(@n INT32) AS BEGIN " +
+            "CREATE PROCEDURE trace(n INT32) AS BEGIN " +
             "  PRINT 'enter trace' " +
-            "  FOR @i = 1 TO @n PRINT @i " +
+            "  FOR i = 1 TO n PRINT i " +
             "  PRINT 'exit trace' " +
             "END");
 
@@ -851,9 +851,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Assert_PredicateTrue_ContinuesNormally()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @x INT32 = 5; " +
-            "ASSERT @x > 1; " +
-            "DECLARE @after INT32 = 99");
+            "DECLARE x INT32 = 5; " +
+            "ASSERT x > 1; " +
+            "DECLARE after INT32 = 99");
 
         Assert.Equal(99, Convert.ToInt32(result.FinalBindings["after"]));
     }
@@ -863,8 +863,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunAsync(
-                "DECLARE @x INT32 = 0; " +
-                "ASSERT @x > 1 MESSAGE 'x must be positive'"));
+                "DECLARE x INT32 = 0; " +
+                "ASSERT x > 1 MESSAGE 'x must be positive'"));
         Assert.Equal("x must be positive", ex.Message);
     }
 
@@ -873,10 +873,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunAsync(
-                "DECLARE @x INT32 = 0; " +
-                "ASSERT @x > 1"));
+                "DECLARE x INT32 = 0; " +
+                "ASSERT x > 1"));
         Assert.Contains("Assertion failed", ex.Message);
-        Assert.Contains("@x", ex.Message);
+        Assert.Contains("x", ex.Message);
     }
 
     [Fact]
@@ -886,8 +886,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // matches IF/WHILE three-valued semantics.
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunAsync(
-                "DECLARE @x INT32; " +
-                "ASSERT @x > 1 MESSAGE 'unknown is not safe'"));
+                "DECLARE x INT32; " +
+                "ASSERT x > 1 MESSAGE 'unknown is not safe'"));
         Assert.Equal("unknown is not safe", ex.Message);
     }
 
@@ -898,9 +898,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // reference. Useful for surfacing the violating value in the error.
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunAsync(
-                "DECLARE @msg STRING = 'x was too small'; " +
-                "DECLARE @x INT32 = 7; " +
-                "ASSERT @x > 100 MESSAGE @msg"));
+                "DECLARE msg STRING = 'x was too small'; " +
+                "DECLARE x INT32 = 7; " +
+                "ASSERT x > 100 MESSAGE msg"));
         Assert.Equal("x was too small", ex.Message);
     }
 
@@ -910,9 +910,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // ASSERT failures route through the standard exception channel,
         // so an enclosing TRY/CATCH catches them like any other error.
         BatchResult result = await RunAsync(
-            "DECLARE @msg STRING = ''; " +
+            "DECLARE msg STRING = ''; " +
             "TRY ASSERT 1 = 2 MESSAGE 'arithmetic broke' " +
-            "CATCH @err SET @msg = @err");
+            "CATCH err SET msg = err");
 
         Assert.Equal("arithmetic broke", result.FinalBindings["msg"]);
     }
@@ -934,8 +934,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // renderer kicks in.
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunAsync(
-                "DECLARE @code INT32 = 42; " +
-                "RAISE @code"));
+                "DECLARE code INT32 = 42; " +
+                "RAISE code"));
         Assert.Equal("42", ex.Message);
     }
 
@@ -945,12 +945,12 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // Standard pattern: log the failure then propagate. Outer TRY
         // catches the rethrown error; the message survives the round-trip.
         BatchResult result = await RunAsync(
-            "DECLARE @outer_msg STRING = ''; " +
+            "DECLARE outer_msg STRING = ''; " +
             "TRY BEGIN " +
             "  TRY ASSERT 1 = 2 MESSAGE 'inner failure' " +
-            "  CATCH @inner RAISE @inner " +
+            "  CATCH inner_err RAISE inner_err " +
             "END " +
-            "CATCH @outer SET @outer_msg = @outer");
+            "CATCH outer_err SET outer_msg = outer_err");
 
         Assert.Equal("inner failure", result.FinalBindings["outer_msg"]);
     }
@@ -962,8 +962,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // RAISE, the loop terminates and the exception propagates.
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunAsync(
-                "FOR @i = 1 TO 10 BEGIN " +
-                "  IF @i = 5 RAISE 'hit five' " +
+                "FOR i = 1 TO 10 BEGIN " +
+                "  IF i = 5 RAISE 'hit five' " +
                 "END"));
         Assert.Equal("hit five", ex.Message);
     }
@@ -974,11 +974,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // RAISE inside a TRY behaves like any other thrown error: CATCH
         // handles it, FINALLY runs.
         BatchResult result = await RunAsync(
-            "DECLARE @caught BOOLEAN = FALSE; " +
-            "DECLARE @cleaned BOOLEAN = FALSE; " +
+            "DECLARE caught BOOLEAN = FALSE; " +
+            "DECLARE cleaned BOOLEAN = FALSE; " +
             "TRY RAISE 'oops' " +
-            "CATCH @err SET @caught = TRUE " +
-            "FINALLY SET @cleaned = TRUE");
+            "CATCH err SET caught = TRUE " +
+            "FINALLY SET cleaned = TRUE");
 
         Assert.Equal(true, result.FinalBindings["caught"]);
         Assert.Equal(true, result.FinalBindings["cleaned"]);
@@ -990,10 +990,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Try_NoError_RunsTryBody_SkipsCatch()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @ran_try BOOLEAN = FALSE; " +
-            "DECLARE @ran_catch BOOLEAN = FALSE; " +
-            "TRY SET @ran_try = TRUE " +
-            "CATCH @e SET @ran_catch = TRUE");
+            "DECLARE ran_try BOOLEAN = FALSE; " +
+            "DECLARE ran_catch BOOLEAN = FALSE; " +
+            "TRY SET ran_try = TRUE " +
+            "CATCH e SET ran_catch = TRUE");
 
         Assert.Equal(true, result.FinalBindings["ran_try"]);
         Assert.Equal(false, result.FinalBindings["ran_catch"]);
@@ -1004,12 +1004,12 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // Trigger a runtime error inside TRY (calling a non-existent
         // procedure) so the catch path takes over. The message is bound
-        // to @err — capture by writing it into an outer-scope variable.
+        // to err — capture by writing it into an outer-scope variable.
         TableCatalog catalog = CreateCatalog();
         BatchResult result = await RunAsync(
-            "DECLARE @msg STRING = ''; " +
+            "DECLARE msg STRING = ''; " +
             "TRY CALL does_not_exist() " +
-            "CATCH @err SET @msg = @err",
+            "CATCH err SET msg = err",
             catalog);
 
         Assert.NotEqual(string.Empty, (string?)result.FinalBindings["msg"]);
@@ -1019,14 +1019,17 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Try_ErrorVariable_ScopedToCatchBlock_NotVisibleAfter()
     {
-        // @err disappears after CATCH ends — referencing it later raises.
+        // err disappears after CATCH ends — referencing it later raises.
+        // Variable-first resolution misses the (out-of-scope) variable and
+        // falls through to a "name not found" error wrapped in the
+        // evaluator's span-bearing ExpressionEvaluationException.
         TableCatalog catalog = CreateCatalog();
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => RunAsync(
-                "DECLARE @msg STRING = ''; " +
+                "DECLARE msg STRING = ''; " +
                 "TRY CALL does_not_exist() " +
-                "CATCH @err SET @msg = @err; " +
-                "SET @msg = @err",  // @err out of scope here
+                "CATCH err SET msg = err; " +
+                "SET msg = err",  // err out of scope here
                 catalog));
         Assert.Contains("err", ex.Message);
     }
@@ -1035,13 +1038,13 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Try_BlockBody_RunsAllStatements()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT32 = 0; " +
+            "DECLARE sum INT32 = 0; " +
             "TRY BEGIN " +
-            "  SET @sum = @sum + 1 " +
-            "  SET @sum = @sum + 2 " +
-            "  SET @sum = @sum + 3 " +
+            "  SET sum = sum + 1 " +
+            "  SET sum = sum + 2 " +
+            "  SET sum = sum + 3 " +
             "END " +
-            "CATCH @e SET @sum = -1");
+            "CATCH e SET sum = -1");
 
         Assert.Equal(6, Convert.ToInt32(result.FinalBindings["sum"]));
     }
@@ -1050,11 +1053,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Try_Finally_RunsAfterSuccessfulTry()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @ran_try BOOLEAN = FALSE; " +
-            "DECLARE @ran_finally BOOLEAN = FALSE; " +
-            "TRY SET @ran_try = TRUE " +
-            "CATCH @e SET @ran_try = FALSE " +
-            "FINALLY SET @ran_finally = TRUE");
+            "DECLARE ran_try BOOLEAN = FALSE; " +
+            "DECLARE ran_finally BOOLEAN = FALSE; " +
+            "TRY SET ran_try = TRUE " +
+            "CATCH e SET ran_try = FALSE " +
+            "FINALLY SET ran_finally = TRUE");
 
         Assert.Equal(true, result.FinalBindings["ran_try"]);
         Assert.Equal(true, result.FinalBindings["ran_finally"]);
@@ -1065,11 +1068,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
         BatchResult result = await RunAsync(
-            "DECLARE @ran_catch BOOLEAN = FALSE; " +
-            "DECLARE @ran_finally BOOLEAN = FALSE; " +
+            "DECLARE ran_catch BOOLEAN = FALSE; " +
+            "DECLARE ran_finally BOOLEAN = FALSE; " +
             "TRY CALL does_not_exist() " +
-            "CATCH @e SET @ran_catch = TRUE " +
-            "FINALLY SET @ran_finally = TRUE",
+            "CATCH e SET ran_catch = TRUE " +
+            "FINALLY SET ran_finally = TRUE",
             catalog);
 
         Assert.Equal(true, result.FinalBindings["ran_catch"]);
@@ -1083,10 +1086,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // but FINALLY runs whether CATCH fired or not. Confirm the
         // simple "no error" case fires FINALLY.
         BatchResult result = await RunAsync(
-            "DECLARE @cleanup BOOLEAN = FALSE; " +
-            "TRY DECLARE @x INT32 = 1 " +
-            "CATCH @e SET @cleanup = FALSE " +
-            "FINALLY SET @cleanup = TRUE");
+            "DECLARE cleanup BOOLEAN = FALSE; " +
+            "TRY DECLARE x INT32 = 1 " +
+            "CATCH e SET cleanup = FALSE " +
+            "FINALLY SET cleanup = TRUE");
 
         Assert.Equal(true, result.FinalBindings["cleanup"]);
     }
@@ -1096,9 +1099,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // FINALLY is optional; bare TRY/CATCH parses and runs.
         BatchResult result = await RunAsync(
-            "DECLARE @done BOOLEAN = FALSE; " +
-            "TRY SET @done = TRUE " +
-            "CATCH @e SET @done = FALSE");
+            "DECLARE done BOOLEAN = FALSE; " +
+            "TRY SET done = TRUE " +
+            "CATCH e SET done = FALSE");
 
         Assert.Equal(true, result.FinalBindings["done"]);
     }
@@ -1115,7 +1118,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => RunAsync(
                 "TRY CALL original_error() " +
-                "CATCH @e CALL catch_error() " +
+                "CATCH e CALL catch_error() " +
                 "FINALLY CALL finally_error()",
                 catalog));
         Assert.Contains("finally_error", ex.Message);
@@ -1135,8 +1138,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
             // because the exception escapes — instead verify via the message.
             result = await RunAsync(
                 "TRY CALL original_error() " +
-                "CATCH @e CALL catch_error() " +
-                "FINALLY DECLARE @cleanup BOOLEAN = TRUE",
+                "CATCH e CALL catch_error() " +
+                "FINALLY DECLARE cleanup BOOLEAN = TRUE",
                 catalog);
         });
 
@@ -1150,16 +1153,16 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // loop must exit. CATCH is bypassed (control-flow signals don't
         // hit CATCH).
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT32 = 0; " +
-            "DECLARE @cleanup_count INT32 = 0; " +
-            "DECLARE @catch_count INT32 = 0; " +
-            "FOR @i = 1 TO 10 BEGIN " +
+            "DECLARE sum INT32 = 0; " +
+            "DECLARE cleanup_count INT32 = 0; " +
+            "DECLARE catch_count INT32 = 0; " +
+            "FOR i = 1 TO 10 BEGIN " +
             "  TRY BEGIN " +
-            "    IF @i = 4 BREAK " +
-            "    SET @sum = @sum + @i " +
+            "    IF i = 4 BREAK " +
+            "    SET sum = sum + i " +
             "  END " +
-            "  CATCH @e SET @catch_count = @catch_count + 1 " +
-            "  FINALLY SET @cleanup_count = @cleanup_count + 1 " +
+            "  CATCH e SET catch_count = catch_count + 1 " +
+            "  FINALLY SET cleanup_count = cleanup_count + 1 " +
             "END");
 
         // Iterations: i=1,2,3 run cleanly; i=4 hits BREAK before sum updates.
@@ -1175,15 +1178,15 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // CONTINUE inside a TRY inside a loop: FINALLY runs, then the
         // loop advances to the next iteration. CATCH bypassed.
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT32 = 0; " +
-            "DECLARE @cleanup_count INT32 = 0; " +
-            "FOR @i = 1 TO 5 BEGIN " +
+            "DECLARE sum INT32 = 0; " +
+            "DECLARE cleanup_count INT32 = 0; " +
+            "FOR i = 1 TO 5 BEGIN " +
             "  TRY BEGIN " +
-            "    IF @i % 2 = 0 CONTINUE " +
-            "    SET @sum = @sum + @i " +
+            "    IF i % 2 = 0 CONTINUE " +
+            "    SET sum = sum + i " +
             "  END " +
-            "  CATCH @e SET @sum = -1 " +
-            "  FINALLY SET @cleanup_count = @cleanup_count + 1 " +
+            "  CATCH e SET sum = -1 " +
+            "  FINALLY SET cleanup_count = cleanup_count + 1 " +
             "END");
 
         // Odd values accumulate: 1+3+5 = 9. FINALLY fires on every iter (5).
@@ -1197,13 +1200,13 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // Outer TRY has an inner TRY that catches; outer CATCH should not fire.
         TableCatalog catalog = CreateCatalog();
         BatchResult result = await RunAsync(
-            "DECLARE @inner_caught BOOLEAN = FALSE; " +
-            "DECLARE @outer_caught BOOLEAN = FALSE; " +
+            "DECLARE inner_caught BOOLEAN = FALSE; " +
+            "DECLARE outer_caught BOOLEAN = FALSE; " +
             "TRY BEGIN " +
             "  TRY CALL does_not_exist() " +
-            "  CATCH @inner SET @inner_caught = TRUE " +
+            "  CATCH inner_err SET inner_caught = TRUE " +
             "END " +
-            "CATCH @outer SET @outer_caught = TRUE",
+            "CATCH outer_err SET outer_caught = TRUE",
             catalog);
 
         Assert.Equal(true, result.FinalBindings["inner_caught"]);
@@ -1218,12 +1221,12 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // expected.
         TableCatalog catalog = CreateCatalog();
         BatchResult result = await RunAsync(
-            "DECLARE @outer_caught BOOLEAN = FALSE; " +
+            "DECLARE outer_caught BOOLEAN = FALSE; " +
             "TRY BEGIN " +
             "  TRY CALL first_error() " +
-            "  CATCH @inner CALL second_error() " +
+            "  CATCH inner_err CALL second_error() " +
             "END " +
-            "CATCH @outer SET @outer_caught = TRUE",
+            "CATCH outer_err SET outer_caught = TRUE",
             catalog);
 
         Assert.Equal(true, result.FinalBindings["outer_caught"]);
@@ -1236,14 +1239,14 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // Loop would naturally run i=0..9; BREAK fires when i=5, so the
         // accumulator stops at 0+1+2+3+4=10 and i is left at 5 (BREAK
-        // bypasses the SET @i = @i + 1 line).
+        // bypasses the SET i = i + 1 line).
         BatchResult result = await RunAsync(
-            "DECLARE @i INT32 = 0; " +
-            "DECLARE @sum INT32 = 0; " +
-            "WHILE @i < 10 BEGIN " +
-            "  IF @i = 5 BREAK; " +
-            "  SET @sum = @sum + @i; " +
-            "  SET @i = @i + 1; " +
+            "DECLARE i INT32 = 0; " +
+            "DECLARE sum INT32 = 0; " +
+            "WHILE i < 10 BEGIN " +
+            "  IF i = 5 BREAK; " +
+            "  SET sum = sum + i; " +
+            "  SET i = i + 1; " +
             "END");
 
         Assert.Equal(10, Convert.ToInt32(result.FinalBindings["sum"]));
@@ -1253,16 +1256,16 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task While_Continue_SkipsRestOfIterationButReevaluatesPredicate()
     {
-        // Predicate is on @i, but @i only advances inside the body before
+        // Predicate is on i, but i only advances inside the body before
         // CONTINUE. The classic shape: increment first, then conditionally
         // skip — sums only the odd numbers in 1..10.
         BatchResult result = await RunAsync(
-            "DECLARE @i INT32 = 0; " +
-            "DECLARE @sum INT32 = 0; " +
-            "WHILE @i < 10 BEGIN " +
-            "  SET @i = @i + 1; " +
-            "  IF @i % 2 = 0 CONTINUE; " +
-            "  SET @sum = @sum + @i; " +
+            "DECLARE i INT32 = 0; " +
+            "DECLARE sum INT32 = 0; " +
+            "WHILE i < 10 BEGIN " +
+            "  SET i = i + 1; " +
+            "  IF i % 2 = 0 CONTINUE; " +
+            "  SET sum = sum + i; " +
             "END");
 
         // 1 + 3 + 5 + 7 + 9 = 25
@@ -1274,10 +1277,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task ForCounter_Break_ExitsLoopImmediately()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT32 = 0; " +
-            "FOR @i = 1 TO 100 BEGIN " +
-            "  IF @i > 5 BREAK; " +
-            "  SET @sum = @sum + @i; " +
+            "DECLARE sum INT32 = 0; " +
+            "FOR i = 1 TO 100 BEGIN " +
+            "  IF i > 5 BREAK; " +
+            "  SET sum = sum + i; " +
             "END");
 
         // 1 + 2 + 3 + 4 + 5 = 15
@@ -1288,10 +1291,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task ForCounter_Continue_SkipsRestOfIteration()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT32 = 0; " +
-            "FOR @i = 1 TO 10 BEGIN " +
-            "  IF @i % 2 = 0 CONTINUE; " +
-            "  SET @sum = @sum + @i; " +
+            "DECLARE sum INT32 = 0; " +
+            "FOR i = 1 TO 10 BEGIN " +
+            "  IF i % 2 = 0 CONTINUE; " +
+            "  SET sum = sum + i; " +
             "END");
 
         // 1 + 3 + 5 + 7 + 9 = 25
@@ -1306,9 +1309,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [1], [2], [3], [4], [5]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @first INT32 = 0; " +
-            "FOR @row IN (SELECT id FROM orders) BEGIN " +
-            "  SET @first = @row['id']; " +
+            "DECLARE first INT32 = 0; " +
+            "FOR row IN (SELECT id FROM orders) BEGIN " +
+            "  SET first = row['id']; " +
             "  BREAK; " +
             "END",
             catalog);
@@ -1324,10 +1327,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [1], [2], [3], [4], [5]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT32 = 0; " +
-            "FOR @row IN (SELECT id FROM orders) BEGIN " +
-            "  IF @row['id'] % 2 = 0 CONTINUE; " +
-            "  SET @sum = @sum + @row['id']; " +
+            "DECLARE sum INT32 = 0; " +
+            "FOR row IN (SELECT id FROM orders) BEGIN " +
+            "  IF row['id'] % 2 = 0 CONTINUE; " +
+            "  SET sum = sum + row['id']; " +
             "END",
             catalog);
 
@@ -1339,14 +1342,14 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Break_BreaksOnlyInnermostLoop()
     {
         // Nested FOR; inner BREAK fires when j > i. Outer loop continues
-        // after each inner BREAK, so @sum collects only j ≤ i for each
+        // after each inner BREAK, so sum collects only j ≤ i for each
         // (i, j) pair: i=1 → j=1; i=2 → j=1,2; i=3 → j=1,2,3.
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT32 = 0; " +
-            "FOR @i = 1 TO 3 BEGIN " +
-            "  FOR @j = 1 TO 10 BEGIN " +
-            "    IF @j > @i BREAK; " +
-            "    SET @sum = @sum + 1; " +
+            "DECLARE sum INT32 = 0; " +
+            "FOR i = 1 TO 3 BEGIN " +
+            "  FOR j = 1 TO 10 BEGIN " +
+            "    IF j > i BREAK; " +
+            "    SET sum = sum + 1; " +
             "  END " +
             "END");
 
@@ -1377,8 +1380,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // count as a loop, so the signal escapes to the entry point.
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunAsync(
-                "DECLARE @x INT32 = 1; " +
-                "IF @x = 1 BREAK"));
+                "DECLARE x INT32 = 1; " +
+                "IF x = 1 BREAK"));
         Assert.Contains("BREAK", ex.Message, StringComparison.Ordinal);
     }
 
@@ -1392,11 +1395,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // the block. The batch grammar allows omitting the inter-statement
         // separator.
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT64 = 0 " +
-            "FOR @i = 1 TO 3 BEGIN " +
-            "  SET @sum = @sum + @i " +
+            "DECLARE sum INT64 = 0 " +
+            "FOR i = 1 TO 3 BEGIN " +
+            "  SET sum = sum + i " +
             "END " +
-            "DECLARE @final INT64 = @sum");
+            "DECLARE final INT64 = sum");
 
         Assert.Equal(6L, Convert.ToInt64(result.FinalBindings["sum"]));
         Assert.Equal(6L, Convert.ToInt64(result.FinalBindings["final"]));
@@ -1409,9 +1412,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // each statement starts with one. This isn't a recommended style,
         // but it should parse.
         BatchResult result = await RunAsync(
-            "DECLARE @a INT32 = 1 " +
-            "DECLARE @b INT32 = 2 " +
-            "SET @a = @a + @b");
+            "DECLARE a INT32 = 1 " +
+            "DECLARE b INT32 = 2 " +
+            "SET a = a + b");
 
         Assert.Equal(3, Convert.ToInt32(result.FinalBindings["a"]));
     }
@@ -1422,10 +1425,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // BEGIN/END mirrors the top-level grammar: separators between
         // statements are optional.
         BatchResult result = await RunAsync(
-            "DECLARE @a INT32 = 0; " +
+            "DECLARE a INT32 = 0; " +
             "BEGIN " +
-            "  SET @a = 1 " +
-            "  SET @a = @a + 10 " +
+            "  SET a = 1 " +
+            "  SET a = a + 10 " +
             "END");
 
         Assert.Equal(11, Convert.ToInt32(result.FinalBindings["a"]));
@@ -1438,10 +1441,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // Without coercion, the literal `0` (parsed as the narrowest fitting
         // integer kind) would silently win over the declared INT64 — leaving
-        // @sum bound to Int8. Subsequent arithmetic (which currently widens
+        // sum bound to Int8. Subsequent arithmetic (which currently widens
         // to Float32 anyway) would then be wrong on different ground. The
         // coercion ensures the binding's kind matches the declaration.
-        BatchResult result = await RunAsync("DECLARE @sum INT64 = 0");
+        BatchResult result = await RunAsync("DECLARE sum INT64 = 0");
 
         // The result is materialised through the AsInt64 path, which would
         // throw if the value were still Int8.
@@ -1454,8 +1457,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task SelectAssign_NoFrom_SingleAssignment_BindsValue()
     {
         BatchResult result = await RunAsync(
-            "DECLARE @x INT64 = 0; " +
-            "SELECT @x = 42");
+            "DECLARE x INT64 = 0; " +
+            "SELECT x := 42");
         Assert.Equal(42L, Convert.ToInt64(result.FinalBindings["x"]));
     }
 
@@ -1466,10 +1469,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // values from the single computed row. No FROM, so the query
         // produces exactly one row.
         BatchResult result = await RunAsync(
-            "DECLARE @a INT64 = 0; " +
-            "DECLARE @b INT64 = 0; " +
-            "DECLARE @c INT64 = 0; " +
-            "SELECT @a = 1, @b = 2, @c = 3");
+            "DECLARE a INT64 = 0; " +
+            "DECLARE b INT64 = 0; " +
+            "DECLARE c INT64 = 0; " +
+            "SELECT a := 1, b := 2, c := 3");
         Assert.Equal(1L, Convert.ToInt64(result.FinalBindings["a"]));
         Assert.Equal(2L, Convert.ToInt64(result.FinalBindings["b"]));
         Assert.Equal(3L, Convert.ToInt64(result.FinalBindings["c"]));
@@ -1488,8 +1491,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [30]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @last INT64 = 0; " +
-            "SELECT @last = v FROM nums ORDER BY v",
+            "DECLARE last INT64 = 0; " +
+            "SELECT last := v FROM nums ORDER BY v",
             catalog);
 
         Assert.Equal(30L, Convert.ToInt64(result.FinalBindings["last"]));
@@ -1505,8 +1508,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [10]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @x INT64 = 999; " +
-            "SELECT @x = v FROM nums WHERE v > 1000",
+            "DECLARE x INT64 = 999; " +
+            "SELECT x := v FROM nums WHERE v > 1000",
             catalog);
 
         Assert.Equal(999L, Convert.ToInt64(result.FinalBindings["x"]));
@@ -1524,9 +1527,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [3, 300]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @x INT64 = 0; " +
-            "DECLARE @y INT64 = 0; " +
-            "SELECT @x = a, @y = b FROM pairs ORDER BY a",
+            "DECLARE x INT64 = 0; " +
+            "DECLARE y INT64 = 0; " +
+            "SELECT x := a, y := b FROM pairs ORDER BY a",
             catalog);
 
         Assert.Equal(3L, Convert.ToInt64(result.FinalBindings["x"]));
@@ -1541,8 +1544,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [10]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @doubled INT64 = 0; " +
-            "SELECT @doubled = v + v FROM nums",
+            "DECLARE doubled INT64 = 0; " +
+            "SELECT doubled := v + v FROM nums",
             catalog);
 
         Assert.Equal(20L, Convert.ToInt64(result.FinalBindings["doubled"]));
@@ -1555,11 +1558,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // signal. Confirms the parser DOESN'T lift this case into
         // assignment form — the variable's pre-existing value is intact.
         BatchResult result = await RunAsync(
-            "DECLARE @x INT32 = 5; " +
-            "SELECT @x = 5 AS isFive");
+            "DECLARE x INT32 = 5; " +
+            "SELECT x = 5 AS isFive");
 
-        // @x is unchanged because the SELECT was a projection, not an
-        // assignment. Comparison `@x = 5` evaluated to TRUE for the
+        // x is unchanged because the SELECT was a projection, not an
+        // assignment. Comparison `x = 5` evaluated to TRUE for the
         // single synthetic row but the boolean result didn't bind anywhere.
         Assert.Equal(5, Convert.ToInt32(result.FinalBindings["x"]));
     }
@@ -1571,8 +1574,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // is rejected with a clear message.
         await Assert.ThrowsAnyAsync<InvalidOperationException>(
             () => RunAsync(
-                "DECLARE @x INT64 = 0; " +
-                "SELECT @x = 1, 'hello'"));
+                "DECLARE x INT64 = 0; " +
+                "SELECT x := 1, 'hello'"));
     }
 
     [Fact]
@@ -1580,7 +1583,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // The variable scope's Set call surfaces the missing binding.
         await Assert.ThrowsAnyAsync<InvalidOperationException>(
-            () => RunAsync("SELECT @undeclared = 1"));
+            () => RunAsync("SELECT undeclared := 1"));
     }
 
     [Fact]
@@ -1597,26 +1600,28 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [3]);
 
         BatchResult result = await RunAsync(
-            "DECLARE @sum INT64 = 0; " +
-            "FOR @row IN (SELECT v FROM nums) " +
-            "  SELECT @sum = @sum + @row['v']",
+            "DECLARE sum INT64 = 0; " +
+            "FOR row IN (SELECT v FROM nums) " +
+            "  SELECT sum := sum + row['v']",
             catalog);
 
         Assert.Equal(6L, Convert.ToInt64(result.FinalBindings["sum"]));
     }
 
-    // ───────────────────── Top-level @var without batch context ─────────────────────
+    // ───────────────────── Top-level var without batch context ─────────────────────
 
     [Fact]
-    public async Task BareSelect_OutsideBatch_VariableReference_Throws()
+    public async Task BareSelect_OutsideBatch_UndeclaredName_Throws()
     {
-        // A SELECT @x run via the standard catalog.Plan(...) path (no
-        // BatchContext attached) must throw at evaluation time —
-        // VariableExpression has no scope to resolve against.
+        // A SELECT against a bare name with no batch context attached and
+        // no row source must throw at evaluation time: the name doesn't
+        // match a declared variable (no scope) and it doesn't match a column
+        // (no row schema). The evaluator wraps the failure in
+        // ExpressionEvaluationException with source-span context.
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan plan = catalog.Plan("SELECT @x");
+        IQueryPlan plan = catalog.Plan("SELECT x");
 
-        await Assert.ThrowsAnyAsync<InvalidOperationException>(async () =>
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
             await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
             {

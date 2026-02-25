@@ -53,23 +53,23 @@ export function splitTopLevel(s: string, delim: string): string[] {
 
 // Parses a parameter string from system_udfs / system_procedures.
 // Format mirrors what UdfsTableProvider / ProceduresTableProvider emit:
-//   "@a INT32, @b STRING IS NOT NULL, @c INT32 = 0"
+//   "a INT32, b STRING IS NOT NULL, c INT32 = 0"
 // We pull each parameter's name and type for DECLARE scaffolding.
 export function parseParameterList(s: string | undefined | null): ParsedParam[] {
   if (!s) return [];
   const parts = splitTopLevel(s, ',');
   const result: ParsedParam[] = [];
   for (const p of parts) {
-    const m = p.trim().match(/^@(\w+)\s+(\w+)/);
+    const m = p.trim().match(/^(\w+)\s+(\w+)/);
     if (m) result.push({ name: m[1], type: m[2] });
   }
   return result;
 }
 
 // Builds:
-//   DECLARE @a INT32
-//   DECLARE @b STRING
-//   CALL udf.name(@a, @b)
+//   DECLARE a INT32
+//   DECLARE b STRING
+//   CALL udf.name(a, b)
 // for UDFs/procedures. Caller fills in values before running.
 export function buildExecuteTemplate(
   prefix: string,
@@ -80,8 +80,8 @@ export function buildExecuteTemplate(
   if (params.length === 0) {
     return `CALL ${prefix}.${name}()`;
   }
-  const declares = params.map((p) => `DECLARE @${p.name} ${p.type}`).join('\n');
-  const args = params.map((p) => `@${p.name}`).join(', ');
+  const declares = params.map((p) => `DECLARE ${p.name} ${p.type}`).join('\n');
+  const args = params.map((p) => p.name).join(', ');
   return `${declares}\n\nCALL ${prefix}.${name}(${args})`;
 }
 
@@ -128,7 +128,7 @@ export function buildBuiltinExecuteTemplate(fn: BuiltinFunction): string {
   if (params.length === 0) {
     return `SELECT ${fn.name}()`;
   }
-  const declares = params.map((p) => `DECLARE @${p.name} ${p.type}`).join('\n');
-  const args = params.map((p) => `@${p.name}`).join(', ');
+  const declares = params.map((p) => `DECLARE ${p.name} ${p.type}`).join('\n');
+  const args = params.map((p) => p.name).join(', ');
   return `${declares}\n\nSELECT ${fn.name}(${args})`;
 }

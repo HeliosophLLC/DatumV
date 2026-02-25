@@ -19,7 +19,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
     public void CreateModel_HappyPath_ParsesAllFields()
     {
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE MODEL classify(@img IMAGE) RETURNS INT32 USING 'classify.onnx' " +
+            "CREATE MODEL classify(img IMAGE) RETURNS INT32 USING 'classify.onnx' " +
             "AS BEGIN RETURN 1 END");
 
         CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
@@ -41,7 +41,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
     {
         // The grammar accepts BEGIN…END with or without a leading AS.
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE MODEL classify(@img IMAGE) RETURNS INT32 USING 'classify.onnx' " +
+            "CREATE MODEL classify(img IMAGE) RETURNS INT32 USING 'classify.onnx' " +
             "BEGIN RETURN 1 END");
 
         CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
@@ -52,7 +52,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
     public void CreateModel_OrReplace_SetsFlag()
     {
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE OR REPLACE MODEL classify(@img IMAGE) RETURNS INT32 " +
+            "CREATE OR REPLACE MODEL classify(img IMAGE) RETURNS INT32 " +
             "USING 'classify.onnx' AS BEGIN RETURN 1 END");
 
         CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
@@ -63,7 +63,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
     public void CreateModel_IfNotExists_SetsFlag()
     {
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE MODEL IF NOT EXISTS classify(@img IMAGE) RETURNS INT32 " +
+            "CREATE MODEL IF NOT EXISTS classify(img IMAGE) RETURNS INT32 " +
             "USING 'classify.onnx' AS BEGIN RETURN 1 END");
 
         CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
@@ -74,7 +74,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
     public void CreateModel_ReturnsIsNotNull_SetsFlag()
     {
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE MODEL classify(@img IMAGE) RETURNS INT32 IS NOT NULL " +
+            "CREATE MODEL classify(img IMAGE) RETURNS INT32 IS NOT NULL " +
             "USING 'classify.onnx' AS BEGIN RETURN 1 END");
 
         CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
@@ -88,7 +88,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
         // `models`, but the parser is permissive — it surfaces whatever
         // qualifier the user wrote and the registrar enforces the rule.
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE MODEL models.classify(@img IMAGE) RETURNS INT32 " +
+            "CREATE MODEL models.classify(img IMAGE) RETURNS INT32 " +
             "USING 'classify.onnx' AS BEGIN RETURN 1 END");
 
         CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
@@ -102,7 +102,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
         // The parser hands the USING path through verbatim; `file://`
         // resolution is the registrar's job.
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE MODEL classify(@img IMAGE) RETURNS INT32 " +
+            "CREATE MODEL classify(img IMAGE) RETURNS INT32 " +
             "USING 'file:///tmp/classify.onnx' AS BEGIN RETURN 1 END");
 
         CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
@@ -115,7 +115,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
         // USING is a contextual identifier (Identifier+Where), so case
         // doesn't matter and the lowercase form must parse.
         Statement stmt = SqlParser.ParseStatement(
-            "CREATE MODEL classify(@img IMAGE) RETURNS INT32 " +
+            "CREATE MODEL classify(img IMAGE) RETURNS INT32 " +
             "using 'classify.onnx' AS BEGIN RETURN 1 END");
 
         CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
@@ -130,7 +130,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
         // crashing the registrar later.
         FormatException ex = Assert.Throws<FormatException>(
             () => SqlParser.ParseStatement(
-                "CREATE MODEL classify(@img IMAGE) RETURNS INT32 " +
+                "CREATE MODEL classify(img IMAGE) RETURNS INT32 " +
                 "USING '' AS BEGIN RETURN 1 END"));
         Assert.Contains("USING clause", ex.Message);
     }
@@ -141,7 +141,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
         // RETURNS is required on MODEL — the planner needs a known scalar
         // shape to dispatch through `infer()`.
         Assert.ThrowsAny<Exception>(() => SqlParser.ParseStatement(
-            "CREATE MODEL classify(@img IMAGE) USING 'classify.onnx' " +
+            "CREATE MODEL classify(img IMAGE) USING 'classify.onnx' " +
             "AS BEGIN RETURN 1 END"));
     }
 
@@ -151,7 +151,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
         // USING is required — there's no ambient default for the model
         // file and the registrar wouldn't know what to load.
         Assert.ThrowsAny<Exception>(() => SqlParser.ParseStatement(
-            "CREATE MODEL classify(@img IMAGE) RETURNS INT32 " +
+            "CREATE MODEL classify(img IMAGE) RETURNS INT32 " +
             "AS BEGIN RETURN 1 END"));
     }
 
@@ -161,7 +161,7 @@ public sealed class CreateModelParserTests : ServiceTestBase
         // Body is always procedural — no expression-body form because the
         // only legal use of a model body is to call infer().
         Assert.ThrowsAny<Exception>(() => SqlParser.ParseStatement(
-            "CREATE MODEL classify(@img IMAGE) RETURNS INT32 " +
+            "CREATE MODEL classify(img IMAGE) RETURNS INT32 " +
             "USING 'classify.onnx'"));
     }
 

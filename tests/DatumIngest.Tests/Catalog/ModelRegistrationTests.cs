@@ -54,7 +54,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     }
 
     private string Ddl(string body) =>
-        $"CREATE MODEL classify(@x INT32) RETURNS INT32 USING '{_absoluteUsingPath}' " +
+        $"CREATE MODEL classify(x INT32) RETURNS INT32 USING '{_absoluteUsingPath}' " +
         $"AS BEGIN {body} END";
 
     // ───────────────────── CREATE MODEL ─────────────────────
@@ -64,7 +64,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
 
-        catalog.Plan(Ddl("RETURN @x"));
+        catalog.Plan(Ddl("RETURN x"));
 
         Assert.True(catalog.DeclaredModels.TryGet(
             new QualifiedName("models", "classify"), out ModelDescriptor? descriptor));
@@ -81,7 +81,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        catalog.Plan(Ddl("RETURN @x"));
+        catalog.Plan(Ddl("RETURN x"));
 
         // Adapter lands at `models.classify` so SELECT models.classify(...)
         // dispatches to the body via the standard scalar pipeline.
@@ -95,8 +95,8 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
         catalog.Plan(
-            $"CREATE MODEL models.classify(@x INT32) RETURNS INT32 " +
-            $"USING '{_absoluteUsingPath}' AS BEGIN RETURN @x END");
+            $"CREATE MODEL models.classify(x INT32) RETURNS INT32 " +
+            $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x END");
 
         Assert.True(catalog.DeclaredModels.TryGet(
             new QualifiedName("models", "classify"), out _));
@@ -109,8 +109,8 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan(
-                $"CREATE MODEL public.classify(@x INT32) RETURNS INT32 " +
-                $"USING '{_absoluteUsingPath}' AS BEGIN RETURN @x END"));
+                $"CREATE MODEL public.classify(x INT32) RETURNS INT32 " +
+                $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x END"));
         Assert.Contains("'models' schema", ex.Message);
     }
 
@@ -122,7 +122,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => catalog.Plan(Ddl("RETURN @x")));
+            () => catalog.Plan(Ddl("RETURN x")));
         Assert.Contains("InferenceDispatcher", ex.Message);
     }
 
@@ -135,8 +135,8 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"datum-test-missing-{Guid.NewGuid():N}.onnx");
 
         Assert.Throws<FileNotFoundException>(() => catalog.Plan(
-            $"CREATE MODEL classify(@x INT32) RETURNS INT32 " +
-            $"USING '{bogus}' AS BEGIN RETURN @x END"));
+            $"CREATE MODEL classify(x INT32) RETURNS INT32 " +
+            $"USING '{bogus}' AS BEGIN RETURN x END"));
     }
 
     [Fact]
@@ -149,8 +149,8 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan(
-                "CREATE MODEL classify(@x INT32) RETURNS INT32 " +
-                "USING 'classify.onnx' AS BEGIN RETURN @x END"));
+                "CREATE MODEL classify(x INT32) RETURNS INT32 " +
+                "USING 'classify.onnx' AS BEGIN RETURN x END"));
         Assert.Contains("ModelCatalog", ex.Message);
     }
 
@@ -159,10 +159,10 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        catalog.Plan(Ddl("RETURN @x"));
+        catalog.Plan(Ddl("RETURN x"));
 
         Assert.ThrowsAny<InvalidOperationException>(
-            () => catalog.Plan(Ddl("RETURN @x + 1")));
+            () => catalog.Plan(Ddl("RETURN x + 1")));
     }
 
     [Fact]
@@ -170,13 +170,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
 
-        catalog.Plan(Ddl("RETURN @x"));
+        catalog.Plan(Ddl("RETURN x"));
         StubSession firstSession = dispatcher.LastSession!;
         Assert.False(firstSession.Disposed);
 
         catalog.Plan(
-            $"CREATE OR REPLACE MODEL classify(@x INT32) RETURNS INT32 " +
-            $"USING '{_absoluteUsingPath}' AS BEGIN RETURN @x + 1 END");
+            $"CREATE OR REPLACE MODEL classify(x INT32) RETURNS INT32 " +
+            $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x + 1 END");
 
         // Old session must be disposed; new session is live.
         Assert.True(firstSession.Disposed);
@@ -190,12 +190,12 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
 
-        catalog.Plan(Ddl("RETURN @x"));
+        catalog.Plan(Ddl("RETURN x"));
         StubSession firstSession = dispatcher.LastSession!;
 
         catalog.Plan(
-            $"CREATE MODEL IF NOT EXISTS classify(@x INT32) RETURNS INT32 " +
-            $"USING '{_absoluteUsingPath}' AS BEGIN RETURN @x + 1 END");
+            $"CREATE MODEL IF NOT EXISTS classify(x INT32) RETURNS INT32 " +
+            $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x + 1 END");
 
         // No second load happened — the existing descriptor wins and
         // no new session was bound.
@@ -210,7 +210,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
 
-        catalog.Plan(Ddl("RETURN @x"));
+        catalog.Plan(Ddl("RETURN x"));
         StubSession session = dispatcher.LastSession!;
 
         catalog.Plan("DROP MODEL classify");
@@ -227,7 +227,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        catalog.Plan(Ddl("RETURN @x"));
+        catalog.Plan(Ddl("RETURN x"));
         catalog.Plan("DROP MODEL models.classify");
 
         Assert.False(catalog.DeclaredModels.TryGet(
@@ -283,8 +283,8 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             CreatePool(), "data", ["v"], [new object?[] { 5 }]));
 
         catalog.Plan(
-            $"CREATE MODEL square(@x INT32) RETURNS INT32 USING '{_absoluteUsingPath}' " +
-            $"AS BEGIN RETURN @x * @x END");
+            $"CREATE MODEL square(x INT32) RETURNS INT32 USING '{_absoluteUsingPath}' " +
+            $"AS BEGIN RETURN x * x END");
 
         IQueryPlan plan = catalog.Plan("SELECT models.square(v) FROM data");
 
@@ -350,7 +350,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     {
         // The smallest viable infer() shape: single Float32 input, single
         // Float32 output. Stub session doubles its input. The model body
-        // is `RETURN infer(@x)`, so calling the model with 3.0 should
+        // is `RETURN infer(x)`, so calling the model with 3.0 should
         // surface 6.0 — proving infer() resolved frame.CurrentModel,
         // pulled the bound session, marshalled the scalar into a tensor,
         // and unwrapped the output back to a scalar ValueRef.
@@ -363,8 +363,8 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             CreatePool(), "data", ["v"], [new object?[] { 3.0f }]));
 
         catalog.Plan(
-            $"CREATE MODEL doubler(@x Float32) RETURNS Float32 USING '{_absoluteUsingPath}' " +
-            $"AS BEGIN RETURN infer(@x) END");
+            $"CREATE MODEL doubler(x Float32) RETURNS Float32 USING '{_absoluteUsingPath}' " +
+            $"AS BEGIN RETURN infer(x) END");
 
         IQueryPlan plan = catalog.Plan("SELECT models.doubler(v) FROM data");
 

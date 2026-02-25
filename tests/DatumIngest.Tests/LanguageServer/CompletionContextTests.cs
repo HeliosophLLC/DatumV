@@ -676,7 +676,7 @@ public sealed class CompletionContextTests : ServiceTestBase
     public void Classify_AfterIfKeyword_ReturnsProceduralExpression()
     {
         // `IF |` — predicate position. Procedural-expression zone (no row
-        // context, so column names aren't offered — only @vars and scalar
+        // context, so column names aren't offered — only vars and scalar
         // functions).
         string sql = "IF ";
         CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
@@ -687,9 +687,9 @@ public sealed class CompletionContextTests : ServiceTestBase
     [Fact]
     public void Classify_AfterIfPredicateOperator_ReturnsProceduralExpression()
     {
-        // `IF @x > |` — predicate continues; the trailing `>` says we need
+        // `IF x > |` — predicate continues; the trailing `>` says we need
         // another operand, not a body. Still procedural-expression context.
-        string sql = "IF @x > ";
+        string sql = "IF x > ";
         CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
 
         Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
@@ -712,10 +712,10 @@ public sealed class CompletionContextTests : ServiceTestBase
     [Fact]
     public void Classify_AfterIfPredicateComplete_ReturnsStatementStart()
     {
-        // `IF @x > 1 |` — predicate looks done (last token is value-like);
+        // `IF x > 1 |` — predicate looks done (last token is value-like);
         // the body is what's expected next. StatementStart includes BEGIN
         // and the procedural statement keywords.
-        string sql = "IF @x > 1 ";
+        string sql = "IF x > 1 ";
         CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
 
         Assert.Equal(CompletionZoneKind.StatementStart, zone.Kind);
@@ -724,7 +724,7 @@ public sealed class CompletionContextTests : ServiceTestBase
     [Fact]
     public void Classify_AfterWhilePredicateComplete_ReturnsStatementStart()
     {
-        string sql = "WHILE @i < 10 ";
+        string sql = "WHILE i < 10 ";
         CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
 
         Assert.Equal(CompletionZoneKind.StatementStart, zone.Kind);
@@ -733,7 +733,7 @@ public sealed class CompletionContextTests : ServiceTestBase
     [Fact]
     public void Classify_AfterElse_ReturnsStatementStart()
     {
-        string sql = "IF @x > 0 SET @y = 1 ELSE ";
+        string sql = "IF x > 0 SET y = 1 ELSE ";
         CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
 
         Assert.Equal(CompletionZoneKind.StatementStart, zone.Kind);
@@ -795,8 +795,8 @@ public sealed class CompletionContextTests : ServiceTestBase
     [Fact]
     public void Classify_AfterDeclareName_ReturnsAfterDeclareType()
     {
-        // `DECLARE @x ⌷` — type name expected.
-        CompletionZone zone = CompletionContext.Classify("DECLARE @x ", 11);
+        // `DECLARE x ⌷` — type name expected.
+        CompletionZone zone = CompletionContext.Classify("DECLARE x ", 11);
 
         Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
     }
@@ -804,7 +804,7 @@ public sealed class CompletionContextTests : ServiceTestBase
     [Fact]
     public void Classify_AfterDeclareNameWithPartialType_ReturnsAfterDeclareTypeWithPrefix()
     {
-        CompletionZone zone = CompletionContext.Classify("DECLARE @x INT", 14);
+        CompletionZone zone = CompletionContext.Classify("DECLARE x INT", 14);
 
         Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
         Assert.Equal("INT", zone.Prefix);
@@ -814,7 +814,7 @@ public sealed class CompletionContextTests : ServiceTestBase
     public void Classify_AfterDeclareEquals_ReturnsProceduralExpression()
     {
         // Past `=` — initializer position, columns out of scope.
-        CompletionZone zone = CompletionContext.Classify("DECLARE @x INT32 = ", 19);
+        CompletionZone zone = CompletionContext.Classify("DECLARE x INT32 = ", 19);
 
         Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
     }
@@ -832,7 +832,7 @@ public sealed class CompletionContextTests : ServiceTestBase
     public void Classify_InsideCreateFunctionParamAfterVar_ReturnsAfterDeclareType()
     {
         CompletionZone zone = CompletionContext.Classify(
-            "CREATE FUNCTION foo(@x ", 23);
+            "CREATE FUNCTION foo(x ", 23);
 
         Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
     }
@@ -841,7 +841,7 @@ public sealed class CompletionContextTests : ServiceTestBase
     public void Classify_InsideCreateProcedureParamAfterVar_ReturnsAfterDeclareType()
     {
         CompletionZone zone = CompletionContext.Classify(
-            "CREATE PROCEDURE foo(@x ", 24);
+            "CREATE PROCEDURE foo(x ", 24);
 
         Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
     }
@@ -850,9 +850,9 @@ public sealed class CompletionContextTests : ServiceTestBase
     public void Classify_InsideCreateFunctionAfterComma_SuppressesCompletions()
     {
         // After `, ` in a param list — the user is about to type a fresh
-        // `@var` name; we have nothing useful to suggest.
+        // `var` name; we have nothing useful to suggest.
         CompletionZone zone = CompletionContext.Classify(
-            "CREATE FUNCTION foo(@x INT32, ", 30);
+            "CREATE FUNCTION foo(x INT32, ", 30);
 
         Assert.Equal(CompletionZoneKind.AfterAs, zone.Kind);
     }
@@ -861,7 +861,7 @@ public sealed class CompletionContextTests : ServiceTestBase
     public void Classify_InsideCreateFunctionParamDefaultExpression_ReturnsProceduralExpression()
     {
         CompletionZone zone = CompletionContext.Classify(
-            "CREATE FUNCTION foo(@x INT32 = ", 31);
+            "CREATE FUNCTION foo(x INT32 = ", 31);
 
         Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
     }
@@ -892,7 +892,7 @@ public sealed class CompletionContextTests : ServiceTestBase
     {
         // CREATE FUNCTION foo(...) RETURNS | — type position.
         CompletionZone zone = CompletionContext.Classify(
-            "CREATE FUNCTION foo(@x INT32) RETURNS ", 38);
+            "CREATE FUNCTION foo(x INT32) RETURNS ", 38);
 
         Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
     }
@@ -914,70 +914,70 @@ public sealed class CompletionContextTests : ServiceTestBase
     public void Classify_AfterDeclare_ExposesVariableInScope()
     {
         CompletionZone zone = CompletionContext.Classify(
-            "DECLARE @xyz INT32 = 0\nIF ", 26);
+            "DECLARE xyz INT32 = 0\nIF ", 26);
 
         Assert.NotNull(zone.VariablesInScope);
-        Assert.Contains("@xyz", zone.VariablesInScope!);
+        Assert.Contains("xyz", zone.VariablesInScope!);
     }
 
     [Fact]
     public void Classify_VariablePrefix_MatchesPartiallyTypedVar()
     {
-        // `IF @x` — prefix should be `@x` so the popup filters to vars
-        // starting with `@x`. Variable kind tokens were previously
+        // `IF x` — prefix should be `x` so the popup filters to vars
+        // starting with `x`. Variable kind tokens were previously
         // ineligible for prefix extraction.
         CompletionZone zone = CompletionContext.Classify(
-            "DECLARE @xyz INT32 = 0\nIF @x", 28);
+            "DECLARE xyz INT32 = 0\nIF x", 28);
 
-        Assert.Equal("@x", zone.Prefix);
-        Assert.Contains("@xyz", zone.VariablesInScope!);
+        Assert.Equal("x", zone.Prefix);
+        Assert.Contains("xyz", zone.VariablesInScope!);
     }
 
     [Fact]
-    public void Classify_TrailingAtSign_TreatsAsVariableSigilPrefix()
+    public void Classify_BareIdentifierPrefix_OffersVariablesInProceduralExpression()
     {
-        // Bare `@` doesn't tokenize, but the user clearly wants variable
-        // suggestions. Prefix is `@` so completion filters to @-prefixed
-        // items, and the zone stays in the procedural-expression context
-        // (not StatementStart) so vars actually get offered.
+        // Post-PG-alignment variables are bare identifiers. Typing a bare
+        // identifier prefix inside a procedural expression context surfaces
+        // in-scope variables alongside columns / built-ins; the prefix
+        // filters the popup.
         CompletionZone zone = CompletionContext.Classify(
-            "DECLARE @xyz INT32 = 0\nIF @", 27);
+            "DECLARE xyz INT32 = 0\nIF x", 27);
 
-        Assert.Equal("@", zone.Prefix);
+        Assert.Equal("x", zone.Prefix);
         Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
-        Assert.Contains("@xyz", zone.VariablesInScope!);
+        Assert.Contains("xyz", zone.VariablesInScope!);
     }
 
     [Fact]
     public void Classify_ForLoopVariable_ExposedInScope()
     {
         CompletionZone zone = CompletionContext.Classify(
-            "FOR @i = 1 TO 10 BEGIN PRINT ", 29);
+            "FOR i = 1 TO 10 BEGIN PRINT ", 29);
 
         Assert.NotNull(zone.VariablesInScope);
-        Assert.Contains("@i", zone.VariablesInScope!);
+        Assert.Contains("i", zone.VariablesInScope!);
     }
 
     [Fact]
     public void Classify_CatchErrorVariable_ExposedInScope()
     {
         CompletionZone zone = CompletionContext.Classify(
-            "TRY SELECT 1 CATCH @err PRINT ", 30);
+            "TRY SELECT 1 CATCH err PRINT ", 30);
 
         Assert.NotNull(zone.VariablesInScope);
-        Assert.Contains("@err", zone.VariablesInScope!);
+        Assert.Contains("err", zone.VariablesInScope!);
     }
 
     [Fact]
     public void Classify_VariablesInScope_DeduplicatedAcrossDeclarations()
     {
         CompletionZone zone = CompletionContext.Classify(
-            "DECLARE @a INT32 = 0\nDECLARE @b INT32 = 0\nDECLARE @a INT32 = 1\nIF ", 65);
+            "DECLARE a INT32 = 0\nDECLARE b INT32 = 0\nDECLARE a INT32 = 1\nIF ", 65);
 
-        // Even though @a is "redeclared" in the source, the popup should
+        // Even though a is "redeclared" in the source, the popup should
         // surface it once — duplicates are confusing in completion UI.
-        Assert.Equal(2, zone.VariablesInScope!.Count(v => v == "@a") +
-                        zone.VariablesInScope!.Count(v => v == "@b"));
-        Assert.Single(zone.VariablesInScope!, v => v == "@a");
+        Assert.Equal(2, zone.VariablesInScope!.Count(v => v == "a") +
+                        zone.VariablesInScope!.Count(v => v == "b"));
+        Assert.Single(zone.VariablesInScope!, v => v == "a");
     }
 }

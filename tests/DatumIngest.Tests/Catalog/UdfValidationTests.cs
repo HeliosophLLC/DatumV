@@ -34,7 +34,7 @@ public class UdfValidationTests : ServiceTestBase
             columns: ["v"],
             new object?[] { null });
 
-        catalog.Plan("CREATE FUNCTION shout(@s STRING IS NOT NULL) AS upper(@s)");
+        catalog.Plan("CREATE FUNCTION shout(s STRING IS NOT NULL) AS upper(s)");
         IQueryPlan plan = catalog.Plan("SELECT shout(v) FROM data");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
@@ -44,7 +44,7 @@ public class UdfValidationTests : ServiceTestBase
         // but the user-visible message (on either layer) names the parameter
         // so the user can locate the offending arg.
         string fullMessage = ex.Message + (ex.InnerException?.Message ?? "");
-        Assert.Contains("@s", fullMessage);
+        Assert.Contains("s", fullMessage);
         Assert.Contains("must not be null", fullMessage, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -55,7 +55,7 @@ public class UdfValidationTests : ServiceTestBase
             columns: ["v"],
             new object?[] { "hello" });
 
-        catalog.Plan("CREATE FUNCTION shout(@s STRING IS NOT NULL) AS upper(@s)");
+        catalog.Plan("CREATE FUNCTION shout(s STRING IS NOT NULL) AS upper(s)");
         IQueryPlan plan = catalog.Plan("SELECT shout(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
@@ -72,7 +72,7 @@ public class UdfValidationTests : ServiceTestBase
             columns: ["v"],
             new object?[] { null });
 
-        catalog.Plan("CREATE FUNCTION shout(@s STRING) AS upper(@s)");
+        catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
         IQueryPlan plan = catalog.Plan("SELECT shout(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
@@ -89,7 +89,7 @@ public class UdfValidationTests : ServiceTestBase
             columns: ["v"],
             new object?[] { 3.7 });
 
-        catalog.Plan("CREATE FUNCTION truncated(@x FLOAT64) RETURNS INT32 AS @x");
+        catalog.Plan("CREATE FUNCTION truncated(x FLOAT64) RETURNS INT32 AS x");
         IQueryPlan plan = catalog.Plan("SELECT truncated(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
@@ -107,8 +107,8 @@ public class UdfValidationTests : ServiceTestBase
             new object?[] { "not a number" });
 
         catalog.Plan(
-            "CREATE FUNCTION parsed(@s STRING) RETURNS INT32 IS NOT NULL " +
-            "AS try_cast(@s, INT32)");
+            "CREATE FUNCTION parsed(s STRING) RETURNS INT32 IS NOT NULL " +
+            "AS try_cast(s, INT32)");
         IQueryPlan plan = catalog.Plan("SELECT parsed(s) FROM data");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
@@ -127,8 +127,8 @@ public class UdfValidationTests : ServiceTestBase
             new object?[] { "42" });
 
         catalog.Plan(
-            "CREATE FUNCTION parsed(@s STRING) RETURNS INT32 IS NOT NULL " +
-            "AS try_cast(@s, INT32)");
+            "CREATE FUNCTION parsed(s STRING) RETURNS INT32 IS NOT NULL " +
+            "AS try_cast(s, INT32)");
         IQueryPlan plan = catalog.Plan("SELECT parsed(s) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
@@ -148,7 +148,7 @@ public class UdfValidationTests : ServiceTestBase
             new object?[] { null },
             new object?[] { "third" });
 
-        catalog.Plan("CREATE FUNCTION shout(@s STRING IS NOT NULL) AS upper(@s)");
+        catalog.Plan("CREATE FUNCTION shout(s STRING IS NOT NULL) AS upper(s)");
         IQueryPlan plan = catalog.Plan("SELECT shout(v) FROM data");
 
         await Assert.ThrowsAnyAsync<Exception>(

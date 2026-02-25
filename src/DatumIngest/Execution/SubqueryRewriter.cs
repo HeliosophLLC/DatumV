@@ -321,7 +321,6 @@ internal static class SubqueryRewriter
             case ColumnReference:
             case ErrorExpression:
             case ParameterExpression:
-            case VariableExpression:
             case WindowFunctionCallExpression:
             // Semi-join subquery nodes are handled by SemiJoinRewriter before
             // this rewriter runs, so they pass through unchanged.

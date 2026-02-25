@@ -186,18 +186,6 @@ public static class SqlTokenizer
         select Unit.Value;
 
     /// <summary>
-    /// Recognizes a procedural variable reference: <c>@</c> followed by a C-style
-    /// identifier. The full span (including the <c>@</c> prefix) is captured as a
-    /// single token; the parser strips the prefix when building
-    /// <c>VariableExpression</c>. Mirrors <see cref="ParameterToken"/>.
-    /// </summary>
-    private static readonly TextParser<Unit> VariableToken =
-        from at in Character.EqualTo('@')
-        from first in Character.Letter.Or(Character.EqualTo('_'))
-        from rest in Character.LetterOrDigit.Or(Character.EqualTo('_')).IgnoreMany()
-        select Unit.Value;
-
-    /// <summary>
     /// Recognizes a SQL Server-style temporary-table identifier prefix: <c>#</c> followed
     /// by a C-style identifier. The full span (including <c>#</c>) is emitted as a single
     /// <see cref="SqlToken.Identifier"/> token, preserving the prefix in the table name.
@@ -228,6 +216,7 @@ public static class SqlTokenizer
             .Match(Span.EqualTo("<>"), SqlToken.NotEquals)
             .Match(Span.EqualTo("||"), SqlToken.DoublePipe)
             .Match(Span.EqualTo("@@"), SqlToken.AtAt)
+            .Match(Span.EqualTo(":="), SqlToken.ColonEquals)
 
             // Single-character symbols
             .Match(Character.EqualTo('*'), SqlToken.Star)
@@ -457,10 +446,6 @@ public static class SqlTokenizer
             // Named parameter placeholders ($name) — before numeric literals
             // and identifiers so the $ prefix is not treated as unexpected input.
             .Match(ParameterToken, SqlToken.Parameter)
-
-            // Procedural variable references (@name) — same precedence rule
-            // as parameters; the @ prefix would otherwise be unexpected.
-            .Match(VariableToken, SqlToken.Variable)
 
             // Temp-table identifier prefix (#name) — before generic identifiers
             // so the # is captured as part of the name rather than rejected.

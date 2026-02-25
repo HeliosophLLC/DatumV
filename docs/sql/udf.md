@@ -29,16 +29,16 @@ The two shapes coexist in the same catalog and are called identically from SQL.
 ```sql
 -- Macro UDF
 CREATE [OR REPLACE] [PURE] FUNCTION [IF NOT EXISTS] [schema.]name(
-    @param TYPE [IS NOT NULL] [= default] [, ...]
+    param TYPE [IS NOT NULL] [= default] [, ...]
 ) [RETURNS TYPE [IS NOT NULL]] AS expression;
 
 -- Procedural UDF
 CREATE [OR REPLACE] [PURE] FUNCTION [IF NOT EXISTS] [schema.]name(
-    @param TYPE [IS NOT NULL] [= default] [, ...]
+    param TYPE [IS NOT NULL] [= default] [, ...]
 ) RETURNS TYPE [IS NOT NULL]
 BEGIN
-    [DECLARE @var TYPE [= expr] ;]
-    [SET @var = expr ;]
+    [DECLARE var TYPE [= expr] ;]
+    [SET var = expr ;]
     [IF predicate statement [ELSE statement]]
     [WHILE predicate statement]
     RETURN expr
@@ -65,26 +65,26 @@ site by the planner. By the time the operator tree is built, no UDF call
 nodes remain — the substituted body is what the planner sees.
 
 ```sql
-CREATE FUNCTION shout(@name STRING) AS upper(@name);
+CREATE FUNCTION shout(name STRING) AS upper(name);
 
 SELECT shout(first_name) FROM users;
 -- equivalent to: SELECT upper(first_name) FROM users
 ```
 
-Parameters use the `@`-prefix at the declaration site and are referenced the
-same way inside the body. The inliner substitutes each `@param` with the
+Parameters are bare identifiers — no sigil — at both the declaration site
+and inside the body. The inliner substitutes each `param` with the
 corresponding call-site argument expression at plan time:
 
 ```sql
-CREATE FUNCTION add(@a INT32, @b INT32) AS @a + @b;
+CREATE FUNCTION add(a INT32, b INT32) AS a + b;
 
 SELECT add(price, tax) FROM orders;
 -- equivalent to: SELECT price + tax FROM orders
 ```
 
-A bare identifier in the body (no `@`-prefix, not a built-in function)
-resolves against the columns available at the call site — see
-[Scoping Rules](#scoping-rules).
+A bare identifier in the body that doesn't match a parameter resolves
+against the columns available at the call site — see [Scoping
+Rules](#scoping-rules).
 
 ### Execution Model
 
@@ -108,12 +108,12 @@ scope each time.
 ```sql
 CREATE FUNCTION twin() RETURNS STRING
 BEGIN
-    DECLARE @x FLOAT32 = random(0.0, 1.0);
-    RETURN concat(CAST(@x AS STRING), '/', CAST(@x AS STRING))
+    DECLARE x FLOAT32 = random(0.0, 1.0);
+    RETURN concat(CAST(x AS STRING), '/', CAST(x AS STRING))
 END
 ```
 
-`@x` is evaluated once when the DECLARE runs and reused both times it
+`x` is evaluated once when the DECLARE runs and reused both times it
 appears in the RETURN. A macro UDF would re-evaluate `random(0.0, 1.0)`
 at every reference, producing two different numbers.
 
@@ -123,8 +123,8 @@ Inside a `BEGIN … END` block:
 
 | Statement | Description |
 |---|---|
-| `DECLARE @var TYPE [= expr]` | Declares a local variable, optionally initialised. Without `= expr`, the variable is a typed NULL. |
-| `SET @var = expr` | Reassigns an existing variable. |
+| `DECLARE var TYPE [= expr]` | Declares a local variable, optionally initialised. Without `= expr`, the variable is a typed NULL. |
+| `SET var = expr` | Reassigns an existing variable. |
 | `IF predicate stmt [ELSE stmt]` | Conditional branch. Either arm can be a single statement or a `BEGIN … END` block. |
 | `WHILE predicate stmt` | Loops while the predicate holds. |
 | `BEGIN … END` | Block, primarily useful as the arm of `IF`/`WHILE`. |
@@ -161,16 +161,16 @@ macro UDF may be cheaper.
 A procedural body can call macro UDFs and other procedural UDFs:
 
 ```sql
-CREATE FUNCTION dbl(@x INT32) AS @x * 2;   -- macro
+CREATE FUNCTION dbl(x INT32) AS x * 2;   -- macro
 
-CREATE FUNCTION quad(@x INT32) RETURNS INT32
+CREATE FUNCTION quad(x INT32) RETURNS INT32
 BEGIN
-    RETURN dbl(dbl(@x))
+    RETURN dbl(dbl(x))
 END
 ```
 
 The reference to `dbl` is inlined into the body at registration time,
-so the runtime adapter sees `@x * 2` substituted in. Procedural-to-procedural
+so the runtime adapter sees `x * 2` substituted in. Procedural-to-procedural
 calls are resolved through the registry at evaluation time.
 
 ### Forward References
@@ -179,8 +179,8 @@ Two procedural UDFs can reference each other. Registering `a` before `b` is
 valid even when `a`'s body calls `b`:
 
 ```sql
-CREATE FUNCTION a(@x INT32) RETURNS INT32 BEGIN RETURN b(@x) END
-CREATE FUNCTION b(@x INT32) RETURNS INT32 BEGIN RETURN @x + 1 END
+CREATE FUNCTION a(x INT32) RETURNS INT32 BEGIN RETURN b(x) END
+CREATE FUNCTION b(x INT32) RETURNS INT32 BEGIN RETURN x + 1 END
 ```
 
 Both can be defined in either order. Actual mutual recursion (`a → b → a`)
@@ -192,7 +192,7 @@ is caught at runtime — see [Cycle Detection](#cycle-detection).
 yield the same result with no side effects.
 
 ```sql
-CREATE PURE FUNCTION square(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END
+CREATE PURE FUNCTION square(x INT32) RETURNS INT32 BEGIN RETURN x * x END
 ```
 
 The `PURE` modifier enables CSE to treat the UDF as a hoistable leaf.
@@ -231,8 +231,8 @@ redefinition is rejected. `CREATE OR ALTER FUNCTION` is accepted as a
 synonym for users coming from T-SQL.
 
 ```sql
-CREATE OR REPLACE FUNCTION shout(@name STRING) AS lower(@name);
-CREATE OR ALTER  FUNCTION shout(@name STRING) AS lower(@name);  -- same
+CREATE OR REPLACE FUNCTION shout(name STRING) AS lower(name);
+CREATE OR ALTER  FUNCTION shout(name STRING) AS lower(name);  -- same
 ```
 
 `OR REPLACE` can swap a name between the two body shapes. A procedural UDF
@@ -245,7 +245,7 @@ procedural gains one.
 exists. The original definition wins; no error is raised.
 
 ```sql
-CREATE FUNCTION IF NOT EXISTS shout(@name STRING) AS upper(@name);
+CREATE FUNCTION IF NOT EXISTS shout(name STRING) AS upper(name);
 ```
 
 ### IS NOT NULL on parameters
@@ -254,13 +254,13 @@ Append `IS NOT NULL` to a parameter type to require a non-null argument. A
 NULL at the call site throws an error naming the parameter.
 
 ```sql
-CREATE FUNCTION shout(@name STRING IS NOT NULL) AS upper(@name);
+CREATE FUNCTION shout(name STRING IS NOT NULL) AS upper(name);
 
 SELECT shout(first_name) FROM users WHERE first_name IS NOT NULL;
 -- works fine
 
 SELECT shout(NULL) FROM dual;
--- error: UDF 'public.shout' parameter '@name' must not be null.
+-- error: UDF 'public.shout' parameter 'name' must not be null.
 ```
 
 For procedural UDFs the null check fires before any body statement runs.
@@ -272,7 +272,7 @@ Omitted trailing arguments fall back to the default. Defaults must sit at
 the tail of the parameter list.
 
 ```sql
-CREATE FUNCTION add(@a INT32, @b INT32 = 5) AS @a + @b;
+CREATE FUNCTION add(a INT32, b INT32 = 5) AS a + b;
 
 SELECT add(2);     -- 7
 SELECT add(2, 10); -- 12
@@ -281,7 +281,7 @@ SELECT add(2, 10); -- 12
 `IS NOT NULL` precedes `=`:
 
 ```sql
-CREATE FUNCTION shout(@name STRING IS NOT NULL = 'world') AS upper(@name);
+CREATE FUNCTION shout(name STRING IS NOT NULL = 'world') AS upper(name);
 ```
 
 ### RETURNS
@@ -291,7 +291,7 @@ inliner wraps the body with an implicit `CAST`. For procedural UDFs it is
 required — the parser rejects a `BEGIN … END` body without it.
 
 ```sql
-CREATE FUNCTION truncated(@x FLOAT64) RETURNS INT32 AS @x;
+CREATE FUNCTION truncated(x FLOAT64) RETURNS INT32 AS x;
 
 SELECT truncated(3.7) FROM dual;  -- yields 3
 ```
@@ -299,8 +299,8 @@ SELECT truncated(3.7) FROM dual;  -- yields 3
 Add `IS NOT NULL` to the return type to assert the body never returns NULL:
 
 ```sql
-CREATE FUNCTION parsed(@s STRING) RETURNS INT32 IS NOT NULL
-AS try_cast(@s, INT32);
+CREATE FUNCTION parsed(s STRING) RETURNS INT32 IS NOT NULL
+AS try_cast(s, INT32);
 ```
 
 ### DROP FUNCTION
@@ -349,8 +349,8 @@ nested calls depth-first; for procedurals the runtime adapter dispatches
 through the function registry.
 
 ```sql
-CREATE FUNCTION first_token(@s STRING)  AS split(@s, ' ')[0];
-CREATE FUNCTION shout_first(@s STRING)  AS upper(first_token(@s));
+CREATE FUNCTION first_token(s STRING)  AS split(s, ' ')[0];
+CREATE FUNCTION shout_first(s STRING)  AS upper(first_token(s));
 
 SELECT shout_first(headline) FROM articles;
 -- expanded plan: upper(split(headline, ' ')[0])
@@ -361,10 +361,10 @@ read-only schema that hosts every registered ONNX / LLM model — calls
 look like any other schema-qualified function call:
 
 ```sql
-CREATE FUNCTION dnd_rewrite_caption(@caption STRING) AS
+CREATE FUNCTION dnd_rewrite_caption(caption STRING) AS
     models.llama31_8b(
         dnd_rewrite_prompt(
-            @caption,
+            caption,
             random_choice(array('gothic', 'folk horror', 'cosmic horror')),
             random_choice(array('possession', 'curse', 'time loop'))
         ),
@@ -388,13 +388,13 @@ body shape:
 
 ```sql
 -- Macro cycle (indirect, caught at call site)
-CREATE FUNCTION a(@x INT32) AS b(@x);
-CREATE FUNCTION b(@x INT32) AS a(@x);
+CREATE FUNCTION a(x INT32) AS b(x);
+CREATE FUNCTION b(x INT32) AS a(x);
 SELECT a(1) FROM dual;
 -- error: Cyclic UDF reference detected: a → b → a.
 
 -- Procedural cycle (direct, caught at runtime)
-CREATE FUNCTION recurse(@x INT32) RETURNS INT32 BEGIN RETURN recurse(@x) END
+CREATE FUNCTION recurse(x INT32) RETURNS INT32 BEGIN RETURN recurse(x) END
 SELECT recurse(1) FROM dual;
 -- error: Cyclic procedural UDF call detected: public.recurse.
 ```
@@ -403,13 +403,13 @@ SELECT recurse(1) FROM dual;
 
 UDF parameters and column references live in different namespaces:
 
-- **`@param`** — substituted with the call-site argument at inline time
+- **`param`** — substituted with the call-site argument at inline time
   (macros) or bound into a fresh scope at call time (procedurals).
 - **Bare identifiers** in a macro body — column references resolved against
   the columns available at the call site.
 
 ```sql
-CREATE FUNCTION boost(@score FLOAT32) AS @score * weight;
+CREATE FUNCTION boost(score FLOAT32) AS score * weight;
 --                                                 ^ resolves at call site
 
 SELECT boost(raw_score) FROM scores WHERE weight IS NOT NULL;
@@ -425,9 +425,9 @@ Lambda parameters bind bare identifiers and live in a separate namespace
 from UDF parameters:
 
 ```sql
-CREATE FUNCTION sum_doubled(@arr ARRAY) AS
-    array_reduce(@arr, (a, b) -> a + b, 0);
--- @arr is substituted at inline time; 'a' and 'b' are lambda-scoped.
+CREATE FUNCTION sum_doubled(arr ARRAY) AS
+    array_reduce(arr, (a, b) -> a + b, 0);
+-- arr is substituted at inline time; 'a' and 'b' are lambda-scoped.
 ```
 
 ## Introspection
@@ -447,7 +447,7 @@ Schema:
 | `schema`          | String  | no       | Schema the UDF lives in (e.g. `public`, `analytics`). |
 | `name`            | String  | no       | Unqualified UDF name. The full call site is `[schema.]name(...)`. |
 | `parameter_count` | Int32   | no       | Number of declared parameters. |
-| `parameters`      | String  | no       | Comma-separated `"@name TYPE [IS NOT NULL]"` rendition. |
+| `parameters`      | String  | no       | Comma-separated `"name TYPE [IS NOT NULL]"` rendition. |
 | `return_type`     | String  | yes      | The `RETURNS` annotation (with any `IS NOT NULL` suffix), or NULL when omitted. |
 | `body_kind`       | String  | no       | `"macro"` or `"procedural"`. |
 | `is_pure`         | Boolean | no       | Whether the UDF was declared `PURE`. |
@@ -487,7 +487,7 @@ schema alongside the body shape:
       "returnType": null,
       "returnIsNotNull": false,
       "body_kind": "macro",
-      "body": "upper(@name)"
+      "body": "upper(name)"
     },
     {
       "schema": "analytics",
@@ -497,7 +497,7 @@ schema alongside the body shape:
       "returnIsNotNull": false,
       "body_kind": "procedural",
       "is_pure": false,
-      "source_text": "CREATE FUNCTION analytics.twin() RETURNS STRING BEGIN\n    DECLARE @x FLOAT32 = random(0.0, 1.0);\n    RETURN concat(CAST(@x AS STRING), '/', CAST(@x AS STRING))\nEND"
+      "source_text": "CREATE FUNCTION analytics.twin() RETURNS STRING BEGIN\n    DECLARE x FLOAT32 = random(0.0, 1.0);\n    RETURN concat(CAST(x AS STRING), '/', CAST(x AS STRING))\nEND"
     }
   ]
 }
@@ -531,8 +531,8 @@ must be discarded and recreated.
   `models.X(...)`), and variable references are resolvable inside the body.
 - **No BREAK/CONTINUE in procedural bodies.** These are parsed but rejected
   at runtime; use `IF`/`RETURN` to short-circuit.
-- **Subquery bodies don't see macro parameters.** A `@param` inside
-  `(SELECT ... WHERE col = @param)` in a macro body survives inlining as a
+- **Subquery bodies don't see macro parameters.** A `param` inside
+  `(SELECT ... WHERE col = param)` in a macro body survives inlining as a
   `VariableExpression` and is resolved at evaluation time against the
   procedural variable scope (if any). Pass arguments through the outer
   expression instead.

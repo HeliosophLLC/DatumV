@@ -34,7 +34,7 @@ public class ProcedureDdlParsingTests : ServiceTestBase
     public void Create_SingleParam_ParsesAtPrefixAndType()
     {
         CreateProcedureStatement create = Parse<CreateProcedureStatement>(
-            "CREATE PROCEDURE inc(@x INT32) AS BEGIN SET @x = @x + 1 END");
+            "CREATE PROCEDURE inc(x INT32) AS BEGIN SET x = x + 1 END");
 
         Assert.Single(create.Parameters);
         Assert.Equal("x", create.Parameters[0].Name);
@@ -46,8 +46,8 @@ public class ProcedureDdlParsingTests : ServiceTestBase
     public void Create_MultipleParams_AllCaptured()
     {
         CreateProcedureStatement create = Parse<CreateProcedureStatement>(
-            "CREATE PROCEDURE add3(@a INT32, @b INT32, @c INT32) AS BEGIN " +
-            "  DECLARE @sum INT32 = @a + @b + @c " +
+            "CREATE PROCEDURE add3(a INT32, b INT32, c INT32) AS BEGIN " +
+            "  DECLARE sum INT32 = a + b + c " +
             "END");
 
         Assert.Equal(3, create.Parameters.Count);
@@ -58,8 +58,8 @@ public class ProcedureDdlParsingTests : ServiceTestBase
     public void Create_ParamWithIsNotNull_SetsFlag()
     {
         CreateProcedureStatement create = Parse<CreateProcedureStatement>(
-            "CREATE PROCEDURE need_name(@name STRING IS NOT NULL) AS BEGIN " +
-            "  SELECT @name " +
+            "CREATE PROCEDURE need_name(name STRING IS NOT NULL) AS BEGIN " +
+            "  SELECT name " +
             "END");
 
         Assert.True(create.Parameters[0].IsNotNull);
@@ -97,8 +97,8 @@ public class ProcedureDdlParsingTests : ServiceTestBase
     public void Create_BodyContainsControlFlow_PreservesStructure()
     {
         CreateProcedureStatement create = Parse<CreateProcedureStatement>(
-            "CREATE PROCEDURE classify(@score FLOAT64) AS BEGIN " +
-            "  IF @score > 0.5 " +
+            "CREATE PROCEDURE classify(score FLOAT64) AS BEGIN " +
+            "  IF score > 0.5 " +
             "    SELECT 'high' " +
             "  ELSE " +
             "    SELECT 'low' " +

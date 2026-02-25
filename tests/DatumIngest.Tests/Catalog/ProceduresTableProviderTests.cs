@@ -97,13 +97,13 @@ public class ProceduresTableProviderTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE foo(@a INT32, @b STRING IS NOT NULL) AS BEGIN SELECT @a, @b END");
+            "CREATE PROCEDURE foo(a INT32, b STRING IS NOT NULL) AS BEGIN SELECT a, b END");
 
         ProceduresTableProvider provider = (ProceduresTableProvider)catalog[ProceduresTableProvider.TableName];
         List<SystemProcedureRow> rows = await ScanProviderAsync(provider);
 
         Assert.Equal(2, rows[0].ParameterCount);
-        Assert.Equal("@a INT32, @b STRING IS NOT NULL", rows[0].Parameters, ignoreCase: true);
+        Assert.Equal("a INT32, b STRING IS NOT NULL", rows[0].Parameters, ignoreCase: true);
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public class ProceduresTableProviderTests : ServiceTestBase
     {
         // The user's exact input — formatting and all — survives to the
         // introspection table.
-        const string sql = "CREATE PROCEDURE multi_line(@x INT32) AS BEGIN\n  SET @x = @x + 1\nEND";
+        const string sql = "CREATE PROCEDURE multi_line(x INT32) AS BEGIN\n  SET x = x + 1\nEND";
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(sql);
 

@@ -165,10 +165,10 @@ public class ProcedureIntegrationTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
             "CREATE PROCEDURE setone() AS BEGIN " +
-            "  DECLARE @x INT32 = 7 " +
+            "  DECLARE x INT32 = 7 " +
             "END");
 
-        // The procedure's @x lives in its own BatchContext and is gone after
+        // The procedure's x lives in its own BatchContext and is gone after
         // the procedure ends — so we can't observe it via FinalBindings.
         // We assert that the call doesn't throw and the procedure is
         // registered & callable.
@@ -188,16 +188,16 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // procedure's frame. The procedure body runs against its own context.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE assign_outer(@v INT64) AS BEGIN " +
-            "  DECLARE @local INT64 = @v + 100 " +
+            "CREATE PROCEDURE assign_outer(v INT64) AS BEGIN " +
+            "  DECLARE local INT64 = v + 100 " +
             "END");
 
         BatchResult result = await RunBatchAsync(
-            "DECLARE @answer INT64 = 0; " +
+            "DECLARE answer INT64 = 0; " +
             "CALL assign_outer(5)",
             catalog);
 
-        // @answer untouched by the procedure (procedure has its own scope).
+        // answer untouched by the procedure (procedure has its own scope).
         Assert.Equal(0L, Convert.ToInt64(result.FinalBindings["answer"]));
     }
 
@@ -205,21 +205,21 @@ public class ProcedureIntegrationTests : ServiceTestBase
     public async Task ExecProc_ProcedureSeeMutationFromCaller_ViaArgsOnly()
     {
         // Args evaluate in caller scope — the procedure receives the
-        // computed value of @counter, not a reference. Mutations inside
+        // computed value of counter, not a reference. Mutations inside
         // the procedure cannot leak out.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE shadow(@v INT64) AS BEGIN " +
-            "  SET @v = 999 " +
+            "CREATE PROCEDURE shadow(v INT64) AS BEGIN " +
+            "  SET v = 999 " +
             "END");
 
         BatchResult result = await RunBatchAsync(
-            "DECLARE @counter INT64 = 5; " +
-            "CALL shadow(@counter)",
+            "DECLARE counter INT64 = 5; " +
+            "CALL shadow(counter)",
             catalog);
 
-        // @counter is 5 still — the procedure's SET on its local @v
-        // doesn't touch the caller's @counter.
+        // counter is 5 still — the procedure's SET on its local v
+        // doesn't touch the caller's counter.
         Assert.Equal(5L, Convert.ToInt64(result.FinalBindings["counter"]));
     }
 
@@ -228,8 +228,8 @@ public class ProcedureIntegrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE need_two(@a INT32, @b INT32) AS BEGIN " +
-            "  DECLARE @sum INT32 = @a + @b " +
+            "CREATE PROCEDURE need_two(a INT32, b INT32) AS BEGIN " +
+            "  DECLARE sum INT32 = a + b " +
             "END");
 
         await Assert.ThrowsAnyAsync<InvalidOperationException>(
@@ -255,17 +255,17 @@ public class ProcedureIntegrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE need_name(@name STRING IS NOT NULL) AS BEGIN " +
-            "  SELECT @name " +
+            "CREATE PROCEDURE need_name(name STRING IS NOT NULL) AS BEGIN " +
+            "  SELECT name " +
             "END");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => RunBatchAsync(
-                "DECLARE @n STRING = NULL; CALL need_name(@n)",
+                "DECLARE n STRING = NULL; CALL need_name(n)",
                 catalog));
 
         string fullMessage = ex.Message + (ex.InnerException?.Message ?? "");
-        Assert.Contains("@name", fullMessage);
+        Assert.Contains("name", fullMessage);
         Assert.Contains("must not be null", fullMessage, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -273,16 +273,16 @@ public class ProcedureIntegrationTests : ServiceTestBase
     public async Task ExecProc_ArgsEvaluateInCallerScope()
     {
         // The argument expression is evaluated against the caller's
-        // BatchContext, so it can reference the caller's @vars.
+        // BatchContext, so it can reference the caller's vars.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE noop(@v INT64) AS BEGIN " +
-            "  DECLARE @x INT64 = @v " +
+            "CREATE PROCEDURE noop(v INT64) AS BEGIN " +
+            "  DECLARE x INT64 = v " +
             "END");
 
         BatchResult result = await RunBatchAsync(
-            "DECLARE @input INT64 = 42; " +
-            "CALL noop(@input + 8)",
+            "DECLARE input INT64 = 42; " +
+            "CALL noop(input + 8)",
             catalog);
 
         Assert.Equal(42L, Convert.ToInt64(result.FinalBindings["input"]));
@@ -326,12 +326,12 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // Three procedures chained linearly — well under the cap. Final
         // depth is 3 inside `c`; rolls back to 0 when the batch ends.
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE PROCEDURE c() AS BEGIN DECLARE @inside INT64 = 99 END");
+        catalog.Plan("CREATE PROCEDURE c() AS BEGIN DECLARE inside INT64 = 99 END");
         catalog.Plan("CREATE PROCEDURE b() AS BEGIN CALL c() END");
         catalog.Plan("CREATE PROCEDURE a() AS BEGIN CALL b() END");
 
         BatchResult result = await RunBatchAsync(
-            "DECLARE @x INT64 = 1; CALL a()",
+            "DECLARE x INT64 = 1; CALL a()",
             catalog);
 
         // Caller's variable should still be bound — proves the chain
@@ -349,7 +349,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan(
                 "CREATE PROCEDURE outer_proc() AS BEGIN " +
-                "  CREATE FUNCTION inner_fn(@x INT32) AS @x + 1 " +
+                "  CREATE FUNCTION inner_fn(x INT32) AS x + 1 " +
                 "END"));
         Assert.Contains("CREATE FUNCTION", ex.Message);
         Assert.Contains("inner_fn", ex.Message);
@@ -373,7 +373,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
     public void CreateProcedure_NestedDropFunction_Throws()
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION victim(@x INT32) AS @x");
+        catalog.Plan("CREATE FUNCTION victim(x INT32) AS x");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan(
@@ -409,11 +409,11 @@ public class ProcedureIntegrationTests : ServiceTestBase
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan(
                 "CREATE PROCEDURE outer_proc() AS BEGIN " +
-                "  DECLARE @i INT32 = 0 " +
-                "  WHILE @i < 1 BEGIN " +
-                "    IF @i = 0 " +
+                "  DECLARE i INT32 = 0 " +
+                "  WHILE i < 1 BEGIN " +
+                "    IF i = 0 " +
                 "      DROP PROCEDURE nonexistent " +
-                "    SET @i = @i + 1 " +
+                "    SET i = i + 1 " +
                 "  END " +
                 "END"));
         Assert.Contains("DROP PROCEDURE", ex.Message);
@@ -428,7 +428,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan(
-                "CREATE PROCEDURE foo(@a INT32, @b INT32 = 0, @c INT32) AS BEGIN SELECT 1 END"));
+                "CREATE PROCEDURE foo(a INT32, b INT32 = 0, c INT32) AS BEGIN SELECT 1 END"));
         Assert.Contains("contiguous", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("c", ex.Message);
     }
@@ -438,17 +438,17 @@ public class ProcedureIntegrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE add_default(@a INT64, @b INT64 = 100) AS BEGIN " +
-            "  DECLARE @sum INT64 = @a + @b " +
+            "CREATE PROCEDURE add_default(a INT64, b INT64 = 100) AS BEGIN " +
+            "  DECLARE sum INT64 = a + b " +
             "END");
 
-        // Caller provides only @a → @b takes its default.
-        // Procedure's @sum can't escape, so verify via a caller-side var
+        // Caller provides only a → b takes its default.
+        // Procedure's sum can't escape, so verify via a caller-side var
         // that the proc completed without an arity error.
         BatchResult result = await RunBatchAsync(
-            "DECLARE @ok BOOLEAN = FALSE; " +
+            "DECLARE ok BOOLEAN = FALSE; " +
             "CALL add_default(7); " +
-            "SET @ok = TRUE",
+            "SET ok = TRUE",
             catalog);
 
         Assert.Equal(true, result.FinalBindings["ok"]);
@@ -457,19 +457,19 @@ public class ProcedureIntegrationTests : ServiceTestBase
     [Fact]
     public async Task ExecProc_DefaultEvaluatedInCallerScope()
     {
-        // Default expressions can reference caller @vars — they evaluate
+        // Default expressions can reference caller vars — they evaluate
         // in the same scope as user-supplied arguments.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE record(@n INT64 = 0) AS BEGIN " +
-            "  DECLARE @captured INT64 = @n " +
+            "CREATE PROCEDURE record(n INT64 = 0) AS BEGIN " +
+            "  DECLARE captured INT64 = n " +
             "END");
 
         BatchResult result = await RunBatchAsync(
-            "DECLARE @done BOOLEAN = FALSE; " +
+            "DECLARE done BOOLEAN = FALSE; " +
             "CALL record(); " +    // omit → default = 0
             "CALL record(42); " +   // explicit
-            "SET @done = TRUE",
+            "SET done = TRUE",
             catalog);
 
         Assert.Equal(true, result.FinalBindings["done"]);
@@ -480,7 +480,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE need_one(@a INT64, @b INT64 = 0) AS BEGIN SELECT @a END");
+            "CREATE PROCEDURE need_one(a INT64, b INT64 = 0) AS BEGIN SELECT a END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunBatchAsync("CALL need_one()", catalog));
@@ -492,7 +492,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE one_or_two(@a INT64, @b INT64 = 0) AS BEGIN SELECT @a END");
+            "CREATE PROCEDURE one_or_two(a INT64, b INT64 = 0) AS BEGIN SELECT a END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunBatchAsync("CALL one_or_two(1, 2, 3)", catalog));
@@ -506,7 +506,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // should still fire when the caller omits the argument.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE need_one(@a INT64 IS NOT NULL = NULL) AS BEGIN SELECT @a END");
+            "CREATE PROCEDURE need_one(a INT64 IS NOT NULL = NULL) AS BEGIN SELECT a END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunBatchAsync("CALL need_one()", catalog));

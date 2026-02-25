@@ -79,7 +79,7 @@ public sealed class VariableScopeTests
     [Fact]
     public void Declare_InInner_ShadowsOuter()
     {
-        // Outer @x = 1; inner @x = 2 — inner shadows outer for the lifetime
+        // Outer x = 1; inner x = 2 — inner shadows outer for the lifetime
         // of the inner block. Both bindings exist; the lookup returns the
         // inner one because TryGet walks innermost-first.
         VariableScope scope = new();
@@ -138,7 +138,7 @@ public sealed class VariableScopeTests
     [Fact]
     public void NameLookup_IsCaseInsensitive()
     {
-        // @X and @x resolve to the same binding — matches how the codebase
+        // X and x resolve to the same binding — matches how the codebase
         // handles UDF names and SQL identifiers generally.
         VariableScope scope = new();
         scope.Declare("Counter", DataValue.FromInt32(7));

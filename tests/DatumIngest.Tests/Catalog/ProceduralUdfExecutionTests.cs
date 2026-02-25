@@ -35,14 +35,14 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
     public async Task SingleReturn_EvaluatesBodyExpression()
     {
         // Smallest legal procedural UDF: one statement, RETURN expr.
-        // The adapter should dispatch the call, evaluate @x * @x against
+        // The adapter should dispatch the call, evaluate x * x against
         // the parameter binding, and return Int32.
         TableCatalog catalog = CreateCatalog("data",
             columns: ["v"],
             new object?[] { 5 });
 
         catalog.Plan(
-            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+            "CREATE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END");
         IQueryPlan plan = catalog.Plan("SELECT sq(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
@@ -56,15 +56,15 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
     {
         // DECLARE evaluates once and the bound value is reused inside RETURN.
         // Without per-call evaluation semantics this would fail (the body
-        // would only resolve @y the same way macro substitution would).
+        // would only resolve y the same way macro substitution would).
         TableCatalog catalog = CreateCatalog("data",
             columns: ["v"],
             new object?[] { 3 });
 
         catalog.Plan(
-            "CREATE FUNCTION step(@x INT32) RETURNS INT32 BEGIN " +
-                "DECLARE @y INT32 = @x + 1; " +
-                "RETURN @y * 2 " +
+            "CREATE FUNCTION step(x INT32) RETURNS INT32 BEGIN " +
+                "DECLARE y INT32 = x + 1; " +
+                "RETURN y * 2 " +
             "END");
         IQueryPlan plan = catalog.Plan("SELECT step(v) FROM data");
 
@@ -80,8 +80,8 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         // The whole motivation for procedural UDFs: a DECLARE whose RHS is
         // nondeterministic should roll *once* per invocation and reuse the
         // rolled value everywhere it's referenced.
-        // RETURN concat(cast(@x AS STRING), '/', cast(@x AS STRING)) — the
-        // two halves must match because @x was rolled once. A macro UDF
+        // RETURN concat(cast(x AS STRING), '/', cast(x AS STRING)) — the
+        // two halves must match because x was rolled once. A macro UDF
         // would re-roll on every reference. Strings are read against the
         // batch's arena while it's still live so non-inline payloads don't
         // dangle.
@@ -91,8 +91,8 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
 
         catalog.Plan(
             "CREATE FUNCTION twin() RETURNS STRING BEGIN " +
-                "DECLARE @x FLOAT32 = random(0.0, 1.0); " +
-                "RETURN concat(CAST(@x AS STRING), '/', CAST(@x AS STRING)) " +
+                "DECLARE x FLOAT32 = random(0.0, 1.0); " +
+                "RETURN concat(CAST(x AS STRING), '/', CAST(x AS STRING)) " +
             "END");
         IQueryPlan plan = catalog.Plan("SELECT twin() FROM data");
 
@@ -125,8 +125,8 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             new object?[] { 4 });
 
         catalog.Plan(
-            "CREATE FUNCTION abs2(@x INT32) RETURNS INT32 BEGIN " +
-                "IF @x < 0 RETURN -@x ELSE RETURN @x " +
+            "CREATE FUNCTION abs2(x INT32) RETURNS INT32 BEGIN " +
+                "IF x < 0 RETURN -x ELSE RETURN x " +
             "END");
         IQueryPlan plan = catalog.Plan("SELECT abs2(v) FROM data");
 
@@ -149,8 +149,8 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             new object?[] { 9 });
 
         catalog.Plan(
-            "CREATE FUNCTION half(@x INT32) RETURNS INT32 BEGIN " +
-                "RETURN @x / 2.0 " +
+            "CREATE FUNCTION half(x INT32) RETURNS INT32 BEGIN " +
+                "RETURN x / 2.0 " +
             "END");
         IQueryPlan plan = catalog.Plan("SELECT half(v) FROM data");
 
@@ -169,13 +169,13 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             new object?[] { null });
 
         catalog.Plan(
-            "CREATE FUNCTION sq(@x INT32 IS NOT NULL) RETURNS INT32 BEGIN RETURN @x * @x END");
+            "CREATE FUNCTION sq(x INT32 IS NOT NULL) RETURNS INT32 BEGIN RETURN x * x END");
         IQueryPlan plan = catalog.Plan("SELECT sq(v) FROM data");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => CollectFirstColumnAsync(plan));
         string fullMessage = ex.Message + (ex.InnerException?.Message ?? "");
-        Assert.Contains("@x", fullMessage);
+        Assert.Contains("x", fullMessage);
         Assert.Contains("must not be null", fullMessage, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -192,10 +192,10 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             columns: ["v"],
             new object?[] { 3 });
 
-        catalog.Plan("CREATE FUNCTION dbl(@x INT32) AS @x * 2");
+        catalog.Plan("CREATE FUNCTION dbl(x INT32) AS x * 2");
         catalog.Plan(
-            "CREATE FUNCTION quad(@x INT32) RETURNS INT32 BEGIN " +
-                "RETURN dbl(dbl(@x)) " +
+            "CREATE FUNCTION quad(x INT32) RETURNS INT32 BEGIN " +
+                "RETURN dbl(dbl(x)) " +
             "END");
         IQueryPlan plan = catalog.Plan("SELECT quad(v) FROM data");
 
@@ -213,10 +213,10 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             new object?[] { 4 });
 
         catalog.Plan(
-            "CREATE FUNCTION inc(@x INT32) RETURNS INT32 BEGIN RETURN @x + 1 END");
+            "CREATE FUNCTION inc(x INT32) RETURNS INT32 BEGIN RETURN x + 1 END");
         catalog.Plan(
-            "CREATE FUNCTION inc2(@x INT32) RETURNS INT32 BEGIN " +
-                "RETURN inc(inc(@x)) " +
+            "CREATE FUNCTION inc2(x INT32) RETURNS INT32 BEGIN " +
+                "RETURN inc(inc(x)) " +
             "END");
         IQueryPlan plan = catalog.Plan("SELECT inc2(v) FROM data");
 
@@ -237,8 +237,8 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             new object?[] { 1 });
 
         catalog.Plan(
-            "CREATE FUNCTION recurse(@x INT32) RETURNS INT32 BEGIN " +
-                "RETURN recurse(@x) " +
+            "CREATE FUNCTION recurse(x INT32) RETURNS INT32 BEGIN " +
+                "RETURN recurse(x) " +
             "END");
         IQueryPlan plan = catalog.Plan("SELECT recurse(v) FROM data");
 
@@ -260,9 +260,9 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             new object?[] { 1 });
 
         catalog.Plan(
-            "CREATE FUNCTION a(@x INT32) RETURNS INT32 BEGIN RETURN b(@x) END");
+            "CREATE FUNCTION a(x INT32) RETURNS INT32 BEGIN RETURN b(x) END");
         catalog.Plan(
-            "CREATE FUNCTION b(@x INT32) RETURNS INT32 BEGIN RETURN a(@x) END");
+            "CREATE FUNCTION b(x INT32) RETURNS INT32 BEGIN RETURN a(x) END");
         IQueryPlan plan = catalog.Plan("SELECT a(v) FROM data");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
@@ -283,7 +283,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             new object?[] { 1 });
 
         catalog.Plan(
-            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+            "CREATE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END");
         catalog.Plan("DROP FUNCTION sq");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(() =>
@@ -309,9 +309,9 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             new object?[] { 5 });
 
         catalog.Plan(
-            "CREATE FUNCTION transform(@x INT32) RETURNS INT32 BEGIN RETURN @x + 1 END");
+            "CREATE FUNCTION transform(x INT32) RETURNS INT32 BEGIN RETURN x + 1 END");
         catalog.Plan(
-            "CREATE OR REPLACE FUNCTION transform(@x INT32) RETURNS INT32 BEGIN RETURN @x * 100 END");
+            "CREATE OR REPLACE FUNCTION transform(x INT32) RETURNS INT32 BEGIN RETURN x * 100 END");
         IQueryPlan plan = catalog.Plan("SELECT transform(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
@@ -331,9 +331,9 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             columns: ["v"],
             new object?[] { 5 });
 
-        catalog.Plan("CREATE FUNCTION transform(@x INT32) AS @x + 1");
+        catalog.Plan("CREATE FUNCTION transform(x INT32) AS x + 1");
         catalog.Plan(
-            "CREATE OR REPLACE FUNCTION transform(@x INT32) RETURNS INT32 BEGIN RETURN @x * 100 END");
+            "CREATE OR REPLACE FUNCTION transform(x INT32) RETURNS INT32 BEGIN RETURN x * 100 END");
         IQueryPlan plan = catalog.Plan("SELECT transform(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
@@ -352,9 +352,9 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             new object?[] { 5 });
 
         catalog.Plan(
-            "CREATE FUNCTION transform(@x INT32) RETURNS INT32 BEGIN RETURN @x + 1 END");
+            "CREATE FUNCTION transform(x INT32) RETURNS INT32 BEGIN RETURN x + 1 END");
         catalog.Plan(
-            "CREATE OR REPLACE FUNCTION transform(@x INT32) AS @x * 100");
+            "CREATE OR REPLACE FUNCTION transform(x INT32) AS x * 100");
         IQueryPlan plan = catalog.Plan("SELECT transform(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
@@ -393,8 +393,8 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         catalog.Models = BuildEchoCatalog();
 
         catalog.Plan(
-            "CREATE FUNCTION wrap(@s STRING) RETURNS STRING BEGIN " +
-                "RETURN models.echo(@s) " +
+            "CREATE FUNCTION wrap(s STRING) RETURNS STRING BEGIN " +
+                "RETURN models.echo(s) " +
             "END");
         IQueryPlan plan = catalog.Plan("SELECT wrap(caption) FROM data");
 
@@ -425,9 +425,9 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         catalog.Models = BuildEchoCatalog();
 
         catalog.Plan(
-            "CREATE FUNCTION rewrite(@caption STRING) RETURNS STRING BEGIN " +
-                "DECLARE @prompt STRING = concat('rewrite: ', @caption); " +
-                "RETURN models.echo(@prompt) " +
+            "CREATE FUNCTION rewrite(caption STRING) RETURNS STRING BEGIN " +
+                "DECLARE prompt STRING = concat('rewrite: ', caption); " +
+                "RETURN models.echo(prompt) " +
             "END");
         IQueryPlan plan = catalog.Plan("SELECT rewrite(caption) FROM data");
 

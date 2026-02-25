@@ -5,7 +5,7 @@ namespace DatumIngest.Tests.Parsing;
 
 /// <summary>
 /// AST-shape tests for the procedural-flow grammar (BEGIN/END, IF/ELSE,
-/// WHILE, FOR/IN, FOR ... TO, DECLARE, SET, and the <c>@var</c> expression).
+/// WHILE, FOR/IN, FOR ... TO, DECLARE, SET, and the <c>var</c> expression).
 /// Slice 2 — parsing only; no execution semantics yet.
 /// </summary>
 public class ProceduralParsingTests : ServiceTestBase
@@ -16,29 +16,36 @@ public class ProceduralParsingTests : ServiceTestBase
         return Assert.IsType<T>(stmt);
     }
 
-    // ───────────────────── @var expression ─────────────────────
+    // ───────────────────── var expression ─────────────────────
 
     [Fact]
-    public void VariableReference_StripsAtPrefixIntoBareName()
+    public void BareVariableReference_ParsesAsUnqualifiedColumnReference()
     {
-        // @var inside a SELECT projection becomes a VariableExpression with
-        // the leading @ stripped — the AST stores the bare identifier.
-        QueryExpression q = SqlParser.Parse("SELECT @count");
+        // A bare identifier in expression position parses as a
+        // ColumnReference. The evaluator's variable-first precedence
+        // resolves it against VariableScope before the row schema, so
+        // procedural-batch usage like `SELECT count` reads the declared
+        // variable, while non-batch usage reads the row's column.
+        QueryExpression q = SqlParser.Parse("SELECT count");
         SelectQueryExpression sqe = Assert.IsType<SelectQueryExpression>(q);
-        VariableExpression var = Assert.IsType<VariableExpression>(
+        ColumnReference col = Assert.IsType<ColumnReference>(
             sqe.Statement.Columns[0].Expression);
-        Assert.Equal("count", var.Name);
+        Assert.Null(col.TableName);
+        Assert.Equal("count", col.ColumnName);
     }
 
     [Fact]
-    public void VariableReference_DistinctFromParameterReference()
+    public void BareReference_DistinctFromParameterReference()
     {
-        QueryExpression qVar = SqlParser.Parse("SELECT @x");
+        // Variables / columns share the ColumnReference AST node; parameters
+        // ($-prefix) get their own ParameterExpression node and bind at a
+        // separate stage.
+        QueryExpression qVar = SqlParser.Parse("SELECT x");
         QueryExpression qParam = SqlParser.Parse("SELECT $x");
         SelectQueryExpression sqVar = Assert.IsType<SelectQueryExpression>(qVar);
         SelectQueryExpression sqParam = Assert.IsType<SelectQueryExpression>(qParam);
 
-        Assert.IsType<VariableExpression>(sqVar.Statement.Columns[0].Expression);
+        Assert.IsType<ColumnReference>(sqVar.Statement.Columns[0].Expression);
         Assert.IsType<ParameterExpression>(sqParam.Statement.Columns[0].Expression);
     }
 
@@ -47,7 +54,7 @@ public class ProceduralParsingTests : ServiceTestBase
     [Fact]
     public void Declare_TypedNoInitializer_CapturesNameAndType()
     {
-        DeclareStatement decl = Parse<DeclareStatement>("DECLARE @count INT32");
+        DeclareStatement decl = Parse<DeclareStatement>("DECLARE count INT32");
         Assert.Equal("count", decl.VariableName);
         Assert.Equal("INT32", decl.TypeName, ignoreCase: true);
         Assert.Null(decl.Initializer);
@@ -56,7 +63,7 @@ public class ProceduralParsingTests : ServiceTestBase
     [Fact]
     public void Declare_TypedWithLiteralInitializer_CapturesBoth()
     {
-        DeclareStatement decl = Parse<DeclareStatement>("DECLARE @n INT32 = 5");
+        DeclareStatement decl = Parse<DeclareStatement>("DECLARE n INT32 = 5");
         Assert.Equal("n", decl.VariableName);
         Assert.Equal("INT32", decl.TypeName, ignoreCase: true);
         LiteralExpression lit = Assert.IsType<LiteralExpression>(decl.Initializer);
@@ -66,7 +73,7 @@ public class ProceduralParsingTests : ServiceTestBase
     [Fact]
     public void Declare_StringTypeWithStringLiteral_Works()
     {
-        DeclareStatement decl = Parse<DeclareStatement>("DECLARE @greeting STRING = 'hi'");
+        DeclareStatement decl = Parse<DeclareStatement>("DECLARE greeting STRING = 'hi'");
         Assert.Equal("greeting", decl.VariableName);
         Assert.Equal("STRING", decl.TypeName, ignoreCase: true);
         LiteralExpression lit = Assert.IsType<LiteralExpression>(decl.Initializer);
@@ -76,7 +83,7 @@ public class ProceduralParsingTests : ServiceTestBase
     [Fact]
     public void Declare_AngleBracketArrayType_CanonicalisesToArrayWrapper()
     {
-        DeclareStatement decl = Parse<DeclareStatement>("DECLARE @players Array<STRING>");
+        DeclareStatement decl = Parse<DeclareStatement>("DECLARE players Array<STRING>");
         Assert.Equal("players", decl.VariableName);
         Assert.Equal("Array<STRING>", decl.TypeName);
         Assert.Null(decl.Initializer);
@@ -85,7 +92,7 @@ public class ProceduralParsingTests : ServiceTestBase
     [Fact]
     public void Declare_PostfixBracketSugar_DesugarsToArrayWrapper()
     {
-        DeclareStatement decl = Parse<DeclareStatement>("DECLARE @scores FLOAT32[]");
+        DeclareStatement decl = Parse<DeclareStatement>("DECLARE scores FLOAT32[]");
         Assert.Equal("scores", decl.VariableName);
         // Both syntaxes share one canonical form so downstream consumers
         // (the resolver, system_udfs, the catalog file) see one shape.
@@ -97,7 +104,7 @@ public class ProceduralParsingTests : ServiceTestBase
     [Fact]
     public void Set_LiteralAssignment_CapturesNameAndValue()
     {
-        SetStatement set = Parse<SetStatement>("SET @x = 42");
+        SetStatement set = Parse<SetStatement>("SET x = 42");
         Assert.Equal("x", set.VariableName);
         LiteralExpression lit = Assert.IsType<LiteralExpression>(set.Value);
         Assert.Equal(42L, Convert.ToInt64(lit.Value!));
@@ -107,11 +114,11 @@ public class ProceduralParsingTests : ServiceTestBase
     public void Set_ExpressionAssignment_BinaryExpressionPreserved()
     {
         // Confirms the RHS is parsed as a full expression, not just an atom.
-        SetStatement set = Parse<SetStatement>("SET @x = @x + 1");
+        SetStatement set = Parse<SetStatement>("SET x = x + 1");
         Assert.Equal("x", set.VariableName);
         BinaryExpression bin = Assert.IsType<BinaryExpression>(set.Value);
-        VariableExpression lhs = Assert.IsType<VariableExpression>(bin.Left);
-        Assert.Equal("x", lhs.Name);
+        ColumnReference lhs = Assert.IsType<ColumnReference>(bin.Left);
+        Assert.Equal("x", lhs.ColumnName);
     }
 
     // ───────────────────── BEGIN/END block ─────────────────────
@@ -128,7 +135,7 @@ public class ProceduralParsingTests : ServiceTestBase
     public void Block_MultipleStatements_PreservesOrder()
     {
         BlockStatement block = Parse<BlockStatement>(
-            "BEGIN DECLARE @x INT32 = 1; SET @x = 2; SELECT @x END");
+            "BEGIN DECLARE x INT32 = 1; SET x = 2; SELECT x END");
         Assert.Equal(3, block.Statements.Count);
         Assert.IsType<DeclareStatement>(block.Statements[0]);
         Assert.IsType<SetStatement>(block.Statements[1]);
@@ -156,7 +163,7 @@ public class ProceduralParsingTests : ServiceTestBase
     [Fact]
     public void If_NoElse_ProducesIfWithNullElse()
     {
-        IfStatement ifs = Parse<IfStatement>("IF @x > 0 SELECT @x");
+        IfStatement ifs = Parse<IfStatement>("IF x > 0 SELECT x");
         Assert.IsType<BinaryExpression>(ifs.Predicate);
         Assert.IsType<QueryStatement>(ifs.Then);
         Assert.Null(ifs.Else);
@@ -165,7 +172,7 @@ public class ProceduralParsingTests : ServiceTestBase
     [Fact]
     public void If_WithElse_BothBranchesParsed()
     {
-        IfStatement ifs = Parse<IfStatement>("IF @x > 0 SELECT 'pos' ELSE SELECT 'neg'");
+        IfStatement ifs = Parse<IfStatement>("IF x > 0 SELECT 'pos' ELSE SELECT 'neg'");
         Assert.NotNull(ifs.Else);
         Assert.IsType<QueryStatement>(ifs.Then);
         Assert.IsType<QueryStatement>(ifs.Else);
@@ -177,7 +184,7 @@ public class ProceduralParsingTests : ServiceTestBase
         // ELSE IF is just ELSE followed by an IF statement — no special syntax.
         // The parser produces a recursive IfStatement-in-Else shape.
         IfStatement outer = Parse<IfStatement>(
-            "IF @x > 0 SELECT 'pos' ELSE IF @x < 0 SELECT 'neg' ELSE SELECT 'zero'");
+            "IF x > 0 SELECT 'pos' ELSE IF x < 0 SELECT 'neg' ELSE SELECT 'zero'");
 
         IfStatement middle = Assert.IsType<IfStatement>(outer.Else);
         Assert.IsType<QueryStatement>(middle.Then);
@@ -188,7 +195,7 @@ public class ProceduralParsingTests : ServiceTestBase
     public void If_BlockBody_ParsesBlockAsThenBranch()
     {
         IfStatement ifs = Parse<IfStatement>(
-            "IF @x > 0 BEGIN SET @x = 0; SELECT @x END");
+            "IF x > 0 BEGIN SET x = 0; SELECT x END");
         BlockStatement block = Assert.IsType<BlockStatement>(ifs.Then);
         Assert.Equal(2, block.Statements.Count);
     }
@@ -199,7 +206,7 @@ public class ProceduralParsingTests : ServiceTestBase
     public void While_PredicateAndBody_Parsed()
     {
         WhileStatement loop = Parse<WhileStatement>(
-            "WHILE @i < 10 BEGIN SET @i = @i + 1 END");
+            "WHILE i < 10 BEGIN SET i = i + 1 END");
         Assert.IsType<BinaryExpression>(loop.Predicate);
         Assert.IsType<BlockStatement>(loop.Body);
     }
@@ -210,7 +217,7 @@ public class ProceduralParsingTests : ServiceTestBase
     public void For_CounterForm_ParsesAsForCounterStatement()
     {
         ForCounterStatement loop = Parse<ForCounterStatement>(
-            "FOR @i = 1 TO 10 SELECT @i");
+            "FOR i = 1 TO 10 SELECT i");
         Assert.Equal("i", loop.VariableName);
         LiteralExpression startLit = Assert.IsType<LiteralExpression>(loop.Start);
         LiteralExpression endLit = Assert.IsType<LiteralExpression>(loop.End);
@@ -223,7 +230,7 @@ public class ProceduralParsingTests : ServiceTestBase
     public void For_InForm_ParsesAsForInStatement()
     {
         ForInStatement loop = Parse<ForInStatement>(
-            "FOR @row IN (SELECT * FROM t) SELECT @row");
+            "FOR row IN (SELECT * FROM t) SELECT row");
         Assert.Equal("row", loop.VariableName);
         Assert.IsType<SelectQueryExpression>(loop.Source);
     }
@@ -231,11 +238,11 @@ public class ProceduralParsingTests : ServiceTestBase
     [Fact]
     public void For_DispatchesToCorrectVariantByLookahead()
     {
-        // Same FOR @var prefix; the next token decides. This exercises the
+        // Same FOR var prefix; the next token decides. This exercises the
         // .Try() backtrack between ForCounterStatementParser and
         // ForInStatementParser.
-        Statement counter = SqlParser.ParseStatement("FOR @i = 1 TO 5 SELECT @i");
-        Statement cursor = SqlParser.ParseStatement("FOR @i IN (SELECT 1) SELECT @i");
+        Statement counter = SqlParser.ParseStatement("FOR i = 1 TO 5 SELECT i");
+        Statement cursor = SqlParser.ParseStatement("FOR i IN (SELECT 1) SELECT i");
 
         Assert.IsType<ForCounterStatement>(counter);
         Assert.IsType<ForInStatement>(cursor);
@@ -250,7 +257,7 @@ public class ProceduralParsingTests : ServiceTestBase
         // separated by `;`. Confirms BatchParser dispatches via the same
         // SingleStatementParser .Or() chain.
         IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
-            "DECLARE @x INT32 = 1; IF @x > 0 SELECT @x; SELECT 'done'");
+            "DECLARE x INT32 = 1; IF x > 0 SELECT x; SELECT 'done'");
 
         Assert.Equal(3, stmts.Count);
         Assert.IsType<DeclareStatement>(stmts[0]);
@@ -264,7 +271,7 @@ public class ProceduralParsingTests : ServiceTestBase
         // The semicolons inside BEGIN/END are interior to the BlockStatement;
         // the top-level batch sees a single statement, not three.
         IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
-            "BEGIN DECLARE @x INT32 = 1; SET @x = 2; SELECT @x END");
+            "BEGIN DECLARE x INT32 = 1; SET x = 2; SELECT x END");
         Assert.Single(stmts);
         BlockStatement block = Assert.IsType<BlockStatement>(stmts[0]);
         Assert.Equal(3, block.Statements.Count);

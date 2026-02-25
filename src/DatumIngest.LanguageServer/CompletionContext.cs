@@ -182,13 +182,13 @@ public static class CompletionContext
         {
             SqlToken k = tokens[i].Kind;
             // The patterns that introduce a binding all have a `@var`
-            // immediately following: DECLARE @x ..., FOR @i = ...,
-            // FOR @row IN ..., CATCH @err ...
+            // immediately following: DECLARE x ..., FOR i = ...,
+            // FOR row IN ..., CATCH err ...
             bool introduces = k == SqlToken.Declare
                 || k == SqlToken.For
                 || k == SqlToken.Catch;
             if (!introduces) continue;
-            if (tokens[i + 1].Kind != SqlToken.Variable) continue;
+            if (tokens[i + 1].Kind != SqlToken.Identifier) continue;
             string name = tokens[i + 1].Text;
             if (string.IsNullOrEmpty(name)) continue;
             if (seen.Add(name)) ordered.Add(name);
@@ -201,12 +201,11 @@ public static class CompletionContext
     /// </summary>
     /// <remarks>
     /// One retry is attempted when the first pass throws: if the text ends
-    /// with a bare <c>@</c> or <c>$</c> (a Variable / Parameter sigil with
-    /// no name yet), we re-tokenize with the trailing sigil stripped so the
-    /// classifier still sees the preceding tokens. Without this the user
-    /// typing "<c>IF @</c>" would land at the empty-tokens early-return
-    /// branch (StatementStart) and miss out on procedural-context
-    /// completions like the in-scope variable list.
+    /// with a bare <c>$</c> (a Parameter sigil with no name yet), we
+    /// re-tokenize with the trailing sigil stripped so the classifier
+    /// still sees the preceding tokens. Without this the user typing
+    /// "<c>WHERE x = $</c>" would land at the empty-tokens early-return
+    /// branch and miss out on parameter-context completions.
     /// </remarks>
     private static List<TokenInfo> TokenizeSafely(string text)
     {
@@ -227,7 +226,7 @@ public static class CompletionContext
             // empty result, which the classifier handles cleanly.
         }
 
-        if (text.Length > 0 && (text[^1] == '@' || text[^1] == '$'))
+        if (text.Length > 0 && text[^1] == '$')
         {
             try
             {
@@ -275,13 +274,12 @@ public static class CompletionContext
         }
 
         // The last token is (part of) the word the user is typing. Variable
-        // (`@x`) and Parameter (`$p`) tokens are also valid prefixes —
-        // without including them, typing `@x` would yield no prefix and
-        // the popup would show every variable instead of those starting
-        // with `x`.
+        // Parameter (`$p`) tokens are also valid prefixes — without
+        // including them, typing `$p` would yield no prefix and the
+        // popup would show every parameter instead of those starting
+        // with `p`. Bare identifiers cover the procedural-variable case.
         TokenInfo lastToken = tokens[^1];
         if (lastToken.Kind == SqlToken.Identifier ||
-            lastToken.Kind == SqlToken.Variable ||
             lastToken.Kind == SqlToken.Parameter ||
             IsKeywordToken(lastToken.Kind))
         {
@@ -964,8 +962,7 @@ public static class CompletionContext
         for (int i = leftParenIdx + 1; i <= lastTokenIdx; i++)
         {
             SqlToken k = tokens[i].Kind;
-            if (k == SqlToken.Variable
-                || k == SqlToken.Comma
+            if (k == SqlToken.Comma
                 || k == SqlToken.Equals
                 || k == SqlToken.TypeKeyword
                 || k == SqlToken.Identifier
@@ -977,11 +974,11 @@ public static class CompletionContext
         return anchor switch
         {
             // Right after `(` (no anchor) or right after `,` — the user is
-            // about to type a `@var` name. Suppress completions; we have
+            // about to type a parameter name. Suppress completions; we have
             // nothing useful to suggest for a fresh identifier.
             null or SqlToken.Comma => CompletionZoneKind.AfterAs,
-            // After a `@var` token — the type is what comes next.
-            SqlToken.Variable => CompletionZoneKind.AfterDeclareType,
+            // After an identifier token — the type is what comes next.
+            SqlToken.Identifier => CompletionZoneKind.AfterDeclareType,
             // After `=` — the user is typing the default-value expression.
             SqlToken.Equals => CompletionZoneKind.ProceduralExpression,
             // After type / IS / NOT / NULL — these are post-type modifiers.
@@ -999,8 +996,8 @@ public static class CompletionContext
     /// </summary>
     /// <remarks>
     /// Used to disambiguate procedural control-flow contexts:
-    /// <c>IF @x &gt; 1 |</c> ends on a value-like literal (predicate looks
-    /// done — body expected), while <c>IF @x &gt; |</c> ends on an operator
+    /// <c>IF x &gt; 1 |</c> ends on a value-like literal (predicate looks
+    /// done — body expected), while <c>IF x &gt; |</c> ends on an operator
     /// (predicate continues — expression expected).
     /// </remarks>
     private static bool IsValueLikeToken(SqlToken kind) => kind switch
@@ -1009,7 +1006,6 @@ public static class CompletionContext
         SqlToken.NumberLiteral => true,
         SqlToken.StringLiteral => true,
         SqlToken.TemplateString => true,
-        SqlToken.Variable => true,
         SqlToken.Parameter => true,
         SqlToken.True => true,
         SqlToken.False => true,

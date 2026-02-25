@@ -347,7 +347,7 @@ public sealed class ExecutionContext
     /// Borrowed reference to the enclosing batch's variable-payload arena.
     /// When this query is running inside a procedural batch, the procedural
     /// executor sets this from <see cref="BatchContext.VariableStore"/> so
-    /// the evaluator can resolve <c>VariableExpression</c> reads against
+    /// the evaluator can resolve variable reads against
     /// the procedure-lifetime arena rather than the per-query
     /// <see cref="Store"/>. <see langword="null"/> for top-level queries
     /// outside any procedural batch.
@@ -365,7 +365,7 @@ public sealed class ExecutionContext
     /// <summary>
     /// Borrowed reference to the enclosing batch's variable scope chain.
     /// Walked by the evaluator (innermost frame first) when resolving
-    /// <c>VariableExpression</c> reads. <see langword="null"/> for
+    /// variable reads. <see langword="null"/> for
     /// top-level queries outside any procedural batch.
     /// </summary>
     public VariableScope? VariableScope { get; init; }

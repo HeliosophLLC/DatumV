@@ -73,7 +73,7 @@ public sealed class BatchContext : IDisposable
     /// Block-scoped visibility for procedural variables. Mutated by the
     /// procedural executor on <c>DECLARE</c> / <c>SET</c> /
     /// <c>BEGIN</c> / <c>END</c>; read by query evaluators to resolve
-    /// <c>VariableExpression</c> at evaluation time.
+    /// unqualified <see cref="DatumIngest.Parsing.Ast.ColumnReference"/> nodes at evaluation time (variable-first precedence).
     /// </summary>
     public VariableScope VariableScope { get; }
 

@@ -269,7 +269,7 @@ public sealed class BinaryArithmeticKindTests : ServiceTestBase
     public async Task ForIn_AccumulateInt64_StaysInt64Throughout()
     {
         // The user's exact scenario: summing INT64 file sizes through a
-        // FOR-IN loop. Before kind-promoted arithmetic, @sum would silently
+        // FOR-IN loop. Before kind-promoted arithmetic, sum would silently
         // become Float32 after the first `+`, losing precision past
         // ~10⁷ bytes. This pins the fix end-to-end.
         TableCatalog catalog = CreateCatalog("files",
@@ -278,14 +278,14 @@ public sealed class BinaryArithmeticKindTests : ServiceTestBase
             [DataValue.FromInt64(3_500_000_002L)]);
 
         IReadOnlyList<DatumIngest.Parsing.Ast.Statement> stmts = DatumIngest.Parsing.SqlParser.ParseBatch(
-            "DECLARE @sum INT64 = 0 " +
-            "FOR @row IN (SELECT size FROM files) " +
-            "  SET @sum = @sum + @row['size']");
+            "DECLARE sum INT64 = 0 " +
+            "FOR row IN (SELECT size FROM files) " +
+            "  SET sum = sum + row['size']");
 
         DatumIngest.Execution.BatchExecutor exec = new(catalog);
         DatumIngest.Execution.BatchResult result = await exec.ExecuteAsync(stmts, CancellationToken.None);
 
-        // Convert.ToInt64 round-trips correctly only if @sum was bound as
+        // Convert.ToInt64 round-trips correctly only if sum was bound as
         // an integer kind through the whole loop — Float32 would have
         // dropped precision below the asserted exact total.
         Assert.Equal(6_000_000_003L, Convert.ToInt64(result.FinalBindings["sum"]));

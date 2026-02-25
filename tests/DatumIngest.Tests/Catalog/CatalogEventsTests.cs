@@ -45,7 +45,7 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
         FunctionCreatedEvent? captured = null;
         catalog.Events.FunctionCreated += e => captured = e;
 
-        await catalog.PlanAsync("CREATE FUNCTION public.dbl(@x INT32) RETURNS INT32 AS @x * 2");
+        await catalog.PlanAsync("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
 
         Assert.NotNull(captured);
         Assert.Equal("public", captured!.Name.Schema);
@@ -57,12 +57,12 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
     public async Task CreateOrReplaceFunction_FiresFunctionAltered_WhenPreviousExists()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
-        await catalog.PlanAsync("CREATE FUNCTION public.dbl(@x INT32) RETURNS INT32 AS @x * 2");
+        await catalog.PlanAsync("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
 
         FunctionAlteredEvent? captured = null;
         catalog.Events.FunctionAltered += e => captured = e;
 
-        await catalog.PlanAsync("CREATE OR REPLACE FUNCTION public.dbl(@x INT32) RETURNS INT32 AS @x + @x");
+        await catalog.PlanAsync("CREATE OR REPLACE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x + x");
 
         Assert.NotNull(captured);
         Assert.NotNull(captured!.Before);
@@ -73,7 +73,7 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
     public async Task DropFunction_FiresFunctionDropped()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
-        await catalog.PlanAsync("CREATE FUNCTION public.dbl(@x INT32) RETURNS INT32 AS @x * 2");
+        await catalog.PlanAsync("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
 
         FunctionDroppedEvent? captured = null;
         catalog.Events.FunctionDropped += e => captured = e;
@@ -193,13 +193,13 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
     public async Task IfNotExistsCreateFunction_DoesNotFire_WhenAlreadyExists()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
-        await catalog.PlanAsync("CREATE FUNCTION public.dbl(@x INT32) RETURNS INT32 AS @x * 2");
+        await catalog.PlanAsync("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
 
         bool fired = false;
         catalog.Events.FunctionCreated += _ => fired = true;
         catalog.Events.FunctionAltered += _ => fired = true;
 
-        await catalog.PlanAsync("CREATE FUNCTION IF NOT EXISTS public.dbl(@x INT32) RETURNS INT32 AS @x * 99");
+        await catalog.PlanAsync("CREATE FUNCTION IF NOT EXISTS public.dbl(x INT32) RETURNS INT32 AS x * 99");
 
         Assert.False(fired, "IF NOT EXISTS hit on an existing function should not raise any event.");
     }

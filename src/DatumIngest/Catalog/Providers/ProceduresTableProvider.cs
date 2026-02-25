@@ -26,7 +26,7 @@ namespace DatumIngest.Catalog.Providers;
 /// <list type="table">
 ///   <item><term>name</term><description>Unqualified procedure name. Call sites use the <c>proc.</c> prefix.</description></item>
 ///   <item><term>parameter_count</term><description>Number of declared parameters. <c>0</c> for nullary procedures.</description></item>
-///   <item><term>parameters</term><description>Comma-separated rendition of the parameter list, <c>"@name TYPE [IS NOT NULL], @name TYPE"</c>. Empty string for nullary procedures.</description></item>
+///   <item><term>parameters</term><description>Comma-separated rendition of the parameter list, <c>"name TYPE [IS NOT NULL], name TYPE"</c>. Empty string for nullary procedures.</description></item>
 ///   <item><term>source_text</term><description>The original CREATE PROCEDURE source as registered. Whitespace and comments are preserved.</description></item>
 /// </list>
 /// </para>
@@ -129,7 +129,6 @@ public sealed class ProceduresTableProvider : NonSeekableTableProviderBase
         {
             if (i > 0) sb.Append(", ");
             UdfParameter p = parameters[i];
-            sb.Append('@');
             sb.Append(p.Name);
             sb.Append(' ');
             sb.Append(p.TypeName);

@@ -21,7 +21,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_SingleStringParam_ProducesCreateFunctionStatement()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION shout(@name STRING) AS upper(@name)");
+            "CREATE FUNCTION shout(name STRING) AS upper(name)");
 
         Assert.Equal("shout", create.Name);
         Assert.Single(create.Parameters);
@@ -38,7 +38,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_MultipleParams_ParsesAllInOrder()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION add3(@a INT32, @b INT32, @c INT32) AS @a + @b + @c");
+            "CREATE FUNCTION add3(a INT32, b INT32, c INT32) AS a + b + c");
 
         Assert.Equal(3, create.Parameters.Count);
         Assert.Equal("a", create.Parameters[0].Name);
@@ -59,7 +59,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_WithReturnsAnnotation_CapturesReturnType()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 AS @x * @x");
+            "CREATE FUNCTION sq(x INT32) RETURNS INT32 AS x * x");
 
         Assert.Equal("INT32", create.ReturnTypeName, ignoreCase: true);
         Assert.False(create.ReturnIsNotNull);
@@ -69,7 +69,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_ParamWithIsNotNull_SetsFlag()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION shout(@name STRING IS NOT NULL) AS upper(@name)");
+            "CREATE FUNCTION shout(name STRING IS NOT NULL) AS upper(name)");
 
         Assert.True(create.Parameters[0].IsNotNull);
     }
@@ -78,7 +78,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_MixedNullableAndNotNullParams_CapturesPerParameter()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION combine(@a STRING IS NOT NULL, @b STRING) AS concat(@a, @b)");
+            "CREATE FUNCTION combine(a STRING IS NOT NULL, b STRING) AS concat(a, b)");
 
         Assert.True(create.Parameters[0].IsNotNull);
         Assert.False(create.Parameters[1].IsNotNull);
@@ -88,7 +88,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_ArrayParameter_AngleBracket_PreservesCanonicalForm()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION first_player(@players Array<STRING>) AS @players[0]");
+            "CREATE FUNCTION first_player(players Array<STRING>) AS players[0]");
 
         Assert.Equal("Array<STRING>", create.Parameters[0].TypeName);
         Assert.False(create.Parameters[0].IsNotNull);
@@ -98,7 +98,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_ArrayParameter_PostfixSugar_DesugarsToCanonical()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION first_score(@scores FLOAT32[]) AS @scores[0]");
+            "CREATE FUNCTION first_score(scores FLOAT32[]) AS scores[0]");
 
         Assert.Equal("Array<FLOAT32>", create.Parameters[0].TypeName);
     }
@@ -109,7 +109,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         // The IS NOT NULL modifier sits *after* the type, so the array
         // parser doesn't swallow it; the parameter still records both pieces.
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION join_names(@players Array<STRING> IS NOT NULL) AS array_to_string(@players, ',')");
+            "CREATE FUNCTION join_names(players Array<STRING> IS NOT NULL) AS array_to_string(players, ',')");
 
         Assert.Equal("Array<STRING>", create.Parameters[0].TypeName);
         Assert.True(create.Parameters[0].IsNotNull);
@@ -119,7 +119,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_ArrayReturnType_PreservedOnDescriptor()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION lift(@x INT32) RETURNS Array<INT32> AS array_of(@x)");
+            "CREATE FUNCTION lift(x INT32) RETURNS Array<INT32> AS array_of(x)");
 
         Assert.Equal("Array<INT32>", create.ReturnTypeName);
     }
@@ -128,7 +128,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_ReturnsWithIsNotNull_SetsFlag()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 IS NOT NULL AS @x * @x");
+            "CREATE FUNCTION sq(x INT32) RETURNS INT32 IS NOT NULL AS x * x");
 
         Assert.Equal("INT32", create.ReturnTypeName, ignoreCase: true);
         Assert.True(create.ReturnIsNotNull);
@@ -138,7 +138,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_OrReplace_SetsFlag()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE OR REPLACE FUNCTION shout(@name STRING) AS upper(@name)");
+            "CREATE OR REPLACE FUNCTION shout(name STRING) AS upper(name)");
 
         Assert.True(create.OrReplace);
         Assert.False(create.IfNotExists);
@@ -149,7 +149,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     {
         // T-SQL spelling — accepted as a synonym for OR REPLACE.
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE OR ALTER FUNCTION shout(@name STRING) AS upper(@name)");
+            "CREATE OR ALTER FUNCTION shout(name STRING) AS upper(name)");
 
         Assert.True(create.OrReplace);
         Assert.False(create.IfNotExists);
@@ -159,7 +159,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_IfNotExists_SetsFlag()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION IF NOT EXISTS shout(@name STRING) AS upper(@name)");
+            "CREATE FUNCTION IF NOT EXISTS shout(name STRING) AS upper(name)");
 
         Assert.True(create.IfNotExists);
         Assert.False(create.OrReplace);
@@ -169,7 +169,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_ParamWithDefault_CapturesDefaultExpression()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION shout(@name STRING = 'world') AS upper(@name)");
+            "CREATE FUNCTION shout(name STRING = 'world') AS upper(name)");
 
         Assert.Single(create.Parameters);
         Assert.NotNull(create.Parameters[0].Default);
@@ -183,7 +183,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         // itself a valid scalar predicate; placing the modifier last would
         // be ambiguous with the default expression.
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION add(@x INT32 IS NOT NULL = 0, @y INT32 IS NOT NULL = 0) AS @x + @y");
+            "CREATE FUNCTION add(x INT32 IS NOT NULL = 0, y INT32 IS NOT NULL = 0) AS x + y");
 
         Assert.Equal(2, create.Parameters.Count);
         Assert.NotNull(create.Parameters[0].Default);
@@ -195,9 +195,9 @@ public class UdfDdlParsingTests : ServiceTestBase
     [Fact]
     public void Create_MixOfRequiredAndDefault_CapturesBoth()
     {
-        // Required @a; defaulted @b — minimum arity is 1.
+        // Required a; defaulted b — minimum arity is 1.
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION add(@a INT32, @b INT32 = 1) AS @a + @b");
+            "CREATE FUNCTION add(a INT32, b INT32 = 1) AS a + b");
 
         Assert.Null(create.Parameters[0].Default);
         Assert.NotNull(create.Parameters[1].Default);
@@ -208,7 +208,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     {
         // Validates that the new template-string syntax composes with UDF DDL.
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION greet(@name STRING) AS `Hello ${@name}!`");
+            "CREATE FUNCTION greet(name STRING) AS `Hello ${name}!`");
 
         FunctionCallExpression body = Assert.IsType<FunctionCallExpression>(create.ExpressionBody);
         Assert.Equal("concat", body.FunctionName);
@@ -221,7 +221,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         // it after UDF inlining. Post-S7b the parser splits schema and bare
         // name; FunctionName carries the bare model name and SchemaName == "models".
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION classify(@img IMAGE) AS models.mobilenetv2(@img)");
+            "CREATE FUNCTION classify(img IMAGE) AS models.mobilenetv2(img)");
 
         FunctionCallExpression body = Assert.IsType<FunctionCallExpression>(create.ExpressionBody);
         Assert.Equal("models", body.SchemaName);
@@ -233,7 +233,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_BodyIsBinaryExpression_ParsesAsExpression()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION inc(@x INT32) AS @x + 1");
+            "CREATE FUNCTION inc(x INT32) AS x + 1");
 
         BinaryExpression body = Assert.IsType<BinaryExpression>(create.ExpressionBody);
         Assert.Equal(BinaryOperator.Add, body.Operator);
@@ -249,7 +249,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         // catalog persists. ParseBatchWithText returns the verbatim slice
         // alongside the AST so the catalog file can round-trip.
         string sql =
-            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END";
+            "CREATE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END";
 
         IReadOnlyList<(Statement Statement, string SourceText)> result =
             SqlParser.ParseBatchWithText(sql);
@@ -265,8 +265,8 @@ public class UdfDdlParsingTests : ServiceTestBase
         // Two procedural CREATE FUNCTIONs separated by a semicolon. Each
         // slice should contain the full source text of its own statement,
         // excluding the separator.
-        string a = "CREATE FUNCTION inc(@x INT32) RETURNS INT32 BEGIN RETURN @x + 1 END";
-        string b = "CREATE FUNCTION dec(@x INT32) RETURNS INT32 BEGIN RETURN @x - 1 END";
+        string a = "CREATE FUNCTION inc(x INT32) RETURNS INT32 BEGIN RETURN x + 1 END";
+        string b = "CREATE FUNCTION dec(x INT32) RETURNS INT32 BEGIN RETURN x - 1 END";
         string sql = a + ";\n" + b;
 
         IReadOnlyList<(Statement Statement, string SourceText)> result =
@@ -276,7 +276,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         Assert.Equal(a, result[0].SourceText);
         // Second slice may carry leading whitespace from the separator gap;
         // what matters is the body is captured in full.
-        Assert.Contains("BEGIN RETURN @x - 1 END", result[1].SourceText);
+        Assert.Contains("BEGIN RETURN x - 1 END", result[1].SourceText);
     }
 
     [Fact]
@@ -286,10 +286,10 @@ public class UdfDdlParsingTests : ServiceTestBase
         // recognise that those belong to the BEGIN…END body, not to the
         // outer batch's statement separator.
         string sql =
-            "CREATE FUNCTION step(@x INT32) RETURNS INT32 BEGIN " +
-                "DECLARE @y INT32 = @x + 1; " +
-                "DECLARE @z INT32 = @y * 2; " +
-                "RETURN @z " +
+            "CREATE FUNCTION step(x INT32) RETURNS INT32 BEGIN " +
+                "DECLARE y INT32 = x + 1; " +
+                "DECLARE z INT32 = y * 2; " +
+                "RETURN z " +
             "END";
 
         IReadOnlyList<(Statement Statement, string SourceText)> result =
@@ -309,7 +309,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         // parse an expression after AS (which would fail and produce a
         // misleading "unexpected CREATE" error at position 1).
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 AS BEGIN RETURN @x * @x END");
+            "CREATE FUNCTION sq(x INT32) RETURNS INT32 AS BEGIN RETURN x * x END");
 
         Assert.Null(create.ExpressionBody);
         Assert.NotNull(create.StatementBody);
@@ -324,7 +324,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         // an expression of it. The body parses into a Statement[] (not the
         // Expression slot used by macro UDFs) and Body is null.
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+            "CREATE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END");
 
         Assert.Null(create.ExpressionBody);
         Assert.NotNull(create.StatementBody);
@@ -338,9 +338,9 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_ProceduralBody_DeclareThenReturn_PreservesStatementOrder()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION step(@x INT32) RETURNS INT32 BEGIN " +
-                "DECLARE @y INT32 = @x + 1; " +
-                "RETURN @y " +
+            "CREATE FUNCTION step(x INT32) RETURNS INT32 BEGIN " +
+                "DECLARE y INT32 = x + 1; " +
+                "RETURN y " +
             "END");
 
         Assert.NotNull(create.StatementBody);
@@ -353,7 +353,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_PureProceduralFunction_SetsIsPureFlag()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE PURE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+            "CREATE PURE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END");
 
         Assert.True(create.IsPure);
         Assert.NotNull(create.StatementBody);
@@ -363,7 +363,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_OrReplacePureFunction_SetsBothFlags()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE OR REPLACE PURE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+            "CREATE OR REPLACE PURE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END");
 
         Assert.True(create.OrReplace);
         Assert.True(create.IsPure);
@@ -375,7 +375,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         // T-SQL spelling — OR ALTER is a synonym for OR REPLACE and composes
         // with PURE in the same position.
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE OR ALTER PURE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+            "CREATE OR ALTER PURE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END");
 
         Assert.True(create.OrReplace);
         Assert.True(create.IsPure);
@@ -389,7 +389,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         // a flag that does nothing.
         FormatException ex = Assert.Throws<FormatException>(() =>
             Parse<CreateFunctionStatement>(
-                "CREATE PURE FUNCTION sq(@x INT32) AS @x * @x"));
+                "CREATE PURE FUNCTION sq(x INT32) AS x * x"));
 
         Assert.Contains("PURE", ex.Message);
     }
@@ -401,7 +401,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         // explicit — without it the type system has no return shape.
         FormatException ex = Assert.Throws<FormatException>(() =>
             Parse<CreateFunctionStatement>(
-                "CREATE FUNCTION sq(@x INT32) BEGIN RETURN @x * @x END"));
+                "CREATE FUNCTION sq(x INT32) BEGIN RETURN x * x END"));
 
         Assert.Contains("RETURNS", ex.Message);
     }
@@ -413,8 +413,8 @@ public class UdfDdlParsingTests : ServiceTestBase
         // path could exit with no value defined for the function's result.
         FormatException ex = Assert.Throws<FormatException>(() =>
             Parse<CreateFunctionStatement>(
-                "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN " +
-                    "DECLARE @y INT32 = @x * @x " +
+                "CREATE FUNCTION sq(x INT32) RETURNS INT32 BEGIN " +
+                    "DECLARE y INT32 = x * x " +
                 "END"));
 
         Assert.Contains("RETURN", ex.Message);
@@ -427,9 +427,9 @@ public class UdfDdlParsingTests : ServiceTestBase
         // SELECT in statement position has no place to send its rows.
         FormatException ex = Assert.Throws<FormatException>(() =>
             Parse<CreateFunctionStatement>(
-                "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN " +
-                    "SELECT @x; " +
-                    "RETURN @x " +
+                "CREATE FUNCTION sq(x INT32) RETURNS INT32 BEGIN " +
+                    "SELECT x; " +
+                    "RETURN x " +
                 "END"));
 
         Assert.Contains("SELECT", ex.Message);
@@ -442,8 +442,8 @@ public class UdfDdlParsingTests : ServiceTestBase
         // covers top-level statement-position SELECTs. RETURN (SELECT ...)
         // is a useful idiom for "compute one value via a query".
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION lookup(@id INT32) RETURNS STRING BEGIN " +
-                "RETURN (SELECT name FROM users WHERE id = @id) " +
+            "CREATE FUNCTION lookup(id INT32) RETURNS STRING BEGIN " +
+                "RETURN (SELECT name FROM users WHERE id = id) " +
             "END");
 
         Assert.NotNull(create.StatementBody);
@@ -457,8 +457,8 @@ public class UdfDdlParsingTests : ServiceTestBase
         // The trailing RETURN at the body's top level still satisfies the
         // "last statement is RETURN" check.
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION abs2(@x INT32) RETURNS INT32 BEGIN " +
-                "IF @x < 0 RETURN -@x ELSE RETURN @x " +
+            "CREATE FUNCTION abs2(x INT32) RETURNS INT32 BEGIN " +
+                "IF x < 0 RETURN -x ELSE RETURN x " +
             "END");
 
         Assert.NotNull(create.StatementBody);
@@ -473,7 +473,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         // semicolon after END terminates the statement cleanly and a
         // following statement parses as its own batch entry.
         IReadOnlyList<Statement> batch = SqlParser.ParseBatch(
-            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END; " +
+            "CREATE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END; " +
             "SELECT udf.sq(3) FROM dual;");
 
         Assert.Equal(2, batch.Count);
@@ -487,7 +487,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         // Regression check: existing macro UDFs must keep parsing into the
         // Expression-body slot with a null StatementBody and IsPure=false.
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION shout(@name STRING) AS upper(@name)");
+            "CREATE FUNCTION shout(name STRING) AS upper(name)");
 
         Assert.NotNull(create.ExpressionBody);
         Assert.Null(create.StatementBody);
@@ -515,7 +515,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Create_TrailingSemicolon_IsAcceptedByBatch()
     {
         IReadOnlyList<Statement> batch = SqlParser.ParseBatch(
-            "CREATE FUNCTION shout(@name STRING) AS upper(@name);");
+            "CREATE FUNCTION shout(name STRING) AS upper(name);");
 
         Assert.Single(batch);
         Assert.IsType<CreateFunctionStatement>(batch[0]);
@@ -525,7 +525,7 @@ public class UdfDdlParsingTests : ServiceTestBase
     public void Batch_CreateThenSelect_ParsesBoth()
     {
         IReadOnlyList<Statement> batch = SqlParser.ParseBatch(
-            "CREATE FUNCTION shout(@name STRING) AS upper(@name); SELECT udf.shout('hi') FROM dual;");
+            "CREATE FUNCTION shout(name STRING) AS upper(name); SELECT udf.shout('hi') FROM dual;");
 
         Assert.Equal(2, batch.Count);
         Assert.IsType<CreateFunctionStatement>(batch[0]);

@@ -26,17 +26,18 @@ namespace DatumIngest.Execution;
 /// detection therefore lives at inlining time.
 /// </para>
 /// <para>
-/// Parameter substitution — UDF parameters are written as <c>@name</c>
-/// at the declaration site and referenced as <c>@name</c> inside the
-/// body, so substitution targets <see cref="VariableExpression"/> nodes
-/// whose name matches a parameter. Non-parameter <c>VariableExpression</c>
-/// nodes (e.g. references to a procedural variable in the calling
-/// batch) are left alone and resolved at evaluation time.
+/// Parameter substitution — UDF parameters are bare PG-style identifiers
+/// (e.g. <c>x</c>) both at the declaration site and inside the body, so
+/// substitution targets unqualified <see cref="ColumnReference"/> nodes
+/// whose name matches a parameter. Bare names that don't match a UDF
+/// parameter pass through and resolve at evaluation time against either
+/// the procedural variable scope (variable-first precedence) or the row
+/// schema.
 /// </para>
 /// <para>
 /// Validation wrapping — parameters declared with <c>IS NOT NULL</c>
 /// have their substituted argument expression wrapped with
-/// <c>__assert_not_null(arg, '@name')</c>; the entire substituted body
+/// <c>__assert_not_null(arg, 'name')</c>; the entire substituted body
 /// is wrapped with <c>cast(body, ReturnType)</c> when <c>RETURNS T</c>
 /// is set, and with <c>__assert_not_null(body, 'return value of fn')</c>
 /// when <c>RETURNS T IS NOT NULL</c> is set. The wrappers compose: a
@@ -331,7 +332,7 @@ public static class UdfInliner
                 {
                     arg = WrapNotNull(
                         arg,
-                        $"UDF '{call.CallName}' parameter '@{param.Name}' must not be null.");
+                        $"UDF '{call.CallName}' parameter '{param.Name}' must not be null.");
                 }
                 paramToArg[param.Name] = arg;
             }
@@ -400,15 +401,13 @@ public static class UdfInliner
                 [value, new LiteralExpression(message)]);
 
         /// <summary>
-        /// Walks <paramref name="body"/> and replaces each
-        /// <see cref="VariableExpression"/> whose name matches a key in
+        /// Walks <paramref name="body"/> and replaces each unqualified
+        /// <see cref="ColumnReference"/> whose name matches a key in
         /// <paramref name="paramToArg"/> with the corresponding argument
-        /// expression. <c>VariableExpression</c> nodes whose names don't
-        /// match a UDF parameter (e.g. references to a procedural variable
-        /// in the calling batch) survive substitution and resolve at
-        /// evaluation time. Lambda and SCAN-accumulator scopes don't
-        /// interact with parameter substitution because they bind bare
-        /// identifiers, not <c>@</c>-prefixed variables.
+        /// expression. Names that don't match a UDF parameter survive
+        /// substitution and resolve at evaluation time against the
+        /// procedural variable scope or the row schema. Lambda and
+        /// SCAN-accumulator scopes shadow outer parameters of the same name.
         /// </summary>
         private static Expression SubstituteParameters(
             Expression body,
@@ -420,8 +419,9 @@ public static class UdfInliner
             {
                 switch (expr)
                 {
-                    case VariableExpression v
-                        when activeParams.TryGetValue(v.Name, out Expression? arg):
+                    case ColumnReference c
+                        when c.TableName is null
+                            && activeParams.TryGetValue(c.ColumnName, out Expression? arg):
                         return arg;
 
                     case LambdaExpression lam:

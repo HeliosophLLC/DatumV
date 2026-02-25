@@ -40,7 +40,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
     public void CreateFunction_Unqualified_LandsInPublic()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
-        catalog.Plan("CREATE FUNCTION shout(@s STRING) AS upper(@s)");
+        catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
 
         UdfDescriptor descriptor = Assert.Single(catalog.Udfs.Entries);
         Assert.Equal("public", descriptor.SchemaName);
@@ -52,7 +52,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
         catalog.Plan("CREATE SCHEMA myapp");
-        catalog.Plan("CREATE FUNCTION myapp.classify(@x INT32) AS @x + 1");
+        catalog.Plan("CREATE FUNCTION myapp.classify(x INT32) AS x + 1");
 
         Assert.True(catalog.Udfs.TryGet(new QualifiedName("myapp", "classify"), out UdfDescriptor? udf));
         Assert.Equal("myapp", udf!.SchemaName);
@@ -74,8 +74,8 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
         catalog.Plan("CREATE SCHEMA myapp");
-        catalog.Plan("CREATE FUNCTION myapp.a(@x INT32) AS @x");
-        catalog.Plan("CREATE FUNCTION b(@x INT32) AS @x");
+        catalog.Plan("CREATE FUNCTION myapp.a(x INT32) AS x");
+        catalog.Plan("CREATE FUNCTION b(x INT32) AS x");
 
         // Explicit-schema drop.
         catalog.Plan("DROP FUNCTION myapp.a");
@@ -94,7 +94,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         using TableCatalog catalog = CreateCatalog(_catalogPath);
         catalog.Plan("CREATE TABLE t (id Int32)");
         catalog.Plan("INSERT INTO t VALUES (5)");
-        catalog.Plan("CREATE FUNCTION square(@x INT32) AS @x * @x");
+        catalog.Plan("CREATE FUNCTION square(x INT32) AS x * x");
 
         IQueryPlan plan = catalog.Plan("SELECT square(id) FROM t");
         List<int> values = await CollectFirstColumnAsInt32Async(plan);
@@ -108,7 +108,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE SCHEMA myapp");
         catalog.Plan("CREATE TABLE t (id Int32)");
         catalog.Plan("INSERT INTO t VALUES (3)");
-        catalog.Plan("CREATE FUNCTION myapp.dbl(@x INT32) AS @x + @x");
+        catalog.Plan("CREATE FUNCTION myapp.dbl(x INT32) AS x + x");
 
         IQueryPlan plan = catalog.Plan("SELECT myapp.dbl(id) FROM t");
         List<int> values = await CollectFirstColumnAsInt32Async(plan);
@@ -159,8 +159,8 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         using (TableCatalog first = CreateCatalog(_catalogPath))
         {
             first.Plan("CREATE SCHEMA myapp");
-            first.Plan("CREATE FUNCTION myapp.classify(@x INT32) AS @x + 1");
-            first.Plan("CREATE PROCEDURE myapp.tally(@n INT32) AS BEGIN SELECT @n END");
+            first.Plan("CREATE FUNCTION myapp.classify(x INT32) AS x + 1");
+            first.Plan("CREATE PROCEDURE myapp.tally(n INT32) AS BEGIN SELECT n END");
         }
 
         using TableCatalog reopened = CreateCatalog(_catalogPath);
@@ -198,8 +198,8 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
         catalog.Plan("CREATE SCHEMA myapp");
-        catalog.Plan("CREATE FUNCTION myapp.classify(@x INT32) AS @x");
-        catalog.Plan("CREATE FUNCTION shout(@s STRING) AS upper(@s)");
+        catalog.Plan("CREATE FUNCTION myapp.classify(x INT32) AS x");
+        catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
 
         IQueryPlan plan = catalog.Plan("SELECT schema, name FROM system.udfs ORDER BY schema, name");
 
@@ -226,7 +226,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
         catalog.Plan("CREATE SCHEMA myapp");
-        catalog.Plan("CREATE FUNCTION myapp.classify(@x INT32) AS @x + 1");
+        catalog.Plan("CREATE FUNCTION myapp.classify(x INT32) AS x + 1");
 
         LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, catalog.Functions);
         CompletionProvider completion = new(manifest);
@@ -241,7 +241,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
         catalog.Plan("CREATE SCHEMA myapp");
-        catalog.Plan("CREATE FUNCTION myapp.classify(@x INT32) RETURNS INT32 AS @x + 1");
+        catalog.Plan("CREATE FUNCTION myapp.classify(x INT32) RETURNS INT32 AS x + 1");
 
         LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, catalog.Functions);
         SignatureHelpProvider sigHelp = new(manifest);
@@ -274,7 +274,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
         catalog.Plan("CREATE SCHEMA myapp");
-        catalog.Plan("CREATE FUNCTION myapp.classify(@x INT32) RETURNS INT32 AS @x + 1");
+        catalog.Plan("CREATE FUNCTION myapp.classify(x INT32) RETURNS INT32 AS x + 1");
 
         LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, catalog.Functions);
         HoverProvider hover = new(manifest);

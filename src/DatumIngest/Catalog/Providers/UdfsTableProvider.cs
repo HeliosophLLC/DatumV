@@ -170,7 +170,6 @@ public sealed class UdfsTableProvider : NonSeekableTableProviderBase
         {
             if (i > 0) sb.Append(", ");
             UdfParameter p = parameters[i];
-            sb.Append('@');
             sb.Append(p.Name);
             sb.Append(' ');
             sb.Append(p.TypeName);

@@ -18,15 +18,15 @@ download the file, point `USING` at it, write a one-line body, and
 
 ```sql
 CREATE [OR REPLACE] MODEL [IF NOT EXISTS] [models.]name(
-    @param TYPE [IS NOT NULL] [= default] [, ...]
+    param TYPE [IS NOT NULL] [= default] [, ...]
 ) RETURNS TYPE [IS NOT NULL]
   USING 'file://...'
 [AS] BEGIN
-    [DECLARE @var TYPE [= expr] ;]
-    [SET @var = expr ;]
+    [DECLARE var TYPE [= expr] ;]
+    [SET var = expr ;]
     [IF predicate statement [ELSE statement]]
     [WHILE predicate statement]
-    RETURN infer(@param)
+    RETURN infer(param)
 END
 
 DROP MODEL [IF EXISTS] [models.]name;
@@ -45,10 +45,10 @@ A few non-obvious rules covered in detail below:
 
 ```sql
 -- Register a softmax model from disk.
-CREATE MODEL softmax(@x Float32[]) RETURNS Float32[]
+CREATE MODEL softmax(x Float32[]) RETURNS Float32[]
     USING 'file:///opt/datum/models/softmax.onnx'
 AS BEGIN
-    RETURN infer(@x)
+    RETURN infer(x)
 END;
 
 -- Call it.
@@ -62,11 +62,11 @@ Because the body is procedural, the same shape supports preprocessing or
 postprocessing alongside the model dispatch:
 
 ```sql
-CREATE MODEL classify(@logits Float32[]) RETURNS Float32[]
+CREATE MODEL classify(logits Float32[]) RETURNS Float32[]
     USING 'file:///opt/datum/models/classifier.onnx'
 AS BEGIN
-    DECLARE @scores Float32[] = infer(@logits);
-    RETURN @scores
+    DECLARE scores Float32[] = infer(logits);
+    RETURN scores
 END;
 ```
 
@@ -85,19 +85,19 @@ END;
 
 ```sql
 -- Absolute (Linux/macOS):
-CREATE MODEL m(@x Float32[]) RETURNS Float32[]
+CREATE MODEL m(x Float32[]) RETURNS Float32[]
     USING 'file:///home/me/onnx/m.onnx'
-AS BEGIN RETURN infer(@x) END;
+AS BEGIN RETURN infer(x) END;
 
 -- Absolute (Windows):
-CREATE MODEL m(@x Float32[]) RETURNS Float32[]
+CREATE MODEL m(x Float32[]) RETURNS Float32[]
     USING 'file://C:/onnx/m.onnx'
-AS BEGIN RETURN infer(@x) END;
+AS BEGIN RETURN infer(x) END;
 
 -- Relative (resolves to <models-dir>/onnx/m.onnx):
-CREATE MODEL m(@x Float32[]) RETURNS Float32[]
+CREATE MODEL m(x Float32[]) RETURNS Float32[]
     USING 'onnx/m.onnx'
-AS BEGIN RETURN infer(@x) END;
+AS BEGIN RETURN infer(x) END;
 ```
 
 The file must exist at `CREATE MODEL` time — load is eager. If the file
@@ -123,18 +123,18 @@ CREATE MODEL **always** lands in the `models` schema. Both forms below
 register the same `models.classify`:
 
 ```sql
-CREATE MODEL classify(@x Float32[]) RETURNS Float32[]
-    USING 'file://...' AS BEGIN RETURN infer(@x) END;
+CREATE MODEL classify(x Float32[]) RETURNS Float32[]
+    USING 'file://...' AS BEGIN RETURN infer(x) END;
 
-CREATE MODEL models.classify(@x Float32[]) RETURNS Float32[]
-    USING 'file://...' AS BEGIN RETURN infer(@x) END;
+CREATE MODEL models.classify(x Float32[]) RETURNS Float32[]
+    USING 'file://...' AS BEGIN RETURN infer(x) END;
 ```
 
 Any other qualifier is rejected:
 
 ```sql
-CREATE MODEL public.classify(@x Float32[]) RETURNS Float32[]
-    USING 'file://...' AS BEGIN RETURN infer(@x) END;
+CREATE MODEL public.classify(x Float32[]) RETURNS Float32[]
+    USING 'file://...' AS BEGIN RETURN infer(x) END;
 -- error: CREATE MODEL public.classify: models must live in the
 --        'models' schema. Use 'CREATE MODEL classify' or
 --        'CREATE MODEL models.classify'.
@@ -213,8 +213,8 @@ Inside a `BEGIN … END` block:
 
 | Statement | Description |
 |---|---|
-| `DECLARE @var TYPE [= expr]` | Declares a local variable, optionally initialised. Without `= expr`, the variable is a typed NULL. |
-| `SET @var = expr` | Reassigns an existing variable. |
+| `DECLARE var TYPE [= expr]` | Declares a local variable, optionally initialised. Without `= expr`, the variable is a typed NULL. |
+| `SET var = expr` | Reassigns an existing variable. |
 | `IF predicate stmt [ELSE stmt]` | Conditional branch. Either arm can be a single statement or a `BEGIN … END` block. |
 | `WHILE predicate stmt` | Loops while the predicate holds. |
 | `BEGIN … END` | Block, primarily useful as the arm of `IF`/`WHILE`. |
@@ -238,9 +238,9 @@ short version:
 ### OR REPLACE
 
 ```sql
-CREATE OR REPLACE MODEL classify(@x Float32[]) RETURNS Float32[]
+CREATE OR REPLACE MODEL classify(x Float32[]) RETURNS Float32[]
     USING 'file:///opt/models/v2.onnx'
-AS BEGIN RETURN infer(@x) END;
+AS BEGIN RETURN infer(x) END;
 ```
 
 Re-loads the new model file, registers the new descriptor, and disposes
@@ -260,9 +260,9 @@ Append `IS NOT NULL` to a parameter to require a non-null argument. A
 NULL at the call site throws an error before the body runs.
 
 ```sql
-CREATE MODEL classify(@x Float32[] IS NOT NULL) RETURNS Float32[]
+CREATE MODEL classify(x Float32[] IS NOT NULL) RETURNS Float32[]
     USING 'file:///opt/models/classify.onnx'
-AS BEGIN RETURN infer(@x) END;
+AS BEGIN RETURN infer(x) END;
 ```
 
 ### Default parameter values
@@ -271,10 +271,10 @@ A parameter declared with `= expr` becomes optional at the call site.
 Defaults must sit at the tail of the parameter list (same rule as UDFs).
 
 ```sql
-CREATE MODEL classify(@x Float32[], @threshold Float32 = 0.5)
+CREATE MODEL classify(x Float32[], threshold Float32 = 0.5)
     RETURNS Float32[]
     USING 'file://...'
-AS BEGIN RETURN infer(@x) END;
+AS BEGIN RETURN infer(x) END;
 ```
 
 ### DROP MODEL
