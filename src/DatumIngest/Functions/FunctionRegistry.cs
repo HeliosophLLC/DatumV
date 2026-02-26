@@ -579,10 +579,25 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ImageDrawBoundingBoxesFunction>();
         registry.RegisterScalar<Scalar.Image.ApplyColormapFunction>();
         registry.RegisterScalar<Scalar.Image.ImageToTensorFunction>();
+        registry.RegisterScalar<Scalar.Image.TensorToImageFunction>();
         registry.RegisterScalar<Scalar.Image.ImagenetMeanFunction>();
         registry.RegisterScalar<Scalar.Image.ImagenetStdFunction>();
         registry.RegisterScalar<Scalar.Image.ClipMeanFunction>();
         registry.RegisterScalar<Scalar.Image.ClipStdFunction>();
+
+        // Activations — softmax / sigmoid. ReLU + GELU + tanh land when a
+        // model actually needs them post-graph (most are baked into the
+        // ONNX export).
+        registry.RegisterScalar<Scalar.Activation.SoftmaxFunction>();
+        registry.RegisterScalar<Scalar.Activation.SigmoidFunction>();
+
+        // Vector reductions + normalization + detection postprocess.
+        registry.RegisterScalar<Scalar.Vector.ArgmaxFunction>();
+        registry.RegisterScalar<Scalar.Vector.TopkFunction>();
+        registry.RegisterScalar<Scalar.Vector.L2NormalizeFunction>();
+        registry.RegisterScalar<Scalar.Vector.CosineSimilarityFunction>();
+        registry.RegisterScalar<Scalar.Vector.NmsFunction>();
+        registry.RegisterScalar<Scalar.Vector.MaskToPolygonFunction>();
 
         // Tokenization helpers live in their own `tokenizer` schema (sibling
         // to `inference` and `templates`) so the namespace is self-describing

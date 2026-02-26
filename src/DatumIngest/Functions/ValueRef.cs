@@ -1,3 +1,5 @@
+using System.Numerics;
+
 using DatumIngest.Functions.Image;
 using DatumIngest.Model;
 using SkiaSharp;
@@ -1056,6 +1058,11 @@ public readonly struct ValueRef
             DataKind.UInt128  => DataValue.FromArenaArray<UInt128>((UInt128[])values, elementKind, target),
             DataKind.Int128   => DataValue.FromArenaArray<Int128>((Int128[])values, elementKind, target),
             DataKind.Uuid     => DataValue.FromArenaArray<Guid>((Guid[])values, elementKind, target),
+            // Spatial: Point2D packs two floats inline (Vector2 is 8 bytes,
+            // matching DataValue.ScalarByteSize(Point2D)). Used by
+            // mask_to_polygon and any future polygon / polyline / contour
+            // returning function.
+            DataKind.Point2D  => DataValue.FromArenaArray<Vector2>((Vector2[])values, elementKind, target),
             _ => throw new NotSupportedException(
                 $"FromPrimitiveArray materialisation for element kind {elementKind} is not supported. "
                 + "Add a case here when the kind has a fixed-width primitive representation."),
