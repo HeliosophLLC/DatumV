@@ -162,6 +162,17 @@ public sealed class TableColumnEntry
 /// </summary>
 public sealed class FunctionSignature
 {
+    /// <summary>
+    /// The schema this function is registered under (<c>system</c>,
+    /// <c>inference</c>, <c>tokenizer</c>, <c>templates</c>, …). Used by
+    /// the completion provider to filter built-ins on
+    /// <c>schema.</c>-qualified completions — without it, every function
+    /// would surface under every schema or none at all. Defaults to
+    /// <c>system</c> for backward compatibility with manifests that
+    /// predate schema-aware functions.
+    /// </summary>
+    public string SchemaName { get; init; } = "system";
+
     /// <summary>The function name as used in SQL expressions.</summary>
     public required string Name { get; init; }
 

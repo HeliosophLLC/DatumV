@@ -50,6 +50,7 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
+                AddSchemaNames(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -57,6 +58,7 @@ public sealed class CompletionProvider
             case CompletionZoneKind.AfterJoin:
                 AddTables(items);
                 AddTableValuedFunctions(items);
+                AddSchemaNames(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -68,18 +70,21 @@ public sealed class CompletionProvider
             case CompletionZoneKind.AfterWhere:
                 AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
+                AddSchemaNames(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterOn:
                 AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
+                AddSchemaNames(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.Expression:
                 AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
+                AddSchemaNames(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -90,6 +95,7 @@ public sealed class CompletionProvider
                 // user typing `IF b…` would see column names like `backend`
                 // from `system_models` even though there's no FROM in scope.
                 AddScalarFunctions(items);
+                AddSchemaNames(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -121,6 +127,7 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
+                AddSchemaNames(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -132,6 +139,7 @@ public sealed class CompletionProvider
                 AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
+                AddSchemaNames(items);
                 break;
 
             case CompletionZoneKind.InsideOver:
@@ -207,6 +215,7 @@ public sealed class CompletionProvider
                 // UPDATE rather than FROM, so leave columns un-scoped here.
                 AddColumns(items, tablesInScope: null);
                 AddScalarFunctions(items);
+                AddSchemaNames(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -445,11 +454,56 @@ public sealed class CompletionProvider
     private static bool IsInternalFunction(FunctionSignature function) =>
         function.Name.StartsWith("__", StringComparison.Ordinal);
 
+    /// <summary>
+    /// Surfaces every off-search-path schema that hosts at least one
+    /// function as a <see cref="CompletionItemKind.Schema"/> completion.
+    /// Lets the user type <c>tok</c> and pick <c>tokenizer</c> rather
+    /// than needing to know the full <c>tokenizer.encode</c> shape up
+    /// front. Search-path schemas (<c>system</c>, <c>public</c>) are
+    /// skipped — their functions already surface unqualified.
+    /// </summary>
+    /// <remarks>
+    /// Inserts just the schema name (no trailing dot); the editor's own
+    /// trigger-on-dot completion fires the qualified-completion zone
+    /// once the user types <c>.</c> after acceptance. Sort order 3 puts
+    /// these below scalar functions (2) and TVFs (1) so they don't
+    /// shadow the more-common completions at the top of the popup.
+    /// </remarks>
+    private void AddSchemaNames(List<CompletionItem> items)
+    {
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        foreach (FunctionSignature function in _manifest.Functions)
+        {
+            string schema = function.SchemaName;
+            if (string.IsNullOrEmpty(schema)) continue;
+            if (ContainsIgnoreCase(_manifest.SearchPath, schema)) continue;
+            if (IsInternalFunction(function)) continue;
+            if (!seen.Add(schema)) continue;
+
+            items.Add(new CompletionItem
+            {
+                Label = schema,
+                Kind = CompletionItemKind.Schema,
+                Detail = $"[schema] {schema}.* — qualified namespace",
+                InsertText = schema,
+                SortOrder = 3,
+            });
+        }
+    }
+
     private void AddScalarFunctions(List<CompletionItem> items)
     {
         foreach (FunctionSignature function in _manifest.Functions)
         {
             if (function.IsTableValued || IsInternalFunction(function))
+            {
+                continue;
+            }
+            // Only surface unqualified names for functions whose schema is
+            // on the search path. Functions in inference / tokenizer /
+            // templates require the user to qualify; surfacing them bare
+            // would suggest a name that doesn't actually resolve.
+            if (!ContainsIgnoreCase(_manifest.SearchPath, function.SchemaName))
             {
                 continue;
             }
@@ -475,6 +529,13 @@ public sealed class CompletionProvider
         foreach (FunctionSignature function in _manifest.Functions)
         {
             if (!function.IsTableValued || IsInternalFunction(function))
+            {
+                continue;
+            }
+            // Same search-path filter as scalar functions — qualified-only
+            // TVFs (inference.onnx_inspect, inference.devices, ...) should
+            // not surface as bare names.
+            if (!ContainsIgnoreCase(_manifest.SearchPath, function.SchemaName))
             {
                 continue;
             }
@@ -560,16 +621,16 @@ public sealed class CompletionProvider
         }
 
         // Built-in scalar / aggregate / window / table-valued functions
-        // all live in the system schema. Only offer them when the user
-        // explicitly qualified with system — bare typing already goes
-        // through the regular function completion path.
-        if (string.Equals(schema, "system", StringComparison.OrdinalIgnoreCase))
+        // live in whichever schema they were registered under — system,
+        // inference, tokenizer, templates, … — so filter by SchemaName
+        // rather than hardcoding "system". Without this, qualified
+        // completions like `inference.` / `tokenizer.` would surface
+        // nothing for built-in functions.
+        foreach (FunctionSignature function in _manifest.Functions)
         {
-            foreach (FunctionSignature function in _manifest.Functions)
-            {
-                if (IsInternalFunction(function)) continue;
-                items.Add(BuildBuiltinCompletion(function));
-            }
+            if (IsInternalFunction(function)) continue;
+            if (!string.Equals(function.SchemaName, schema, StringComparison.OrdinalIgnoreCase)) continue;
+            items.Add(BuildBuiltinCompletion(function));
         }
     }
 
@@ -623,7 +684,7 @@ public sealed class CompletionProvider
         {
             Label = function.Name,
             Kind = CompletionItemKind.Function,
-            Detail = $"system.{function.Name}({parameters}){returnInfo}",
+            Detail = $"{function.SchemaName}.{function.Name}({parameters}){returnInfo}",
             InsertText = $"{function.Name}(",
             SortOrder = 1,
         };

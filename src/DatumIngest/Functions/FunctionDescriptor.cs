@@ -22,10 +22,18 @@ namespace DatumIngest.Functions;
 /// <c>ExpressionTypeResolver</c> checks this and refuses out-of-context
 /// call sites before any rows are scanned.
 /// </param>
+/// <param name="SchemaName">
+/// SQL schema this function is registered under (<c>system</c>,
+/// <c>inference</c>, <c>tokenizer</c>, <c>templates</c>, …). Threaded
+/// through to the language-server manifest so completion can filter
+/// built-ins on <c>schema.</c>-qualified popups. Defaults to
+/// <c>system</c> for legacy / unspecified registrations.
+/// </param>
 public sealed record FunctionDescriptor(
     string PrimaryName,
     IReadOnlyList<string> Aliases,
     FunctionCategory Category,
     string Description,
     IReadOnlyList<FunctionSignatureVariant> Signatures,
-    BodyScopeRequirement BodyScope = BodyScopeRequirement.None);
+    BodyScopeRequirement BodyScope = BodyScopeRequirement.None,
+    string SchemaName = "system");

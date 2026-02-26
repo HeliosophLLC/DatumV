@@ -84,18 +84,20 @@ public static class CatalogManifestBuilder
 
         // Aggregate / window / table-valued functions don't yet carry static
         // signature metadata — register-by-instance only — so their argument
-        // lists stay empty until the registries gain descriptors.
-        foreach (string name in functions.AggregateFunctionNames)
+        // lists stay empty until the registries gain descriptors. SchemaName
+        // flows in from the registry's QualifiedName keys so completion can
+        // filter inference.devices() / templates.X / etc. correctly.
+        foreach (QualifiedName qn in functions.AggregateFunctionQualifiedNames)
         {
-            functionSigs.Add(new FunctionSignature { Name = name, Parameters = [], IsAggregate = true });
+            functionSigs.Add(new FunctionSignature { SchemaName = qn.Schema, Name = qn.Name, Parameters = [], IsAggregate = true });
         }
-        foreach (string name in functions.WindowFunctionNames)
+        foreach (QualifiedName qn in functions.WindowFunctionQualifiedNames)
         {
-            functionSigs.Add(new FunctionSignature { Name = name, Parameters = [], IsWindowFunction = true });
+            functionSigs.Add(new FunctionSignature { SchemaName = qn.Schema, Name = qn.Name, Parameters = [], IsWindowFunction = true });
         }
-        foreach (string name in functions.TableValuedFunctionNames)
+        foreach (QualifiedName qn in functions.TableValuedFunctionQualifiedNames)
         {
-            functionSigs.Add(new FunctionSignature { Name = name, Parameters = [], IsTableValued = true });
+            functionSigs.Add(new FunctionSignature { SchemaName = qn.Schema, Name = qn.Name, Parameters = [], IsTableValued = true });
         }
 
         // Keywords list = clause keywords + bool/null literals. Type names and
@@ -274,6 +276,7 @@ public static class CatalogManifestBuilder
 
         return new FunctionSignature
         {
+            SchemaName = descriptor.SchemaName,
             Name = surfacedName,
             Parameters = parameters,
             ReturnType = returnType,

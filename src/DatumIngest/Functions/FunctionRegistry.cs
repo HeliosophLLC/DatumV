@@ -59,7 +59,8 @@ public sealed class FunctionRegistry
             Category: T.Category,
             Description: T.Description,
             Signatures: T.Signatures,
-            BodyScope: T.BodyScope);
+            BodyScope: T.BodyScope,
+            SchemaName: schema);
 
         if (!_scalarFunctions.TryAdd(key, instance))
         {
@@ -149,8 +150,14 @@ public sealed class FunctionRegistry
 
         if (descriptor is not null)
         {
-            _scalarDescriptorsByName[key] = descriptor;
-            _scalarDescriptors.Add(descriptor);
+            // Stamp the schema on the descriptor from the parsed registry
+            // key, so language-server completion can filter built-ins by
+            // schema. Callers building descriptors by hand (chat templates,
+            // procedural UDFs) usually default SchemaName to "system" and
+            // the parsed key carries the truth.
+            FunctionDescriptor schemaStamped = descriptor with { SchemaName = key.Schema };
+            _scalarDescriptorsByName[key] = schemaStamped;
+            _scalarDescriptors.Add(schemaStamped);
         }
     }
 

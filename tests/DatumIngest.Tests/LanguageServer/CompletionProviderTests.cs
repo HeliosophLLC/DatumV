@@ -187,6 +187,174 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.DoesNotContain(items, item => item.Label == "id");
     }
 
+    /// <summary>
+    /// Regression: built-in functions registered in non-<c>system</c> schemas
+    /// (e.g. <c>inference.onnx_inspect</c>, <c>tokenizer.encode</c>) must
+    /// surface when the user qualifies with the schema name. Earlier the
+    /// completion provider hardcoded <c>schema == "system"</c> before
+    /// surfacing built-ins, which suppressed everything for the new schemas.
+    /// </summary>
+    [Fact]
+    public void GetCompletions_AfterSchemaDot_OffersBuiltinsFromThatSchema()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            SearchPath = ["public", "system"],
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "inference",
+                    Name = "onnx_inspect",
+                    Parameters = [new ParameterSignature { Name = "path", Kind = "String" }],
+                    IsTableValued = true,
+                    Description = "Introspect ONNX file.",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "tokenizer",
+                    Name = "encode",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "text", Kind = "String" },
+                        new ParameterSignature { Name = "path", Kind = "String" },
+                    ],
+                    ReturnType = "Int64",
+                    Description = "Tokenize text.",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "abs",
+                    Parameters = [new ParameterSignature { Name = "value", Kind = "Float32" }],
+                    ReturnType = "Float32",
+                    Description = "Absolute value.",
+                },
+            ],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem[] inferenceItems = provider.GetCompletions("SELECT * FROM inference.", 24);
+        Assert.Contains(inferenceItems, i => i.Label == "onnx_inspect");
+        Assert.DoesNotContain(inferenceItems, i => i.Label == "encode");
+        Assert.DoesNotContain(inferenceItems, i => i.Label == "abs");
+
+        CompletionItem[] tokenizerItems = provider.GetCompletions("SELECT tokenizer.", 17);
+        Assert.Contains(tokenizerItems, i => i.Label == "encode");
+        Assert.DoesNotContain(tokenizerItems, i => i.Label == "onnx_inspect");
+        Assert.DoesNotContain(tokenizerItems, i => i.Label == "abs");
+
+        // The qualified built-in's Detail line must show the actual schema,
+        // not the legacy "system." hardcoded prefix.
+        CompletionItem encodeItem = Assert.Single(tokenizerItems, i => i.Label == "encode");
+        Assert.StartsWith("tokenizer.encode", encodeItem.Detail);
+    }
+
+    /// <summary>
+    /// Regression: typing a prefix that matches a schema name (e.g. <c>tok</c>
+    /// for <c>tokenizer</c>) must surface the schema itself as a completion
+    /// item — otherwise users can only reach qualified functions by typing
+    /// the full schema name + dot, which assumes prior knowledge of the
+    /// schema's existence.
+    /// </summary>
+    [Fact]
+    public void GetCompletions_PrefixMatchesSchema_SurfacesSchemaName()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            SearchPath = ["public", "system"],
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "tokenizer",
+                    Name = "encode",
+                    Parameters = [new ParameterSignature { Name = "text", Kind = "String" }],
+                    ReturnType = "Int64",
+                    Description = "Tokenize text.",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "inference",
+                    Name = "onnx_inspect",
+                    Parameters = [new ParameterSignature { Name = "path", Kind = "String" }],
+                    IsTableValued = true,
+                    Description = "Introspect ONNX file.",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "abs",
+                    Parameters = [new ParameterSignature { Name = "value", Kind = "Float32" }],
+                    ReturnType = "Float32",
+                    Description = "Absolute value.",
+                },
+            ],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        // Typing `tok` in an expression context should surface `tokenizer`
+        // as a Schema-kind item so the user can drill in.
+        CompletionItem[] selectItems = provider.GetCompletions("SELECT tok", 10);
+        CompletionItem tokenizerItem = Assert.Single(selectItems, i => i.Label == "tokenizer");
+        Assert.Equal(CompletionItemKind.Schema, tokenizerItem.Kind);
+
+        // FROM-zone should also surface schemas that host TVFs.
+        CompletionItem[] fromItems = provider.GetCompletions("SELECT * FROM inf", 17);
+        Assert.Contains(fromItems, i => i.Label == "inference" && i.Kind == CompletionItemKind.Schema);
+
+        // Search-path schemas (system, public) should NOT surface as
+        // schema-kind completions — their functions are already visible
+        // unqualified, so the schema name would be noise.
+        Assert.DoesNotContain(selectItems, i => i.Label == "system" && i.Kind == CompletionItemKind.Schema);
+        Assert.DoesNotContain(selectItems, i => i.Label == "public" && i.Kind == CompletionItemKind.Schema);
+    }
+
+    /// <summary>
+    /// Regression: unqualified completion must filter to schemas on the
+    /// search path. Functions in <c>inference</c>/<c>tokenizer</c>/<c>templates</c>
+    /// require qualification, so surfacing them as bare names would suggest
+    /// identifiers that don't resolve at parse time.
+    /// </summary>
+    [Fact]
+    public void GetCompletions_Unqualified_HidesNonSearchPathBuiltins()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            SearchPath = ["public", "system"],
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "abs",
+                    Parameters = [new ParameterSignature { Name = "value", Kind = "Float32" }],
+                    ReturnType = "Float32",
+                    Description = "Absolute value.",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "tokenizer",
+                    Name = "encode",
+                    Parameters = [new ParameterSignature { Name = "text", Kind = "String" }],
+                    ReturnType = "Int64",
+                    Description = "Tokenize text.",
+                },
+            ],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem[] items = provider.GetCompletions("SELECT ", 7);
+        Assert.Contains(items, i => i.Label == "abs");
+        Assert.DoesNotContain(items, i => i.Label == "encode");
+    }
+
     // ───────────────────── INTO / AS — no completions ─────────────────────
 
     [Fact]

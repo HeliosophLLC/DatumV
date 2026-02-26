@@ -47,4 +47,12 @@ public enum CompletionItemKind
 
     /// <summary>A procedural variable (@-prefixed) declared earlier in the batch.</summary>
     Variable = 6,
+
+    /// <summary>
+    /// A schema / namespace name (<c>inference</c>, <c>tokenizer</c>,
+    /// <c>templates</c>, <c>models</c>). Surfaced so the user can pick a
+    /// schema with partial typing and drill in with <c>.</c>.
+    /// Maps to LSP <c>CompletionItemKind.Module = 9</c>.
+    /// </summary>
+    Schema = 9,
 }
