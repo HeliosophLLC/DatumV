@@ -630,7 +630,10 @@ public sealed class FunctionRegistry
         // introspection surface (onnx_inspect, devices, ...) doesn't
         // crowd `system`. Users call qualified: inference.onnx_inspect(...).
         registry.RegisterTableValued<TableValued.OnnxInspectFunction>("inference");
+        registry.RegisterTableValued<TableValued.OnnxInspectMetaFunction>("inference");
+        registry.RegisterTableValued<TableValued.InferCompatibilityFunction>("inference");
         registry.RegisterTableValued<TableValued.DevicesFunction>("inference");
+        registry.RegisterScalar<Scalar.Inference.ModelSkeletonFunction>("inference");
 
         // ── Aggregate ─────────────────────────────────────────────────────
         registry.RegisterAggregate(new Aggregates.CountFunction());

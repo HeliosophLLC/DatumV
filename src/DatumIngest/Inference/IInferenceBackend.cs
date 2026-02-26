@@ -54,6 +54,23 @@ public interface IInferenceBackend
     IReadOnlyList<DeviceProbeResult> ProbeAllDevices();
 
     /// <summary>
+    /// Highest <c>ai.onnx</c> opset version this backend's underlying
+    /// runtime can consume. Compared by the
+    /// <c>inference.infer_compatibility()</c> introspection TVF against
+    /// the opset declared in the candidate ONNX file so users can answer
+    /// "is this model too new for what I have installed?" without an
+    /// actual load attempt.
+    /// </summary>
+    /// <remarks>
+    /// Hardcoded per backend implementation — ORT and OpenVINO don't expose
+    /// the value through their C# bindings. Bump when bumping the
+    /// underlying runtime version. The OnnxRuntime backend tracks the
+    /// ai.onnx opset ceiling specifically (custom-domain opsets like
+    /// com.microsoft have their own version space that's not compared).
+    /// </remarks>
+    int MaxSupportedOpset { get; }
+
+    /// <summary>
     /// Pre-load check: can this backend load the bundle described by
     /// <paramref name="bundle"/> on any of its available devices? Allows
     /// the dispatcher to rank candidates and skip backends that would

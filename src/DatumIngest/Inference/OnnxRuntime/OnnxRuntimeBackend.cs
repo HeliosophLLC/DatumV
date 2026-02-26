@@ -36,6 +36,15 @@ public sealed class OnnxRuntimeBackend : IInferenceBackend
     public InferenceBackendId Id => InferenceBackendId.OnnxRuntime;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Microsoft.ML.OnnxRuntime 1.25.1 ships with ai.onnx opset 22 as its
+    /// ceiling. Bump alongside the ORT package version — the value isn't
+    /// exposed through the managed bindings so this constant is the source
+    /// of truth for the inference.infer_compatibility() check.
+    /// </remarks>
+    public int MaxSupportedOpset => 22;
+
+    /// <inheritdoc />
     public IReadOnlyList<InferenceDevice> AvailableDevices
     {
         get
