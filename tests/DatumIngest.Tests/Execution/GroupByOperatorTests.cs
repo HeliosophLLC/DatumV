@@ -350,4 +350,110 @@ public class GroupByOperatorTests : ServiceTestBase
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(groupBy, context));
     }
+
+    // ─────────────── Hash path: multi-batch input + mid-stream output yield ───────────────
+
+    /// <summary>
+    /// Exercises the non-streaming hash aggregation path with input that spans many
+    /// small input batches AND produces enough distinct groups to force the output
+    /// batch to fill mid-stream. Pins down the per-batch <c>InvocationFrame</c>
+    /// reconstruction, accumulator state crossing batch boundaries, and the
+    /// <c>outputBatch.IsFull → yield</c> cycle that the existing tests do not cover.
+    /// </summary>
+    [Fact]
+    public async Task HashAggregation_ManySmallBatches_ManyGroups_ProducesCorrectCounts()
+    {
+        const int groupCount = 50;
+        const int rowsPerGroup = 10;
+
+        List<object?[]> rows = new(groupCount * rowsPerGroup);
+        for (int rowIndex = 0; rowIndex < groupCount * rowsPerGroup; rowIndex++)
+        {
+            int groupIndex = rowIndex % groupCount;
+            rows.Add([$"k{groupIndex:D2}", (float)rowIndex]);
+        }
+
+        MockOperator source = CreateMockOperator(CategoryValueColumns, rows.ToArray());
+
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [new ColumnReference("category")],
+            aggregateColumns:
+            [
+                new AggregateColumn(new CountFunction(), [], "COUNT(*)", IsCountStar: true),
+                new AggregateColumn(
+                    new SumFunction(),
+                    [new ColumnReference("value")],
+                    "SUM(value)"),
+            ]);
+
+        // batchSize: 4 ensures both the input is read across many batches AND the
+        // 50 output groups must yield across multiple output batches.
+        ExecutionContext context = CreateExecutionContext(batchSize: 4);
+        List<Row> results = await CollectAsync(groupBy, context);
+
+        Assert.Equal(groupCount, results.Count);
+
+        HashSet<string> seenKeys = new();
+        foreach (Row row in results)
+        {
+            string key = row["category"].AsString();
+            Assert.True(seenKeys.Add(key), $"duplicate group {key}");
+
+            int groupIndex = int.Parse(key.AsSpan(1));
+            float expectedSum = 0f;
+            for (int rowIndex = groupIndex; rowIndex < groupCount * rowsPerGroup; rowIndex += groupCount)
+            {
+                expectedSum += rowIndex;
+            }
+
+            Assert.Equal(rowsPerGroup, (int)row["COUNT(*)"].AsInt64());
+            Assert.Equal(expectedSum, row["SUM(value)"].AsFloat32());
+        }
+    }
+
+    // ─────────────── COUNT(DISTINCT …) with GROUP BY ───────────────
+
+    /// <summary>
+    /// COUNT(DISTINCT v) keyed by a GROUP BY column. Exercises the keyed-aggregation
+    /// branch of <c>DistinctAccumulatorDecorator</c> wrapping — the per-group budget
+    /// split in <c>InitializeDistinctBudgets</c> (the <c>MaxAssumedGroups = 256</c>
+    /// path) only fires when a GROUP BY key is present alongside DISTINCT.
+    /// </summary>
+    [Fact]
+    public async Task CountDistinct_WithGroupBy_PerGroupDeduplication()
+    {
+        MockOperator source = CreateMockOperator(CategoryValueColumns,
+            ["A", 1f],
+            ["A", 2f],
+            ["A", 2f],
+            ["A", 3f],
+            ["A", 3f],
+            ["A", 3f],
+            ["B", 10f],
+            ["B", 10f],
+            ["B", 20f]);
+
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [new ColumnReference("category")],
+            aggregateColumns:
+            [
+                new AggregateColumn(
+                    new CountFunction(),
+                    [new ColumnReference("value")],
+                    "COUNT(DISTINCT value)",
+                    Distinct: true),
+            ]);
+
+        List<Row> results = await CollectAsync(groupBy);
+
+        Assert.Equal(2, results.Count);
+
+        Row groupA = results.First(row => row["category"].AsString() == "A");
+        Row groupB = results.First(row => row["category"].AsString() == "B");
+
+        Assert.Equal(3L, groupA["COUNT(DISTINCT value)"].AsInt64());
+        Assert.Equal(2L, groupB["COUNT(DISTINCT value)"].AsInt64());
+    }
 }

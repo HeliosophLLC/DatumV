@@ -3,8 +3,8 @@ using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Diagnostics;
+using DatumIngest.Execution.Operators.GroupBy;
 using DatumIngest.Functions;
-using DatumIngest.Functions.Aggregates;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -31,37 +31,10 @@ namespace DatumIngest.Execution.Operators;
 /// </summary>
 public sealed class GroupByOperator : IQueryOperator, IDisposable
 {
-    /// <summary>Number of hash partitions used when spilling to disk.</summary>
-    private const int SpillPartitionCount = 64;
-
     private readonly IQueryOperator _source;
     private readonly IReadOnlyList<Expression> _groupByExpressions;
     private readonly IReadOnlyList<AggregateColumn> _aggregateColumns;
     private readonly bool _streamingSorted;
-
-    /// <summary>
-    /// Per-accumulator memory budget for DISTINCT hash sets. Computed once at the
-    /// start of <see cref="ExecuteHashAsync"/> and used by <see cref="CreateGroupState"/>.
-    /// <c>null</c> disables spill-to-disk for DISTINCT sets.
-    /// </summary>
-    private long? _distinctMemoryBudgetBytes;
-
-    /// <summary>
-    /// Estimated number of distinct values per group for DISTINCT aggregates.
-    /// Used to pre-size the <see cref="HashSet{T}"/> in
-    /// <see cref="DistinctAccumulatorDecorator"/> and avoid repeated resize
-    /// doublings that generate Gen2 garbage.
-    /// </summary>
-    private int _estimatedDistinctCountPerGroup;
-
-    /// <summary>
-    /// Cached <see cref="RuntimeTypeHandle"/> of each aggregate column's inner
-    /// accumulator type (before <see cref="DistinctAccumulatorDecorator"/> wrapping).
-    /// Built lazily on the first <see cref="CreateGroupState"/> call so that
-    /// subsequent calls can rent pooled accumulators by type without creating
-    /// throwaway instances.
-    /// </summary>
-    private RuntimeTypeHandle[]? _accumulatorInnerTypes;
 
     /// <summary>
     /// Creates a GROUP BY operator.
@@ -166,24 +139,13 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         Pool pool = context.Pool;
         ExpressionEvaluator evaluator = new(context);
 
-        bool useSingleKey = _groupByExpressions.Count == 1;
-
-        ColumnLookup? outputLookup = null;
         Arena? operatorArena = null;
+        OutputBatchWriter? writer = null;
 
         GroupState? currentGroup = null;
-        DataValue? currentSingleKey = null;
-        DataValue[]? currentKeyValues = null;
-
-        (DataValue[][] argumentScratch, DataValue[]?[]? sortKeyScratch) = CreateAggregateArgumentScratch();
-
-        // Reusable scratch buffer for composite key evaluation — avoids a
-        // per-row DataValue[] allocation in the multi-key path. Only the keys
-        // for the first row of each new group are copied to permanent storage.
-        int keyCount = _groupByExpressions.Count;
-        DataValue[]? compositeKeyScratch = (!useSingleKey) ? new DataValue[keyCount] : null;
-
-        RowBatch? outputBatch = null;
+        StreamingGroupKey keys = new(_groupByExpressions);
+        AggregateArgumentBinder binder = new(_aggregateColumns);
+        GroupStateFactory groupStateFactory = new(pool, context, _aggregateColumns);
 
         try
         {
@@ -194,6 +156,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     if (inputBatch.Count == 0) continue;
 
                     operatorArena ??= pool.RentArena();
+                    writer ??= new OutputBatchWriter(_groupByExpressions, _aggregateColumns, pool, context.BatchSize, operatorArena);
 
                     InvocationFrame frame = new(
                         inputBatch.Arena,
@@ -206,72 +169,26 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         context.CancellationToken.ThrowIfCancellationRequested();
                         context.QueryMeter?.ThrowIfExceeded();
 
-                        // Evaluate group keys and detect key change.
-                        if (useSingleKey)
+                        await keys.EvaluateAsync(evaluator, row, context.CancellationToken).ConfigureAwait(false);
+
+                        if (currentGroup is not null && keys.ScratchDiffersFromCurrent())
                         {
-                            DataValue key = await evaluator.EvaluateAsync(_groupByExpressions[0], row, context.CancellationToken).ConfigureAwait(false);
-
-                            if (currentGroup is not null && !key.Equals(currentSingleKey!))
-                            {
-                                FlushOrderedBuffersForGroup(currentGroup, context, in frame);
-                                (Row emitted, outputLookup) = await EmitGroupRowAsync(currentGroup, isGlobalAggregation: false,
-                                    pool, outputLookup, frame).ConfigureAwait(false);
-                                outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena!);
-                                outputBatch.Add(emitted.RawValues);
-                                pool.Backing.Return(currentGroup);
-                                currentGroup = null;
-                                if (outputBatch.IsFull)
-                                {
-                                    RowBatch toYield = outputBatch;
-                                    outputBatch = null;
-                                    yield return toYield;
-                                }
-                            }
-
-                            if (currentGroup is null)
-                            {
-                                currentGroup = CreateGroupState(pool, context, in frame);
-                                currentGroup.KeyValues = [key];
-                                currentSingleKey = key;
-                            }
+                            FlushOrderedBuffersForGroup(currentGroup, context, in frame);
+                            RowBatch? ready = await writer.AddAsync(currentGroup, isGlobalAggregation: false, frame).ConfigureAwait(false);
+                            pool.Backing.Return(currentGroup);
+                            currentGroup = null;
+                            if (ready is not null) yield return ready;
                         }
-                        else
+
+                        if (currentGroup is null)
                         {
-                            for (int index = 0; index < keyCount; index++)
-                            {
-                                compositeKeyScratch![index] = await evaluator.EvaluateAsync(_groupByExpressions[index], row, context.CancellationToken).ConfigureAwait(false);
-                            }
-
-                            if (currentGroup is not null && !CompositeKeysEqual(currentKeyValues!, compositeKeyScratch!))
-                            {
-                                FlushOrderedBuffersForGroup(currentGroup, context, in frame);
-                                (Row emitted, outputLookup) = await EmitGroupRowAsync(currentGroup, isGlobalAggregation: false,
-                                    pool, outputLookup, frame).ConfigureAwait(false);
-                                outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena!);
-                                outputBatch.Add(emitted.RawValues);
-                                pool.Backing.Return(currentGroup);
-                                currentGroup = null;
-                                if (outputBatch.IsFull)
-                                {
-                                    RowBatch toYield = outputBatch;
-                                    outputBatch = null;
-                                    yield return toYield;
-                                }
-                            }
-
-                            if (currentGroup is null)
-                            {
-                                // Copy scratch into permanent storage only at group boundaries.
-                                DataValue[] permanentKey = compositeKeyScratch!.AsSpan(0, keyCount).ToArray();
-                                currentGroup = CreateGroupState(pool, context, in frame);
-                                currentGroup.KeyValues = permanentKey;
-                                currentKeyValues = permanentKey;
-                            }
+                            currentGroup = groupStateFactory.Create(in frame);
+                            currentGroup.KeyValues = keys.CaptureCurrent();
                         }
 
                         // Evaluate and accumulate aggregate arguments using reusable scratch buffers.
-                        await EvaluateAggregateArgumentsIntoAsync(evaluator, row, argumentScratch, sortKeyScratch, context.CancellationToken).ConfigureAwait(false);
-                        AccumulateRow(currentGroup, argumentScratch, sortKeyScratch, context, in frame);
+                        await binder.EvaluateAsync(evaluator, row, context.CancellationToken).ConfigureAwait(false);
+                        binder.AccumulateInto(currentGroup, context, in frame);
                     }
                 }
                 finally
@@ -284,27 +201,21 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             if (currentGroup is not null)
             {
                 operatorArena ??= pool.RentArena();
+                writer ??= new OutputBatchWriter(_groupByExpressions, _aggregateColumns, pool, context.BatchSize, operatorArena);
                 InvocationFrame trailingFrame = new(operatorArena, operatorArena, context.SidecarRegistry);
                 FlushOrderedBuffersForGroup(currentGroup, context, in trailingFrame);
-                (Row emitted, outputLookup) = await EmitGroupRowAsync(currentGroup, isGlobalAggregation: false,
-                    pool, outputLookup, trailingFrame).ConfigureAwait(false);
-                outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
-                outputBatch.Add(emitted.RawValues);
+                RowBatch? ready = await writer.AddAsync(currentGroup, isGlobalAggregation: false, trailingFrame).ConfigureAwait(false);
                 pool.Backing.Return(currentGroup);
                 currentGroup = null;
+                if (ready is not null) yield return ready;
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
+            if (writer?.Flush() is RowBatch trailing) yield return trailing;
         }
         finally
         {
             if (currentGroup is not null) pool.Backing.Return(currentGroup);
-            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
+            if (writer?.Flush() is RowBatch leftover) context.ReturnRowBatch(leftover);
             if (operatorArena is not null) pool.ReturnArena(operatorArena);
         }
     }
@@ -373,8 +284,6 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         CancellationToken cancellationToken = context.CancellationToken;
         Arena? operatorArena = null;
 
-        InitializeDistinctBudgets(context, isGlobalAggregation);
-
         // Acquire worker slots from the optional global budget.
         int desiredWorkers = context.DegreeOfParallelism;
         int acquiredFromBudget = 0;
@@ -421,7 +330,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             if (workerCount == 1)
             {
                 await foreach (RowBatch fastPathBatch in ExecuteHashSingleWorkerAsync(
-                    context, pool, useSingleKey, isGlobalAggregation).ConfigureAwait(false))
+                    context, pool, isGlobalAggregation).ConfigureAwait(false))
                 {
                     yield return fastPathBatch;
                 }
@@ -449,10 +358,16 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 InvocationFrame workerAccumFrame = InvocationFrame.Symmetric(
                     context.Store, context.SidecarRegistry);
 
+                GroupStateFactory globalGroupStateFactory = new(
+                    pool, context, _aggregateColumns,
+                    memoryBudget: context.MemoryBudgetBytes,
+                    estimatedSourceRowCount: null,
+                    isGlobalAggregation: true);
+
                 GroupState[] workerGlobalGroups = new GroupState[workerCount];
                 for (int i = 0; i < workerCount; i++)
                 {
-                    workerGlobalGroups[i] = CreateGroupState(pool, context, in workerAccumFrame);
+                    workerGlobalGroups[i] = globalGroupStateFactory.Create(in workerAccumFrame);
                 }
 
                 Task globalFeeder = Task.Run(async () =>
@@ -484,16 +399,14 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     globalWorkers[wi] = Task.Run(async () =>
                     {
                         ExpressionEvaluator workerEvaluator = new(context);
-
-                        (DataValue[][] workerArgScratch, DataValue[]?[]? workerSortScratch) =
-                            CreateAggregateArgumentScratch();
+                        AggregateArgumentBinder workerBinder = new(_aggregateColumns);
 
                         await foreach (Row row in globalChannel.Reader.ReadAllAsync(cancellationToken)
                             .ConfigureAwait(false))
                         {
-                            await EvaluateAggregateArgumentsIntoAsync(
-                                workerEvaluator, row, workerArgScratch, workerSortScratch, cancellationToken).ConfigureAwait(false);
-                            AccumulateRow(workerGlobalGroups[wi], workerArgScratch, workerSortScratch, context, in workerAccumFrame);
+                            await workerBinder.EvaluateAsync(
+                                workerEvaluator, row, cancellationToken).ConfigureAwait(false);
+                            workerBinder.AccumulateInto(workerGlobalGroups[wi], context, in workerAccumFrame);
                             // Row values extracted — batch-level ReturnBatch handles array return.
                         }
                     }, cancellationToken);
@@ -507,8 +420,6 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     await MergeGroupStateAsync(workerGlobalGroups[0], workerGlobalGroups[i], workerAccumFrame).ConfigureAwait(false);
                 }
 
-                ColumnLookup? globalOutputLookup = null;
-
                 bool globalHasOrderedAggregates = _aggregateColumns.Any(
                     column => column.OrderBy is not null);
 
@@ -521,12 +432,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     FlushOrderedBuffers([workerGlobalGroups[0]], context, in globalEmitFrame);
                 }
 
-                (Row globalEmitted, globalOutputLookup) = await EmitGroupRowAsync(
-                    workerGlobalGroups[0], isGlobalAggregation: true,
-                    pool, globalOutputLookup, globalEmitFrame).ConfigureAwait(false);
-                RowBatch globalOutputBatch = pool.RentRowBatch(globalOutputLookup!, context.BatchSize, operatorArena);
-                globalOutputBatch.Add(globalEmitted.RawValues);
-                yield return globalOutputBatch;
+                OutputBatchWriter globalWriter = new(_groupByExpressions, _aggregateColumns, pool, context.BatchSize, operatorArena);
+                if (await globalWriter.AddAsync(workerGlobalGroups[0], isGlobalAggregation: true, globalEmitFrame).ConfigureAwait(false) is RowBatch globalReady)
+                    yield return globalReady;
+                if (globalWriter.Flush() is RowBatch globalTrailing)
+                    yield return globalTrailing;
 
                 yield break;
             }
@@ -562,39 +472,42 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     private async IAsyncEnumerable<RowBatch> ExecuteHashSingleWorkerAsync(
         ExecutionContext context,
         Pool pool,
-        bool useSingleKey,
         bool isGlobalAggregation)
     {
         Arena? operatorArena = null;
-        Arena? bufferArena = null;
         ExpressionEvaluator evaluator = new(context);
 
-        Dictionary<DataValue, GroupState>? singleKeyTable = useSingleKey && !isGlobalAggregation
-            ? new Dictionary<DataValue, GroupState>() : null;
-        Dictionary<CompositeKey, GroupState>? compositeKeyTable = !useSingleKey && !isGlobalAggregation
-            ? new Dictionary<CompositeKey, GroupState>(CompositeKeyComparer.Instance) : null;
+        IHashGroupTable? hashTable = isGlobalAggregation
+            ? null
+            : _groupByExpressions.Count == 1
+                ? new SingleHashGroupTable(_groupByExpressions[0])
+                : new CompositeHashGroupTable(_groupByExpressions);
 
         // Long-lived frame captured by accumulators that need a stable Target arena
         // (e.g. DistinctAccumulatorDecorator's _capturedFrame for replay merges).
         // context.Store survives the query's lifetime.
         InvocationFrame initFrame = InvocationFrame.Symmetric(context.Store, context.SidecarRegistry);
-        GroupState? globalGroup = isGlobalAggregation ? CreateGroupState(pool, context, in initFrame) : null;
 
         long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue && !isGlobalAggregation
-            ? new MemoryEstimator() : null;
 
-        SpillReaderWriter? spiller = null;
-        ColumnLookup? spillSchema = null;
-        RowBatch?[]? partitionBuffers = null;
-        bool spilling = false;
+        GroupStateFactory groupStateFactory = new(
+            pool, context, _aggregateColumns,
+            memoryBudget: memoryBudget,
+            estimatedSourceRowCount: isGlobalAggregation ? null : GetEstimatedSourceRowCount(),
+            isGlobalAggregation: isGlobalAggregation);
 
-        (DataValue[][] argumentScratch, DataValue[]?[]? sortKeyScratch) = CreateAggregateArgumentScratch();
-        int keyCount = _groupByExpressions.Count;
-        DataValue[]? compositeKeyScratch = (!useSingleKey && !isGlobalAggregation) ? new DataValue[keyCount] : null;
+        GroupState? globalGroup = isGlobalAggregation ? groupStateFactory.Create(in initFrame) : null;
 
-        ColumnLookup? outputLookup = null;
-        RowBatch? outputBatch = null;
+        SpillCoordinator? spillCoordinator = (memoryBudget.HasValue && !isGlobalAggregation)
+            ? new SpillCoordinator(pool, context, _groupByExpressions, _aggregateColumns)
+            : null;
+
+        AggregateArgumentBinder binder = new(_aggregateColumns);
+
+        KeyedHashAggregator? aggregator = isGlobalAggregation ? null : new KeyedHashAggregator(
+            context, hashTable!, binder, spillCoordinator, memoryBudget, groupStateFactory);
+
+        OutputBatchWriter? writer = null;
 
         try
         {
@@ -616,160 +529,15 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         context.CancellationToken.ThrowIfCancellationRequested();
                         context.QueryMeter?.ThrowIfExceeded();
 
-                        DataValue singleKey = default;
-                        if (useSingleKey)
-                        {
-                            singleKey = await evaluator.EvaluateAsync(_groupByExpressions[0], row, context.CancellationToken).ConfigureAwait(false);
-                        }
-                        else if (!isGlobalAggregation)
-                        {
-                            for (int k = 0; k < keyCount; k++)
-                            {
-                                compositeKeyScratch![k] = await evaluator.EvaluateAsync(_groupByExpressions[k], row, context.CancellationToken).ConfigureAwait(false);
-                            }
-                        }
-
-                        await EvaluateAggregateArgumentsIntoAsync(evaluator, row, argumentScratch, sortKeyScratch, context.CancellationToken).ConfigureAwait(false);
-
                         if (isGlobalAggregation)
                         {
-                            AccumulateRow(globalGroup!, argumentScratch, sortKeyScratch, context, in accumFrame);
+                            await binder.EvaluateAsync(evaluator, row, context.CancellationToken).ConfigureAwait(false);
+                            binder.AccumulateInto(globalGroup!, context, in accumFrame);
                             continue;
                         }
 
-                        if (spilling)
-                        {
-                            int hashCode = useSingleKey
-                                ? singleKey.GetHashCode()
-                                : CompositeKeyHashMap<GroupState>.ComputeHash(
-                                    compositeKeyScratch!.AsSpan(0, keyCount));
-                            int partition = (int)((uint)hashCode % SpillPartitionCount);
-
-                            partitionBuffers![partition] ??= pool.RentRowBatch(
-                                spillSchema!, context.BatchSize, bufferArena!);
-
-                            DataValue[] flatValues = pool.RentDataValues(spillSchema!.Count);
-                            try
-                            {
-                                int offset = 0;
-                                if (useSingleKey)
-                                {
-                                    flatValues[offset++] = DataValueRetention.Stabilize(
-                                        singleKey, inputBatch.Arena, bufferArena!);
-                                }
-                                else
-                                {
-                                    for (int k = 0; k < keyCount; k++)
-                                    {
-                                        flatValues[offset++] = DataValueRetention.Stabilize(
-                                            compositeKeyScratch![k], inputBatch.Arena, bufferArena!);
-                                    }
-                                }
-                                for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
-                                {
-                                    DataValue[] argValues = argumentScratch[aggregateIndex];
-                                    for (int argIndex = 0; argIndex < argValues.Length; argIndex++)
-                                    {
-                                        flatValues[offset++] = DataValueRetention.Stabilize(
-                                            argValues[argIndex], inputBatch.Arena, bufferArena!);
-                                    }
-                                    if (sortKeyScratch?[aggregateIndex] is DataValue[] sortKeys)
-                                    {
-                                        for (int sortIndex = 0; sortIndex < sortKeys.Length; sortIndex++)
-                                        {
-                                            flatValues[offset++] = DataValueRetention.Stabilize(
-                                                sortKeys[sortIndex], inputBatch.Arena, bufferArena!);
-                                        }
-                                    }
-                                }
-                                partitionBuffers[partition]!.Add(flatValues);
-                                flatValues = null!;
-                            }
-                            finally
-                            {
-                                if (flatValues is not null) pool.Backing.Return(flatValues);
-                            }
-
-                            if (partitionBuffers[partition]!.IsFull)
-                            {
-                                spiller!.Write(partitionBuffers[partition]!, partition);
-                                partitionBuffers[partition] = null;
-                            }
-
-                            // Pre-existing in-memory groups still receive new rows so pre-spill
-                            // data is not lost. Drain skips these keys via partition-local dedup.
-                            GroupState? existing = null;
-                            if (useSingleKey)
-                                singleKeyTable!.TryGetValue(singleKey, out existing);
-                            else
-                                compositeKeyTable!.TryGetValue(
-                                    new CompositeKey(compositeKeyScratch!.AsSpan(0, keyCount).ToArray()),
-                                    out existing);
-
-                            if (existing is not null)
-                                AccumulateRow(existing, argumentScratch, sortKeyScratch, context, in accumFrame);
-                            continue;
-                        }
-
-                        GroupState group;
-                        if (useSingleKey)
-                        {
-                            if (!singleKeyTable!.TryGetValue(singleKey, out GroupState? existingGroup))
-                            {
-                                existingGroup = CreateGroupState(pool, context, in accumFrame);
-                                existingGroup.KeyValues = [singleKey];
-                                singleKeyTable[singleKey] = existingGroup;
-                            }
-                            group = existingGroup;
-                        }
-                        else
-                        {
-                            DataValue[] permanentKey = compositeKeyScratch!.AsSpan(0, keyCount).ToArray();
-                            CompositeKey ck = new(permanentKey);
-                            if (!compositeKeyTable!.TryGetValue(ck, out GroupState? existingGroup))
-                            {
-                                existingGroup = CreateGroupState(pool, context, in accumFrame);
-                                existingGroup.KeyValues = permanentKey;
-                                compositeKeyTable[ck] = existingGroup;
-                            }
-                            group = existingGroup;
-                        }
-
-                        AccumulateRow(group, argumentScratch, sortKeyScratch, context, in accumFrame);
-
-                        if (estimator is not null)
-                        {
-                            if (estimator.ShouldSample())
-                                estimator.RecordSample(row);
-                            estimator.IncrementRowCount();
-                            long groupCount = useSingleKey
-                                ? singleKeyTable!.Count
-                                : compositeKeyTable!.Count;
-                            long estimatedMemory = estimator.EstimateBytesForRowCount(groupCount);
-
-                            if (estimatedMemory > memoryBudget!.Value)
-                            {
-                                spilling = true;
-                                spillSchema = BuildSpillSchema();
-                                bufferArena = pool.RentArena();
-                                int hint = (int)Math.Min(memoryBudget.Value / 2, int.MaxValue);
-                                spiller = new SpillReaderWriter(
-                                    pool, spillSchema, context.SpillDirectory,
-                                    initialArenaCapacity: hint,
-                                    partitionCount: SpillPartitionCount);
-                                partitionBuffers = new RowBatch?[SpillPartitionCount];
-
-                                if (ExecutionTracer.IsEnabled)
-                                {
-                                    ExecutionTracer.Write(
-                                        $"GROUP BY spill start  budget={ExecutionTracer.FormatBytes(memoryBudget.Value)}  estimated={ExecutionTracer.FormatBytes(estimatedMemory)}  groups={groupCount}");
-                                }
-                            }
-                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                            {
-                                estimator.EscalateToEveryRow();
-                            }
-                        }
+                        await aggregator!.ConsumeRowAsync(
+                            row, evaluator, inputBatch.Arena, accumFrame, context.CancellationToken).ConfigureAwait(false);
                     }
                 }
                 finally
@@ -778,18 +546,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 }
             }
 
-            // Flush remaining partition buffers before drain.
-            if (spiller is not null && partitionBuffers is not null)
-            {
-                for (int p = 0; p < partitionBuffers.Length; p++)
-                {
-                    if (partitionBuffers[p] is not null)
-                    {
-                        spiller.Write(partitionBuffers[p]!, p);
-                        partitionBuffers[p] = null;
-                    }
-                }
-            }
+            spillCoordinator?.FlushPartitionBuffers();
 
             // Emit phase.
             bool hasOrderedAggregates = _aggregateColumns.Any(c => c.OrderBy is not null);
@@ -799,179 +556,65 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             // operatorArena since the global path may need it before in-memory emit.
             operatorArena ??= pool.RentArena();
             InvocationFrame emitFrame = new(context.Store, operatorArena, context.SidecarRegistry);
+            writer = new OutputBatchWriter(_groupByExpressions, _aggregateColumns, pool, context.BatchSize, operatorArena);
 
             if (isGlobalAggregation)
             {
                 if (hasOrderedAggregates)
                     FlushOrderedBuffers([globalGroup!], context, in emitFrame);
 
-                (Row globalEmitted, outputLookup) = await EmitGroupRowAsync(globalGroup!, isGlobalAggregation: true, pool, outputLookup, emitFrame).ConfigureAwait(false);
-                outputBatch = pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
-                outputBatch.Add(globalEmitted.RawValues);
-                RowBatch globalToYield = outputBatch;
-                outputBatch = null;
-                yield return globalToYield;
+                if (await writer.AddAsync(globalGroup!, isGlobalAggregation: true, emitFrame).ConfigureAwait(false) is RowBatch globalReady)
+                    yield return globalReady;
+                if (writer.Flush() is RowBatch globalTrailing)
+                    yield return globalTrailing;
                 yield break;
             }
 
-            IEnumerable<GroupState> inMemoryGroups = useSingleKey
-                ? singleKeyTable!.Values
-                : compositeKeyTable!.Values;
-
             if (hasOrderedAggregates)
-                FlushOrderedBuffers(inMemoryGroups, context, in emitFrame);
+                FlushOrderedBuffers(hashTable!.AllGroups, context, in emitFrame);
 
-            foreach (GroupState g in inMemoryGroups)
+            foreach (GroupState g in hashTable!.AllGroups)
             {
-                (Row emitted, outputLookup) = await EmitGroupRowAsync(g, isGlobalAggregation: false, pool, outputLookup, emitFrame).ConfigureAwait(false);
-                outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
-                outputBatch.Add(emitted.RawValues);
-                if (outputBatch.IsFull)
-                {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
-                }
+                if (await writer.AddAsync(g, isGlobalAggregation: false, emitFrame).ConfigureAwait(false) is RowBatch ready)
+                    yield return ready;
             }
 
             // Drain spilled partitions: rebuild partition-local hash tables from the
             // replayed spill rows, skipping keys already represented in the in-memory
             // table (those rows have already been accumulated into the in-memory group
             // via the during-spill side-channel).
-            if (spilling)
+            if (spillCoordinator is not null && spillCoordinator.IsSpilling)
             {
                 // Drain frame: replayed batches' values resolve against the spiller's
                 // consolidated arena (Source). Accumulator state still lives in
                 // context.Store (Target) so it can outlive the replayed batches.
                 InvocationFrame drainFrame = new(
-                    spiller!.ConsolidatedArena, context.Store, context.SidecarRegistry);
+                    spillCoordinator.ConsolidatedArena, context.Store, context.SidecarRegistry);
 
-                for (int partition = 0; partition < SpillPartitionCount; partition++)
+                await foreach (IHashGroupTable partTable in spillCoordinator.DrainPartitionsAsync(
+                    hashTable!, binder, drainFrame, groupStateFactory).ConfigureAwait(false))
                 {
-                    if (spiller!.RowsWrittenInPartition(partition) == 0) continue;
-
-                    Dictionary<DataValue, GroupState>? partSingleGroups = useSingleKey
-                        ? new Dictionary<DataValue, GroupState>() : null;
-                    Dictionary<CompositeKey, GroupState>? partCompositeGroups = !useSingleKey
-                        ? new Dictionary<CompositeKey, GroupState>(CompositeKeyComparer.Instance) : null;
-
-                    await foreach (RowBatch spillBatch in spiller.ReplayPartitionAsync(
-                        context, spillSchema!, partition).ConfigureAwait(false))
-                    {
-                        try
-                        {
-                            for (int sb = 0; sb < spillBatch.Count; sb++)
-                            {
-                                Row spillRow = spillBatch[sb];
-                                int offset = 0;
-
-                                DataValue[] partKey = new DataValue[keyCount];
-                                for (int k = 0; k < keyCount; k++)
-                                {
-                                    partKey[k] = spillRow[offset++];
-                                }
-
-                                bool isAlreadyInMemory = useSingleKey
-                                    ? singleKeyTable!.ContainsKey(partKey[0])
-                                    : compositeKeyTable!.ContainsKey(new CompositeKey(partKey));
-                                if (isAlreadyInMemory) continue;
-
-                                GroupState partGroup;
-                                if (useSingleKey)
-                                {
-                                    if (!partSingleGroups!.TryGetValue(partKey[0], out GroupState? pg))
-                                    {
-                                        pg = CreateGroupState(pool, context, in drainFrame);
-                                        pg.KeyValues = partKey;
-                                        partSingleGroups[partKey[0]] = pg;
-                                    }
-                                    partGroup = pg;
-                                }
-                                else
-                                {
-                                    CompositeKey partCk = new(partKey);
-                                    if (!partCompositeGroups!.TryGetValue(partCk, out GroupState? pg))
-                                    {
-                                        pg = CreateGroupState(pool, context, in drainFrame);
-                                        pg.KeyValues = partKey;
-                                        partCompositeGroups[partCk] = pg;
-                                    }
-                                    partGroup = pg;
-                                }
-
-                                for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
-                                {
-                                    DataValue[] argValues = argumentScratch[aggregateIndex];
-                                    for (int argIndex = 0; argIndex < argValues.Length; argIndex++)
-                                    {
-                                        argValues[argIndex] = spillRow[offset++];
-                                    }
-                                    if (sortKeyScratch?[aggregateIndex] is DataValue[] sortKeys)
-                                    {
-                                        for (int sortIndex = 0; sortIndex < sortKeys.Length; sortIndex++)
-                                        {
-                                            sortKeys[sortIndex] = spillRow[offset++];
-                                        }
-                                    }
-                                }
-
-                                AccumulateRow(partGroup, argumentScratch, sortKeyScratch, context, in drainFrame);
-                            }
-                        }
-                        finally
-                        {
-                            context.ReturnRowBatch(spillBatch);
-                        }
-                    }
-
-                    IEnumerable<GroupState> partGroups = useSingleKey
-                        ? partSingleGroups!.Values
-                        : partCompositeGroups!.Values;
-
                     if (hasOrderedAggregates)
-                        FlushOrderedBuffers(partGroups, context, in emitFrame);
+                        FlushOrderedBuffers(partTable.AllGroups, context, in emitFrame);
 
-                    foreach (GroupState pg in partGroups)
+                    foreach (GroupState pg in partTable.AllGroups)
                     {
-                        (Row emitted, outputLookup) = await EmitGroupRowAsync(pg, isGlobalAggregation: false, pool, outputLookup, emitFrame).ConfigureAwait(false);
-                        outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
-                        outputBatch.Add(emitted.RawValues);
-                        if (outputBatch.IsFull)
-                        {
-                            RowBatch toYield = outputBatch;
-                            outputBatch = null;
-                            yield return toYield;
-                        }
+                        if (await writer.AddAsync(pg, isGlobalAggregation: false, emitFrame).ConfigureAwait(false) is RowBatch ready)
+                            yield return ready;
                     }
 
-                    pool.Backing.Return(partGroups, _aggregateColumns.Count);
+                    pool.Backing.Return(partTable.AllGroups, _aggregateColumns.Count);
                 }
             }
 
-            pool.Backing.Return(inMemoryGroups, _aggregateColumns.Count);
+            pool.Backing.Return(hashTable!.AllGroups, _aggregateColumns.Count);
 
-            if (outputBatch is not null)
-            {
-                RowBatch trailingBatch = outputBatch;
-                outputBatch = null;
-                yield return trailingBatch;
-            }
+            if (writer.Flush() is RowBatch trailingBatch) yield return trailingBatch;
         }
         finally
         {
-            if (partitionBuffers is not null)
-            {
-                for (int p = 0; p < partitionBuffers.Length; p++)
-                {
-                    if (partitionBuffers[p] is not null)
-                    {
-                        context.ReturnRowBatch(partitionBuffers[p]!);
-                    }
-                }
-            }
-            spiller?.Dispose();
-            if (bufferArena is not null) pool.ReturnArena(bufferArena);
-            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
+            spillCoordinator?.Dispose();
+            if (writer?.Flush() is RowBatch leftover) context.ReturnRowBatch(leftover);
             if (operatorArena is not null) pool.ReturnArena(operatorArena);
         }
     }
@@ -996,236 +639,6 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             else
             {
                 await target.Accumulators[i].MergeAsync(source.Accumulators[i], frame).ConfigureAwait(false);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Computes <see cref="_distinctMemoryBudgetBytes"/> and
-    /// <see cref="_estimatedDistinctCountPerGroup"/> based on the operator's
-    /// memory budget and estimated source cardinality. Read by
-    /// <see cref="CreateGroupState"/> when wrapping accumulators in
-    /// <see cref="DistinctAccumulatorDecorator"/>.
-    /// </summary>
-    private void InitializeDistinctBudgets(ExecutionContext context, bool isGlobalAggregation)
-    {
-        long? memoryBudget = context.MemoryBudgetBytes;
-        long? estimatedSourceRows = isGlobalAggregation ? null : GetEstimatedSourceRowCount();
-        int initialCapacity = estimatedSourceRows.HasValue
-            ? (int)Math.Min(estimatedSourceRows.Value, int.MaxValue / 2)
-            : 16;
-
-        // For DISTINCT aggregates, compute a per-accumulator memory budget so the
-        // DistinctAccumulatorDecorator can spill to disk when its hash set grows
-        // beyond the limit.
-        //
-        // For global aggregation (no GROUP BY), the full budget is split across
-        // the distinct aggregate count. For keyed aggregation, the budget is
-        // divided by an assumed concurrent-DISTINCT-set count (256) so total
-        // memory across groups stays within the overall budget while avoiding
-        // the pathological case where a handful of groups accumulate millions
-        // of entries.
-        if (memoryBudget.HasValue)
-        {
-            int distinctAggregateCount = _aggregateColumns.Count(column => column.Distinct);
-
-            if (distinctAggregateCount > 0)
-            {
-                if (isGlobalAggregation)
-                {
-                    _distinctMemoryBudgetBytes = memoryBudget.Value / distinctAggregateCount;
-                }
-                else
-                {
-                    const long MaxAssumedGroups = 256;
-                    _distinctMemoryBudgetBytes = memoryBudget.Value / MaxAssumedGroups / distinctAggregateCount;
-                }
-            }
-        }
-
-        // Pre-size DISTINCT hash sets based on estimated distinct values per group.
-        // Cap at 1M to avoid over-allocating for skewed data.
-        if (_aggregateColumns.Any(c => c.Distinct) && estimatedSourceRows.HasValue)
-        {
-            long divisor = isGlobalAggregation ? 1 : Math.Max(initialCapacity, 256);
-            _estimatedDistinctCountPerGroup = (int)Math.Min(
-                estimatedSourceRows.Value / divisor, 1_000_000);
-        }
-    }
-
-    /// <summary>
-    /// Creates a new <see cref="GroupState"/> for a single aggregation group,
-    /// optionally passing a memory budget to DISTINCT accumulator decorators.
-    /// </summary>
-    /// <remarks>
-    /// Uses <see cref="_distinctMemoryBudgetBytes"/> (computed once by
-    /// <see cref="InitializeDistinctBudgets"/>) for per-group DISTINCT spill budgets.
-    /// </remarks>
-    /// <summary>
-    /// Builds the schema used by spilled rows: <c>__key_0...__key_{N-1}</c> for the GROUP BY
-    /// keys, then per aggregate <c>__arg_{i}_{j}</c> for each argument expression and
-    /// <c>__sort_{i}_{k}</c> for each ORDER BY expression. CountStar contributes no args.
-    /// Captured once on first spill and reused by every partition.
-    /// </summary>
-    private ColumnLookup BuildSpillSchema()
-    {
-        int keyCount = _groupByExpressions.Count;
-        int extraCount = 0;
-        for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
-        {
-            AggregateColumn column = _aggregateColumns[aggregateIndex];
-            if (!column.IsCountStar)
-            {
-                extraCount += column.ArgumentExpressions.Count;
-            }
-            if (column.OrderBy is not null)
-            {
-                extraCount += column.OrderBy.Count;
-            }
-        }
-
-        string[] names = new string[keyCount + extraCount];
-        int next = 0;
-        for (int keyIndex = 0; keyIndex < keyCount; keyIndex++)
-        {
-            names[next++] = $"__key_{keyIndex}";
-        }
-        for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
-        {
-            AggregateColumn column = _aggregateColumns[aggregateIndex];
-            if (!column.IsCountStar)
-            {
-                for (int argIndex = 0; argIndex < column.ArgumentExpressions.Count; argIndex++)
-                {
-                    names[next++] = $"__arg_{aggregateIndex}_{argIndex}";
-                }
-            }
-            if (column.OrderBy is not null)
-            {
-                for (int sortIndex = 0; sortIndex < column.OrderBy.Count; sortIndex++)
-                {
-                    names[next++] = $"__sort_{aggregateIndex}_{sortIndex}";
-                }
-            }
-        }
-
-        return new ColumnLookup(names);
-    }
-
-    private GroupState CreateGroupState(Pool pool, ExecutionContext context, in InvocationFrame frame)
-    {
-        int count = _aggregateColumns.Count;
-        GroupState state = pool.Backing.RentGroupState(count);
-        RuntimeTypeHandle[]? innerTypes = _accumulatorInnerTypes;
-
-        for (int index = 0; index < count; index++)
-        {
-            AggregateColumn column = _aggregateColumns[index];
-            IAggregateAccumulator? existing = state.Accumulators[index];
-            IAggregateAccumulator? accumulator = null;
-
-            // Try to reuse the accumulator left in the pooled array from the
-            // previous owner. A type-handle comparison avoids creating fresh
-            // objects for the overwhelmingly common same-operator-shape case.
-            // Pooled decorators are not reused when a memory budget is active
-            // because the budget is context-specific and the pooled instance
-            // may carry stale spill state.
-            if (innerTypes is not null && existing is not null)
-            {
-                if (!column.Distinct
-                    && existing is not DistinctAccumulatorDecorator
-                    && existing.GetType().TypeHandle.Equals(innerTypes[index]))
-                {
-                    existing.Reset();
-                    accumulator = existing;
-                }
-                else if (column.Distinct
-                         && _distinctMemoryBudgetBytes is null
-                         && existing is DistinctAccumulatorDecorator decorator
-                         && decorator.InnerAccumulator.GetType().TypeHandle.Equals(innerTypes[index]))
-                {
-                    existing.Reset();
-                    accumulator = existing;
-                }
-            }
-
-            if (accumulator is null)
-            {
-                accumulator = column.Function.CreateAccumulator();
-
-                if (column.Distinct)
-                {
-                    accumulator = new DistinctAccumulatorDecorator(
-                        accumulator,
-                        column.ArgumentExpressions.Count,
-                        in frame,
-                        context,
-                        _distinctMemoryBudgetBytes,
-                        _distinctMemoryBudgetBytes.HasValue
-                            ? column.Function.CreateAccumulator
-                            : null,
-                        _estimatedDistinctCountPerGroup);
-                }
-            }
-
-            state.Accumulators[index] = accumulator;
-
-            if (column.OrderBy is not null)
-            {
-                state.OrderedBuffers ??= new OrderedAggregateBuffer?[count];
-                state.OrderedBuffers[index] = new OrderedAggregateBuffer(
-                    column.ArgumentExpressions.Count, column.OrderBy.Count);
-            }
-        }
-
-        if (innerTypes is null)
-        {
-            RuntimeTypeHandle[] newTypes = new RuntimeTypeHandle[count];
-            for (int i = 0; i < count; i++)
-            {
-                IAggregateAccumulator accumulator = state.Accumulators[i];
-                if (accumulator is DistinctAccumulatorDecorator decorator)
-                {
-                    newTypes[i] = decorator.InnerAccumulator.GetType().TypeHandle;
-                }
-                else
-                {
-                    newTypes[i] = accumulator.GetType().TypeHandle;
-                }
-            }
-
-            Interlocked.CompareExchange(ref _accumulatorInnerTypes, newTypes, null);
-        }
-
-        return state;
-    }
-
-    /// <summary>
-    /// Accumulates one input row's aggregate arguments into the given group state.
-    /// </summary>
-    private void AccumulateRow(
-        GroupState group,
-        DataValue[][] allArguments,
-        DataValue[]?[]? allSortKeys,
-        ExecutionContext context,
-        in InvocationFrame frame)
-    {
-        for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
-        {
-            AggregateColumn aggregateColumn = _aggregateColumns[aggregateIndex];
-
-            if (aggregateColumn.OrderBy is not null && allSortKeys?[aggregateIndex] is DataValue[] sortKeys)
-            {
-                // Ordered aggregate: append argument and sort-key values into the
-                // flat buffer. No per-row array allocation — the buffer stores
-                // values contiguously with stride-based access.
-                group.OrderedBuffers![aggregateIndex]!.Add(
-                    allArguments[aggregateIndex], sortKeys);
-            }
-            else
-            {
-                group.Accumulators[aggregateIndex].Accumulate(allArguments[aggregateIndex], in frame);
-                context.QueryMeter?.Add(aggregateColumn.Function.QueryUnitCost);
             }
         }
     }
@@ -1291,146 +704,6 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             buffer.Clear();
         }
     }
-
-    /// <summary>
-    /// Creates reusable scratch buffers for aggregate argument and sort-key evaluation.
-    /// The outer <see cref="DataValue"/>[][] and each inner <see cref="DataValue"/>[] are
-    /// allocated once and reused across all input rows, eliminating per-row heap allocations.
-    /// </summary>
-    private (DataValue[][] Arguments, DataValue[]?[]? SortKeys) CreateAggregateArgumentScratch()
-    {
-        DataValue[][] arguments = new DataValue[_aggregateColumns.Count][];
-        DataValue[]?[]? sortKeys = null;
-
-        for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
-        {
-            AggregateColumn aggregateColumn = _aggregateColumns[aggregateIndex];
-
-            if (aggregateColumn.IsCountStar)
-            {
-                arguments[aggregateIndex] = [];
-            }
-            else
-            {
-                arguments[aggregateIndex] = new DataValue[aggregateColumn.ArgumentExpressions.Count];
-
-                if (aggregateColumn.OrderBy is not null)
-                {
-                    sortKeys ??= new DataValue[]?[_aggregateColumns.Count];
-                    sortKeys[aggregateIndex] = new DataValue[aggregateColumn.OrderBy.Count];
-                }
-            }
-        }
-
-        return (arguments, sortKeys);
-    }
-
-    /// <summary>
-    /// Evaluates all aggregate function arguments and optional sort keys for a single
-    /// input row into pre-allocated scratch buffers. Callers must create the buffers
-    /// once via <see cref="CreateAggregateArgumentScratch"/> and pass them on every row.
-    /// </summary>
-    private async ValueTask EvaluateAggregateArgumentsIntoAsync(
-        ExpressionEvaluator evaluator,
-        Row row,
-        DataValue[][] allArguments,
-        DataValue[]?[]? allSortKeys,
-        CancellationToken cancellationToken)
-    {
-        for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
-        {
-            AggregateColumn aggregateColumn = _aggregateColumns[aggregateIndex];
-
-            if (aggregateColumn.IsCountStar)
-            {
-                continue;
-            }
-
-            DataValue[] arguments = allArguments[aggregateIndex];
-            for (int argumentIndex = 0; argumentIndex < aggregateColumn.ArgumentExpressions.Count; argumentIndex++)
-            {
-                arguments[argumentIndex] = await evaluator.EvaluateAsync(
-                    aggregateColumn.ArgumentExpressions[argumentIndex], row, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (aggregateColumn.OrderBy is not null)
-            {
-                DataValue[] sortKeyBuffer = allSortKeys![aggregateIndex]!;
-                for (int sortIndex = 0; sortIndex < aggregateColumn.OrderBy.Count; sortIndex++)
-                {
-                    sortKeyBuffer[sortIndex] = await evaluator.EvaluateAsync(
-                        aggregateColumn.OrderBy[sortIndex].Expression, row, cancellationToken).ConfigureAwait(false);
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Compares two composite GROUP BY key arrays for equality.
-    /// </summary>
-    private static bool CompositeKeysEqual(DataValue[] a, DataValue[] b)
-    {
-        for (int index = 0; index < a.Length; index++)
-        {
-            if (!a[index].Equals(b[index]))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Emits a single output row from a completed group state. Returns the row and
-    /// the (potentially newly-built) <see cref="ColumnLookup"/> so callers can carry
-    /// it across emit calls — async methods can't take <c>ref</c> parameters, so the
-    /// previous <c>ref outputLookup</c> pattern is replaced by tuple return.
-    /// </summary>
-    private async ValueTask<(Row Row, ColumnLookup Lookup)> EmitGroupRowAsync(
-        GroupState group,
-        bool isGlobalAggregation,
-        Pool pool,
-        ColumnLookup? outputLookup,
-        InvocationFrame frame)
-    {
-        int outputFieldCount = _groupByExpressions.Count + _aggregateColumns.Count;
-
-        if (outputLookup is null)
-        {
-            string[] outputNames = new string[outputFieldCount];
-
-            for (int index = 0; index < _groupByExpressions.Count; index++)
-            {
-                outputNames[index] = QueryExplainer.FormatExpression(_groupByExpressions[index]);
-            }
-
-            for (int index = 0; index < _aggregateColumns.Count; index++)
-            {
-                outputNames[_groupByExpressions.Count + index] = _aggregateColumns[index].OutputName;
-            }
-
-            outputLookup = new ColumnLookup(outputNames);
-        }
-
-        DataValue[] values = pool.RentDataValues(outputFieldCount);
-
-        if (!isGlobalAggregation)
-        {
-            for (int index = 0; index < _groupByExpressions.Count; index++)
-            {
-                values[index] = group.KeyValues![index];
-            }
-        }
-
-        for (int index = 0; index < _aggregateColumns.Count; index++)
-        {
-            values[_groupByExpressions.Count + index] = await group.Accumulators[index].ResultAsync(frame).ConfigureAwait(false);
-        }
-
-        return (new Row(outputLookup, values), outputLookup);
-    }
-
 
     /// <inheritdoc />
     public void Dispose()
