@@ -188,6 +188,62 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Regression: <c>CALL</c> followed by a space had no completion zone,
+    /// so the classifier fell back to <see cref="CompletionZoneKind.StatementStart"/>
+    /// and offered statement-start keywords instead of procedure names.
+    /// After the fix, <c>AfterCall</c> surfaces procedures from search-path
+    /// schemas plus off-search-path schema names for drill-in.
+    /// </summary>
+    [Fact]
+    public void GetCompletions_AfterCall_OffersProceduresAndSchemas()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            SearchPath = ["public", "system"],
+            Tables = [],
+            Functions =
+            [
+                // A schema that has no procedures but has functions —
+                // should still surface as a schema for users to drill in
+                // (the procedures might come from later).
+                new FunctionSignature
+                {
+                    SchemaName = "tokenizer",
+                    Name = "encode",
+                    Parameters = [new ParameterSignature { Name = "text", Kind = "String" }],
+                    Description = "Tokenize text.",
+                },
+            ],
+            Procedures =
+            [
+                new ProcedureEntry
+                {
+                    SchemaName = "public",
+                    Name = "do_something",
+                    Parameters = [new ParameterSignature { Name = "x", Kind = "Int32" }],
+                },
+                new ProcedureEntry
+                {
+                    SchemaName = "system",
+                    Name = "vacuum",
+                    Parameters = [],
+                },
+            ],
+            Keywords = ["SELECT", "FROM", "CALL"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem[] items = provider.GetCompletions("CALL ", 5);
+
+        // Search-path procedures surface as bare names.
+        Assert.Contains(items, i => i.Label == "do_something" && i.Kind == CompletionItemKind.Function);
+        Assert.Contains(items, i => i.Label == "vacuum" && i.Kind == CompletionItemKind.Function);
+
+        // Off-search-path schemas surface so users can drill in with `.`.
+        Assert.Contains(items, i => i.Label == "tokenizer" && i.Kind == CompletionItemKind.Schema);
+    }
+
+    /// <summary>
     /// Regression: built-in functions registered in non-<c>system</c> schemas
     /// (e.g. <c>inference.onnx_inspect</c>, <c>tokenizer.encode</c>) must
     /// surface when the user qualifies with the schema name. Earlier the
@@ -253,6 +309,59 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Regression: typing <c>CALL </c> must surface procedures from
+    /// search-path schemas (bare) and off-search-path schemas (drillable).
+    /// Earlier <c>CALL</c> wasn't recognised by the zone classifier and
+    /// fell through to <c>StatementStart</c>, suggesting only top-level
+    /// keywords.
+    /// </summary>
+    [Fact]
+    public void GetCompletions_AfterCall_SurfacesProceduresAndSchemas()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            SearchPath = ["public", "system"],
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "tokenizer",
+                    Name = "encode",
+                    Parameters = [new ParameterSignature { Name = "text", Kind = "String" }],
+                    ReturnType = "Int64",
+                },
+            ],
+            Procedures =
+            [
+                new ProcedureEntry
+                {
+                    SchemaName = "public",
+                    Name = "my_proc",
+                    Parameters = [new ParameterSignature { Name = "x", Kind = "Int32" }],
+                },
+                new ProcedureEntry
+                {
+                    SchemaName = "tokenizer",
+                    Name = "load_pretrained",
+                    Parameters = [new ParameterSignature { Name = "name", Kind = "String" }],
+                },
+            ],
+            Keywords = ["SELECT", "FROM", "CALL"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem[] items = provider.GetCompletions("CALL ", 5);
+
+        // Search-path procedure is offered bare.
+        Assert.Contains(items, i => i.Label == "my_proc");
+        // Off-search-path procedure NOT offered bare (would need qualification).
+        Assert.DoesNotContain(items, i => i.Label == "load_pretrained");
+        // Off-search-path schema IS offered so user can drill into it.
+        Assert.Contains(items, i => i.Label == "tokenizer" && i.Kind == CompletionItemKind.Schema);
+    }
+
+    /// <summary>
     /// Regression: typing a prefix that matches a schema name (e.g. <c>tok</c>
     /// for <c>tokenizer</c>) must surface the schema itself as a completion
     /// item — otherwise users can only reach qualified functions by typing
@@ -307,11 +416,44 @@ public sealed class CompletionProviderTests : ServiceTestBase
         CompletionItem[] fromItems = provider.GetCompletions("SELECT * FROM inf", 17);
         Assert.Contains(fromItems, i => i.Label == "inference" && i.Kind == CompletionItemKind.Schema);
 
-        // Search-path schemas (system, public) should NOT surface as
-        // schema-kind completions — their functions are already visible
-        // unqualified, so the schema name would be noise.
-        Assert.DoesNotContain(selectItems, i => i.Label == "system" && i.Kind == CompletionItemKind.Schema);
+        // `system` surfaces as a schema even though its functions are
+        // unqualified-callable — drilling `system.` is the discovery
+        // path for the catalog-introspection tables (system.tables,
+        // system.functions, system.models, …). `public` is filtered out
+        // (default-default schema; surfacing would be pure noise).
+        Assert.Contains(selectItems, i => i.Label == "system" && i.Kind == CompletionItemKind.Schema);
         Assert.DoesNotContain(selectItems, i => i.Label == "public" && i.Kind == CompletionItemKind.Schema);
+    }
+
+    /// <summary>
+    /// Regression: <c>models</c> surfaces as a schema whenever at least
+    /// one model is registered, even though no <c>FunctionSignature</c>
+    /// has <c>SchemaName == "models"</c> (models are a separate manifest
+    /// list, not function-shaped).
+    /// </summary>
+    [Fact]
+    public void GetCompletions_SurfacesModelsSchema_WhenAnyModelIsRegistered()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            SearchPath = ["public", "system"],
+            Tables = [],
+            Functions = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "mobilenet_v2",
+                    OutputKind = "Int32",
+                    Category = "vision",
+                },
+            ],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem[] items = provider.GetCompletions("SELECT mod", 10);
+        Assert.Contains(items, i => i.Label == "models" && i.Kind == CompletionItemKind.Schema);
     }
 
     /// <summary>

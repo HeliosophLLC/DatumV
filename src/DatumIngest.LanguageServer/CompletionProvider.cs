@@ -258,6 +258,11 @@ public sealed class CompletionProvider
                 // Cursor is inside a string or comment — suppress all completions
                 // so e.g. ALTER doesn't get inserted while the user types a literal.
                 break;
+
+            case CompletionZoneKind.AfterCall:
+                AddProcedures(items);
+                AddSchemaNames(items);
+                break;
         }
 
         // Filter by prefix if the user has partially typed something.
@@ -455,36 +460,104 @@ public sealed class CompletionProvider
         function.Name.StartsWith("__", StringComparison.Ordinal);
 
     /// <summary>
-    /// Surfaces every off-search-path schema that hosts at least one
-    /// function as a <see cref="CompletionItemKind.Schema"/> completion.
-    /// Lets the user type <c>tok</c> and pick <c>tokenizer</c> rather
-    /// than needing to know the full <c>tokenizer.encode</c> shape up
-    /// front. Search-path schemas (<c>system</c>, <c>public</c>) are
-    /// skipped — their functions already surface unqualified.
+    /// Surfaces procedures whose schema is on the search path as bare,
+    /// callable names after the user types <c>CALL</c>. Procedures in
+    /// non-search-path schemas need qualification — those show up via
+    /// <see cref="AddSchemaNames"/> + the <see cref="CompletionZoneKind.AfterDot"/>
+    /// drill-in path.
+    /// </summary>
+    private void AddProcedures(List<CompletionItem> items)
+    {
+        if (_manifest.Procedures is null) return;
+        foreach (ProcedureEntry proc in _manifest.Procedures)
+        {
+            if (!ContainsIgnoreCase(_manifest.SearchPath, proc.SchemaName)) continue;
+            items.Add(BuildProcedureCompletion(proc));
+        }
+    }
+
+    /// <summary>
+    /// Surfaces every distinct schema name discoverable in the manifest
+    /// — across built-in functions, UDFs, procedures, tables, and the
+    /// <c>models</c> namespace — as a <see cref="CompletionItemKind.Schema"/>
+    /// completion. Lets the user type <c>tok</c> and pick <c>tokenizer</c>,
+    /// or <c>mod</c> and pick <c>models</c>, without knowing the full
+    /// qualified call up front.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Search-path schemas (<c>system</c>) are <em>included</em> — the
+    /// user can drill <c>system.</c> to discover the catalog-introspection
+    /// tables and the explicitly-qualified function forms. Only
+    /// <c>public</c> is filtered out, because it's the default-default
+    /// and surfacing it would be noise (same identifiers are reachable
+    /// unqualified).
+    /// </para>
+    /// <para>
     /// Inserts just the schema name (no trailing dot); the editor's own
     /// trigger-on-dot completion fires the qualified-completion zone
     /// once the user types <c>.</c> after acceptance. Sort order 3 puts
-    /// these below scalar functions (2) and TVFs (1) so they don't
-    /// shadow the more-common completions at the top of the popup.
+    /// these below scalar functions (2) and TVFs (1).
+    /// </para>
     /// </remarks>
     private void AddSchemaNames(List<CompletionItem> items)
     {
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+
+        // Built-in functions / TVFs / aggregates / window functions.
         foreach (FunctionSignature function in _manifest.Functions)
         {
-            string schema = function.SchemaName;
-            if (string.IsNullOrEmpty(schema)) continue;
-            if (ContainsIgnoreCase(_manifest.SearchPath, schema)) continue;
             if (IsInternalFunction(function)) continue;
-            if (!seen.Add(schema)) continue;
+            string schema = function.SchemaName;
+            if (!string.IsNullOrEmpty(schema)) seen.Add(schema);
+        }
 
+        // User-defined functions.
+        if (_manifest.Udfs is not null)
+        {
+            foreach (UdfEntry udf in _manifest.Udfs)
+            {
+                if (!string.IsNullOrEmpty(udf.SchemaName)) seen.Add(udf.SchemaName);
+            }
+        }
+
+        // Procedures (CALL targets).
+        if (_manifest.Procedures is not null)
+        {
+            foreach (ProcedureEntry proc in _manifest.Procedures)
+            {
+                if (!string.IsNullOrEmpty(proc.SchemaName)) seen.Add(proc.SchemaName);
+            }
+        }
+
+        // Tables (schema-qualified entries surface their schema —
+        // <c>system.tables</c>, <c>datum_catalog.functions</c>, etc.).
+        foreach (TableSchemaEntry table in _manifest.Tables)
+        {
+            int dot = table.Name.IndexOf('.');
+            if (dot > 0) seen.Add(table.Name[..dot]);
+        }
+
+        // Models always live in the `models` namespace — surface it
+        // whenever there's at least one registered so the user can drill
+        // `models.<name>` even without typing the full model name first.
+        if (_manifest.Models is not null && _manifest.Models.Count > 0)
+        {
+            seen.Add("models");
+        }
+
+        // `public` is the default-default schema. Its identifiers
+        // surface unqualified everywhere — listing it as a schema is
+        // pure noise.
+        seen.Remove("public");
+
+        foreach (string schema in seen)
+        {
             items.Add(new CompletionItem
             {
                 Label = schema,
                 Kind = CompletionItemKind.Schema,
-                Detail = $"[schema] {schema}.* — qualified namespace",
+                Detail = $"[schema] {schema}.*",
                 InsertText = schema,
                 SortOrder = 3,
             });

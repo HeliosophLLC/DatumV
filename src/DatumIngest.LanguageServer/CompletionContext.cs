@@ -660,6 +660,12 @@ public static class CompletionContext
                     // — no row context, so columns aren't legal here.
                     return CompletionZoneKind.ProceduralExpression;
 
+                case SqlToken.Call:
+                    // CALL <schema>.<proc>(args) — surface procedures from
+                    // search-path schemas as bare names, plus off-search-
+                    // path schema names so the user can drill in.
+                    return CompletionZoneKind.AfterCall;
+
                 // ───────────────────── DDL / DML keywords ─────────────────────
 
                 case SqlToken.Create:
@@ -1437,4 +1443,13 @@ public enum CompletionZoneKind
 
     /// <summary>Cursor sits inside an unclosed string literal or comment — no completions are appropriate.</summary>
     InsideStringOrComment,
+
+    /// <summary>
+    /// After <c>CALL</c> — offer procedures from search-path schemas
+    /// unqualified, plus off-search-path schema names so the user can
+    /// drill into <c>tokenizer.</c> / <c>inference.</c> / etc.
+    /// Procedures REQUIRE <c>CALL</c>, so this is the only zone where
+    /// they surface top-level.
+    /// </summary>
+    AfterCall,
 }
