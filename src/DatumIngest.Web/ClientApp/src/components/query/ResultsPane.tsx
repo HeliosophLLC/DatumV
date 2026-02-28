@@ -11,7 +11,7 @@ import {
   type JsonCell,
   type TabExecution,
 } from '@/state/execution';
-import { tabsState } from '@/state/tabs';
+import { panesState, findLeaf } from '@/state/tabs';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
@@ -24,11 +24,13 @@ import { cn } from '@/lib/utils';
 // Cells render in arrival order so a multi-statement script shows the
 // procedural progression top-to-bottom.
 
-export function ResultsPane() {
+export function ResultsPane({ leafId }: { leafId: string }) {
   const { t } = useTranslation('query');
-  const { activeTabId } = useSnapshot(tabsState);
+  useSnapshot(panesState);
   const { byTabId } = useSnapshot(executionsState);
 
+  const leaf = findLeaf(panesState.root, leafId);
+  const activeTabId = leaf?.activeTabId ?? null;
   if (activeTabId === null) return null;
   const exec = byTabId[activeTabId];
 
@@ -42,15 +44,16 @@ export function ResultsPane() {
     : [];
 
   // Pre-run / no-data state — no exec yet, OR a terminal run produced
-  // nothing visible. Render the hint, no status bar (StatusBar hides
-  // itself on idle anyway).
+  // nothing visible. Render the hint plus the status bar in its
+  // "Ready" state so the bar's height stays constant across the
+  // lifecycle (no layout shift when the first run begins).
   if (!exec || (visibleCells.length === 0 && exec.error === null)) {
     return (
       <div className="flex h-full flex-col overflow-hidden">
         <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">
           {t('resultsEmpty')}
         </div>
-        {exec && <StatusBar exec={exec as TabExecution} />}
+        <StatusBar exec={(exec as TabExecution | undefined) ?? null} />
       </div>
     );
   }
@@ -114,38 +117,48 @@ function isVisibleCell(cell: {
   return false;
 }
 
-function StatusBar({ exec }: { exec: TabExecution }) {
+function StatusBar({ exec }: { exec: TabExecution | null }) {
   const { t } = useTranslation('query');
 
   // Live timer during streaming. The exec's startedAt is fixed; we re-
   // render once a second so the "Executing…" duration ticks. After
   // termination we lock to exec.elapsedMs (the server's measurement,
-  // not our client clock).
+  // not our client clock). Pre-run state shows 0ms.
   const [tickMs, setTickMs] = useState<number>(() =>
-    exec.status === 'streaming' && exec.startedAt !== null
+    exec && exec.status === 'streaming' && exec.startedAt !== null
       ? Date.now() - exec.startedAt
-      : exec.elapsedMs ?? 0,
+      : exec?.elapsedMs ?? 0,
   );
   useEffect(() => {
-    if (exec.status !== 'streaming' || exec.startedAt === null) return;
+    if (!exec || exec.status !== 'streaming' || exec.startedAt === null) return;
     const start = exec.startedAt;
     const id = window.setInterval(() => {
       setTickMs(Date.now() - start);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [exec.status, exec.startedAt]);
+  }, [exec?.status, exec?.startedAt, exec]);
 
-  if (exec.status === 'idle') return null;
-
+  // Idle path: no execution has started yet (or the slot was cleared
+  // when the tab closed and reopened). Show a "Ready" message + 0ms
+  // duration + 0 rows so the bar's three-panel layout stays stable
+  // from first paint through every subsequent run.
+  const status = exec?.status ?? 'idle';
   const hasError =
-    exec.error !== null || exec.cells.some((c) => c.error !== null);
-  const totalRows = exec.cells.reduce((sum, c) => sum + c.rowCount, 0);
-  const elapsedMs =
-    exec.status === 'streaming' ? tickMs : exec.elapsedMs ?? tickMs;
+    exec !== null &&
+    (exec.error !== null || exec.cells.some((c) => c.error !== null));
+  const totalRows = exec
+    ? exec.cells.reduce((sum, c) => sum + c.rowCount, 0)
+    : 0;
+  const elapsedMs = !exec
+    ? 0
+    : exec.status === 'streaming'
+      ? tickMs
+      : exec.elapsedMs ?? tickMs;
 
   let leftMessage: string;
-  if (exec.status === 'streaming') leftMessage = t('statusBarRunning');
-  else if (exec.status === 'cancelled') leftMessage = t('statusBarCancelled');
+  if (status === 'idle') leftMessage = t('statusBarReady');
+  else if (status === 'streaming') leftMessage = t('statusBarRunning');
+  else if (status === 'cancelled') leftMessage = t('statusBarCancelled');
   else if (hasError) leftMessage = t('statusBarError');
   else leftMessage = t('statusBarSuccess');
 
@@ -159,7 +172,7 @@ function StatusBar({ exec }: { exec: TabExecution }) {
   return (
     <div className="bg-status-bar text-status-bar-foreground border-border flex shrink-0 items-stretch overflow-hidden border-t text-xs">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3 py-1">
-        <StatusIcon status={exec.status} hasError={hasError} />
+        <StatusIcon status={status} hasError={hasError} />
         <span className="truncate">{leftMessage}</span>
       </div>
       <div className="border-status-bar-foreground/25 flex shrink-0 items-center whitespace-nowrap border-l px-3 py-1 font-mono">
@@ -182,7 +195,10 @@ function StatusIcon({
   // Iconography is decoupled from the bar's yellow background — the
   // shape carries the meaning, the colour reinforces it. Green check
   // for clean success; red alert when any cell errored; muted ban for
-  // cancelled; the toolbar's spinner during run.
+  // cancelled; the toolbar's spinner during run. Idle gets no icon —
+  // the "Ready" label is enough and adding a neutral glyph would
+  // visually outweigh its informational value.
+  if (status === 'idle') return null;
   if (status === 'streaming') {
     return <Loader2 className="size-3.5 shrink-0 animate-spin" />;
   }
@@ -195,39 +211,22 @@ function StatusIcon({
   return <Check className="size-3.5 shrink-0 text-green-700 dark:text-green-600" />;
 }
 
-// Formats elapsed milliseconds as `HHh MMm SSs`. Uses Intl.DurationFormat
-// when the runtime exposes it (Chromium ≥ 129, Electron ≥ 33) and falls
-// back to a manual padded format otherwise so the bar renders the same
-// shape on older runtimes. Always-positive — negative would mean a
-// clock-skew bug upstream.
+// Formats elapsed milliseconds as `MM:SS.mmm`. Sub-second precision is
+// what matters most for query timing (a 200ms vs 800ms difference is
+// meaningful; 1h vs 2h almost never is for an editor session), so the
+// hours panel from the prior format is gone and milliseconds get a
+// full 3-digit panel instead. Minutes still pads to two digits so the
+// width stays stable even at sub-minute durations. Always-positive —
+// negative would mean a clock-skew bug upstream.
 function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const clamped = Math.max(0, ms);
+  const totalSeconds = Math.floor(clamped / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-
-  // Try Intl.DurationFormat first — gives locale-aware unit labels in
-  // non-English runtimes once that lands. `narrow` style emits "h/m/s"
-  // suffixes which match the user-requested shape.
-  type DurationFormatCtor = new (
-    locale: string,
-    options: { style: 'narrow' },
-  ) => { format(input: { hours: number; minutes: number; seconds: number }): string };
-  const ctor = (Intl as unknown as { DurationFormat?: DurationFormatCtor }).DurationFormat;
-  if (ctor) {
-    try {
-      const fmt = new ctor('en', { style: 'narrow' });
-      const formatted = fmt.format({ hours, minutes, seconds });
-      // Intl emits no leading zeros; the spec wants `00h 00m 00s`, so
-      // when the result lacks them, fall through to the manual path.
-      if (/^\d{2}h \d{2}m \d{2}s$/.test(formatted)) return formatted;
-    } catch {
-      /* fall through to manual formatter */
-    }
-  }
-
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(hours)}h ${pad(minutes)}m ${pad(seconds)}s`;
+  const millis = Math.floor(clamped % 1000);
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const pad3 = (n: number) => String(n).padStart(3, '0');
+  return `${pad2(minutes)}:${pad2(seconds)}.${pad3(millis)}`;
 }
 
 function CellBlock({

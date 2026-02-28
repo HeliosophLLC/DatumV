@@ -1,43 +1,70 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { Plus, X } from 'lucide-react';
+import { Play, Plus, Square, X } from 'lucide-react';
 import {
-  tabsState,
+  panesState,
   openTab,
   closeTab,
   selectTab,
   renameTab,
+  moveTab,
+  findLeaf,
 } from '@/state/tabs';
+import { cancelTab, executionsState, runTab } from '@/state/execution';
+import { resolveRunSql } from '@/state/activeEditor';
+import {
+  TAB_DRAG_MIME,
+  parseTabDragData,
+  writeTabDragData,
+} from './tabDrag';
 import { cn } from '@/lib/utils';
 
-// VSCode-style tab strip. Click to select, × to close, double-click to
-// rename (prompt dialog for now — replace with an inline editable
-// element when we have a styled component for it). The strip is a
-// horizontal flex row with overflow-x-auto; tab order is the same as
-// `tabsState.tabs`.
+// VSCode-style tab strip, scoped to a single leaf pane. Click to select,
+// × to close, double-click to rename. Tabs are draggable; the strip is
+// also a drop target so users can reorder within a leaf or move tabs in
+// from another leaf.
 
-export function TabStrip() {
+export function TabStrip({ leafId }: { leafId: string }) {
   const { t } = useTranslation('query');
-  const { tabs, activeTabId } = useSnapshot(tabsState);
+  useSnapshot(panesState); // re-render on any tab change
+  useSnapshot(executionsState); // re-render when any tab's run status changes
+  const leaf = findLeaf(panesState.root, leafId);
+  if (!leaf) return null;
 
   return (
     <div className="border-border bg-background flex h-9 shrink-0 items-stretch border-b">
       <div className="flex flex-1 items-stretch overflow-x-auto">
-        {tabs.map((tab) => (
-          <TabChip
-            key={tab.id}
-            id={tab.id}
-            title={tab.title}
-            dirty={tab.dirty}
-            active={tab.id === activeTabId}
-            renameLabel={t('renameTab')}
-            renamePromptLabel={t('renamePrompt')}
-            closeLabel={t('closeTab')}
-          />
-        ))}
+        {leaf.tabs.map((tab, index) => {
+          const exec = executionsState.byTabId[tab.id];
+          const isStreaming = exec?.status === 'streaming';
+          return (
+            <TabChip
+              key={tab.id}
+              leafId={leafId}
+              id={tab.id}
+              index={index}
+              title={tab.title}
+              sql={tab.sql}
+              dirty={tab.dirty}
+              active={tab.id === leaf.activeTabId}
+              isStreaming={isStreaming}
+              renameLabel={t('renameTab')}
+              renamePromptLabel={t('renamePrompt')}
+              closeLabel={t('closeTab')}
+              runLabel={t('run')}
+              cancelLabel={t('cancel')}
+            />
+          );
+        })}
+        {/* End-of-strip drop sentinel + new-tab button. The sentinel
+            absorbs drops past the last tab so the user can move a tab to
+            the very end. The button stretches to fill remaining space so
+            the click target is forgiving. */}
+        <EndSentinel leafId={leafId} tabCount={leaf.tabs.length} />
         <button
           type="button"
-          onClick={() => openTab()}
+          onClick={() => openTab('', leafId)}
           aria-label={t('newTab')}
           title={t('newTab')}
           className={cn(
@@ -53,30 +80,43 @@ export function TabStrip() {
 }
 
 function TabChip({
+  leafId,
   id,
+  index,
   title,
+  sql,
   dirty,
   active,
+  isStreaming,
   renameLabel,
   renamePromptLabel,
   closeLabel,
+  runLabel,
+  cancelLabel,
 }: {
+  leafId: string;
   id: string;
+  index: number;
   title: string;
+  sql: string;
   dirty: boolean;
   active: boolean;
+  isStreaming: boolean;
   renameLabel: string;
   renamePromptLabel: string;
   closeLabel: string;
+  runLabel: string;
+  cancelLabel: string;
 }) {
+  // 'before' = drop indicator on the left edge; 'after' = right edge.
+  // null while no drag is over this chip.
+  const [dropSide, setDropSide] = useState<'before' | 'after' | null>(null);
+
   function onSelect() {
     selectTab(id);
   }
 
   function onRename() {
-    // Native prompt is intentional for v1 — keeps the surface tiny.
-    // Replace with an inline-editable component when we have one in
-    // the design system.
     const next = window.prompt(renamePromptLabel, title);
     if (next === null) return;
     renameTab(id, next);
@@ -87,24 +127,105 @@ function TabChip({
     closeTab(id);
   }
 
+  function onPlayOrStop(e: React.MouseEvent) {
+    // Don't switch tabs when clicking the play button — the user might
+    // be kicking off a long-running query from a tab they don't want
+    // to leave the current one for. The click does NOT propagate to
+    // the tab's onSelect.
+    e.stopPropagation();
+    if (isStreaming) {
+      cancelTab(id);
+      return;
+    }
+    // resolveRunSql honours the focused editor's current selection only
+    // when that editor belongs to THIS tab's leaf. So clicking the
+    // Play button on a tab in leaf B while you've been editing leaf B
+    // runs your selection; clicking it on leaf A's tab from leaf B's
+    // editor falls back to the whole tab text. Matches Ctrl+Enter's
+    // selection-aware behaviour.
+    void runTab(id, resolveRunSql(sql, leafId));
+  }
+
+  function onDragStart(e: React.DragEvent) {
+    writeTabDragData(e.dataTransfer, { fromLeafId: leafId, tabId: id });
+  }
+
+  function hasTabPayload(e: React.DragEvent): boolean {
+    return e.dataTransfer.types.includes(TAB_DRAG_MIME);
+  }
+
+  function onDragOver(e: React.DragEvent) {
+    if (!hasTabPayload(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = e.currentTarget.getBoundingClientRect();
+    const side = e.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+    setDropSide(side);
+  }
+
+  function onDragLeave() {
+    setDropSide(null);
+  }
+
+  function onDrop(e: React.DragEvent) {
+    if (!hasTabPayload(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const payload = parseTabDragData(e.dataTransfer);
+    const side = dropSide;
+    setDropSide(null);
+    if (!payload) return;
+    // Insert position depends on which half of the chip the cursor was
+    // over. `moveTab` adjusts internally when source-and-target are the
+    // same leaf so the rendered position matches the indicator.
+    const insertIndex = side === 'after' ? index + 1 : index;
+    moveTab(payload.tabId, leafId, insertIndex);
+  }
+
   return (
     <div
       role="tab"
       aria-selected={active}
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       onClick={onSelect}
       onDoubleClick={onRename}
       title={renameLabel}
       className={cn(
         'group border-border relative flex shrink-0 cursor-pointer items-center gap-2 border-r px-3 py-1.5 text-sm transition-colors',
-        // Active indicator is a pseudo-element so it doesn't add to the
-        // tab's box height — otherwise the strip's overflow-x:auto gets
-        // auto-promoted to overflow-y:auto (CSS spec) and we get a 1 px
-        // vertical scrollbar from the height delta.
         active
           ? 'bg-background text-foreground after:bg-primary after:absolute after:inset-x-0 after:bottom-0 after:h-0.5'
           : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground',
       )}
     >
+      {dropSide === 'before' && (
+        <div className="bg-primary pointer-events-none absolute inset-y-0 left-0 w-0.5" />
+      )}
+      {dropSide === 'after' && (
+        <div className="bg-primary pointer-events-none absolute inset-y-0 right-0 w-0.5" />
+      )}
+      <button
+        type="button"
+        onClick={onPlayOrStop}
+        aria-label={isStreaming ? cancelLabel : runLabel}
+        title={isStreaming ? cancelLabel : runLabel}
+        className={cn(
+          'flex shrink-0 cursor-pointer items-center justify-center rounded-xs p-0.5 transition-colors',
+          isStreaming
+            ? 'text-destructive hover:bg-destructive/15'
+            : 'text-primary hover:bg-primary/15',
+        )}
+      >
+        {isStreaming ? (
+          <Square className="size-3" />
+        ) : (
+          <Play className="size-3" />
+        )}
+      </button>
       <span className="max-w-[160px] truncate">
         {title}
         {dirty ? ' •' : ''}
@@ -122,6 +243,49 @@ function TabChip({
       >
         <X className="size-3" />
       </button>
+    </div>
+  );
+}
+
+function EndSentinel({ leafId, tabCount }: { leafId: string; tabCount: number }) {
+  const [hover, setHover] = useState(false);
+
+  function hasTabPayload(e: React.DragEvent): boolean {
+    return e.dataTransfer.types.includes(TAB_DRAG_MIME);
+  }
+
+  function onDragOver(e: React.DragEvent) {
+    if (!hasTabPayload(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    setHover(true);
+  }
+
+  function onDragLeave() {
+    setHover(false);
+  }
+
+  function onDrop(e: React.DragEvent) {
+    if (!hasTabPayload(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const payload = parseTabDragData(e.dataTransfer);
+    setHover(false);
+    if (!payload) return;
+    moveTab(payload.tabId, leafId, tabCount);
+  }
+
+  return (
+    <div
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className="relative w-2 shrink-0"
+    >
+      {hover && (
+        <div className="bg-primary pointer-events-none absolute inset-y-0 left-0 w-0.5" />
+      )}
     </div>
   );
 }

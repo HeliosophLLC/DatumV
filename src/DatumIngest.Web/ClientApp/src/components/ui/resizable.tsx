@@ -44,8 +44,11 @@ function ResizableHandle({
         // 1px line, always visible at the border colour. The `after`
         // pseudo-element is a 4px hit zone (also doubles as the thicker
         // visible bar on hover) — it sits absolutely over the 1px line so
-        // widening it doesn't disturb the flex row.
-        'bg-border focus-visible:ring-ring relative flex w-px items-center justify-center transition-colors duration-150',
+        // widening it doesn't disturb the flex row. `z-20` keeps the hit
+        // zone above adjacent Monaco editors during a resize — without
+        // it the editor's internal layers can swallow drag events at the
+        // edge of the panel.
+        'bg-border focus-visible:ring-ring relative z-20 flex w-px items-center justify-center transition-colors duration-150',
         'hover:bg-primary data-[separator=active]:bg-primary',
         'after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 after:bg-transparent after:transition-colors after:duration-150',
         'hover:after:bg-primary data-[separator=active]:after:bg-primary',

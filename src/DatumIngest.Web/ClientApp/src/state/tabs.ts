@@ -1,17 +1,23 @@
 import { proxy, subscribe } from 'valtio';
 
-// Query-editor tab state. Each tab is an editable SQL document with its
-// own title, dirty flag, and last-run result handle. The Monaco editor
-// renders the active tab's text and keeps cursor / scroll / undo per
-// tab id via dedicated ITextModel instances (managed in the view).
+// Query-editor pane tree. PR 1 shipped a flat `tabs[]` model; PR 7 lifts
+// that into a recursive binary tree of panes so the user can split the
+// editor surface VSCode-style. The shape:
 //
-// PR 1 keeps the model flat — `tabs[]` + `activeTabId`. PR 7 layers in
-// tab groups; the refactor is a single `Tab[]` → `Group[] { tabs: Tab[] }`
-// shape change. Pre-emptively nesting groups now adds dead branches and
-// makes the early surface harder to read.
+//   PaneNode = LeafPane { tabs: Tab[], activeTabId }
+//            | SplitPane { orientation, children: [PaneNode, PaneNode] }
+//
+// Binary splits map 1:1 onto a `ResizablePanelGroup` with two `Panel`s;
+// N-way splits are achievable by nesting splits of the same orientation.
+// Keeping it binary keeps state mutations small and lossless under
+// drag-to-edge.
+//
+// All `Tab` instances in the tree are unique by `id`. Closing the last
+// tab in a non-root leaf collapses the leaf into its sibling so a
+// pane never hangs around empty.
 
 export interface Tab {
-  /** Stable identifier; used as Monaco model key. Never reused once closed. */
+  /** Stable identifier; used as Monaco model key and execution-state key. */
   id: string;
   /** Display name on the strip. Defaults to "Untitled-N" until renamed. */
   title: string;
@@ -21,182 +27,535 @@ export interface Tab {
   dirty: boolean;
 }
 
-interface TabsState {
+export interface LeafPane {
+  kind: 'leaf';
+  /** Stable identifier; used as the focused-leaf key + DnD source/target. */
+  id: string;
   tabs: Tab[];
+  /** Null when the leaf has no tabs (transient — empty non-root leaves collapse). */
   activeTabId: string | null;
 }
 
-const STORAGE_KEY = 'datumingest:tabs';
-const SAVE_DEBOUNCE_MS = 500;
+export type SplitOrientation = 'horizontal' | 'vertical';
 
-// Lazily generate ids. `crypto.randomUUID` is available in every browser /
-// Electron renderer we target (Chromium ≥ 92). Falls back to a timestamp+
-// random suffix for the unlikely older runtime, which still gives stable
-// keys within a session.
-function newTabId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
-  }
-  return `tab-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+export interface SplitPane {
+  kind: 'split';
+  id: string;
+  /**
+   * `horizontal` = side-by-side (children stack along the X axis).
+   * `vertical`   = stacked (children stack along the Y axis).
+   * Matches the semantics of `ResizablePanelGroup.orientation`.
+   */
+  orientation: SplitOrientation;
+  children: [PaneNode, PaneNode];
 }
 
-function nextUntitledTitle(existing: readonly Tab[]): string {
-  // Find the smallest N such that "Untitled-N" isn't taken.
-  const taken = new Set(
-    existing
-      .map((t) => /^Untitled-(\d+)$/.exec(t.title)?.[1])
-      .filter((n): n is string => n !== undefined)
-      .map((n) => parseInt(n, 10)),
-  );
+export type PaneNode = LeafPane | SplitPane;
+
+interface PanesState {
+  root: PaneNode;
+  /**
+   * The leaf whose editor most recently had focus. Used by the toolbar /
+   * keybinds to decide which tab to act on. Always points at a live
+   * leaf in `root`; actions keep this invariant.
+   */
+  focusedLeafId: string;
+}
+
+const STORAGE_KEY = 'datumingest:panes';
+const SAVE_DEBOUNCE_MS = 500;
+
+// No layout cap. The per-axis rule we tried earlier turned out to be a
+// poor fit for "max columns" — depending on tree shape, a user could
+// still produce arbitrarily wide layouts by always dropping on the
+// edge of the deeper subtree. Rather than chase a constraint that
+// doesn't match user intent, splits are unbounded; the user gets to
+// arrange their workspace however they want.
+
+function newId(prefix: string): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+}
+
+function newTabId(): string {
+  return newId('tab');
+}
+
+function newLeafId(): string {
+  return newId('leaf');
+}
+
+function newSplitId(): string {
+  return newId('split');
+}
+
+function nextUntitledTitle(tree: PaneNode): string {
+  const taken = new Set<number>();
+  forEachTab(tree, (t) => {
+    const m = /^Untitled-(\d+)$/.exec(t.title);
+    if (m) taken.add(parseInt(m[1], 10));
+  });
   let n = 1;
   while (taken.has(n)) n++;
   return `Untitled-${n}`;
 }
 
-function readPersisted(): TabsState | null {
+// ────────── Tree traversal helpers ──────────
+
+function forEachTab(node: PaneNode, fn: (t: Tab) => void): void {
+  if (node.kind === 'leaf') {
+    for (const t of node.tabs) fn(t);
+  } else {
+    forEachTab(node.children[0], fn);
+    forEachTab(node.children[1], fn);
+  }
+}
+
+function forEachLeaf(node: PaneNode, fn: (l: LeafPane) => void): void {
+  if (node.kind === 'leaf') {
+    fn(node);
+  } else {
+    forEachLeaf(node.children[0], fn);
+    forEachLeaf(node.children[1], fn);
+  }
+}
+
+export function findLeaf(node: PaneNode, leafId: string): LeafPane | null {
+  if (node.kind === 'leaf') return node.id === leafId ? node : null;
+  return findLeaf(node.children[0], leafId) ?? findLeaf(node.children[1], leafId);
+}
+
+export function findTab(
+  node: PaneNode,
+  tabId: string,
+): { leaf: LeafPane; tab: Tab; index: number } | null {
+  if (node.kind === 'leaf') {
+    const index = node.tabs.findIndex((t) => t.id === tabId);
+    if (index < 0) return null;
+    return { leaf: node, tab: node.tabs[index], index };
+  }
+  return (
+    findTab(node.children[0], tabId) ?? findTab(node.children[1], tabId)
+  );
+}
+
+function firstLeaf(node: PaneNode): LeafPane {
+  if (node.kind === 'leaf') return node;
+  return firstLeaf(node.children[0]);
+}
+
+/**
+ * Walks the tree and returns the parent split + which side `target` is on,
+ * or null when `target` is the root. Used by collapse / split-replace.
+ */
+function findParent(
+  root: PaneNode,
+  target: PaneNode,
+): { parent: SplitPane; side: 0 | 1 } | null {
+  if (root.kind === 'leaf') return null;
+  if (root.children[0] === target) return { parent: root, side: 0 };
+  if (root.children[1] === target) return { parent: root, side: 1 };
+  return (
+    findParent(root.children[0], target) ??
+    findParent(root.children[1], target)
+  );
+}
+
+// ────────── Initial state + persistence ──────────
+
+interface PersistedTab {
+  id: string;
+  title: string;
+  sql: string;
+}
+
+type PersistedNode =
+  | { kind: 'leaf'; id: string; tabs: PersistedTab[]; activeTabId: string | null }
+  | {
+      kind: 'split';
+      id: string;
+      orientation: SplitOrientation;
+      children: [PersistedNode, PersistedNode];
+    };
+
+interface PersistedState {
+  root: PersistedNode;
+  focusedLeafId: string;
+}
+
+function readPersisted(): PanesState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<TabsState>;
-    if (!Array.isArray(parsed.tabs)) return null;
-    // Validate each tab has the required shape; drop malformed entries
-    // rather than crashing the whole boot.
+    const parsed = JSON.parse(raw) as Partial<PersistedState>;
+    if (!parsed.root) return null;
+    const root = parsePersistedNode(parsed.root);
+    if (!root) return null;
+    // Validate the focused leaf still exists; fall back to the first leaf.
+    const focused =
+      typeof parsed.focusedLeafId === 'string' && findLeaf(root, parsed.focusedLeafId)
+        ? parsed.focusedLeafId
+        : firstLeaf(root).id;
+    return { root, focusedLeafId: focused };
+  } catch {
+    return null;
+  }
+}
+
+function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
+  if (!raw) return null;
+  if (raw.kind === 'leaf') {
+    if (typeof raw.id !== 'string') return null;
+    if (!Array.isArray(raw.tabs)) return null;
     const tabs: Tab[] = [];
-    for (const t of parsed.tabs) {
+    for (const t of raw.tabs) {
       if (
         typeof t?.id === 'string' &&
         typeof t.title === 'string' &&
         typeof t.sql === 'string'
       ) {
-        tabs.push({
-          id: t.id,
-          title: t.title,
-          sql: t.sql,
-          dirty: Boolean(t.dirty),
-        });
+        tabs.push({ id: t.id, title: t.title, sql: t.sql, dirty: false });
       }
     }
     if (tabs.length === 0) return null;
     const activeTabId =
-      typeof parsed.activeTabId === 'string' &&
-      tabs.some((t) => t.id === parsed.activeTabId)
-        ? parsed.activeTabId
+      typeof raw.activeTabId === 'string' &&
+      tabs.some((t) => t.id === raw.activeTabId)
+        ? raw.activeTabId
         : tabs[0].id;
-    return { tabs, activeTabId };
-  } catch {
-    // localStorage unavailable, parse errors, etc. — fall through to
-    // a fresh single-tab state. Never block the app on persistence
-    // failure.
-    return null;
+    return { kind: 'leaf', id: raw.id, tabs, activeTabId };
   }
+  if (raw.kind === 'split') {
+    if (typeof raw.id !== 'string') return null;
+    if (raw.orientation !== 'horizontal' && raw.orientation !== 'vertical') return null;
+    if (!Array.isArray(raw.children) || raw.children.length !== 2) return null;
+    const a = parsePersistedNode(raw.children[0]);
+    const b = parsePersistedNode(raw.children[1]);
+    if (!a || !b) return null;
+    return { kind: 'split', id: raw.id, orientation: raw.orientation, children: [a, b] };
+  }
+  return null;
 }
 
-function createInitialState(): TabsState {
+function createInitialState(): PanesState {
   const persisted = readPersisted();
   if (persisted) return persisted;
 
-  // First-ever boot: one empty Untitled-1 tab.
+  // First-ever boot: one leaf with one Untitled-1 tab.
   const firstTab: Tab = {
     id: newTabId(),
     title: 'Untitled-1',
     sql: '',
     dirty: false,
   };
-  return { tabs: [firstTab], activeTabId: firstTab.id };
+  const leaf: LeafPane = {
+    kind: 'leaf',
+    id: newLeafId(),
+    tabs: [firstTab],
+    activeTabId: firstTab.id,
+  };
+  return { root: leaf, focusedLeafId: leaf.id };
 }
 
-export const tabsState = proxy<TabsState>(createInitialState());
+export const panesState = proxy<PanesState>(createInitialState());
 
-// Debounced auto-save. Subscribes to every mutation and pushes the
-// snapshot through localStorage on a trailing-edge timer so a burst of
-// keystrokes results in one write rather than dozens. Always-on once
-// the module is imported; no React lifecycle to wire up.
+// Debounced auto-save.
 let saveTimer: number | undefined;
-subscribe(tabsState, () => {
+subscribe(panesState, () => {
   if (saveTimer !== undefined) window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => {
     saveTimer = undefined;
     try {
-      // Strip the `dirty` field on persist — it's a per-session UI
-      // concept, not part of the document. Reloading shouldn't
-      // resurrect a "you have unsaved changes" indicator from a
-      // previous run.
-      const snapshot = {
-        tabs: tabsState.tabs.map((t) => ({
-          id: t.id,
-          title: t.title,
-          sql: t.sql,
-        })),
-        activeTabId: tabsState.activeTabId,
+      const snapshot: PersistedState = {
+        root: serializeNode(panesState.root),
+        focusedLeafId: panesState.focusedLeafId,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
     } catch {
       // Quota errors / disabled storage — drop the save silently.
-      // Loss-of-tabs across a crash is preferable to crashing on every
-      // keystroke.
     }
   }, SAVE_DEBOUNCE_MS);
 });
 
-// ────────── Actions ──────────
-
-export function openTab(initialSql = ''): Tab {
-  const tab: Tab = {
-    id: newTabId(),
-    title: nextUntitledTitle(tabsState.tabs),
-    sql: initialSql,
-    dirty: false,
+function serializeNode(node: PaneNode): PersistedNode {
+  if (node.kind === 'leaf') {
+    return {
+      kind: 'leaf',
+      id: node.id,
+      tabs: node.tabs.map((t) => ({ id: t.id, title: t.title, sql: t.sql })),
+      activeTabId: node.activeTabId,
+    };
+  }
+  return {
+    kind: 'split',
+    id: node.id,
+    orientation: node.orientation,
+    children: [serializeNode(node.children[0]), serializeNode(node.children[1])],
   };
-  tabsState.tabs.push(tab);
-  tabsState.activeTabId = tab.id;
-  return tab;
 }
 
-export function closeTab(id: string): void {
-  const idx = tabsState.tabs.findIndex((t) => t.id === id);
-  if (idx < 0) return;
+// ────────── Snapshot helpers ──────────
 
-  tabsState.tabs.splice(idx, 1);
-
-  // Reselect if we closed the active one. Picks the neighbour to the
-  // right by default (fall back to the left at the end of the strip)
-  // so closing in sequence walks the user toward the strip's start
-  // rather than jumping to a random surviving tab. When the last tab
-  // is closed we leave `activeTabId` null — the editor renders a
-  // blank surface until the user opens a new tab.
-  if (tabsState.activeTabId === id) {
-    if (tabsState.tabs.length === 0) {
-      tabsState.activeTabId = null;
-    } else {
-      const neighbour = tabsState.tabs[idx] ?? tabsState.tabs[idx - 1];
-      tabsState.activeTabId = neighbour.id;
-    }
-  }
-}
-
-export function selectTab(id: string): void {
-  if (tabsState.tabs.some((t) => t.id === id)) {
-    tabsState.activeTabId = id;
-  }
-}
-
-export function renameTab(id: string, title: string): void {
-  const tab = tabsState.tabs.find((t) => t.id === id);
-  if (!tab) return;
-  const trimmed = title.trim();
-  if (trimmed.length === 0) return;
-  tab.title = trimmed;
-}
-
-export function setTabSql(id: string, sql: string): void {
-  const tab = tabsState.tabs.find((t) => t.id === id);
-  if (!tab) return;
-  if (tab.sql === sql) return;
-  tab.sql = sql;
-  tab.dirty = true;
+/**
+ * Returns the leaf the user is currently focused on (toolbar, keybinds,
+ * results pane all consult this). Always non-null — the tree always has
+ * at least one leaf.
+ */
+export function getFocusedLeaf(): LeafPane {
+  const leaf = findLeaf(panesState.root, panesState.focusedLeafId);
+  if (leaf) return leaf;
+  // Defensive: if the focused id is stale, snap to the first leaf and
+  // repair the state so subsequent reads agree.
+  const first = firstLeaf(panesState.root);
+  panesState.focusedLeafId = first.id;
+  return first;
 }
 
 export function getActiveTab(): Tab | null {
-  if (tabsState.activeTabId === null) return null;
-  return tabsState.tabs.find((t) => t.id === tabsState.activeTabId) ?? null;
+  const leaf = getFocusedLeaf();
+  if (leaf.activeTabId === null) return null;
+  return leaf.tabs.find((t) => t.id === leaf.activeTabId) ?? null;
+}
+
+// ────────── Mutation helpers ──────────
+
+function replaceNode(target: PaneNode, replacement: PaneNode): void {
+  const found = findParent(panesState.root, target);
+  if (!found) {
+    panesState.root = replacement;
+    return;
+  }
+  found.parent.children[found.side] = replacement;
+}
+
+/**
+ * Collapses an empty leaf into its sibling. The root leaf is left
+ * untouched — an empty root is allowed (renders a blank surface, see
+ * QueryEditorView's null-activeTab branch).
+ */
+function collapseIfEmpty(leaf: LeafPane): void {
+  if (leaf.tabs.length > 0) return;
+  const found = findParent(panesState.root, leaf);
+  if (!found) return; // root leaf — leave alone.
+  const sibling = found.parent.children[found.side === 0 ? 1 : 0];
+  replaceNode(found.parent, sibling);
+  // If the focused leaf disappeared, retarget at the first leaf in
+  // whatever survived. firstLeaf walks into the sibling subtree.
+  if (panesState.focusedLeafId === leaf.id) {
+    panesState.focusedLeafId = firstLeaf(sibling).id;
+  }
+}
+
+// ────────── Public actions ──────────
+
+/**
+ * Opens a new tab in the targeted leaf (focused leaf by default) and
+ * makes it active. Returns the created tab.
+ */
+export function openTab(initialSql = '', leafId?: string): Tab {
+  const leaf =
+    (leafId ? findLeaf(panesState.root, leafId) : null) ?? getFocusedLeaf();
+  const tab: Tab = {
+    id: newTabId(),
+    title: nextUntitledTitle(panesState.root),
+    sql: initialSql,
+    dirty: false,
+  };
+  leaf.tabs.push(tab);
+  leaf.activeTabId = tab.id;
+  panesState.focusedLeafId = leaf.id;
+  return tab;
+}
+
+export function closeTab(tabId: string): void {
+  const found = findTab(panesState.root, tabId);
+  if (!found) return;
+  const { leaf, index } = found;
+
+  leaf.tabs.splice(index, 1);
+
+  if (leaf.activeTabId === tabId) {
+    if (leaf.tabs.length === 0) {
+      leaf.activeTabId = null;
+    } else {
+      const neighbour = leaf.tabs[index] ?? leaf.tabs[index - 1];
+      leaf.activeTabId = neighbour.id;
+    }
+  }
+
+  collapseIfEmpty(leaf);
+}
+
+export function selectTab(tabId: string): void {
+  const found = findTab(panesState.root, tabId);
+  if (!found) return;
+  found.leaf.activeTabId = tabId;
+  panesState.focusedLeafId = found.leaf.id;
+}
+
+export function focusLeaf(leafId: string): void {
+  if (findLeaf(panesState.root, leafId)) {
+    panesState.focusedLeafId = leafId;
+  }
+}
+
+export function renameTab(tabId: string, title: string): void {
+  const found = findTab(panesState.root, tabId);
+  if (!found) return;
+  const trimmed = title.trim();
+  if (trimmed.length === 0) return;
+  found.tab.title = trimmed;
+}
+
+export function setTabSql(tabId: string, sql: string): void {
+  const found = findTab(panesState.root, tabId);
+  if (!found) return;
+  if (found.tab.sql === sql) return;
+  found.tab.sql = sql;
+  found.tab.dirty = true;
+}
+
+/**
+ * Moves `tabId` to `toLeafId` at `insertIndex`. Same-leaf reorder is a
+ * special case (handled by index adjustment). Source leaf collapses if
+ * the move empties it.
+ */
+export function moveTab(
+  tabId: string,
+  toLeafId: string,
+  insertIndex: number,
+): void {
+  const sourceFound = findTab(panesState.root, tabId);
+  const target = findLeaf(panesState.root, toLeafId);
+  if (!sourceFound || !target) return;
+
+  const { leaf: source, index: fromIndex } = sourceFound;
+
+  if (source === target) {
+    // Same-leaf reorder. Splice out + back in. Adjust insertIndex when
+    // it's past the removed slot so the user-visible destination matches
+    // where the drop indicator was.
+    const [moved] = source.tabs.splice(fromIndex, 1);
+    const adjusted = insertIndex > fromIndex ? insertIndex - 1 : insertIndex;
+    const clamped = Math.max(0, Math.min(adjusted, source.tabs.length));
+    source.tabs.splice(clamped, 0, moved);
+    source.activeTabId = moved.id;
+    panesState.focusedLeafId = source.id;
+    return;
+  }
+
+  const [moved] = source.tabs.splice(fromIndex, 1);
+  const clamped = Math.max(0, Math.min(insertIndex, target.tabs.length));
+  target.tabs.splice(clamped, 0, moved);
+  target.activeTabId = moved.id;
+
+  // Repair the source's active tab if we removed the one it pointed at.
+  if (source.activeTabId === tabId) {
+    if (source.tabs.length === 0) {
+      source.activeTabId = null;
+    } else {
+      const neighbour = source.tabs[fromIndex] ?? source.tabs[fromIndex - 1];
+      source.activeTabId = neighbour.id;
+    }
+  }
+
+  panesState.focusedLeafId = target.id;
+  collapseIfEmpty(source);
+}
+
+export type SplitSide = 'left' | 'right' | 'top' | 'bottom';
+
+/**
+ * Splits `targetLeafId` by pulling `tabId` into a new leaf placed on
+ * `side`. The new leaf becomes focused. If the split would empty the
+ * source leaf, the resulting structure still works — the source leaf
+ * collapses naturally on the next refresh because we run
+ * `collapseIfEmpty` here.
+ */
+export function splitLeaf(
+  targetLeafId: string,
+  tabId: string,
+  side: SplitSide,
+): void {
+  const target = findLeaf(panesState.root, targetLeafId);
+  const sourceFound = findTab(panesState.root, tabId);
+  if (!target || !sourceFound) return;
+  const { leaf: source, index: fromIndex } = sourceFound;
+
+  // Pulling the only tab into a split of its own leaf is a no-op — the
+  // user gets the same layout they started with. Bail before mutating.
+  if (source === target && source.tabs.length === 1) return;
+
+  const newOrientation: SplitOrientation =
+    side === 'left' || side === 'right' ? 'horizontal' : 'vertical';
+
+  const [moved] = source.tabs.splice(fromIndex, 1);
+
+  // Repair source.activeTabId before we possibly collapse the source.
+  if (source.activeTabId === tabId) {
+    if (source.tabs.length === 0) {
+      source.activeTabId = null;
+    } else {
+      const neighbour = source.tabs[fromIndex] ?? source.tabs[fromIndex - 1];
+      source.activeTabId = neighbour.id;
+    }
+  }
+
+  const newLeaf: LeafPane = {
+    kind: 'leaf',
+    id: newLeafId(),
+    tabs: [moved],
+    activeTabId: moved.id,
+  };
+
+  // Child order from the side: left/top means the new leaf comes
+  // first in the split's child pair; right/bottom means it comes
+  // second. Orientation is already resolved above (`newOrientation`).
+  const newLeafFirst = side === 'left' || side === 'top';
+
+  // Important: collapse source BEFORE wrapping target in a new split,
+  // because the source might BE the target (single tab being split into
+  // itself — already handled above, but defensively). Otherwise collapse
+  // after the wrap so the parent pointer lookup still finds the target.
+  if (source !== target) {
+    // Wrap the target leaf in a new split with the new leaf alongside it.
+    const newSplit: SplitPane = {
+      kind: 'split',
+      id: newSplitId(),
+      orientation: newOrientation,
+      children: newLeafFirst ? [newLeaf, target] : [target, newLeaf],
+    };
+    replaceNode(target, newSplit);
+    collapseIfEmpty(source);
+  } else {
+    // Same leaf as both source and target: we're peeling a tab off
+    // `source` into a sibling leaf. Wrap source (now smaller) in a new
+    // split alongside the new leaf.
+    const newSplit: SplitPane = {
+      kind: 'split',
+      id: newSplitId(),
+      orientation: newOrientation,
+      children: newLeafFirst ? [newLeaf, source] : [source, newLeaf],
+    };
+    replaceNode(source, newSplit);
+  }
+
+  panesState.focusedLeafId = newLeaf.id;
+}
+
+/** Read-only flat view of every live tab. Used by the LSP / cell GC. */
+export function getAllTabs(): Tab[] {
+  const out: Tab[] = [];
+  forEachTab(panesState.root, (t) => out.push(t));
+  return out;
+}
+
+/** Read-only flat view of every leaf id. Used by the editor view to
+ *  garbage-collect Monaco models when a leaf disappears. */
+export function getAllLeafIds(): string[] {
+  const out: string[] = [];
+  forEachLeaf(panesState.root, (l) => out.push(l.id));
+  return out;
 }

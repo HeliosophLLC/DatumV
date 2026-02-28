@@ -53,6 +53,25 @@ export function initMonaco(): void {
   // mounts.
   loader.config({ monaco });
 
+  // Unbind Monaco's defaults for Ctrl/Cmd+Enter and F5 globally so those
+  // keystrokes bubble out of Monaco to our window-level "run the focused
+  // tab" handler in QueryEditorView. Two things to know:
+  //
+  //   1. Per-editor `editor.addCommand(key, fn)` doesn't work across
+  //      multiple editors — Monaco's StandaloneKeybindingService matches
+  //      the FIRST registered command for a given keystroke regardless
+  //      of which editor has focus, so the keystroke kept firing the
+  //      pre-split leaf's handler after a pane was split.
+  //   2. Monaco's default Ctrl+Enter is `editor.action.insertLineAfter`;
+  //      without disabling it, the keystroke would both insert a line
+  //      AND fall through to our window handler (which would still run
+  //      the query). Mapping `command: null` clears the default and
+  //      lets the event bubble untouched.
+  monaco.editor.addKeybindingRules([
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, command: null },
+    { keybinding: monaco.KeyCode.F5, command: null },
+  ]);
+
   // Fire-and-forget LSP wiring: fetches the Monarch grammar and
   // registers completion / hover / signature / diagnostics providers
   // against the SQL language. Async because the initial grammar fetch

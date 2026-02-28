@@ -13,6 +13,7 @@
   "resultsEmpty": "Run a query to see results.",
   "cellRowCount": "{rows} {rows, plural, one {row} other {rows}}",
   "cellTruncated": "truncated",
+  "statusBarReady": "Ready",
   "statusBarRunning": "Executing…",
   "statusBarSuccess": "Query executed successfully",
   "statusBarError": "One or more errors occurred",
