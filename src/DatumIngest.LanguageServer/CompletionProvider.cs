@@ -50,7 +50,7 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
-                AddSchemaNames(items);
+                AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -58,7 +58,7 @@ public sealed class CompletionProvider
             case CompletionZoneKind.AfterJoin:
                 AddTables(items);
                 AddTableValuedFunctions(items);
-                AddSchemaNames(items);
+                AddSchemaNames(items, SchemaSurfaces.FromClause);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -70,21 +70,21 @@ public sealed class CompletionProvider
             case CompletionZoneKind.AfterWhere:
                 AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
-                AddSchemaNames(items);
+                AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterOn:
                 AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
-                AddSchemaNames(items);
+                AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.Expression:
                 AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
-                AddSchemaNames(items);
+                AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -95,7 +95,7 @@ public sealed class CompletionProvider
                 // user typing `IF b…` would see column names like `backend`
                 // from `system_models` even though there's no FROM in scope.
                 AddScalarFunctions(items);
-                AddSchemaNames(items);
+                AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -127,7 +127,7 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
-                AddSchemaNames(items);
+                AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -139,7 +139,7 @@ public sealed class CompletionProvider
                 AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
-                AddSchemaNames(items);
+                AddSchemaNames(items, SchemaSurfaces.Expression);
                 break;
 
             case CompletionZoneKind.InsideOver:
@@ -215,7 +215,7 @@ public sealed class CompletionProvider
                 // UPDATE rather than FROM, so leave columns un-scoped here.
                 AddColumns(items, tablesInScope: null);
                 AddScalarFunctions(items);
-                AddSchemaNames(items);
+                AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -260,8 +260,20 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterCall:
+                // CALL is permissive in DatumIngest: PlanCall lowers
+                // `CALL fn(args)` to `SELECT fn(args)`, so procedures,
+                // UDFs, and built-in scalar functions are all callable
+                // through it. Surface every callable kind from the
+                // search path as a bare name + drillable schemas for
+                // the rest. Aggregates / window functions / TVFs are
+                // excluded — they don't work standalone (need
+                // FROM / GROUP BY / OVER context). Table-only schemas
+                // (datum_catalog, information_schema) are also filtered
+                // out — nothing scalar-CALLable lives there.
                 AddProcedures(items);
-                AddSchemaNames(items);
+                AddUdfs(items);
+                AddScalarFunctions(items);
+                AddSchemaNames(items, SchemaSurfaces.Call);
                 break;
         }
 
@@ -477,10 +489,60 @@ public sealed class CompletionProvider
     }
 
     /// <summary>
-    /// Surfaces every distinct schema name discoverable in the manifest
-    /// — across built-in functions, UDFs, procedures, tables, and the
-    /// <c>models</c> namespace — as a <see cref="CompletionItemKind.Schema"/>
-    /// completion. Lets the user type <c>tok</c> and pick <c>tokenizer</c>,
+    /// Surfaces user-defined functions whose schema is on the search
+    /// path as bare callable names. Used by the <c>CALL</c> popup:
+    /// DatumIngest lowers <c>CALL udf.fn(args)</c> to
+    /// <c>SELECT udf.fn(args)</c> (see <c>TableCatalog.PlanCall</c>), so
+    /// UDFs are CALLable just like procedures. Without this, a user who
+    /// runs <c>CREATE FUNCTION Test()</c> and then types <c>CALL </c>
+    /// sees no completion for their own function.
+    /// </summary>
+    private void AddUdfs(List<CompletionItem> items)
+    {
+        if (_manifest.Udfs is null) return;
+        foreach (UdfEntry udf in _manifest.Udfs)
+        {
+            if (!ContainsIgnoreCase(_manifest.SearchPath, udf.SchemaName)) continue;
+            items.Add(BuildUdfCompletion(udf));
+        }
+    }
+
+    /// <summary>
+    /// Sources <see cref="AddSchemaNames"/> should consult when collecting
+    /// schema names. Lets each completion zone ask for the schemas that
+    /// actually host the kind of thing the zone surfaces — e.g.
+    /// <see cref="CompletionZoneKind.AfterCall"/> wants <see cref="Procedures"/>
+    /// only, not table or function schemas that have nothing to do with
+    /// <c>CALL</c>.
+    /// </summary>
+    [Flags]
+    private enum SchemaSurfaces
+    {
+        Functions  = 1 << 0,
+        Procedures = 1 << 1,
+        Tables     = 1 << 2,
+        Models     = 1 << 3,
+
+        /// <summary>Everything reachable from an expression position.</summary>
+        Expression = Functions | Models,
+
+        /// <summary>Everything reachable from a FROM / JOIN position.</summary>
+        FromClause = Functions | Tables,
+
+        /// <summary>
+        /// Everything CALLable: procedures (CALL-canonical) plus
+        /// functions and UDFs (DatumIngest lowers <c>CALL fn(args)</c>
+        /// to <c>SELECT fn(args)</c>, so all scalar callables apply).
+        /// Excludes tables — nothing is CALLable from a table-only
+        /// schema like datum_catalog or information_schema.
+        /// </summary>
+        Call       = Procedures | Functions,
+    }
+
+    /// <summary>
+    /// Surfaces distinct schema names from the manifest sources selected
+    /// by <paramref name="include"/> as <see cref="CompletionItemKind.Schema"/>
+    /// completions. Lets the user type <c>tok</c> and pick <c>tokenizer</c>,
     /// or <c>mod</c> and pick <c>models</c>, without knowing the full
     /// qualified call up front.
     /// </summary>
@@ -500,56 +562,68 @@ public sealed class CompletionProvider
     /// these below scalar functions (2) and TVFs (1).
     /// </para>
     /// </remarks>
-    private void AddSchemaNames(List<CompletionItem> items)
+    private void AddSchemaNames(List<CompletionItem> items, SchemaSurfaces include)
     {
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
 
-        // Built-in functions / TVFs / aggregates / window functions.
-        foreach (FunctionSignature function in _manifest.Functions)
+        if (include.HasFlag(SchemaSurfaces.Functions))
         {
-            if (IsInternalFunction(function)) continue;
-            string schema = function.SchemaName;
-            if (!string.IsNullOrEmpty(schema)) seen.Add(schema);
-        }
-
-        // User-defined functions.
-        if (_manifest.Udfs is not null)
-        {
-            foreach (UdfEntry udf in _manifest.Udfs)
+            // Built-in functions / TVFs / aggregates / window functions.
+            foreach (FunctionSignature function in _manifest.Functions)
             {
-                if (!string.IsNullOrEmpty(udf.SchemaName)) seen.Add(udf.SchemaName);
+                if (IsInternalFunction(function)) continue;
+                string schema = function.SchemaName;
+                if (!string.IsNullOrEmpty(schema)) seen.Add(schema);
+            }
+
+            // User-defined functions — same call shape as built-ins.
+            if (_manifest.Udfs is not null)
+            {
+                foreach (UdfEntry udf in _manifest.Udfs)
+                {
+                    if (!string.IsNullOrEmpty(udf.SchemaName)) seen.Add(udf.SchemaName);
+                }
             }
         }
 
-        // Procedures (CALL targets).
-        if (_manifest.Procedures is not null)
+        if (include.HasFlag(SchemaSurfaces.Procedures))
         {
-            foreach (ProcedureEntry proc in _manifest.Procedures)
+            if (_manifest.Procedures is not null)
             {
-                if (!string.IsNullOrEmpty(proc.SchemaName)) seen.Add(proc.SchemaName);
+                foreach (ProcedureEntry proc in _manifest.Procedures)
+                {
+                    if (!string.IsNullOrEmpty(proc.SchemaName)) seen.Add(proc.SchemaName);
+                }
             }
         }
 
-        // Tables (schema-qualified entries surface their schema —
-        // <c>system.tables</c>, <c>datum_catalog.functions</c>, etc.).
-        foreach (TableSchemaEntry table in _manifest.Tables)
+        if (include.HasFlag(SchemaSurfaces.Tables))
         {
-            int dot = table.Name.IndexOf('.');
-            if (dot > 0) seen.Add(table.Name[..dot]);
+            // Tables (schema-qualified entries surface their schema —
+            // <c>system.tables</c>, <c>datum_catalog.functions</c>, etc.).
+            foreach (TableSchemaEntry table in _manifest.Tables)
+            {
+                int dot = table.Name.IndexOf('.');
+                if (dot > 0) seen.Add(table.Name[..dot]);
+            }
         }
 
-        // Models always live in the `models` namespace — surface it
-        // whenever there's at least one registered so the user can drill
-        // `models.<name>` even without typing the full model name first.
-        if (_manifest.Models is not null && _manifest.Models.Count > 0)
+        if (include.HasFlag(SchemaSurfaces.Models))
         {
-            seen.Add("models");
+            // Models always live in the `models` namespace — surface it
+            // whenever there's at least one registered so the user can drill
+            // `models.<name>` even without typing the full model name first.
+            if (_manifest.Models is not null && _manifest.Models.Count > 0)
+            {
+                seen.Add("models");
+            }
         }
 
-        // `public` is the default-default schema. Its identifiers
-        // surface unqualified everywhere — listing it as a schema is
-        // pure noise.
-        seen.Remove("public");
+        // `public` is the default-default schema. Some zones surface its
+        // contents unqualified (where it adds nothing) but in zones with
+        // restrictive filters — CALL surfacing only procedures /
+        // callables — the user's own `CREATE FUNCTION` lands in public
+        // and they expect public to be drillable too. List it.
 
         foreach (string schema in seen)
         {
@@ -568,7 +642,17 @@ public sealed class CompletionProvider
     {
         foreach (FunctionSignature function in _manifest.Functions)
         {
-            if (function.IsTableValued || IsInternalFunction(function))
+            // Exclude every non-scalar kind. Aggregates, window functions,
+            // and TVFs each have their own emitter (AddAggregateFunctions
+            // / AddWindowFunctions / AddTableValuedFunctions) — zones
+            // that want them call those explicitly. Without this filter
+            // SUM, ARRAY_AGG, ROW_NUMBER, RANGE etc. leak into every
+            // expression / CALL / WHERE / ON popup as duplicates that
+            // surface in contexts where they aren't legal standalone.
+            if (function.IsTableValued
+                || function.IsAggregate
+                || function.IsWindowFunction
+                || IsInternalFunction(function))
             {
                 continue;
             }

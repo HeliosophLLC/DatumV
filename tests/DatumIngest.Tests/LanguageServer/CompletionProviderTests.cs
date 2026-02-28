@@ -195,23 +195,60 @@ public sealed class CompletionProviderTests : ServiceTestBase
     /// schemas plus off-search-path schema names for drill-in.
     /// </summary>
     [Fact]
-    public void GetCompletions_AfterCall_OffersProceduresAndSchemas()
+    public void GetCompletions_AfterCall_OffersProceduresUdfsAndCallableSchemas()
     {
         LanguageServerManifest manifest = new()
         {
             SearchPath = ["public", "system"],
-            Tables = [],
+            Tables =
+            [
+                // Table-only schema: should NOT surface in the CALL popup —
+                // datum_catalog hosts no callables (no procedures / UDFs /
+                // built-in functions), so suggesting it would be misleading.
+                new TableSchemaEntry
+                {
+                    Name = "datum_catalog.functions",
+                    Columns = [],
+                },
+            ],
             Functions =
             [
-                // A schema that has no procedures but has functions —
-                // should still surface as a schema for users to drill in
-                // (the procedures might come from later).
+                // Function-bearing off-search-path schema: SHOULD surface
+                // — CALL lowers to SELECT, so tokenizer.encode is reachable.
                 new FunctionSignature
                 {
                     SchemaName = "tokenizer",
                     Name = "encode",
                     Parameters = [new ParameterSignature { Name = "text", Kind = "String" }],
                     Description = "Tokenize text.",
+                },
+                // Search-path scalar function: SHOULD surface as a bare
+                // name. `CALL concat('a','b')` lowers to
+                // `SELECT concat('a','b')` and works.
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "concat",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "a", Kind = "String" },
+                        new ParameterSignature { Name = "b", Kind = "String" },
+                    ],
+                    ReturnType = "String",
+                    Description = "Concatenate strings.",
+                },
+            ],
+            Udfs =
+            [
+                // Search-path UDF: SHOULD surface as a bare name. This is
+                // the user's reported case — `CREATE FUNCTION Test()` lands
+                // in public and they expect `CALL Test()` to autocomplete.
+                new UdfEntry
+                {
+                    SchemaName = "public",
+                    Name = "Test",
+                    Parameters = [],
+                    ReturnType = "String",
                 },
             ],
             Procedures =
@@ -222,10 +259,12 @@ public sealed class CompletionProviderTests : ServiceTestBase
                     Name = "do_something",
                     Parameters = [new ParameterSignature { Name = "x", Kind = "Int32" }],
                 },
+                // Procedure-bearing custom schema: SHOULD surface so the
+                // user can drill `admin.` for the procedure list.
                 new ProcedureEntry
                 {
-                    SchemaName = "system",
-                    Name = "vacuum",
+                    SchemaName = "admin",
+                    Name = "compact",
                     Parameters = [],
                 },
             ],
@@ -235,12 +274,75 @@ public sealed class CompletionProviderTests : ServiceTestBase
 
         CompletionItem[] items = provider.GetCompletions("CALL ", 5);
 
-        // Search-path procedures surface as bare names.
+        // Search-path procedures + UDFs + built-in scalars all surface
+        // as bare names — every scalar-callable thing is reachable from
+        // CALL via the lower-to-SELECT path.
         Assert.Contains(items, i => i.Label == "do_something" && i.Kind == CompletionItemKind.Function);
-        Assert.Contains(items, i => i.Label == "vacuum" && i.Kind == CompletionItemKind.Function);
+        Assert.Contains(items, i => i.Label == "Test" && i.Kind == CompletionItemKind.Function);
+        Assert.Contains(items, i => i.Label == "concat" && i.Kind == CompletionItemKind.Function);
 
-        // Off-search-path schemas surface so users can drill in with `.`.
+        // Procedure-bearing and function-bearing off-search-path schemas
+        // both surface — anything CALLable via lower-to-SELECT counts.
+        Assert.Contains(items, i => i.Label == "admin" && i.Kind == CompletionItemKind.Schema);
         Assert.Contains(items, i => i.Label == "tokenizer" && i.Kind == CompletionItemKind.Schema);
+
+        // `public` also surfaces — users with UDFs/procedures in public
+        // expect to be able to drill it explicitly.
+        Assert.Contains(items, i => i.Label == "public" && i.Kind == CompletionItemKind.Schema);
+
+        // Table-only schemas don't surface — nothing scalar-callable.
+        Assert.DoesNotContain(items, i => i.Label == "datum_catalog" && i.Kind == CompletionItemKind.Schema);
+    }
+
+    /// <summary>
+    /// Regression: aggregate and window functions must not leak into the
+    /// CALL popup (or any scalar-expression popup). They need GROUP BY /
+    /// OVER context, so a standalone <c>CALL SUM(x)</c> wouldn't plan.
+    /// Earlier <c>AddScalarFunctions</c> filtered only <c>IsTableValued</c>
+    /// — aggregates and window functions slipped through.
+    /// </summary>
+    [Fact]
+    public void GetCompletions_AfterCall_DoesNotSurfaceAggregatesOrWindowFunctions()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            SearchPath = ["public", "system"],
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "sum",
+                    Parameters = [new ParameterSignature { Name = "x", Kind = "Float32" }],
+                    ReturnType = "Float32",
+                    IsAggregate = true,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "row_number",
+                    Parameters = [],
+                    ReturnType = "Int64",
+                    IsWindowFunction = true,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "abs",
+                    Parameters = [new ParameterSignature { Name = "v", Kind = "Float32" }],
+                    ReturnType = "Float32",
+                },
+            ],
+            Keywords = ["CALL"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem[] items = provider.GetCompletions("CALL ", 5);
+
+        Assert.Contains(items, i => i.Label == "abs");
+        Assert.DoesNotContain(items, i => i.Label == "sum");
+        Assert.DoesNotContain(items, i => i.Label == "row_number");
     }
 
     /// <summary>
@@ -416,13 +518,15 @@ public sealed class CompletionProviderTests : ServiceTestBase
         CompletionItem[] fromItems = provider.GetCompletions("SELECT * FROM inf", 17);
         Assert.Contains(fromItems, i => i.Label == "inference" && i.Kind == CompletionItemKind.Schema);
 
-        // `system` surfaces as a schema even though its functions are
-        // unqualified-callable — drilling `system.` is the discovery
-        // path for the catalog-introspection tables (system.tables,
-        // system.functions, system.models, …). `public` is filtered out
-        // (default-default schema; surfacing would be pure noise).
-        Assert.Contains(selectItems, i => i.Label == "system" && i.Kind == CompletionItemKind.Schema);
-        Assert.DoesNotContain(selectItems, i => i.Label == "public" && i.Kind == CompletionItemKind.Schema);
+        // Whether `system` / `public` surface as schema-kind items is a
+        // property of AddSchemaNames, not of the prefix filter. Check it
+        // against an unprefixed query — `SELECT ` — so the prefix filter
+        // doesn't strip every schema whose label doesn't start with `tok`.
+        // Both surface: `system` for catalog-introspection drill-in,
+        // `public` because users who `CREATE FUNCTION foo()` land their
+        // routines there and expect to see it in the dropdown.
+        CompletionItem[] unfilteredItems = provider.GetCompletions("SELECT ", 7);
+        Assert.Contains(unfilteredItems, i => i.Label == "system" && i.Kind == CompletionItemKind.Schema);
     }
 
     /// <summary>
