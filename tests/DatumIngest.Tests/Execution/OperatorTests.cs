@@ -1075,4 +1075,188 @@ public class OperatorTests : ServiceTestBase
         Assert.Single(rows);
         Assert.Equal(42f, rows[0]["x"].AsFloat32());
     }
+
+    // ─────────────── Hash join: composite-key residual ───────────────
+
+    /// <summary>
+    /// Composite-key hash join with a residual non-equi conjunct. Two equi-conjuncts
+    /// (l.a = r.a AND l.b = r.b) form the composite hash key; the trailing
+    /// l.weight &gt; r.threshold becomes the residual filter applied after key match.
+    /// Hits the composite-key path of <c>extraction.Residual is not null</c>, which
+    /// the existing single-key residual test does not exercise.
+    /// </summary>
+    [Fact]
+    public async Task HashJoin_CompositeKey_ResidualFilter_AppliedAfterMatch()
+    {
+        MockOperator left = CreateMockOperator(
+            ["l.a", "l.b", "l.weight"],
+            [1f, "x", 100f],
+            [1f, "x", 50f],
+            [2f, "y", 200f]);
+
+        MockOperator right = CreateMockOperator(
+            ["r.a", "r.b", "r.threshold"],
+            [1f, "x", 75f],
+            [2f, "y", 150f]);
+
+        // ON (l.a = r.a) AND (l.b = r.b) AND (l.weight > r.threshold)
+        Expression equiA = new BinaryExpression(
+            new ColumnReference("l", "a"), BinaryOperator.Equal, new ColumnReference("r", "a"));
+        Expression equiB = new BinaryExpression(
+            new ColumnReference("l", "b"), BinaryOperator.Equal, new ColumnReference("r", "b"));
+        Expression residual = new BinaryExpression(
+            new ColumnReference("l", "weight"), BinaryOperator.GreaterThan, new ColumnReference("r", "threshold"));
+        Expression onCondition = new BinaryExpression(
+            new BinaryExpression(equiA, BinaryOperator.And, equiB),
+            BinaryOperator.And,
+            residual);
+
+        JoinOperator join = new(left, right, JoinType.Inner, onCondition);
+
+        List<Row> rows = await CollectAsync(join);
+
+        // (1, "x", 100) vs (1, "x", 75): 100 > 75 → match
+        // (1, "x",  50) vs (1, "x", 75):  50 > 75 → fails residual
+        // (2, "y", 200) vs (2, "y",150): 200 > 150 → match
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r["l.weight"].AsFloat32() == 100f);
+        Assert.Contains(rows, r => r["l.weight"].AsFloat32() == 200f);
+    }
+
+    // ─────────────── Nested-loop join: no equi-keys path ───────────────
+
+    /// <summary>
+    /// Inner join with a non-equi-only ON condition (l.x &gt; r.threshold).
+    /// <see cref="JoinKeyExtractor"/> cannot decompose this into equalities so
+    /// <see cref="JoinOperator"/> falls through to <c>ExecuteNestedLoopJoinAsync</c>.
+    /// Validates the cartesian-product loop + residual evaluation path that no
+    /// existing test reaches.
+    /// </summary>
+    [Fact]
+    public async Task NestedLoopJoin_NoEquiKeys_AppliesNonEquiCondition()
+    {
+        MockOperator left = CreateMockOperator(
+            ["l.x"],
+            [10f],
+            [50f],
+            [100f]);
+
+        MockOperator right = CreateMockOperator(
+            ["r.threshold"],
+            [25f],
+            [75f]);
+
+        JoinOperator join = new(left, right, JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("l", "x"),
+                BinaryOperator.GreaterThan,
+                new ColumnReference("r", "threshold")));
+
+        List<Row> rows = await CollectAsync(join);
+
+        // 10  > 25 → no  | 10  > 75 → no
+        // 50  > 25 → yes | 50  > 75 → no
+        // 100 > 25 → yes | 100 > 75 → yes
+        Assert.Equal(3, rows.Count);
+    }
+
+    // ─────────────── Hash join: NullSensitiveAntiSemi at operator level ───────────────
+
+    /// <summary>
+    /// LEFT ANTI-SEMI join with <c>nullSensitiveAntiSemi: true</c>: when any
+    /// build-side key is NULL, the entire result is empty (NOT IN semantics —
+    /// any unknown comparison makes the whole condition unknown).
+    /// </summary>
+    [Fact]
+    public async Task HashJoin_LeftAntiSemi_NullSensitive_BuildHasNull_ReturnsEmpty()
+    {
+        MockOperator left = CreateMockOperator(
+            ["x"],
+            [1f],
+            [2f],
+            [3f]);
+
+        MockOperator right = CreateMockOperator(
+            ["y"],
+            [2f],
+            [DataValue.Null(DataKind.Float32)]);
+
+        JoinOperator join = new(left, right,
+            JoinType.LeftAntiSemi,
+            new BinaryExpression(
+                new ColumnReference("x"),
+                BinaryOperator.Equal,
+                new ColumnReference("y")),
+            nullSensitiveAntiSemi: true);
+
+        List<Row> rows = await CollectAsync(join);
+
+        Assert.Empty(rows);
+    }
+
+    /// <summary>
+    /// LEFT ANTI-SEMI join with <c>nullSensitiveAntiSemi: true</c>: probe rows
+    /// with a NULL key are excluded (NULL NOT IN ... is UNKNOWN). Non-null probe
+    /// rows that don't appear in the build set are emitted.
+    /// </summary>
+    [Fact]
+    public async Task HashJoin_LeftAntiSemi_NullSensitive_ProbeHasNull_ExcludesNullProbeRows()
+    {
+        MockOperator left = CreateMockOperator(
+            ["x"],
+            [1f],
+            [2f],
+            [DataValue.Null(DataKind.Float32)]);
+
+        MockOperator right = CreateMockOperator(
+            ["y"],
+            [2f]);
+
+        JoinOperator join = new(left, right,
+            JoinType.LeftAntiSemi,
+            new BinaryExpression(
+                new ColumnReference("x"),
+                BinaryOperator.Equal,
+                new ColumnReference("y")),
+            nullSensitiveAntiSemi: true);
+
+        List<Row> rows = await CollectAsync(join);
+
+        // x=1     : no match in build → emitted
+        // x=2     : matches build       → excluded
+        // x=NULL  : excluded (NULL NOT IN is UNKNOWN)
+        Assert.Single(rows);
+        Assert.Equal(1f, rows[0]["x"].AsFloat32());
+    }
+
+    // ─────────────── RIGHT join with empty probe (GetFirstRowForNullPadAsync) ───────────────
+
+    /// <summary>
+    /// RIGHT JOIN with an empty left (probe) side. The build side has unmatched
+    /// rows; <c>GetFirstRowForNullPadAsync</c> returns <c>null</c> because the
+    /// probe is empty, exercising the "no probe row ever" fallback that emits
+    /// each unmatched build row solo with the build-side schema.
+    /// </summary>
+    [Fact]
+    public async Task RightJoin_EmptyLeft_EmitsAllRightRowsSolo()
+    {
+        MockOperator left = CreateMockOperator(["l.id"]);  // empty
+
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.val"],
+            [10f, "a"],
+            [20f, "b"]);
+
+        JoinOperator join = new(left, right, JoinType.Right,
+            new BinaryExpression(
+                new ColumnReference("l", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("r", "id")));
+
+        List<Row> rows = await CollectAsync(join);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r["r.id"].AsFloat32() == 10f && r["r.val"].AsString() == "a");
+        Assert.Contains(rows, r => r["r.id"].AsFloat32() == 20f && r["r.val"].AsString() == "b");
+    }
 }

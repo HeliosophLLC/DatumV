@@ -1,3 +1,4 @@
+using DatumIngest.Execution.Operators.Joins;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -86,11 +87,20 @@ public sealed class LateralJoinOperator : IQueryOperator
     {
         Pool pool = context.Pool;
         ExpressionEvaluator evaluator = new(context);
-        JoinOperator.CombinedRowSchema? schema = null;
+        JoinOutputWriter writer = new(context, pool);
         Row? residualCheckRow = null;
         DataValue[]? residualCheckBuffer = null;
-        Row? cachedNullRight = null;
-        RowBatch? outputBatch = null;
+        NullPadCache cachedNullRight = new(pool);
+
+        // Buffer for unmatched LEFT-LATERAL driving rows seen before any right
+        // row has materialised. We can't emit combined-with-null-pad until we
+        // have a right-side template, and emitting left-solo would mix schemas
+        // in the output batch once a later leftRow matches. Stabilise into
+        // context.Store so deferred rows survive their source leftBatch's
+        // return. Flushed when the first right row appears (as combined emits
+        // preserving input order) or at end-of-execution (as left-solo if no
+        // right row ever appears).
+        List<Row>? deferredUnmatchedLefts = null;
 
         try
         {
@@ -114,10 +124,10 @@ public sealed class LateralJoinOperator : IQueryOperator
                                 for (int rightIndex = 0; rightIndex < rightBatch.Count; rightIndex++)
                                 {
                                     Row rightRow = rightBatch[rightIndex];
-                                    schema ??= JoinOperator.CombinedRowSchema.Build(leftRow, rightRow);
 
                                     if (_onCondition is not null)
                                     {
+                                        JoinSchema schema = writer.GetCombinedSchema(leftRow, rightRow);
                                         if (residualCheckRow is null)
                                         {
                                             (residualCheckRow, residualCheckBuffer) = schema.CreateReusableRow();
@@ -131,16 +141,24 @@ public sealed class LateralJoinOperator : IQueryOperator
                                     }
 
                                     matched = true;
-                                    cachedNullRight ??= JoinOperator.CreateNullRow(rightRow, pool);
-                                    outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                                    outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, pool));
+                                    bool firstRightRowEver = !cachedNullRight.HasValue;
+                                    cachedNullRight.Initialize(rightRow);
 
-                                    if (outputBatch.IsFull)
+                                    // The first right row anywhere unlocks the combined schema.
+                                    // Flush any deferred unmatched lefts now — in input order,
+                                    // before this leftRow's own match emit — as combined-with-null-pad.
+                                    if (firstRightRowEver && deferredUnmatchedLefts is not null)
                                     {
-                                        RowBatch toYield = outputBatch;
-                                        outputBatch = null;
-                                        yield return toYield;
+                                        foreach (Row deferred in deferredUnmatchedLefts)
+                                        {
+                                            if (writer.EmitCombined(deferred, cachedNullRight.Value) is RowBatch flushReady)
+                                                yield return flushReady;
+                                            pool.ReturnRow(deferred);
+                                        }
+                                        deferredUnmatchedLefts = null;
                                     }
+
+                                    if (writer.EmitCombined(leftRow, rightRow) is RowBatch ready) yield return ready;
                                 }
                             }
                             finally
@@ -152,28 +170,21 @@ public sealed class LateralJoinOperator : IQueryOperator
                         // LEFT LATERAL: emit left + NULLs when no right rows matched.
                         if (!matched && _joinType == JoinType.Left)
                         {
-                            if (schema is not null && cachedNullRight is not null)
+                            if (cachedNullRight.HasValue)
                             {
-                                outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                                outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, pool));
+                                // At least one right row materialised earlier — emit this
+                                // unmatched left with the cached null-padded right immediately.
+                                if (writer.EmitCombined(leftRow, cachedNullRight.Value) is RowBatch ready) yield return ready;
                             }
                             else
                             {
-                                // No right row has ever been observed — emit the left row solo
-                                // so the empty-lateral case still surfaces the driving row. Copy
-                                // the values into a pool-rented buffer so the output batch owns
-                                // its rows independent of the left batch's rental.
-                                outputBatch ??= context.RentRowBatch(leftRow.ColumnLookup);
-                                DataValue[] copy = pool.RentAndCopyDataValues(
-                                    leftRow, leftBatch.Arena, outputBatch.Arena);
-                                outputBatch.Add(copy);
-                            }
-
-                            if (outputBatch.IsFull)
-                            {
-                                RowBatch toYield = outputBatch;
-                                outputBatch = null;
-                                yield return toYield;
+                                // No right row has appeared yet anywhere. Stabilise into
+                                // context.Store and defer; we'll emit combined-with-null-pad
+                                // if a right row appears later, or fall back to left-solo at
+                                // end of execution if not.
+                                DataValue[] stableValues = pool.RentAndCopyDataValues(leftRow, leftBatch.Arena, context.Store);
+                                deferredUnmatchedLefts ??= new List<Row>();
+                                deferredUnmatchedLefts.Add(new Row(leftRow.ColumnLookup, stableValues));
                             }
                         }
                     }
@@ -184,23 +195,33 @@ public sealed class LateralJoinOperator : IQueryOperator
                 }
             }
 
-            if (outputBatch is not null)
+            // End of driving rows. Anything still deferred means no right row ever
+            // materialised — fall back to left-solo emit (the only schema we have).
+            if (deferredUnmatchedLefts is not null)
             {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
+                foreach (Row deferred in deferredUnmatchedLefts)
+                {
+                    if (writer.EmitPassThrough(deferred, context.Store) is RowBatch ready) yield return ready;
+                    pool.ReturnRow(deferred);
+                }
+                deferredUnmatchedLefts = null;
             }
+
+            if (writer.Flush() is RowBatch trailing) yield return trailing;
         }
         finally
         {
-            if (outputBatch is not null)
-            {
-                context.ReturnRowBatch(outputBatch);
-            }
+            if (writer.Flush() is RowBatch leftover) context.ReturnRowBatch(leftover);
 
-            if (cachedNullRight is not null)
+            cachedNullRight.Return();
+
+            // Exception-path cleanup for any stabilised rows still buffered.
+            if (deferredUnmatchedLefts is not null)
             {
-                pool.ReturnRow(cachedNullRight.Value);
+                foreach (Row deferred in deferredUnmatchedLefts)
+                {
+                    pool.ReturnRow(deferred);
+                }
             }
         }
     }

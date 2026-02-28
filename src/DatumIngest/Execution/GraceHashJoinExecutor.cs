@@ -1,10 +1,10 @@
 using System.Collections;
 using System.Diagnostics;
 using DatumIngest.Diagnostics;
+using DatumIngest.Execution.Operators.Joins;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
-using static DatumIngest.Execution.Operators.JoinOperator;
 
 namespace DatumIngest.Execution;
 
@@ -409,7 +409,7 @@ internal sealed class GraceHashJoinExecutor
     /// <summary>
     /// Holds the in-memory hash table for a single Grace hash join partition,
     /// built after Phase 1a to enable the hybrid streaming probe in Phase 1b.
-    /// Caches the <see cref="CombinedRowSchema"/> and null-build template so they are
+    /// Caches the <see cref="JoinSchema"/> and null-build template so they are
     /// allocated at most once per partition across many probe row lookups.
     /// </summary>
     private sealed class PartitionBuildTable
@@ -417,7 +417,7 @@ internal sealed class GraceHashJoinExecutor
         internal readonly List<Row> BuildRows;
         internal readonly DataValueHashMap<List<(int Index, Row Row)>>? SingleKeyTable;
         internal readonly CompositeKeyHashMap<List<(int Index, Row Row)>>? CompositeKeyTable;
-        internal CombinedRowSchema? JoinSchema;
+        internal JoinSchema? JoinSchema;
         internal Row? CachedNullBuild;
         /// <summary>Reusable scratch buffer for residual evaluation — allocated once on first use.</summary>
         internal DataValue[]? ResidualScratch;
@@ -533,7 +533,7 @@ internal sealed class GraceHashJoinExecutor
 
                 if (_extraction.Residual is not null)
                 {
-                    table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                    table.JoinSchema ??= JoinSchema.Build(leftRow, rightRow);
                     if (table.ResidualScratch is null)
                     {
                         (table.ResidualScratchRow, table.ResidualScratch) = table.JoinSchema.CreateReusableRow();
@@ -556,7 +556,7 @@ internal sealed class GraceHashJoinExecutor
 
                 if (_extraction.Residual is null)
                 {
-                    table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                    table.JoinSchema ??= JoinSchema.Build(leftRow, rightRow);
                 }
 
                 yield return table.JoinSchema!.CombinePooled(leftRow, rightRow, pool);
@@ -598,7 +598,7 @@ internal sealed class GraceHashJoinExecutor
                 {
                     Row leftRow = _flipped ? nullBuild.Value : probeRow;
                     Row rightRow = _flipped ? probeRow : nullBuild.Value;
-                    table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                    table.JoinSchema ??= JoinSchema.Build(leftRow, rightRow);
                     yield return table.JoinSchema.CombinePooled(leftRow, rightRow, pool);
                 }
                 else
@@ -765,7 +765,7 @@ internal sealed class GraceHashJoinExecutor
             bool needBuildUnmatched = _flipped ? leftMustAppear : rightMustAppear;
             bool needProbeUnmatched = _flipped ? rightMustAppear : leftMustAppear;
             BitArray? buildMatched = needBuildUnmatched ? new BitArray(buildRowList.Count) : null;
-            CombinedRowSchema? schema = null;
+            JoinSchema? schema = null;
             Row? cachedNullBuild = null;
             DataValue[]? residualScratch = null;
             Row residualScratchRow = default;
@@ -803,7 +803,7 @@ internal sealed class GraceHashJoinExecutor
 
                         if (_extraction.Residual is not null)
                         {
-                            schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                            schema ??= JoinSchema.Build(leftRow, rightRow);
                             if (residualScratch is null)
                             {
                                 (residualScratchRow, residualScratch) = schema.CreateReusableRow();
@@ -830,7 +830,7 @@ internal sealed class GraceHashJoinExecutor
 
                         if (_extraction.Residual is null)
                         {
-                            schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                            schema ??= JoinSchema.Build(leftRow, rightRow);
                         }
 
                         outputBatch ??= context.RentRowBatch(schema!.ColumnLookup);
@@ -876,7 +876,7 @@ internal sealed class GraceHashJoinExecutor
                     {
                         Row leftRow = _flipped ? nullBuild.Value : probeRow;
                         Row rightRow = _flipped ? probeRow : nullBuild.Value;
-                        schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                        schema ??= JoinSchema.Build(leftRow, rightRow);
                         outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
                         outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, pool));
                         if (outputBatch.IsFull)
@@ -903,7 +903,7 @@ internal sealed class GraceHashJoinExecutor
             // Emit unmatched build rows when the build side must fully appear.
             if (buildMatched is not null)
             {
-                CombinedRowSchema? buildUnmatchedSchema = null;
+                JoinSchema? buildUnmatchedSchema = null;
 
                 for (int index = 0; index < buildRowList.Count; index++)
                 {
@@ -915,7 +915,7 @@ internal sealed class GraceHashJoinExecutor
                         {
                             Row leftRow = _flipped ? buildRowList[index] : nullPad.Value;
                             Row rightRow = _flipped ? nullPad.Value : buildRowList[index];
-                            buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                            buildUnmatchedSchema ??= JoinSchema.Build(leftRow, rightRow);
                             outputBatch ??= context.RentRowBatch(buildUnmatchedSchema.ColumnLookup);
                             outputBatch.Add(buildUnmatchedSchema.CombinePooledValues(leftRow, rightRow, pool));
                             if (outputBatch.IsFull)

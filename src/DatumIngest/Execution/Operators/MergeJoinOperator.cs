@@ -1,8 +1,8 @@
 using DatumIngest.Diagnostics;
+using DatumIngest.Execution.Operators.Joins;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
-using static DatumIngest.Execution.Operators.JoinOperator;
 using static DatumIngest.Execution.StatisticsPredicateEvaluator;
 using DatumIngest.Indexing.Sorted;
 
@@ -113,11 +113,11 @@ public sealed class MergeJoinOperator : IQueryOperator
         bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
         bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
 
-        CombinedRowSchema? schema = null;
+        JoinOutputWriter writer = new(context, pool);
         Row? residualCheckRow = null;
         DataValue[]? residualCheckBuffer = null;
-        Row? cachedNullRight = null;
-        Row? cachedNullLeft = null;
+        NullPadCache cachedNullRight = new(pool);
+        NullPadCache cachedNullLeft = new(pool);
 
         // Materialize right-side duplicates for a given key value. For merge join,
         // when the left side has multiple rows with the same key, we must re-scan
@@ -135,7 +135,6 @@ public sealed class MergeJoinOperator : IQueryOperator
         RowBatch? currentRightBatch = null;
         int rightRowIndex = -1;
 
-        RowBatch? outputBatch = null;
 
         // Advance the left cursor to the next row, fetching new batches as needed.
         async ValueTask<bool> AdvanceLeftCursorAsync()
@@ -232,11 +231,8 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     if (leftMustAppear)
                     {
-                        cachedNullRight ??= CreateNullRow(rightRow, pool);
-                        schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
-                        outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, pool));
-                        if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
+                        Row nullRight = cachedNullRight.GetOrCreate(rightRow);
+                        if (writer.EmitCombined(leftRow, nullRight) is RowBatch ready) yield return ready;
                     }
 
                     hasLeft = await AdvanceLeftCursorAsync().ConfigureAwait(false);
@@ -247,11 +243,8 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     if (rightMustAppear)
                     {
-                        cachedNullLeft ??= CreateNullRow(leftRow, pool);
-                        schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
-                        outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(cachedNullLeft.Value, rightRow, pool));
-                        if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
+                        Row nullLeft = cachedNullLeft.GetOrCreate(leftRow);
+                        if (writer.EmitCombined(nullLeft, rightRow) is RowBatch ready) yield return ready;
                     }
 
                     hasRight = await AdvanceRightCursorAsync().ConfigureAwait(false);
@@ -265,11 +258,8 @@ public sealed class MergeJoinOperator : IQueryOperator
                     // Left key is smaller — no match on the right side.
                     if (leftMustAppear)
                     {
-                        cachedNullRight ??= CreateNullRow(rightRow, pool);
-                        schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
-                        outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, pool));
-                        if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
+                        Row nullRight = cachedNullRight.GetOrCreate(rightRow);
+                        if (writer.EmitCombined(leftRow, nullRight) is RowBatch ready) yield return ready;
                     }
 
                     hasLeft = await AdvanceLeftCursorAsync().ConfigureAwait(false);
@@ -279,11 +269,8 @@ public sealed class MergeJoinOperator : IQueryOperator
                     // Right key is smaller — no match on the left side.
                     if (rightMustAppear)
                     {
-                        cachedNullLeft ??= CreateNullRow(leftRow, pool);
-                        schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
-                        outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(cachedNullLeft.Value, rightRow, pool));
-                        if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
+                        Row nullLeft = cachedNullLeft.GetOrCreate(leftRow);
+                        if (writer.EmitCombined(nullLeft, rightRow) is RowBatch ready) yield return ready;
                     }
 
                     hasRight = await AdvanceRightCursorAsync().ConfigureAwait(false);
@@ -328,11 +315,10 @@ public sealed class MergeJoinOperator : IQueryOperator
 
                         foreach (Row matchedRight in rightGroup)
                         {
-                            schema ??= CombinedRowSchema.Build(leftRow, matchedRight);
-
                             // Apply residual filter for non-equi conjuncts.
                             if (_extraction.Residual is not null)
                             {
+                                JoinSchema schema = writer.GetCombinedSchema(leftRow, matchedRight);
                                 if (residualCheckRow is null)
                                 {
                                     (residualCheckRow, residualCheckBuffer) = schema.CreateReusableRow();
@@ -346,19 +332,14 @@ public sealed class MergeJoinOperator : IQueryOperator
                             }
 
                             leftRowMatched = true;
-                            outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                            outputBatch.Add(schema.CombinePooledValues(leftRow, matchedRight, pool));
-                            if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
+                            if (writer.EmitCombined(leftRow, matchedRight) is RowBatch ready) yield return ready;
                         }
 
                         if (!leftRowMatched && leftMustAppear)
                         {
                             // All right-group rows filtered out by residual — emit unmatched left.
-                            cachedNullRight ??= CreateNullRow(rightGroup[0], pool);
-                            schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
-                            outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                            outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, pool));
-                            if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
+                            Row nullRight = cachedNullRight.GetOrCreate(rightGroup[0]);
+                            if (writer.EmitCombined(leftRow, nullRight) is RowBatch ready) yield return ready;
                         }
 
                         // Advance left and check if the next left row shares the same key.
@@ -389,21 +370,15 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     Row leftRow = GetCurrentLeftRow();
 
-                    if (cachedNullRight is not null)
+                    if (cachedNullRight.HasValue)
                     {
-                        schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
-                        outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, pool));
-                        if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
+                        Row nullRight = cachedNullRight.Value;
+                        if (writer.EmitCombined(leftRow, nullRight) is RowBatch ready) yield return ready;
                     }
                     else
                     {
                         // No right rows were ever seen — emit left row alone.
-                        outputBatch ??= context.RentRowBatch(leftRow.ColumnLookup);
-                        DataValue[] copy = pool.RentAndCopyDataValues(
-                            leftRow, currentLeftBatch!.Arena, outputBatch.Arena);
-                        outputBatch.Add(copy);
-                        if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
+                        if (writer.EmitPassThrough(leftRow, currentLeftBatch!.Arena) is RowBatch ready) yield return ready;
                     }
                 }
 
@@ -419,33 +394,22 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     Row rightRow = GetCurrentRightRow();
 
-                    if (cachedNullLeft is not null)
+                    if (cachedNullLeft.HasValue)
                     {
-                        schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
-                        outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(cachedNullLeft.Value, rightRow, pool));
-                        if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
+                        Row nullLeft = cachedNullLeft.Value;
+                        if (writer.EmitCombined(nullLeft, rightRow) is RowBatch ready) yield return ready;
                     }
                     else
                     {
                         // No left rows were ever seen — emit right row alone.
-                        outputBatch ??= context.RentRowBatch(rightRow.ColumnLookup);
-                        DataValue[] copy = pool.RentAndCopyDataValues(
-                            rightRow, currentRightBatch!.Arena, outputBatch.Arena);
-                        outputBatch.Add(copy);
-                        if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
+                        if (writer.EmitPassThrough(rightRow, currentRightBatch!.Arena) is RowBatch ready) yield return ready;
                     }
                 }
 
                 hasRight = await AdvanceRightCursorAsync().ConfigureAwait(false);
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch b = outputBatch;
-                outputBatch = null;
-                yield return b;
-            }
+            if (writer.Flush() is RowBatch trailing) yield return trailing;
 
             if (ExecutionTracer.IsEnabled)
             {
@@ -455,25 +419,15 @@ public sealed class MergeJoinOperator : IQueryOperator
         }
         finally
         {
-            if (outputBatch is not null)
-            {
-                context.ReturnRowBatch(outputBatch);
-            }
+            if (writer.Flush() is RowBatch leftover) context.ReturnRowBatch(leftover);
 
             foreach (Row row in rightGroup)
             {
                 pool.ReturnRow(row);
             }
 
-            if (cachedNullRight is not null)
-            {
-                pool.ReturnRow(cachedNullRight.Value);
-            }
-
-            if (cachedNullLeft is not null)
-            {
-                pool.ReturnRow(cachedNullLeft.Value);
-            }
+            cachedNullRight.Return();
+            cachedNullLeft.Return();
 
             // Return any open input batches not yet consumed by the cursor advances.
             if (currentLeftBatch is not null)

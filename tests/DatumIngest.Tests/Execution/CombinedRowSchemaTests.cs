@@ -1,11 +1,11 @@
-using DatumIngest.Execution.Operators;
+using DatumIngest.Execution.Operators.Joins;
 using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Execution;
 
 /// <summary>
-/// Tests for <see cref="JoinOperator.CombinedRowSchema"/> to verify that
-/// unqualified column shortcuts are preserved through join row merging.
+/// Tests for <see cref="JoinSchema"/> to verify that unqualified column
+/// shortcuts are preserved through join row merging.
 /// </summary>
 public sealed class CombinedRowSchemaTests : ServiceTestBase
 {
@@ -25,8 +25,8 @@ public sealed class CombinedRowSchemaTests : ServiceTestBase
             ["right_alias.index", "right_alias.image"],
             [DataValue.FromFloat32(0), DataValue.FromFloat32(42)]);
 
-        JoinOperator.CombinedRowSchema schema =
-            JoinOperator.CombinedRowSchema.Build(left, right);
+        JoinSchema schema =
+            JoinSchema.Build(left, right);
         Row combined = schema.Combine(left, right);
 
         // Unique columns should be reachable by unqualified name.
@@ -56,8 +56,8 @@ public sealed class CombinedRowSchemaTests : ServiceTestBase
             ["right_alias.index", "right_alias.image"],
             [DataValue.FromFloat32(0), DataValue.FromFloat32(42)]);
 
-        JoinOperator.CombinedRowSchema schema =
-            JoinOperator.CombinedRowSchema.Build(left, right);
+        JoinSchema schema =
+            JoinSchema.Build(left, right);
         Row combined = schema.Combine(left, right);
 
         // "index" exists on both sides — unqualified lookup should fail.
@@ -78,8 +78,8 @@ public sealed class CombinedRowSchemaTests : ServiceTestBase
         Row left = MakeRow(["id", "name"], [DataValue.FromFloat32(1), DataValue.FromFloat32(2)]);
         Row right = MakeRow(["value"], [DataValue.FromFloat32(3)]);
 
-        JoinOperator.CombinedRowSchema schema =
-            JoinOperator.CombinedRowSchema.Build(left, right);
+        JoinSchema schema =
+            JoinSchema.Build(left, right);
         Row combined = schema.Combine(left, right);
 
         Assert.True(combined.TryGetValue("id", out _));

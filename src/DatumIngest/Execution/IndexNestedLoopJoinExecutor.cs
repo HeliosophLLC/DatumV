@@ -1,6 +1,7 @@
 using DatumIngest.Catalog;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution.Operators;
+using DatumIngest.Execution.Operators.Joins;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -113,7 +114,7 @@ internal sealed class IndexNestedLoopJoinExecutor
         (Expression probeKeyExpression, Expression _) = _extraction.KeyPairs[0];
         Expression? residual = _extraction.Residual;
 
-        JoinOperator.CombinedRowSchema? combinedSchema = null;
+        JoinSchema? combinedSchema = null;
 
         // Pre-computed alias schema for re-qualifying build-side rows that the
         // seekable provider returns with raw (unqualified) column names.
@@ -210,7 +211,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                         Row buildRow = ApplyBuildAlias(rawBuildRow.Value, ref buildAliasSchema, pool);
                         if (_buildAlias is not null) pool.ReturnDataValues(rawBuildRow.Value.RawValues);
 
-                        combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
+                        combinedSchema ??= JoinSchema.Build(probeRow, buildRow);
                         if (residualScratchBuffer is null)
                         {
                             (residualScratchRow, residualScratchBuffer) = combinedSchema.CreateReusableRow();
@@ -250,7 +251,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                     Row buildRow = ApplyBuildAlias(rawBuildRow.Value, ref buildAliasSchema, pool);
                     if (_buildAlias is not null) pool.ReturnDataValues(rawBuildRow.Value.RawValues);
 
-                    combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
+                    combinedSchema ??= JoinSchema.Build(probeRow, buildRow);
 
                     if (residual is not null)
                     {
