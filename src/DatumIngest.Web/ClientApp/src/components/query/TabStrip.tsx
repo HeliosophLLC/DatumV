@@ -32,8 +32,15 @@ export function TabStrip({ leafId }: { leafId: string }) {
   const leaf = findLeaf(panesState.root, leafId);
   if (!leaf) return null;
 
+  // No bottom border on the strip — the active tab paints `bg-editor`
+  // to merge into the Monaco surface below, and inactive tabs / the
+  // empty right-side gap pick up enough separation from the strip's
+  // own `bg-background` against the editor's lighter colour. A
+  // hairline border here would always cut across the active tab —
+  // `overflow-x-auto` on the inner row clips the pseudo-element we'd
+  // otherwise use to overlay it.
   return (
-    <div className="border-border bg-background flex h-9 shrink-0 items-stretch border-b">
+    <div className="bg-background flex h-9 shrink-0 items-stretch">
       <div className="flex flex-1 items-stretch overflow-x-auto">
         {leaf.tabs.map((tab, index) => {
           const exec = executionsState.byTabId[tab.id];
@@ -69,11 +76,17 @@ export function TabStrip({ leafId }: { leafId: string }) {
           title={t('newTab')}
           className={cn(
             'text-muted-foreground hover:bg-muted hover:text-foreground',
-            'flex shrink-0 cursor-pointer items-center justify-center px-3 transition-colors',
+            'border-border flex shrink-0 cursor-pointer items-center justify-center border-b px-3 transition-colors',
           )}
         >
           <Plus className="size-4" />
         </button>
+        {/* Trailing filler that paints the strip's separator line in
+            the empty area to the right of the + button. flex-1 with
+            default shrink so it collapses to 0 when tabs overflow
+            horizontally — the scrollable row then fills the width on
+            its own and the filler is never seen. */}
+        <div className="border-border flex-1 border-b" />
       </div>
     </div>
   );
@@ -198,8 +211,20 @@ function TabChip({
       className={cn(
         'group border-border relative flex shrink-0 cursor-pointer items-center gap-2 border-r px-3 py-1.5 text-sm transition-colors',
         active
-          ? 'bg-background text-foreground after:bg-primary after:absolute after:inset-x-0 after:bottom-0 after:h-0.5'
-          : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground',
+          ? cn(
+              // Match the Monaco editor surface so the active tab
+              // visually flows into the editor below. No border-b
+              // here — the strip's separator line is painted by the
+              // inactive tabs / sentinel / + button / trailing filler,
+              // each carrying their own bottom border. The active tab
+              // intentionally omits it so there's no hairline between
+              // tab and editor.
+              'bg-editor text-foreground',
+              // Top accent — primary line at the top so the tab reads
+              // as "front edge of the editor pane".
+              "before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-primary before:content-['']",
+            )
+          : 'border-b border-border text-muted-foreground hover:bg-muted/40 hover:text-foreground',
       )}
     >
       {dropSide === 'before' && (
@@ -281,7 +306,7 @@ function EndSentinel({ leafId, tabCount }: { leafId: string; tabCount: number })
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className="relative w-2 shrink-0"
+      className="border-border relative w-2 shrink-0 border-b"
     >
       {hover && (
         <div className="bg-primary pointer-events-none absolute inset-y-0 left-0 w-0.5" />

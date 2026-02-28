@@ -25,6 +25,12 @@ export interface Tab {
   sql: string;
   /** True when `sql` differs from the last persisted-or-saved baseline. */
   dirty: boolean;
+  /**
+   * Editor-pane share of the editor/results vertical split, as a
+   * percentage (0–100). Undefined means "use the default 65". Persisted
+   * so the layout survives reload.
+   */
+  editorSize?: number;
 }
 
 export interface LeafPane {
@@ -169,6 +175,7 @@ interface PersistedTab {
   id: string;
   title: string;
   sql: string;
+  editorSize?: number;
 }
 
 type PersistedNode =
@@ -216,7 +223,18 @@ function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
         typeof t.title === 'string' &&
         typeof t.sql === 'string'
       ) {
-        tabs.push({ id: t.id, title: t.title, sql: t.sql, dirty: false });
+        tabs.push({
+          id: t.id,
+          title: t.title,
+          sql: t.sql,
+          dirty: false,
+          editorSize:
+            typeof t.editorSize === 'number' &&
+            t.editorSize > 0 &&
+            t.editorSize < 100
+              ? t.editorSize
+              : undefined,
+        });
       }
     }
     if (tabs.length === 0) return null;
@@ -284,7 +302,12 @@ function serializeNode(node: PaneNode): PersistedNode {
     return {
       kind: 'leaf',
       id: node.id,
-      tabs: node.tabs.map((t) => ({ id: t.id, title: t.title, sql: t.sql })),
+      tabs: node.tabs.map((t) => ({
+        id: t.id,
+        title: t.title,
+        sql: t.sql,
+        editorSize: t.editorSize,
+      })),
       activeTabId: node.activeTabId,
     };
   }
@@ -415,6 +438,27 @@ export function setTabSql(tabId: string, sql: string): void {
   if (found.tab.sql === sql) return;
   found.tab.sql = sql;
   found.tab.dirty = true;
+}
+
+/**
+ * Records the editor-pane percentage of the editor/results vertical
+ * split for `tabId`. Called whenever the panel group's layout settles
+ * (post-drag, or after a programmatic resize on tab switch).
+ *
+ * Clamped to (0, 100) so a stuck collapse can't poison the field —
+ * the panel library uses 0 / 100 as collapsed states, which would
+ * misrender on reload. Otherwise the value is written through
+ * verbatim: the panel library already rounds `asPercentage` to three
+ * decimal places, and any further "skip small changes" threshold here
+ * causes the persisted state to lag the lib's actual state, which
+ * shows up as a layout jump on the next reload.
+ */
+export function setTabEditorSize(tabId: string, size: number): void {
+  const found = findTab(panesState.root, tabId);
+  if (!found) return;
+  if (size <= 0 || size >= 100) return;
+  if (found.tab.editorSize === size) return;
+  found.tab.editorSize = size;
 }
 
 /**

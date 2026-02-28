@@ -55,6 +55,7 @@
   --color-status-bar-foreground: var(--status-bar-foreground);
   --color-table-row: var(--table-row);
   --color-table-pane: var(--table-pane);
+  --color-editor: var(--editor-bg);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
@@ -125,6 +126,14 @@
   --table-row: oklch(1 0 0);
   --table-pane: var(--background);
 
+  /* Monaco editor surface colour. Matches Monaco's `vs` theme so the
+     active tab can paint with the same colour and visually merge into
+     the editor beneath it — gives the tab the "part of the editor"
+     feel rather than sitting on top as a separate chip. Kept distinct
+     from `--background` because the rest of the app uses a faintly
+     blue-tinted surface, while Monaco's vs theme is pure white. */
+  --editor-bg: #ffffff;
+
   --font-sans: 'Source Code Pro', 'Geist', 'Geist Fallback', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   --font-serif: 'Source Serif 4', 'Geist', 'Geist Fallback', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
   --font-mono: 'Source Code Pro', 'Geist Mono', 'Geist Mono Fallback', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
@@ -184,6 +193,10 @@
      doesn't introduce a competing tint. */
   --table-row: oklch(0% 0 0);
   --table-pane: oklch(--background);
+
+  /* Matches Monaco's `vs-dark` editor surface. See the light-mode
+     comment on `--editor-bg` above for the rationale. */
+  --editor-bg: #1e1e1e;
 
   --shadow-2xs: 0px 1px 2px 0px oklch(0 0 0 / 0.01);
   --shadow-xs: 0px 1px 2px 0px oklch(0 0 0 / 0.01);

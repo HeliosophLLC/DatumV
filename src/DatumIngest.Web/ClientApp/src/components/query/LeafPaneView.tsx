@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useSnapshot } from 'valtio';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import Editor, { type OnMount } from '@monaco-editor/react';
+import { usePanelRef } from 'react-resizable-panels';
 import {
   panesState,
   setTabSql,
+  setTabEditorSize,
   focusLeaf,
   findLeaf,
   moveTab,
@@ -52,6 +54,12 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
   // decisions consult the global tree via `findTabAnywhere`, not this
   // set's contents.
   const knownTabsRef = useRef<Set<string>>(new Set());
+
+  // Imperative handle on the editor's ResizablePanel. Lets the tab-
+  // change effect call `resize()` to swap the editor / results split
+  // to whatever the newly-active tab had saved, without remounting the
+  // panel group (which would kill Monaco state and animate ugly).
+  const editorPanelRef = usePanelRef();
 
   // Drag-and-drop state for the split overlay. The overlay itself is
   // purely presentational — it has pointer-events: none even when
@@ -104,6 +112,32 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
     syncActiveModel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTabId, tabs]);
+
+  // Restore the editor / results split for the newly-active tab. Reads
+  // through the proxy each time so we don't capture a stale snapshot —
+  // this matters when a cross-pane drag changes the leaf's tabs and the
+  // effect re-runs with a freshly arrived tab. Programmatic `resize`
+  // also re-fires the group's `onLayoutChanged` below; the threshold
+  // there absorbs the no-op write-back.
+  useEffect(() => {
+    if (activeTabId === null) return;
+    const live = findLeaf(panesState.root, leafId);
+    const tab = live?.tabs.find((t) => t.id === activeTabId);
+    if (!tab) return;
+    editorPanelRef.current?.resize(`${tab.editorSize ?? 65}%`);
+  }, [activeTabId, leafId, editorPanelRef]);
+
+  // Persist the editor's share of the split whenever the layout
+  // settles (after a user drag, or after programmatic resize). We
+  // attribute the change to whichever tab is *currently* active on
+  // this leaf — read fresh through the proxy rather than captured.
+  function onPanelLayoutChanged() {
+    const size = editorPanelRef.current?.getSize().asPercentage;
+    if (size === undefined) return;
+    const live = findLeaf(panesState.root, leafId);
+    if (!live || live.activeTabId === null) return;
+    setTabEditorSize(live.activeTabId, size);
+  }
 
   // On leaf unmount, clear our active-editor registration. We also
   // sweep `knownTabsRef` for tabs that have vanished from the tree —
@@ -229,10 +263,18 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
       <TabStrip leafId={leafId} />
       {activeTabId !== null ? (
         <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">
-        <ResizablePanelGroup orientation="vertical" className="flex-1">
+        <ResizablePanelGroup
+          orientation="vertical"
+          className="flex-1"
+          onLayoutChanged={onPanelLayoutChanged}
+        >
           <ResizablePanel
+            panelRef={editorPanelRef}
             id={`editor-${leafId}`}
-            defaultSize="65%"
+            // Compute initial size from the active tab so the first
+            // paint matches the saved layout. The effect above handles
+            // tab switches; this only matters for the very first render.
+            defaultSize={`${tabs.find((t) => t.id === activeTabId)?.editorSize ?? 65}%`}
             minSize="20%"
             className="flex flex-col overflow-hidden"
           >
@@ -276,7 +318,13 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
           <ResizableHandle />
           <ResizablePanel
             id={`results-${leafId}`}
-            defaultSize="35%"
+            // No `defaultSize`. With both panels specifying default
+            // sizes, any non-100 sum (e.g. editor=67.5% + results=35%
+            // = 102.5%) gets normalised by the lib, which shaves a bit
+            // off the editor each reload — and since we persist the
+            // post-normalisation value, the drift compounds. Leaving
+            // results sizeless lets the lib auto-fill the remainder
+            // exactly, so there's nothing to renormalise.
             minSize="10%"
             className="flex flex-col overflow-hidden"
           >
