@@ -3,7 +3,16 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { IStreamResult, Subject } from '@microsoft/signalr';
+import type { CatalogChangedEvent } from '../DatumIngest.Web.Hubs';
 import type { ModelDownloadStarted, ModelDownloadProgress, ModelDownloadComplete, ModelDownloadFailed } from '../DatumIngest.Web.ModelLibrary';
+
+export type ICatalogHub = {
+    /**
+    * @param message Transpiled from string
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    ping(message: string): Promise<void>;
+}
 
 export type IStreamHub = {
     /**
@@ -20,6 +29,19 @@ export type IStreamHub = {
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     cancelMessage(): Promise<void>;
+}
+
+export type ICatalogHubClient = {
+    /**
+    * @param message Transpiled from string
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onPong(message: string): Promise<void>;
+    /**
+    * @param change Transpiled from DatumIngest.Web.Hubs.CatalogChangedEvent
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onCatalogChanged(change: CatalogChangedEvent): Promise<void>;
 }
 
 export type IStreamHubClient = {

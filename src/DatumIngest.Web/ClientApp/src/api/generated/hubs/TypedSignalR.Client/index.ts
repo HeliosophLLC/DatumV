@@ -3,7 +3,8 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { HubConnection, IStreamResult, Subject } from '@microsoft/signalr';
-import type { IStreamHub, IStreamHubClient } from './DatumIngest.Web.Hubs';
+import type { ICatalogHub, IStreamHub, ICatalogHubClient, IStreamHubClient } from './DatumIngest.Web.Hubs';
+import type { CatalogChangedEvent } from '../DatumIngest.Web.Hubs';
 import type { ModelDownloadStarted, ModelDownloadProgress, ModelDownloadComplete, ModelDownloadFailed } from '../DatumIngest.Web.ModelLibrary';
 
 
@@ -43,26 +44,55 @@ class ReceiverMethodSubscription implements Disposable {
 // API
 
 export type HubProxyFactoryProvider = {
+    (hubType: "ICatalogHub"): HubProxyFactory<ICatalogHub>;
     (hubType: "IStreamHub"): HubProxyFactory<IStreamHub>;
 }
 
 export const getHubProxyFactory = ((hubType: string) => {
+    if(hubType === "ICatalogHub") {
+        return ICatalogHub_HubProxyFactory.Instance;
+    }
     if(hubType === "IStreamHub") {
         return IStreamHub_HubProxyFactory.Instance;
     }
 }) as HubProxyFactoryProvider;
 
 export type ReceiverRegisterProvider = {
+    (receiverType: "ICatalogHubClient"): ReceiverRegister<ICatalogHubClient>;
     (receiverType: "IStreamHubClient"): ReceiverRegister<IStreamHubClient>;
 }
 
 export const getReceiverRegister = ((receiverType: string) => {
+    if(receiverType === "ICatalogHubClient") {
+        return ICatalogHubClient_Binder.Instance;
+    }
     if(receiverType === "IStreamHubClient") {
         return IStreamHubClient_Binder.Instance;
     }
 }) as ReceiverRegisterProvider;
 
 // HubProxy
+
+class ICatalogHub_HubProxyFactory implements HubProxyFactory<ICatalogHub> {
+    public static Instance = new ICatalogHub_HubProxyFactory();
+
+    private constructor() {
+    }
+
+    public readonly createHubProxy = (connection: HubConnection): ICatalogHub => {
+        return new ICatalogHub_HubProxy(connection);
+    }
+}
+
+class ICatalogHub_HubProxy implements ICatalogHub {
+
+    public constructor(private connection: HubConnection) {
+    }
+
+    public readonly ping = async (message: string): Promise<void> => {
+        return await this.connection.invoke("Ping", message);
+    }
+}
 
 class IStreamHub_HubProxyFactory implements HubProxyFactory<IStreamHub> {
     public static Instance = new IStreamHub_HubProxyFactory();
@@ -95,6 +125,30 @@ class IStreamHub_HubProxy implements IStreamHub {
 
 
 // Receiver
+
+class ICatalogHubClient_Binder implements ReceiverRegister<ICatalogHubClient> {
+
+    public static Instance = new ICatalogHubClient_Binder();
+
+    private constructor() {
+    }
+
+    public readonly register = (connection: HubConnection, receiver: ICatalogHubClient): Disposable => {
+
+        const __onPong = (...args: [string]) => receiver.onPong(...args);
+        const __onCatalogChanged = (...args: [CatalogChangedEvent]) => receiver.onCatalogChanged(...args);
+
+        connection.on("OnPong", __onPong);
+        connection.on("OnCatalogChanged", __onCatalogChanged);
+
+        const methodList: ReceiverMethod[] = [
+            { methodName: "OnPong", method: __onPong },
+            { methodName: "OnCatalogChanged", method: __onCatalogChanged }
+        ]
+
+        return new ReceiverMethodSubscription(connection, methodList);
+    }
+}
 
 class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
 

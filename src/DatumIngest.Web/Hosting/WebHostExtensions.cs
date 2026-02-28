@@ -1,7 +1,9 @@
 ﻿using System.Text.Json.Serialization;
 using DatumIngest.Catalog;
+using DatumIngest.Inference;
 using DatumIngest.Models;
 using DatumIngest.Pooling;
+using DatumIngest.Web.Catalog;
 using DatumIngest.Web.Compute;
 using DatumIngest.Web.Execution;
 using DatumIngest.Web.Hubs;
@@ -49,6 +51,13 @@ public static class WebHostExtensions
                 string catalogFile = Path.Combine(catalogRootPath, CatalogStore.DefaultFileName);
                 TableCatalog catalog = new(pool, catalogFile);
 
+                // Wire the process-singleton inference dispatcher so
+                // CREATE MODEL, inference.devices(), and the rest of
+                // the inference toolkit can resolve their backend.
+                // Without this, every inference.* TVF throws "no
+                // InferenceDispatcher is configured on this host."
+                catalog.InferenceDispatcher = sp.GetRequiredService<IInferenceDispatcher>();
+
                 // Settings-side override (set via the Settings UI, persisted
                 // to settings.json) beats the host-config value. If neither
                 // is set, ModelCatalog falls back to $DATUM_MODELS env var,
@@ -81,6 +90,13 @@ public static class WebHostExtensions
             // any DDL that ran during startup migrations.
             services.AddSingleton<LanguageManifestService>();
             services.AddHostedService<LanguageManifestStartupService>();
+
+            // Catalog change broadcaster. Subscribes to the in-process
+            // CatalogEvents bus at startup and fans each commit out to
+            // every connected CatalogHub client. The service is registered
+            // only as a hosted service (no consumer needs to inject it),
+            // and runs once for the catalog's lifetime.
+            services.AddHostedService<CatalogEventBroadcastService>();
 
             // Streaming SQL execution. Scoped so each request gets its own
             // service instance — its only mutable state today is the
@@ -168,6 +184,7 @@ public static class WebHostExtensions
         app.UseMiddleware<ContextResolverMiddleware>();
         app.MapControllers();
         app.MapHub<StreamHub>("/hubs/stream");
+        app.MapHub<CatalogHub>("/hubs/catalog");
         app.MapFallbackToFile("index.html");
         return app;
     }

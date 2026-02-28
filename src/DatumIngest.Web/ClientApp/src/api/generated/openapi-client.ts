@@ -734,7 +734,7 @@ export interface CompletionItem {
 }
 
 /** Classification of a completion item, aligned with LSP CompletionItemKind values. */
-export type CompletionItemKind = "function" | "column" | "variable" | "keyword" | "table" | "typeParameter";
+export type CompletionItemKind = "function" | "column" | "variable" | "schema" | "keyword" | "table" | "typeParameter";
 
 export interface LangPositionRequest {
     sql?: string;
