@@ -294,6 +294,22 @@ public interface ITableProvider : IDisposable
             $"Table '{QualifiedName}' does not support DropColumnDefault (CanAlterColumns is false).");
 
     /// <summary>
+    /// Relaxes the NOT NULL constraint on the column at
+    /// <paramref name="columnIndex"/> so subsequent INSERTs may write NULL.
+    /// Existing rows keep their stored bytes; the per-page
+    /// <c>HasNullBitmap</c> flag drives decode for historical pages, while
+    /// pages flushed after this call carry a null bitmap.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>.
+    /// Called by the catalog as the body of
+    /// <c>ALTER TABLE … ALTER COLUMN c DROP NOT NULL</c>.
+    /// </remarks>
+    Task DropColumnNotNullAsync(int columnIndex, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(
+            $"Table '{QualifiedName}' does not support DropColumnNotNull (CanAlterColumns is false).");
+
+    /// <summary>
     /// Opens a caller-owned <see cref="IAppendSession"/> for streaming
     /// inserts. The session holds a writer for its lifetime; rows
     /// become visible only after <see cref="IAppendSession.CommitAsync"/>.

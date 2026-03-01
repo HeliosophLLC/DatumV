@@ -815,11 +815,34 @@ public class DdlParsingTests : ServiceTestBase
     [Fact]
     public void AlterTableAlterColumnDrop_UnknownTarget_Throws()
     {
-        // NOT NULL is deferred — explicit rejection (rewrite required).
         // PRIMARY KEY isn't an ALTER COLUMN target in PG either.
         Assert.Throws<ParseException>(() =>
             SqlParser.ParseStatement(
                 "ALTER TABLE users ALTER COLUMN id DROP SOMETHING_ELSE"));
+    }
+
+    [Fact]
+    public void AlterTableAlterColumnDropNotNull_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE users ALTER COLUMN id DROP NOT NULL");
+
+        AlterTableAlterColumnDropStatement alter = Assert.IsType<AlterTableAlterColumnDropStatement>(statement);
+        Assert.Equal("users", alter.TableName);
+        Assert.Equal("id", alter.ColumnName);
+        Assert.Equal(AlterColumnDropTarget.NotNull, alter.Target);
+        Assert.False(alter.IfExists);
+    }
+
+    [Fact]
+    public void AlterTableAlterColumnDropNotNull_IfExists_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE users ALTER COLUMN id DROP NOT NULL IF EXISTS");
+
+        AlterTableAlterColumnDropStatement alter = Assert.IsType<AlterTableAlterColumnDropStatement>(statement);
+        Assert.True(alter.IfExists);
+        Assert.Equal(AlterColumnDropTarget.NotNull, alter.Target);
     }
 
     // ─── ALTER TABLE IF EXISTS (table-level guard) ───

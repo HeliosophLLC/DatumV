@@ -895,4 +895,120 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         Schema schema = reopened["t"].GetSchema();
         Assert.Null(schema.Columns[1].DefaultExpression);
     }
+
+    // ──────────────────── ALTER TABLE … ALTER COLUMN c DROP NOT NULL ────────────────────
+    //
+    // Relaxes NOT NULL on an existing column. Existing rows are untouched
+    // (the encoder already either wrote bitmaps or not — per-page flag on
+    // PageDescriptorV2 records which); future INSERTs may write NULL.
+
+    [Fact]
+    public void AlterTable_DropNotNull_ClearsNullability()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32 NOT NULL, name String)");
+
+        catalog.Plan("ALTER TABLE t ALTER COLUMN id DROP NOT NULL");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.True(schema.Columns[0].Nullable);
+    }
+
+    [Fact]
+    public async Task AlterTable_DropNotNull_PreExistingRowsRoundTrip_NewNullAccepted()
+    {
+        // Pre-drop the column was NOT NULL; existing rows have non-null values
+        // stored in pages WITHOUT a null bitmap. After DROP NOT NULL, future
+        // INSERTs can supply NULL — those rows land in new pages WITH a null
+        // bitmap. Both kinds of page must round-trip correctly.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32 NOT NULL, name String)");
+        catalog.Plan("INSERT INTO t VALUES (1, 'alice'), (2, 'bob')");
+
+        catalog.Plan("ALTER TABLE t ALTER COLUMN id DROP NOT NULL");
+        catalog.Plan("INSERT INTO t (name) VALUES ('carol')");
+
+        Dictionary<string, int?> seen = new();
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Arena arena = batch.Arena;
+            for (int r = 0; r < batch.Count; r++)
+            {
+                string name = batch[r][1].AsString(arena);
+                seen[name] = batch[r][0].IsNull ? null : batch[r][0].AsInt32();
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(1, seen["alice"]);
+        Assert.Equal(2, seen["bob"]);
+        Assert.Null(seen["carol"]);
+    }
+
+    [Fact]
+    public void AlterTable_DropNotNull_OnAlreadyNullableColumn_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, name String)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("ALTER TABLE t ALTER COLUMN id DROP NOT NULL"));
+        Assert.Contains("NOT NULL", ex.Message);
+    }
+
+    [Fact]
+    public void AlterTable_DropNotNull_OnAlreadyNullableColumn_IfExists_NoThrow()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, name String)");
+
+        catalog.Plan("ALTER TABLE t ALTER COLUMN id DROP NOT NULL IF EXISTS");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.True(schema.Columns[0].Nullable);
+    }
+
+    [Fact]
+    public void AlterTable_DropNotNull_UnknownColumn_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32 NOT NULL)");
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE t ALTER COLUMN missing DROP NOT NULL"));
+        Assert.Contains("missing", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AlterTable_DropNotNull_SurvivesReopen()
+    {
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE t (id Int32 NOT NULL, name String)");
+            catalog.Plan("INSERT INTO t VALUES (1, 'alice')");
+            catalog.Plan("ALTER TABLE t ALTER COLUMN id DROP NOT NULL");
+            catalog.Plan("INSERT INTO t (name) VALUES ('bob')");
+        }
+
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
+        Schema schema = reopened["t"].GetSchema();
+        Assert.True(schema.Columns[0].Nullable);
+
+        // Both the pre-drop NOT-NULL-encoded page and the post-drop
+        // nullable-encoded page must decode correctly after reopen.
+        List<(string Name, int? Id)> rows = new();
+        await foreach (RowBatch batch in reopened["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Arena arena = batch.Arena;
+            for (int r = 0; r < batch.Count; r++)
+            {
+                rows.Add((batch[r][1].AsString(arena),
+                    batch[r][0].IsNull ? null : batch[r][0].AsInt32()));
+            }
+            batch.Dispose();
+        }
+        Assert.Contains(("alice", (int?)1), rows);
+        Assert.Contains(("bob", (int?)null), rows);
+    }
 }

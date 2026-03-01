@@ -30,12 +30,22 @@ namespace DatumIngest.DatumFile.V2;
 /// non-comparable kinds (Vector, Image, Array, Struct, byte arrays) —
 /// for those kinds only chapter+volume null counts are meaningful.
 /// </param>
+/// <param name="HasNullBitmap">
+/// Whether this page's payload is preceded by a per-row null bitmap.
+/// Per-page (not per-column) so a column's pages can be heterogeneous —
+/// e.g. after <c>ALTER TABLE … ALTER COLUMN c DROP NOT NULL</c>,
+/// historical pages stay no-bitmap and new pages carry bitmaps. The
+/// decoder reads this flag instead of the column descriptor's
+/// <c>IsNullable</c>; the encoder stamps it from the column descriptor
+/// at flush time.
+/// </param>
 public sealed record PageDescriptorV2(
     ushort FileId,
     long PageOffset,
     uint PageByteLength,
     ushort RowCount,
-    DatumZoneMap? ZoneMap)
+    DatumZoneMap? ZoneMap,
+    bool HasNullBitmap = false)
 {
     /// <summary>
     /// Convenience constructor for callers that always produce
@@ -43,15 +53,15 @@ public sealed record PageDescriptorV2(
     /// passing <see cref="DatumFormatV2.LocalFileId"/> as
     /// <c>FileId</c>.
     /// </summary>
-    public PageDescriptorV2(long pageOffset, uint pageByteLength, ushort rowCount, DatumZoneMap? zoneMap)
-        : this(DatumFormatV2.LocalFileId, pageOffset, pageByteLength, rowCount, zoneMap)
+    public PageDescriptorV2(long pageOffset, uint pageByteLength, ushort rowCount, DatumZoneMap? zoneMap, bool hasNullBitmap = false)
+        : this(DatumFormatV2.LocalFileId, pageOffset, pageByteLength, rowCount, zoneMap, hasNullBitmap)
     {
     }
 
     /// <summary>
     /// Serializes this page descriptor: fileId(2) + offset(8) +
     /// length(4) + rowCount(2) + zoneMapPresent(1) + optional zone map
-    /// bytes.
+    /// bytes + hasNullBitmap(1).
     /// </summary>
     internal void Serialize(BinaryWriter writer)
     {
@@ -61,6 +71,7 @@ public sealed record PageDescriptorV2(
         writer.Write(RowCount);
         writer.Write(ZoneMap is not null);
         ZoneMap?.Serialize(writer);
+        writer.Write(HasNullBitmap);
     }
 
     /// <summary>Deserializes a page descriptor written by <see cref="Serialize"/>.</summary>
@@ -72,6 +83,7 @@ public sealed record PageDescriptorV2(
         ushort rowCount = reader.ReadUInt16();
         bool hasZoneMap = reader.ReadBoolean();
         DatumZoneMap? zoneMap = hasZoneMap ? DatumZoneMap.Deserialize(reader) : null;
-        return new PageDescriptorV2(fileId, offset, length, rowCount, zoneMap);
+        bool hasNullBitmap = reader.ReadBoolean();
+        return new PageDescriptorV2(fileId, offset, length, rowCount, zoneMap, hasNullBitmap);
     }
 }

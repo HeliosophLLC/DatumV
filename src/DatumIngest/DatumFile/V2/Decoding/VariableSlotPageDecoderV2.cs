@@ -38,6 +38,7 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         ReadOnlyMemory<byte> pageBytes,
         int rowCount,
         byte sidecarStoreId,
+        bool hasNullBitmap,
         IBlobSource? sidecarSource = null,
         IValueStore? eagerStore = null,
         ushort columnRuntimeStructTypeId = 0)
@@ -56,7 +57,9 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         _column = column;
         _pageBytes = pageBytes;
         RowCount = rowCount;
-        _isNullable = column.IsNullable;
+        // Per-page bitmap-presence flag (from PageDescriptorV2); see
+        // FixedWidthPageDecoderV2 for why this is per-page now.
+        _isNullable = hasNullBitmap;
         _sidecarStoreId = sidecarStoreId;
 
         int bitmapBytes = DatumNullBitmap.ByteCount(rowCount);

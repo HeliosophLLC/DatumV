@@ -13,7 +13,7 @@ internal sealed class BitPackedBooleanPageDecoderV2 : IPageDecoderV2
     private readonly ReadOnlyMemory<byte> _pageBytes;
     private readonly int _valueBitmapOffset;
 
-    public BitPackedBooleanPageDecoderV2(ColumnDescriptorV2 column, ReadOnlyMemory<byte> pageBytes, int rowCount)
+    public BitPackedBooleanPageDecoderV2(ColumnDescriptorV2 column, ReadOnlyMemory<byte> pageBytes, int rowCount, bool hasNullBitmap)
     {
         if (column.Encoder != EncoderKind.BitPackedBoolean)
         {
@@ -22,7 +22,9 @@ internal sealed class BitPackedBooleanPageDecoderV2 : IPageDecoderV2
                 nameof(column));
         }
 
-        _isNullable = column.IsNullable;
+        // Per-page bitmap-presence flag (from PageDescriptorV2); see
+        // FixedWidthPageDecoderV2 for why this is per-page now.
+        _isNullable = hasNullBitmap;
         _pageBytes = pageBytes;
         RowCount = rowCount;
 

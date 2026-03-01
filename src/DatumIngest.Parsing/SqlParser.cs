@@ -4223,7 +4223,19 @@ public static class SqlParser
         select (Statement)new AlterTableDropConstraintStatement(prefix.TableName, constraintName, ifExists, prefix.IfExists, prefix.SchemaName);
 
     /// <summary>
-    /// Parses the <c>COLUMN col DROP { IDENTITY | DEFAULT } [IF EXISTS]</c>
+    /// Parses the column-attribute drop target after <c>DROP</c>: one of
+    /// <c>IDENTITY</c>, <c>DEFAULT</c>, or <c>NOT NULL</c>. NOT NULL
+    /// consumes two tokens so it's structurally distinct from the others.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, AlterColumnDropTarget> AlterColumnDropTargetParser =
+        Token.EqualTo(SqlToken.Identity).Try().Select(_ => AlterColumnDropTarget.Identity)
+            .Or(Token.EqualTo(SqlToken.Default).Try().Select(_ => AlterColumnDropTarget.Default))
+            .Or((from notKw in Token.EqualTo(SqlToken.Not)
+                 from nullKw in Token.EqualTo(SqlToken.Null)
+                 select AlterColumnDropTarget.NotNull));
+
+    /// <summary>
+    /// Parses the <c>COLUMN col DROP { IDENTITY | DEFAULT | NOT NULL } [IF EXISTS]</c>
     /// body of an <c>ALTER TABLE name ALTER</c> statement, once the outer
     /// <c>ALTER</c> verb has been consumed.
     /// </summary>
@@ -4231,14 +4243,11 @@ public static class SqlParser
         from columnKw in Token.EqualTo(SqlToken.Column)
         from colName in IdentifierOrKeywordAsName
         from dropKw in Token.EqualTo(SqlToken.Drop)
-        from targetKw in Token.EqualTo(SqlToken.Identity).Try()
-            .Or(Token.EqualTo(SqlToken.Default))
+        from target in AlterColumnDropTargetParser
         from ifExists in IfExistsParser
         select (Statement)new AlterTableAlterColumnDropStatement(
             prefix.TableName, colName,
-            targetKw.Kind == SqlToken.Identity
-                ? AlterColumnDropTarget.Identity
-                : AlterColumnDropTarget.Default,
+            target,
             ifExists,
             prefix.IfExists,
             prefix.SchemaName);

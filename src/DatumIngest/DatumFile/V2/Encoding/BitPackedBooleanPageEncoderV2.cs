@@ -102,7 +102,7 @@ internal sealed class BitPackedBooleanPageEncoderV2 : IPageEncoderV2
         Buffer.BlockCopy(_valueBitmap, 0, page, offset, bitmapBytes);
 
         DatumZoneMap zoneMap = _zoneMap.Build();
-        EncodedPageV2 result = new(page, _rowCount, zoneMap);
+        EncodedPageV2 result = new(page, _rowCount, zoneMap, HasNullBitmap: _isNullable);
 
         Reset();
         return result;

@@ -1451,9 +1451,8 @@ public sealed record AlterTableDropConstraintStatement(
 
 /// <summary>
 /// Which column attribute an <see cref="AlterTableAlterColumnDropStatement"/>
-/// targets. PG supports <c>DROP DEFAULT</c>, <c>DROP IDENTITY</c>, and
-/// <c>DROP NOT NULL</c>; v1 ships the first two (NOT NULL is deferred
-/// because removing it requires rewriting page bytes to add a null bitmap).
+/// targets. PG-compatible set: <c>DROP DEFAULT</c>, <c>DROP IDENTITY</c>,
+/// <c>DROP NOT NULL</c>.
 /// </summary>
 public enum AlterColumnDropTarget
 {
@@ -1462,6 +1461,14 @@ public enum AlterColumnDropTarget
 
     /// <summary>Removes the column's <c>DEFAULT</c> expression from the footer's defaults table.</summary>
     Default,
+
+    /// <summary>
+    /// Relaxes the column to allow NULL values. Pre-existing pages keep
+    /// whatever bitmap state they were written with (recorded per-page in
+    /// <c>PageDescriptorV2.HasNullBitmap</c>); only future INSERTs gain
+    /// the ability to write NULL.
+    /// </summary>
+    NotNull,
 }
 
 /// <summary>

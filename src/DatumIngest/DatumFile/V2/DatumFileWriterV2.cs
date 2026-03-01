@@ -1340,6 +1340,48 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     }
 
     /// <summary>
+    /// Flips <paramref name="columnName"/>'s descriptor flag <c>IsNullable</c>
+    /// to <see langword="true"/> in <paramref name="datumPath"/>. Pure
+    /// footer mutation. Historical pages keep their stored bytes; the
+    /// per-page <c>HasNullBitmap</c> flag on each <see cref="PageDescriptorV2"/>
+    /// continues to drive decoding for those pages, while pages flushed
+    /// after this call carry a null bitmap.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// No-op when the column is already nullable. Throws when the column
+    /// doesn't exist (caller validates upstream — this is a safety net).
+    /// </para>
+    /// <para>
+    /// The reverse operation — tightening a nullable column to NOT NULL —
+    /// is intentionally unsupported here because it requires scanning
+    /// existing rows to validate that no NULLs are present.
+    /// </para>
+    /// </remarks>
+    public static void ClearColumnNotNull(string datumPath, string columnName)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+        ArgumentNullException.ThrowIfNull(columnName);
+
+        string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
+        using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
+
+        int? columnIndex = FindLiveColumnIndex(writer, columnName);
+        if (columnIndex is null)
+        {
+            throw new InvalidOperationException(
+                $"ClearColumnNotNull: column '{columnName}' does not exist on '{datumPath}'.");
+        }
+
+        ColumnDescriptorV2 prior = writer._columns![columnIndex.Value];
+        if (!prior.IsNullable)
+        {
+            writer._columns[columnIndex.Value] = prior with { IsNullable = true };
+        }
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
     /// Removes <paramref name="columnName"/>'s entry from the footer's
     /// defaults table in <paramref name="datumPath"/>. Pure footer
     /// mutation. Existing rows are unaffected; future INSERTs that omit
@@ -1800,6 +1842,7 @@ public sealed partial class DatumFileWriterV2 : IDisposable
             new ReadOnlyMemory<byte>(pageBytes),
             partialPage.RowCount,
             sidecarStoreId: 0,
+            hasNullBitmap: partialPage.HasNullBitmap,
             sidecarSource: sidecarReadStore,
             eagerStore: rehydrateArena);
 
@@ -2095,11 +2138,19 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         EncodedPageV2 page = _encoders![columnIndex].Flush();
         long offset = _stream.Position;
         _stream.Write(page.Bytes);
+        // Source HasNullBitmap from the encoder's actual output — NOT from
+        // the current column descriptor. The encoder was constructed when
+        // the descriptor was still in its previous shape (e.g. IsNullable
+        // false before ALTER … DROP NOT NULL), and produces bytes matching
+        // that shape regardless of any descriptor mutation made before
+        // flush. The per-page flag must agree with the bytes that were
+        // actually written.
         _pageDirectory![columnIndex].Add(new PageDescriptorV2(
             offset,
             (uint)page.Bytes.Length,
             (ushort)page.RowCount,
-            page.ZoneMap));
+            page.ZoneMap,
+            hasNullBitmap: page.HasNullBitmap));
         _hierarchies![columnIndex].AddPage(page.ZoneMap);
     }
 

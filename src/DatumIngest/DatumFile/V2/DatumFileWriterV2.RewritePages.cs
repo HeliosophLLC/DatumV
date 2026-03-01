@@ -191,6 +191,7 @@ public sealed partial class DatumFileWriterV2
                         pageMemory,
                         rowCount,
                         sidecarStoreId: 0,
+                        hasNullBitmap: oldPage.HasNullBitmap,
                         sidecarSource: null,
                         eagerStore: null);
 
@@ -221,7 +222,11 @@ public sealed partial class DatumFileWriterV2
                         newPageOffset,
                         (uint)encoded.Bytes.Length,
                         (ushort)encoded.RowCount,
-                        encoded.ZoneMap);
+                        encoded.ZoneMap,
+                        // Source from the encoder's actual output to stay
+                        // consistent with the FlushPage convention — see
+                        // DatumFileWriterV2.FlushPage for the rationale.
+                        HasNullBitmap: encoded.HasNullBitmap);
 
                     replacements[(columnIndex, pageIndex)] = newDescriptor;
                 }

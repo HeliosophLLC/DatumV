@@ -17,7 +17,7 @@ internal sealed class FixedWidthPageDecoderV2 : IPageDecoderV2
     private readonly ReadOnlyMemory<byte> _pageBytes;
     private readonly int _payloadOffset;
 
-    public FixedWidthPageDecoderV2(ColumnDescriptorV2 column, ReadOnlyMemory<byte> pageBytes, int rowCount)
+    public FixedWidthPageDecoderV2(ColumnDescriptorV2 column, ReadOnlyMemory<byte> pageBytes, int rowCount, bool hasNullBitmap)
     {
         if (column.Encoder != EncoderKind.FixedWidth)
         {
@@ -28,7 +28,11 @@ internal sealed class FixedWidthPageDecoderV2 : IPageDecoderV2
 
         _kind = column.Kind;
         _strideBytes = column.FixedWidthStrideBytes;
-        _isNullable = column.IsNullable;
+        // `hasNullBitmap` is the per-page flag (from PageDescriptorV2). After
+        // `ALTER … DROP NOT NULL`, a single column can have a mix of
+        // bitmap-bearing and bitmap-less pages — the decoder picks per
+        // page, not per column.
+        _isNullable = hasNullBitmap;
         _pageBytes = pageBytes;
         RowCount = rowCount;
 

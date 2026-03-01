@@ -80,10 +80,12 @@ Three optional companion sidecars extend the base format:
 
 Every page is uncompressed. The encoder kind is recorded once per column in the footer schema block; readers dispatch on `EncoderKind` to pick the decoder.
 
+**Null-bitmap presence is per-page, not per-column.** Each `PageDescriptorV2` carries a `HasNullBitmap` flag (recorded by the encoder when the page was flushed); the decoder reads that flag to know whether the page starts with a bitmap or jumps straight into payload. A single column can have a heterogeneous mix of bitmap-bearing and bitmap-less pages — that's how `ALTER TABLE … ALTER COLUMN c DROP NOT NULL` works without rewriting historical pages.
+
 ### `FixedWidth` (Int8/16/32/64, UInt8/16/32/64, Float32/64, Date, Time, Duration, DateTime, Uuid)
 
 ```
-[null bitmap : ⌈rows / 8⌉ bytes]   (omitted when column non-nullable)
+[null bitmap : ⌈rows / 8⌉ bytes]   (omitted when the page's HasNullBitmap is false)
 [payload     : rows × stride bytes]   null cells store zero — bitmap is authoritative
 ```
 
@@ -101,7 +103,7 @@ Stride is determined by `DataKind`:
 ### `BitPackedBoolean` (Boolean only)
 
 ```
-[null bitmap   : ⌈rows / 8⌉ bytes]   (omitted when column non-nullable)
+[null bitmap   : ⌈rows / 8⌉ bytes]   (omitted when the page's HasNullBitmap is false)
 [value bitmap  : ⌈rows / 8⌉ bytes]   bit i = the row's boolean value (undefined when null)
 ```
 
@@ -110,7 +112,7 @@ A 1024-row nullable boolean page is 256 bytes (vs 1024 bytes for raw byte-per-ro
 ### `VariableSlot` (String, JsonValue, Array, Image, Vector, Matrix, Tensor, Struct, typed arrays)
 
 ```
-[null bitmap         : ⌈rows / 8⌉ bytes]   (omitted when column non-nullable)
+[null bitmap         : ⌈rows / 8⌉ bytes]   (omitted when the page's HasNullBitmap is false)
 [inline bitmap       : ⌈rows / 8⌉ bytes]   bit i = 1 means row i's slot is inline; 0 = sidecar pointer
 [inline-length array : rows × 1 byte ]    per-row inline-payload length 0..16; meaningful only when inline bit is set
 [slots               : rows × 16 bytes]
@@ -202,6 +204,10 @@ For each column (in schema order, count = prologue.columnCount):
     uint16 : rowCount               (≤ pageSize; last page may be partial)
     bool   : hasZoneMap
     If hasZoneMap: ZoneMap          (per-page min/max/nullCount)
+    bool   : hasNullBitmap          (true = this page begins with a per-row null bitmap;
+                                     false = decoder jumps straight into payload. Per-page
+                                     because `ALTER … DROP NOT NULL` leaves historical
+                                     pages without a bitmap and writes new ones with.)
 
   int32: chapterCount
   ZoneMap[chapterCount]              (one per 64-page chapter; aggregated from page maps)
@@ -427,6 +433,25 @@ The common header (4 bytes) prefixes every page:
 Insert walks root→leaf recording the path, builds the merged entry list, then COW-rewrites every page on the path with fresh page ids. If a leaf would overflow it splits and the separator key bubbles up; recursive internal splits can grow a new root. After all new pages are written and fsync'd, the inactive header slot is rewritten with the new root id + CommitGen+1 + CRC and fsync'd a second time. Old pages (the path that was just rewritten) are leaked on disk pending a future free-list reuse pass.
 
 The PK index is single-writer per data path. The provider's mutation lock (the same one that gates `INSERT`/`DELETE`/`ALTER`) serialises all access; the file is opened with `FileShare.None`.
+
+## Format gotchas
+
+A few invariants that aren't obvious from the layout alone, captured here because violating them silently corrupts reads:
+
+### Descriptors describe wire format; schemas describe semantics
+
+`ColumnDescriptorV2` flags like `IsNullable` aren't pure metadata — they tell the encoder what to write and the decoder what to expect. **Never flip a wire-format flag on a column whose pages are already on disk.** Doing so makes the decoder interpret existing bytes through the new shape; you'll see values off by a bitmap byte (e.g. an `Int64` value of `1` decoding as `256`).
+
+Two correct patterns when a schema-level attribute needs to change after data exists:
+
+- **Move the encoding decision to per-page metadata.** Null-bitmap presence is the canonical case: `IsNullable` is no longer the decoding authority — `PageDescriptorV2.HasNullBitmap` is. Old pages keep their stored shape; new pages flush in the new shape; the decoder reads each page through its own flag. `ALTER … DROP NOT NULL` works under this rule with no page rewrite.
+- **Override at schema-build time without mutating the descriptor.** PK promotion (`ALTER TABLE … ADD COLUMN … PRIMARY KEY`) keeps the column's on-disk `IsNullable=true` (the pages have a bitmap because that's how they were written), but the schema-build override reports `Nullable=false` whenever the column appears in `PrimaryKeyColumnIndices`. Same shape on disk, tighter shape at the SQL layer.
+
+### Encoders are the source of truth for what a page actually contains
+
+`PageDescriptorV2.HasNullBitmap` is sourced from `EncodedPageV2.HasNullBitmap` at `FlushPage` time — **not** from the current column descriptor. The reason: between encoder construction and flush, a mutation (e.g. `ClearColumnNotNull`) may have flipped the column descriptor's `IsNullable`, but the encoder was built with the old value and continues to produce bytes in the old shape until reset. Stamping the descriptor's current `IsNullable` into the page descriptor would claim a bitmap that isn't there.
+
+Whenever the encoder's output and the column descriptor diverge, the descriptor that goes into the page directory must reflect what the encoder did, not what the column has become.
 
 ## Reading flow
 

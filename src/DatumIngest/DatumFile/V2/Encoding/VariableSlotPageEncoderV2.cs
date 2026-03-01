@@ -201,7 +201,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         Buffer.BlockCopy(_slots, 0, page, offset, slotBytes);
 
         DatumZoneMap zoneMap = _zoneMap.Build();
-        EncodedPageV2 result = new(page, _rowCount, zoneMap);
+        EncodedPageV2 result = new(page, _rowCount, zoneMap, HasNullBitmap: _isNullable);
 
         Reset();
         return result;

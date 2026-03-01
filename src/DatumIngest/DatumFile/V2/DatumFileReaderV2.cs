@@ -374,7 +374,8 @@ public sealed class DatumFileReaderV2 : IDisposable
         PageDescriptorV2 descriptor = column.Pages[pageIndex];
         ReadOnlyMemory<byte> bytes = ReadPageBytes(columnIndex, pageIndex);
         return PageDecoderFactoryV2.Create(
-            column.Descriptor, bytes, descriptor.RowCount, sidecarStoreId, sidecarSource, eagerStore,
+            column.Descriptor, bytes, descriptor.RowCount, sidecarStoreId,
+            descriptor.HasNullBitmap, sidecarSource, eagerStore,
             columnRuntimeStructTypeId);
     }
 

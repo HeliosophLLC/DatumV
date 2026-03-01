@@ -17,7 +17,16 @@ namespace DatumIngest.DatumFile.V2.Encoding;
 /// Zone map covering the values in this page. May carry only a null
 /// count for non-comparable kinds.
 /// </param>
+/// <param name="HasNullBitmap">
+/// Whether <see cref="Bytes"/> begins with a per-row null bitmap. Records
+/// the encoder's actual output so the writer can stamp the matching
+/// <see cref="PageDescriptorV2.HasNullBitmap"/> flag — necessary because
+/// the column descriptor's <c>IsNullable</c> may have been mutated
+/// between encoder construction and page flush (e.g. by
+/// <c>ALTER … DROP NOT NULL</c>).
+/// </param>
 internal readonly record struct EncodedPageV2(
     byte[] Bytes,
     int RowCount,
-    DatumZoneMap ZoneMap);
+    DatumZoneMap ZoneMap,
+    bool HasNullBitmap);

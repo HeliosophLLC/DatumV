@@ -508,6 +508,19 @@ internal static class AlterTableExecutor
                 await provider.DropColumnDefaultAsync(columnIndex).ConfigureAwait(false);
                 break;
 
+            case AlterColumnDropTarget.NotNull:
+                // Reject when the column is already nullable AND IF EXISTS
+                // was not given (matches PG: "column X is not a not-null
+                // constraint"). Silent no-op with IF EXISTS.
+                if (column.Nullable)
+                {
+                    if (alter.IfExists) return EmptyQueryPlan.Instance;
+                    throw new InvalidOperationException(
+                        $"column \"{alter.ColumnName}\" of relation \"{alter.TableName}\" does not have a NOT NULL constraint");
+                }
+                await provider.DropColumnNotNullAsync(columnIndex).ConfigureAwait(false);
+                break;
+
             default:
                 throw new InvalidOperationException(
                     $"ALTER COLUMN DROP target {alter.Target} is not implemented.");

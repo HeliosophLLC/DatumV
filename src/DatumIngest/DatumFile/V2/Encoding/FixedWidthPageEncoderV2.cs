@@ -101,7 +101,7 @@ internal sealed class FixedWidthPageEncoderV2 : IPageEncoderV2
         Buffer.BlockCopy(_payload, 0, page, bitmapBytes, payloadBytes);
 
         DatumZoneMap zoneMap = _zoneMap.Build();
-        EncodedPageV2 result = new(page, _rowCount, zoneMap);
+        EncodedPageV2 result = new(page, _rowCount, zoneMap, HasNullBitmap: _isNullable);
 
         Reset();
         return result;

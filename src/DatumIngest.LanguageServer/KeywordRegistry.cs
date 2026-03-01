@@ -255,10 +255,10 @@ internal static class KeywordRegistry
             ["COLUMN"],
 
         // ALTER TABLE name ALTER COLUMN col DROP — droppable column
-        // attributes. NOT NULL is intentionally absent (deferred until
-        // page-rewrite support lands).
+        // attributes. NOT NULL is wired via the per-page HasNullBitmap
+        // flag (historical pages stay no-bitmap, new pages carry one).
         [CompletionZoneKind.AfterAlterColumnDrop] =
-            ["IDENTITY", "DEFAULT", "IF EXISTS"],
+            ["IDENTITY", "DEFAULT", "NOT NULL", "IF EXISTS"],
 
         // ALTER TABLE ADD COLUMN accepts the same constraint set as CREATE
         // TABLE columns (PRIMARY KEY, NULL/NOT NULL, DEFAULT, GENERATED …)
