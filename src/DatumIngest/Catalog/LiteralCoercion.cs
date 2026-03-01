@@ -4,12 +4,12 @@ namespace DatumIngest.Catalog;
 
 /// <summary>
 /// Coerces a CLR literal value (as produced by
-/// <c>SqlParser.NarrowNumericLiteral</c>: <see cref="sbyte"/> / <see cref="short"/> /
-/// <see cref="int"/> / <see cref="long"/> for integers, <see cref="float"/> /
-/// <see cref="double"/> for fractionals) into a <see cref="DataValue"/>
-/// of a target <see cref="DataKind"/>. Lossless coercions are accepted;
-/// lossy or cross-family coercions throw a descriptive
-/// <see cref="InvalidOperationException"/>.
+/// <c>SqlParser.ParseNumericLiteral</c>: <see cref="sbyte"/> / <see cref="short"/> /
+/// <see cref="int"/> / <see cref="long"/> / <see cref="ulong"/> / <see cref="Int128"/> /
+/// <see cref="UInt128"/> for integers, <see cref="float"/> / <see cref="double"/>
+/// for fractionals) into a <see cref="DataValue"/> of a target <see cref="DataKind"/>.
+/// Lossless coercions are accepted; lossy or cross-family coercions throw a
+/// descriptive <see cref="InvalidOperationException"/>.
 /// </summary>
 internal static class LiteralCoercion
 {
@@ -104,24 +104,37 @@ internal static class LiteralCoercion
             _ => throw IncompatibleLiteral(literal, "Duration", columnName),
         };
 
-    private static DataValue CoerceDecimal(object literal, string columnName) =>
-        literal switch
+    private static DataValue CoerceDecimal(object literal, string columnName)
+    {
+        try
         {
-            decimal d => DataValue.FromDecimal(d),
-            sbyte s => DataValue.FromDecimal(s),
-            short s => DataValue.FromDecimal(s),
-            int i => DataValue.FromDecimal(i),
-            long l => DataValue.FromDecimal(l),
-            byte b => DataValue.FromDecimal(b),
-            ushort u => DataValue.FromDecimal(u),
-            uint u => DataValue.FromDecimal(u),
-            ulong u => DataValue.FromDecimal(u),
-            // Float→decimal could lose precision silently; require an explicit
-            // decimal-typed literal or cast on the SQL side.
-            string s when decimal.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, out decimal parsed)
-                => DataValue.FromDecimal(parsed),
-            _ => throw IncompatibleLiteral(literal, "Decimal", columnName),
-        };
+            return literal switch
+            {
+                decimal d => DataValue.FromDecimal(d),
+                sbyte s => DataValue.FromDecimal(s),
+                short s => DataValue.FromDecimal(s),
+                int i => DataValue.FromDecimal(i),
+                long l => DataValue.FromDecimal(l),
+                byte b => DataValue.FromDecimal(b),
+                ushort u => DataValue.FromDecimal(u),
+                uint u => DataValue.FromDecimal(u),
+                ulong u => DataValue.FromDecimal(u),
+                Int128 i128 => DataValue.FromDecimal((decimal)i128),
+                UInt128 u128 => DataValue.FromDecimal((decimal)u128),
+                // Float→decimal could lose precision silently; require an explicit
+                // decimal-typed literal or cast on the SQL side.
+                string s when decimal.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, out decimal parsed)
+                    => DataValue.FromDecimal(parsed),
+                _ => throw IncompatibleLiteral(literal, "Decimal", columnName),
+            };
+        }
+        catch (OverflowException)
+        {
+            throw new InvalidOperationException(
+                $"Column '{columnName}': literal {literal} does not fit in Decimal " +
+                $"(range [{decimal.MinValue}, {decimal.MaxValue}]).");
+        }
+    }
 
     private static DataValue CoerceBoolean(object literal, string columnName) =>
         literal switch
@@ -155,6 +168,9 @@ internal static class LiteralCoercion
             ushort u => u,
             uint u => u,
             ulong u when u <= long.MaxValue => (long)u,
+            Int128 i128 when i128 >= long.MinValue && i128 <= long.MaxValue => (long)i128,
+            UInt128 u128 when u128 <= (UInt128)long.MaxValue => (long)u128,
+            Int128 or UInt128 => throw OutOfRange(literal, "Int64", columnName, long.MinValue, long.MaxValue),
             _ => throw IncompatibleLiteral(literal, "Int64", columnName),
         };
 
@@ -169,6 +185,9 @@ internal static class LiteralCoercion
             ushort u => u,
             uint u => u,
             ulong u => u,
+            Int128 i128 => i128,
+            UInt128 u128 when u128 <= (UInt128)Int128.MaxValue => (Int128)u128,
+            UInt128 => throw OutOfRange(literal, "Int128", columnName, Int128.MinValue, Int128.MaxValue),
             _ => throw IncompatibleLiteral(literal, "Int128", columnName),
         };
 
@@ -184,7 +203,9 @@ internal static class LiteralCoercion
             ushort u => u,
             uint u => u,
             ulong u => u,
-            _ when literal is sbyte or short or int or long
+            Int128 i128 when i128 >= 0 => (UInt128)i128,
+            UInt128 u128 => u128,
+            _ when literal is sbyte or short or int or long or Int128
                 => throw new InvalidOperationException(
                     $"Column '{columnName}': cannot store negative literal in UInt128."),
             _ => throw IncompatibleLiteral(literal, "UInt128", columnName),
@@ -203,12 +224,23 @@ internal static class LiteralCoercion
             ushort u => u,
             uint u => u,
             ulong u => u,
+            Int128 i128 when i128 >= 0 && i128 <= ulong.MaxValue => (ulong)i128,
+            UInt128 u128 when u128 <= ulong.MaxValue => (ulong)u128,
+            Int128 i128 when i128 < 0
+                => throw new InvalidOperationException(
+                    $"Column '{columnName}': cannot store negative literal in UInt64."),
+            Int128 or UInt128 => throw OutOfRange(literal, "UInt64", columnName, 0, ulong.MaxValue),
             _ when literal is sbyte or short or int or long
                 => throw new InvalidOperationException(
                     $"Column '{columnName}': cannot store negative literal in UInt64."),
             _ => throw IncompatibleLiteral(literal, "UInt64", columnName),
         };
     }
+
+    private static InvalidOperationException OutOfRange(
+        object literal, string targetName, string columnName, object min, object max) =>
+        new($"Column '{columnName}': literal {literal} does not fit in {targetName} " +
+            $"(range [{min}, {max}]).");
 
     private static T ToSignedInRange<T>(object literal, long min, long max, string columnName, string targetName)
         where T : struct
@@ -223,6 +255,10 @@ internal static class LiteralCoercion
             ushort u => u,
             uint u => u,
             ulong u when u <= long.MaxValue => (long)u,
+            Int128 i128 when i128 >= long.MinValue && i128 <= long.MaxValue => (long)i128,
+            UInt128 u128 when u128 <= (UInt128)long.MaxValue => (long)u128,
+            Int128 or UInt128 or ulong
+                => throw OutOfRange(literal, targetName, columnName, min, max),
             _ => throw IncompatibleLiteral(literal, targetName, columnName),
         };
 
@@ -248,6 +284,13 @@ internal static class LiteralCoercion
             ushort u => u,
             uint u => u,
             ulong u => u,
+            Int128 i128 when i128 >= 0 && i128 <= ulong.MaxValue => (ulong)i128,
+            UInt128 u128 when u128 <= ulong.MaxValue => (ulong)u128,
+            Int128 i128 when i128 < 0
+                => throw new InvalidOperationException(
+                    $"Column '{columnName}': cannot store negative literal in {targetName}."),
+            Int128 or UInt128
+                => throw OutOfRange(literal, targetName, columnName, 0UL, max),
             _ when literal is sbyte or short or int or long
                 => throw new InvalidOperationException(
                     $"Column '{columnName}': cannot store negative literal in {targetName}."),
@@ -292,6 +335,8 @@ internal static class LiteralCoercion
             case ushort u: return u;
             case uint u: return u;
             case ulong u: return u;
+            case Int128 i128: return (float)i128;
+            case UInt128 u128: return (float)u128;
             default: throw IncompatibleLiteral(literal, "Float32", columnName);
         }
     }
@@ -310,6 +355,8 @@ internal static class LiteralCoercion
             ushort u => u,
             uint u => u,
             ulong u => u,
+            Int128 i128 => (double)i128,
+            UInt128 u128 => (double)u128,
             _ => throw IncompatibleLiteral(literal, "Float64", columnName),
         };
 

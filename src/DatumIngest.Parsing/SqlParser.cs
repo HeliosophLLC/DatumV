@@ -169,30 +169,61 @@ public static class SqlParser
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> NumberLiteral =
         Token.EqualTo(SqlToken.NumberLiteral)
-            .Apply(Numerics.DecimalDouble)
-            .Select(value => (Expression)new LiteralExpression(NarrowNumericLiteral(value)));
+            .Select(token => (Expression)new LiteralExpression(ParseNumericLiteral(token.ToStringValue())));
 
-    private static object NarrowNumericLiteral(double d)
+    /// <summary>
+    /// Parses a numeric literal token (digits, optional '.', optional exponent)
+    /// into the narrowest CLR type that represents it exactly. Pure-integer
+    /// text walks sbyte → short → int → long → ulong → Int128 → UInt128.
+    /// Fractional or exponent-bearing text parses as double; if the value is
+    /// whole (e.g. <c>1.0</c>) it then narrows through the integer ladder, and
+    /// otherwise narrows to float when the float round-trip is exact. The
+    /// token never carries a sign — unary minus is a separate parse node.
+    /// </summary>
+    private static object ParseNumericLiteral(string text)
     {
-        // ReSharper disable once CompareOfFloatsByEqualityOperator
-        if (d != System.Math.Truncate(d))
+        bool fractional = text.IndexOf('.') >= 0
+            || text.IndexOf('e') >= 0
+            || text.IndexOf('E') >= 0;
+
+        if (fractional)
         {
+            double d = double.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+            // ReSharper disable once CompareOfFloatsByEqualityOperator
+            if (d == System.Math.Truncate(d) && !double.IsInfinity(d))
+            {
+                // Whole-valued fractional literal (e.g. 1.0, 1e3) — narrow
+                // through the integer ladder. A finite whole double fits in
+                // long (|d| <= 2^53), so we never need the wider rungs.
+                long whole = (long)d;
+                return NarrowSignedInt(whole);
+            }
             float f = (float)d;
-            // Without the explicit (object) cast on the float branch, the C# ternary
-            // unifies the operand types to the common arithmetic type (double) and
-            // implicitly widens the float back, so the narrowing was getting silently
-            // discarded — every decimal literal landed as a double regardless of
-            // representability. Boxing the float-branch result preserves the runtime
-            // type as System.Single.
+            // Boxing the float-branch result preserves the runtime type as
+            // System.Single; without the (object) cast the C# ternary unifies
+            // to double and the narrowing is silently discarded.
             // ReSharper disable once CompareOfFloatsByEqualityOperator
             return (double)f == d ? (object)f : d;
         }
 
-        if (d >= sbyte.MinValue && d <= sbyte.MaxValue) return (sbyte)d;
-        if (d >= short.MinValue && d <= short.MaxValue) return (short)d;
-        if (d >= int.MinValue && d <= int.MaxValue) return (int)d;
-        if (d >= long.MinValue && d <= long.MaxValue) return (long)d;
-        return d;
+        System.Globalization.NumberStyles style = System.Globalization.NumberStyles.None;
+        System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
+        if (sbyte.TryParse(text, style, culture, out sbyte sb)) return sb;
+        if (short.TryParse(text, style, culture, out short s)) return s;
+        if (int.TryParse(text, style, culture, out int i)) return i;
+        if (long.TryParse(text, style, culture, out long l)) return l;
+        if (ulong.TryParse(text, style, culture, out ulong u)) return u;
+        if (Int128.TryParse(text, style, culture, out Int128 i128)) return i128;
+        if (UInt128.TryParse(text, style, culture, out UInt128 u128)) return u128;
+        throw new FormatException($"Integer literal '{text}' exceeds 128-bit range.");
+    }
+
+    private static object NarrowSignedInt(long value)
+    {
+        if (value >= sbyte.MinValue && value <= sbyte.MaxValue) return (sbyte)value;
+        if (value >= short.MinValue && value <= short.MaxValue) return (short)value;
+        if (value >= int.MinValue && value <= int.MaxValue) return (int)value;
+        return value;
     }
 
     /// <summary>String literal with quote unescaping.</summary>
