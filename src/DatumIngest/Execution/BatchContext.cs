@@ -100,13 +100,13 @@ public sealed class BatchContext : IDisposable
     public int ProcedureCallDepth { get; init; }
 
     /// <summary>
-    /// Stabilises <paramref name="value"/> from <paramref name="sourceStore"/>
-    /// into <see cref="VariableStore"/> and binds it to <paramref name="name"/>
-    /// in the topmost frame of <see cref="VariableScope"/>. Throws if the
-    /// name is already declared in the topmost frame. When
-    /// <paramref name="structFieldNames"/> is non-<see langword="null"/>,
-    /// the names attach to this binding so downstream
-    /// <c>@var['field']</c> access can resolve a position.
+    /// Lifts <paramref name="value"/> from <paramref name="sourceStore"/>
+    /// into a managed-payload <see cref="ValueRef"/> and binds it to
+    /// <paramref name="name"/> in the topmost frame of
+    /// <see cref="VariableScope"/>. Throws if the name is already declared
+    /// in the topmost frame. When <paramref name="structFieldNames"/> is
+    /// non-<see langword="null"/>, the names attach to this binding so
+    /// downstream <c>@var['field']</c> access can resolve a position.
     /// </summary>
     public void Declare(
         string name,
@@ -114,19 +114,26 @@ public sealed class BatchContext : IDisposable
         IValueStore sourceStore,
         IReadOnlyList<string>? structFieldNames = null)
     {
-        DataValue stable = DataValueRetention.Stabilize(value, sourceStore, VariableStore);
-        VariableScope.Declare(name, stable, structFieldNames);
+        EvaluationFrame frame = new(
+            Row.Empty, sourceStore, VariableStore,
+            outerRow: null, sidecarRegistry: null, types: Types);
+        ValueRef bound = ExpressionEvaluator.ToValueRef(value, frame);
+        VariableScope.Declare(name, bound, structFieldNames);
     }
 
     /// <summary>
-    /// Stabilises <paramref name="value"/> into <see cref="VariableStore"/>
-    /// and updates the existing binding. Walks the scope chain outward to
-    /// find the frame holding the name. Throws if the name is unbound.
+    /// Lifts <paramref name="value"/> from <paramref name="sourceStore"/>
+    /// into a managed-payload <see cref="ValueRef"/> and updates the
+    /// existing binding. Walks the scope chain outward to find the frame
+    /// holding the name. Throws if the name is unbound.
     /// </summary>
     public void Set(string name, DataValue value, IValueStore sourceStore)
     {
-        DataValue stable = DataValueRetention.Stabilize(value, sourceStore, VariableStore);
-        VariableScope.Set(name, stable);
+        EvaluationFrame frame = new(
+            Row.Empty, sourceStore, VariableStore,
+            outerRow: null, sidecarRegistry: null, types: Types);
+        ValueRef bound = ExpressionEvaluator.ToValueRef(value, frame);
+        VariableScope.Set(name, bound);
     }
 
     /// <summary>

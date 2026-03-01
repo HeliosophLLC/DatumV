@@ -1,14 +1,15 @@
 using DatumIngest.Execution;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Execution;
 
 /// <summary>
 /// Substrate-only tests for <see cref="BatchContext"/>: ownership of the
-/// procedure-lifetime <c>VariableStore</c> arena, stabilise-on-bind
-/// semantics, and IDisposable lifecycle. Confirms the core correctness
-/// property: a value bound from a transient producing arena remains
-/// readable from <c>VariableStore</c> after the producing arena is gone.
+/// procedure-lifetime <c>VariableStore</c> arena, lift-on-bind semantics
+/// (DataValue → managed-payload ValueRef), and IDisposable lifecycle.
+/// Confirms the core correctness property: a value bound from a transient
+/// producing arena remains readable after the producing arena is gone.
 /// </summary>
 public sealed class BatchContextTests
 {
@@ -22,12 +23,13 @@ public sealed class BatchContextTests
     }
 
     [Fact]
-    public void Declare_StabilisesArenaPayloadIntoVariableStore()
+    public void Declare_LiftsArenaPayloadToManagedString()
     {
         // The crux: a value with payload in a producing-query's arena
-        // gets copied into VariableStore when bound. Reading later via
-        // VariableStore returns the original string — proves stabilise
-        // ran (otherwise we'd be dereferencing the producing arena).
+        // gets lifted into a managed-payload ValueRef when bound. Reading
+        // later returns the original string — proves the lift ran
+        // (otherwise we'd be dereferencing the producing arena, which is
+        // disposed below).
         const string longText = "This string is more than 16 UTF-8 bytes, so the payload lives in an arena rather than inline.";
 
         Arena producingArena = new();
@@ -37,14 +39,15 @@ public sealed class BatchContextTests
         using BatchContext ctx = new();
         ctx.Declare("greeting", produced, producingArena);
 
-        DataValue bound = ctx.VariableScope.Get("greeting");
-        // The bound value reads from VariableStore (procedure-scoped),
-        // not the producing arena. Bytes were copied at bind time.
-        Assert.Equal(longText, bound.AsString(ctx.VariableStore));
+        // Drop the producing arena's reference — the binding must survive.
+        producingArena.ReleaseReference();
+
+        ValueRef bound = ctx.VariableScope.Get("greeting");
+        Assert.Equal(longText, bound.AsString());
     }
 
     [Fact]
-    public void Set_StabilisesNewValueIntoVariableStore()
+    public void Set_LiftsNewValueToManagedString()
     {
         const string firstText = "First long enough payload to require an arena copy on bind.";
         const string secondText = "Second long enough payload that overwrites the first via SET.";
@@ -56,24 +59,23 @@ public sealed class BatchContextTests
         ctx.Declare("msg", DataValue.FromString(firstText, producingArena), producingArena);
         ctx.Set("msg", DataValue.FromString(secondText, producingArena), producingArena);
 
-        DataValue current = ctx.VariableScope.Get("msg");
-        Assert.Equal(secondText, current.AsString(ctx.VariableStore));
+        ValueRef current = ctx.VariableScope.Get("msg");
+        Assert.Equal(secondText, current.AsString());
     }
 
     [Fact]
     public void InlineValueBinding_DoesNotTouchVariableStore()
     {
         // Inline values (≤ 16 UTF-8 bytes for strings, all numerics) carry
-        // their payload inside the DataValue struct. Stabilise is still
-        // called for uniformity, but no bytes hit VariableStore — sanity
-        // check that the round-trip works in this path too.
+        // their payload inside the DataValue struct. The lift is a no-op —
+        // sanity check that the round-trip works in this path too.
         Arena producing = new();
         producing.AddReference();
 
         using BatchContext ctx = new();
         ctx.Declare("count", DataValue.FromInt32(42), producing);
 
-        DataValue val = ctx.VariableScope.Get("count");
+        ValueRef val = ctx.VariableScope.Get("count");
         Assert.Equal(42, val.AsInt32());
     }
 

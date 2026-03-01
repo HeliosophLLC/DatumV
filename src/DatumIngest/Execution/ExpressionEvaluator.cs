@@ -495,13 +495,14 @@ public sealed class ExpressionEvaluator
         // this — variables are never schema-qualified.
         if (column.TableName is null
             && _variableScope is not null
-            && _variableStore is not null
-            && _variableScope.TryGet(column.ColumnName, out DataValue variableValue))
+            && _variableScope.TryGet(column.ColumnName, out ValueRef variableValue))
         {
-            // Stabilise from the procedure-lifetime variable store into the
-            // frame's target arena so downstream code reads the value like
-            // any other arena-backed datum.
-            return DataValueRetention.Stabilize(variableValue, _variableStore, frame.Target);
+            // The scope holds a ValueRef; the DataValue path needs the value
+            // anchored in frame.Target. ToDataValue handles every payload
+            // shape — inline scalars pass through, managed payloads
+            // (Materialized) write into frame.Target on demand, arena-backed
+            // values stabilise across arenas.
+            return variableValue.ToDataValue(frame.Target, variableValue.TypeId, frame.Types);
         }
 
         Row row = frame.Row;
@@ -797,6 +798,15 @@ public sealed class ExpressionEvaluator
                 return await EvaluateUnaryAsValueRefAsync(unary, frame, cancellationToken).ConfigureAwait(false);
             case IsNullExpression isNull:
                 return await EvaluateIsNullAsValueRefAsync(isNull, frame, cancellationToken).ConfigureAwait(false);
+            case ColumnReference columnRef
+                when columnRef.TableName is null
+                    && _variableScope is not null
+                    && _variableScope.TryGet(columnRef.ColumnName, out ValueRef variableValue):
+                // Procedural variable read: scope holds the ValueRef directly.
+                // Return it without round-tripping through arena+ToValueRef so
+                // managed payloads (Float32 tensors, SKBitmaps, etc.) stay on
+                // the GC heap end-to-end through DECLARE → read → consume.
+                return variableValue;
         }
 
         DataValue raw = await EvaluateAsync(expression, frame, cancellationToken).ConfigureAwait(false);
@@ -807,9 +817,13 @@ public sealed class ExpressionEvaluator
     /// Materialises a <see cref="DataValue"/> argument into a
     /// <see cref="ValueRef"/>: arena-backed strings/arrays are read into managed
     /// payloads, sidecar-backed values are loaded via the registry, and inline
-    /// values pass through unchanged.
+    /// values pass through unchanged. Public so callers that produce a
+    /// <see cref="DataValue"/> from a sub-query (procedural batch evaluation,
+    /// scalar sub-SELECT) can lift the result to a managed-payload ValueRef
+    /// before storing it in a <see cref="VariableScope"/> — the resulting
+    /// binding outlives the producing batch's arena.
     /// </summary>
-    private static ValueRef ToValueRef(DataValue value, EvaluationFrame frame)
+    public static ValueRef ToValueRef(DataValue value, EvaluationFrame frame)
     {
         // Null values: pick the right shape (null array vs null scalar) so
         // downstream IsArray checks don't misfire on a typed-null array.

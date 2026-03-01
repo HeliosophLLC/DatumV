@@ -545,7 +545,22 @@ public sealed class BatchExecutor
     private static string? RenderForPrint(DataValue value, IValueStore store)
     {
         if (value.IsNull) return null;
-        object? managed = Materialize(value, store);
+        object? managed = value.Kind switch
+        {
+            DataKind.Boolean => value.AsBoolean(),
+            DataKind.UInt8 => value.AsUInt8(),
+            DataKind.Int8 => value.AsInt8(),
+            DataKind.Int16 => value.AsInt16(),
+            DataKind.UInt16 => value.AsUInt16(),
+            DataKind.Int32 => value.AsInt32(),
+            DataKind.UInt32 => value.AsUInt32(),
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.UInt64 => value.AsUInt64(),
+            DataKind.Float32 => value.AsFloat32(),
+            DataKind.Float64 => value.AsFloat64(),
+            DataKind.String => value.AsString(store),
+            _ => (object?)value,
+        };
         return managed switch
         {
             null => null,
@@ -559,7 +574,7 @@ public sealed class BatchExecutor
     private async Task ExecuteDeclareAsync(
         DeclareStatement decl, BatchContext batchContext, CancellationToken ct)
     {
-        DataValue stable;
+        ValueRef bound;
         if (decl.Initializer is not null)
         {
             // When the user supplies both a declared type and an initializer
@@ -574,7 +589,8 @@ public sealed class BatchExecutor
             Expression effective = decl.TypeName is not null
                 ? new CastExpression(decl.Initializer, decl.TypeName, decl.Span)
                 : decl.Initializer;
-            stable = await EvaluateScalarAsync(effective, batchContext, ct).ConfigureAwait(false);
+            DataValue stable = await EvaluateScalarAsync(effective, batchContext, ct).ConfigureAwait(false);
+            bound = LiftBoundaryValue(stable, batchContext);
         }
         else
         {
@@ -590,17 +606,36 @@ public sealed class BatchExecutor
                     $"DECLARE @{decl.VariableName}: cannot resolve type name '{decl.TypeName}'. " +
                     "Use a recognised SQL type (Int32, Float64, String, Boolean, Array<String>, etc.) or supply an initializer.");
             }
-            stable = isArray ? DataValue.NullArrayOf(kind) : DataValue.Null(kind);
+            bound = isArray ? ValueRef.NullArray(kind) : ValueRef.Null(kind);
         }
 
-        batchContext.VariableScope.Declare(decl.VariableName, stable);
+        batchContext.VariableScope.Declare(decl.VariableName, bound);
     }
 
     private async Task ExecuteSetAsync(
         SetStatement set, BatchContext batchContext, CancellationToken ct)
     {
         DataValue stable = await EvaluateScalarAsync(set.Value, batchContext, ct).ConfigureAwait(false);
-        batchContext.VariableScope.Set(set.VariableName, stable);
+        batchContext.VariableScope.Set(set.VariableName, LiftBoundaryValue(stable, batchContext));
+    }
+
+    /// <summary>
+    /// Lifts a <see cref="DataValue"/> produced by <see cref="EvaluateScalarAsync"/>
+    /// (anchored in <see cref="BatchContext.VariableStore"/>) into a
+    /// <see cref="ValueRef"/> for storage in <see cref="VariableScope"/>.
+    /// Byte payloads materialise into managed memory so the binding survives
+    /// any future arena recycle; inline scalars pass through unchanged.
+    /// </summary>
+    private ValueRef LiftBoundaryValue(DataValue value, BatchContext batchContext)
+    {
+        EvaluationFrame boundary = new(
+            Row.Empty,
+            batchContext.VariableStore,
+            batchContext.VariableStore,
+            outerRow: null,
+            sidecarRegistry: _catalog.SidecarRegistry,
+            types: batchContext.Types);
+        return ExpressionEvaluator.ToValueRef(value, boundary);
     }
 
     /// <summary>
@@ -868,9 +903,16 @@ public sealed class BatchExecutor
                 {
                     string? variableName = assignTargets[colIdx];
                     if (variableName is null) continue; // defensive — shouldn't happen post-validation
-                    DataValue stable = DataValueRetention.Stabilize(
-                        row[colIdx], batch.Arena, batchContext.VariableStore);
-                    batchContext.VariableScope.Set(variableName, stable);
+                    // Lift directly from the producing batch's arena into a
+                    // managed-payload ValueRef so the binding survives the
+                    // batch's recycle without going through VariableStore.
+                    EvaluationFrame batchFrame = new(
+                        row, batch.Arena, batchContext.VariableStore,
+                        outerRow: null,
+                        sidecarRegistry: _catalog.SidecarRegistry,
+                        types: batchContext.Types);
+                    ValueRef bound = ExpressionEvaluator.ToValueRef(row[colIdx], batchFrame);
+                    batchContext.VariableScope.Set(variableName, bound);
                 }
             }
         }
@@ -939,8 +981,9 @@ public sealed class BatchExecutor
                 batchContext.VariableScope.PushFrame();
                 try
                 {
-                    DataValue messageValue = DataValue.FromString(
-                        ex.Message ?? string.Empty, batchContext.VariableStore);
+                    // Managed-string payload — survives any future arena
+                    // recycle without anchoring in VariableStore.
+                    ValueRef messageValue = ValueRef.FromString(ex.Message ?? string.Empty);
                     batchContext.VariableScope.Declare(tryStmt.ErrorVariableName, messageValue);
                     try
                     {
@@ -1002,7 +1045,7 @@ public sealed class BatchExecutor
             for (long i = start; i <= end; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                DataValue iValue = DataValue.FromInt64(i);
+                ValueRef iValue = ValueRef.FromInt64(i);
                 if (i == start)
                 {
                     batchContext.VariableScope.Declare(forC.VariableName, iValue);
@@ -1088,13 +1131,20 @@ public sealed class BatchExecutor
                 ct.ThrowIfCancellationRequested();
                 Row row = batch[rowIdx];
 
-                // Stabilise field values into the procedure-lifetime store,
-                // then build a struct that points entirely into VariableStore.
-                DataValue[] fields = new DataValue[colCount];
+                // Lift each field directly into a managed-payload ValueRef
+                // against the producing batch's arena, then assemble a
+                // ValueRef.FromStruct — the resulting binding has no arena
+                // dependency and survives the batch recycle without
+                // touching VariableStore.
+                EvaluationFrame batchFrame = new(
+                    row, batch.Arena, batchContext.VariableStore,
+                    outerRow: null,
+                    sidecarRegistry: _catalog.SidecarRegistry,
+                    types: batchContext.Types);
+                ValueRef[] fieldRefs = new ValueRef[colCount];
                 for (int j = 0; j < colCount; j++)
                 {
-                    fields[j] = DataValueRetention.Stabilize(
-                        row[j], batch.Arena, batchContext.VariableStore);
+                    fieldRefs[j] = ExpressionEvaluator.ToValueRef(row[j], batchFrame);
                 }
                 // Intern the row schema once into the batch-shared registry. Sharing
                 // the registry across all queries in the batch (FOR source, body
@@ -1105,13 +1155,12 @@ public sealed class BatchExecutor
                     StructFieldDescriptor[] fieldDescriptors = new StructFieldDescriptor[colCount];
                     for (int j = 0; j < colCount; j++)
                     {
-                        int fieldTypeId = batchContext.Types.InternScalarType(fields[j].Kind);
+                        int fieldTypeId = batchContext.Types.InternScalarType(fieldRefs[j].Kind);
                         fieldDescriptors[j] = new StructFieldDescriptor(fieldNames[j], fieldTypeId);
                     }
                     rowTypeId = (ushort)batchContext.Types.InternStructType(fieldDescriptors);
                 }
-                DataValue rowStruct = DataValue.FromStruct(
-                    fields, batchContext.VariableStore, rowTypeId);
+                ValueRef rowStruct = ValueRef.FromStruct(fieldRefs, rowTypeId);
 
                 batchContext.VariableScope.PushFrame();
                 try
@@ -1474,27 +1523,29 @@ public sealed class BatchExecutor
     private static Dictionary<string, object?> SnapshotRootBindings(BatchContext batchContext)
     {
         // Walk every visible binding in the scope chain and materialise
-        // into managed form. The result must outlive the batch context's
-        // VariableStore (which is about to dispose), so we convert each
-        // value here while VariableStore is still alive.
+        // into managed form. The scope now holds ValueRefs (managed payloads
+        // for non-inline values), so the snapshot is independent of
+        // VariableStore — the conversion is purely a kind-switch.
         Dictionary<string, object?> snapshot = new(StringComparer.OrdinalIgnoreCase);
-        foreach (KeyValuePair<string, DataValue> entry in batchContext.VariableScope.EnumerateVisible())
+        foreach (KeyValuePair<string, ValueRef> entry in batchContext.VariableScope.EnumerateVisible())
         {
-            snapshot[entry.Key] = Materialize(entry.Value, batchContext.VariableStore);
+            snapshot[entry.Key] = Materialize(entry.Value);
         }
         return snapshot;
     }
 
     /// <summary>
-    /// Materialises a <see cref="DataValue"/> into managed form for
+    /// Materialises a <see cref="ValueRef"/> into managed form for
     /// post-batch inspection. Coverage matches what's testable today:
-    /// numerics, booleans, strings, NULLs. Unsupported kinds return the
-    /// raw <see cref="DataValue"/> boxed — the caller can decide how to
-    /// surface it.
+    /// numerics, booleans, strings, NULLs. Arrays and other composite
+    /// kinds return the raw <see cref="ValueRef"/> boxed — the caller
+    /// can decide how to surface them (state-inspector renders show the
+    /// shape, integration tests compare numeric/string scalars).
     /// </summary>
-    private static object? Materialize(DataValue value, IValueStore store)
+    private static object? Materialize(ValueRef value)
     {
         if (value.IsNull) return null;
+        if (value.IsArray) return value; // boxed for caller to inspect
         return value.Kind switch
         {
             DataKind.Boolean => value.AsBoolean(),
@@ -1508,8 +1559,8 @@ public sealed class BatchExecutor
             DataKind.UInt64 => value.AsUInt64(),
             DataKind.Float32 => value.AsFloat32(),
             DataKind.Float64 => value.AsFloat64(),
-            DataKind.String => value.AsString(store),
-            _ => value, // boxed DataValue — caller can stabilise / inspect manually
+            DataKind.String => value.AsString(),
+            _ => value, // boxed ValueRef — caller can stabilise / inspect manually
         };
     }
 }

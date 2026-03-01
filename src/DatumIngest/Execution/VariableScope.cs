@@ -1,3 +1,4 @@
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 namespace DatumIngest.Execution;
@@ -11,13 +12,17 @@ namespace DatumIngest.Execution;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <strong>Scope vs storage.</strong> This class only tracks visibility
-/// — name → <see cref="DataValue"/>. Byte payloads (strings, byte arrays,
-/// nested structs/arrays) live in the <see cref="BatchContext.VariableStore"/>
-/// arena; this scope holds DataValues whose offsets point into that
-/// arena. The producer (the procedural executor binding the variable)
-/// is responsible for stabilising the payload into <c>VariableStore</c>
-/// before calling <see cref="Declare"/> or <see cref="Set"/>.
+/// <strong>Scope holds ValueRefs, not DataValues.</strong> Each binding's
+/// value is a <see cref="ValueRef"/> — the runtime representation that
+/// discriminates between inline scalars, arena-backed payloads, and
+/// managed payloads (<see cref="ValueRef.Materialized"/>). Holding ValueRef
+/// directly means a body's <c>DECLARE @x = expr</c> can keep a managed
+/// payload (e.g. <c>float[]</c>, <c>SKBitmap</c>) without materialising it
+/// into the body's variable arena — a 960×960 Float32 tensor stays as a
+/// managed array reference, not 11 MB of arena memcpy. Producers route
+/// their expression evaluation through
+/// <see cref="ExpressionEvaluator.EvaluateAsValueRefAsync"/> so intermediate
+/// values flow as managed payloads end-to-end.
 /// </para>
 /// <para>
 /// <strong>Case-insensitive names.</strong> <c>@X</c> and <c>@x</c>
@@ -30,11 +35,7 @@ namespace DatumIngest.Execution;
 /// names alongside the value. Used by <c>FOR @row IN (...)</c> so
 /// <c>@row['column']</c> can resolve a named field at evaluation time
 /// without per-row schema lookup. Non-struct bindings leave field
-/// names <see langword="null"/>. A future per-query type registry
-/// (planned but not yet shipped) will replace this localised tracking
-/// with a self-describing <see cref="DataValue"/> carrying a type id;
-/// the <c>TryGetFieldNames</c> entry point keeps the consumer-side
-/// surface stable through that migration.
+/// names <see langword="null"/>.
 /// </para>
 /// </remarks>
 public sealed class VariableScope
@@ -42,12 +43,12 @@ public sealed class VariableScope
     private readonly Stack<Dictionary<string, Binding>> _frames = new();
 
     /// <summary>
-    /// Internal per-binding shape: the bound <see cref="DataValue"/>
+    /// Internal per-binding shape: the bound <see cref="ValueRef"/>
     /// plus optional struct field names. Keeping these together avoids
     /// a parallel dictionary and keeps lookup atomic.
     /// </summary>
     private readonly record struct Binding(
-        DataValue Value,
+        ValueRef Value,
         IReadOnlyList<string>? StructFieldNames);
 
     /// <summary>
@@ -99,7 +100,7 @@ public sealed class VariableScope
     /// </summary>
     public void Declare(
         string name,
-        DataValue value,
+        ValueRef value,
         IReadOnlyList<string>? structFieldNames = null)
     {
         Dictionary<string, Binding> top = _frames.Peek();
@@ -118,7 +119,7 @@ public sealed class VariableScope
     /// struct field names for the binding (SET re-assigns the value but
     /// not the binding's structural identity).
     /// </summary>
-    public void Set(string name, DataValue value)
+    public void Set(string name, ValueRef value)
     {
         foreach (Dictionary<string, Binding> frame in _frames)
         {
@@ -129,7 +130,7 @@ public sealed class VariableScope
             }
         }
         throw new InvalidOperationException(
-            $"Variable '{name}' is not declared in any enclosing scope.");
+            $"Variable '@{name}' is not declared in any enclosing scope.");
     }
 
     /// <summary>
@@ -138,7 +139,7 @@ public sealed class VariableScope
     /// ones). Returns <see langword="false"/> when no matching binding
     /// exists.
     /// </summary>
-    public bool TryGet(string name, out DataValue value)
+    public bool TryGet(string name, out ValueRef value)
     {
         foreach (Dictionary<string, Binding> frame in _frames)
         {
@@ -157,9 +158,9 @@ public sealed class VariableScope
     /// <see cref="TryGet"/> when the absence of a binding is a valid
     /// outcome.
     /// </summary>
-    public DataValue Get(string name)
+    public ValueRef Get(string name)
     {
-        if (TryGet(name, out DataValue value)) return value;
+        if (TryGet(name, out ValueRef value)) return value;
         throw new InvalidOperationException($"Variable '@{name}' is not declared.");
     }
 
@@ -192,7 +193,7 @@ public sealed class VariableScope
     /// Useful for snapshotting state at batch end and for diagnostic
     /// printing.
     /// </summary>
-    public IEnumerable<KeyValuePair<string, DataValue>> EnumerateVisible()
+    public IEnumerable<KeyValuePair<string, ValueRef>> EnumerateVisible()
     {
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
         foreach (Dictionary<string, Binding> frame in _frames)
@@ -201,7 +202,7 @@ public sealed class VariableScope
             {
                 if (seen.Add(entry.Key))
                 {
-                    yield return new KeyValuePair<string, DataValue>(entry.Key, entry.Value.Value);
+                    yield return new KeyValuePair<string, ValueRef>(entry.Key, entry.Value.Value);
                 }
             }
         }

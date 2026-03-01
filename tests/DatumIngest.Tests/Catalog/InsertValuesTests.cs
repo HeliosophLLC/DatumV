@@ -224,6 +224,82 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(5f, rows[0][0].AsFloat32());
     }
 
+    // ──────────────────── 128-bit literal coercion ────────────────────
+
+    [Fact]
+    public async Task InsertValues_SmallLiteralIntoInt128_Widens()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int128)");
+
+        catalog.Plan("INSERT INTO t VALUES (1)");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Equal((Int128)1, rows[0][0].AsInt128());
+    }
+
+    [Fact]
+    public async Task InsertValues_Above64BitLiteralIntoInt128_RoundTrips()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int128)");
+
+        // 2^65 — larger than UInt64.MaxValue, so the parser must reach
+        // the Int128/UInt128 rungs without going through double.
+        catalog.Plan("INSERT INTO t VALUES (36893488147419103232)");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Equal((Int128)1 << 65, rows[0][0].AsInt128());
+    }
+
+    [Fact]
+    public async Task InsertValues_Int128MaxLiteral_RoundTrips()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int128)");
+
+        catalog.Plan("INSERT INTO t VALUES (170141183460469231731687303715884105727)");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Equal(Int128.MaxValue, rows[0][0].AsInt128());
+    }
+
+    [Fact]
+    public async Task InsertValues_UInt128MaxLiteral_RoundTrips()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id UInt128)");
+
+        catalog.Plan("INSERT INTO t VALUES (340282366920938463463374607431768211455)");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Equal(UInt128.MaxValue, rows[0][0].AsUInt128());
+    }
+
+    [Fact]
+    public void InsertValues_LiteralExceeding128Bits_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id UInt128)");
+
+        // UInt128.MaxValue + 1.
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("INSERT INTO t VALUES (340282366920938463463374607431768211456)"));
+        Assert.Contains("128-bit", ex.Message);
+    }
+
+    [Fact]
+    public void InsertValues_Int128LiteralOverflowsInt64_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int64)");
+
+        // 2^65 — parser produces Int128, coercion to Int64 must reject.
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("INSERT INTO t VALUES (36893488147419103232)"));
+        Assert.Contains("Int64", ex.Message);
+    }
+
     // ──────────────────── Temporal / Decimal coercion ────────────────────
 
     [Fact]

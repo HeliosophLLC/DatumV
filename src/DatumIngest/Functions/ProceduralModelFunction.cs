@@ -166,15 +166,19 @@ public sealed class ProceduralModelFunction : IScalarFunction
                 "Every control-flow path must terminate with RETURN expr.");
         }
 
-        DataValue returnValue = signal.Value;
+        ValueRef returnValue = signal.Value;
 
         if (!returnValue.IsNull && returnValue.Kind != _returnKind)
         {
+            // Slow-path numeric/string coercion: materialise via the
+            // existing CastExpression pipeline. Round-trips through
+            // DataValue once — only triggered on kind mismatch.
+            DataValue asData = returnValue.ToDataValue(variableStore, returnValue.TypeId, frame.Types);
             CastExpression syntheticCast = new(
-                new LiteralValueExpression(returnValue),
+                new LiteralValueExpression(asData),
                 _descriptor.ReturnTypeName,
                 Span: null);
-            returnValue = await evaluator.EvaluateAsync(syntheticCast, bodyFrame, cancellationToken).ConfigureAwait(false);
+            returnValue = await evaluator.EvaluateAsValueRefAsync(syntheticCast, bodyFrame, cancellationToken).ConfigureAwait(false);
         }
 
         if (_descriptor.ReturnIsNotNull && returnValue.IsNull)
@@ -183,10 +187,7 @@ public sealed class ProceduralModelFunction : IScalarFunction
                 $"Model '{_descriptor.QualifiedName}' return value must not be null.");
         }
 
-        return await evaluator.EvaluateAsValueRefAsync(
-            new LiteralValueExpression(returnValue),
-            bodyFrame,
-            cancellationToken).ConfigureAwait(false);
+        return returnValue;
     }
 
     /// <summary>
@@ -204,28 +205,21 @@ public sealed class ProceduralModelFunction : IScalarFunction
         CancellationToken cancellationToken)
     {
         int paramCount = _descriptor.Parameters.Count;
-        DataValue[] resolved = new DataValue[paramCount];
-        bool[] needsDefault = new bool[paramCount];
-        ReadOnlySpan<ValueRef> argSpan = arguments.Span;
-        for (int i = 0; i < paramCount; i++)
-        {
-            if (i < argSpan.Length)
-            {
-                resolved[i] = argSpan[i].ToDataValue(variableStore);
-            }
-            else
-            {
-                needsDefault[i] = true;
-            }
-        }
+        int suppliedCount = arguments.Length;
+        // Copy the supplied ValueRefs out of the ReadOnlyMemory's span into a
+        // managed array — spans can't be preserved across an await boundary
+        // (default-evaluation needs await), and ValueRef is a struct so the
+        // copy is cheap.
+        ValueRef[] supplied = new ValueRef[suppliedCount];
+        arguments.Span.CopyTo(supplied);
 
         for (int i = 0; i < paramCount; i++)
         {
             UdfParameter param = _descriptor.Parameters[i];
-            DataValue value;
-            if (!needsDefault[i])
+            ValueRef value;
+            if (i < suppliedCount)
             {
-                value = resolved[i];
+                value = supplied[i];
             }
             else if (param.Default is not null)
             {
@@ -241,7 +235,7 @@ public sealed class ProceduralModelFunction : IScalarFunction
                     outerRow: null,
                     sidecarRegistry: frame.SidecarRegistry,
                     types: frame.Types);
-                value = await defaultEvaluator.EvaluateAsync(param.Default, defaultFrame, cancellationToken).ConfigureAwait(false);
+                value = await defaultEvaluator.EvaluateAsValueRefAsync(param.Default, defaultFrame, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -285,23 +279,23 @@ public sealed class ProceduralModelFunction : IScalarFunction
         {
             case ReturnStatement ret:
             {
-                DataValue value = await evaluator.EvaluateAsync(ret.Value, frame, cancellationToken).ConfigureAwait(false);
+                ValueRef value = await evaluator.EvaluateAsValueRefAsync(ret.Value, frame, cancellationToken).ConfigureAwait(false);
                 return new ReturnSignal(value);
             }
             case DeclareStatement decl:
             {
-                DataValue declValue;
+                ValueRef declValue;
                 if (decl.Initializer is not null)
                 {
                     Expression effective = decl.TypeName is not null
                         ? new CastExpression(decl.Initializer, decl.TypeName, decl.Span)
                         : decl.Initializer;
-                    declValue = await evaluator.EvaluateAsync(effective, frame, cancellationToken).ConfigureAwait(false);
+                    declValue = await evaluator.EvaluateAsValueRefAsync(effective, frame, cancellationToken).ConfigureAwait(false);
                 }
                 else if (decl.TypeName is not null
                     && TypeAnnotationResolver.TryParse(decl.TypeName, out DataKind kind, out bool isArray))
                 {
-                    declValue = isArray ? DataValue.NullArrayOf(kind) : DataValue.Null(kind);
+                    declValue = isArray ? ValueRef.NullArray(kind) : ValueRef.Null(kind);
                 }
                 else
                 {
@@ -314,7 +308,7 @@ public sealed class ProceduralModelFunction : IScalarFunction
             }
             case SetStatement set:
             {
-                DataValue value = await evaluator.EvaluateAsync(set.Value, frame, cancellationToken).ConfigureAwait(false);
+                ValueRef value = await evaluator.EvaluateAsValueRefAsync(set.Value, frame, cancellationToken).ConfigureAwait(false);
                 scope.Set(set.VariableName, value);
                 return null;
             }
@@ -375,5 +369,5 @@ public sealed class ProceduralModelFunction : IScalarFunction
         return min;
     }
 
-    private sealed record ReturnSignal(DataValue Value);
+    private sealed record ReturnSignal(ValueRef Value);
 }
