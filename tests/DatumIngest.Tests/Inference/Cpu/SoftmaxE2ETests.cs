@@ -111,4 +111,73 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         }
         return exps;
     }
+
+    /// <summary>
+    /// Step 2 probe: a SQL-defined model must now route through
+    /// <c>ModelInvocationOperator</c> just like a built-in. Attaching an
+    /// <see cref="IModelInvocationTracer"/> to the catalog and observing
+    /// at least one <c>OnDispatchStarted</c>/<c>OnDispatchCompleted</c>
+    /// pair proves the hoister picked up the <c>ProceduralModelAdapter</c>
+    /// — without step 2's plumbing, the call would have stayed on the
+    /// per-row scalar pipeline and the tracer would never fire.
+    /// </summary>
+    [Fact]
+    public async Task Softmax_SqlDefined_RoutesThroughMioWithTracer()
+    {
+        string fixturePath = FixturePath();
+        Assert.True(File.Exists(fixturePath),
+            $"Fixture missing at {fixturePath}.");
+
+        TableCatalog catalog = CreateCatalogWithRealDispatcher();
+        catalog.Add(new InMemoryTableProvider(
+            CreatePool(), "data", ["d"], [new object?[] { 1 }]));
+
+        RecordingTracer tracer = new();
+        catalog.ModelTracer = tracer;
+
+        catalog.Plan(
+            $"CREATE MODEL softmax(x Float32[]) RETURNS Float32[] " +
+            $"USING 'file://{fixturePath}' " +
+            $"AS BEGIN RETURN infer(x) END");
+
+        IQueryPlan plan = catalog.Plan(
+            "SELECT models.softmax([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
+
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            // Drain — we care about the tracer events, not the values.
+        }
+
+        Assert.True(tracer.StartedCount > 0,
+            "Tracer never fired OnDispatchStarted — the SQL-defined model was not hoisted into ModelInvocationOperator.");
+        Assert.Equal(tracer.StartedCount, tracer.CompletedCount);
+        Assert.Contains(tracer.ObservedModels, name =>
+            string.Equals(name, "softmax", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private sealed class RecordingTracer : IModelInvocationTracer
+    {
+        public int StartedCount { get; private set; }
+        public int CompletedCount { get; private set; }
+        public List<string> ObservedModels { get; } = new();
+
+        public void OnDispatchStarted(
+            string modelName,
+            int rowCount,
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides)
+        {
+            StartedCount++;
+            ObservedModels.Add(modelName);
+        }
+
+        public void OnDispatchCompleted(string modelName, int rowCount, TimeSpan elapsed)
+        {
+            CompletedCount++;
+        }
+
+        public void OnDispatchFailed(string modelName, int rowCount, TimeSpan elapsed, Exception exception)
+        {
+        }
+    }
 }

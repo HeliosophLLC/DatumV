@@ -1325,19 +1325,17 @@ public static class ModelInvocationHoister
         => string.Equals(fn.SchemaName, ModelSchema, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// A <c>models.*</c> call is hoistable only when the named model is in
-    /// the built-in <see cref="ModelCatalog"/>. SQL-defined models
-    /// (registered via <c>CREATE MODEL</c> into <c>TableCatalog.DeclaredModels</c>)
-    /// don't satisfy <see cref="ModelInvocationOperator"/>'s contract — it
-    /// expects an <c>IModel</c> with batched <c>InferBatchAsync</c>,
-    /// residency leases, and an <c>OutputFields</c> shape; SQL-defined
-    /// models are per-row <c>IScalarFunction</c>s whose bound sessions
-    /// live on the descriptor. Treating them as non-hoistable lets the
-    /// scalar pipeline route <c>SELECT models.&lt;sql_defined&gt;(...)</c>
-    /// through the registered <c>ProceduralModelFunction</c> adapter
-    /// (Phase 3a). The trade-off is that we lose CSE + batched dispatch
-    /// for SQL-defined models — see the project memo's follow-up for
-    /// when batching here becomes a measured need.
+    /// A <c>models.*</c> call is hoistable when the named model has a
+    /// <see cref="ModelCatalogEntry"/>. Both engine-baked built-ins and
+    /// SQL-defined models (<c>CREATE MODEL</c>, wrapped by
+    /// <c>ProceduralModelAdapter</c>) live in the same catalog after step 2,
+    /// so the gate is a single <c>TryGetEntry</c> lookup. Built-ins go
+    /// through their native batched <c>IModel</c> implementations;
+    /// SQL-defined models go through the adapter (per-row body interpretation
+    /// behind the operator boundary, but with full MIO parity — tracer,
+    /// residency lease, RowLimit, streaming sink, sub-batching). Bodies
+    /// that need true column-pipeline batching wait on step 3's body
+    /// lowerer (Option D).
     /// </summary>
     private static bool IsHoistableModelCall(FunctionCallExpression fn, ModelCatalog catalog)
         => IsModelCall(fn) && catalog.TryGetEntry(StripNamespace(fn.FunctionName)) is not null;

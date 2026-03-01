@@ -811,6 +811,13 @@ internal sealed class RoutineRegistrar
         // descriptor whose sessions are about to be disposed.
         _functions.UnregisterScalar(qn.ToString());
 
+        // Drop the ModelCatalog entry too — symmetric with the dual
+        // registration in RegisterModelAdapter. Without this, MIO's hoister
+        // would still see the entry and route hoisted call sites into a
+        // ProceduralModelAdapter whose descriptor's sessions are about to
+        // be disposed below.
+        _catalog.Models?.Unregister(removed.Name);
+
         _catalog.Events.Raise(new ModelDroppedEvent(qn, removed, sourceText));
 
         DisposeSessions(removed);
@@ -848,21 +855,58 @@ internal sealed class RoutineRegistrar
     }
 
     /// <summary>
-    /// Registers (or replaces) the <see cref="ProceduralModelFunction"/>
-    /// adapter for <paramref name="descriptor"/> in the scalar function
-    /// registry under the model's qualified name (always
-    /// <c>models.NAME</c>). Once registered, <c>SELECT models.X(...)</c>
-    /// dispatches into the body via the standard scalar pipeline.
+    /// Registers (or replaces) the SQL-defined model on two surfaces:
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     The scalar function registry — the <see cref="ProceduralModelFunction"/>
+    ///     adapter satisfies any call site the planner didn't hoist into a
+    ///     <c>ModelInvocationOperator</c> (e.g. inside a UDF body, inside
+    ///     an unhoisted clause). The hoister prefers MIO for top-level
+    ///     <c>models.X(...)</c> calls; the scalar dispatch is the fallback.
+    ///   </description></item>
+    ///   <item><description>
+    ///     The <see cref="ModelCatalog"/> via a <see cref="ProceduralModelAdapter"/>
+    ///     wrapped in a <see cref="ModelCatalogEntry"/>. The hoister consults
+    ///     this catalog at plan time; once the SQL-defined model has an entry
+    ///     here, top-level call sites lift into MIO and inherit operator-
+    ///     boundary parity with built-in models (tracer, residency lease,
+    ///     RowLimit short-circuit, streaming-sink awareness, sub-batching).
+    ///   </description></item>
+    /// </list>
+    /// Both surfaces stay in sync: <c>OR REPLACE</c> replaces both atomically,
+    /// <c>DROP MODEL</c> tears down both.
     /// </summary>
     private void RegisterModelAdapter(ModelDescriptor descriptor, bool replace)
     {
-        ProceduralModelFunction adapter = new(descriptor, _functions);
+        ProceduralModelFunction scalarAdapter = new(descriptor, _functions);
         FunctionDescriptor catalogDescriptor = BuildModelFunctionDescriptor(descriptor);
         _functions.RegisterScalarInstance(
             descriptor.QualifiedName.ToString(),
-            adapter,
+            scalarAdapter,
             descriptor: catalogDescriptor,
             replace: replace);
+
+        ModelCatalog? models = _catalog.Models;
+        if (models is null) return;
+
+        ProceduralModelAdapter iModelAdapter = new(descriptor, _functions);
+        ModelCatalogEntry entry = new(
+            Name: descriptor.Name,
+            Backend: "sql",
+            RelativePath: null,
+            InputKinds: iModelAdapter.InputKinds,
+            OutputKind: iModelAdapter.OutputKind,
+            IsDeterministic: iModelAdapter.IsDeterministic,
+            Loader: _ => iModelAdapter,
+            OptionalArgKinds: iModelAdapter.OptionalKinds.Count > 0 ? iModelAdapter.OptionalKinds : null,
+            EstimatedVramBytes: 0,
+            DisplayName: descriptor.QualifiedName.ToString());
+
+        if (replace)
+        {
+            models.Unregister(descriptor.Name);
+        }
+        models.Register(entry);
     }
 
     /// <summary>
