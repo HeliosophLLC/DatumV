@@ -100,7 +100,8 @@ internal static class InsertExecutor
 
         if (captured is null) return EmptyQueryPlan.Instance;
 
-        return new InsertReturningPlan(
+        return new DmlReturningPlan(
+            DmlReturningKind.Insert,
             insert.TableName,
             targetSchema,
             captured,

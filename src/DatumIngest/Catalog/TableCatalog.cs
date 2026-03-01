@@ -521,12 +521,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return await InsertExecutor.ExecuteAsync(this, insert).ConfigureAwait(false);
 
             case UpdateStatement update:
-                await UpdateExecutor.ExecuteAsync(this, update).ConfigureAwait(false);
-                return EmptyQueryPlan.Instance;
+                return await UpdateExecutor.ExecuteAsync(this, update).ConfigureAwait(false);
 
             case DeleteStatement delete:
-                await DeleteExecutor.ExecuteAsync(this, delete).ConfigureAwait(false);
-                return EmptyQueryPlan.Instance;
+                return await DeleteExecutor.ExecuteAsync(this, delete).ConfigureAwait(false);
 
             default:
                 throw new NotSupportedException(

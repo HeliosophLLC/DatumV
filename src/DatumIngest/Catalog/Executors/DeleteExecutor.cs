@@ -1,3 +1,4 @@
+using DatumIngest.Catalog.Plans;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -23,7 +24,7 @@ namespace DatumIngest.Catalog.Executors;
 /// </remarks>
 internal static class DeleteExecutor
 {
-    public static async Task ExecuteAsync(TableCatalog catalog, DeleteStatement delete)
+    public static async Task<IQueryPlan> ExecuteAsync(TableCatalog catalog, DeleteStatement delete)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(delete);
@@ -42,12 +43,30 @@ internal static class DeleteExecutor
                 "is read-only (CanDeleteRows = false).");
         }
 
-        await ApplyAsync(catalog, provider, delete.Where).ConfigureAwait(false);
+        IReadOnlyList<RowBatch>? captured = await ApplyAsync(catalog, provider, delete).ConfigureAwait(false);
+
+        if (captured is null || delete.Returning is null)
+        {
+            return EmptyQueryPlan.Instance;
+        }
+
+        return new DmlReturningPlan(
+            DmlReturningKind.Delete,
+            delete.TableName,
+            provider.GetSchema(),
+            captured,
+            delete.Returning,
+            catalog);
     }
 
-    private static async Task ApplyAsync(
-        TableCatalog catalog, ITableProvider provider, Expression? predicate)
+    private static async Task<IReadOnlyList<RowBatch>?> ApplyAsync(
+        TableCatalog catalog, ITableProvider provider, DeleteStatement delete)
     {
+        Expression? predicate = delete.Where;
+        bool captureRows = delete.Returning is not null;
+        Schema schema = provider.GetSchema();
+        ColumnLookup? schemaLookup = captureRows ? BuildSchemaLookup(schema) : null;
+
         // Walk the live row sequence with a running counter. The
         // provider's tombstone index space matches a fresh scan's
         // emission order (per ITableProvider.DeleteRows docs), so the
@@ -66,53 +85,113 @@ internal static class DeleteExecutor
         List<long> matched = new();
         long rowIndex = 0;
 
-        await foreach (RowBatch batch in provider.ScanAsync(
-            requiredColumns: null,
-            filterHint: null,
-            targetArena: null,
-            cancellationToken: CancellationToken.None).ConfigureAwait(false))
-        {
-            try
-            {
-                Arena sourceArena = batch.Arena;
+        // RETURNING captures the pre-delete image of every tombstoned row.
+        // One captured RowBatch per scan batch — each owns its own arena.
+        List<RowBatch>? capturedBatches = captureRows ? new() : null;
 
-                // Target arena = source arena: predicate eval doesn't
-                // produce DataValues that need to outlive this batch
-                // (the result is a bool we consume immediately).
-                for (int r = 0; r < batch.Count; r++, rowIndex++)
+        try
+        {
+            await foreach (RowBatch batch in provider.ScanAsync(
+                requiredColumns: null,
+                filterHint: null,
+                targetArena: null,
+                cancellationToken: CancellationToken.None).ConfigureAwait(false))
+            {
+                Arena? captureArena = null;
+                RowBatch? capturedBatch = null;
+                try
                 {
-                    if (evaluator is null)
+                    Arena sourceArena = batch.Arena;
+                    if (captureRows)
                     {
-                        // Unconditional DELETE — every live row matches.
-                        matched.Add(rowIndex);
-                        continue;
+                        captureArena = new Arena();
+                        capturedBatch = catalog.Pool.RentRowBatch(
+                            schemaLookup!, capacity: batch.Count, arena: captureArena);
                     }
 
-                    Row row = batch[r];
-                    EvaluationFrame frame = new(
-                        row,
-                        sourceArena,
-                        sourceArena,
-                        outerRow: null,
-                        sidecarRegistry: catalog.SidecarRegistry,
-                        types: null);
-
-                    if (await evaluator.EvaluateAsBooleanAsync(
-                            predicate!, frame, CancellationToken.None).ConfigureAwait(false))
+                    // Target arena = source arena: predicate eval doesn't
+                    // produce DataValues that need to outlive this batch
+                    // (the result is a bool we consume immediately).
+                    for (int r = 0; r < batch.Count; r++, rowIndex++)
                     {
+                        Row row = batch[r];
+                        bool matches;
+                        if (evaluator is null)
+                        {
+                            matches = true;
+                        }
+                        else
+                        {
+                            EvaluationFrame frame = new(
+                                row,
+                                sourceArena,
+                                sourceArena,
+                                outerRow: null,
+                                sidecarRegistry: catalog.SidecarRegistry,
+                                types: null);
+
+                            matches = await evaluator.EvaluateAsBooleanAsync(
+                                predicate!, frame, CancellationToken.None).ConfigureAwait(false);
+                        }
+
+                        if (!matches) continue;
                         matched.Add(rowIndex);
+
+                        // RETURNING capture: pre-delete image. Stabilize each
+                        // cell from the scan batch's arena into the capture
+                        // arena so the captured row survives batch disposal.
+                        if (capturedBatch is not null)
+                        {
+                            DataValue[] preImage = catalog.Pool.RentDataValues(schema.Columns.Count);
+                            for (int c = 0; c < schema.Columns.Count; c++)
+                            {
+                                preImage[c] = DataValueRetention.Stabilize(
+                                    row[c], sourceArena, captureArena!);
+                            }
+                            capturedBatch.Add(preImage);
+                        }
+                    }
+
+                    if (capturedBatch is not null && capturedBatch.Count > 0)
+                    {
+                        capturedBatches!.Add(capturedBatch);
+                        capturedBatch = null; // ownership transferred
                     }
                 }
+                finally
+                {
+                    if (capturedBatch is not null)
+                    {
+                        catalog.Pool.ReturnRowBatch(capturedBatch);
+                    }
+                    batch.Dispose();
+                }
             }
-            finally
+        }
+        catch
+        {
+            if (capturedBatches is not null)
             {
-                batch.Dispose();
+                foreach (RowBatch b in capturedBatches) catalog.Pool.ReturnRowBatch(b);
             }
+            throw;
         }
 
         if (matched.Count > 0)
         {
             provider.DeleteRows(matched);
         }
+
+        return capturedBatches;
+    }
+
+    private static ColumnLookup BuildSchemaLookup(Schema schema)
+    {
+        string[] names = new string[schema.Columns.Count];
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            names[i] = schema.Columns[i].Name;
+        }
+        return new ColumnLookup(names);
     }
 }

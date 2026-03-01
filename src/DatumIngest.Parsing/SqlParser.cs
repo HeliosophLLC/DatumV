@@ -4046,6 +4046,7 @@ public static class SqlParser
         from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
         from joinClauses in JoinClausesParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
+        from returning in ReturningClauseParser.AsNullable().OptionalOrDefault()
         select (Statement)new UpdateStatement(
             qualifiedName.TableName,
             alias,
@@ -4053,17 +4054,23 @@ public static class SqlParser
             fromClause,
             joinClauses.Length > 0 ? joinClauses : null,
             whereClause,
-            SchemaName: qualifiedName.SchemaName);
+            SchemaName: qualifiedName.SchemaName,
+            Returning: returning);
 
     /// <summary>
-    /// Parses <c>DELETE FROM name [WHERE ...]</c>.
+    /// Parses <c>DELETE FROM name [WHERE ...] [RETURNING expr [, expr]*]</c>.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> DeleteParser =
         from deleteKw in Token.EqualTo(SqlToken.Delete)
         from fromKw in Token.EqualTo(SqlToken.From)
         from qualifiedName in QualifiedTableNameParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
-        select (Statement)new DeleteStatement(qualifiedName.TableName, whereClause, qualifiedName.SchemaName);
+        from returning in ReturningClauseParser.AsNullable().OptionalOrDefault()
+        select (Statement)new DeleteStatement(
+            qualifiedName.TableName,
+            whereClause,
+            qualifiedName.SchemaName,
+            Returning: returning);
 
     /// <summary>
     /// Disambiguating prefix for <c>ALTER TABLE name</c>. <c>ALTER</c> is

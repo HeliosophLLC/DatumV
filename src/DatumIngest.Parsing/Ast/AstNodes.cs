@@ -1338,6 +1338,13 @@ public sealed record InsertDefaultValuesSource : InsertSource;
 /// <param name="Joins">Optional JOIN clauses between source tables listed in the FROM clause.</param>
 /// <param name="Where">Optional filter and join-condition predicate.</param>
 /// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
+/// <param name="Returning">
+/// Optional RETURNING clause. When non-<see langword="null"/>, the UPDATE yields the
+/// post-image of every row whose WHERE predicate matched (including rows where the
+/// SET assignments were no-ops). The projection-list shape mirrors a SELECT — bare
+/// column references, computed expressions, <c>*</c>, and table-qualified <c>t.*</c>
+/// all expand against the target table's schema. PG semantics.
+/// </param>
 public sealed record UpdateStatement(
     string TableName,
     string? Alias,
@@ -1345,18 +1352,24 @@ public sealed record UpdateStatement(
     FromClause? From = null,
     IReadOnlyList<JoinClause>? Joins = null,
     Expression? Where = null,
-    string? SchemaName = null) : Statement;
+    string? SchemaName = null,
+    IReadOnlyList<SelectColumn>? Returning = null) : Statement;
 
 /// <summary>
-/// <c>DELETE FROM name [WHERE ...]</c> — deletes rows from a table using tombstone bitmaps.
+/// <c>DELETE FROM name [WHERE ...] [RETURNING expr [, expr]*]</c> — deletes rows from a table using tombstone bitmaps.
 /// </summary>
 /// <param name="TableName">The target table name.</param>
 /// <param name="Where">Optional filter predicate restricting which rows are deleted. When omitted, all rows are deleted.</param>
 /// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
+/// <param name="Returning">
+/// Optional RETURNING clause. When non-<see langword="null"/>, the DELETE yields the
+/// pre-image of every row it tombstoned. PG semantics.
+/// </param>
 public sealed record DeleteStatement(
     string TableName,
     Expression? Where = null,
-    string? SchemaName = null) : Statement;
+    string? SchemaName = null,
+    IReadOnlyList<SelectColumn>? Returning = null) : Statement;
 
 /// <summary>
 /// A single <c>column = expression</c> assignment in an UPDATE SET clause.

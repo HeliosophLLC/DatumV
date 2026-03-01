@@ -518,6 +518,17 @@ public static class ParameterBinder
 
     // ───────────────────── Parameter name collection ─────────────────────
 
+    private static void CollectFromSelectColumns(IReadOnlyList<SelectColumn> columns, HashSet<string> names)
+    {
+        foreach (SelectColumn column in columns)
+        {
+            if (column is not (SelectAllColumns or SelectTableColumns))
+            {
+                CollectFromExpression(column.Expression, names);
+            }
+        }
+    }
+
     private static void CollectFromStatement(SelectStatement statement, HashSet<string> names)
     {
         foreach (SelectColumn column in statement.Columns)
@@ -760,7 +771,11 @@ public static class ParameterBinder
             case DeleteStatement del:
                 return new DeleteStatement(
                     del.TableName,
-                    del.Where is not null ? BindExpression(del.Where, parameters) : null);
+                    del.Where is not null ? BindExpression(del.Where, parameters) : null,
+                    del.SchemaName,
+                    Returning: del.Returning is not null
+                        ? BindSelectColumns(del.Returning, parameters)
+                        : null);
 
             case CallStatement call:
                 return new CallStatement(BindExpression(call.Call, parameters), call.Span);
@@ -939,7 +954,13 @@ public static class ParameterBinder
 
         Expression? where = upd.Where is not null ? BindExpression(upd.Where, parameters) : null;
 
-        return new UpdateStatement(upd.TableName, upd.Alias, assigns, from, joins, where);
+        IReadOnlyList<SelectColumn>? returning = upd.Returning is not null
+            ? BindSelectColumns(upd.Returning, parameters)
+            : null;
+
+        return new UpdateStatement(
+            upd.TableName, upd.Alias, assigns, from, joins, where,
+            upd.SchemaName, Returning: returning);
     }
 
     // ───────────────────── Top-level Statement collection ─────────────────────
@@ -968,10 +989,12 @@ public static class ParameterBinder
                     }
                 }
                 if (upd.Where is not null) CollectFromExpression(upd.Where, names);
+                if (upd.Returning is not null) CollectFromSelectColumns(upd.Returning, names);
                 break;
 
             case DeleteStatement del:
                 if (del.Where is not null) CollectFromExpression(del.Where, names);
+                if (del.Returning is not null) CollectFromSelectColumns(del.Returning, names);
                 break;
 
             case CallStatement call:

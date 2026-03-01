@@ -8,58 +8,83 @@ using DatumIngest.Parsing.Ast;
 namespace DatumIngest.Catalog.Plans;
 
 /// <summary>
-/// <see cref="IQueryPlan"/> produced by <see cref="InsertExecutor.ExecuteAsync"/>
-/// when the parsed <see cref="InsertStatement"/> carries a <c>RETURNING</c>
-/// clause. Holds the resolved (post-DEFAULT, post-IDENTITY) inserted batch
-/// from the side-effect path, projects each row through the RETURNING
-/// expressions, and yields the projection as a single <see cref="RowBatch"/>.
+/// Which DML statement produced this plan. Drives the explain-tree label and
+/// the diagnostic prefix on schema-mismatch errors during projection expansion.
+/// </summary>
+internal enum DmlReturningKind
+{
+    /// <summary><c>INSERT … RETURNING</c> — captured rows are the post-commit insert image.</summary>
+    Insert,
+    /// <summary><c>UPDATE … RETURNING</c> — captured rows are the post-update image of every WHERE-matched row.</summary>
+    Update,
+    /// <summary><c>DELETE … RETURNING</c> — captured rows are the pre-delete image of every tombstoned row.</summary>
+    Delete,
+}
+
+/// <summary>
+/// <see cref="IQueryPlan"/> produced by the INSERT / UPDATE / DELETE executors
+/// when the parsed statement carries a <c>RETURNING</c> clause. Holds the
+/// captured row batch from the side-effect path (post-DEFAULT / post-IDENTITY
+/// inserted rows for INSERT, post-update images for UPDATE, pre-delete images
+/// for DELETE), projects each row through the RETURNING expressions, and yields
+/// the projection as one <see cref="RowBatch"/> per captured input batch.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Post-commit semantics.</b> By construction this plan only exists after
-/// <see cref="IAppendSession.CommitAsync"/> has succeeded — the row capture
-/// happens inside <c>ApplyValuesAsync</c> after the session commits. An INSERT
-/// that aborts mid-write throws before the plan is constructed and never
-/// yields rows. This matches PostgreSQL's contract that RETURNING rows are
-/// only observable for committed inserts.
+/// the executor's commit has succeeded — the row capture happens after
+/// <see cref="IAppendSession.CommitAsync"/> / <c>UpdateRowsAsync</c> /
+/// <c>DeleteRows</c>. A DML that aborts mid-write throws before the plan is
+/// constructed and never yields rows. Matches PostgreSQL's contract that
+/// RETURNING rows are only observable for committed mutations.
 /// </para>
 /// <para>
-/// <b>Lifecycle.</b> The plan owns the captured insert batch (and its arena),
-/// plus the projected output batch it builds on first iteration. Both are
-/// returned to the pool via <c>finally</c> in the iterator regardless of
-/// whether the consumer iterates fully, breaks early, or throws — so a host
-/// that does <c>await foreach (var b in plan.ExecuteAsync(ct))</c> is safe.
+/// <b>Lifecycle.</b> The plan owns the captured batches (and any arena they
+/// reference) and returns them to the pool via <c>finally</c> in the iterator
+/// regardless of whether the consumer iterates fully, breaks early, or throws.
 /// </para>
 /// </remarks>
-internal sealed class InsertReturningPlan : IQueryPlan
+internal sealed class DmlReturningPlan : IQueryPlan
 {
+    private readonly DmlReturningKind _kind;
     private readonly string _tableName;
     private readonly Schema _targetSchema;
     private readonly IReadOnlyList<RowBatch> _capturedBatches;
     private readonly IReadOnlyList<SelectColumn> _returningColumns;
     private readonly TableCatalog _catalog;
 
-    public InsertReturningPlan(
+    public DmlReturningPlan(
+        DmlReturningKind kind,
         string tableName,
         Schema targetSchema,
         IReadOnlyList<RowBatch> capturedBatches,
         IReadOnlyList<SelectColumn> returningColumns,
         TableCatalog catalog)
     {
+        _kind = kind;
         _tableName = tableName;
         _targetSchema = targetSchema;
         _capturedBatches = capturedBatches;
         _returningColumns = returningColumns;
         _catalog = catalog;
+
+        string verb = kind switch
+        {
+            DmlReturningKind.Insert => "INSERT",
+            DmlReturningKind.Update => "UPDATE",
+            DmlReturningKind.Delete => "DELETE",
+            _ => "DML",
+        };
+        ExplainTree = new ExplainPlanNode
+        {
+            OperatorName = $"{kind}Returning",
+            Details = $"{verb} … RETURNING — applied at plan time; rows yielded post-commit",
+            EstimatedRows = 0,
+        };
     }
 
     /// <inheritdoc />
-    public ExplainPlanNode ExplainTree { get; } = new()
-    {
-        OperatorName = "InsertReturning",
-        Details = "INSERT … RETURNING — applied at plan time; rows yielded post-commit",
-        EstimatedRows = 0,
-    };
+    public ExplainPlanNode ExplainTree { get; }
 
     /// <inheritdoc />
     public Task<ExplainPlanNode> AnalyzeAsync(CancellationToken cancellationToken)
@@ -84,13 +109,13 @@ internal sealed class InsertReturningPlan : IQueryPlan
         // Per-row evaluator pulls non-inline payloads from each captured
         // batch's arena (Source) and writes new ones into the corresponding
         // output batch's arena (Target). RETURNING expressions can reference
-        // any inserted column; outer rows / variables are not in scope.
+        // any captured column; outer rows / variables are not in scope.
         ExpressionEvaluator evaluator = new(_catalog.Functions);
 
         // Yield one output batch per captured input batch — preserves the
         // streaming shape of INSERT … SELECT (each source RowBatch becomes
         // one RETURNING RowBatch). VALUES has a single captured batch and
-        // therefore yields a single output batch, identical to C1b.
+        // therefore yields a single output batch.
         try
         {
             foreach (RowBatch capturedBatch in _capturedBatches)
@@ -101,9 +126,9 @@ internal sealed class InsertReturningPlan : IQueryPlan
 
                 for (int rowIdx = 0; rowIdx < capturedBatch.Count; rowIdx++)
                 {
-                    Row insertedRow = capturedBatch[rowIdx];
+                    Row capturedRow = capturedBatch[rowIdx];
                     EvaluationFrame frame = new(
-                        insertedRow,
+                        capturedRow,
                         source: capturedBatch.Arena,
                         target: outArena,
                         sidecarRegistry: _catalog.SidecarRegistry);
@@ -141,12 +166,20 @@ internal sealed class InsertReturningPlan : IQueryPlan
     /// Expands the RETURNING column list into flat (name, expression) pairs.
     /// <see cref="SelectAllColumns"/> expands to every target column in
     /// schema-declared order; <see cref="SelectTableColumns"/> filters by
-    /// matching table name (single-table INSERT — only the target qualifies).
+    /// matching table name (single-table DML — only the target qualifies).
     /// Plain <see cref="SelectColumn"/> entries pass through with their
     /// alias-or-derived name.
     /// </summary>
     private List<(string Name, Expression Expr)> ExpandProjection()
     {
+        string verb = _kind switch
+        {
+            DmlReturningKind.Insert => "INSERT INTO",
+            DmlReturningKind.Update => "UPDATE",
+            DmlReturningKind.Delete => "DELETE FROM",
+            _ => "DML on",
+        };
+
         List<(string, Expression)> result = new(_returningColumns.Count);
         foreach (SelectColumn col in _returningColumns)
         {
@@ -170,7 +203,7 @@ internal sealed class InsertReturningPlan : IQueryPlan
                     else
                     {
                         throw new InvalidOperationException(
-                            $"INSERT INTO '{_tableName}' RETURNING: table-qualified `*` references " +
+                            $"{verb} '{_tableName}' RETURNING: table-qualified `*` references " +
                             $"unknown table '{tcol.TableName}'.");
                     }
                     break;
@@ -187,7 +220,7 @@ internal sealed class InsertReturningPlan : IQueryPlan
     /// <summary>
     /// Picks a default output column name for an unaliased expression.
     /// Column references take their column name; everything else falls
-    /// back to a positional <c>?columnN</c> name.
+    /// back to a positional <c>?column?</c> name.
     /// </summary>
     private static string DeriveOutputName(Expression expr) =>
         expr switch

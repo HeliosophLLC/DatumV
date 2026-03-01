@@ -1,3 +1,4 @@
+using DatumIngest.Catalog.Plans;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
@@ -24,7 +25,7 @@ namespace DatumIngest.Catalog.Executors;
 /// </remarks>
 internal static class UpdateExecutor
 {
-    public static async Task ExecuteAsync(TableCatalog catalog, UpdateStatement update)
+    public static async Task<IQueryPlan> ExecuteAsync(TableCatalog catalog, UpdateStatement update)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(update);
@@ -40,22 +41,31 @@ internal static class UpdateExecutor
                 "into the WHERE clause when possible.");
         }
 
-        if (update.From is not null)
+        IReadOnlyList<RowBatch>? captured = update.From is not null
+            ? await ExecuteWithFromAsync(catalog, provider, update).ConfigureAwait(false)
+            : await ExecuteSimpleAsync(catalog, provider, update).ConfigureAwait(false);
+
+        if (captured is null || update.Returning is null)
         {
-            await ExecuteWithFromAsync(catalog, provider, update).ConfigureAwait(false);
+            return EmptyQueryPlan.Instance;
         }
-        else
-        {
-            await ExecuteSimpleAsync(catalog, provider, update).ConfigureAwait(false);
-        }
+
+        return new DmlReturningPlan(
+            DmlReturningKind.Update,
+            update.TableName,
+            provider.GetSchema(),
+            captured,
+            update.Returning,
+            catalog);
     }
 
-    private static async Task ExecuteSimpleAsync(
+    private static async Task<IReadOnlyList<RowBatch>?> ExecuteSimpleAsync(
         TableCatalog catalog,
         ITableProvider provider,
         UpdateStatement update)
     {
         Schema schema = provider.GetSchema();
+        bool captureRows = update.Returning is not null;
 
         // Resolve SET column names → schema column indices once. The
         // validator already verified that every name resolves and no
@@ -75,7 +85,8 @@ internal static class UpdateExecutor
         // catalog's CREATE-TABLE validation forbids computed-to-computed
         // dependencies, so a single (non-topological) pass suffices.
         Dictionary<int, int[]>? dependentsByColumn = BuildDependentsByColumn(schema);
-        ColumnLookup? schemaLookup = dependentsByColumn is null ? null : BuildSchemaLookup(schema);
+        ColumnLookup? schemaLookup =
+            (dependentsByColumn is null && !captureRows) ? null : BuildSchemaLookup(schema);
 
         // workArena outlives every per-batch arena because UpdateRows
         // resolves non-inline SET results against it after the scan
@@ -88,103 +99,163 @@ internal static class UpdateExecutor
         List<RowUpdateRequest> requests = new();
         long liveRowIndex = 0;
 
-        await foreach (RowBatch batch in provider.ScanAsync(
-            requiredColumns: null,
-            filterHint: null,
-            targetArena: null,
-            cancellationToken: CancellationToken.None).ConfigureAwait(false))
-        {
-            try
-            {
-                Arena sourceArena = batch.Arena;
-                for (int r = 0; r < batch.Count; r++, liveRowIndex++)
-                {
-                    Row row = batch[r];
+        // RETURNING captures the post-update image of every WHERE-matched
+        // row, including no-ops (PG semantics). One captured RowBatch per
+        // scan batch — each owns its own arena so the DmlReturningPlan
+        // can dispose them independently after iteration.
+        List<RowBatch>? capturedBatches = captureRows ? new() : null;
 
-                    // WHERE — predicate-only frame; results are inline
-                    // bools so target = source is fine.
-                    if (update.Where is not null)
+        try
+        {
+            await foreach (RowBatch batch in provider.ScanAsync(
+                requiredColumns: null,
+                filterHint: null,
+                targetArena: null,
+                cancellationToken: CancellationToken.None).ConfigureAwait(false))
+            {
+                Arena? captureArena = null;
+                RowBatch? capturedBatch = null;
+                try
+                {
+                    Arena sourceArena = batch.Arena;
+                    if (captureRows)
                     {
-                        EvaluationFrame predFrame = new(
+                        captureArena = new Arena();
+                        capturedBatch = catalog.Pool.RentRowBatch(
+                            schemaLookup!, capacity: batch.Count, arena: captureArena);
+                    }
+
+                    for (int r = 0; r < batch.Count; r++, liveRowIndex++)
+                    {
+                        Row row = batch[r];
+
+                        // WHERE — predicate-only frame; results are inline
+                        // bools so target = source is fine.
+                        if (update.Where is not null)
+                        {
+                            EvaluationFrame predFrame = new(
+                                row,
+                                sourceArena,
+                                sourceArena,
+                                outerRow: null,
+                                sidecarRegistry: catalog.SidecarRegistry,
+                                types: null);
+                            if (!await evaluator.EvaluateAsBooleanAsync(
+                                    update.Where, predFrame, CancellationToken.None).ConfigureAwait(false))
+                            {
+                                continue;
+                            }
+                        }
+
+                        // SET — each expression's result lands in workArena
+                        // so non-inline payloads survive past this batch.
+                        EvaluationFrame setFrame = new(
                             row,
                             sourceArena,
-                            sourceArena,
+                            workArena,
                             outerRow: null,
                             sidecarRegistry: catalog.SidecarRegistry,
                             types: null);
-                        if (!await evaluator.EvaluateAsBooleanAsync(
-                                update.Where, predFrame, CancellationToken.None).ConfigureAwait(false))
+
+                        Dictionary<int, DataValue> rowValues = new(setBindings.Length);
+                        foreach ((int columnIndex, Expression valueExpression) in setBindings)
                         {
-                            continue;
+                            DataValue raw = await evaluator.EvaluateAsync(
+                                valueExpression, setFrame, CancellationToken.None).ConfigureAwait(false);
+
+                            ColumnInfo target = schema.Columns[columnIndex];
+                            DataValue coerced = CoerceForUpdate(
+                                raw, sourceArena, workArena, target, update.TableName, catalog.SidecarRegistry);
+
+                            // No-op detection: when the new value matches the
+                            // existing cell, drop it from the per-row map.
+                            // Catches `SET col = col`, idempotent updates
+                            // (`SET status = 'pending' WHERE status = 'pending'`),
+                            // and partial-row matches in multi-column SETs.
+                            // DataValue.Equals returns false for cross-store
+                            // non-inline values, so this is conservative —
+                            // sidecar-pass-through above keeps wide-string
+                            // value-copies on the same sidecar pointer so
+                            // their offset+length fast path matches.
+                            if (coerced.Equals(row[columnIndex])) continue;
+                            rowValues[columnIndex] = coerced;
+                        }
+
+                        // Recompute dependent GENERATED columns. Runs after the
+                        // user-supplied SETs land in rowValues so the partial-row
+                        // frame sees the new values; no-op detection (Equals
+                        // against the existing slot) drops dependents whose
+                        // recomputed value didn't actually change.
+                        await RecomputeDependentsAsync(
+                            evaluator,
+                            schema,
+                            schemaLookup,
+                            row,
+                            sourceArena,
+                            rowValues,
+                            dependentsByColumn,
+                            workArena,
+                            catalog.SidecarRegistry,
+                            CancellationToken.None).ConfigureAwait(false);
+
+                        if (rowValues.Count > 0)
+                        {
+                            requests.Add(new RowUpdateRequest(liveRowIndex, rowValues));
+                        }
+
+                        // RETURNING capture: build the post-image of this
+                        // WHERE-matched row regardless of whether SET produced
+                        // any writes (PG includes no-op rows in RETURNING).
+                        if (capturedBatch is not null)
+                        {
+                            DataValue[] postImage = catalog.Pool.RentDataValues(schema.Columns.Count);
+                            for (int c = 0; c < schema.Columns.Count; c++)
+                            {
+                                postImage[c] = rowValues.TryGetValue(c, out DataValue newValue)
+                                    ? DataValueRetention.Stabilize(newValue, workArena, captureArena!)
+                                    : DataValueRetention.Stabilize(row[c], sourceArena, captureArena!);
+                            }
+                            capturedBatch.Add(postImage);
                         }
                     }
 
-                    // SET — each expression's result lands in workArena
-                    // so non-inline payloads survive past this batch.
-                    EvaluationFrame setFrame = new(
-                        row,
-                        sourceArena,
-                        workArena,
-                        outerRow: null,
-                        sidecarRegistry: catalog.SidecarRegistry,
-                        types: null);
-
-                    Dictionary<int, DataValue> rowValues = new(setBindings.Length);
-                    foreach ((int columnIndex, Expression valueExpression) in setBindings)
+                    if (capturedBatch is not null)
                     {
-                        DataValue raw = await evaluator.EvaluateAsync(
-                            valueExpression, setFrame, CancellationToken.None).ConfigureAwait(false);
-
-                        ColumnInfo target = schema.Columns[columnIndex];
-                        DataValue coerced = CoerceForUpdate(
-                            raw, sourceArena, workArena, target, update.TableName, catalog.SidecarRegistry);
-
-                        // No-op detection: when the new value matches the
-                        // existing cell, drop it from the per-row map.
-                        // Catches `SET col = col`, idempotent updates
-                        // (`SET status = 'pending' WHERE status = 'pending'`),
-                        // and partial-row matches in multi-column SETs.
-                        // DataValue.Equals returns false for cross-store
-                        // non-inline values, so this is conservative —
-                        // sidecar-pass-through above keeps wide-string
-                        // value-copies on the same sidecar pointer so
-                        // their offset+length fast path matches.
-                        if (coerced.Equals(row[columnIndex])) continue;
-                        rowValues[columnIndex] = coerced;
-                    }
-
-                    // Recompute dependent GENERATED columns. Runs after the
-                    // user-supplied SETs land in rowValues so the partial-row
-                    // frame sees the new values; no-op detection (Equals
-                    // against the existing slot) drops dependents whose
-                    // recomputed value didn't actually change.
-                    await RecomputeDependentsAsync(
-                        evaluator,
-                        schema,
-                        schemaLookup,
-                        row,
-                        sourceArena,
-                        rowValues,
-                        dependentsByColumn,
-                        workArena,
-                        catalog.SidecarRegistry,
-                        CancellationToken.None).ConfigureAwait(false);
-
-                    if (rowValues.Count > 0)
-                    {
-                        requests.Add(new RowUpdateRequest(liveRowIndex, rowValues));
+                        if (capturedBatch.Count > 0)
+                        {
+                            capturedBatches!.Add(capturedBatch);
+                            capturedBatch = null; // ownership transferred
+                        }
                     }
                 }
+                finally
+                {
+                    // Captured batch ownership: success path nulled it out;
+                    // exception path needs cleanup so the arena doesn't leak.
+                    if (capturedBatch is not null)
+                    {
+                        catalog.Pool.ReturnRowBatch(capturedBatch);
+                    }
+                    batch.Dispose();
+                }
             }
-            finally
-            {
-                batch.Dispose();
-            }
-        }
 
-        if (requests.Count > 0)
+            if (requests.Count > 0)
+            {
+                await provider.UpdateRowsAsync(requests, workArena).ConfigureAwait(false);
+            }
+
+            return capturedBatches;
+        }
+        catch
         {
-            await provider.UpdateRowsAsync(requests, workArena).ConfigureAwait(false);
+            // Abort path: never surface partial captured rows to RETURNING.
+            // Return them to the pool so the caller sees nothing.
+            if (capturedBatches is not null)
+            {
+                foreach (RowBatch b in capturedBatches) catalog.Pool.ReturnRowBatch(b);
+            }
+            throw;
         }
     }
 
@@ -199,11 +270,12 @@ internal static class UpdateExecutor
     /// target are last-wins (PostgreSQL semantics) — the accumulator
     /// dictionary overwrites prior values for the same target row.
     /// </summary>
-    private static async Task ExecuteWithFromAsync(
+    private static async Task<IReadOnlyList<RowBatch>?> ExecuteWithFromAsync(
         TableCatalog catalog,
         ITableProvider provider,
         UpdateStatement update)
     {
+        bool captureRows = update.Returning is not null;
         // Source table resolution. PR11d MVP only handles a single
         // TableReference in FROM; subqueries / nested joins are rejected.
         if (update.From!.Source is not TableReference sourceRef)
@@ -233,7 +305,8 @@ internal static class UpdateExecutor
         // last-match-wins means rowValues only stabilises after every
         // matching source row has had its SET evaluated.
         Dictionary<int, int[]>? dependentsByColumn = BuildDependentsByColumn(targetSchema);
-        ColumnLookup? targetSchemaLookup = dependentsByColumn is null ? null : BuildSchemaLookup(targetSchema);
+        ColumnLookup? targetSchemaLookup =
+            (dependentsByColumn is null && !captureRows) ? null : BuildSchemaLookup(targetSchema);
 
         // Resolve SET column names → target-schema column indices.
         (int columnIndex, Expression valueExpression)[] setBindings =
@@ -319,7 +392,7 @@ internal static class UpdateExecutor
         if (sourceRows.Count == 0)
         {
             // No source rows → no joined matches → no UPDATE.
-            return;
+            return null;
         }
 
         ExpressionEvaluator evaluator = new(
@@ -330,15 +403,31 @@ internal static class UpdateExecutor
         Dictionary<long, Dictionary<int, DataValue>> matched = new();
         long liveRowIndex = 0;
 
-        await foreach (RowBatch batch in provider.ScanAsync(
+        // RETURNING capture: one batch per scan batch, each owns its own
+        // arena. Each target row that matched at least one source row gets
+        // its post-image (after last-match-wins resolution) added.
+        List<RowBatch>? capturedBatches = captureRows ? new() : null;
+
+        try
+        {
+            await foreach (RowBatch batch in provider.ScanAsync(
             requiredColumns: null,
             filterHint: null,
             targetArena: null,
             cancellationToken: CancellationToken.None).ConfigureAwait(false))
         {
+            Arena? captureArena = null;
+            RowBatch? capturedBatch = null;
             try
             {
                 Arena targetArena = batch.Arena;
+                if (captureRows)
+                {
+                    captureArena = new Arena();
+                    capturedBatch = catalog.Pool.RentRowBatch(
+                        targetSchemaLookup!, capacity: batch.Count, arena: captureArena);
+                }
+
                 for (int r = 0; r < batch.Count; r++, liveRowIndex++)
                 {
                     Row targetRow = batch[r];
@@ -424,8 +513,8 @@ internal static class UpdateExecutor
                     // wins SET state. Recompute dependent GENERATED columns
                     // now while targetRow is still in scope (the scan batch
                     // disposes at end of this foreach block).
-                    if (matched.TryGetValue(liveRowIndex, out Dictionary<int, DataValue>? finalValues) &&
-                        finalValues.Count > 0)
+                    bool rowMatched = matched.TryGetValue(liveRowIndex, out Dictionary<int, DataValue>? finalValues);
+                    if (rowMatched && finalValues!.Count > 0)
                     {
                         await RecomputeDependentsAsync(
                             evaluator,
@@ -439,17 +528,53 @@ internal static class UpdateExecutor
                             catalog.SidecarRegistry,
                             CancellationToken.None).ConfigureAwait(false);
                     }
+
+                    // RETURNING capture: every WHERE-matched target row gets
+                    // its post-image surfaced, including no-ops. The accumulator
+                    // contains the final last-match-wins SET state (or an empty
+                    // dict if the row matched but every column was a no-op).
+                    if (capturedBatch is not null && rowMatched)
+                    {
+                        Dictionary<int, DataValue> postValues = finalValues!;
+                        DataValue[] postImage = catalog.Pool.RentDataValues(targetColumnCount);
+                        for (int c = 0; c < targetColumnCount; c++)
+                        {
+                            postImage[c] = postValues.TryGetValue(c, out DataValue newValue)
+                                ? DataValueRetention.Stabilize(newValue, workArena, captureArena!)
+                                : DataValueRetention.Stabilize(targetRow[c], targetArena, captureArena!);
+                        }
+                        capturedBatch.Add(postImage);
+                    }
+                }
+
+                if (capturedBatch is not null && capturedBatch.Count > 0)
+                {
+                    capturedBatches!.Add(capturedBatch);
+                    capturedBatch = null; // ownership transferred
                 }
             }
             finally
             {
+                if (capturedBatch is not null)
+                {
+                    catalog.Pool.ReturnRowBatch(capturedBatch);
+                }
                 batch.Dispose();
             }
+        }
+        }
+        catch
+        {
+            if (capturedBatches is not null)
+            {
+                foreach (RowBatch b in capturedBatches) catalog.Pool.ReturnRowBatch(b);
+            }
+            throw;
         }
 
         if (matched.Count == 0)
         {
-            return;
+            return capturedBatches;
         }
 
         List<RowUpdateRequest> requests = new(matched.Count);
@@ -464,9 +589,10 @@ internal static class UpdateExecutor
             }
         }
 
-        if (requests.Count == 0) return;
+        if (requests.Count == 0) return capturedBatches;
 
         await provider.UpdateRowsAsync(requests, workArena).ConfigureAwait(false);
+        return capturedBatches;
     }
 
     /// <summary>
