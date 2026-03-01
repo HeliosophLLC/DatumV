@@ -246,6 +246,12 @@ function ModelCard({ model }: { model: CatalogModelSnapshot }) {
           </Badge>
         ))}
       </div>
+      {(model.attributions?.length ?? 0) > 0 && (
+        <p className="text-muted-foreground mt-1 text-xs">
+          <span className="font-medium">{t('card.attributions')}</span>{' '}
+          {model.attributions!.join(' · ')}
+        </p>
+      )}
 
       {activeDownload && (
         <DownloadProgress download={activeDownload} />

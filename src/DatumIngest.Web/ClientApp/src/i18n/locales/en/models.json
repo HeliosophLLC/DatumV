@@ -15,6 +15,7 @@
   },
   "card": {
     "size": "~{size} MB",
+    "attributions": "Credits:",
     "hardwareCpu": "CPU",
     "hardwareGpu": "GPU",
     "hardwareAny": "CPU/GPU",

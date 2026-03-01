@@ -920,6 +920,7 @@ export interface CatalogModel {
     task?: string;
     tags?: string[];
     licenseIds?: string[];
+    attributions?: string[];
     hardware?: CatalogHardware;
     source?: CatalogSource;
     approxSizeMb?: number;

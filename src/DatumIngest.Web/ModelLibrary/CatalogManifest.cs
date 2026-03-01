@@ -32,6 +32,11 @@ public sealed record CatalogModel(
     string Task,
     IReadOnlyList<string> Tags,
     IReadOnlyList<string> LicenseIds,
+    // Copyright holders / contributors the upstream license requires us
+    // to credit. Order is primary author first, then derivative
+    // contributors (fine-tuner, quantizer, ONNX exporter). Surfaced in
+    // the model card; HF READMEs inherit from this list.
+    IReadOnlyList<string> Attributions,
     CatalogHardware Hardware,
     CatalogSource Source,
     int ApproxSizeMb,
