@@ -11,6 +11,7 @@
   "statusCancelled": "Cancelled",
   "statusError": "Error",
   "resultsEmpty": "Run a query to see results.",
+  "resultsCompleted": "Statement completed (no rows returned).",
   "cellRowCount": "{rows} {rows, plural, one {row} other {rows}}",
   "cellTruncated": "truncated",
   "statusBarReady": "Ready",

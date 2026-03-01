@@ -5,8 +5,8 @@ import { refreshHealth } from './state/health';
 import { refreshSettings, settingsState } from './state/settings';
 import { conversationState } from './state/conversation';
 import { navState, type ActiveView } from './state/nav';
+import { isTornOutWindow } from './state/tabs';
 import { WindowChrome } from '@/components/window/WindowChrome';
-import { SideNav } from '@/components/nav/SideNav';
 import { HomePage } from '@/components/home/HomePage';
 import { ConversationView } from '@/components/chat/ConversationView';
 import { ModelsView } from '@/components/models/ModelsView';
@@ -36,6 +36,29 @@ export default function App() {
     refreshHealth();
     refreshSettings();
   }, []);
+
+  // Torn-out tab windows skip the main shell entirely: no SideNav,
+  // no chat panel, no view switcher — just the query editor for the
+  // tab that was torn out. The split / DnD / Monaco machinery inside
+  // QueryEditorView is identical to the main window's, so dragging
+  // tabs back into the main works seamlessly.
+  //
+  // The `flex-1 flex-col` wrapper is load-bearing: WindowChrome's
+  // content slot is a flex row (SideNav | main panel split in the
+  // regular shell), so a direct flex-row child without explicit grow
+  // settles at content width — the tab strip shrinks to fit the tabs
+  // and the editor sits empty to the right. Wrapping in flex-col +
+  // flex-1 lets the column claim the row's full width, and matches
+  // the layout the ResizablePanel provides in the main-window path.
+  if (isTornOutWindow) {
+    return (
+      <WindowChrome>
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <QueryEditorView />
+        </div>
+      </WindowChrome>
+    );
+  }
 
   const showConversation = messages.length > 0 || status !== 'idle';
 
@@ -93,7 +116,6 @@ export default function App() {
 
   return (
     <WindowChrome>
-      <SideNav />
       <ResizablePanelGroup orientation="horizontal" className="flex-1">
         <ResizablePanel
           panelRef={secondaryRef}

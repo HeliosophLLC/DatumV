@@ -257,7 +257,73 @@ function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
   return null;
 }
 
+/**
+ * Reads a tab seed from the URL hash placed there by Electron's main
+ * process during tab tear-out. Format: `#/tab-window/seed=<base64url>`.
+ * Returns null when the hash doesn't match — this is the boot path for
+ * the regular main window.
+ */
+function readSeedFromHash(): Tab | null {
+  if (typeof window === 'undefined') return null;
+  const hash = window.location.hash || '';
+  const match = /^#\/tab-window\/seed=([A-Za-z0-9_-]+=*)$/.exec(hash);
+  if (!match) return null;
+  try {
+    // base64url decode — atob doesn't handle the URL-safe variant
+    // directly, so normalize first.
+    const normalized = match[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const json = atob(padded);
+    const parsed = JSON.parse(json) as Partial<Tab>;
+    if (
+      typeof parsed.id !== 'string' ||
+      typeof parsed.title !== 'string' ||
+      typeof parsed.sql !== 'string'
+    ) {
+      return null;
+    }
+    return {
+      id: parsed.id,
+      title: parsed.title,
+      sql: parsed.sql,
+      dirty: false,
+      editorSize:
+        typeof parsed.editorSize === 'number' &&
+        parsed.editorSize > 0 &&
+        parsed.editorSize < 100
+          ? parsed.editorSize
+          : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when this renderer was spawned by `tabwindow.spawn` from main
+ * (i.e. it's a torn-out window). Torn-out windows are session-scoped:
+ * they don't load from or save to localStorage, since their lifecycle
+ * is tied to the user's drag-out gesture rather than persistent
+ * workspace state. Dragging a tab back to the main window relocates
+ * its content there, where persistence picks it up.
+ *
+ * Also consumed by `App.tsx` to strip the SideNav + chat panel in
+ * torn-out windows — those surfaces are main-window concepts.
+ */
+export const isTornOutWindow: boolean = readSeedFromHash() !== null;
+
 function createInitialState(): PanesState {
+  const seed = readSeedFromHash();
+  if (seed) {
+    const leaf: LeafPane = {
+      kind: 'leaf',
+      id: newLeafId(),
+      tabs: [seed],
+      activeTabId: seed.id,
+    };
+    return { root: leaf, focusedLeafId: leaf.id };
+  }
+
   const persisted = readPersisted();
   if (persisted) return persisted;
 
@@ -279,23 +345,50 @@ function createInitialState(): PanesState {
 
 export const panesState = proxy<PanesState>(createInitialState());
 
-// Debounced auto-save.
-let saveTimer: number | undefined;
-subscribe(panesState, () => {
-  if (saveTimer !== undefined) window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => {
-    saveTimer = undefined;
-    try {
-      const snapshot: PersistedState = {
-        root: serializeNode(panesState.root),
-        focusedLeafId: panesState.focusedLeafId,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-    } catch {
-      // Quota errors / disabled storage — drop the save silently.
+// Listen for "another window received one of our tabs, please drop
+// your copy" deliveries from the Electron main process. Fired by the
+// destination window's drop handler after a successful cross-window
+// receive. Subscription lives for the renderer's lifetime — no
+// cleanup needed.
+if (typeof window !== 'undefined' && window.electronHost?.isElectron) {
+  window.electronHost.onRemoveTab(({ tabId }) => {
+    closeTab(tabId);
+  });
+}
+
+// In a torn-out window, closing the last tab dismisses the window —
+// there's nothing else in the shell. The main window deliberately
+// stays open with zero tabs (its SideNav + chat surfaces don't
+// depend on tab state, so a tabless main is still a useful workspace
+// to navigate to a different view).
+if (isTornOutWindow) {
+  subscribe(panesState, () => {
+    if (getAllTabs().length === 0) {
+      window.electronHost?.close();
     }
-  }, SAVE_DEBOUNCE_MS);
-});
+  });
+}
+
+// Debounced auto-save. Skipped in torn-out windows so the main window's
+// persisted state isn't trampled by a transient secondary window.
+let saveTimer: number | undefined;
+if (!isTornOutWindow) {
+  subscribe(panesState, () => {
+    if (saveTimer !== undefined) window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => {
+      saveTimer = undefined;
+      try {
+        const snapshot: PersistedState = {
+          root: serializeNode(panesState.root),
+          focusedLeafId: panesState.focusedLeafId,
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      } catch {
+        // Quota errors / disabled storage — drop the save silently.
+      }
+    }, SAVE_DEBOUNCE_MS);
+  });
+}
 
 function serializeNode(node: PaneNode): PersistedNode {
   if (node.kind === 'leaf') {
@@ -586,6 +679,81 @@ export function splitLeaf(
     replaceNode(source, newSplit);
   }
 
+  panesState.focusedLeafId = newLeaf.id;
+}
+
+/**
+ * Adds an externally-supplied tab to `targetLeafId` at `insertIndex`.
+ * Used by the cross-window drop path: when a tab dragged from another
+ * Electron window lands in this window, the tab's content arrives via
+ * `dataTransfer` (the source's panesState is unreachable from here)
+ * and this helper materialises it locally.
+ *
+ * If the incoming tab id collides with an existing one in this tree —
+ * possible if both windows were spawned with seeds derived from the
+ * same root or if a UUID collision happens — we regenerate. The user-
+ * visible content + title stay; only the internal id changes.
+ */
+export function importTabIntoLeaf(
+  targetLeafId: string,
+  tab: { id: string; title: string; sql: string; editorSize?: number },
+  insertIndex?: number,
+): void {
+  const leaf = findLeaf(panesState.root, targetLeafId);
+  if (!leaf) return;
+  const id = findTab(panesState.root, tab.id) ? newTabId() : tab.id;
+  const newTab: Tab = {
+    id,
+    title: tab.title,
+    sql: tab.sql,
+    dirty: false,
+    editorSize: tab.editorSize,
+  };
+  const index =
+    insertIndex !== undefined
+      ? Math.max(0, Math.min(insertIndex, leaf.tabs.length))
+      : leaf.tabs.length;
+  leaf.tabs.splice(index, 0, newTab);
+  leaf.activeTabId = newTab.id;
+  panesState.focusedLeafId = leaf.id;
+}
+
+/**
+ * Cross-window analogue of `splitLeaf`. Wraps `targetLeafId` in a new
+ * split and places an externally-supplied tab in the new sibling leaf
+ * on `side`. Same id-collision policy as `importTabIntoLeaf`.
+ */
+export function importTabAsSplit(
+  targetLeafId: string,
+  tab: { id: string; title: string; sql: string; editorSize?: number },
+  side: SplitSide,
+): void {
+  const target = findLeaf(panesState.root, targetLeafId);
+  if (!target) return;
+  const id = findTab(panesState.root, tab.id) ? newTabId() : tab.id;
+  const newTab: Tab = {
+    id,
+    title: tab.title,
+    sql: tab.sql,
+    dirty: false,
+    editorSize: tab.editorSize,
+  };
+  const newLeaf: LeafPane = {
+    kind: 'leaf',
+    id: newLeafId(),
+    tabs: [newTab],
+    activeTabId: newTab.id,
+  };
+  const newOrientation: SplitOrientation =
+    side === 'left' || side === 'right' ? 'horizontal' : 'vertical';
+  const newLeafFirst = side === 'left' || side === 'top';
+  const newSplit: SplitPane = {
+    kind: 'split',
+    id: newSplitId(),
+    orientation: newOrientation,
+    children: newLeafFirst ? [newLeaf, target] : [target, newLeaf],
+  };
+  replaceNode(target, newSplit);
   panesState.focusedLeafId = newLeaf.id;
 }
 

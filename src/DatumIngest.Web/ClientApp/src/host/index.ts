@@ -55,6 +55,25 @@ declare global {
         filters?: ReadonlyArray<{ name: string; extensions: string[] }>;
       }): Promise<{ canceled: boolean; filePaths: string[] }>;
       openExternal(url: string): Promise<void>;
+
+      // Tab tear-out IPC. See electron/preload.ts for the protocol
+      // each method speaks; the renderer consumers live in the query
+      // pane components (TabStrip / LeafPaneView).
+      spawnTabWindow(payload: {
+        seed: { id: string; title: string; sql: string; editorSize?: number };
+        x: number;
+        y: number;
+      }): Promise<void>;
+      removeTabInSource(payload: {
+        sourceWindowId: number;
+        tabId: string;
+      }): Promise<void>;
+      onRemoveTab(cb: (payload: { tabId: string }) => void): () => void;
+      getCursorScreenPoint(): Promise<{ x: number; y: number }>;
+      isCursorOverApp(): Promise<boolean>;
+      // Synchronous accessor. Returns null briefly during the window's
+      // first few milliseconds while preload's `window.id` IPC settles.
+      windowId(): number | null;
     };
   }
 }

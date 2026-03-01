@@ -11,7 +11,10 @@ import {
   findLeaf,
   moveTab,
   splitLeaf,
+  importTabIntoLeaf,
+  importTabAsSplit,
 } from '@/state/tabs';
+import { isCrossWindowDrop, notifySourceToRemove } from './tearOut';
 import { settingsState } from '@/state/settings';
 import { disposeTabExecution } from '@/state/execution';
 import {
@@ -242,13 +245,30 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
     setDropActive(false);
     setDropZone(null);
     if (!payload || zone === null) return;
+    const crossWindow = isCrossWindowDrop(payload);
+    // Cross-window receive is refused while the source tab is running
+    // — the streaming request lives in the source renderer and a
+    // cross-window move would orphan it. In-window drops ignore this
+    // (the exec state stays attached to the same tabId in the same
+    // panesState).
+    if (crossWindow && payload.isRunning) return;
     if (zone === 'center') {
-      // Append to this leaf's tab list. moveTab no-ops cleanly when
-      // source === target at the same effective index.
-      moveTab(payload.tabId, leafId, Number.MAX_SAFE_INTEGER);
+      if (crossWindow) {
+        importTabIntoLeaf(leafId, payload.tab, Number.MAX_SAFE_INTEGER);
+        notifySourceToRemove(payload);
+      } else {
+        // Append to this leaf's tab list. moveTab no-ops cleanly when
+        // source === target at the same effective index.
+        moveTab(payload.tabId, leafId, Number.MAX_SAFE_INTEGER);
+      }
       return;
     }
-    splitLeaf(leafId, payload.tabId, zone);
+    if (crossWindow) {
+      importTabAsSplit(leafId, payload.tab, zone);
+      notifySourceToRemove(payload);
+    } else {
+      splitLeaf(leafId, payload.tabId, zone);
+    }
   }
 
   return (

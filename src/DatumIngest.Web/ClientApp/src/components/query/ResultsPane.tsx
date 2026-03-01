@@ -47,11 +47,22 @@ export function ResultsPane({ leafId }: { leafId: string }) {
   // nothing visible. Render the hint plus the status bar in its
   // "Ready" state so the bar's height stays constant across the
   // lifecycle (no layout shift when the first run begins).
+  //
+  // The pane message differentiates "never run" from "ran and produced
+  // nothing visible" — without this, a successful DDL/DML statement
+  // shows "Query executed successfully" in the status bar but
+  // "Run a query to see results" in the pane, which reads as a
+  // contradiction. Streaming and cancelled states leave the pane
+  // blank — the status bar's spinner / "Cancelled" label already
+  // carries that state.
   if (!exec || (visibleCells.length === 0 && exec.error === null)) {
+    let emptyMessage = '';
+    if (!exec) emptyMessage = t('resultsEmpty');
+    else if (exec.status === 'done') emptyMessage = t('resultsCompleted');
     return (
       <div className="flex h-full flex-col overflow-hidden">
         <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">
-          {t('resultsEmpty')}
+          {emptyMessage}
         </div>
         <StatusBar exec={(exec as TabExecution | undefined) ?? null} />
       </div>

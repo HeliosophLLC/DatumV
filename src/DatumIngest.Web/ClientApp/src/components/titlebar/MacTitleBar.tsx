@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { minimize, toggleMaximize, close } from '@/state/window';
+import { AppNav } from '@/components/nav/AppNav';
 
 // macOS-flavored: 28px tall, three circular "traffic lights" left
 // (close/minimize/zoom), title centered to the full bar (not the remaining
@@ -12,7 +13,7 @@ import { minimize, toggleMaximize, close } from '@/state/window';
 export function MacTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
   const { t } = useTranslation();
   return (
-    <header className="app-drag relative flex h-7 items-center border-b bg-background px-3 select-none">
+    <header className="app-drag relative flex h-9 items-center gap-3 border-b bg-background px-3 select-none">
       <div className="app-no-drag relative z-10 flex items-center gap-2">
         <button
           type="button"
@@ -37,6 +38,7 @@ export function MacTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
           </>
         )}
       </div>
+      <AppNav dialog={dialog} />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
         {t('app.name')}
       </div>

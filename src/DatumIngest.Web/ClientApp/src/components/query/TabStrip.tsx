@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { Play, Plus, Square, X } from 'lucide-react';
@@ -10,6 +10,7 @@ import {
   renameTab,
   moveTab,
   findLeaf,
+  importTabIntoLeaf,
 } from '@/state/tabs';
 import { cancelTab, executionsState, runTab } from '@/state/execution';
 import { resolveRunSql } from '@/state/activeEditor';
@@ -17,7 +18,13 @@ import {
   TAB_DRAG_MIME,
   parseTabDragData,
   writeTabDragData,
+  type TabDragPayload,
 } from './tabDrag';
+import {
+  isCrossWindowDrop,
+  notifySourceToRemove,
+  tearOutTabIfNoDrop,
+} from './tearOut';
 import { cn } from '@/lib/utils';
 
 // VSCode-style tab strip, scoped to a single leaf pane. Click to select,
@@ -53,6 +60,7 @@ export function TabStrip({ leafId }: { leafId: string }) {
               index={index}
               title={tab.title}
               sql={tab.sql}
+              editorSize={tab.editorSize}
               dirty={tab.dirty}
               active={tab.id === leaf.activeTabId}
               isStreaming={isStreaming}
@@ -98,6 +106,7 @@ function TabChip({
   index,
   title,
   sql,
+  editorSize,
   dirty,
   active,
   isStreaming,
@@ -112,6 +121,7 @@ function TabChip({
   index: number;
   title: string;
   sql: string;
+  editorSize: number | undefined;
   dirty: boolean;
   active: boolean;
   isStreaming: boolean;
@@ -140,6 +150,19 @@ function TabChip({
     closeTab(id);
   }
 
+  function onMouseDown(e: React.MouseEvent) {
+    // Middle-click closes the tab (browser-style). preventDefault on
+    // mousedown is required to suppress Chromium's middle-click
+    // autoscroll cursor — without it, releasing the button anywhere
+    // else on the page enters autoscroll mode, which is jarring in
+    // an Electron shell.
+    if (e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeTab(id);
+    }
+  }
+
   function onPlayOrStop(e: React.MouseEvent) {
     // Don't switch tabs when clicking the play button — the user might
     // be kicking off a long-running query from a tab they don't want
@@ -159,8 +182,45 @@ function TabChip({
     void runTab(id, resolveRunSql(sql, leafId));
   }
 
+  // dragstart-time payload. Captured here so `onDragEnd` below has the
+  // full tab content even if the user dragged so fast that the tab
+  // disappeared from state mid-flight (cross-window receive runs the
+  // tab through `closeTab` before our local dragend fires).
+  const dragPayloadRef = useRef<TabDragPayload | null>(null);
+
   function onDragStart(e: React.DragEvent) {
-    writeTabDragData(e.dataTransfer, { fromLeafId: leafId, tabId: id });
+    // SYNCHRONOUS. The HTML5 spec freezes dataTransfer after dragstart's
+    // synchronous body returns; any await before writeTabDragData would
+    // post the writes past the freeze and a cross-window drop would see
+    // empty dataTransfer. host.windowId() is a sync accessor (preload
+    // pre-resolves it on load) — see electron/preload.ts.
+    const host = window.electronHost;
+    const sourceWindowId = host?.isElectron ? host.windowId() : null;
+    const payload: TabDragPayload = {
+      fromLeafId: leafId,
+      tabId: id,
+      sourceWindowId,
+      // Captured at dragstart; if the run finishes mid-drag the
+      // destination still sees the stale flag, which is the safer
+      // direction (refuse rather than orphan an in-flight stream).
+      isRunning: isStreaming,
+      tab: { id, title, sql, editorSize },
+    };
+    dragPayloadRef.current = payload;
+    writeTabDragData(e.dataTransfer, payload);
+  }
+
+  function onDragEnd(e: React.DragEvent) {
+    const payload = dragPayloadRef.current;
+    dragPayloadRef.current = null;
+    if (!payload) return;
+    // `dropEffect === 'none'` is the HTML5 signal that no drop target
+    // accepted the drag. With our in-window + cross-window drops both
+    // calling `preventDefault` + `dropEffect = 'move'`, this only
+    // remains 'none' when the user released outside every drop zone
+    // — exactly the tear-out trigger.
+    if (e.dataTransfer.dropEffect !== 'none') return;
+    void tearOutTabIfNoDrop(payload);
   }
 
   function hasTabPayload(e: React.DragEvent): boolean {
@@ -193,7 +253,17 @@ function TabChip({
     // over. `moveTab` adjusts internally when source-and-target are the
     // same leaf so the rendered position matches the indicator.
     const insertIndex = side === 'after' ? index + 1 : index;
-    moveTab(payload.tabId, leafId, insertIndex);
+    if (isCrossWindowDrop(payload)) {
+      // Refuse cross-window receive while the source's query is still
+      // streaming — the move would orphan the in-flight request in
+      // the source's renderer. Drop is silently no-op; source keeps
+      // the tab.
+      if (payload.isRunning) return;
+      importTabIntoLeaf(leafId, payload.tab, insertIndex);
+      notifySourceToRemove(payload);
+    } else {
+      moveTab(payload.tabId, leafId, insertIndex);
+    }
   }
 
   return (
@@ -202,10 +272,12 @@ function TabChip({
       aria-selected={active}
       draggable
       onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       onClick={onSelect}
+      onMouseDown={onMouseDown}
       onDoubleClick={onRename}
       title={renameLabel}
       className={cn(
@@ -298,7 +370,13 @@ function EndSentinel({ leafId, tabCount }: { leafId: string; tabCount: number })
     const payload = parseTabDragData(e.dataTransfer);
     setHover(false);
     if (!payload) return;
-    moveTab(payload.tabId, leafId, tabCount);
+    if (isCrossWindowDrop(payload)) {
+      if (payload.isRunning) return; // see chip onDrop for rationale.
+      importTabIntoLeaf(leafId, payload.tab, tabCount);
+      notifySourceToRemove(payload);
+    } else {
+      moveTab(payload.tabId, leafId, tabCount);
+    }
   }
 
   return (

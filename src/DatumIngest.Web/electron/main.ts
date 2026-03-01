@@ -188,11 +188,146 @@ function createWindow(opts: { dialog?: boolean; parent?: BrowserWindow; modal?: 
   return win;
 }
 
+// References to the currently-live main window and any torn-out tab
+// windows. Torn-out windows are conceptually dependent on the main
+// window — closing main cascade-closes them rather than leaving
+// orphaned editor surfaces with no obvious "home." Manual tracking
+// (rather than Electron's `parent` BrowserWindow option) keeps the
+// torn-outs independent in z-order and taskbar so the user can move
+// them behind / beside main freely; we still get the close cascade
+// by listening to main's `closed` event.
+let mainWindow: BrowserWindow | null = null;
+const tornOutWindows = new Set<BrowserWindow>();
+
 function createMainWindow(loadUrl: string): BrowserWindow {
   const win = createWindow({});
   win.loadURL(loadUrl);
+  mainWindow = win;
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
+    for (const child of [...tornOutWindows]) {
+      if (!child.isDestroyed()) child.close();
+    }
+  });
   return win;
 }
+
+// ───────────────────────── Tab tear-out ─────────────────────────
+
+interface TabSeed {
+  id: string;
+  title: string;
+  sql: string;
+  editorSize?: number;
+}
+
+/**
+ * Cache of the URL the main window loaded, so a tear-out spawn knows
+ * where to point new BrowserWindows. Captured at first window creation
+ * because the URL depends on dev vs prod and the Kestrel port resolved
+ * at startup — recomputing it would duplicate `startDotnetBackend`'s
+ * resolution logic for no gain.
+ */
+let cachedLoadUrl: string | null = null;
+
+function tearOutLoadUrl(seed: TabSeed): string {
+  if (!cachedLoadUrl) {
+    throw new Error('tearOutLoadUrl called before the main window loaded.');
+  }
+  const origin = new URL(cachedLoadUrl).origin;
+  // Encode the seed payload as URL-safe base64 in the hash. Hash is used
+  // (rather than query string) so the SPA's HTTP route stays "/" and
+  // any react-router-like setup we add later doesn't misinterpret the
+  // payload as a route. Hash is also the same channel `DialogShell`
+  // uses for its modal payloads — symmetry with the existing pattern.
+  const json = JSON.stringify(seed);
+  const b64 = Buffer.from(json, 'utf8').toString('base64url');
+  return `${origin}/#/tab-window/seed=${b64}`;
+}
+
+/**
+ * Spawns a torn-out tab window at the given screen coordinates, seeded
+ * with the supplied tab. Returns the new window so the caller can
+ * coordinate further IPC if needed (today they don't — the seed is
+ * everything the new renderer needs).
+ *
+ * Position semantics: the supplied (x, y) is the top-left of the new
+ * window. Callers (the renderer's tear-out gesture) typically pass the
+ * cursor's screen position minus a small offset so the title bar of the
+ * new window appears under the cursor — keeps the drop feel right.
+ */
+function spawnTabWindow(seed: TabSeed, x: number, y: number): BrowserWindow {
+  const win = createWindow({});
+  win.setBounds({ x: Math.round(x), y: Math.round(y), width: 1280, height: 800 });
+  win.loadURL(tearOutLoadUrl(seed));
+  tornOutWindows.add(win);
+  win.on('closed', () => tornOutWindows.delete(win));
+  return win;
+}
+
+// IPC: renderer → main → renderer for cross-window tab coordination.
+//
+// `tabwindow.spawn` opens a new BrowserWindow at the supplied screen
+// coordinates, pre-seeded with the supplied tab. Used by the tear-out
+// gesture (drag a tab outside any window → drop).
+ipcMain.handle(
+  'tabwindow.spawn',
+  (_event, payload: { seed: TabSeed; x: number; y: number }) => {
+    spawnTabWindow(payload.seed, payload.x, payload.y);
+  },
+);
+
+// `tabwindow.removeInSource` forwards a "tab X was received elsewhere,
+// please close it" instruction from the destination window to the
+// source. Only the source renderer can mutate its own state, so main
+// is just a postman that resolves source window id → webContents.
+ipcMain.handle(
+  'tabwindow.removeInSource',
+  (_event, payload: { sourceWindowId: number; tabId: string }) => {
+    const source = BrowserWindow.fromId(payload.sourceWindowId);
+    if (!source || source.isDestroyed()) return;
+    source.webContents.send('tabwindow.removeTab', { tabId: payload.tabId });
+  },
+);
+
+// `tabwindow.cursorScreenPoint` answers the renderer's "where's the
+// cursor right now in screen coordinates" — the tear-out gesture uses
+// this on `dragend` to position the new window under the cursor.
+// `dragend`'s clientX/clientY can be unreliable when the drag finished
+// outside the source window, so reading the cursor straight from the
+// OS via Electron is more reliable.
+ipcMain.handle('tabwindow.cursorScreenPoint', () => {
+  // Lazy-imported so this file's top-level imports stay tidy.
+  const { screen } = require('electron') as typeof import('electron');
+  const pt = screen.getCursorScreenPoint();
+  return { x: pt.x, y: pt.y };
+});
+
+// `tabwindow.isCursorOverApp` answers "is the cursor inside any of our
+// BrowserWindows right now?" — used by the tear-out gesture as a guard:
+// if the user released the drag while the cursor was over one of our
+// windows (including the source's own title bar / nav / non-drop
+// chrome), they almost certainly didn't intend to spawn a new window.
+// `dropEffect === 'none'` alone doesn't disambiguate "released on empty
+// desktop" from "released on our own chrome where no drop target
+// claimed the event," so we add this geometry check.
+ipcMain.handle('tabwindow.isCursorOverApp', () => {
+  const { screen } = require('electron') as typeof import('electron');
+  const pt = screen.getCursorScreenPoint();
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    const b = win.getBounds();
+    if (
+      pt.x >= b.x &&
+      pt.x < b.x + b.width &&
+      pt.y >= b.y &&
+      pt.y < b.y + b.height
+    ) {
+      return true;
+    }
+  }
+  return false;
+});
 
 function buildApplicationMenu(): void {
   const isMac = process.platform === 'darwin';
@@ -231,6 +366,27 @@ ipcMain.handle('window.toggleMaximize', (event) => {
 });
 ipcMain.handle('window.close', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
+});
+
+// "What's my BrowserWindow id?" — preload's `windowId()` hits this
+// once and caches the result. The renderer uses the id as the
+// "source window" key when coordinating cross-window tab moves.
+//
+// Two paths: `invoke` (async, used by anything that can tolerate a
+// short null window during preload init) and `on` with `sendSync`
+// (synchronous, used by preload itself so the window id is captured
+// before any renderer JS runs). The sync path is necessary because
+// HTML5 dragstart freezes dataTransfer after the synchronous handler
+// returns; a dragstart that happens before an async IPC resolves
+// would write a null sourceWindowId into the drag payload, and the
+// destination window's `notifySourceToRemove` would no-op — leaving
+// the source with a duplicate copy of the moved tab.
+ipcMain.handle('window.id', (event) => {
+  return BrowserWindow.fromWebContents(event.sender)?.id ?? null;
+});
+ipcMain.on('window.id.sync', (event) => {
+  event.returnValue =
+    BrowserWindow.fromWebContents(event.sender)?.id ?? null;
 });
 
 // Dialog open: spawn a child BrowserWindow with parent + modal, await the
@@ -322,6 +478,7 @@ app.whenReady().then(async () => {
   // Dev: load Vite (HMR proxies /api + /hubs to Kestrel). Prod: load
   // Kestrel directly — it serves wwwroot/ for the SPA.
   const loadUrl = app.isPackaged ? kestrelUrl : DEV_VITE_URL;
+  cachedLoadUrl = loadUrl;
   createMainWindow(loadUrl);
 
   app.on('activate', () => {
