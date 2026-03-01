@@ -43,10 +43,12 @@ internal static class LiteralCoercion
             DataKind.Int16 => DataValue.FromInt16(ToSignedInRange<short>(literal, short.MinValue, short.MaxValue, columnName, "Int16")),
             DataKind.Int32 => DataValue.FromInt32(ToSignedInRange<int>(literal, int.MinValue, int.MaxValue, columnName, "Int32")),
             DataKind.Int64 => DataValue.FromInt64(ToInt64(literal, columnName)),
+            DataKind.Int128 => DataValue.FromInt128(ToInt128(literal, columnName)),
             DataKind.UInt8 => DataValue.FromUInt8(ToUnsignedInRange<byte>(literal, byte.MaxValue, columnName, "UInt8")),
             DataKind.UInt16 => DataValue.FromUInt16(ToUnsignedInRange<ushort>(literal, ushort.MaxValue, columnName, "UInt16")),
             DataKind.UInt32 => DataValue.FromUInt32(ToUnsignedInRange<uint>(literal, uint.MaxValue, columnName, "UInt32")),
             DataKind.UInt64 => DataValue.FromUInt64(ToUInt64(literal, columnName)),
+            DataKind.UInt128 => DataValue.FromUInt128(ToUInt128(literal, columnName)),
             DataKind.Float32 => DataValue.FromFloat32(ToFloat32Lossless(literal, columnName)),
             DataKind.Float64 => DataValue.FromFloat64(ToFloat64(literal, columnName)),
             DataKind.String => CoerceString(literal, arena, columnName),
@@ -155,6 +157,39 @@ internal static class LiteralCoercion
             ulong u when u <= long.MaxValue => (long)u,
             _ => throw IncompatibleLiteral(literal, "Int64", columnName),
         };
+
+    private static Int128 ToInt128(object literal, string columnName) =>
+        literal switch
+        {
+            sbyte s => s,
+            short s => s,
+            int i => i,
+            long l => l,
+            byte b => b,
+            ushort u => u,
+            uint u => u,
+            ulong u => u,
+            _ => throw IncompatibleLiteral(literal, "Int128", columnName),
+        };
+
+    private static UInt128 ToUInt128(object literal, string columnName)
+    {
+        return literal switch
+        {
+            sbyte s when s >= 0 => (UInt128)(ulong)s,
+            short s when s >= 0 => (UInt128)(ulong)s,
+            int i when i >= 0 => (UInt128)(ulong)i,
+            long l when l >= 0 => (UInt128)(ulong)l,
+            byte b => b,
+            ushort u => u,
+            uint u => u,
+            ulong u => u,
+            _ when literal is sbyte or short or int or long
+                => throw new InvalidOperationException(
+                    $"Column '{columnName}': cannot store negative literal in UInt128."),
+            _ => throw IncompatibleLiteral(literal, "UInt128", columnName),
+        };
+    }
 
     private static ulong ToUInt64(object literal, string columnName)
     {
