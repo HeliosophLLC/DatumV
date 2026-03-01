@@ -154,6 +154,54 @@ WHERE table_name = 'orders_csv'
 ORDER BY ordinal_position
 ```
 
+#### `information_schema.table_constraints`
+
+Surfaces named constraints (PRIMARY KEY and UNIQUE today; FK and CHECK arrive when those features ship). One row per named constraint per table.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `constraint_catalog` | String | Always `'datum'` |
+| `constraint_schema` | String | `'public'` or `'temp'` |
+| `constraint_name` | String | `<table>_pkey` (PG-canonical auto-name) unless the user supplied a name via `CONSTRAINT name PRIMARY KEY`; for UNIQUE, the index name from `CREATE UNIQUE INDEX` |
+| `table_catalog` | String | Always `'datum'` |
+| `table_schema` | String | `'public'` or `'temp'` |
+| `table_name` | String | Parent table name |
+| `constraint_type` | String | `'PRIMARY KEY'` or `'UNIQUE'` |
+
+```sql
+-- Discover the PK constraint name before dropping it
+SELECT constraint_name
+FROM information_schema.table_constraints
+WHERE table_name = 'users' AND constraint_type = 'PRIMARY KEY'
+-- → 'users_pkey'
+
+ALTER TABLE users DROP CONSTRAINT users_pkey
+```
+
+#### `information_schema.key_column_usage`
+
+For each named constraint, one row per constraint-bearing column with the column's ordinal position **in the constraint** (not in the table). Joins to `table_constraints` on `constraint_name`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `constraint_catalog` | String | Always `'datum'` |
+| `constraint_schema` | String | `'public'` or `'temp'` |
+| `constraint_name` | String | Constraint name (matches `table_constraints.constraint_name`) |
+| `table_catalog` | String | Always `'datum'` |
+| `table_schema` | String | `'public'` or `'temp'` |
+| `table_name` | String | Parent table name |
+| `column_name` | String | Column in the constraint |
+| `ordinal_position` | Int32 | 1-based position **within the constraint's column list** — `PRIMARY KEY (b, a)` reports `b` at ordinal 1 and `a` at ordinal 2 regardless of where those columns sit in the table's schema |
+
+```sql
+-- Show every column that participates in any constraint, ordered as declared
+SELECT tc.table_name, tc.constraint_name, kcu.column_name, kcu.ordinal_position
+FROM information_schema.table_constraints AS tc
+JOIN information_schema.key_column_usage  AS kcu
+  ON kcu.constraint_name = tc.constraint_name
+ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
+```
+
 #### `information_schema.schemata`
 
 | Column | Type | Description |

@@ -608,13 +608,41 @@ public static class CompletionContext
                     return CompletionZoneKind.AfterDeclareType;
 
                 case SqlToken.Set:
-                    // After UPDATE ... SET — offer columns for assignment.
+                    // Disambiguate two shapes of SET:
+                    //   1. `ALTER TABLE name ALTER COLUMN col SET` → set a
+                    //      column attribute (NOT NULL today; DEFAULT later).
+                    //   2. `UPDATE ... SET` → column assignments.
+                    {
+                        int back = index - 1;
+                        // Shape 1: walk back past column-name → COLUMN → ALTER.
+                        if (back >= 0 && (tokens[back].Kind == SqlToken.Identifier
+                                          || IsKeywordToken(tokens[back].Kind))
+                            && back - 2 >= 0
+                            && tokens[back - 1].Kind == SqlToken.Column
+                            && tokens[back - 2].Kind == SqlToken.Alter)
+                        {
+                            return CompletionZoneKind.AfterAlterColumnSet;
+                        }
+                    }
+                    // Shape 2: UPDATE … SET — offer columns for assignment.
                     return CompletionZoneKind.AfterUpdateSet;
 
                 // ───────────────────── Procedural control flow ─────────────────────
 
                 case SqlToken.If:
                 case SqlToken.While:
+                    // Disambiguate procedural IF from `ALTER TABLE IF EXISTS …`
+                    // (DDL table-level guard). When IF is immediately preceded
+                    // by `ALTER TABLE`, the rest of the statement is a regular
+                    // ALTER body — the user wants table-name + verb suggestions
+                    // (same as bare `ALTER TABLE …`), not a procedural predicate.
+                    if (kind == SqlToken.If
+                        && index >= 2
+                        && tokens[index - 1].Kind == SqlToken.Table
+                        && tokens[index - 2].Kind == SqlToken.Alter)
+                    {
+                        return CompletionZoneKind.AfterAlterTable;
+                    }
                     // IF/WHILE have a predicate, then a body. Right after the
                     // keyword (no content) or mid-predicate (last token is an
                     // operator) → procedural expression position (no columns).
@@ -739,9 +767,15 @@ public static class CompletionContext
 
                 case SqlToken.Alter:
                     // A second ALTER inside `ALTER TABLE name ALTER COLUMN …`
-                    // is the column-attribute-mutation verb (needs COLUMN
-                    // next). Recognise the shape by walking back through an
-                    // identifier (table name) → TABLE → outer ALTER.
+                    // is the column-attribute-mutation verb. Recognise the
+                    // shape by walking back through an identifier (table
+                    // name) → TABLE → outer ALTER, then route by what's
+                    // already been typed past this ALTER:
+                    //   - No content past ALTER → cursor at `… ALTER ⌷`,
+                    //     user wants `COLUMN` (AfterAlterTableAlter zone).
+                    //   - Content past ALTER → cursor at `… ALTER COLUMN col ⌷`
+                    //     (or further), user wants `DROP` / `SET` next
+                    //     (AfterAlterColumnName zone).
                     {
                         int back = index - 1;
                         if (back >= 0 && (tokens[back].Kind == SqlToken.Identifier
@@ -753,7 +787,9 @@ public static class CompletionContext
                                 back--;
                                 if (back >= 0 && tokens[back].Kind == SqlToken.Alter)
                                 {
-                                    return CompletionZoneKind.AfterAlterTableAlter;
+                                    return passedContent
+                                        ? CompletionZoneKind.AfterAlterColumnName
+                                        : CompletionZoneKind.AfterAlterTableAlter;
                                 }
                             }
                         }
@@ -1408,6 +1444,19 @@ public enum CompletionZoneKind
     /// droppable column attributes (<c>IDENTITY</c>, <c>DEFAULT</c>).
     /// </summary>
     AfterAlterColumnDrop,
+
+    /// <summary>
+    /// After <c>ALTER TABLE name ALTER COLUMN col SET</c> — offer the
+    /// settable column attributes (currently only <c>NOT NULL</c>).
+    /// </summary>
+    AfterAlterColumnSet,
+
+    /// <summary>
+    /// After <c>ALTER TABLE name ALTER COLUMN col</c> — offer the
+    /// <c>DROP</c> and <c>SET</c> verbs that pick whether to drop or set
+    /// a column attribute.
+    /// </summary>
+    AfterAlterColumnName,
 
     /// <summary>
     /// After a <c>CREATE INDEX name ON table (col, ...)</c> column list closes —

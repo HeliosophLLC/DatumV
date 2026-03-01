@@ -534,6 +534,63 @@ internal static class AlterTableExecutor
     }
 
     /// <summary>
+    /// Applies <c>ALTER TABLE name ALTER COLUMN col SET { NOT NULL }</c>.
+    /// Validates that the column exists. The provider's
+    /// <c>SetColumnNotNullAsync</c> handles the scan-for-NULLs validation
+    /// and the descriptor flip; this method just resolves the column index.
+    /// </summary>
+    public static async Task<IQueryPlan> AlterColumnSetAsync(
+        TableCatalog catalog, AlterTableAlterColumnSetStatement alter, string? sourceText = null)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(alter);
+
+        QualifiedName qn = catalog.ResolveDdlName(alter.SchemaName, alter.TableName);
+        string qualifiedTableName = qn.ToString();
+        if (!catalog.TryGetTable(qualifiedTableName, out ITableProvider? provider))
+        {
+            throw new InvalidOperationException(
+                $"Table '{alter.TableName}' is not registered in the catalog.");
+        }
+
+        Schema schema = provider.GetSchema();
+        int columnIndex = -1;
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            if (string.Equals(schema.Columns[i].Name, alter.ColumnName, StringComparison.OrdinalIgnoreCase))
+            {
+                columnIndex = i;
+                break;
+            }
+        }
+        if (columnIndex < 0)
+        {
+            throw new InvalidOperationException(
+                $"column \"{alter.ColumnName}\" of relation \"{alter.TableName}\" does not exist");
+        }
+
+        switch (alter.Target)
+        {
+            case AlterColumnSetTarget.NotNull:
+                // SetColumnNotNullAsync is idempotent — no-op when already
+                // NOT NULL — and performs the column scan to validate
+                // no rows hold NULL before flipping the descriptor.
+                await provider.SetColumnNotNullAsync(columnIndex).ConfigureAwait(false);
+                break;
+
+            default:
+                throw new InvalidOperationException(
+                    $"ALTER COLUMN SET target {alter.Target} is not implemented.");
+        }
+
+        if (catalog.TryGetTable(qualifiedTableName, out ITableProvider? afterProvider))
+        {
+            catalog.Events.Raise(new TableAlteredEvent(qn, schema, afterProvider.GetSchema(), sourceText));
+        }
+        return EmptyQueryPlan.Instance;
+    }
+
+    /// <summary>
     /// Streams the table's historical rows through the new column's
     /// <see cref="ColumnInfo.ComputedExpression"/>, then dispatches a
     /// single page-COW <c>UpdateRows</c> call that installs the computed

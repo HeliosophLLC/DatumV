@@ -979,6 +979,109 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         Assert.Contains("missing", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    // ──────────────────── ALTER TABLE … ALTER COLUMN c SET NOT NULL ────────────────────
+    //
+    // Tightens a column back to NOT NULL. Unlike DROP, this requires a
+    // scan: every existing row must be non-null or the SET is rejected.
+    // Pre-existing pages keep their bitmap (now redundant, decodes
+    // correctly anyway); future INSERTs reject NULL.
+
+    [Fact]
+    public void AlterTable_SetNotNull_OnCleanColumn_Succeeds()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, name String)");
+        catalog.Plan("INSERT INTO t VALUES (1, 'alice'), (2, 'bob')");
+
+        catalog.Plan("ALTER TABLE t ALTER COLUMN id SET NOT NULL");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.False(schema.Columns[0].Nullable);
+    }
+
+    [Fact]
+    public void AlterTable_SetNotNull_OnColumnWithNulls_Rejects()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, name String)");
+        catalog.Plan("INSERT INTO t VALUES (1, 'alice'), (2, 'bob')");
+        catalog.Plan("INSERT INTO t (name) VALUES ('carol')"); // id = NULL
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("ALTER TABLE t ALTER COLUMN id SET NOT NULL"));
+        Assert.Contains("NULL", ex.Message);
+        Assert.Contains("id", ex.Message);
+
+        // The descriptor must NOT have been flipped — failed validation
+        // shouldn't have any side effects.
+        Schema schema = catalog["t"].GetSchema();
+        Assert.True(schema.Columns[0].Nullable);
+    }
+
+    [Fact]
+    public void AlterTable_SetNotNull_AfterDropThenSet_RejectsNewNullInserts()
+    {
+        // Round-trip: drop NOT NULL, then set it back. Subsequent INSERTs
+        // must reject NULL again — i.e. the descriptor flip really took
+        // and the runtime check fires.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32 NOT NULL, name String)");
+        catalog.Plan("INSERT INTO t VALUES (1, 'alice')");
+        catalog.Plan("ALTER TABLE t ALTER COLUMN id DROP NOT NULL");
+        catalog.Plan("INSERT INTO t (name) VALUES ('bob')"); // id = NULL — accepted while nullable
+        catalog.Plan("DELETE FROM t WHERE name = 'bob'");    // clean out the NULL row
+
+        catalog.Plan("ALTER TABLE t ALTER COLUMN id SET NOT NULL");
+
+        // Pre-existing pages have heterogeneous bitmap state but no NULLs
+        // among live rows. Future NULL insert must be rejected.
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("INSERT INTO t (name) VALUES ('carol')"));
+        Assert.Contains("id", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AlterTable_SetNotNull_OnAlreadyNotNullColumn_Idempotent()
+    {
+        // PG accepts SET NOT NULL on a column that already has the
+        // constraint as a no-op. Match that.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32 NOT NULL, name String)");
+
+        catalog.Plan("ALTER TABLE t ALTER COLUMN id SET NOT NULL");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.False(schema.Columns[0].Nullable);
+    }
+
+    [Fact]
+    public void AlterTable_SetNotNull_UnknownColumn_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, name String)");
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE t ALTER COLUMN missing SET NOT NULL"));
+        Assert.Contains("missing", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AlterTable_SetNotNull_SurvivesReopen()
+    {
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE t (id Int32, name String)");
+            catalog.Plan("INSERT INTO t VALUES (1, 'alice')");
+            catalog.Plan("ALTER TABLE t ALTER COLUMN id SET NOT NULL");
+        }
+
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
+        Schema schema = reopened["t"].GetSchema();
+        Assert.False(schema.Columns[0].Nullable);
+
+        await Task.CompletedTask;
+    }
+
     [Fact]
     public async Task AlterTable_DropNotNull_SurvivesReopen()
     {

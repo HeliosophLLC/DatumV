@@ -4235,20 +4235,51 @@ public static class SqlParser
                  select AlterColumnDropTarget.NotNull));
 
     /// <summary>
-    /// Parses the <c>COLUMN col DROP { IDENTITY | DEFAULT | NOT NULL } [IF EXISTS]</c>
+    /// Parses the column-attribute set target after <c>SET</c>: currently
+    /// only <c>NOT NULL</c>. NOT NULL consumes two tokens, mirroring its
+    /// shape on the DROP side.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, AlterColumnSetTarget> AlterColumnSetTargetParser =
+        (from notKw in Token.EqualTo(SqlToken.Not)
+         from nullKw in Token.EqualTo(SqlToken.Null)
+         select AlterColumnSetTarget.NotNull);
+
+    /// <summary>
+    /// Parses the <c>COLUMN col { DROP target | SET target } [IF EXISTS]</c>
     /// body of an <c>ALTER TABLE name ALTER</c> statement, once the outer
-    /// <c>ALTER</c> verb has been consumed.
+    /// <c>ALTER</c> verb has been consumed. Dispatches DROP vs SET on the
+    /// verb token; the IF EXISTS clause is DROP-only (PG accepts it on
+    /// DROP IDENTITY, treats DROP DEFAULT as idempotent regardless, and
+    /// has no equivalent for SET — a SET NOT NULL with an absent target
+    /// is naturally idempotent since the destination state is the goal).
     /// </summary>
     private static TokenListParser<SqlToken, Statement> AlterTableAlterColumnBody(AlterTablePrefixResult prefix) =>
         from columnKw in Token.EqualTo(SqlToken.Column)
         from colName in IdentifierOrKeywordAsName
-        from dropKw in Token.EqualTo(SqlToken.Drop)
+        from verb in Token.EqualTo(SqlToken.Drop).Try()
+            .Or(Token.EqualTo(SqlToken.Set))
+        from body in verb.Kind == SqlToken.Drop
+            ? AlterColumnDropBody(prefix, colName)
+            : AlterColumnSetBody(prefix, colName)
+        select body;
+
+    private static TokenListParser<SqlToken, Statement> AlterColumnDropBody(
+        AlterTablePrefixResult prefix, string colName) =>
         from target in AlterColumnDropTargetParser
         from ifExists in IfExistsParser
         select (Statement)new AlterTableAlterColumnDropStatement(
             prefix.TableName, colName,
             target,
             ifExists,
+            prefix.IfExists,
+            prefix.SchemaName);
+
+    private static TokenListParser<SqlToken, Statement> AlterColumnSetBody(
+        AlterTablePrefixResult prefix, string colName) =>
+        from target in AlterColumnSetTargetParser
+        select (Statement)new AlterTableAlterColumnSetStatement(
+            prefix.TableName, colName,
+            target,
             prefix.IfExists,
             prefix.SchemaName);
 

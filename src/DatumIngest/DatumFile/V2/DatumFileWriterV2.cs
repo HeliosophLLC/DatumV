@@ -1382,6 +1382,50 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     }
 
     /// <summary>
+    /// Flips <paramref name="columnName"/>'s descriptor flag <c>IsNullable</c>
+    /// to <see langword="false"/> in <paramref name="datumPath"/>. Pure
+    /// footer mutation. Historical pages keep their stored bytes —
+    /// pages written while the column was nullable retain their
+    /// (now-redundant) null bitmap, recorded per-page in
+    /// <see cref="PageDescriptorV2.HasNullBitmap"/>; pages flushed after
+    /// this call carry no bitmap.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// No-op when the column is already NOT NULL. Throws when the column
+    /// doesn't exist.
+    /// </para>
+    /// <para>
+    /// The caller is responsible for scanning the column to verify no
+    /// NULLs exist before invoking — this method does no validation.
+    /// (Validation lives in the provider so it can use the catalog's
+    /// scan path; the writer only owns the footer mutation.)
+    /// </para>
+    /// </remarks>
+    public static void SetColumnNotNull(string datumPath, string columnName)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+        ArgumentNullException.ThrowIfNull(columnName);
+
+        string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
+        using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
+
+        int? columnIndex = FindLiveColumnIndex(writer, columnName);
+        if (columnIndex is null)
+        {
+            throw new InvalidOperationException(
+                $"SetColumnNotNull: column '{columnName}' does not exist on '{datumPath}'.");
+        }
+
+        ColumnDescriptorV2 prior = writer._columns![columnIndex.Value];
+        if (prior.IsNullable)
+        {
+            writer._columns[columnIndex.Value] = prior with { IsNullable = false };
+        }
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
     /// Removes <paramref name="columnName"/>'s entry from the footer's
     /// defaults table in <paramref name="datumPath"/>. Pure footer
     /// mutation. Existing rows are unaffected; future INSERTs that omit

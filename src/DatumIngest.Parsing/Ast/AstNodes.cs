@@ -1499,6 +1499,47 @@ public sealed record AlterTableAlterColumnDropStatement(
     string? SchemaName = null) : Statement;
 
 /// <summary>
+/// Which column attribute an <see cref="AlterTableAlterColumnSetStatement"/>
+/// targets. PG-compatible set in v1: <c>SET NOT NULL</c>. Mirror of
+/// <see cref="AlterColumnDropTarget"/> — future targets (<c>SET DEFAULT expr</c>,
+/// <c>SET DATA TYPE …</c>) live here when they ship.
+/// </summary>
+public enum AlterColumnSetTarget
+{
+    /// <summary>
+    /// Tightens the column to reject NULL values. Catalog scans the column
+    /// and rejects with a PG-flavored "column X contains NULL values"
+    /// error when any row violates the new constraint. Pre-existing
+    /// pages keep their wire format; the decoder reads each page through
+    /// its own <c>HasNullBitmap</c> flag, so bitmap-bearing pages from
+    /// before the SET (now redundant) decode correctly through compaction.
+    /// </summary>
+    NotNull,
+}
+
+/// <summary>
+/// <c>ALTER TABLE name ALTER COLUMN col SET { NOT NULL }</c> — tightens a
+/// column attribute. Sibling to <see cref="AlterTableAlterColumnDropStatement"/>;
+/// kept as a separate AST rather than unified so each direction's
+/// validation semantics (drop = footer-only; set = scan-first) stay
+/// obvious at the dispatch site.
+/// </summary>
+/// <param name="TableName">The target table name.</param>
+/// <param name="ColumnName">The column whose attribute is being set.</param>
+/// <param name="Target">Which attribute to set — currently only <c>NOT NULL</c>.</param>
+/// <param name="TableIfExists">
+/// PG-canonical table-level guard from <c>ALTER TABLE IF EXISTS name …</c>;
+/// the catalog short-circuits to a no-op when the named table doesn't exist.
+/// </param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>.</param>
+public sealed record AlterTableAlterColumnSetStatement(
+    string TableName,
+    string ColumnName,
+    AlterColumnSetTarget Target,
+    bool TableIfExists = false,
+    string? SchemaName = null) : Statement;
+
+/// <summary>
 /// <c>ANALYZE table</c> — rebuilds statistics and indexes for the specified table.
 /// </summary>
 /// <param name="TableName">The target table name.</param>

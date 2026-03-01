@@ -513,6 +513,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 if (alterColumnDrop.TableIfExists && !TryGetTable(ResolveDdlName(alterColumnDrop.SchemaName, alterColumnDrop.TableName).ToString(), out _)) return EmptyQueryPlan.Instance;
                 return await AlterTableExecutor.AlterColumnDropAsync(this, alterColumnDrop, sourceText).ConfigureAwait(false);
 
+            case AlterTableAlterColumnSetStatement alterColumnSet:
+                if (alterColumnSet.TableIfExists && !TryGetTable(ResolveDdlName(alterColumnSet.SchemaName, alterColumnSet.TableName).ToString(), out _)) return EmptyQueryPlan.Instance;
+                return await AlterTableExecutor.AlterColumnSetAsync(this, alterColumnSet, sourceText).ConfigureAwait(false);
+
             case InsertStatement insert:
                 return await InsertExecutor.ExecuteAsync(this, insert).ConfigureAwait(false);
 

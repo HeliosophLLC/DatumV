@@ -845,6 +845,32 @@ public class DdlParsingTests : ServiceTestBase
         Assert.Equal(AlterColumnDropTarget.NotNull, alter.Target);
     }
 
+    [Fact]
+    public void AlterTableAlterColumnSetNotNull_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE users ALTER COLUMN id SET NOT NULL");
+
+        AlterTableAlterColumnSetStatement alter = Assert.IsType<AlterTableAlterColumnSetStatement>(statement);
+        Assert.Equal("users", alter.TableName);
+        Assert.Equal("id", alter.ColumnName);
+        Assert.Equal(AlterColumnSetTarget.NotNull, alter.Target);
+    }
+
+    [Fact]
+    public void AlterTableAlterColumn_SetAndDrop_BothRouteCorrectly()
+    {
+        // Regression guard: the dispatcher that picks SET vs DROP must
+        // route both correctly without ambiguity.
+        Statement set = SqlParser.ParseStatement(
+            "ALTER TABLE t ALTER COLUMN id SET NOT NULL");
+        Statement drop = SqlParser.ParseStatement(
+            "ALTER TABLE t ALTER COLUMN id DROP NOT NULL");
+
+        Assert.IsType<AlterTableAlterColumnSetStatement>(set);
+        Assert.IsType<AlterTableAlterColumnDropStatement>(drop);
+    }
+
     // ─── ALTER TABLE IF EXISTS (table-level guard) ───
 
     /// <summary>

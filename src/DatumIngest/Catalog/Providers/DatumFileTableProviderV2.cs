@@ -2317,6 +2317,73 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <inheritdoc/>
+    public async Task SetColumnNotNullAsync(int columnIndex, CancellationToken ct = default)
+    {
+        await _mutationLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            Schema schema = _snapshot.Schema;
+            if (columnIndex < 0 || columnIndex >= schema.Columns.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(columnIndex),
+                    $"Column index {columnIndex} is out of range for schema with {schema.Columns.Count} columns.");
+            }
+            string columnName = schema.Columns[columnIndex].Name;
+
+            // Idempotent when already NOT NULL (matches PG). The descriptor
+            // flip + finalize would also be a no-op in the writer, but
+            // returning here avoids the unnecessary scan AND the
+            // generation bump.
+            if (!schema.Columns[columnIndex].Nullable)
+            {
+                return;
+            }
+
+            // Validate: scan the column, reject if any row holds NULL.
+            // Single sequential pass — same scan path as a query, so the
+            // cost is one full column read. The mutation lock blocks
+            // concurrent INSERTs for the duration of the scan, so the
+            // result is a consistent snapshot.
+            HashSet<string> requiredColumns = new(StringComparer.OrdinalIgnoreCase) { columnName };
+            await foreach (RowBatch batch in ScanAsync(
+                requiredColumns: requiredColumns,
+                filterHint: null,
+                targetArena: null,
+                cancellationToken: ct).ConfigureAwait(false))
+            {
+                try
+                {
+                    // The scan may project a different column ordering;
+                    // resolve the index from the batch's lookup.
+                    int localIndex = batch.ColumnLookup.GetColumnIndex(columnName);
+                    if (localIndex < 0) continue;
+
+                    for (int r = 0; r < batch.Count; r++)
+                    {
+                        if (batch[r][localIndex].IsNull)
+                        {
+                            throw new InvalidOperationException(
+                                $"column \"{columnName}\" contains NULL values");
+                        }
+                    }
+                }
+                finally
+                {
+                    batch.Dispose();
+                }
+            }
+
+            DatumFileWriterV2.SetColumnNotNull(_descriptor.FilePath, columnName);
+            RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+            InvalidateSourceIndexCache();
+        }
+        finally
+        {
+            _mutationLock.Release();
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task DropColumnNotNullAsync(int columnIndex, CancellationToken ct = default)
     {
         await _mutationLock.WaitAsync(ct).ConfigureAwait(false);

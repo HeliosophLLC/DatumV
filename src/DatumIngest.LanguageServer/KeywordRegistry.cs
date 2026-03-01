@@ -254,11 +254,22 @@ internal static class KeywordRegistry
         [CompletionZoneKind.AfterAlterTableAlter] =
             ["COLUMN"],
 
+        // ALTER TABLE name ALTER COLUMN col — verb position: pick whether
+        // to drop or set a column attribute.
+        [CompletionZoneKind.AfterAlterColumnName] =
+            ["DROP", "SET"],
+
         // ALTER TABLE name ALTER COLUMN col DROP — droppable column
         // attributes. NOT NULL is wired via the per-page HasNullBitmap
         // flag (historical pages stay no-bitmap, new pages carry one).
         [CompletionZoneKind.AfterAlterColumnDrop] =
             ["IDENTITY", "DEFAULT", "NOT NULL", "IF EXISTS"],
+
+        // ALTER TABLE name ALTER COLUMN col SET — settable column
+        // attributes. NOT NULL only in v1 (SET DEFAULT / SET DATA TYPE
+        // come later when their use cases land).
+        [CompletionZoneKind.AfterAlterColumnSet] =
+            ["NOT NULL"],
 
         // ALTER TABLE ADD COLUMN accepts the same constraint set as CREATE
         // TABLE columns (PRIMARY KEY, NULL/NOT NULL, DEFAULT, GENERATED …)

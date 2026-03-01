@@ -350,6 +350,53 @@ public sealed class CompletionContextTests : ServiceTestBase
     }
 
     [Fact]
+    public void Classify_AfterAlterTableIfExists_RoutesToAfterAlterTable()
+    {
+        // `ALTER TABLE IF EXISTS |` — cursor wants a table name. Without
+        // the IF-vs-procedural disambiguator the walk-back hits `SqlToken.If`
+        // first and routes to ProceduralExpression (totally wrong here).
+        CompletionZone zone = CompletionContext.Classify("ALTER TABLE IF EXISTS ", 22);
+
+        Assert.Equal(CompletionZoneKind.AfterAlterTable, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterAlterTableIfExistsWithTableName_RoutesToAfterAlterTable()
+    {
+        // `ALTER TABLE IF EXISTS users |` — user has typed the table name;
+        // now wants verb suggestions (ADD/DROP/ALTER). Same zone as above
+        // — the provider supplies both table names and the verb keywords
+        // for AfterAlterTable so both cursor positions are satisfied.
+        CompletionZone zone = CompletionContext.Classify("ALTER TABLE IF EXISTS users ", 28);
+
+        Assert.Equal(CompletionZoneKind.AfterAlterTable, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterAlterColumnName_OffersDropOrSet()
+    {
+        // `ALTER TABLE t ALTER COLUMN id |` — verb position: DROP / SET.
+        // Without the passedContent split in the inner-ALTER detector,
+        // this would route to AfterAlterTableAlter (which only offers
+        // COLUMN — wrong, COLUMN is already typed).
+        const string sql = "ALTER TABLE t ALTER COLUMN id ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.AfterAlterColumnName, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterAlterTableAlter_StillOffersColumn()
+    {
+        // Regression: `ALTER TABLE t ALTER |` (no content past inner ALTER)
+        // must still route to AfterAlterTableAlter (offering COLUMN).
+        const string sql = "ALTER TABLE t ALTER ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.AfterAlterTableAlter, zone.Kind);
+    }
+
+    [Fact]
     public void Classify_AfterCreateIndexColumnList_ReturnsAfterCreateIndexColumns()
     {
         // Cursor sits past the `)` of the column list; USING / WITH suffixes

@@ -444,7 +444,7 @@ A few invariants that aren't obvious from the layout alone, captured here becaus
 
 Two correct patterns when a schema-level attribute needs to change after data exists:
 
-- **Move the encoding decision to per-page metadata.** Null-bitmap presence is the canonical case: `IsNullable` is no longer the decoding authority — `PageDescriptorV2.HasNullBitmap` is. Old pages keep their stored shape; new pages flush in the new shape; the decoder reads each page through its own flag. `ALTER … DROP NOT NULL` works under this rule with no page rewrite.
+- **Move the encoding decision to per-page metadata.** Null-bitmap presence is the canonical case: `IsNullable` is no longer the decoding authority — `PageDescriptorV2.HasNullBitmap` is. Old pages keep their stored shape; new pages flush in the new shape; the decoder reads each page through its own flag. Both `ALTER … DROP NOT NULL` (relaxing) and `ALTER … SET NOT NULL` (tightening) work under this rule with no page rewrite — the SET path scans the column first to validate no NULLs, then flips the descriptor; pre-existing bitmap-bearing pages decode correctly through the per-page flag, just with a (now-redundant) bitmap that a future compaction can strip.
 - **Override at schema-build time without mutating the descriptor.** PK promotion (`ALTER TABLE … ADD COLUMN … PRIMARY KEY`) keeps the column's on-disk `IsNullable=true` (the pages have a bitmap because that's how they were written), but the schema-build override reports `Nullable=false` whenever the column appears in `PrimaryKeyColumnIndices`. Same shape on disk, tighter shape at the SQL layer.
 
 ### Encoders are the source of truth for what a page actually contains

@@ -310,6 +310,24 @@ public interface ITableProvider : IDisposable
             $"Table '{QualifiedName}' does not support DropColumnNotNull (CanAlterColumns is false).");
 
     /// <summary>
+    /// Tightens the column at <paramref name="columnIndex"/> back to
+    /// NOT NULL. Scans the column first; throws
+    /// <see cref="System.InvalidOperationException"/> with a PG-flavored
+    /// "column X contains NULL values" message when any row holds NULL.
+    /// On success, flips the column descriptor's <c>IsNullable</c> to
+    /// false. Existing pages keep their wire format (bitmap-bearing
+    /// pages decode correctly through the per-page flag).
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>.
+    /// Called by the catalog as the body of
+    /// <c>ALTER TABLE … ALTER COLUMN c SET NOT NULL</c>.
+    /// </remarks>
+    Task SetColumnNotNullAsync(int columnIndex, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(
+            $"Table '{QualifiedName}' does not support SetColumnNotNull (CanAlterColumns is false).");
+
+    /// <summary>
     /// Opens a caller-owned <see cref="IAppendSession"/> for streaming
     /// inserts. The session holds a writer for its lifetime; rows
     /// become visible only after <see cref="IAppendSession.CommitAsync"/>.
