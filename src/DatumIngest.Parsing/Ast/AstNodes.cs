@@ -992,6 +992,38 @@ public sealed record SelectQueryExpression(SelectStatement Statement) : QueryExp
 public sealed record InsertQueryExpression(InsertStatement Insert) : QueryExpression;
 
 /// <summary>
+/// A query expression that wraps a data-modifying <see cref="UpdateStatement"/>
+/// with a <c>RETURNING</c> clause, surfacing it as a row source for outer
+/// constructs (<c>WITH cte AS (UPDATE … RETURNING …) SELECT … FROM cte</c>).
+/// Mirrors PostgreSQL's data-modifying CTEs.
+/// </summary>
+/// <remarks>
+/// The wrapped <see cref="UpdateStatement"/> must carry a non-null
+/// <see cref="UpdateStatement.Returning"/>; an UPDATE without RETURNING
+/// has no rows to project and is rejected at plan time. The UPDATE's side
+/// effect runs at plan time, exactly once per containing query plan,
+/// regardless of how many times the CTE is referenced.
+/// </remarks>
+/// <param name="Update">The wrapped UPDATE statement.</param>
+public sealed record UpdateQueryExpression(UpdateStatement Update) : QueryExpression;
+
+/// <summary>
+/// A query expression that wraps a data-modifying <see cref="DeleteStatement"/>
+/// with a <c>RETURNING</c> clause, surfacing it as a row source for outer
+/// constructs (<c>WITH cte AS (DELETE … RETURNING …) SELECT … FROM cte</c>).
+/// Mirrors PostgreSQL's data-modifying CTEs.
+/// </summary>
+/// <remarks>
+/// The wrapped <see cref="DeleteStatement"/> must carry a non-null
+/// <see cref="DeleteStatement.Returning"/>; a DELETE without RETURNING
+/// has no rows to project and is rejected at plan time. The DELETE's side
+/// effect runs at plan time, exactly once per containing query plan,
+/// regardless of how many times the CTE is referenced.
+/// </remarks>
+/// <param name="Delete">The wrapped DELETE statement.</param>
+public sealed record DeleteQueryExpression(DeleteStatement Delete) : QueryExpression;
+
+/// <summary>
 /// A compound query expression combining two sub-expressions with a set operation.
 /// <para>
 /// ORDER BY, LIMIT, OFFSET, and INTO apply to the final combined result

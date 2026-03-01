@@ -251,6 +251,89 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(100, rows[0][1].AsInt32()); // 50 * 2 — recomputed
     }
 
+    // ──────────────────── Modifying CTE (WITH … UPDATE … RETURNING) ────────────────────
+
+    [Fact]
+    public async Task ModifyingCte_SelectFromCte_YieldsPostUpdateRows()
+    {
+        // Canonical WITH-UPDATE shape: data-modifying CTE + outer SELECT
+        // pulls from it. UPDATE side effect runs at plan time; the outer
+        // query projects from the captured RETURNING (post-image) rows.
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, status String)");
+        catalog.Plan("INSERT INTO t (status) VALUES ('pending'), ('pending')");
+
+        IQueryPlan plan = catalog.Plan(
+            "WITH activated AS (" +
+            "  UPDATE t SET status = 'active' WHERE id = 1 RETURNING id, status" +
+            ") " +
+            "SELECT id, status FROM activated");
+
+        List<DataValue[]> rows = await CollectRows(plan);
+        Assert.Single(rows);
+        Assert.Equal((1L, "active"), (rows[0][0].AsInt64(), rows[0][1].AsString()));
+    }
+
+    [Fact]
+    public async Task ModifyingCte_OuterFiltersRows_OnlyMatchingYield()
+    {
+        // Outer SELECT filters the CTE's RETURNING rows. UPDATE still
+        // applies to every WHERE-matched row regardless of outer filter.
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, score Int32)");
+        catalog.Plan("INSERT INTO t (score) VALUES (10), (20), (30)");
+
+        IQueryPlan plan = catalog.Plan(
+            "WITH bumped AS (" +
+            "  UPDATE t SET score = score + 100 RETURNING id, score" +
+            ") " +
+            "SELECT id, score FROM bumped WHERE score > 115");
+
+        List<DataValue[]> rows = await CollectRows(plan);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal((2L, 120), (rows[0][0].AsInt64(), rows[0][1].AsInt32()));
+        Assert.Equal((3L, 130), (rows[1][0].AsInt64(), rows[1][1].AsInt32()));
+    }
+
+    [Fact]
+    public async Task ModifyingCte_StarReturning_ProjectsAllColumns()
+    {
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String, status String)");
+        catalog.Plan("INSERT INTO t (name, status) VALUES ('alice', 'old')");
+
+        IQueryPlan plan = catalog.Plan(
+            "WITH upd AS (UPDATE t SET status = 'new' RETURNING *) " +
+            "SELECT * FROM upd");
+
+        List<DataValue[]> rows = await CollectRows(plan);
+        Assert.Single(rows);
+        Assert.Equal(3, rows[0].Length);
+        Assert.Equal(1L, rows[0][0].AsInt64());
+        Assert.Equal("alice", rows[0][1].AsString());
+        Assert.Equal("new", rows[0][2].AsString());
+    }
+
+    [Fact]
+    public void ModifyingCte_WithoutReturning_Throws()
+    {
+        // An UPDATE without RETURNING has no rows to project — reject
+        // explicitly at plan time so the user gets a clear error.
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, status String)");
+        catalog.Plan("INSERT INTO t (status) VALUES ('a')");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan(
+                "WITH upd AS (UPDATE t SET status = 'b') " +
+                "SELECT * FROM upd"));
+        Assert.Contains("RETURNING", ex.Message);
+    }
+
     // ──────────────────── Helpers ────────────────────
 
     private static async Task<List<DataValue[]>> CollectRows(IQueryPlan plan)

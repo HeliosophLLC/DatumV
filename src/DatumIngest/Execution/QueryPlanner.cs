@@ -58,6 +58,8 @@ public sealed class QueryPlanner
             SelectQueryExpression select => Plan(select.Statement),
             CompoundQueryExpression compound => PlanCompound(compound),
             InsertQueryExpression insertQuery => PlanInsertQueryExpression(insertQuery),
+            UpdateQueryExpression updateQuery => PlanUpdateQueryExpression(updateQuery),
+            DeleteQueryExpression deleteQuery => PlanDeleteQueryExpression(deleteQuery),
             _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
         };
         return Finalize(op);
@@ -65,7 +67,7 @@ public sealed class QueryPlanner
 
     /// <summary>
     /// Plans an <see cref="InsertQueryExpression"/> (a data-modifying CTE body)
-    /// into an <see cref="Operators.InsertReturningOperator"/>. The INSERT side
+    /// into a <see cref="Operators.DmlReturningOperator"/>. The INSERT side
     /// effect fires when the surrounding plan executes — matching PostgreSQL's
     /// modifying-CTE semantics. <c>EXPLAIN</c> does not commit it.
     /// </summary>
@@ -78,7 +80,41 @@ public sealed class QueryPlanner
                 "RETURNING clause — without it the CTE has no rows to project.");
         }
 
-        return new Operators.InsertReturningOperator(_catalog, insertQuery.Insert);
+        return Operators.DmlReturningOperator.ForInsert(_catalog, insertQuery.Insert);
+    }
+
+    /// <summary>
+    /// Plans an <see cref="UpdateQueryExpression"/> (a data-modifying CTE body).
+    /// Same modifying-CTE semantics as INSERT: side effect fires once per
+    /// surrounding execution; RETURNING is required.
+    /// </summary>
+    private IQueryOperator PlanUpdateQueryExpression(UpdateQueryExpression updateQuery)
+    {
+        if (updateQuery.Update.Returning is null)
+        {
+            throw new InvalidOperationException(
+                $"UPDATE '{updateQuery.Update.TableName}' inside a CTE body must include a " +
+                "RETURNING clause — without it the CTE has no rows to project.");
+        }
+
+        return Operators.DmlReturningOperator.ForUpdate(_catalog, updateQuery.Update);
+    }
+
+    /// <summary>
+    /// Plans a <see cref="DeleteQueryExpression"/> (a data-modifying CTE body).
+    /// Same modifying-CTE semantics as INSERT: side effect fires once per
+    /// surrounding execution; RETURNING is required.
+    /// </summary>
+    private IQueryOperator PlanDeleteQueryExpression(DeleteQueryExpression deleteQuery)
+    {
+        if (deleteQuery.Delete.Returning is null)
+        {
+            throw new InvalidOperationException(
+                $"DELETE FROM '{deleteQuery.Delete.TableName}' inside a CTE body must include a " +
+                "RETURNING clause — without it the CTE has no rows to project.");
+        }
+
+        return Operators.DmlReturningOperator.ForDelete(_catalog, deleteQuery.Delete);
     }
 
     /// <summary>

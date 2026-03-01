@@ -242,4 +242,75 @@ public sealed class StatementParameterBindingTests
         Assert.Contains("v", names);
         Assert.Contains("id", names);
     }
+
+    // ───────────────────── RETURNING binding (INSERT / UPDATE / DELETE) ─────────────────────
+
+    [Fact]
+    public void Bind_InsertReturning_SubstitutesParametersInProjection()
+    {
+        InsertStatement stmt = (InsertStatement)ParseSingle(
+            "INSERT INTO t (n) VALUES ($n) RETURNING id, $tag AS tag");
+        Dictionary<string, DataValue> parameters = new()
+        {
+            ["n"] = DataValue.FromInt32(42),
+            ["tag"] = DataValue.FromString("upload"),
+        };
+
+        InsertStatement bound = (InsertStatement)ParameterBinder.Bind((Statement)stmt, parameters);
+        Assert.NotNull(bound.Returning);
+        // First column is the bare `id` ref; second is the bound `$tag` literal.
+        Assert.IsType<ColumnReference>(bound.Returning![0].Expression);
+        LiteralExpression tagLit = Assert.IsType<LiteralExpression>(bound.Returning![1].Expression);
+        Assert.Equal("upload", tagLit.Value);
+    }
+
+    [Fact]
+    public void Bind_UpdateReturning_SubstitutesParametersInProjection()
+    {
+        UpdateStatement stmt = (UpdateStatement)ParseSingle(
+            "UPDATE t SET v = $v WHERE id = $id RETURNING id, $caller AS by_user");
+        Dictionary<string, DataValue> parameters = new()
+        {
+            ["v"] = DataValue.FromInt32(10),
+            ["id"] = DataValue.FromInt32(1),
+            ["caller"] = DataValue.FromString("alice"),
+        };
+
+        UpdateStatement bound = (UpdateStatement)ParameterBinder.Bind((Statement)stmt, parameters);
+        Assert.NotNull(bound.Returning);
+        LiteralExpression callerLit = Assert.IsType<LiteralExpression>(bound.Returning![1].Expression);
+        Assert.Equal("alice", callerLit.Value);
+    }
+
+    [Fact]
+    public void Bind_DeleteReturning_SubstitutesParametersInProjection()
+    {
+        DeleteStatement stmt = (DeleteStatement)ParseSingle(
+            "DELETE FROM t WHERE id = $id RETURNING id, $reason AS reason");
+        Dictionary<string, DataValue> parameters = new()
+        {
+            ["id"] = DataValue.FromInt32(1),
+            ["reason"] = DataValue.FromString("cleanup"),
+        };
+
+        DeleteStatement bound = (DeleteStatement)ParameterBinder.Bind((Statement)stmt, parameters);
+        Assert.NotNull(bound.Returning);
+        LiteralExpression reasonLit = Assert.IsType<LiteralExpression>(bound.Returning![1].Expression);
+        Assert.Equal("cleanup", reasonLit.Value);
+    }
+
+    [Fact]
+    public void CollectParameterNames_DiscoversParametersInReturningClause()
+    {
+        // Parameter discovery walks Returning expressions for all three DML
+        // statements; without this, the validate-set-equality check would
+        // reject the supplied $tag / $caller / $reason values.
+        Statement insStmt = ParseSingle("INSERT INTO t (n) VALUES (1) RETURNING $tag AS tag");
+        Statement updStmt = ParseSingle("UPDATE t SET v = 1 RETURNING $caller AS by_user");
+        Statement delStmt = ParseSingle("DELETE FROM t RETURNING $reason AS reason");
+
+        Assert.Contains("tag", ParameterBinder.CollectParameterNames(insStmt));
+        Assert.Contains("caller", ParameterBinder.CollectParameterNames(updStmt));
+        Assert.Contains("reason", ParameterBinder.CollectParameterNames(delStmt));
+    }
 }

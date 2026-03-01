@@ -1027,4 +1027,75 @@ public sealed class CompletionContextTests : ServiceTestBase
                         zone.VariablesInScope!.Count(v => v == "b"));
         Assert.Single(zone.VariablesInScope!, v => v == "a");
     }
+
+    // ───────────────────── RETURNING zone ─────────────────────
+
+    [Fact]
+    public void Classify_AfterReturning_Insert_ReturnsAfterReturning()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "INSERT INTO users (name) VALUES ('a') RETURNING ", 48);
+        Assert.Equal(CompletionZoneKind.AfterReturning, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterReturning_Update_ReturnsAfterReturning()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "UPDATE users SET name = 'a' RETURNING ", 38);
+        Assert.Equal(CompletionZoneKind.AfterReturning, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterReturning_Delete_ReturnsAfterReturning()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "DELETE FROM users RETURNING ", 28);
+        Assert.Equal(CompletionZoneKind.AfterReturning, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterReturning_UpdateTargetInScope()
+    {
+        // Augmented ExtractTablesInScope picks up the UPDATE target so
+        // RETURNING projections can complete columns of that table.
+        CompletionZone zone = CompletionContext.Classify(
+            "UPDATE users SET status = 'x' WHERE id = 1 RETURNING ", 53);
+
+        Assert.Equal(CompletionZoneKind.AfterReturning, zone.Kind);
+        Assert.NotNull(zone.TablesInScope);
+        Assert.Contains("users", zone.TablesInScope!);
+    }
+
+    [Fact]
+    public void Classify_AfterReturning_DeleteTargetInScope()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "DELETE FROM orders WHERE id = 1 RETURNING ", 42);
+
+        Assert.Equal(CompletionZoneKind.AfterReturning, zone.Kind);
+        Assert.NotNull(zone.TablesInScope);
+        Assert.Contains("orders", zone.TablesInScope!);
+    }
+
+    [Fact]
+    public void Classify_AfterReturning_InsertTargetInScope()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "INSERT INTO logs (msg) VALUES ('x') RETURNING ", 46);
+
+        Assert.Equal(CompletionZoneKind.AfterReturning, zone.Kind);
+        Assert.NotNull(zone.TablesInScope);
+        Assert.Contains("logs", zone.TablesInScope!);
+    }
+
+    [Fact]
+    public void Classify_AfterUpdateSet_OffersReturningKeyword()
+    {
+        // After `UPDATE t SET x = 1`, RETURNING should now be discoverable
+        // alongside WHERE/FROM.
+        CompletionZone zone = CompletionContext.Classify("UPDATE t SET x = 1 ", 19);
+
+        Assert.Equal(CompletionZoneKind.AfterUpdateSet, zone.Kind);
+    }
 }

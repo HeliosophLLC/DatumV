@@ -698,6 +698,15 @@ public static class ParameterBinder
                 }
 
                 break;
+            case InsertQueryExpression insertQuery:
+                CollectFromAnyStatement(insertQuery.Insert, names);
+                break;
+            case UpdateQueryExpression updateQuery:
+                CollectFromAnyStatement(updateQuery.Update, names);
+                break;
+            case DeleteQueryExpression deleteQuery:
+                CollectFromAnyStatement(deleteQuery.Delete, names);
+                break;
         }
     }
 
@@ -718,6 +727,16 @@ public static class ParameterBinder
                         ? BindOrderByClause(compound.OrderBy, parameters)
                         : null,
                 },
+            // Data-modifying CTE bodies: bind the wrapped statement
+            // (Source, Where, SET, Returning all carry expressions) and
+            // rewrap. Without this, $-parameters inside a CTE's INSERT/
+            // UPDATE/DELETE body wouldn't substitute.
+            InsertQueryExpression insertQuery =>
+                new InsertQueryExpression((InsertStatement)BindAnyStatement(insertQuery.Insert, parameters)),
+            UpdateQueryExpression updateQuery =>
+                new UpdateQueryExpression((UpdateStatement)BindAnyStatement(updateQuery.Update, parameters)),
+            DeleteQueryExpression deleteQuery =>
+                new DeleteQueryExpression((DeleteStatement)BindAnyStatement(deleteQuery.Delete, parameters)),
             _ => query,
         };
     }
@@ -763,7 +782,11 @@ public static class ParameterBinder
                 return new InsertStatement(
                     ins.TableName,
                     ins.ColumnNames,
-                    BindInsertSource(ins.Source, parameters));
+                    BindInsertSource(ins.Source, parameters),
+                    Returning: ins.Returning is not null
+                        ? BindSelectColumns(ins.Returning, parameters)
+                        : null,
+                    SchemaName: ins.SchemaName);
 
             case UpdateStatement upd:
                 return BindUpdate(upd, parameters);
@@ -975,6 +998,7 @@ public static class ParameterBinder
 
             case InsertStatement ins:
                 CollectFromInsertSource(ins.Source, names);
+                if (ins.Returning is not null) CollectFromSelectColumns(ins.Returning, names);
                 break;
 
             case UpdateStatement upd:

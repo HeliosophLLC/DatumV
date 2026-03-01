@@ -329,6 +329,45 @@ SELECT id, 'Hello' FROM new_conv
 
 A CTE body that's an `INSERT` must include a `RETURNING` clause — without it the CTE has no rows to project.
 
+### UPDATE
+
+Mutates rows matching a predicate. The `SET` list assigns one or more non-`PRIMARY KEY`, non-computed columns; expressions evaluate against each matching row's pre-update image. An optional `FROM` clause joins a single source table for cross-table updates (last-match-wins when multiple source rows match the same target).
+
+```sql
+UPDATE features SET risk_tier = 'high' WHERE score > 0.9
+UPDATE orders   SET total = qty * unit_price       -- unconditional
+UPDATE target
+    SET status = src.new_status
+    FROM updates AS src
+    WHERE target.id = src.target_id
+```
+
+`PRIMARY KEY` columns cannot be assigned (delete + reinsert to change a primary key). Computed (`GENERATED ALWAYS AS`) columns cannot be assigned either, but they're recomputed automatically when an `UPDATE` touches one of their referenced source columns. See [UPDATE recomputes dependents](#update-recomputes-dependents) below.
+
+#### RETURNING
+
+`UPDATE` accepts an optional `RETURNING` clause that surfaces the **post-update image** of every row whose `WHERE` predicate matched, including rows where the `SET` was a no-op. Same projection-list shape as `INSERT … RETURNING`.
+
+```sql
+-- Mutate and audit in one statement.
+UPDATE features SET risk_tier = 'high' WHERE score > 0.9
+RETURNING id, risk_tier
+
+-- All resolved post-image columns.
+UPDATE orders SET total = qty * unit_price
+RETURNING *
+
+-- UPDATE … FROM RETURNING: post-image after last-match-wins resolution.
+UPDATE target SET status = src.new_status
+    FROM updates AS src
+    WHERE target.id = src.target_id
+RETURNING target.id, target.status
+```
+
+`RETURNING` rows are visible only after the commit succeeds — an `UPDATE` that aborts mid-write yields no rows. Expressions evaluate in target-table scope; `GENERATED` dependents have already been recomputed before projection, so `RETURNING <computed_col>` surfaces the new value.
+
+`UPDATE … RETURNING` can also be used as a [data-modifying CTE body](cte.md#data-modifying-ctes).
+
 ### DELETE
 
 Soft-deletes rows matching a predicate:
@@ -339,6 +378,24 @@ DELETE FROM features                       -- unconditional: removes every live 
 ```
 
 Tombstoned rows are excluded from subsequent queries. Storage is not reclaimed — a future compaction pass rewrites the file. Row indices passed to the provider's `DeleteRows` are linear over the live row sequence; `DELETE` walks a fresh scan and accumulates indices, so tombstones from prior `DELETE` calls don't shift the numbering incorrectly.
+
+#### RETURNING
+
+`DELETE` accepts an optional `RETURNING` clause that surfaces the **pre-delete image** of every tombstoned row. Projection-list shape is the same as `INSERT` / `UPDATE`.
+
+```sql
+-- Move-and-archive pattern: capture deleted rows for downstream insert.
+DELETE FROM staging WHERE processed = true
+RETURNING id, payload
+
+-- Pre-delete snapshot, all columns.
+DELETE FROM features WHERE score IS NULL
+RETURNING *
+```
+
+`RETURNING` rows are visible only after the tombstone commit succeeds. Expressions evaluate against each row's pre-delete state — column references resolve to the values about to be removed.
+
+`DELETE … RETURNING` can also be used as a [data-modifying CTE body](cte.md#data-modifying-ctes).
 
 ### ALTER TABLE ADD COLUMN
 

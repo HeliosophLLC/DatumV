@@ -39,6 +39,10 @@ internal static class KeywordRegistry
         "ORDER BY", "LIMIT", "OFFSET", "INTO",
         "UNION", "INTERSECT", "EXCEPT",
         "PIVOT", "UNPIVOT", "ASSERT",
+        // `RETURNING` is legal in UPDATE/DELETE WHERE-tails; surfacing
+        // it in SELECT context too is a harmless false positive (psql
+        // does the same). The parser rejects it cleanly in SELECT.
+        "RETURNING",
     ];
 
     /// <summary>Clause keywords available from the GROUP BY position onward.</summary>
@@ -236,7 +240,12 @@ internal static class KeywordRegistry
             ["VALUES", "SELECT"],
 
         [CompletionZoneKind.AfterUpdateSet] =
-            ["WHERE", "FROM"],
+            ["WHERE", "FROM", "RETURNING"],
+
+        // After `RETURNING ⌷` — same expression-keyword set as a SELECT
+        // projection (operators, CAST, CASE, ...). No follow-on clause
+        // keywords because RETURNING is statement-terminal.
+        [CompletionZoneKind.AfterReturning] = ExpressionKeywords,
 
         // ALTER TABLE [IF EXISTS] name — IF EXISTS only meaningful here
         // when no table name has been typed yet, but offering it
@@ -434,7 +443,7 @@ internal static class KeywordRegistry
         [SqlToken.Function] = ["FUNCTION"],
         [SqlToken.Procedure] = ["PROCEDURE"],
         [SqlToken.Returns] = [],        // Component: part of CREATE FUNCTION ... RETURNS
-        [SqlToken.Returning] = [],      // Component: part of INSERT ... RETURNING (surface as standalone completion is a follow-up)
+        [SqlToken.Returning] = ["RETURNING"],
         [SqlToken.Call] = ["CALL"],
         [SqlToken.Assert] = ["ASSERT"],
         [SqlToken.Message] = ["MESSAGE"],

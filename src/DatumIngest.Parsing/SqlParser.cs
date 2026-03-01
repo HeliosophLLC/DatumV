@@ -2169,11 +2169,16 @@ public static class SqlParser
         from hint in MaterializationHintParser.OptionalOrDefault()
         from open in Token.EqualTo(SqlToken.LeftParen)
         // Data-modifying CTE bodies (PostgreSQL's INSERT/UPDATE/DELETE … RETURNING)
-        // share the parens-delimited shape with regular query expressions; try
-        // the INSERT path first (distinct INSERT keyword) before falling back
-        // to QueryExpressionParser. UPDATE / DELETE land in a later phase.
+        // share the parens-delimited shape with regular query expressions.
+        // Each of INSERT / UPDATE / DELETE has a distinct leading keyword, so
+        // they can be tried in series before falling back to
+        // QueryExpressionParser for a regular SELECT body.
         from body in InsertParser.Try().Select(stmt =>
             (QueryExpression)new InsertQueryExpression((InsertStatement)stmt))
+            .Or(UpdateParser.Try().Select(stmt =>
+                (QueryExpression)new UpdateQueryExpression((UpdateStatement)stmt)))
+            .Or(DeleteParser.Try().Select(stmt =>
+                (QueryExpression)new DeleteQueryExpression((DeleteStatement)stmt)))
             .Or(SP.Ref(() => QueryExpressionParser!))
         from close in Token.EqualTo(SqlToken.RightParen)
         select new CommonTableExpression(

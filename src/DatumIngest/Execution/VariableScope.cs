@@ -129,7 +129,7 @@ public sealed class VariableScope
             }
         }
         throw new InvalidOperationException(
-            $"Variable '@{name}' is not declared in any enclosing scope.");
+            $"Variable '{name}' is not declared in any enclosing scope.");
     }
 
     /// <summary>

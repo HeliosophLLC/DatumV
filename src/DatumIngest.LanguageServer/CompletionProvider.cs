@@ -223,6 +223,17 @@ public sealed class CompletionProvider
                 AddTables(items);
                 break;
 
+            case CompletionZoneKind.AfterReturning:
+                // Projection list of an INSERT / UPDATE / DELETE …
+                // RETURNING. Target table is in scope via the augmented
+                // tablesInScope walk (picks up UPDATE x / INSERT INTO x /
+                // DELETE FROM x).
+                AddColumns(items, zone.TablesInScope);
+                AddScalarFunctions(items);
+                AddSchemaNames(items, SchemaSurfaces.Expression);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
+                break;
+
             case CompletionZoneKind.AfterAlterTable:
                 AddTables(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
@@ -934,6 +945,7 @@ public sealed class CompletionProvider
         CompletionZoneKind.InFunctionArguments => true,
         CompletionZoneKind.AfterUpdateSet => true,
         CompletionZoneKind.AfterInsertTable => true,
+        CompletionZoneKind.AfterReturning => true,
         _ => false,
     };
 

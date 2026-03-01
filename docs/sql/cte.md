@@ -68,19 +68,37 @@ Materialized CTEs buffer their results in memory. When a memory budget is config
 
 ### Data-modifying CTEs
 
-A CTE body can also be an `INSERT … RETURNING` statement. The INSERT runs as part of the surrounding query plan and the CTE projects its `RETURNING` rows. Useful for chaining a parent INSERT and a dependent INSERT in a single statement:
+A CTE body can be an `INSERT`, `UPDATE`, or `DELETE` statement with a `RETURNING` clause. The mutation runs as part of the surrounding query plan and the CTE projects its `RETURNING` rows.
 
 ```sql
--- Insert a conversation, then insert its first message referencing the new id.
+-- INSERT: insert a conversation, then insert its first message
+-- referencing the new id.
 WITH new_conv AS (
   INSERT INTO conversations (workspace, title) VALUES ('default', 'Chat')
   RETURNING id
 )
 INSERT INTO messages (conversation_id, body)
 SELECT id, 'Hello' FROM new_conv
+
+-- UPDATE: bump scores and log the affected rows to an audit table.
+WITH bumped AS (
+  UPDATE features SET score = score + 0.1 WHERE risk_tier = 'high'
+  RETURNING id, score
+)
+INSERT INTO score_audit (feature_id, new_score)
+SELECT id, score FROM bumped
+
+-- DELETE: move-and-archive — capture rows being tombstoned so the
+-- archive insert can use them.
+WITH removed AS (
+  DELETE FROM staging WHERE processed = true
+  RETURNING id, payload
+)
+INSERT INTO archive (id, payload)
+SELECT id, payload FROM removed
 ```
 
-The data-modifying CTE body must include a `RETURNING` clause — a CTE has no row source otherwise. See [INSERT … RETURNING](ddl-dml.md#returning) for the projection-list rules.
+The data-modifying CTE body **must** include a `RETURNING` clause — a CTE has no row source otherwise. The mutation runs **exactly once per surrounding query execution**, regardless of how many times the CTE name is referenced. See the per-statement RETURNING sections for projection-list rules: [INSERT](ddl-dml.md#returning), [UPDATE](ddl-dml.md#returning-1), [DELETE](ddl-dml.md#returning-2).
 
 ### Recursive CTEs
 

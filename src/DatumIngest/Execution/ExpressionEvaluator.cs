@@ -707,6 +707,29 @@ public sealed class ExpressionEvaluator
 
         if (scalarFunction is null)
         {
+            // Check the other registries to give a more useful error when
+            // the name does exist but in a non-scalar shape. CALL lowers to
+            // SELECT <expr> so TVFs / aggregates / window functions all
+            // surface as "Unknown function" here unless we cross-check.
+            if (_functions.TryGetTableValued(function.CallName) is not null)
+            {
+                throw new InvalidOperationException(
+                    $"'{function.CallName}' is a table-valued function; use it in a FROM clause " +
+                    $"(e.g. SELECT * FROM {function.CallName}(...)) rather than as a scalar expression.");
+            }
+            else if (_functions.TryGetAggregate(function.CallName) is not null)
+            {
+                throw new InvalidOperationException(
+                    $"'{function.CallName}' is an aggregate function; use it inside SELECT with GROUP BY " +
+                    "(or wrap a scalar argument so it computes against a single value).");
+            }
+            else if (_functions.TryGetWindow(function.CallName) is not null)
+            {
+                throw new InvalidOperationException(
+                    $"'{function.CallName}' is a window function; use it with an OVER clause " +
+                    $"(e.g. {function.CallName}(...) OVER (...)).");
+            }
+            
             throw new InvalidOperationException(
                 $"Unknown function: '{function.CallName}'.");
         }

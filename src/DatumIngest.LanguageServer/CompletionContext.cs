@@ -136,6 +136,28 @@ public static class CompletionContext
         for (int i = 0; i + 1 < tokens.Count; i++)
         {
             SqlToken k = tokens[i].Kind;
+
+            // DML target tables: `UPDATE x ...`, `INSERT INTO x ...`,
+            // `DELETE FROM x ...`. The target is in scope for WHERE,
+            // SET, and RETURNING — same way `FROM x` is for SELECT.
+            // Detection: UPDATE / INTO / FROM-preceded-by-DELETE
+            // immediately followed by an Identifier.
+            if (k == SqlToken.Update
+                || (k == SqlToken.Into && i > 0 && tokens[i - 1].Kind == SqlToken.Insert)
+                || (k == SqlToken.From && i > 0 && tokens[i - 1].Kind == SqlToken.Delete))
+            {
+                int target = i + 1;
+                if (target < tokens.Count && tokens[target].Kind == SqlToken.Identifier)
+                {
+                    string targetName = tokens[target].Text;
+                    if (!string.IsNullOrEmpty(targetName) && seen.Add(targetName))
+                    {
+                        ordered.Add(targetName);
+                    }
+                }
+                continue;
+            }
+
             if (k != SqlToken.From && k != SqlToken.Join) continue;
 
             // Only handle the simple `<keyword> Identifier [...]` shape.
@@ -501,6 +523,13 @@ public static class CompletionContext
 
                 case SqlToken.Where:
                     return CompletionZoneKind.AfterWhere;
+
+                case SqlToken.Returning:
+                    // INSERT / UPDATE / DELETE … RETURNING <projection>.
+                    // The projection list is an expression context against
+                    // the target table; AddColumns surfaces it (we augment
+                    // tablesInScope below to recognise DML targets).
+                    return CompletionZoneKind.AfterReturning;
 
                 case SqlToken.Group:
                     // "GROUP BY" — check for BY token following.
@@ -1419,6 +1448,14 @@ public enum CompletionZoneKind
 
     /// <summary>After DELETE FROM — offer table names.</summary>
     AfterDeleteFrom,
+
+    /// <summary>
+    /// After <c>RETURNING</c> on an INSERT / UPDATE / DELETE — offer the
+    /// target table's columns plus scalar functions / expressions for the
+    /// projection list, plus next-clause keywords (none today; PG's
+    /// statement ends after RETURNING).
+    /// </summary>
+    AfterReturning,
 
     /// <summary>After ALTER TABLE — offer table names.</summary>
     AfterAlterTable,
