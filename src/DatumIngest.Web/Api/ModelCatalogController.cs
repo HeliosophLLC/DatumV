@@ -112,4 +112,28 @@ public sealed class ModelCatalogController(
             return NotFound();
         }
     }
+
+    // GET /api/model-catalog/partial-bytes — bulk view of partial download
+    // state. Returns one entry per model with non-zero .part bytes; models
+    // with no partials are omitted (UI treats absence as zero). Used by
+    // the Models view to surface Resume / Restart affordances.
+    [HttpGet("partial-bytes")]
+    public async Task<IReadOnlyDictionary<string, long>> GetAllPartialBytes(CancellationToken ct)
+        => await downloads.GetAllPartialBytesAsync(ct);
+
+    // DELETE /api/model-catalog/models/{id}/partials — wipes any .part
+    // files for the model so a subsequent install starts from byte zero.
+    [HttpDelete("models/{id}/partials")]
+    public async Task<IActionResult> DeletePartials(string id, CancellationToken ct)
+    {
+        try
+        {
+            await downloads.DeletePartialsAsync(id, ct);
+            return NoContent();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
 }

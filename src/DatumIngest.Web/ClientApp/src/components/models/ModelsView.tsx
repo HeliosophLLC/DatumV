@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { Download, Loader2, Trash2 } from 'lucide-react';
+import { Download, Loader2, RotateCcw, Trash2 } from 'lucide-react';
 import {
   clearFilters,
   collectTags,
@@ -21,6 +21,7 @@ import {
   downloadsState,
   installModel,
   refreshDownloads,
+  restartDownload,
   uninstallModel,
   type ActiveDownload,
 } from '@/state/downloads';
@@ -262,6 +263,7 @@ function ModelCard({ model }: { model: CatalogModelSnapshot }) {
         placeholder={!!model.placeholder}
         installed={installState === 'installed'}
         downloading={!!activeDownload}
+        partialBytes={downloads.partials[modelId] ?? 0}
       />
     </article>
   );
@@ -395,12 +397,14 @@ function CardActions({
   placeholder,
   installed,
   downloading,
+  partialBytes,
 }: {
   modelId: string;
   modelDisplayName: string;
   placeholder: boolean;
   installed: boolean;
   downloading: boolean;
+  partialBytes: number;
 }) {
   const { t } = useTranslation('models');
 
@@ -430,6 +434,33 @@ function CardActions({
     );
   }
 
+  // Bytes from a prior interrupted attempt are sitting on disk. Server-side
+  // installModel resumes naturally from those bytes; Restart wipes them so
+  // the next attempt starts from zero. The latter is the escape hatch when
+  // a corrupted partial blocks completion.
+  if (partialBytes > 0) {
+    return (
+      <div className="mt-1 flex justify-end gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void restartDownload(modelId, modelDisplayName)}
+        >
+          <RotateCcw />
+          {t('card.restart')}
+        </Button>
+        <Button
+          variant="default"
+          size="sm"
+          onClick={() => void installModel(modelId, modelDisplayName)}
+        >
+          <Download />
+          {t('card.resume', { size: formatPartialSize(partialBytes) })}
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-1 flex justify-end">
       <Button
@@ -442,6 +473,18 @@ function CardActions({
       </Button>
     </div>
   );
+}
+
+function formatPartialSize(bytes: number): string {
+  // Single-decimal MB / GB — same scale convention as the in-flight
+  // download speed display, so the user reads "1.6 MB/s" and "120 MB done"
+  // in compatible units.
+  const MB = 1024 * 1024;
+  const GB = MB * 1024;
+  if (bytes >= GB) return `${(bytes / GB).toFixed(1)} GB`;
+  if (bytes >= MB) return `${(bytes / MB).toFixed(0)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
 }
 
 function shortenPath(path: string): string {

@@ -26,6 +26,21 @@ public interface IModelDownloadService
     // result. Future ship-quality version may cache, but the file-system
     // probe is fast enough that bulk == "loop and probe."
     Task<IReadOnlyDictionary<string, ModelInstallState>> ProbeAllAsync(CancellationToken ct = default);
+
+    // Total bytes in any `<file>.part` files inside the model's directory.
+    // Used by the UI to surface a Resume affordance when an interrupted
+    // download left bytes on disk. Zero means "no partials" (or model dir
+    // doesn't exist). Filesystem-only; no HF tree call.
+    Task<long> GetPartialBytesAsync(string modelId, CancellationToken ct = default);
+
+    // Bulk variant. Returns one entry per model that has any partial bytes;
+    // models with none are omitted (UI can default to zero on miss).
+    Task<IReadOnlyDictionary<string, long>> GetAllPartialBytesAsync(CancellationToken ct = default);
+
+    // Deletes all `*.part` files inside the model's directory. Used by the
+    // UI's "Restart" affordance when the user wants to wipe partial bytes
+    // and start fresh. Does not touch completed files — uninstall does that.
+    Task DeletePartialsAsync(string modelId, CancellationToken ct = default);
 }
 
 public enum ModelInstallState

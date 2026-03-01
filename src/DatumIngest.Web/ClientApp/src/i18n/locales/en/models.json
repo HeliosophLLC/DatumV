@@ -23,6 +23,8 @@
     "installed": "Installed",
     "partial": "Partial",
     "download": "Download",
+    "resume": "Resume ({size})",
+    "restart": "Restart",
     "remove": "Remove",
     "downloadingFile": "Downloading file {index} of {count} · {file}",
     "downloadingStarting": "Starting download…",

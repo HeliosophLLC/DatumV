@@ -76,6 +76,10 @@ interface DownloadsState {
   active: Record<string, ActiveDownload>;
   // Last error per model (transient — cleared on next attempt).
   errors: Record<string, string>;
+  // Per-model on-disk partial bytes (sum of *.part files in the model
+  // directory). Populated by refreshDownloads. Used by the Models view to
+  // surface Resume/Restart affordances; absence means zero.
+  partials: Record<string, number>;
   loading: boolean;
 }
 
@@ -83,15 +87,35 @@ export const downloadsState = proxy<DownloadsState>({
   state: null,
   active: {},
   errors: {},
+  partials: {},
   loading: false,
 });
+
+// Filesystem-only refresh; doesn't touch HF. Cheap enough to call from
+// hub event handlers (failure, mid-download checkpoint) without a guard.
+export async function refreshPartials(): Promise<void> {
+  try {
+    const partials = await api.modelCatalog.getAllPartialBytes();
+    downloadsState.partials = { ...partials };
+  } catch (err) {
+    console.error('[downloads] failed to refresh partials', err);
+  }
+}
 
 export async function refreshDownloads(): Promise<void> {
   if (downloadsState.loading) return;
   downloadsState.loading = true;
   try {
-    const states = await api.modelCatalog.getStates();
+    // Probe + partial-bytes scan are independent; run them concurrently.
+    // Probe touches HF for revisions whose dirs exist; partial-bytes is
+    // filesystem-only and effectively instant. Combined wait is dominated
+    // by Probe.
+    const [states, partials] = await Promise.all([
+      api.modelCatalog.getStates(),
+      api.modelCatalog.getAllPartialBytes(),
+    ]);
     downloadsState.state = { ...states };
+    downloadsState.partials = { ...partials };
   } catch (err) {
     console.error('[downloads] failed to refresh states', err);
   } finally {
@@ -176,6 +200,25 @@ async function handleLicenseRequired(
   }
   // License is accepted; retry the install. installModel handles its own
   // optimistic-state setup again.
+  await installModel(modelId, modelDisplayName);
+}
+
+// Wipe any partial bytes for a model on disk, clear local partial-state,
+// and kick off a fresh install. Used by the "Restart" affordance on the
+// model card; complements installModel's natural cross-session resume by
+// giving the user an escape hatch when partials look stuck or wrong.
+export async function restartDownload(
+  modelId: string,
+  modelDisplayName?: string,
+): Promise<void> {
+  try {
+    await api.modelCatalog.deletePartials(modelId);
+    delete downloadsState.partials[modelId];
+  } catch (err) {
+    console.error('[downloads] deletePartials failed', modelId, err);
+    downloadsState.errors[modelId] = describeError(err);
+    return;
+  }
   await installModel(modelId, modelDisplayName);
 }
 
@@ -293,6 +336,9 @@ onModelDownloadProgress((event) => {
 onModelDownloadComplete((event) => {
   delete downloadsState.active[event.modelId];
   delete downloadsState.errors[event.modelId];
+  // Any .part files have been renamed into place by the server; the
+  // Resume/Restart affordances would be stale until the next refresh.
+  delete downloadsState.partials[event.modelId];
   if (downloadsState.state) {
     downloadsState.state[event.modelId] = 'installed';
   }
@@ -309,6 +355,11 @@ onModelDownloadComplete((event) => {
 onModelDownloadFailed((event) => {
   delete downloadsState.active[event.modelId];
   downloadsState.errors[event.modelId] = event.error ?? 'Download failed';
+  // The .part is still on disk and probably bigger than what we last
+  // recorded. Refresh the partials map so the Resume button shows the
+  // current size; fire-and-forget — failures during the refresh are
+  // already logged inside.
+  void refreshPartials();
 });
 
 // ───────────────────────── Derived stats helpers ─────────────────────────

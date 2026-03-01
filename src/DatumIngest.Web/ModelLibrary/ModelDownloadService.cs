@@ -161,6 +161,58 @@ internal sealed class ModelDownloadService : IModelDownloadService
             => (id, await ProbeAsync(id, token).ConfigureAwait(false));
     }
 
+    public Task<long> GetPartialBytesAsync(string modelId, CancellationToken ct = default)
+    {
+        CatalogModel model = ResolveModel(modelId);
+        string modelDir = Path.Combine(_modelsDirectory, model.Id);
+        if (!Directory.Exists(modelDir)) return Task.FromResult(0L);
+
+        long total = 0;
+        // Recursive — some manifests include nested paths like `onnx/model.onnx`,
+        // so .part files can live below the model root.
+        foreach (string file in Directory.EnumerateFiles(modelDir, "*.part", SearchOption.AllDirectories))
+        {
+            try { total += new FileInfo(file).Length; }
+            catch (IOException) { /* file vanished between enumerate and stat; ignore */ }
+        }
+        return Task.FromResult(total);
+    }
+
+    public async Task<IReadOnlyDictionary<string, long>> GetAllPartialBytesAsync(
+        CancellationToken ct = default)
+    {
+        IReadOnlyList<CatalogModel> models = _store.Manifest.Models;
+        Dictionary<string, long> map = new(StringComparer.Ordinal);
+        // Sequential — pure filesystem reads, no benefit from parallelism for
+        // dozens of models, and the order is bounded so we keep this simple.
+        foreach (CatalogModel m in models)
+        {
+            long bytes = await GetPartialBytesAsync(m.Id, ct).ConfigureAwait(false);
+            if (bytes > 0) map[m.Id] = bytes;
+        }
+        return map;
+    }
+
+    public Task DeletePartialsAsync(string modelId, CancellationToken ct = default)
+    {
+        CatalogModel model = ResolveModel(modelId);
+        string modelDir = Path.Combine(_modelsDirectory, model.Id);
+        if (!Directory.Exists(modelDir)) return Task.CompletedTask;
+
+        foreach (string file in Directory.EnumerateFiles(modelDir, "*.part", SearchOption.AllDirectories))
+        {
+            try { File.Delete(file); }
+            catch (IOException ex)
+            {
+                // Don't fail the whole operation if one file is locked; the
+                // caller's intent is "wipe partials," and a subsequent
+                // Install will overwrite anything left behind. Log and move on.
+                _logger.LogWarning(ex, "Could not delete partial {File}", file);
+            }
+        }
+        return Task.CompletedTask;
+    }
+
     private async Task RunDownloadAsync(CatalogModel model, CancellationToken ct)
     {
         string modelDir = Path.Combine(_modelsDirectory, model.Id);
