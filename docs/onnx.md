@@ -238,14 +238,14 @@ preprocessing / `infer()` / postprocessing helpers documented in
 CREATE MODEL classify_image(img Image) RETURNS Int32
 USING 'file:///e:/models/my-model/model.onnx'
 AS BEGIN
-    DECLARE tensor Float32[] = image_to_tensor(img, [224, 224], imagenet_mean(), imagenet_std());
+    DECLARE tensor Float32[] = image_to_tensor_chw(img, [224, 224], imagenet_mean(), imagenet_std());
     DECLARE probs  Float32[] = softmax(infer(tensor));
     RETURN argmax(probs)
 END
 ```
 
 What's happening:
-1. `image_to_tensor` resizes the image to 224×224 and converts to NCHW Float32, applying the ImageNet normalization the model was trained on.
+1. `image_to_tensor_chw` resizes the image to 224×224 and converts to NCHW Float32, applying the ImageNet normalization the model was trained on. (For NHWC graphs, use `image_to_tensor_hwc` — same signature, interleaved output layout.)
 2. `infer` runs the inference, returning the raw logits.
 3. `softmax` converts the logits to a probability distribution.
 4. `argmax` returns the index of the most-likely class.
@@ -256,7 +256,7 @@ What's happening:
 CREATE MODEL embed_image(img Image) RETURNS Float32[]
 USING 'file:///e:/models/clip-image/model.onnx'
 AS BEGIN
-    DECLARE tensor Float32[] = image_to_tensor(img, [224, 224], clip_mean(), clip_std());
+    DECLARE tensor Float32[] = image_to_tensor_chw(img, [224, 224], clip_mean(), clip_std());
     RETURN l2_normalize(infer(tensor))
 END
 ```
@@ -294,7 +294,7 @@ DECLARE ids Int64[] = tokenizer.encode(prompt, '/path/tokenizer.json');
 CREATE MODEL detect(img Image) RETURNS Int32[]
 USING 'file:///e:/models/yolo/model.onnx'
 AS BEGIN
-    DECLARE tensor Float32[] = image_to_tensor(img, [640, 640]);
+    DECLARE tensor Float32[] = image_to_tensor_chw(img, [640, 640]);
     DECLARE raw    Float32[] = infer(tensor);
     -- Assume the model returns [N_boxes * 4] flat + [N_boxes] scores
     -- (model-specific layout; check inference.onnx_inspect output).
@@ -310,7 +310,7 @@ END
 CREATE MODEL outline(img Image) RETURNS Array<Point2D>
 USING 'file:///e:/models/mask-rcnn/model.onnx'
 AS BEGIN
-    DECLARE tensor Float32[] = image_to_tensor(img, [256, 256]);
+    DECLARE tensor Float32[] = image_to_tensor_chw(img, [256, 256]);
     DECLARE mask   Float32[] = infer(tensor);
     RETURN mask_to_polygon(mask, 256, 256, CAST(0.5 AS Float32))
 END
@@ -407,7 +407,7 @@ the model's `onnx_inspect` output.
 The shape solver couldn't reconcile your argument with the model's
 declared input shape. Common causes:
 
-- The model expects an image-sized tensor (`[1, 3, 224, 224]` = 150,528 floats) but your argument is a smaller flat vector. Use `image_to_tensor` to produce the right shape.
+- The model expects an image-sized tensor (`[1, 3, 224, 224]` = 150,528 floats) but your argument is a smaller flat vector. Use `image_to_tensor_chw` (NCHW) or `image_to_tensor_hwc` (NHWC) to produce the right shape.
 - The model has multiple dynamic dims (`[batch, sequence_length]`). v1's solver handles ≤1 dynamic dim cleanly; ≥2 throws. Workaround: re-export the model with a fixed sequence length, or wait for the multi-dim shape solver.
 
 ### Tokenizer errors

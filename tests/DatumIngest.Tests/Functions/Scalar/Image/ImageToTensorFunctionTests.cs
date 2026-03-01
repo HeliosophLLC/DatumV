@@ -10,18 +10,18 @@ using SkiaSharp;
 namespace DatumIngest.Tests.Functions.Scalar.Image;
 
 /// <summary>
-/// Covers <c>image_to_tensor(img, target_size [, mean, std])</c> and the four
+/// Covers <c>image_to_tensor_chw(img, target_size [, mean, std])</c> and the four
 /// normalization-preset constant functions (<c>imagenet_mean</c>,
 /// <c>imagenet_std</c>, <c>clip_mean</c>, <c>clip_std</c>).
 /// </summary>
 /// <remarks>
 /// Preset tests go through the SQL plan since they take no image input.
-/// <c>image_to_tensor</c> tests invoke the function directly with a synthetic
+/// <c>image_to_tensor_chw</c> tests invoke the function directly with a synthetic
 /// <see cref="EvaluationFrame"/> — sidesteps the catalog arena-lifecycle
 /// plumbing required to feed an IMAGE column through a scan operator and
 /// keeps the assertions focused on the math.
 /// </remarks>
-public sealed class ImageToTensorFunctionTests : ServiceTestBase
+public sealed class ImageToTensorChwFunctionTests : ServiceTestBase
 {
     private static SKBitmap SolidBitmap(int width, int height, byte r, byte g, byte b)
     {
@@ -46,7 +46,7 @@ public sealed class ImageToTensorFunctionTests : ServiceTestBase
 
     private static async Task<float[]> InvokeAsync(params ValueRef[] args)
     {
-        ImageToTensorFunction fn = new();
+        ImageToTensorChwFunction fn = new();
         ValueRef result = await fn.ExecuteAsync(
             args.AsMemory(),
             new EvaluationFrame(Row.Empty, new Arena(), new Arena(), types: new TypeRegistry()),
@@ -105,7 +105,7 @@ public sealed class ImageToTensorFunctionTests : ServiceTestBase
         Assert.Equal([0.26862954f, 0.26130258f, 0.27577711f], values);
     }
 
-    // ─── image_to_tensor (direct invocation) ────────────────────────────────
+    // ─── image_to_tensor_chw (direct invocation) ────────────────────────────
 
     [Fact]
     public async Task ImageToTensor_TwoArg_DividesPixelsBy255AndLaysOutNCHW()
@@ -148,7 +148,7 @@ public sealed class ImageToTensorFunctionTests : ServiceTestBase
     public async Task ImageToTensor_ComposesWithImagenetValues()
     {
         // 1×1 grey RGB=(127, 127, 127) with hand-typed ImageNet mean/std.
-        // Cross-checks the math you'd get by combining image_to_tensor with
+        // Cross-checks the math you'd get by combining image_to_tensor_chw with
         // imagenet_mean() / imagenet_std() at the SQL surface.
         using SKBitmap bmp = SolidBitmap(1, 1, 127, 127, 127);
 
@@ -205,7 +205,7 @@ public sealed class ImageToTensorFunctionTests : ServiceTestBase
     [Fact]
     public async Task ImageToTensor_NullImage_ReturnsNullArray()
     {
-        ImageToTensorFunction fn = new();
+        ImageToTensorChwFunction fn = new();
         ValueRef result = await fn.ExecuteAsync(
             new ReadOnlyMemory<ValueRef>([ValueRef.Null(DataKind.Image), Int32Array(1, 1)]),
             MakeFrame(),
@@ -219,8 +219,8 @@ public sealed class ImageToTensorFunctionTests : ServiceTestBase
     [Fact]
     public void Metadata_ExposesNameCategoryAndDescription()
     {
-        Assert.Equal("image_to_tensor", ImageToTensorFunction.Name);
-        Assert.Equal(DatumIngest.Manifest.FunctionCategory.Image, ImageToTensorFunction.Category);
-        Assert.False(string.IsNullOrWhiteSpace(ImageToTensorFunction.Description));
+        Assert.Equal("image_to_tensor_chw", ImageToTensorChwFunction.Name);
+        Assert.Equal(DatumIngest.Manifest.FunctionCategory.Image, ImageToTensorChwFunction.Category);
+        Assert.False(string.IsNullOrWhiteSpace(ImageToTensorChwFunction.Description));
     }
 }

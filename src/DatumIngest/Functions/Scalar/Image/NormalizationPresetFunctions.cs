@@ -9,7 +9,7 @@ namespace DatumIngest.Functions.Scalar.Image;
 /// standard normalization used across PyTorch / torchvision vision models
 /// trained on ImageNet — ResNet, MobileNet, EfficientNet, ViT, and most
 /// detection / segmentation backbones derived from them. Slots directly
-/// into <c>image_to_tensor</c>'s <c>mean</c> argument.
+/// into <c>image_to_tensor_chw</c>'s <c>mean</c> argument.
 /// </summary>
 /// <remarks>
 /// Returning a <see cref="DataKind.Float32"/> array (rather than a literal
@@ -30,7 +30,7 @@ public sealed class ImagenetMeanFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static string Description =>
         "ImageNet RGB channel-mean preset constants for image normalization: [0.485, 0.456, 0.406]. " +
-        "Returns Float32[3]; pass to image_to_tensor as the `mean` argument.";
+        "Returns Float32[3]; pass to image_to_tensor_chw as the `mean` argument.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -72,7 +72,7 @@ public sealed class ImagenetStdFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static string Description =>
         "ImageNet RGB channel-std preset constants for image normalization: [0.229, 0.224, 0.225]. " +
-        "Returns Float32[3]; pass to image_to_tensor as the `std` argument.";
+        "Returns Float32[3]; pass to image_to_tensor_chw as the `std` argument.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -114,7 +114,7 @@ public sealed class ClipMeanFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static string Description =>
         "OpenAI CLIP RGB channel-mean preset constants: [0.48145466, 0.4578275, 0.40821073]. " +
-        "Returns Float32[3]; pass to image_to_tensor as the `mean` argument when using CLIP-family models.";
+        "Returns Float32[3]; pass to image_to_tensor_chw as the `mean` argument when using CLIP-family models.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -155,7 +155,7 @@ public sealed class ClipStdFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static string Description =>
         "OpenAI CLIP RGB channel-std preset constants: [0.26862954, 0.26130258, 0.27577711]. " +
-        "Returns Float32[3]; pass to image_to_tensor as the `std` argument when using CLIP-family models.";
+        "Returns Float32[3]; pass to image_to_tensor_chw as the `std` argument when using CLIP-family models.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =

@@ -7,7 +7,7 @@ using SkiaSharp;
 namespace DatumIngest.Functions.Scalar.Image;
 
 /// <summary>
-/// Inverse of <see cref="ImageToTensorFunction"/>: takes a flat NCHW
+/// Inverse of <see cref="ImageToTensorChwFunction"/>: takes a flat NCHW
 /// Float32 tensor (3 channels × <c>height</c> × <c>width</c>), optionally
 /// denormalises with <c>mean</c> / <c>std</c>, and packs the bytes back
 /// into a PNG-encoded RGB image.
@@ -17,13 +17,13 @@ namespace DatumIngest.Functions.Scalar.Image;
 /// <strong>Call shapes.</strong>
 /// <list type="bullet">
 ///   <item>
-///     <c>tensor_to_image(tensor, height, width)</c> — 3-arg shortcut.
+///     <c>tensor_to_image_chw(tensor, height, width)</c> — 3-arg shortcut.
 ///     Assumes the tensor is already in [0, 1] range (i.e. produced by
-///     <c>image_to_tensor</c> with default mean=[0,0,0] std=[1,1,1]).
+///     <c>image_to_tensor_chw</c> with default mean=[0,0,0] std=[1,1,1]).
 ///     Multiplied by 255 and clamped to byte range.
 ///   </item>
 ///   <item>
-///     <c>tensor_to_image(tensor, height, width, mean, std)</c> — full
+///     <c>tensor_to_image_chw(tensor, height, width, mean, std)</c> — full
 ///     form. Applies the inverse normalize <c>(value * std + mean) * 255</c>
 ///     before clamping. Use the same mean/std the producer used to encode.
 ///   </item>
@@ -33,13 +33,15 @@ namespace DatumIngest.Functions.Scalar.Image;
 /// <strong>Output.</strong> RGB (alpha = 255), PNG-encoded. Float values
 /// outside [0, 1] post-denormalize clamp to byte range — diffusion-model
 /// outputs frequently land slightly outside the range and we don't want
-/// the rounding to silently wrap.
+/// the rounding to silently wrap. Pair with
+/// <see cref="TensorToImageHwcFunction"/> when the producing tensor is in
+/// NHWC layout.
 /// </para>
 /// </remarks>
-public sealed class TensorToImageFunction : IFunction, IScalarFunction
+public sealed class TensorToImageChwFunction : IFunction, IScalarFunction
 {
     /// <inheritdoc />
-    public static string Name => "tensor_to_image";
+    public static string Name => "tensor_to_image_chw";
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Image;
@@ -47,12 +49,70 @@ public sealed class TensorToImageFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static string Description =>
         "Packs a flat NCHW Float32 tensor back into a PNG-encoded RGB image: " +
-        "tensor_to_image(tensor FLOAT32[], height INT, width INT [, mean FLOAT32[3], std FLOAT32[3]]). " +
+        "tensor_to_image_chw(tensor FLOAT32[], height INT, width INT [, mean FLOAT32[3], std FLOAT32[3]]). " +
         "5-arg form applies inverse normalize (value * std + mean); 3-arg form skips it. " +
         "Tensor must have length 3 × height × width.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+        TensorToImageShared.BuildSignatures();
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<TensorToImageChwFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+        => TensorToImageShared.ExecuteAsync(Name, arguments, layout: TensorLayout.Chw);
+}
+
+/// <summary>
+/// NHWC sibling of <see cref="TensorToImageChwFunction"/>. Same semantics
+/// and call shape; the only difference is the tensor index layout —
+/// interleaved <c>[R, G, B]</c> triples instead of channel-major planes.
+/// </summary>
+public sealed class TensorToImageHwcFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "tensor_to_image_hwc";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Image;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Packs a flat NHWC Float32 tensor back into a PNG-encoded RGB image: " +
+        "tensor_to_image_hwc(tensor FLOAT32[], height INT, width INT [, mean FLOAT32[3], std FLOAT32[3]]). " +
+        "Same args as the _chw variant; differs only in input layout — pixels are interleaved as " +
+        "[R, G, B] triples instead of channel-major planes.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+        TensorToImageShared.BuildSignatures();
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<TensorToImageHwcFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+        => TensorToImageShared.ExecuteAsync(Name, arguments, layout: TensorLayout.Hwc);
+}
+
+/// <summary>
+/// Shared signature + execution for the CHW and HWC tensor-to-image
+/// functions. Both variants take identical arguments and run identical
+/// math; only the tensor index layout differs.
+/// </summary>
+internal static class TensorToImageShared
+{
+    public static IReadOnlyList<FunctionSignatureVariant> BuildSignatures() =>
     [
         new FunctionSignatureVariant(
             Parameters:
@@ -76,15 +136,10 @@ public sealed class TensorToImageFunction : IFunction, IScalarFunction
             ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
     ];
 
-    /// <inheritdoc />
-    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
-        FunctionMetadata.Validate<TensorToImageFunction>(argumentKinds);
-
-    /// <inheritdoc />
-    public ValueTask<ValueRef> ExecuteAsync(
+    public static ValueTask<ValueRef> ExecuteAsync(
+        string fnName,
         ReadOnlyMemory<ValueRef> arguments,
-        EvaluationFrame frame,
-        CancellationToken cancellationToken)
+        TensorLayout layout)
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
         if (args[0].IsNull)
@@ -96,7 +151,7 @@ public sealed class TensorToImageFunction : IFunction, IScalarFunction
         int width = args[2].ToInt32();
         if (height <= 0 || width <= 0)
         {
-            throw new FunctionArgumentException(Name,
+            throw new FunctionArgumentException(fnName,
                 $"height and width must be positive, got [{height}, {width}].");
         }
 
@@ -104,8 +159,8 @@ public sealed class TensorToImageFunction : IFunction, IScalarFunction
         float stdR = 1f, stdG = 1f, stdB = 1f;
         if (args.Length == 5)
         {
-            (meanR, meanG, meanB) = ReadFloat3(args[3], "mean");
-            (stdR, stdG, stdB)    = ReadFloat3(args[4], "std");
+            (meanR, meanG, meanB) = ReadFloat3(fnName, args[3], "mean");
+            (stdR, stdG, stdB)    = ReadFloat3(fnName, args[4], "std");
         }
 
         float[] tensor = ActivationOps.ReadFloat32Array(args[0]);
@@ -113,7 +168,7 @@ public sealed class TensorToImageFunction : IFunction, IScalarFunction
         int expected = 3 * plane;
         if (tensor.Length != expected)
         {
-            throw new FunctionArgumentException(Name,
+            throw new FunctionArgumentException(fnName,
                 $"tensor length must equal 3 × height × width = {expected}, got {tensor.Length}.");
         }
 
@@ -124,20 +179,43 @@ public sealed class TensorToImageFunction : IFunction, IScalarFunction
         unsafe
         {
             byte* p = (byte*)pixelPtr;
-            for (int y = 0; y < height; y++)
+            if (layout == TensorLayout.Chw)
             {
-                for (int x = 0; x < width; x++)
+                for (int y = 0; y < height; y++)
                 {
-                    int idx = y * width + x;
-                    float r = tensor[0 * plane + idx] * stdR + meanR;
-                    float g = tensor[1 * plane + idx] * stdG + meanG;
-                    float b = tensor[2 * plane + idx] * stdB + meanB;
+                    for (int x = 0; x < width; x++)
+                    {
+                        int idx = y * width + x;
+                        float r = tensor[0 * plane + idx] * stdR + meanR;
+                        float g = tensor[1 * plane + idx] * stdG + meanG;
+                        float b = tensor[2 * plane + idx] * stdB + meanB;
 
-                    int dst = idx * 4;
-                    p[dst + 0] = ToByte(r);
-                    p[dst + 1] = ToByte(g);
-                    p[dst + 2] = ToByte(b);
-                    p[dst + 3] = 255;
+                        int dst = idx * 4;
+                        p[dst + 0] = ToByte(r);
+                        p[dst + 1] = ToByte(g);
+                        p[dst + 2] = ToByte(b);
+                        p[dst + 3] = 255;
+                    }
+                }
+            }
+            else // Hwc
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        int idx = y * width + x;
+                        int src = idx * 3;
+                        float r = tensor[src]     * stdR + meanR;
+                        float g = tensor[src + 1] * stdG + meanG;
+                        float b = tensor[src + 2] * stdB + meanB;
+
+                        int dst = idx * 4;
+                        p[dst + 0] = ToByte(r);
+                        p[dst + 1] = ToByte(g);
+                        p[dst + 2] = ToByte(b);
+                        p[dst + 3] = 255;
+                    }
                 }
             }
         }
@@ -160,22 +238,21 @@ public sealed class TensorToImageFunction : IFunction, IScalarFunction
     }
 
     /// <summary>
-    /// Reads a 3-element Float32 array as (R, G, B). Same dual-payload
-    /// handling as <see cref="ImageToTensorFunction"/>: accepts both the
+    /// Reads a 3-element Float32 array as (R, G, B). Accepts both the
     /// <c>FromPrimitiveArray</c> typed buffer and the <c>ValueRef[]</c>
     /// inline-array form.
     /// </summary>
-    private static (float R, float G, float B) ReadFloat3(ValueRef arg, string paramName)
+    private static (float R, float G, float B) ReadFloat3(string fnName, ValueRef arg, string paramName)
     {
         if (arg.IsNull)
         {
-            throw new FunctionArgumentException(Name, $"{paramName} must not be null.");
+            throw new FunctionArgumentException(fnName, $"{paramName} must not be null.");
         }
         if (arg.Materialized is float[] direct)
         {
             if (direct.Length != 3)
             {
-                throw new FunctionArgumentException(Name,
+                throw new FunctionArgumentException(fnName,
                     $"{paramName} must have exactly 3 elements (R, G, B), got {direct.Length}.");
             }
             return (direct[0], direct[1], direct[2]);
@@ -183,14 +260,14 @@ public sealed class TensorToImageFunction : IFunction, IScalarFunction
         ReadOnlySpan<ValueRef> elements = arg.GetArrayElements();
         if (elements.Length != 3)
         {
-            throw new FunctionArgumentException(Name,
+            throw new FunctionArgumentException(fnName,
                 $"{paramName} must have exactly 3 elements (R, G, B), got {elements.Length}.");
         }
         if (!elements[0].TryToFloat(out float r) ||
             !elements[1].TryToFloat(out float g) ||
             !elements[2].TryToFloat(out float b))
         {
-            throw new FunctionArgumentException(Name,
+            throw new FunctionArgumentException(fnName,
                 $"{paramName} elements must be coercible to Float32.");
         }
         return (r, g, b);

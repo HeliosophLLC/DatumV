@@ -87,6 +87,163 @@ internal static class ImageTensorPrep
     }
 
     /// <summary>
+    /// Stretch-resize HWC variant: same per-channel normalisation as
+    /// <see cref="StretchAndPackNchw(SKBitmap, Span{float}, int, int, ReadOnlySpan{float}, ReadOnlySpan{float}, bool)"/>,
+    /// but the output is interleaved per pixel — <c>dest[(y*W + x)*3 + c]</c>
+    /// instead of channel-major planes. ONNX models with input shape
+    /// <c>[B, H, W, C]</c> (typically TF-exported graphs) consume this layout
+    /// directly.
+    /// </summary>
+    public static void StretchAndPackNhwc(
+        SKBitmap source,
+        Span<float> dest,
+        int width,
+        int height,
+        ReadOnlySpan<float> channelScale,
+        ReadOnlySpan<float> channelBias,
+        bool bgr = false)
+    {
+        SKImageInfo info = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using SKBitmap resized = source.Resize(info, SKSamplingOptions.Default)
+            ?? throw new InvalidOperationException(
+                $"SkiaSharp failed to resize image to {width}×{height}.");
+
+        int planeSize = height * width;
+        nint pixelPtr = resized.GetPixels();
+
+        unsafe
+        {
+            byte* src = (byte*)pixelPtr;
+            for (int yx = 0; yx < planeSize; yx++)
+            {
+                int b = yx * 4; // Skia Rgba8888: byte 0=R, 1=G, 2=B, 3=A
+                float c0 = bgr ? src[b + 2] : src[b];
+                float c1 = src[b + 1];
+                float c2 = bgr ? src[b] : src[b + 2];
+
+                int di = yx * 3;
+                dest[di]     = c0 * channelScale[0] + channelBias[0];
+                dest[di + 1] = c1 * channelScale[1] + channelBias[1];
+                dest[di + 2] = c2 * channelScale[2] + channelBias[2];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Per-channel letterbox CHW variant: aspect-preserving resize into a square canvas,
+    /// pre-fill the padding region uniformly with <paramref name="padFill"/>, normalise
+    /// per-channel as <c>output = rawByte * channelScale[c] + channelBias[c]</c>, and write
+    /// NCHW float32 into <paramref name="dest"/>. The <c>image_letterbox_tensor_chw</c> SQL
+    /// surface uses this overload to support ImageNet-style normalisation in letterbox layout.
+    /// </summary>
+    /// <returns>The letterbox scale factor <c>min(target/origW, target/origH)</c>.</returns>
+    public static float LetterboxAndPackNchw(
+        SKBitmap source,
+        Span<float> dest,
+        int targetSize,
+        ReadOnlySpan<float> channelScale,
+        ReadOnlySpan<float> channelBias,
+        float padFill,
+        bool bgr = false)
+    {
+        int origW = source.Width;
+        int origH = source.Height;
+        float ratio = MathF.Min((float)targetSize / origW, (float)targetSize / origH);
+        int newW = Math.Max(1, Math.Min(targetSize, (int)MathF.Round(origW * ratio)));
+        int newH = Math.Max(1, Math.Min(targetSize, (int)MathF.Round(origH * ratio)));
+
+        SKImageInfo info = new(newW, newH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using SKBitmap resized = source.Resize(info, SKSamplingOptions.Default)
+            ?? throw new InvalidOperationException(
+                $"SkiaSharp failed to resize image to {newW}×{newH} for letterbox.");
+
+        int planeSize = targetSize * targetSize;
+        dest.Fill(padFill);
+
+        nint pixelPtr = resized.GetPixels();
+        unsafe
+        {
+            byte* src = (byte*)pixelPtr;
+            for (int y = 0; y < newH; y++)
+            {
+                int srcRow = y * newW * 4;
+                int dstRow = y * targetSize;
+                for (int x = 0; x < newW; x++)
+                {
+                    int sb = srcRow + x * 4;
+                    int di = dstRow + x;
+
+                    float c0 = bgr ? src[sb + 2] : src[sb];
+                    float c1 = src[sb + 1];
+                    float c2 = bgr ? src[sb] : src[sb + 2];
+
+                    dest[di]                 = c0 * channelScale[0] + channelBias[0];
+                    dest[planeSize + di]     = c1 * channelScale[1] + channelBias[1];
+                    dest[2 * planeSize + di] = c2 * channelScale[2] + channelBias[2];
+                }
+            }
+        }
+
+        return ratio;
+    }
+
+    /// <summary>
+    /// Per-channel letterbox HWC variant: same aspect-preserving resize + uniform pad +
+    /// per-channel normalisation as <see cref="LetterboxAndPackNchw(SKBitmap, Span{float}, int, ReadOnlySpan{float}, ReadOnlySpan{float}, float, bool)"/>,
+    /// but the output is interleaved per pixel: <c>dest[(y*W + x)*3 + c]</c>. ONNX models
+    /// with input shape <c>[B, H, W, C]</c> (typically TF-exported graphs) consume this
+    /// layout directly.
+    /// </summary>
+    public static float LetterboxAndPackNhwc(
+        SKBitmap source,
+        Span<float> dest,
+        int targetSize,
+        ReadOnlySpan<float> channelScale,
+        ReadOnlySpan<float> channelBias,
+        float padFill,
+        bool bgr = false)
+    {
+        int origW = source.Width;
+        int origH = source.Height;
+        float ratio = MathF.Min((float)targetSize / origW, (float)targetSize / origH);
+        int newW = Math.Max(1, Math.Min(targetSize, (int)MathF.Round(origW * ratio)));
+        int newH = Math.Max(1, Math.Min(targetSize, (int)MathF.Round(origH * ratio)));
+
+        SKImageInfo info = new(newW, newH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using SKBitmap resized = source.Resize(info, SKSamplingOptions.Default)
+            ?? throw new InvalidOperationException(
+                $"SkiaSharp failed to resize image to {newW}×{newH} for letterbox.");
+
+        dest.Fill(padFill);
+
+        nint pixelPtr = resized.GetPixels();
+        unsafe
+        {
+            byte* src = (byte*)pixelPtr;
+            for (int y = 0; y < newH; y++)
+            {
+                int srcRow = y * newW * 4;
+                int dstRow = y * targetSize * 3;
+                for (int x = 0; x < newW; x++)
+                {
+                    int sb = srcRow + x * 4;
+                    int di = dstRow + x * 3;
+
+                    float c0 = bgr ? src[sb + 2] : src[sb];
+                    float c1 = src[sb + 1];
+                    float c2 = bgr ? src[sb] : src[sb + 2];
+
+                    dest[di]     = c0 * channelScale[0] + channelBias[0];
+                    dest[di + 1] = c1 * channelScale[1] + channelBias[1];
+                    dest[di + 2] = c2 * channelScale[2] + channelBias[2];
+                }
+            }
+        }
+
+        return ratio;
+    }
+
+    /// <summary>
     /// Letterbox-resize <paramref name="source"/> into a <paramref name="targetSize"/>×<paramref name="targetSize"/>
     /// canvas (aspect-preserving, image placed at top-left), pre-fill the padding region with
     /// <paramref name="padFill"/>, normalise uniformly as <c>rawByte * scale + bias</c>, and write

@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Direct-invocation tests for the Tier 3 postprocess helpers: softmax,
 /// sigmoid, argmax, topk, l2_normalize, cosine_similarity, nms,
-/// tensor_to_image, mask_to_polygon.
+/// tensor_to_image_chw, mask_to_polygon.
 /// </summary>
 /// <remarks>
 /// Invokes each function class directly with a synthetic
@@ -221,14 +221,14 @@ public sealed class Tier3PostprocessTests : ServiceTestBase
             ValueRef.FromFloat32(1.5f)));
     }
 
-    // ─── tensor_to_image ─────────────────────────────────────────────────────
+    // ─── tensor_to_image_chw ─────────────────────────────────────────────────
 
     [Fact]
     public async Task TensorToImage_ReconstructsSolidColor()
     {
         // 1×1 RGB(128, 64, 200) → tensor at /255 → reconstruct via 3-arg form.
         float r = 128f / 255f, g = 64f / 255f, b = 200f / 255f;
-        ValueRef result = await InvokeAsync(new TensorToImageFunction(),
+        ValueRef result = await InvokeAsync(new TensorToImageChwFunction(),
             F32(r, g, b),
             ValueRef.FromInt32(1), ValueRef.FromInt32(1));
 
@@ -243,17 +243,17 @@ public sealed class Tier3PostprocessTests : ServiceTestBase
     [Fact]
     public async Task TensorToImage_RoundTripsImageToTensor()
     {
-        // Build a 2×2 solid image, push through image_to_tensor, then back
-        // through tensor_to_image. Pixels should round-trip within 1 byte.
+        // Build a 2×2 solid image, push through image_to_tensor_chw, then back
+        // through tensor_to_image_chw. Pixels should round-trip within 1 byte.
         using SKBitmap solid = new(2, 2, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         using (SKCanvas canvas = new(solid)) canvas.Clear(new SKColor(100, 200, 50));
 
-        ValueRef forward = await InvokeAsync(new ImageToTensorFunction(),
+        ValueRef forward = await InvokeAsync(new ImageToTensorChwFunction(),
             ValueRef.FromImage(solid),
             ValueRef.FromPrimitiveArray(new[] { 2, 2 }, DataKind.Int32));
         float[] tensor = AsFloatArr(forward);
 
-        ValueRef back = await InvokeAsync(new TensorToImageFunction(),
+        ValueRef back = await InvokeAsync(new TensorToImageChwFunction(),
             ValueRef.FromPrimitiveArray(tensor, DataKind.Float32),
             ValueRef.FromInt32(2), ValueRef.FromInt32(2));
 
@@ -274,7 +274,7 @@ public sealed class Tier3PostprocessTests : ServiceTestBase
     public async Task TensorToImage_WrongLength_Throws()
     {
         await Assert.ThrowsAsync<FunctionArgumentException>(() => InvokeAsync(
-            new TensorToImageFunction(),
+            new TensorToImageChwFunction(),
             F32(1f, 2f, 3f, 4f),                            // length 4 ≠ 3*2*2=12
             ValueRef.FromInt32(2), ValueRef.FromInt32(2)));
     }
