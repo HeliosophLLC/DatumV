@@ -43,6 +43,7 @@ public sealed class InferOperator : IQueryOperator
     private readonly ModelDescriptor _descriptor;
     private readonly string _sessionName;
     private readonly string _inputColumnName;
+    private readonly string? _shapeColumnName;
     private readonly string _outputColumnName;
 
     /// <summary>
@@ -52,18 +53,27 @@ public sealed class InferOperator : IQueryOperator
     /// <param name="descriptor">SQL-defined model descriptor holding the bound session.</param>
     /// <param name="sessionName">Session name within the descriptor's <c>BoundSessions</c>. v1 always uses <c>"default"</c>.</param>
     /// <param name="inputColumnName">Source column carrying the input tensor (Float32[] per row).</param>
+    /// <param name="shapeColumnName">
+    /// Optional source column carrying the explicit input tensor shape as <c>Int32[]</c>
+    /// per row. Required when the session's input spec has multiple dynamic dimensions
+    /// (e.g. PP-OCR-det's <c>[-1, 3, -1, -1]</c>) — the shape resolver can't pick a
+    /// unique answer from the array length alone. When null, the shape is resolved
+    /// from the spec (works for ≤1 dynamic dim).
+    /// </param>
     /// <param name="outputColumnName">Column to append on the output batch carrying the model's per-row result.</param>
     public InferOperator(
         IQueryOperator source,
         ModelDescriptor descriptor,
         string sessionName,
         string inputColumnName,
-        string outputColumnName)
+        string outputColumnName,
+        string? shapeColumnName = null)
     {
         _source = source;
         _descriptor = descriptor;
         _sessionName = sessionName;
         _inputColumnName = inputColumnName;
+        _shapeColumnName = shapeColumnName;
         _outputColumnName = outputColumnName;
     }
 
@@ -79,6 +89,13 @@ public sealed class InferOperator : IQueryOperator
     /// <summary>The source column carrying the per-row input tensor.</summary>
     public string InputColumnName => _inputColumnName;
 
+    /// <summary>
+    /// The optional source column carrying the per-row explicit shape
+    /// (Int32[]). Null means "resolve shape from the spec." See the
+    /// constructor parameter doc for when this is required.
+    /// </summary>
+    public string? ShapeColumnName => _shapeColumnName;
+
     /// <summary>The output column the operator appends carrying the model's result.</summary>
     public string OutputColumnName => _outputColumnName;
 
@@ -89,21 +106,29 @@ public sealed class InferOperator : IQueryOperator
             _descriptor,
             _sessionName,
             _inputColumnName,
-            _outputColumnName);
+            _outputColumnName,
+            _shapeColumnName);
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain() =>
-        new OperatorPlanDescription("Infer")
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        Dictionary<string, string> properties = new()
         {
-            Properties = new Dictionary<string, string>
-            {
-                ["model"] = _descriptor.QualifiedName.ToString(),
-                ["session"] = _sessionName,
-                ["input"] = _inputColumnName,
-                ["output"] = _outputColumnName,
-            },
+            ["model"] = _descriptor.QualifiedName.ToString(),
+            ["session"] = _sessionName,
+            ["input"] = _inputColumnName,
+            ["output"] = _outputColumnName,
+        };
+        if (_shapeColumnName is not null)
+        {
+            properties["shape"] = _shapeColumnName;
+        }
+        return new OperatorPlanDescription("Infer")
+        {
+            Properties = properties,
             Children = [(_source, null)],
         };
+    }
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
@@ -124,11 +149,17 @@ public sealed class InferOperator : IQueryOperator
 
         TensorSpec inputSpec = session.Inputs[0];
         TensorSpec outputSpec = session.Outputs[0];
-        bool batchable = IsBatchableShape(inputSpec);
+        // When the body supplies explicit shapes per row, force per-row
+        // dispatch — cross-row packing isn't safe when each row may have
+        // a different declared shape (the typical case: variable-shape
+        // detectors like PP-OCR-det where each image is resized to its
+        // own aspect-preserving dims).
+        bool batchable = _shapeColumnName is null && IsBatchableShape(inputSpec);
 
         Pool pool = context.Pool;
         ColumnLookup? outputLookup = null;
         int inputColIdx = -1;
+        int shapeColIdx = -1;
         int[]? sourceCopySlots = null;
 
         await foreach (RowBatch sourceBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
@@ -150,6 +181,14 @@ public sealed class InferOperator : IQueryOperator
                         $"InferOperator: input column '{_inputColumnName}' not found in upstream batch. " +
                         $"Available: [{string.Join(", ", sourceLookup.ColumnNames)}].");
                 }
+                if (_shapeColumnName is not null
+                    && !sourceLookup.TryGetColumnOrdinal(_shapeColumnName, out shapeColIdx))
+                {
+                    context.ReturnRowBatch(sourceBatch);
+                    throw new InvalidOperationException(
+                        $"InferOperator: shape column '{_shapeColumnName}' not found in upstream batch. " +
+                        $"Available: [{string.Join(", ", sourceLookup.ColumnNames)}].");
+                }
                 string[] outputNames = new string[sourceLookup.Count + 1];
                 for (int i = 0; i < sourceLookup.Count; i++) outputNames[i] = sourceLookup.ColumnNames[i];
                 outputNames[^1] = _outputColumnName;
@@ -160,7 +199,7 @@ public sealed class InferOperator : IQueryOperator
             }
 
             ValueRef[] perRowOutputs = await DispatchBatchAsync(
-                session, inputSpec, outputSpec, sourceBatch, inputColIdx, batchable, ct).ConfigureAwait(false);
+                session, inputSpec, outputSpec, sourceBatch, inputColIdx, shapeColIdx, batchable, ct).ConfigureAwait(false);
 
             RowBatch outputBatch = context.RentRowBatch(outputLookup, sourceBatch.Count);
             for (int rowIdx = 0; rowIdx < sourceBatch.Count; rowIdx++)
@@ -214,6 +253,7 @@ public sealed class InferOperator : IQueryOperator
         TensorSpec outputSpec,
         RowBatch sourceBatch,
         int inputColIdx,
+        int shapeColIdx,
         bool batchable,
         System.Threading.CancellationToken ct)
     {
@@ -227,9 +267,14 @@ public sealed class InferOperator : IQueryOperator
         // primitive arrays (Step 1's no-arena DECLARE chains keep this
         // managed end-to-end), so no arena reads.
         float[][] inputs = new float[rowCount][];
+        int[]?[]? perRowShapes = _shapeColumnName is null ? null : new int[]?[rowCount];
         for (int rowIdx = 0; rowIdx < rowCount; rowIdx++)
         {
             inputs[rowIdx] = ExtractFloat32Array(sourceBatch[rowIdx][inputColIdx], sourceBatch.Arena);
+            if (perRowShapes is not null)
+            {
+                perRowShapes[rowIdx] = ExtractInt32Shape(sourceBatch[rowIdx][shapeColIdx], sourceBatch.Arena);
+            }
         }
 
         bool sameLength = rowCount <= 1 || AllSameLength(inputs);
@@ -242,8 +287,9 @@ public sealed class InferOperator : IQueryOperator
             for (int rowIdx = 0; rowIdx < rowCount; rowIdx++)
             {
                 ct.ThrowIfCancellationRequested();
+                int[]? explicitShape = perRowShapes?[rowIdx];
                 results[rowIdx] = await SingleRowDispatchAsync(
-                    session, inputSpec, outputSpec, inputs[rowIdx], ct).ConfigureAwait(false);
+                    session, inputSpec, outputSpec, inputs[rowIdx], explicitShape, ct).ConfigureAwait(false);
             }
         }
         return results;
@@ -342,13 +388,29 @@ public sealed class InferOperator : IQueryOperator
         TensorSpec inputSpec,
         TensorSpec outputSpec,
         float[] input,
+        int[]? explicitShape,
         System.Threading.CancellationToken ct)
     {
         TensorBag inputBag = session.CreateInputBag();
         TensorBag? outputBag = null;
         try
         {
-            int[] shape = ResolveSingleShape(inputSpec, input.Length);
+            // Explicit shape wins when supplied — required for sessions
+            // with multiple dynamic dims (PP-OCR-det's [-1, 3, -1, -1]).
+            // Otherwise resolve from the spec.
+            int[] shape = explicitShape ?? ResolveSingleShape(inputSpec, input.Length);
+            // Sanity check: the shape's product must match the input
+            // element count regardless of whether it came from the spec
+            // or the body. Catches the typical "wrong shape literal in
+            // the SQL" bug at the operator boundary, not deep in ORT.
+            long product = 1;
+            foreach (int dim in shape) product *= dim;
+            if (product != input.Length)
+            {
+                throw new InvalidOperationException(
+                    $"InferOperator: shape [{string.Join(", ", shape)}] (product {product}) "
+                    + $"doesn't match the Float32[] input's element count {input.Length}.");
+            }
             inputBag.Add<float>(inputSpec.Name, DataKind.Float32, shape, input);
             outputBag = await session.RunAsync(inputBag, ct).ConfigureAwait(false);
 
@@ -358,9 +420,9 @@ public sealed class InferOperator : IQueryOperator
                     $"InferOperator: session output bag missing declared output '{outputSpec.Name}'.");
             }
             ReadOnlySpan<float> f32 = outputTensor.AsSpan<float>();
-            long product = 1;
-            foreach (int dim in outputTensor.Shape) product *= dim;
-            return product == 1
+            long outputProduct = 1;
+            foreach (int dim in outputTensor.Shape) outputProduct *= dim;
+            return outputProduct == 1
                 ? ValueRef.FromFloat32(f32[0])
                 : ValueRef.FromPrimitiveArray(f32.ToArray(), DataKind.Float32);
         }
@@ -447,5 +509,37 @@ public sealed class InferOperator : IQueryOperator
         // shape accordingly (rank-1 dynamic, leading-batch-dim with rank-1
         // feature, etc.).
         return [cell.AsFloat32()];
+    }
+
+    /// <summary>
+    /// Pulls a shape array out of a DataValue cell. Accepts Int32[] or
+    /// Int64[] (coerced to Int32). Used when the body supplies an
+    /// explicit shape via <c>infer(value, shape)</c>.
+    /// </summary>
+    private static int[] ExtractInt32Shape(DataValue cell, Arena arena)
+    {
+        if (cell.IsNull)
+        {
+            throw new InvalidOperationException(
+                "InferOperator: shape column cell is null. The body's shape expression must produce a non-null Int32[] for every row.");
+        }
+        if (!cell.IsArray)
+        {
+            throw new InvalidOperationException(
+                $"InferOperator: shape column expected Int32[] or Int64[], got {cell.Kind} (not an array).");
+        }
+        if (cell.Kind == DataKind.Int32)
+        {
+            return cell.AsArraySpan<int>(arena).ToArray();
+        }
+        if (cell.Kind == DataKind.Int64)
+        {
+            ReadOnlySpan<long> src = cell.AsArraySpan<long>(arena);
+            int[] result = new int[src.Length];
+            for (int i = 0; i < src.Length; i++) result[i] = checked((int)src[i]);
+            return result;
+        }
+        throw new InvalidOperationException(
+            $"InferOperator: shape column kind {cell.Kind}[] not supported; use Int32[] or Int64[].");
     }
 }

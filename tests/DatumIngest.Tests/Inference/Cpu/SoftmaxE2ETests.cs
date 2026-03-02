@@ -225,6 +225,149 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         foreach (ExplainPlanNode child in node.Children) WalkPlan(child, visit);
     }
 
+    /// <summary>
+    /// Regression test for the 2-arg <c>infer(value, shape)</c> path.
+    /// The softmax fixture's input shape is a single dynamic dim
+    /// (<c>[None]</c>), so a body that passes an explicit shape exercises
+    /// the lowerer's 2-arg detection + the InferOperator's per-row
+    /// shape column without needing a multi-dynamic-dim ONNX. The
+    /// explicit shape <c>[3]</c> matches the 3-element softmax input,
+    /// so output is identical to the 1-arg form.
+    /// </summary>
+    [Fact]
+    public async Task Softmax_TwoArgInfer_WithExplicitShape_ProducesSameOutput()
+    {
+        string fixturePath = FixturePath();
+        Assert.True(File.Exists(fixturePath), $"Fixture missing at {fixturePath}.");
+
+        TableCatalog catalog = CreateCatalogWithRealDispatcher();
+        catalog.Add(new InMemoryTableProvider(
+            CreatePool(), "data", ["d"], [new object?[] { 1 }]));
+
+        catalog.Plan(
+            $"CREATE MODEL softmax_shaped(x Float32[]) RETURNS Float32[] " +
+            $"USING 'file://{fixturePath}' " +
+            $"AS BEGIN RETURN infer(x, [CAST(3 AS Int32)]) END");
+
+        IQueryPlan plan = catalog.Plan(
+            "SELECT models.softmax_shaped([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
+
+        ExplainPlanNode tree = plan.ExplainTree;
+        bool sawInfer = false;
+        bool sawShapeProperty = false;
+        WalkPlan(tree, n =>
+        {
+            if (n.OperatorName == "Infer")
+            {
+                sawInfer = true;
+                if (n.Properties?.ContainsKey("shape") == true) sawShapeProperty = true;
+            }
+        });
+        Assert.True(sawInfer, "Plan tree must contain an Infer operator.");
+        Assert.True(sawShapeProperty, "Infer operator must record the shape column when 2-arg infer() is used.");
+
+        List<float[]> rows = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                DataValue cell = batch[i][0];
+                rows.Add(cell.AsArraySpan<float>(batch.Arena).ToArray());
+            }
+        }
+
+        Assert.Single(rows);
+        float[] expected = SoftmaxReference([1.0f, 2.0f, 3.0f]);
+        for (int i = 0; i < expected.Length; i++)
+        {
+            Assert.InRange(rows[0][i] - expected[i], -1e-5f, 1e-5f);
+        }
+    }
+
+    /// <summary>
+    /// Regression test for the synthesized-column-passthrough bug
+    /// (2026-05-16). A SQL-defined model body that references an earlier
+    /// DECLARE's value <em>across an intervening DECLARE</em> requires
+    /// each Project step to pass the prior synthesized hidden column
+    /// through. Without explicit passthrough, <c>SELECT *</c> expansion
+    /// in <see cref="ProjectOperator"/> filters <c>__</c>-prefixed names
+    /// out, so the column survives one step (the next Project's expression
+    /// reads from the upstream row directly) but vanishes from the second-
+    /// next Project's upstream — its expression can't find it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The shape that triggers it.</strong> The PP-OCR-det body
+    /// has this pattern: <c>DECLARE resized = ...; DECLARE rh = image_height(resized);
+    /// DECLARE rw = image_width(resized); DECLARE tensor = image_to_tensor_chw(resized, ...)</c>.
+    /// <c>tensor</c> references <c>resized</c> after <c>rh</c> and
+    /// <c>rw</c> were declared — <c>__mb_resized</c> is two and three
+    /// Projects back by then. Without explicit passthrough each
+    /// intervening Project drops it.
+    /// </para>
+    /// <para>
+    /// <strong>This regression test mirrors that shape.</strong>
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Softmax_MultiDeclareBody_PreservesSynthesizedColumnsAcrossSteps()
+    {
+        string fixturePath = FixturePath();
+        Assert.True(File.Exists(fixturePath), $"Fixture missing at {fixturePath}.");
+
+        TableCatalog catalog = CreateCatalogWithRealDispatcher();
+        catalog.Add(new InMemoryTableProvider(
+            CreatePool(), "data", ["d"], [new object?[] { 1 }]));
+
+        // `original` is referenced by `result` AFTER `dummy1` and `dummy2`
+        // were declared. Without explicit passthrough, the Project for
+        // `dummy2` drops `__mb_..._original` from its output, so the
+        // Project for `result` can't evaluate `ColumnReference(__mb_..._original)`
+        // against its upstream row.
+        catalog.Plan(
+            $"CREATE MODEL softmax_chained(x Float32[]) RETURNS Float32[] " +
+            $"USING 'file://{fixturePath}' " +
+            $"AS BEGIN " +
+            $"  DECLARE original Float32[] = x; " +
+            $"  DECLARE dummy1 Float32[] = original; " +
+            $"  DECLARE dummy2 Float32[] = original; " +
+            $"  DECLARE result Float32[] = infer(original); " +
+            $"  RETURN result " +
+            $"END");
+
+        IQueryPlan plan = catalog.Plan(
+            "SELECT models.softmax_chained([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
+
+        // Confirm we're actually testing the lowered path — without this
+        // assertion the test would silently pass even if the model fell
+        // back to MIO + ProceduralModelAdapter (which doesn't exercise the
+        // synth-column passthrough).
+        ExplainPlanNode tree = plan.ExplainTree;
+        bool sawInfer = false;
+        WalkPlan(tree, n => { if (n.OperatorName == "Infer") sawInfer = true; });
+        Assert.True(sawInfer, "Test must run via the lowered path; saw no Infer operator in the plan tree.");
+
+        // Execute end-to-end — the lowered Project chain must keep every
+        // synthesized column alive long enough for every later reference
+        // to resolve.
+        List<float[]> rows = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                DataValue cell = batch[i][0];
+                rows.Add(cell.AsArraySpan<float>(batch.Arena).ToArray());
+            }
+        }
+
+        Assert.Single(rows);
+        float[] expected = SoftmaxReference([1.0f, 2.0f, 3.0f]);
+        for (int i = 0; i < expected.Length; i++)
+        {
+            Assert.InRange(rows[0][i] - expected[i], -1e-5f, 1e-5f);
+        }
+    }
+
     private sealed class RecordingTracer : IModelInvocationTracer
     {
         public int StartedCount { get; private set; }

@@ -38,7 +38,18 @@
     "keep authoritative upstream as primary (so users get bug fixes / new",
     "revisions) while having a safety net against repo deletions. Currently",
     "no entries declare a `mirrorRepo` — populated as Heliosoph mirrors come",
-    "online (see models/upload-plan.json)."
+    "online (see models/upload-plan.json).",
+    "",
+    "Install SQL: a model entry may optionally include `installSql`, a path",
+    "(relative to models/) pointing at a SQL file that contains the canonical",
+    "`CREATE MODEL` statement(s) for the downloaded weights. After the",
+    "downloader places files on disk, it reads this SQL file and executes it",
+    "via the catalog so `models.<name>(...)` is callable from any query. The",
+    "file may contain multiple CREATE MODEL statements for multi-endpoint",
+    "bundles (CLIP image+text encoders, Whisper encoder+decoder, MobileSAM",
+    "image encoder + mask decoders). Entries without `installSql` simply",
+    "download the weights — registration is the user's responsibility (LLMs",
+    "via the built-in IModel path, SD bundles awaiting multi-session `infer()`)."
   ],
   "schemaVersion": 1,
 
@@ -430,12 +441,13 @@
       "attributions": ["PaddlePaddle Authors — Baidu Inc. (PaddleOCR contributors)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/paddleocr-v4-det-onnx", "revision": "e8454256830dd5e4eb08f9e6f6d8b84d7d1c9dab", "include": ["ch_PP-OCRv4_det.onnx"] },
-      "approxSizeMb": 5
+      "approxSizeMb": 5,
+      "installSql": "sql/paddleocr-v4-det.sql"
     },
     {
       "id": "realesrgan-x4v3",
-      "displayName": "Real-ESRGAN x4v3 (4× Upscaler)",
-      "description": "General-purpose 4× image super-resolution. Tiny (~5 MB) but punches above its weight on real photos and screenshots. Tile large inputs to manage memory.",
+      "displayName": "Real-ESRGAN x4v3 (4x Upscaler)",
+      "description": "General-purpose 4x image super-resolution. Tiny (~5 MB) but punches above its weight on real photos and screenshots. Tile large inputs to manage memory.",
       "task": "super-resolution",
       "tags": ["super-resolution", "upscaling", "real-esrgan"],
       "licenseIds": ["bsd-3-clause"],

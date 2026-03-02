@@ -178,13 +178,20 @@ public static class ModelBodyLowerer
             {
                 Expression rhs = SubstituteRefs(decl.Initializer!, paramSubst, declaredVars);
                 string colName = $"__mb_{descriptor.Name}_{stmtIdx}_{decl.VariableName}";
-                current = AppendStatement(current, descriptor, rhs, colName);
+                // Snapshot the prior synth column names BEFORE adding this one
+                // so each new Project explicitly preserves the previous
+                // hidden columns. SelectAllColumns filters out `__`-prefixed
+                // names; without explicit passthrough, the chain loses each
+                // synthesized column on the next step.
+                string[] priorSynth = declaredVars.Values.ToArray();
+                current = AppendStatement(current, descriptor, rhs, colName, priorSynth);
                 declaredVars[decl.VariableName] = colName;
             }
             else if (stmt is ReturnStatement ret)
             {
                 Expression returnExpr = SubstituteRefs(ret.Value, paramSubst, declaredVars);
-                current = AppendStatement(current, descriptor, returnExpr, outputColumnName);
+                string[] priorSynth = declaredVars.Values.ToArray();
+                current = AppendStatement(current, descriptor, returnExpr, outputColumnName, priorSynth);
                 return current;
             }
             stmtIdx++;
@@ -201,26 +208,77 @@ public static class ModelBodyLowerer
     /// When the RHS is an <c>infer()</c> call we split it: project the
     /// argument expression into a hidden column, then an InferOperator
     /// reads from that column. Otherwise just project the expression as
-    /// the named output column.
+    /// the named output column. <paramref name="priorSynthColumns"/>
+    /// lists the synthesized hidden column names from earlier DECLAREs;
+    /// each Project explicitly passes them through alongside
+    /// <c>SELECT *</c> so the chain doesn't lose them to the
+    /// hidden-name filter.
     /// </summary>
     private static IQueryOperator AppendStatement(
         IQueryOperator source,
         ModelDescriptor descriptor,
         Expression expr,
-        string outputColumn)
+        string outputColumn,
+        IReadOnlyList<string> priorSynthColumns)
     {
-        if (expr is FunctionCallExpression fc && IsInferCall(fc) && fc.Arguments.Count == 1)
+        if (expr is FunctionCallExpression fc && IsInferCall(fc))
         {
-            string inputCol = $"{outputColumn}__in";
-            IQueryOperator projected = AddDerivedColumn(source, inputCol, fc.Arguments[0]);
-            return new InferOperator(
-                projected,
-                descriptor,
-                sessionName: "default",
-                inputColumnName: inputCol,
-                outputColumnName: outputColumn);
+            // 1-arg form: infer(value). Shape comes from the session's
+            // input spec — works for ≤1 dynamic dim.
+            if (fc.Arguments.Count == 1)
+            {
+                string inputCol = $"{outputColumn}__in";
+                IQueryOperator projected = AddDerivedColumn(source, inputCol, fc.Arguments[0], priorSynthColumns);
+                return new InferOperator(
+                    projected,
+                    descriptor,
+                    sessionName: "default",
+                    inputColumnName: inputCol,
+                    outputColumnName: outputColumn);
+            }
+            // 2-arg form: infer(value, shape Int32[]). Project both the
+            // input and the shape into hidden columns, then InferOperator
+            // reads the shape per row. Required for multi-dynamic-dim
+            // sessions (PP-OCR-det's [-1, 3, -1, -1] is the canonical case).
+            if (fc.Arguments.Count == 2)
+            {
+                string inputCol = $"{outputColumn}__in";
+                string shapeCol = $"{outputColumn}__shape";
+                // Two Projects so each new column lands on a stable
+                // upstream batch. The shape Project also passes the input
+                // column through (it's part of priorSynthColumns at that
+                // point) so InferOperator sees both on its source row.
+                IQueryOperator afterInput = AddDerivedColumn(source, inputCol, fc.Arguments[0], priorSynthColumns);
+                IReadOnlyList<string> priorPlusInput = AppendOne(priorSynthColumns, inputCol);
+                IQueryOperator afterShape = AddDerivedColumn(afterInput, shapeCol, fc.Arguments[1], priorPlusInput);
+                return new InferOperator(
+                    afterShape,
+                    descriptor,
+                    sessionName: "default",
+                    inputColumnName: inputCol,
+                    outputColumnName: outputColumn,
+                    shapeColumnName: shapeCol);
+            }
+            // 3+ args: not a known infer() shape; fall through to the
+            // generic AddDerivedColumn path. The scalar dispatch will
+            // throw a clean arity error at evaluation time.
         }
-        return AddDerivedColumn(source, outputColumn, expr);
+        return AddDerivedColumn(source, outputColumn, expr, priorSynthColumns);
+    }
+
+    /// <summary>
+    /// Appends one name to a read-only list and returns the result.
+    /// Used by the 2-arg <c>infer(value, shape)</c> lowering path: the
+    /// second Project (which produces the shape column) needs to see the
+    /// just-added input column among its passthrough set so both columns
+    /// reach the downstream InferOperator on the same row.
+    /// </summary>
+    private static IReadOnlyList<string> AppendOne(IReadOnlyList<string> source, string extra)
+    {
+        string[] result = new string[source.Count + 1];
+        for (int i = 0; i < source.Count; i++) result[i] = source[i];
+        result[^1] = extra;
+        return result;
     }
 
     /// <summary>
@@ -229,16 +287,44 @@ public static class ModelBodyLowerer
     /// <paramref name="colName"/> carrying <paramref name="expr"/>. Used
     /// for both DECLARE-as-column and the final RETURN projection.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Hidden column passthrough.</strong> <c>SelectAllColumns</c>
+    /// expansion explicitly skips <c>__</c>-prefixed names (so user
+    /// queries' <c>SELECT *</c> doesn't leak planner-internal columns).
+    /// The lowerer's synth columns use that prefix on purpose — they're
+    /// hidden from end users — but each Project in the chain needs the
+    /// previous ones to survive so subsequent DECLAREs can reference them.
+    /// We explicitly list each prior synth column as a passthrough
+    /// <see cref="SelectColumn"/> alongside <c>SelectAllColumns</c>.
+    /// </para>
+    /// </remarks>
     private static IQueryOperator AddDerivedColumn(
         IQueryOperator source,
         string colName,
-        Expression expr)
+        Expression expr,
+        IReadOnlyList<string> priorSynthColumns)
     {
-        IReadOnlyList<SelectColumn> columns =
-        [
+        List<SelectColumn> columns = new(capacity: priorSynthColumns.Count + 2)
+        {
+            // User-visible columns from upstream (img, etc.). The hidden-
+            // name filter inside SelectAllColumns ensures __mb_* / __cse_*
+            // / other planner-synthetic names don't surface twice — they
+            // come through the explicit entries below instead.
             new SelectAllColumns(),
-            new SelectColumn(expr, Alias: colName),
-        ];
+        };
+        // Explicit passthrough of every prior synthesized hidden column.
+        // Without these, the chain loses each __mb_* column at the next
+        // step's SelectAllColumns expansion.
+        for (int i = 0; i < priorSynthColumns.Count; i++)
+        {
+            string prior = priorSynthColumns[i];
+            columns.Add(new SelectColumn(
+                new ColumnReference(TableName: null, ColumnName: prior),
+                Alias: prior));
+        }
+        // And the new derived column for this statement.
+        columns.Add(new SelectColumn(expr, Alias: colName));
         return new ProjectOperator(source, columns);
     }
 

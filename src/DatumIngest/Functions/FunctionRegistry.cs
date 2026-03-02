@@ -585,12 +585,16 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ImageCutoutFunction>();
         registry.RegisterScalar<Scalar.Image.ImageDrawBoundingBoxesFunction>();
         registry.RegisterScalar<Scalar.Image.ApplyColormapFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageWidthFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageHeightFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageResizeToStrideFunction>();
         registry.RegisterScalar<Scalar.Image.ImageToTensorChwFunction>();
         registry.RegisterScalar<Scalar.Image.ImageToTensorHwcFunction>();
         registry.RegisterScalar<Scalar.Image.ImageLetterboxTensorChwFunction>();
         registry.RegisterScalar<Scalar.Image.ImageLetterboxTensorHwcFunction>();
         registry.RegisterScalar<Scalar.Image.TensorToImageChwFunction>();
         registry.RegisterScalar<Scalar.Image.TensorToImageHwcFunction>();
+        registry.RegisterScalar<Scalar.Image.DbnetPostprocessFunction>();
         registry.RegisterScalar<Scalar.Image.ImagenetMeanFunction>();
         registry.RegisterScalar<Scalar.Image.ImagenetStdFunction>();
         registry.RegisterScalar<Scalar.Image.ClipMeanFunction>();

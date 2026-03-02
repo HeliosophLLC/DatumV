@@ -56,18 +56,38 @@ public sealed class InferFunction : IFunction, IScalarFunction
     public static string Description =>
         "Dispatches the currently-bound model session on its input. Only "
         + "callable from inside a CREATE MODEL body — outside a model "
-        + "frame there is no session to dispatch to. v1 supports "
+        + "frame there is no session to dispatch to. "
+        + "infer(value) resolves the tensor shape from the session's input "
+        + "spec (works when ≤1 dynamic dim). "
+        + "infer(value, shape Int32[]) overrides the shape explicitly — required "
+        + "when the input spec has multiple dynamic dims (e.g. PP-OCR-det's "
+        + "[-1, 3, -1, -1] where batch + H + W are all dynamic). v1 supports "
         + "single-input, single-output sessions; multi-tensor bundles "
         + "are a follow-up.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
     [
-        // Single argument: any numeric scalar or primitive array. The
-        // return rule is SameAs(0) because v1 echoes the argument kind —
-        // the session's actual output kind is decided at run time, and
-        // the surrounding model body's RETURN coercion takes care of
-        // any mismatch with the declared model return type.
+        // 2-arg form: explicit shape. Required when the session's input
+        // shape has multiple dynamic dimensions (e.g. PP-OCR-det's
+        // `[-1, 3, -1, -1]` — batch + H + W are all dynamic and can't be
+        // disambiguated from the array length alone). The shape array is
+        // passed straight through to the session as the tensor's dims.
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("value", DataKindMatcher.Any),
+                new ParameterSpec("shape", DataKindMatcher.Family(DataKindFamily.IntegerFamily), IsArray: ArrayMatch.Array),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.SameAs(0)),
+        // 1-arg form: any numeric scalar or primitive array. The return
+        // rule is SameAs(0) because v1 echoes the argument kind — the
+        // session's actual output kind is decided at run time, and the
+        // surrounding model body's RETURN coercion takes care of any
+        // mismatch with the declared model return type. The shape is
+        // resolved from the session's input spec; works for shapes with
+        // ≤1 dynamic dimension.
         new FunctionSignatureVariant(
             Parameters: [new ParameterSpec("value", DataKindMatcher.Any)],
             VariadicTrailing: null,
@@ -118,13 +138,18 @@ public sealed class InferFunction : IFunction, IScalarFunction
         }
 
         ReadOnlySpan<ValueRef> args = arguments.Span;
-        if (args.Length != 1)
+        if (args.Length is < 1 or > 2)
         {
             throw new InvalidOperationException(
-                $"infer() expects exactly 1 argument; got {args.Length}.");
+                $"infer() expects 1 or 2 arguments (value [, shape]); got {args.Length}.");
         }
 
         ValueRef arg = args[0];
+        int[]? explicitShape = null;
+        if (args.Length == 2)
+        {
+            explicitShape = ReadShapeArray(args[1], model.QualifiedName.ToString());
+        }
         TensorSpec inputSpec = session.Inputs[0];
         TensorSpec outputSpec = session.Outputs[0];
 
@@ -136,7 +161,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
         TensorBag? outputBag = null;
         try
         {
-            AddInputTensor(inputBag, inputSpec, arg, model.QualifiedName.ToString());
+            AddInputTensor(inputBag, inputSpec, arg, model.QualifiedName.ToString(), explicitShape);
 
             outputBag = await session
                 .RunAsync(inputBag, cancellationToken)
@@ -164,10 +189,13 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// Marshals one call-site argument into the input tensor. Scalars
     /// fan out into the input shape's element count (with dynamic
     /// dimensions resolving to 1); primitive arrays flow through with
-    /// a 1-d shape matching the array length.
+    /// a 1-d shape matching the array length. When
+    /// <paramref name="explicitShape"/> is non-null it bypasses
+    /// <see cref="ResolveShape"/> entirely and is used verbatim — the
+    /// only way to satisfy session specs with multiple dynamic dims.
     /// </summary>
     private static void AddInputTensor(
-        TensorBag bag, TensorSpec spec, ValueRef arg, string modelName)
+        TensorBag bag, TensorSpec spec, ValueRef arg, string modelName, int[]? explicitShape)
     {
         if (arg.IsNull)
         {
@@ -178,13 +206,13 @@ public sealed class InferFunction : IFunction, IScalarFunction
         switch (spec.ElementKind)
         {
             case DataKind.Float32:
-                AddFloat32Tensor(bag, spec, arg, modelName);
+                AddFloat32Tensor(bag, spec, arg, modelName, explicitShape);
                 break;
             case DataKind.Int64:
-                AddInt64Tensor(bag, spec, arg, modelName);
+                AddInt64Tensor(bag, spec, arg, modelName, explicitShape);
                 break;
             case DataKind.Int32:
-                AddInt32Tensor(bag, spec, arg, modelName);
+                AddInt32Tensor(bag, spec, arg, modelName, explicitShape);
                 break;
             default:
                 throw new NotSupportedException(
@@ -195,16 +223,19 @@ public sealed class InferFunction : IFunction, IScalarFunction
     }
 
     private static void AddFloat32Tensor(
-        TensorBag bag, TensorSpec spec, ValueRef arg, string modelName)
+        TensorBag bag, TensorSpec spec, ValueRef arg, string modelName, int[]? explicitShape)
     {
         if (arg.IsArray)
         {
             float[] data = ExtractPrimitiveArray<float>(arg, DataKind.Float32, modelName);
-            bag.Add<float>(spec.Name, DataKind.Float32, ResolveShape(spec, data.Length), data);
+            int[] shape = explicitShape ?? ResolveShape(spec, data.Length);
+            ValidateShapeMatchesElements(shape, data.Length, modelName, "Float32");
+            bag.Add<float>(spec.Name, DataKind.Float32, shape, data);
         }
         else if (arg.TryToFloat(out float scalar))
         {
-            bag.Add<float>(spec.Name, DataKind.Float32, ResolveShape(spec, 1), [scalar]);
+            int[] shape = explicitShape ?? ResolveShape(spec, 1);
+            bag.Add<float>(spec.Name, DataKind.Float32, shape, [scalar]);
         }
         else
         {
@@ -215,16 +246,19 @@ public sealed class InferFunction : IFunction, IScalarFunction
     }
 
     private static void AddInt64Tensor(
-        TensorBag bag, TensorSpec spec, ValueRef arg, string modelName)
+        TensorBag bag, TensorSpec spec, ValueRef arg, string modelName, int[]? explicitShape)
     {
         if (arg.IsArray)
         {
             long[] data = ExtractPrimitiveArray<long>(arg, DataKind.Int64, modelName);
-            bag.Add<long>(spec.Name, DataKind.Int64, ResolveShape(spec, data.Length), data);
+            int[] shape = explicitShape ?? ResolveShape(spec, data.Length);
+            ValidateShapeMatchesElements(shape, data.Length, modelName, "Int64");
+            bag.Add<long>(spec.Name, DataKind.Int64, shape, data);
         }
         else if (arg.TryToInt64(out long scalar))
         {
-            bag.Add<long>(spec.Name, DataKind.Int64, ResolveShape(spec, 1), [scalar]);
+            int[] shape = explicitShape ?? ResolveShape(spec, 1);
+            bag.Add<long>(spec.Name, DataKind.Int64, shape, [scalar]);
         }
         else
         {
@@ -235,16 +269,19 @@ public sealed class InferFunction : IFunction, IScalarFunction
     }
 
     private static void AddInt32Tensor(
-        TensorBag bag, TensorSpec spec, ValueRef arg, string modelName)
+        TensorBag bag, TensorSpec spec, ValueRef arg, string modelName, int[]? explicitShape)
     {
         if (arg.IsArray)
         {
             int[] data = ExtractPrimitiveArray<int>(arg, DataKind.Int32, modelName);
-            bag.Add<int>(spec.Name, DataKind.Int32, ResolveShape(spec, data.Length), data);
+            int[] shape = explicitShape ?? ResolveShape(spec, data.Length);
+            ValidateShapeMatchesElements(shape, data.Length, modelName, "Int32");
+            bag.Add<int>(spec.Name, DataKind.Int32, shape, data);
         }
         else if (arg.TryToInt32(out int scalar))
         {
-            bag.Add<int>(spec.Name, DataKind.Int32, ResolveShape(spec, 1), [scalar]);
+            int[] shape = explicitShape ?? ResolveShape(spec, 1);
+            bag.Add<int>(spec.Name, DataKind.Int32, shape, [scalar]);
         }
         else
         {
@@ -252,6 +289,70 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 $"Model '{modelName}': infer() expected a numeric scalar or Int32 array "
                 + $"for input '{spec.Name}', got {arg.Kind}{(arg.IsArray ? "[]" : "")}.");
         }
+    }
+
+    /// <summary>
+    /// Cross-checks that an explicit shape's product matches the input
+    /// array's element count. Catches the typical user error of passing
+    /// the wrong shape (e.g. forgetting a batch dim, swapping H and W,
+    /// passing an Image-dim shape against a flattened tensor).
+    /// </summary>
+    private static void ValidateShapeMatchesElements(
+        int[] shape, int elementCount, string modelName, string elementKindLabel)
+    {
+        long product = 1;
+        foreach (int dim in shape) product *= dim;
+        if (product != elementCount)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}': infer() shape [{string.Join(", ", shape)}] (product {product}) "
+                + $"doesn't match the {elementKindLabel}[] argument's element count {elementCount}. "
+                + "The shape's product must equal the array length.");
+        }
+    }
+
+    /// <summary>
+    /// Pulls the explicit shape array out of an Int32[] / Int64[] argument
+    /// (or a SQL array literal that coerces to integers). Used by the
+    /// 2-arg <c>infer(value, shape)</c> form. The result is always Int32[]
+    /// because the underlying session API expects <c>int</c> dims.
+    /// </summary>
+    private static int[] ReadShapeArray(ValueRef shapeArg, string modelName)
+    {
+        if (shapeArg.IsNull)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}': infer() shape argument must not be null.");
+        }
+        if (!shapeArg.IsArray)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}': infer() shape argument must be an integer array; got "
+                + $"{shapeArg.Kind}{(shapeArg.IsArray ? "[]" : "")}.");
+        }
+        if (shapeArg.Materialized is int[] int32Direct)
+        {
+            return int32Direct;
+        }
+        if (shapeArg.Materialized is long[] int64Direct)
+        {
+            int[] copied = new int[int64Direct.Length];
+            for (int i = 0; i < int64Direct.Length; i++) copied[i] = checked((int)int64Direct[i]);
+            return copied;
+        }
+        ReadOnlySpan<ValueRef> elements = shapeArg.GetArrayElements();
+        int[] result = new int[elements.Length];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            if (!elements[i].TryToInt32(out int v))
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer() shape element [{i}] ({elements[i].Kind}) "
+                    + "is not coercible to Int32.");
+            }
+            result[i] = v;
+        }
+        return result;
     }
 
     /// <summary>

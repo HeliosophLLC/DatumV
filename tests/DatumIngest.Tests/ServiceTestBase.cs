@@ -3,11 +3,15 @@ using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
+using DatumIngest.ModelLibrary;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
+using DatumIngest.Tests.Infra;
+
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace DatumIngest.Tests;
 
@@ -45,10 +49,82 @@ public abstract class ServiceTestBase : IDisposable
         services.AddDatumIngest();
         services.AddFileFormats();
 
+        // ModelLibrary: the manifest store reads models/catalog.json (resolved
+        // from the test binary upward), the download service can fetch missing
+        // ONNX files from HuggingFace, and a capturing progress reporter lets
+        // tests await `EnsureModelDownloadedAsync`. Adds essentially zero cost
+        // to tests that don't call the helper — the manifest is lazy and the
+        // HTTP client only spins up on first download.
+        services.AddLogging();
+        services.AddModelLibrary(new ModelLibraryOptions(
+            CatalogRootPath: ModelsDirectory,
+            ModelsDirectory: ModelsDirectory));
+        services.AddSingleton<TestDownloadProgressReporter>();
+        services.AddSingleton<IDownloadProgressReporter>(
+            sp => sp.GetRequiredService<TestDownloadProgressReporter>());
+
         ConfigureServices(services);
 
         return services.BuildServiceProvider();
     }
+
+    /// <summary>
+    /// Resolved models directory: the <c>DATUM_MODELS</c> env var when set,
+    /// otherwise the per-user fallback under <c>%LOCALAPPDATA%/DatumIngest/models</c>
+    /// (Windows) or <c>~/.local/share/DatumIngest/models</c> (Linux/macOS).
+    /// Matches <see cref="DatumIngest.Models.ModelCatalog.DefaultModelDirectory"/>
+    /// so tests and production code see the same model files. Set
+    /// <c>DATUM_MODELS=E:\Path\To\Models</c> in your shell to keep large
+    /// model files off the C: drive without changing test code.
+    /// </summary>
+    public static string ModelsDirectory =>
+        Environment.GetEnvironmentVariable("DATUM_MODELS")
+        ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "DatumIngest",
+            "models");
+
+    /// <summary>
+    /// Ensures the catalog entry's files are present on disk, downloading
+    /// from the configured source (HuggingFace today) when missing. Returns
+    /// immediately when the model is already present. Throws
+    /// <see cref="InvalidOperationException"/> if the download fails;
+    /// callers that want to soft-skip the test on network failure should
+    /// catch and bail.
+    /// </summary>
+    /// <param name="modelId">Catalog id, e.g. <c>"paddleocr-v4-det"</c>.</param>
+    /// <param name="timeout">Cap on how long the download can take. Default 5 minutes.</param>
+    protected async Task EnsureModelDownloadedAsync(
+        string modelId,
+        TimeSpan? timeout = null,
+        CancellationToken ct = default)
+    {
+        IModelDownloadService dl = GetService<IModelDownloadService>();
+        ModelInstallState state = await dl.ProbeAsync(modelId, ct).ConfigureAwait(false);
+        if (state is ModelInstallState.Installed or ModelInstallState.Downloaded)
+        {
+            return;
+        }
+
+        // Subscribe to the reporter BEFORE kicking off the download so the
+        // terminal event doesn't fire-and-vanish before we're listening.
+        TestDownloadProgressReporter reporter = GetService<TestDownloadProgressReporter>();
+        using CancellationTokenSource timeoutCts = new(timeout ?? TimeSpan.FromMinutes(5));
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        Task terminal = reporter.WaitForTerminalAsync(modelId, linked.Token);
+
+        await dl.InstallAsync(modelId, linked.Token).ConfigureAwait(false);
+        await terminal.ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Returns the absolute path to a file inside a downloaded model's
+    /// local directory. Convention: <c>&lt;ModelsDirectory&gt;/&lt;modelId&gt;/&lt;fileName&gt;</c>.
+    /// Used by tests that need to point at a specific ONNX/tokenizer file
+    /// after <see cref="EnsureModelDownloadedAsync"/>.
+    /// </summary>
+    protected static string GetDownloadedModelPath(string modelId, string fileName) =>
+        Path.Combine(ModelsDirectory, modelId, fileName);
 
     /// <summary>Resolves a service from the test provider.</summary>
     protected T GetService<T>() where T : notnull
