@@ -1,20 +1,19 @@
-using Tapper;
+﻿// TODO: fold proper XML doc comments + a JsonSerializerContext into a follow-up PR.
+#pragma warning disable CS1591 // missing XML comment for publicly visible type or member
+#pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
-namespace DatumIngest.Web.ModelLibrary;
+namespace DatumIngest.ModelLibrary;
 
-// Push payloads from the server over SignalR for model-download status.
-// Mirrored 1:1 by the TypedSignalR codegen so the React side gets typed
-// callbacks. [TranspilationSource] tells `dotnet-tsrts` to emit each record
-// as a TypeScript interface; without it the transpiler refuses to handle
-// the type and the post-build codegen fails.
+// Lifecycle events emitted by ModelDownloadService through
+// IDownloadProgressReporter. Pure data — hosts that need to surface these
+// over the wire (the Web project's SignalR hub, for example) wrap them in
+// their own DTO types and convert at the boundary.
 
-[TranspilationSource]
 public sealed record ModelDownloadStarted(
     string ModelId,
     int FileCount,
     long TotalBytes);
 
-[TranspilationSource]
 public sealed record ModelDownloadProgress(
     string ModelId,
     string CurrentFile,        // path inside the repo (e.g. "unet/model.onnx")
@@ -25,8 +24,6 @@ public sealed record ModelDownloadProgress(
     long BytesReadTotal,       // across all files in this model
     long BytesTotalAcrossModel);
 
-[TranspilationSource]
 public sealed record ModelDownloadComplete(string ModelId);
 
-[TranspilationSource]
 public sealed record ModelDownloadFailed(string ModelId, string Error);

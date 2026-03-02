@@ -34,3 +34,47 @@ export type CatalogChangedEvent = {
     childName?: string;
 }
 
+/** Transpiled from DatumIngest.Web.Hubs.ModelDownloadStartedDto */
+export type ModelDownloadStartedDto = {
+    /** Transpiled from string */
+    modelId: string;
+    /** Transpiled from int */
+    fileCount: number;
+    /** Transpiled from long */
+    totalBytes: number;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.ModelDownloadProgressDto */
+export type ModelDownloadProgressDto = {
+    /** Transpiled from string */
+    modelId: string;
+    /** Transpiled from string */
+    currentFile: string;
+    /** Transpiled from int */
+    fileIndex: number;
+    /** Transpiled from int */
+    fileCount: number;
+    /** Transpiled from long */
+    bytesReadInFile: number;
+    /** Transpiled from long */
+    bytesTotalInFile: number;
+    /** Transpiled from long */
+    bytesReadTotal: number;
+    /** Transpiled from long */
+    bytesTotalAcrossModel: number;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.ModelDownloadCompleteDto */
+export type ModelDownloadCompleteDto = {
+    /** Transpiled from string */
+    modelId: string;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.ModelDownloadFailedDto */
+export type ModelDownloadFailedDto = {
+    /** Transpiled from string */
+    modelId: string;
+    /** Transpiled from string */
+    error: string;
+}
+

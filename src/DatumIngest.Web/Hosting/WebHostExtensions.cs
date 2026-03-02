@@ -1,6 +1,7 @@
 ﻿using System.Text.Json.Serialization;
 using DatumIngest.Catalog;
 using DatumIngest.Inference;
+using DatumIngest.ModelLibrary;
 using DatumIngest.Models;
 using DatumIngest.Pooling;
 using DatumIngest.Web.Catalog;
@@ -147,15 +148,23 @@ public static class WebHostExtensions
         // each user gets their own settings.json under their compute node.
         services.AddScoped<ISettingsService, LocalSettingsService>();
 
-        // Model catalog: manifest reader (singleton — catalog.json is content
-        // shipped with the app), HF Hub HTTP client, license acceptance, and
-        // the download orchestrator. HfHubClient takes a long-lived HttpClient
-        // from IHttpClientFactory; downloads are multi-GB streams and a fresh
-        // socket per download is fine.
-        services.AddSingleton<IManifestStore, ManifestStore>();
-        services.AddSingleton<ILicenseAcceptanceService, LicenseAcceptanceService>();
-        services.AddHttpClient<HfHubClient>();
-        services.AddSingleton<IModelDownloadService, ModelDownloadService>();
+        // Model catalog: manifest reader, HF Hub HTTP client, license
+        // acceptance, and the download orchestrator. AddModelLibrary lives in
+        // the DatumIngest core assembly — tests and CLI consumers can pull
+        // the same surface without dragging in the Web project. The Web host
+        // then registers a SignalR-backed progress reporter that bridges
+        // core download events to connected hub clients.
+        ModelLibraryOptions modelLibraryOptions = new(
+            CatalogRootPath: options.CatalogRootPath ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "DatumIngest"),
+            ModelsDirectory: options.ModelsDirectory
+                ?? Environment.GetEnvironmentVariable("DATUM_MODELS")
+                ?? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "DatumIngest", "models"));
+        services.AddModelLibrary(modelLibraryOptions);
+        services.AddSingleton<IDownloadProgressReporter, SignalRDownloadProgressReporter>();
 
         services.AddControllers()
             .AddJsonOptions(o =>

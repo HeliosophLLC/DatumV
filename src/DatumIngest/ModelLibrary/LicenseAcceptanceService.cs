@@ -1,7 +1,11 @@
-﻿using System.Text.Json;
-using DatumIngest.Web.Hosting;
+﻿// TODO: fold proper XML doc comments + a JsonSerializerContext into a follow-up PR.
+#pragma warning disable CS1591 // missing XML comment for publicly visible type or member
+#pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
-namespace DatumIngest.Web.ModelLibrary;
+using System.Text.Json;
+
+
+namespace DatumIngest.ModelLibrary;
 
 internal sealed class LicenseAcceptanceService : ILicenseAcceptanceService
 {
@@ -9,12 +13,9 @@ internal sealed class LicenseAcceptanceService : ILicenseAcceptanceService
     private readonly SemaphoreSlim _lock = new(1, 1);
     private HashSet<string>? _cache;
 
-    public LicenseAcceptanceService(WebHostOptions options)
+    public LicenseAcceptanceService(ModelLibraryOptions options)
     {
-        string root = options.CatalogRootPath
-            ?? throw new InvalidOperationException(
-                "License acceptance requires CatalogRootPath to be set.");
-        _path = Path.Combine(root, "license-acceptance.json");
+        _path = Path.Combine(options.CatalogRootPath, "license-acceptance.json");
     }
 
     public async Task<bool> IsAcceptedAsync(string licenseId, CancellationToken ct = default)

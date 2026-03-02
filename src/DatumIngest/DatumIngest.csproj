@@ -46,6 +46,19 @@
     <PackageReference Include="LLamaSharp" Version="0.27.0" />
     <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="0.27.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
+    <!--
+      Microsoft.Extensions.Http supplies AddHttpClient<TClient> + the
+      IHttpClientFactory it registers. Required by ModelLibrary's HfHubClient
+      (one HttpClient with connection pooling, lifecycle-managed by the
+      framework instead of `new HttpClient()` per resolve).
+    -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.5" />
+    <!--
+      Microsoft.Extensions.FileSystemGlobbing supplies the Matcher used by
+      HfHubClient.FilterByIncludes to apply `**/*`, `onnx/*`, etc. glob
+      patterns from catalog source.include against the HF tree listing.
+    -->
+    <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.5" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.25.1" />
     <!--
       ORT GenAI 0.13.x targets ORT 1.25.x — the matching managed-runtime layer

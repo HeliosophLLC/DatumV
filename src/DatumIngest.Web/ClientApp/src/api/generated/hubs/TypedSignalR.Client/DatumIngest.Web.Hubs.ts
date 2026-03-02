@@ -3,8 +3,7 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { IStreamResult, Subject } from '@microsoft/signalr';
-import type { CatalogChangedEvent } from '../DatumIngest.Web.Hubs';
-import type { ModelDownloadStarted, ModelDownloadProgress, ModelDownloadComplete, ModelDownloadFailed } from '../DatumIngest.Web.ModelLibrary';
+import type { CatalogChangedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
 
 export type ICatalogHub = {
     /**
@@ -65,24 +64,24 @@ export type IStreamHubClient = {
     */
     onError(message: string): Promise<void>;
     /**
-    * @param started Transpiled from DatumIngest.Web.ModelLibrary.ModelDownloadStarted
+    * @param started Transpiled from DatumIngest.Web.Hubs.ModelDownloadStartedDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
-    onModelDownloadStarted(started: ModelDownloadStarted): Promise<void>;
+    onModelDownloadStarted(started: ModelDownloadStartedDto): Promise<void>;
     /**
-    * @param progress Transpiled from DatumIngest.Web.ModelLibrary.ModelDownloadProgress
+    * @param progress Transpiled from DatumIngest.Web.Hubs.ModelDownloadProgressDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
-    onModelDownloadProgress(progress: ModelDownloadProgress): Promise<void>;
+    onModelDownloadProgress(progress: ModelDownloadProgressDto): Promise<void>;
     /**
-    * @param complete Transpiled from DatumIngest.Web.ModelLibrary.ModelDownloadComplete
+    * @param complete Transpiled from DatumIngest.Web.Hubs.ModelDownloadCompleteDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
-    onModelDownloadComplete(complete: ModelDownloadComplete): Promise<void>;
+    onModelDownloadComplete(complete: ModelDownloadCompleteDto): Promise<void>;
     /**
-    * @param failed Transpiled from DatumIngest.Web.ModelLibrary.ModelDownloadFailed
+    * @param failed Transpiled from DatumIngest.Web.Hubs.ModelDownloadFailedDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
-    onModelDownloadFailed(failed: ModelDownloadFailed): Promise<void>;
+    onModelDownloadFailed(failed: ModelDownloadFailedDto): Promise<void>;
 }
 

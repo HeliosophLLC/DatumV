@@ -1,4 +1,4 @@
-using DatumIngest.Web.ModelLibrary;
+using DatumIngest.ModelLibrary;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DatumIngest.Web.Api;

@@ -7,12 +7,22 @@ import type {
   IStreamHub,
   IStreamHubClient,
 } from './generated/hubs/TypedSignalR.Client/DatumIngest.Web.Hubs';
+// The codegen emits these as `*Dto` types (matching the C# DTO names in
+// DatumIngest.Web.Hubs/ModelDownloadDtos.cs). Alias them to the
+// suffix-free names that downstream consumers already use, so the file
+// rename + DTO suffix don't leak past this boundary.
 import type {
+  ModelDownloadStartedDto as ModelDownloadStarted,
+  ModelDownloadProgressDto as ModelDownloadProgress,
+  ModelDownloadCompleteDto as ModelDownloadComplete,
+  ModelDownloadFailedDto as ModelDownloadFailed,
+} from './generated/hubs/DatumIngest.Web.Hubs';
+export type {
   ModelDownloadStarted,
   ModelDownloadProgress,
   ModelDownloadComplete,
   ModelDownloadFailed,
-} from './generated/hubs/DatumIngest.Web.ModelLibrary';
+};
 
 // Singleton HubConnection + proxy + a fan-out dispatcher.
 //

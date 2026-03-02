@@ -1,16 +1,19 @@
-﻿using System.Collections.Concurrent;
-using DatumIngest.Web.Hosting;
-using DatumIngest.Web.Hubs;
-using Microsoft.AspNetCore.SignalR;
+﻿// TODO: fold proper XML doc comments + a JsonSerializerContext into a follow-up PR.
+#pragma warning disable CS1591 // missing XML comment for publicly visible type or member
+#pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
-namespace DatumIngest.Web.ModelLibrary;
+using System.Collections.Concurrent;
+
+using Microsoft.Extensions.Logging;
+
+namespace DatumIngest.ModelLibrary;
 
 internal sealed class ModelDownloadService : IModelDownloadService
 {
     private readonly IManifestStore _store;
     private readonly HfHubClient _hub;
     private readonly ILicenseAcceptanceService _licenses;
-    private readonly IHubContext<StreamHub, IStreamHubClient> _signalR;
+    private readonly IDownloadProgressReporter _reporter;
     private readonly ILogger<ModelDownloadService> _logger;
     private readonly string _modelsDirectory;
 
@@ -23,21 +26,16 @@ internal sealed class ModelDownloadService : IModelDownloadService
         IManifestStore store,
         HfHubClient hub,
         ILicenseAcceptanceService licenses,
-        IHubContext<StreamHub, IStreamHubClient> signalR,
-        WebHostOptions options,
+        IDownloadProgressReporter reporter,
+        ModelLibraryOptions options,
         ILogger<ModelDownloadService> logger)
     {
         _store = store;
         _hub = hub;
         _licenses = licenses;
-        _signalR = signalR;
+        _reporter = reporter;
         _logger = logger;
-
-        _modelsDirectory = options.ModelsDirectory
-            ?? Environment.GetEnvironmentVariable("DATUM_MODELS")
-            ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DatumIngest", "models");
+        _modelsDirectory = options.ModelsDirectory;
     }
 
     public async Task<ModelInstallState> ProbeAsync(string modelId, CancellationToken ct = default)
@@ -225,8 +223,9 @@ internal sealed class ModelDownloadService : IModelDownloadService
             IReadOnlyList<HfTreeEntry> files = HfHubClient.FilterByIncludes(raw, model.Source.Include);
 
             long totalBytes = files.Sum(f => f.Size);
-            await _signalR.Clients.All.OnModelDownloadStarted(
-                new ModelDownloadStarted(model.Id, files.Count, totalBytes)).ConfigureAwait(false);
+            await _reporter.OnStartedAsync(
+                new ModelDownloadStarted(model.Id, files.Count, totalBytes), ct)
+                .ConfigureAwait(false);
 
             long bytesAcrossModel = 0;
             for (int i = 0; i < files.Count; i++)
@@ -237,9 +236,14 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 int index = i;
                 long fileSize = file.Size;
                 long bytesAtStart = bytesAcrossModel;
+                CancellationToken progressCt = ct;
                 var progress = new Progress<DownloadByteProgress>(p =>
                 {
-                    _ = _signalR.Clients.All.OnModelDownloadProgress(new ModelDownloadProgress(
+                    // Fire-and-forget: convert to Task so a ValueTask backed
+                    // by IValueTaskSource (some custom reporter impls) isn't
+                    // discarded improperly. The Progress<T> callback is sync;
+                    // we don't want to block the download loop per emit.
+                    _ = _reporter.OnProgressAsync(new ModelDownloadProgress(
                         ModelId: model.Id,
                         CurrentFile: file.Path,
                         FileIndex: index + 1,
@@ -247,7 +251,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
                         BytesReadInFile: p.BytesRead,
                         BytesTotalInFile: p.BytesTotal ?? fileSize,
                         BytesReadTotal: bytesAtStart + p.BytesRead,
-                        BytesTotalAcrossModel: totalBytes));
+                        BytesTotalAcrossModel: totalBytes), progressCt).AsTask();
                 });
 
                 string actualSha = await _hub.DownloadFileAsync(
@@ -267,19 +271,22 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 bytesAcrossModel += file.Size;
             }
 
-            await _signalR.Clients.All.OnModelDownloadComplete(
-                new ModelDownloadComplete(model.Id)).ConfigureAwait(false);
+            await _reporter.OnCompleteAsync(
+                new ModelDownloadComplete(model.Id), CancellationToken.None)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            await _signalR.Clients.All.OnModelDownloadFailed(
-                new ModelDownloadFailed(model.Id, "cancelled")).ConfigureAwait(false);
+            await _reporter.OnFailedAsync(
+                new ModelDownloadFailed(model.Id, "cancelled"), CancellationToken.None)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Download of {ModelId} failed", model.Id);
-            await _signalR.Clients.All.OnModelDownloadFailed(
-                new ModelDownloadFailed(model.Id, ex.Message)).ConfigureAwait(false);
+            await _reporter.OnFailedAsync(
+                new ModelDownloadFailed(model.Id, ex.Message), CancellationToken.None)
+                .ConfigureAwait(false);
         }
         finally
         {

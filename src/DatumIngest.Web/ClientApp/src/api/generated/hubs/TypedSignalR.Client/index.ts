@@ -4,8 +4,7 @@
 // @ts-nocheck
 import type { HubConnection, IStreamResult, Subject } from '@microsoft/signalr';
 import type { ICatalogHub, IStreamHub, ICatalogHubClient, IStreamHubClient } from './DatumIngest.Web.Hubs';
-import type { CatalogChangedEvent } from '../DatumIngest.Web.Hubs';
-import type { ModelDownloadStarted, ModelDownloadProgress, ModelDownloadComplete, ModelDownloadFailed } from '../DatumIngest.Web.ModelLibrary';
+import type { CatalogChangedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
 
 
 // components
@@ -163,10 +162,10 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
         const __onToken = (...args: [string]) => receiver.onToken(...args);
         const __onComplete = () => receiver.onComplete();
         const __onError = (...args: [string]) => receiver.onError(...args);
-        const __onModelDownloadStarted = (...args: [ModelDownloadStarted]) => receiver.onModelDownloadStarted(...args);
-        const __onModelDownloadProgress = (...args: [ModelDownloadProgress]) => receiver.onModelDownloadProgress(...args);
-        const __onModelDownloadComplete = (...args: [ModelDownloadComplete]) => receiver.onModelDownloadComplete(...args);
-        const __onModelDownloadFailed = (...args: [ModelDownloadFailed]) => receiver.onModelDownloadFailed(...args);
+        const __onModelDownloadStarted = (...args: [ModelDownloadStartedDto]) => receiver.onModelDownloadStarted(...args);
+        const __onModelDownloadProgress = (...args: [ModelDownloadProgressDto]) => receiver.onModelDownloadProgress(...args);
+        const __onModelDownloadComplete = (...args: [ModelDownloadCompleteDto]) => receiver.onModelDownloadComplete(...args);
+        const __onModelDownloadFailed = (...args: [ModelDownloadFailedDto]) => receiver.onModelDownloadFailed(...args);
 
         connection.on("OnPong", __onPong);
         connection.on("OnToken", __onToken);
