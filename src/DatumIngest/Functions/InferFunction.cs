@@ -14,11 +14,15 @@ namespace DatumIngest.Functions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <strong>Scope (smallest viable).</strong> Single-input, single-output
-/// sessions only. Multi-input bundles need either a struct-of-tensors
-/// argument shape or named overloads; multi-output bundles need a
-/// struct-of-tensors return shape. Both extensions are mechanical and
-/// land when the first multi-tensor model demands them.
+/// <strong>Scope.</strong> Single-output sessions only. Multi-input is
+/// supported via a struct argument: <c>infer({a: x, b: y})</c> binds
+/// each session input by name (case-insensitive). For multi-input sessions
+/// with multiple dynamic dimensions per input — BERT-family transformers
+/// where every input is <c>[batch, seq_len]</c> — pass a parallel
+/// struct of shape arrays as the second argument:
+/// <c>infer({a: x, b: y}, {a: [1, n], b: [1, n]})</c>.
+/// Multi-output bundles still need a struct-of-tensors return shape and
+/// land when the first multi-output model demands them.
 /// </para>
 /// <para>
 /// <strong>Argument marshalling.</strong>
@@ -29,6 +33,8 @@ namespace DatumIngest.Functions;
 ///   <item><description>Primitive arrays passed via
 ///   <see cref="ValueRef.FromPrimitiveArray{T}"/> flow through directly,
 ///   preserving the array's flat element count.</description></item>
+///   <item><description>Struct arguments unpack by field name into the
+///   session's input bag; one field per session input.</description></item>
 /// </list>
 /// </para>
 /// <para>
@@ -61,18 +67,36 @@ public sealed class InferFunction : IFunction, IScalarFunction
         + "spec (works when ≤1 dynamic dim). "
         + "infer(value, shape Int32[]) overrides the shape explicitly — required "
         + "when the input spec has multiple dynamic dims (e.g. PP-OCR-det's "
-        + "[-1, 3, -1, -1] where batch + H + W are all dynamic). v1 supports "
-        + "single-input, single-output sessions; multi-tensor bundles "
-        + "are a follow-up.";
+        + "[-1, 3, -1, -1] where batch + H + W are all dynamic). "
+        + "infer({a: x, b: y}) and infer({a: x, b: y}, {a: [..], b: [..]}) "
+        + "feed a multi-input session by matching struct field names to session "
+        + "input names case-insensitively. v1 supports single-output sessions; "
+        + "multi-output bundles are a follow-up.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
     [
-        // 2-arg form: explicit shape. Required when the session's input
-        // shape has multiple dynamic dimensions (e.g. PP-OCR-det's
-        // `[-1, 3, -1, -1]` — batch + H + W are all dynamic and can't be
-        // disambiguated from the array length alone). The shape array is
-        // passed straight through to the session as the tensor's dims.
+        // 2-arg multi-input form: struct of tensors + struct of explicit
+        // shapes, fields matched by name. Required for BERT-family
+        // transformers where every input has multiple dynamic dims
+        // ([batch, seq_len]) so the per-input shape can't be inferred
+        // from a single 1-d array length. Listed BEFORE the (Any, Int[])
+        // form so the matcher prefers the more specific (Struct, Struct)
+        // shape when both could apply.
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("inputs", DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("shapes", DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Scalar),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.SameAs(0)),
+        // 2-arg single-input form: value + explicit shape array. Required
+        // when the session's input shape has multiple dynamic dimensions
+        // (e.g. PP-OCR-det's `[-1, 3, -1, -1]` — batch + H + W are all
+        // dynamic and can't be disambiguated from the array length alone).
+        // The shape array is passed straight through to the session as the
+        // tensor's dims.
         new FunctionSignatureVariant(
             Parameters:
             [
@@ -81,13 +105,13 @@ public sealed class InferFunction : IFunction, IScalarFunction
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.SameAs(0)),
-        // 1-arg form: any numeric scalar or primitive array. The return
-        // rule is SameAs(0) because v1 echoes the argument kind — the
-        // session's actual output kind is decided at run time, and the
+        // 1-arg form: any numeric scalar, primitive array, or struct. The
+        // return rule is SameAs(0) because v1 echoes the argument kind —
+        // the session's actual output kind is decided at run time, and the
         // surrounding model body's RETURN coercion takes care of any
-        // mismatch with the declared model return type. The shape is
-        // resolved from the session's input spec; works for shapes with
-        // ≤1 dynamic dimension.
+        // mismatch with the declared model return type. For a struct
+        // argument, each session input's shape is resolved from its own
+        // input spec (works when each spec has ≤1 dynamic dim).
         new FunctionSignatureVariant(
             Parameters: [new ParameterSpec("value", DataKindMatcher.Any)],
             VariadicTrailing: null,
@@ -128,13 +152,12 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 + "USING file).");
         }
 
-        if (session.Inputs.Count != 1 || session.Outputs.Count != 1)
+        if (session.Outputs.Count != 1)
         {
             throw new InvalidOperationException(
                 $"Model '{model.QualifiedName.ToString()}': infer() v1 supports only "
-                + $"single-input, single-output sessions, but the bound session "
-                + $"declares {session.Inputs.Count} input(s) and {session.Outputs.Count} "
-                + "output(s). Multi-tensor support is a follow-up.");
+                + $"single-output sessions, but the bound session declares "
+                + $"{session.Outputs.Count} output(s). Multi-output support is a follow-up.");
         }
 
         ReadOnlySpan<ValueRef> args = arguments.Span;
@@ -145,6 +168,28 @@ public sealed class InferFunction : IFunction, IScalarFunction
         }
 
         ValueRef arg = args[0];
+
+        // Multi-input dispatch: a struct argument unpacks by field name
+        // into the session's input bag. Routes here for any (Struct) or
+        // (Struct, Struct) call regardless of session arity — a struct arg
+        // against a single-input session is allowed but unusual.
+        if (arg.Kind == DataKind.Struct && !arg.IsArray)
+        {
+            ValueRef? shapeStructArg = args.Length == 2 ? args[1] : null;
+            return await ExecuteMultiInputAsync(
+                session, arg, shapeStructArg, frame, model.QualifiedName.ToString(), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (session.Inputs.Count != 1)
+        {
+            throw new InvalidOperationException(
+                $"Model '{model.QualifiedName.ToString()}': scalar infer() requires a "
+                + $"single-input session, but the bound session declares "
+                + $"{session.Inputs.Count} input(s). Use the struct form "
+                + "infer({{field_name := value, ...}}) to bind multiple inputs by name.");
+        }
+
         int[]? explicitShape = null;
         if (args.Length == 2)
         {
@@ -177,6 +222,133 @@ public sealed class InferFunction : IFunction, IScalarFunction
             }
 
             return ReadOutputTensor(outputTensor, model.QualifiedName.ToString());
+        }
+        finally
+        {
+            inputBag.Dispose();
+            outputBag?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Multi-input dispatch path. Takes a struct value whose field names
+    /// match the session's input names case-insensitively, optionally a
+    /// parallel struct of explicit shape arrays, and feeds every session
+    /// input from the corresponding field. Used for BERT-family transformers
+    /// where every input has multiple dynamic dims and per-input shape can't
+    /// be inferred from a 1-d array length.
+    /// </summary>
+    private static async ValueTask<ValueRef> ExecuteMultiInputAsync(
+        IInferenceSession session,
+        ValueRef inputsStruct,
+        ValueRef? shapesStruct,
+        EvaluationFrame frame,
+        string modelName,
+        CancellationToken cancellationToken)
+    {
+        if (frame.Types is null)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}': multi-input infer() requires a TypeRegistry on the "
+                + "evaluation frame to resolve struct field names against session inputs.");
+        }
+        if (inputsStruct.IsNull)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}': multi-input infer() input struct must not be null.");
+        }
+
+        TypeDescriptor? inputsDesc = frame.Types.GetDescriptor(inputsStruct.TypeId);
+        if (inputsDesc?.Fields is null || inputsDesc.Fields.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}': multi-input infer() inputs struct has no field "
+                + "descriptors — the struct must be built from a literal with named fields.");
+        }
+
+        TypeDescriptor? shapesDesc = null;
+        if (shapesStruct is { } shapeArg)
+        {
+            if (shapeArg.IsNull)
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': multi-input infer() shapes struct must not be null.");
+            }
+            if (shapeArg.Kind != DataKind.Struct || shapeArg.IsArray)
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': multi-input infer() expected a Struct shapes "
+                    + $"argument, got {shapeArg.Kind}{(shapeArg.IsArray ? "[]" : "")}.");
+            }
+            shapesDesc = frame.Types.GetDescriptor(shapeArg.TypeId);
+            if (shapesDesc?.Fields is null)
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': multi-input infer() shapes struct has no field "
+                    + "descriptors.");
+            }
+        }
+
+        // Snapshot field spans into local arrays so we can iterate them
+        // across the await without holding a ReadOnlySpan over a struct.
+        ReadOnlySpan<ValueRef> inputFieldsSpan = inputsStruct.GetStructFields();
+        ValueRef[] inputFields = new ValueRef[inputFieldsSpan.Length];
+        inputFieldsSpan.CopyTo(inputFields);
+
+        ValueRef[]? shapeFields = null;
+        if (shapesStruct is { } sa)
+        {
+            ReadOnlySpan<ValueRef> shapeFieldsSpan = sa.GetStructFields();
+            shapeFields = new ValueRef[shapeFieldsSpan.Length];
+            shapeFieldsSpan.CopyTo(shapeFields);
+        }
+
+        TensorBag inputBag = session.CreateInputBag();
+        TensorBag? outputBag = null;
+        try
+        {
+            foreach (TensorSpec inputSpec in session.Inputs)
+            {
+                int fieldIdx = inputsDesc.FindFieldIndex(inputSpec.Name);
+                if (fieldIdx < 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Model '{modelName}': multi-input infer() inputs struct has no field "
+                        + $"matching session input '{inputSpec.Name}'. Available fields: "
+                        + $"{string.Join(", ", inputsDesc.Fields.Select(f => f.Name))}.");
+                }
+
+                int[]? explicitShape = null;
+                if (shapesDesc is not null)
+                {
+                    int shapeIdx = shapesDesc.FindFieldIndex(inputSpec.Name);
+                    if (shapeIdx < 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"Model '{modelName}': multi-input infer() shapes struct has no field "
+                            + $"matching session input '{inputSpec.Name}'. Available fields: "
+                            + $"{string.Join(", ", shapesDesc.Fields!.Select(f => f.Name))}.");
+                    }
+                    explicitShape = ReadShapeArray(shapeFields![shapeIdx], modelName);
+                }
+
+                AddInputTensor(inputBag, inputSpec, inputFields[fieldIdx], modelName, explicitShape);
+            }
+
+            outputBag = await session
+                .RunAsync(inputBag, cancellationToken)
+                .ConfigureAwait(false);
+
+            TensorSpec outputSpec = session.Outputs[0];
+            if (!outputBag.TryGet(outputSpec.Name, out IInferenceTensor outputTensor))
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': session returned no tensor named '{outputSpec.Name}' "
+                    + "(declared output). The session implementation is misconfigured — "
+                    + "its output bag must contain every name in Outputs.");
+            }
+
+            return ReadOutputTensor(outputTensor, modelName);
         }
         finally
         {

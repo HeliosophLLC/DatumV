@@ -381,6 +381,83 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Equal(6.0f, values[0].AsFloat32());
     }
 
+    [Fact]
+    public async Task Infer_MultiInput_StructArg_FeedsSessionInputsByFieldName()
+    {
+        // Multi-input v1: pass a struct of tensors whose field names match
+        // the session's input names. The stub session takes two Int64
+        // scalars (input_a + input_b) and emits their sum as a Float32. The
+        // body's `infer({input_a: a, input_b: b})` proves struct-arg
+        // dispatch, name-based input resolution, and the no-explicit-shape
+        // fast path (each input's [1] spec resolves without help).
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        dispatcher.NextSession = StubSession.MultiInputInt64Sum();
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["a", "b"], [new object?[] { 7L, 1L }]));
+
+        catalog.Plan(
+            $"CREATE MODEL adder(a Int64, b Int64) RETURNS Float32 USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN infer({{input_a: a, input_b: b}}) END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.adder(a, b) FROM data");
+
+        List<DataValue> values = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][0]);
+            }
+        }
+        Assert.Single(values);
+        Assert.Equal(DataKind.Float32, values[0].Kind);
+        Assert.Equal(8.0f, values[0].AsFloat32());
+    }
+
+    [Fact]
+    public async Task Infer_MultiInput_StructArgWithExplicitShapes_RoutesParallelShapesByFieldName()
+    {
+        // Exercises the (Struct, Struct) 2-arg form — the canonical shape
+        // for BERT-family embedding models where every input has multiple
+        // dynamic dims and the per-input shape can't be inferred from a 1-d
+        // length alone. The stub session declares both inputs as fully-
+        // dynamic ([null, null]) so the dispatch is FORCED through the
+        // explicit-shape path: a 1-arg struct call would throw at shape
+        // resolution. The test passes only if each shape-struct field
+        // routes to its corresponding session input by name.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        dispatcher.NextSession = StubSession.MultiInputMaskedDotProduct();
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["a", "b"], [new object?[] { 7L, 1L }]));
+
+        catalog.Plan(
+            $"CREATE MODEL embed(a Int64, b Int64) RETURNS Float32 USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN infer("
+            + $"{{input_ids: a, attention_mask: b}}, "
+            + $"{{input_ids: [CAST(1 AS Int32), CAST(1 AS Int32)], "
+            + $"attention_mask: [CAST(1 AS Int32), CAST(1 AS Int32)]}}) END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.embed(a, b) FROM data");
+
+        List<DataValue> values = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][0]);
+            }
+        }
+        Assert.Single(values);
+        Assert.Equal(DataKind.Float32, values[0].Kind);
+        Assert.Equal(7.0f, values[0].AsFloat32()); // 7L * 1L = 7
+    }
+
     // ───────────────────── Stubs ─────────────────────
 
     /// <summary>
@@ -485,6 +562,58 @@ public sealed class ModelRegistrationTests : ServiceTestBase
                 }
                 StubTensorBag output = new();
                 output.Add<float>("output", DataKind.Float32, [doubled.Length], doubled.AsSpan());
+                return output;
+            });
+
+        /// <summary>
+        /// Two-input scalar Int64 session that emits the sum as a Float32
+        /// scalar. Smallest shape for multi-input infer() dispatch — both
+        /// inputs have a fully-determined [1] spec so no explicit-shape
+        /// argument is needed.
+        /// </summary>
+        public static StubSession MultiInputInt64Sum() => new(
+            inputs:
+            [
+                new TensorSpec("input_a", DataKind.Int64, [1]),
+                new TensorSpec("input_b", DataKind.Int64, [1]),
+            ],
+            outputs: [new TensorSpec("output", DataKind.Float32, [1])],
+            run: bag =>
+            {
+                long a = bag["input_a"].AsSpan<long>()[0];
+                long b = bag["input_b"].AsSpan<long>()[0];
+                float sum = a + b;
+                StubTensorBag output = new();
+                output.Add<float>("output", DataKind.Float32, [1], new[] { sum }.AsSpan());
+                return output;
+            });
+
+        /// <summary>
+        /// BERT-shaped two-input session: <c>input_ids</c> and
+        /// <c>attention_mask</c> both as <see cref="DataKind.Int64"/> with
+        /// shape <c>[batch=?, seq_len=?]</c> (every dim dynamic), output
+        /// <c>pooled</c> as <see cref="DataKind.Float32"/>. The dual-dynamic
+        /// input shape forces the call-site to pass explicit shapes — the
+        /// canonical scenario for the (Struct, Struct) infer() form. Run
+        /// delegate emits <c>sum(ids[i] * mask[i])</c> so tests can assert
+        /// on a deterministic Float32 scalar.
+        /// </summary>
+        public static StubSession MultiInputMaskedDotProduct() => new(
+            inputs:
+            [
+                new TensorSpec("input_ids",      DataKind.Int64, new int?[] { null, null }),
+                new TensorSpec("attention_mask", DataKind.Int64, new int?[] { null, null }),
+            ],
+            outputs: [new TensorSpec("pooled", DataKind.Float32, new int?[] { 1 })],
+            run: bag =>
+            {
+                ReadOnlySpan<long> ids  = bag["input_ids"].AsSpan<long>();
+                ReadOnlySpan<long> mask = bag["attention_mask"].AsSpan<long>();
+                float sum = 0;
+                int n = System.Math.Min(ids.Length, mask.Length);
+                for (int i = 0; i < n; i++) sum += ids[i] * mask[i];
+                StubTensorBag output = new();
+                output.Add<float>("pooled", DataKind.Float32, [1], new[] { sum }.AsSpan());
                 return output;
             });
     }

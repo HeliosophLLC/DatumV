@@ -20,7 +20,7 @@ namespace DatumIngest.Functions.Scalar.Image;
 /// the input from an image.
 /// </para>
 /// <para>
-/// <strong>Algorithm.</strong> Identical to <c>PpOcrDetectionModel.FindRegions</c>:
+/// <strong>Algorithm.</strong> The canonical DBNet post-processing recipe:
 /// <list type="number">
 ///   <item>Per-pixel threshold at <c>pixel_threshold</c> (PaddleOCR default 0.3).</item>
 ///   <item>BFS over surviving pixels with 4-connectivity; each connected
@@ -178,7 +178,7 @@ public sealed class DbnetPostprocessFunction : IFunction, IScalarFunction
     /// probability map, with per-component bbox + mean score. Each
     /// surviving component is DBNet-unclipped and mapped back to
     /// original-image coordinates. Mirrors
-    /// <c>PpOcrDetectionModel.FindRegions</c> 1:1 — same component shapes,
+    /// PaddleOCR's reference DBNet post-processing 1:1 — same component shapes,
     /// same accept/reject rules, same unclip formula — so the SQL-defined
     /// model produces equivalent boxes to the C# IModel.
     /// </summary>

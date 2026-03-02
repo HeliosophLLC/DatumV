@@ -142,7 +142,7 @@ public sealed class ProceduralModelFunction : IScalarFunction
             sidecarRegistry: frame.SidecarRegistry,
             variableScope: scope,
             variableStore: variableStore,
-            typeRegistry: null);
+            typeRegistry: frame.Types);
 
         // The load-bearing tweak vs ProceduralUdfFunction: body frame
         // carries this model's descriptor so infer() can resolve its

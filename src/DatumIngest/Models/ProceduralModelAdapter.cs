@@ -142,6 +142,10 @@ public sealed class ProceduralModelAdapter : IModel
         // doesn't match the declared RETURNS T). Released on exit.
         Arena arena = new();
         arena.AddReference();
+        // One TypeRegistry per batch so struct literals inside the body
+        // (e.g. multi-input infer({...})) get a stable typeId that the
+        // scalar function path can resolve back to field descriptors.
+        TypeRegistry typeRegistry = new();
         try
         {
             ValueRef[] results = new ValueRef[rowCount];
@@ -165,7 +169,7 @@ public sealed class ProceduralModelAdapter : IModel
                     arena,
                     outerRow: null,
                     sidecarRegistry: null,
-                    types: null);
+                    types: typeRegistry);
 
                 results[row] = await _function
                     .ExecuteAsync(args.AsMemory(0, suppliedCount), frame, cancellationToken)

@@ -117,9 +117,11 @@ public static class ModelBodyLowerer
                     // would need a separate "introduce a literal NULL
                     // column" path the lowerer doesn't bother with.
                     if (decl.Initializer is null) return false;
+                    if (ContainsMultiInputInfer(decl.Initializer)) return false;
                     break;
-                case ReturnStatement when i == body.Count - 1:
+                case ReturnStatement ret when i == body.Count - 1:
                     // Tail RETURN is the only valid terminator.
+                    if (ContainsMultiInputInfer(ret.Value)) return false;
                     break;
                 default:
                     // SET, IF, WHILE, BLOCK, BREAK, CONTINUE, mid-body RETURN,
@@ -128,6 +130,80 @@ public static class ModelBodyLowerer
             }
         }
         return body[^1] is ReturnStatement;
+    }
+
+    /// <summary>
+    /// Returns whether <paramref name="expr"/> (or any sub-expression)
+    /// is a multi-input <c>infer()</c> call — i.e. an infer whose first
+    /// argument is a struct literal. The lowerer's InferOperator path
+    /// only handles single-tensor inputs (with an optional shape array);
+    /// multi-input bodies fall back to the row-at-a-time
+    /// <c>ProceduralModelAdapter</c> path where the scalar
+    /// <c>InferFunction</c> handles the struct unpack natively.
+    /// </summary>
+    private static bool ContainsMultiInputInfer(Expression? expr)
+    {
+        if (expr is null) return false;
+        switch (expr)
+        {
+            case FunctionCallExpression fc:
+                if (IsInferCall(fc)
+                    && fc.Arguments.Count >= 1
+                    && fc.Arguments[0] is StructLiteralExpression)
+                {
+                    return true;
+                }
+                for (int i = 0; i < fc.Arguments.Count; i++)
+                {
+                    if (ContainsMultiInputInfer(fc.Arguments[i])) return true;
+                }
+                return false;
+            case BinaryExpression b:
+                return ContainsMultiInputInfer(b.Left) || ContainsMultiInputInfer(b.Right);
+            case UnaryExpression u:
+                return ContainsMultiInputInfer(u.Operand);
+            case CastExpression c:
+                return ContainsMultiInputInfer(c.Expression);
+            case IsNullExpression n:
+                return ContainsMultiInputInfer(n.Expression);
+            case InExpression i:
+                if (ContainsMultiInputInfer(i.Expression)) return true;
+                for (int k = 0; k < i.Values.Count; k++)
+                {
+                    if (ContainsMultiInputInfer(i.Values[k])) return true;
+                }
+                return false;
+            case BetweenExpression bt:
+                return ContainsMultiInputInfer(bt.Expression)
+                    || ContainsMultiInputInfer(bt.Low)
+                    || ContainsMultiInputInfer(bt.High);
+            case CaseExpression ce:
+                if (ce.Operand is not null && ContainsMultiInputInfer(ce.Operand)) return true;
+                for (int k = 0; k < ce.WhenClauses.Count; k++)
+                {
+                    if (ContainsMultiInputInfer(ce.WhenClauses[k].Condition)) return true;
+                    if (ContainsMultiInputInfer(ce.WhenClauses[k].Result)) return true;
+                }
+                return ce.ElseResult is not null && ContainsMultiInputInfer(ce.ElseResult);
+            case LikeExpression like:
+                return ContainsMultiInputInfer(like.Expression)
+                    || ContainsMultiInputInfer(like.Pattern)
+                    || ContainsMultiInputInfer(like.EscapeCharacter);
+            case StructLiteralExpression sl:
+                for (int k = 0; k < sl.Fields.Count; k++)
+                {
+                    if (ContainsMultiInputInfer(sl.Fields[k].Value)) return true;
+                }
+                return false;
+            case IndexAccessExpression ia:
+                return ContainsMultiInputInfer(ia.Source) || ContainsMultiInputInfer(ia.Index);
+            case AtTimeZoneExpression atz:
+                return ContainsMultiInputInfer(atz.Expression) || ContainsMultiInputInfer(atz.TimeZone);
+            case LambdaExpression lam:
+                return ContainsMultiInputInfer(lam.Body);
+            default:
+                return false;
+        }
     }
 
     /// <summary>
