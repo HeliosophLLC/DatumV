@@ -193,7 +193,13 @@ public sealed class QueryPlanner
     private IQueryOperator Finalize(IQueryOperator op)
     {
         IQueryOperator afterModelHoist = ModelInvocationHoister.Hoist(op, _catalog.Models);
-        return CommonSubexpressionEliminator.Eliminate(afterModelHoist, _functionRegistry);
+        // Post-pass: replace MIOs that target SQL-defined straight-line bodies
+        // with a lowered chain of ProjectOperator + InferOperator nodes. Non-
+        // lowerable bodies stay on the MIO + ProceduralModelAdapter path from
+        // step 2. Built-in models always stay on MIO.
+        IQueryOperator afterBodyLower = ModelBodyLowerer.LowerSqlDefinedBodies(
+            afterModelHoist, _catalog.DeclaredModels);
+        return CommonSubexpressionEliminator.Eliminate(afterBodyLower, _functionRegistry);
     }
 
     /// <summary>

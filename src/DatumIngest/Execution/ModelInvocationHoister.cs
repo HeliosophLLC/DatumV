@@ -1282,7 +1282,7 @@ public static class ModelInvocationHoister
     /// doesn't expose a child set we recognise — that path is identity-on-
     /// expressions and just hands the rewriter a no-op.
     /// </summary>
-    private static IQueryOperator RewriteChildren(
+    internal static IQueryOperator RewriteChildren(
         IQueryOperator op, Func<IQueryOperator, IQueryOperator> childRewriter)
     {
         // For Phase A we recognise the small set of operators that wrap a single

@@ -108,7 +108,30 @@ Evaluates a fixed set of pure scalar expressions per row and appends them as hid
 
 ### `ModelInvocationOperator`
 
-Hoisted target for `models.<name>(...)` calls. Evaluates the model's input expressions per row, dispatches the model in batches (one batch per upstream `RowBatch`), and scatters outputs back as a hidden column (named `__model_*`). One operator per distinct hoisted call site; nested model calls become a stack of operators with the inner one closer to the source. See [common-subexpression elimination](common-subexpression-elimination.md) for the planner pass that inserts these operators.
+Hoisted target for `models.<name>(...)` calls when the model is a built-in `IModel` or when a SQL-defined model's body is not straight-line. Evaluates the model's input expressions per row, dispatches the model in batches (one batch per upstream `RowBatch`) via `IModel.InferBatchAsync`, and scatters outputs back as a hidden column (named `__model_*`). One operator per distinct hoisted call site; nested model calls become a stack of operators with the inner one closer to the source. Carries the residency lease, tracer hook, `RowLimit` short-circuit, streaming-sink routing, and `PreferredBatchSize` sub-batching. See [common-subexpression elimination](common-subexpression-elimination.md) for the planner pass that inserts these operators.
+
+For SQL-defined models, the body runs once per row inside `InferBatchAsync` via a `ProceduralModelAdapter` wrapper. Straight-line bodies bypass this path entirely — they lower into a column pipeline of `ProjectOperator` and `InferOperator` nodes before reaching execution (see [`InferOperator`](#inferoperator) below).
+
+### `InferOperator`
+
+Lowered target for `infer()` calls inside a SQL-defined model's body. Produced by the `ModelBodyLowerer` post-pass when the body is a straight-line sequence of `DECLARE v = expr` statements followed by a tail `RETURN expr`. The body's procedural `infer()` scalar disappears at plan time; this operator owns the `IInferenceSession.RunAsync` dispatch directly.
+
+- **Batched packing.** When the bound session's input shape has rank ≥ 2 with a leading dynamic dim (the canonical `[batch, feature_dims...]` shape) AND every row in the incoming batch shares the same feature element count, packs all rows into a single `[B, feature_dims...]` tensor and runs one `Session.Run`. Outputs split back into per-row slices.
+- **Per-row fallback.** When the session shape isn't batchable (rank 1 dynamic, fully concrete shapes, multi-dynamic shapes) or rows have non-uniform input sizes (variable-shape detectors), dispatches one `Session.Run` per row inside the operator boundary. Still amortises the residency lease and cancellation token across the batch.
+- **Float32 in / out.** v1 supports `Float32` for both input and output tensors; the lowerer falls back to `ModelInvocationOperator` for other element kinds. Scalar `Float32` cells wrap into length-1 tensors so single-scalar bodies (`RETURN infer(x)` where `x` is a scalar) compose with the array-input path.
+
+A lowered model body like:
+
+```sql
+CREATE MODEL classify(img Image) RETURNS Float32[]
+  USING 'file://...'
+AS BEGIN
+  DECLARE t Float32[] = image_to_tensor_chw(img, [224, 224], imagenet_mean(), imagenet_std())
+  RETURN infer(t)
+END
+```
+
+becomes the physical plan `Scan → Project(__t = image_to_tensor_chw(img, ...)) → Infer(model=classify, __t → __out) → Project(__out AS output)` — the same shape a hand-written C# `IModel` would produce. Built-in C# models and SQL-defined non-straight-line bodies still route through `ModelInvocationOperator`.
 
 ---
 
@@ -253,6 +276,7 @@ Uniform Bernoulli filter at a given percentage. Each row is independently includ
 | `AliasOperator` | ✅ | any |
 | `RowEnricherOperator` | ✅ | any |
 | `ModelInvocationOperator` | ✅ (per-batch dispatch) | any |
+| `InferOperator` | ✅ (per-batch dispatch, packed when shape allows) | any (with input-tensor column) |
 | `GroupByOperator` | ⚠️ blocking in hash mode, streaming in sorted mode | any / sorted |
 | `WindowOperator` | ❌ blocking | any |
 | `PivotOperator` | ❌ blocking | any |
