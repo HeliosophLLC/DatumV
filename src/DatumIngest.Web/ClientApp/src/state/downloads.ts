@@ -6,6 +6,8 @@ import {
   onModelDownloadFailed,
   onModelDownloadProgress,
   onModelDownloadStarted,
+  onModelInstalled,
+  onModelInstalling,
 } from '@/api/hub';
 import { openDialog } from '@/state/dialogs';
 import type { ModelInstallState } from '@/api/generated/openapi-client';
@@ -74,6 +76,12 @@ interface DownloadsState {
   // Lazily loaded; null until refreshDownloads completes.
   state: Record<string, ModelInstallState> | null;
   active: Record<string, ActiveDownload>;
+  // Set of model ids currently in the post-download install phase
+  // (CatalogModel.installSql is running). Entries appear on OnModelInstalling
+  // and disappear on OnModelInstalled / OnModelDownloadFailed. Distinct
+  // from `active` so the UI can render an "installing…" spinner without
+  // the byte-progress chrome.
+  installing: Record<string, true>;
   // Last error per model (transient — cleared on next attempt).
   errors: Record<string, string>;
   // Per-model on-disk partial bytes (sum of *.part files in the model
@@ -86,6 +94,7 @@ interface DownloadsState {
 export const downloadsState = proxy<DownloadsState>({
   state: null,
   active: {},
+  installing: {},
   errors: {},
   partials: {},
   loading: false,
@@ -226,7 +235,7 @@ export async function uninstallModel(modelId: string): Promise<void> {
   try {
     await api.modelCatalog.uninstall(modelId);
     if (downloadsState.state) {
-      downloadsState.state[modelId] = 'notInstalled';
+      downloadsState.state[modelId] = 'notDownloaded';
     }
     delete downloadsState.errors[modelId];
   } catch (err) {
@@ -340,6 +349,11 @@ onModelDownloadComplete((event) => {
   // Resume/Restart affordances would be stale until the next refresh.
   delete downloadsState.partials[event.modelId];
   if (downloadsState.state) {
+    // Files-on-disk phase done. For entries with no installSql this is
+    // terminal and the server-side probe would have returned Installed;
+    // optimistically reflect Installed locally too. Entries with installSql
+    // will fire OnModelInstalling next and we'll demote to Downloaded
+    // until OnModelInstalled lifts it back.
     downloadsState.state[event.modelId] = 'installed';
   }
   // Native toast on Electron. Best-effort — fire and forget; failure
@@ -347,13 +361,36 @@ onModelDownloadComplete((event) => {
   if (window.electronHost?.isElectron) {
     void window.electronHost.notify({
       title: 'Download complete',
-      body: `${event.modelId} is installed`,
+      body: `${event.modelId} is downloaded`,
+    });
+  }
+});
+
+onModelInstalling((event) => {
+  downloadsState.installing[event.modelId] = true;
+  // Demote the optimistic OnComplete-set Installed back to Downloaded so
+  // the UI doesn't flash "Installed" between Complete and Installed.
+  if (downloadsState.state) {
+    downloadsState.state[event.modelId] = 'downloaded';
+  }
+});
+
+onModelInstalled((event) => {
+  delete downloadsState.installing[event.modelId];
+  if (downloadsState.state) {
+    downloadsState.state[event.modelId] = 'installed';
+  }
+  if (window.electronHost?.isElectron) {
+    void window.electronHost.notify({
+      title: 'Install complete',
+      body: `${event.modelId} is ready to use`,
     });
   }
 });
 
 onModelDownloadFailed((event) => {
   delete downloadsState.active[event.modelId];
+  delete downloadsState.installing[event.modelId];
   downloadsState.errors[event.modelId] = event.error ?? 'Download failed';
   // The .part is still on disk and probably bigger than what we last
   // recorded. Refresh the partials map so the Resume button shows the

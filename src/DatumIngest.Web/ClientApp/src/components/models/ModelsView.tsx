@@ -208,7 +208,9 @@ function ModelCard({ model }: { model: CatalogModelSnapshot }) {
   const modelDisplayName = model.displayName ?? modelId;
   const installState = downloads.state?.[modelId];
   const activeDownload = downloads.active[modelId];
+  const installing = downloads.installing[modelId] === true;
   const error = downloads.errors[modelId];
+  const hasInstallSql = typeof model.installSql === 'string' && model.installSql.length > 0;
 
   return (
     <article className="hover:bg-muted/40 flex flex-col gap-2 rounded-xs border p-4 transition-colors">
@@ -218,8 +220,14 @@ function ModelCard({ model }: { model: CatalogModelSnapshot }) {
           {model.placeholder && (
             <Badge variant="muted">{t('card.comingSoon')}</Badge>
           )}
-          {!model.placeholder && installState === 'installed' && (
+          {!model.placeholder && installState === 'installed' && !installing && (
             <Badge>{t('card.installed')}</Badge>
+          )}
+          {!model.placeholder && installState === 'downloaded' && !installing && (
+            <Badge variant="muted">{t('card.downloaded')}</Badge>
+          )}
+          {!model.placeholder && installing && (
+            <Badge variant="muted">{t('card.installing')}</Badge>
           )}
           {!model.placeholder && installState === 'partial' && !activeDownload && (
             <Badge variant="muted">{t('card.partial')}</Badge>
@@ -268,7 +276,10 @@ function ModelCard({ model }: { model: CatalogModelSnapshot }) {
         modelDisplayName={modelDisplayName}
         placeholder={!!model.placeholder}
         installed={installState === 'installed'}
+        downloaded={installState === 'downloaded'}
         downloading={!!activeDownload}
+        installing={installing}
+        hasInstallSql={hasInstallSql}
         partialBytes={downloads.partials[modelId] ?? 0}
       />
     </article>
@@ -402,14 +413,20 @@ function CardActions({
   modelDisplayName,
   placeholder,
   installed,
+  downloaded,
   downloading,
+  installing,
+  hasInstallSql,
   partialBytes,
 }: {
   modelId: string;
   modelDisplayName: string;
   placeholder: boolean;
   installed: boolean;
+  downloaded: boolean;
   downloading: boolean;
+  installing: boolean;
+  hasInstallSql: boolean;
   partialBytes: number;
 }) {
   const { t } = useTranslation('models');
@@ -424,6 +441,17 @@ function CardActions({
       </p>
     );
   }
+  if (installing) {
+    // The SQL install runs server-side after the bytes-on-disk phase finishes.
+    // No bytes to render, but the spinner + helper text make it clear the
+    // model isn't done becoming usable yet.
+    return (
+      <p className="text-muted-foreground mt-1 flex items-center gap-2 text-xs">
+        <Loader2 className="size-3 animate-spin" />
+        {t('card.installingHint')}
+      </p>
+    );
+  }
 
   if (installed) {
     return (
@@ -435,6 +463,34 @@ function CardActions({
         >
           <Trash2 />
           {t('card.remove')}
+        </Button>
+      </div>
+    );
+  }
+
+  // Files-are-there-but-install-didn't-run path. Most common after a
+  // process restart (ModelRegistry is in-memory and resets) — the user
+  // has the bytes but needs to re-register the SQL-defined model. The
+  // Install button re-invokes the same /install endpoint, which is
+  // idempotent for an already-downloaded model (Probe sees Downloaded
+  // and proceeds straight to the install step).
+  if (downloaded && hasInstallSql) {
+    return (
+      <div className="mt-1 flex justify-end gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void uninstallModel(modelId)}
+        >
+          <Trash2 />
+          {t('card.remove')}
+        </Button>
+        <Button
+          variant="default"
+          size="sm"
+          onClick={() => void installModel(modelId, modelDisplayName)}
+        >
+          {t('card.install')}
         </Button>
       </div>
     );

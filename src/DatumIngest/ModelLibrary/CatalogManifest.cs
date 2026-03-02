@@ -50,7 +50,19 @@ public sealed record CatalogModel(
     bool Placeholder = false,
     // The HF source repo requires a logged-in token to download (gated
     // repos like Meta-Llama). Independent of license acceptance.
-    bool RequiresHfLogin = false);
+    bool RequiresHfLogin = false,
+    // Path (relative to the catalog.json directory) to a .sql file that
+    // registers this model into the SQL catalog after download completes.
+    // The file may contain one or more CREATE MODEL statements; the
+    // probe convention is that the SQL registers a model whose qualified
+    // name is `public.<Id with '-' replaced by '_'>` — that name is what
+    // the installer looks up to decide "installed vs only downloaded."
+    // Additional CREATE MODEL statements in the same file are registered
+    // for the model's own use (sub-models, helpers) but aren't tracked
+    // independently by the catalog. Null for models that need no SQL
+    // glue (today: most models are still consumed via the built-in IModel
+    // path and don't need an installSql entry).
+    string? InstallSql = null);
 
 public sealed record CatalogHardware(
     int MinRamMb,

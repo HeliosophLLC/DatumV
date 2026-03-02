@@ -70,6 +70,18 @@ export type ModelDownloadCompleteDto = {
     modelId: string;
 }
 
+/** Transpiled from DatumIngest.Web.Hubs.ModelInstallingDto */
+export type ModelInstallingDto = {
+    /** Transpiled from string */
+    modelId: string;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.ModelInstalledDto */
+export type ModelInstalledDto = {
+    /** Transpiled from string */
+    modelId: string;
+}
+
 /** Transpiled from DatumIngest.Web.Hubs.ModelDownloadFailedDto */
 export type ModelDownloadFailedDto = {
     /** Transpiled from string */

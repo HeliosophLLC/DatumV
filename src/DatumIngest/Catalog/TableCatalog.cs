@@ -136,7 +136,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             SidecarRegistry,
             catalogDirectory,
             allowExplicitTablePaths,
-            persistManifest: () => CatalogStore?.Save(Udfs, Procedures));
+            persistManifest: () => CatalogStore?.Save(Udfs, Procedures, DeclaredModels));
 
         // Construct the read-only backends. System holds host-attached
         // projections; Virtual holds the SQL-standard / engine-introspection
@@ -373,6 +373,98 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// those inherited from the parent catalog if present.
     /// </summary>
     public int Count => FlatFileCatalog.Count + SystemCatalog.Count + VirtualCatalog.Count;
+
+    /// <summary>
+    /// Re-applies every <c>CREATE MODEL</c> statement persisted by a
+    /// prior process. Hosts call this once at startup, after the inference
+    /// dispatcher and models directory are wired, so SQL-defined models
+    /// survive a restart with the same registration semantics as
+    /// <see cref="UdfRegistry"/> entries (which rehydrate synchronously
+    /// inside the constructor).
+    /// </summary>
+    /// <returns>
+    /// A report of how many model entries were rehydrated, how many were
+    /// skipped, and any warnings collected along the way. Empty when the
+    /// catalog has no <see cref="CatalogStore"/> or no persisted models.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Why this isn't done inside the constructor: <c>CREATE MODEL</c>
+    /// calls <c>IInferenceDispatcher.LoadBundleAsync</c>, which is async
+    /// and can take real time (file IO + native session construction).
+    /// Constructors can't be async; we'd be forced into
+    /// <c>.GetAwaiter().GetResult()</c> with all the deadlock baggage
+    /// that entails. Splitting rehydration into an explicit async entry
+    /// point lets hosts schedule it on a hosted service after DI is
+    /// fully assembled.
+    /// </para>
+    /// <para>
+    /// Failure handling mirrors the UDF rehydrate path: each persisted
+    /// entry is rehydrated independently; a per-entry failure (missing
+    /// ONNX file, dispatcher refuses to load, parse error) logs a
+    /// warning and continues with the remaining entries so one broken
+    /// model doesn't keep all the others from coming back.
+    /// </para>
+    /// </remarks>
+    public async Task<ModelRehydrationReport> RehydrateModelsAsync(CancellationToken ct = default)
+    {
+        if (CatalogStore is null || CatalogStore.LoadedModelEntries.Count == 0)
+        {
+            return new ModelRehydrationReport(Loaded: 0, Skipped: 0, Warnings: []);
+        }
+
+        int loaded = 0;
+        int skipped = 0;
+        List<string> warnings = new();
+
+        foreach (PendingModelEntry entry in CatalogStore.LoadedModelEntries)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            CreateModelStatement create;
+            try
+            {
+                Statement parsed = SqlParser.ParseStatement(entry.SourceText);
+                if (parsed is not CreateModelStatement c)
+                {
+                    skipped++;
+                    warnings.Add(
+                        $"Skipping model '{entry.Schema}.{entry.Name}': persisted source did not parse as a CREATE MODEL statement.");
+                    continue;
+                }
+                create = c;
+            }
+            catch (Exception ex)
+            {
+                skipped++;
+                warnings.Add(
+                    $"Skipping model '{entry.Schema}.{entry.Name}': source failed to parse — {ex.Message}");
+                continue;
+            }
+
+            try
+            {
+                // suppressSave: the catalog file already holds these entries;
+                // re-saving on each rehydrate would rewrite identical bytes N
+                // times. Save resumes for the next user-driven DDL.
+                await Routines.ApplyCreateModelAsync(create, entry.SourceText, suppressSave: true)
+                    .ConfigureAwait(false);
+                loaded++;
+            }
+            catch (Exception ex)
+            {
+                // Dispatcher load failure (missing file, unsupported op,
+                // GPU not available, etc.) — skip the entry and keep
+                // going. The user can DROP MODEL + re-issue CREATE MODEL
+                // to fix it once the environment is repaired.
+                skipped++;
+                warnings.Add(
+                    $"Skipping model '{entry.Schema}.{entry.Name}': failed to rehydrate — {ex.Message}");
+            }
+        }
+
+        return new ModelRehydrationReport(loaded, skipped, warnings);
+    }
 
     /// <summary>
     /// Parses and plans <paramref name="sql"/> against this catalog, returning an

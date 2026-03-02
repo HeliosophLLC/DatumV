@@ -14,6 +14,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
     private readonly HfHubClient _hub;
     private readonly ILicenseAcceptanceService _licenses;
     private readonly IDownloadProgressReporter _reporter;
+    private readonly IModelInstaller _installer;
     private readonly ILogger<ModelDownloadService> _logger;
     private readonly string _modelsDirectory;
 
@@ -27,6 +28,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
         HfHubClient hub,
         ILicenseAcceptanceService licenses,
         IDownloadProgressReporter reporter,
+        IModelInstaller installer,
         ModelLibraryOptions options,
         ILogger<ModelDownloadService> logger)
     {
@@ -34,6 +36,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
         _hub = hub;
         _licenses = licenses;
         _reporter = reporter;
+        _installer = installer;
         _logger = logger;
         _modelsDirectory = options.ModelsDirectory;
     }
@@ -47,11 +50,11 @@ internal sealed class ModelDownloadService : IModelDownloadService
         // and waste a network call. A local directory with the same name —
         // empty leftover, prior failed download — doesn't change the fact
         // that there's nothing to compare against.
-        if (model.Placeholder) return ModelInstallState.NotInstalled;
+        if (model.Placeholder) return ModelInstallState.NotDownloaded;
 
         string modelDir = Path.Combine(_modelsDirectory, model.Id);
 
-        if (!Directory.Exists(modelDir)) return ModelInstallState.NotInstalled;
+        if (!Directory.Exists(modelDir)) return ModelInstallState.NotDownloaded;
 
         // For ship-quality probes we'd cache the tree result. For v1 the
         // probe-on-list-refresh case is acceptable; each probe is one HTTP
@@ -68,7 +71,8 @@ internal sealed class ModelDownloadService : IModelDownloadService
         {
             // Network issue, gated repo, deleted revision — we can't tell
             // installed-vs-not without the tree. Surface as Partial so the
-            // UI shows "needs attention" rather than a false Installed.
+            // UI shows "needs attention" rather than a false-positive
+            // Downloaded.
             _logger.LogWarning(ex, "Probe of {ModelId} could not reach HF tree", modelId);
             return ModelInstallState.Partial;
         }
@@ -80,9 +84,19 @@ internal sealed class ModelDownloadService : IModelDownloadService
             if (File.Exists(localPath) && new FileInfo(localPath).Length == entry.Size) present++;
         }
 
-        if (present == tree.Count) return ModelInstallState.Installed;
-        if (present == 0) return ModelInstallState.NotInstalled;
-        return ModelInstallState.Partial;
+        if (present == 0) return ModelInstallState.NotDownloaded;
+        if (present < tree.Count) return ModelInstallState.Partial;
+
+        // All files present on disk. For entries with no InstallSql,
+        // NullModelInstaller answers true and we land at Installed — the
+        // UI treats that as terminal ready-to-use. For entries with
+        // InstallSql, the Web-side installer asks the SQL catalog whether
+        // the conventional model name (id with '-' → '_', schema "public")
+        // is registered. Missing registration means files-are-there-but-
+        // install-hasn't-been-run; we surface that as Downloaded so the UI
+        // can offer an Install affordance.
+        bool registered = await _installer.IsInstalledAsync(model, ct).ConfigureAwait(false);
+        return registered ? ModelInstallState.Installed : ModelInstallState.Downloaded;
     }
 
     public async Task InstallAsync(string modelId, CancellationToken ct = default)
@@ -274,6 +288,25 @@ internal sealed class ModelDownloadService : IModelDownloadService
             await _reporter.OnCompleteAsync(
                 new ModelDownloadComplete(model.Id), CancellationToken.None)
                 .ConfigureAwait(false);
+
+            // Run the SQL install glue, if any. Failures here surface as
+            // ModelDownloadFailed so the UI shows a single "this didn't
+            // work" path — from the user's perspective the model isn't
+            // usable until both halves succeed. We deliberately don't
+            // delete the downloaded files on install failure: the bytes
+            // are valid and re-trying install is cheaper than re-downloading.
+            if (!string.IsNullOrEmpty(model.InstallSql))
+            {
+                await _reporter.OnInstallingAsync(
+                    new ModelInstalling(model.Id), CancellationToken.None)
+                    .ConfigureAwait(false);
+
+                await _installer.InstallAsync(model, ct).ConfigureAwait(false);
+
+                await _reporter.OnInstalledAsync(
+                    new ModelInstalled(model.Id), CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException)
         {

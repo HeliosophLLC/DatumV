@@ -47,9 +47,17 @@ public interface IModelDownloadService
     Task DeletePartialsAsync(string modelId, CancellationToken ct = default);
 }
 
+// Per-model lifecycle state surfaced to the UI. The transitions are:
+//   NotDownloaded -> (download starts) -> Partial -> Downloaded
+//   Downloaded    -> (installSql runs) -> Installed
+// For catalog entries with installSql == null the Downloaded state is
+// terminal and the UI treats it as "ready"; entries with installSql
+// require the installer to register the SQL-defined model into the
+// catalog's ModelRegistry before they're considered Installed.
 public enum ModelInstallState
 {
-    NotInstalled,
+    NotDownloaded,
     Partial,     // some expected files present, others missing
-    Installed,
+    Downloaded,  // all files present; either no installSql, or installSql not yet run
+    Installed,   // for entries with installSql: SQL has been executed and registered
 }

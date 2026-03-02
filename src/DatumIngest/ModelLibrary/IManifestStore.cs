@@ -11,6 +11,11 @@ public interface IManifestStore
 {
     CatalogManifest Manifest { get; }
 
+    // Absolute path to the directory that holds catalog.json. Paths inside
+    // the manifest (license textFile, installSql, future per-model assets)
+    // resolve relative to this directory.
+    string ManifestDirectory { get; }
+
     // Returns the raw license text (markdown or plain text, depending on
     // license) for the given license id. Null if the id is unknown or the
     // referenced textFile is missing on disk.

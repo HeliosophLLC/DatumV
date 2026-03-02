@@ -4,7 +4,7 @@
 // @ts-nocheck
 import type { HubConnection, IStreamResult, Subject } from '@microsoft/signalr';
 import type { ICatalogHub, IStreamHub, ICatalogHubClient, IStreamHubClient } from './DatumIngest.Web.Hubs';
-import type { CatalogChangedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
+import type { CatalogChangedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
 
 
 // components
@@ -165,6 +165,8 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
         const __onModelDownloadStarted = (...args: [ModelDownloadStartedDto]) => receiver.onModelDownloadStarted(...args);
         const __onModelDownloadProgress = (...args: [ModelDownloadProgressDto]) => receiver.onModelDownloadProgress(...args);
         const __onModelDownloadComplete = (...args: [ModelDownloadCompleteDto]) => receiver.onModelDownloadComplete(...args);
+        const __onModelInstalling = (...args: [ModelInstallingDto]) => receiver.onModelInstalling(...args);
+        const __onModelInstalled = (...args: [ModelInstalledDto]) => receiver.onModelInstalled(...args);
         const __onModelDownloadFailed = (...args: [ModelDownloadFailedDto]) => receiver.onModelDownloadFailed(...args);
 
         connection.on("OnPong", __onPong);
@@ -174,6 +176,8 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
         connection.on("OnModelDownloadStarted", __onModelDownloadStarted);
         connection.on("OnModelDownloadProgress", __onModelDownloadProgress);
         connection.on("OnModelDownloadComplete", __onModelDownloadComplete);
+        connection.on("OnModelInstalling", __onModelInstalling);
+        connection.on("OnModelInstalled", __onModelInstalled);
         connection.on("OnModelDownloadFailed", __onModelDownloadFailed);
 
         const methodList: ReceiverMethod[] = [
@@ -184,6 +188,8 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
             { methodName: "OnModelDownloadStarted", method: __onModelDownloadStarted },
             { methodName: "OnModelDownloadProgress", method: __onModelDownloadProgress },
             { methodName: "OnModelDownloadComplete", method: __onModelDownloadComplete },
+            { methodName: "OnModelInstalling", method: __onModelInstalling },
+            { methodName: "OnModelInstalled", method: __onModelInstalled },
             { methodName: "OnModelDownloadFailed", method: __onModelDownloadFailed }
         ]
 

@@ -926,6 +926,7 @@ export interface CatalogModel {
     approxSizeMb?: number;
     placeholder?: boolean;
     requiresHfLogin?: boolean;
+    installSql?: string | undefined;
 }
 
 export interface CatalogHardware {
@@ -941,7 +942,7 @@ export interface CatalogSource {
     include?: string[];
 }
 
-export type ModelInstallState = "notInstalled" | "partial" | "installed";
+export type ModelInstallState = "notDownloaded" | "partial" | "downloaded" | "installed";
 
 export interface ProblemDetails {
     type?: string | undefined;

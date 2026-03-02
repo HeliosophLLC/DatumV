@@ -25,6 +25,12 @@ public sealed class NullDownloadProgressReporter : IDownloadProgressReporter
     public ValueTask OnCompleteAsync(ModelDownloadComplete complete, CancellationToken ct)
         => ValueTask.CompletedTask;
 
+    public ValueTask OnInstallingAsync(ModelInstalling installing, CancellationToken ct)
+        => ValueTask.CompletedTask;
+
+    public ValueTask OnInstalledAsync(ModelInstalled installed, CancellationToken ct)
+        => ValueTask.CompletedTask;
+
     public ValueTask OnFailedAsync(ModelDownloadFailed failed, CancellationToken ct)
         => ValueTask.CompletedTask;
 }

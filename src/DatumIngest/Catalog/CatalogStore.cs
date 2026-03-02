@@ -22,9 +22,10 @@ namespace DatumIngest.Catalog;
 /// </para>
 /// <code>
 /// {
-///   "version": 3,
+///   "version": 5,
 ///   "udfs":       [{ "schema": "udf",  "name": "shout", "parameters": [...], "body_kind": "macro", "body": "upper(s)" }],
 ///   "procedures": [{ "schema": "proc", "name": "...", "source_text": "..." }],
+///   "models":     [{ "schema": "models", "name": "paddleocr_v4_det", "source_text": "CREATE OR REPLACE MODEL paddleocr_v4_det(...)" }],
 ///   "backends": {
 ///     "flat_file": {
 ///       "tables": [
@@ -44,10 +45,10 @@ namespace DatumIngest.Catalog;
 /// </para>
 /// <para>
 /// <strong>No backward compatibility.</strong> A manifest whose version
-/// is not <c>4</c> is rejected with <see cref="CatalogStoreLoadException"/>
+/// is not <c>5</c> is rejected with <see cref="CatalogStoreLoadException"/>
 /// — the caller must delete the catalog directory and start fresh.
 /// Schema support requires v3; real schema membership for UDFs /
-/// procedures requires v4.
+/// procedures requires v4; persistence of SQL-defined models requires v5.
 /// </para>
 /// <para>
 /// Failure handling at load:
@@ -82,10 +83,17 @@ public sealed class CatalogStore
     ///     determines the <see cref="QualifiedName"/> the registry stores
     ///     the entry under. The <c>udf</c> / <c>proc</c> placeholder schemas
     ///     are abandoned.</description></item>
+    ///   <item><description><c>5</c>: adds a top-level <c>models</c> section.
+    ///     SQL-defined models created via <c>CREATE MODEL</c> persist their
+    ///     verbatim source text so they can be re-applied (via the inference
+    ///     dispatcher's <c>LoadBundleAsync</c>) on the next process start.
+    ///     Rehydration is deferred to <see cref="TableCatalog.RehydrateModelsAsync"/>
+    ///     because session loading is async — Load only captures the
+    ///     pending entries.</description></item>
     /// </list>
-    /// Only v4 is accepted; older and newer versions both throw at load.
+    /// Only v5 is accepted; older and newer versions both throw at load.
     /// </summary>
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
 
     private readonly string _path;
     private readonly object _writeLock = new();
@@ -106,6 +114,16 @@ public sealed class CatalogStore
     /// <see cref="Load"/> runs or when the file had no FlatFile state.
     /// </summary>
     private FlatFileBackendState? _loadedFlatFileState;
+
+    /// <summary>
+    /// Pending SQL-defined-model entries captured at the last <see cref="Load"/>
+    /// call. Empty before <see cref="Load"/> runs or when the file had no
+    /// model entries. Consumed by <see cref="TableCatalog.RehydrateModelsAsync"/>
+    /// after the inference dispatcher and models directory are wired
+    /// — loading bundles is async and can't happen inside the synchronous
+    /// catalog constructor.
+    /// </summary>
+    private IReadOnlyList<PendingModelEntry> _loadedModelEntries = [];
 
     /// <summary>Creates a store rooted at <paramref name="path"/>.</summary>
     /// <param name="path">Absolute path to the catalog JSON file.</param>
@@ -141,6 +159,15 @@ public sealed class CatalogStore
     /// FlatFile backend can rehydrate every persistent table.
     /// </remarks>
     public FlatFileBackendState? LoadedFlatFileBackendState => _loadedFlatFileState;
+
+    /// <summary>
+    /// Pending model entries captured by the most recent <see cref="Load"/>
+    /// call. The list is in (schema, name) sort order — same order they
+    /// were written. <see cref="TableCatalog.RehydrateModelsAsync"/>
+    /// iterates this collection after the inference dispatcher is wired
+    /// to re-execute each persisted <c>CREATE MODEL</c> statement.
+    /// </summary>
+    public IReadOnlyList<PendingModelEntry> LoadedModelEntries => _loadedModelEntries;
 
     /// <summary>
     /// Loads the persisted state into <paramref name="udfs"/> and
@@ -207,6 +234,29 @@ public sealed class CatalogStore
 
         // Capture the FlatFile backend's state so TableCatalog can rehydrate it.
         _loadedFlatFileState = parsed.Backends?.FlatFile;
+
+        // Capture SQL-defined model entries. They're rehydrated later via
+        // TableCatalog.RehydrateModelsAsync (after the dispatcher + models
+        // directory are wired). Skip entries with missing fields here so
+        // the rehydrate loop doesn't have to re-validate; warnings land
+        // on the load report.
+        List<PendingModelEntry> models = new();
+        foreach (CatalogFileModelEntry entry in parsed.Models ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(entry.Name) ||
+                string.IsNullOrWhiteSpace(entry.SourceText))
+            {
+                // No skip-count for models in the report — rehydration runs
+                // separately and can surface failures from there. Warning
+                // is still useful so a malformed entry isn't silent.
+                continue;
+            }
+            models.Add(new PendingModelEntry(
+                Schema: entry.Schema ?? "models",
+                Name: entry.Name!,
+                SourceText: entry.SourceText!));
+        }
+        _loadedModelEntries = models;
 
         int loadedUdfs = 0;
         int skippedUdfs = 0;
@@ -503,12 +553,18 @@ public sealed class CatalogStore
     private const string UdfBodyKindProcedural = "procedural";
 
     /// <summary>
-    /// Atomically persists the current state of <paramref name="udfs"/>
-    /// and <paramref name="procedures"/> to the file. Writes to a sibling
-    /// <c>.tmp</c> path and renames into place so a crash never leaves a
-    /// half-written file at the canonical location.
+    /// Atomically persists the current state of <paramref name="udfs"/>,
+    /// <paramref name="procedures"/>, and <paramref name="models"/> to the
+    /// file. Writes to a sibling <c>.tmp</c> path and renames into place
+    /// so a crash never leaves a half-written file at the canonical location.
     /// </summary>
-    public void Save(UdfRegistry udfs, ProcedureRegistry procedures)
+    /// <param name="udfs">UDF registry to snapshot into the <c>udfs</c> section.</param>
+    /// <param name="procedures">Procedure registry to snapshot into the <c>procedures</c> section.</param>
+    /// <param name="models">SQL-defined model registry. May be <see langword="null"/>
+    /// when the caller has no models to persist (e.g. a test fixture
+    /// stripped down to UDFs); the <c>models</c> section is then omitted
+    /// from the output instead of written as an empty list.</param>
+    public void Save(UdfRegistry udfs, ProcedureRegistry procedures, ModelRegistry? models)
     {
         // Snapshot under the write lock so a concurrent CREATE / DROP
         // doesn't observe a partial state mid-serialisation.
@@ -563,6 +619,20 @@ public sealed class CatalogStore
                         SourceText = e.SourceText,
                     })
                     .ToList(),
+                // v5: SQL-defined models persist verbatim source text. Bound
+                // sessions are recreated on rehydrate via the dispatcher;
+                // only the SQL (and the resolved (schema, name) for diagnostics)
+                // need to live on disk.
+                Models = models?.Entries
+                    .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(e => new CatalogFileModelEntry
+                    {
+                        Schema = e.SchemaName,
+                        Name = e.Name,
+                        SourceText = e.SourceText,
+                    })
+                    .ToList(),
                 Backends = flatFileState is null
                     ? null
                     : new CatalogFileBackends { FlatFile = flatFileState },
@@ -600,6 +670,7 @@ internal sealed class CatalogFile
     public int Version { get; set; }
     public List<CatalogFileUdfEntry>? Udfs { get; set; }
     public List<CatalogFileProcedureEntry>? Procedures { get; set; }
+    public List<CatalogFileModelEntry>? Models { get; set; }
 
     /// <summary>
     /// Per-backend persistent state. Each <see cref="ITableCatalog"/>
@@ -777,6 +848,45 @@ internal sealed class CatalogFileProcedureEntry
 }
 
 /// <summary>
+/// One SQL-defined model entry in the persisted catalog. Stores the
+/// original <c>CREATE MODEL</c> source verbatim so re-applying it on
+/// startup picks up the same USING path, parameters, return type, and
+/// body the user wrote — no separate AST formatter required.
+/// </summary>
+/// <remarks>
+/// Unlike <see cref="CatalogFileUdfEntry"/>, model entries don't store
+/// parameter / return-type fields separately: the source text is the
+/// only thing the rehydrate path needs, and the parser produces the same
+/// <see cref="CreateModelStatement"/> it did originally. The bound
+/// inference sessions are recreated at rehydrate time via the
+/// dispatcher's bundle loader.
+/// </remarks>
+internal sealed class CatalogFileModelEntry
+{
+    /// <summary>Schema portion of the canonical name. Always <c>"models"</c> in v5 (CREATE MODEL enforces it).</summary>
+    public string? Schema { get; set; }
+
+    /// <summary>Unqualified model name within the schema.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>Verbatim <c>CREATE MODEL</c> SQL. Reparsed on load.</summary>
+    public string? SourceText { get; set; }
+}
+
+/// <summary>
+/// Decoded, validated form of a <see cref="CatalogFileModelEntry"/> after
+/// <see cref="CatalogStore.Load"/>. Surfaced via
+/// <see cref="CatalogStore.LoadedModelEntries"/> so
+/// <see cref="TableCatalog.RehydrateModelsAsync"/> can re-execute each
+/// persisted CREATE MODEL once the inference dispatcher and models
+/// directory are configured.
+/// </summary>
+/// <param name="Schema">Schema name from the entry (always <c>"models"</c> today).</param>
+/// <param name="Name">Unqualified model name.</param>
+/// <param name="SourceText">Verbatim CREATE MODEL SQL to re-parse and re-apply.</param>
+public sealed record PendingModelEntry(string Schema, string Name, string SourceText);
+
+/// <summary>
 /// Source-generated JSON serializer context for the catalog file. Required
 /// for trimming/AOT support — reflection-based serialization is gated by the
 /// project's IL trim warnings.
@@ -789,11 +899,13 @@ internal sealed class CatalogFileProcedureEntry
 [JsonSerializable(typeof(CatalogFileUdfEntry))]
 [JsonSerializable(typeof(CatalogFileUdfParameterEntry))]
 [JsonSerializable(typeof(CatalogFileProcedureEntry))]
+[JsonSerializable(typeof(CatalogFileModelEntry))]
 [JsonSerializable(typeof(List<FlatFileTableEntry>))]
 [JsonSerializable(typeof(List<FlatFileIndexEntry>))]
 [JsonSerializable(typeof(List<CatalogFileUdfEntry>))]
 [JsonSerializable(typeof(List<CatalogFileUdfParameterEntry>))]
 [JsonSerializable(typeof(List<CatalogFileProcedureEntry>))]
+[JsonSerializable(typeof(List<CatalogFileModelEntry>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     WriteIndented = true,

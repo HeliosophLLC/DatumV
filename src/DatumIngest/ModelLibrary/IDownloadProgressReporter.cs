@@ -18,5 +18,14 @@ public interface IDownloadProgressReporter
 
     ValueTask OnCompleteAsync(ModelDownloadComplete complete, CancellationToken ct);
 
+    // Emitted only for catalog entries with InstallSql set, after
+    // OnCompleteAsync and before OnInstalledAsync.
+    ValueTask OnInstallingAsync(ModelInstalling installing, CancellationToken ct);
+
+    // Emitted only for catalog entries with InstallSql set, after a
+    // successful install. For entries without InstallSql, OnCompleteAsync
+    // is the terminal success event.
+    ValueTask OnInstalledAsync(ModelInstalled installed, CancellationToken ct);
+
     ValueTask OnFailedAsync(ModelDownloadFailed failed, CancellationToken ct);
 }

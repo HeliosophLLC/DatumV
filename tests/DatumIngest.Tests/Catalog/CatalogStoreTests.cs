@@ -357,7 +357,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 4,
+              "version": 5,
               "udfs": [
                 {"name": "shout", "parameters": [{"name": "s", "type": "STRING"}], "body": "upper(s)"}
               ]
@@ -462,7 +462,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 4,
+              "version": 5,
               "udfs": [
                 {
                   "name": "good",
@@ -494,7 +494,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 4,
+              "version": 5,
               "udfs": [
                 {"name": "", "parameters": [], "body": "1"},
                 {"name": "good", "parameters": [], "body": "1"}

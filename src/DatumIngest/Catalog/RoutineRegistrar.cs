@@ -134,7 +134,7 @@ internal sealed class RoutineRegistrar
             ApplyCreateMacroFunction(create, qn);
         }
 
-        _catalogStore?.Save(_udfs, _procedures);
+        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
 
         if (_udfs.TryGet(qn, out UdfDescriptor? after))
         {
@@ -488,7 +488,7 @@ internal sealed class RoutineRegistrar
         // call is idempotent for macro UDFs (no adapter ever existed) so
         // we don't need to gate it on IsProcedural.
         UnregisterProceduralAdapter(udf.QualifiedName);
-        _catalogStore?.Save(_udfs, _procedures);
+        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
 
         _catalog.Events.Raise(new FunctionDroppedEvent(udf.QualifiedName, udf, sourceText));
     }
@@ -654,12 +654,15 @@ internal sealed class RoutineRegistrar
     /// </list>
     /// </para>
     /// <para>
-    /// <strong>Persistence.</strong> SQL-defined models are not
-    /// persisted across process restarts in v1. The bound inference
-    /// sessions hold native handles that would need a re-load on
-    /// rehydrate; rather than carry that complexity now, models stay
-    /// process-scoped. Users re-issue <c>CREATE MODEL</c> after a
-    /// restart.
+    /// <strong>Persistence.</strong> SQL-defined models persist their
+    /// verbatim CREATE MODEL source text in the catalog file (v5+).
+    /// On startup, <see cref="TableCatalog.RehydrateModelsAsync"/> walks
+    /// the persisted entries and re-invokes <see cref="ApplyCreateModelAsync"/>
+    /// for each — the source text reparses, the USING path resolves
+    /// against the current models directory, and the inference
+    /// dispatcher reloads the bundle. Bound inference sessions are
+    /// re-created at rehydrate time; they never travel across process
+    /// boundaries.
     /// </para>
     /// </remarks>
     /// <summary>
@@ -672,7 +675,7 @@ internal sealed class RoutineRegistrar
     private const string ModelsSchema = "models";
 
     public async Task ApplyCreateModelAsync(
-        CreateModelStatement create, string? sourceText = null)
+        CreateModelStatement create, string? sourceText = null, bool suppressSave = false)
     {
         ValidateDefaultsContiguous(create.Parameters, $"CREATE MODEL {create.Name}");
 
@@ -753,6 +756,15 @@ internal sealed class RoutineRegistrar
         // qualified name; OR REPLACE flips the entry atomically.
         RegisterModelAdapter(descriptor, replace: create.OrReplace);
 
+        // Persist now so a process crash between CREATE MODEL completion
+        // and a subsequent commit doesn't lose the registration. Skipped
+        // during rehydration where the file already holds these entries
+        // — re-saving would just rewrite identical bytes N times.
+        if (!suppressSave)
+        {
+            _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
+        }
+
         if (displaced is null)
         {
             _catalog.Events.Raise(new ModelCreatedEvent(qn, descriptor, sourceText));
@@ -817,6 +829,8 @@ internal sealed class RoutineRegistrar
         // ProceduralModelAdapter whose descriptor's sessions are about to
         // be disposed below.
         _catalog.Models?.Unregister(removed.Name);
+
+        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
 
         _catalog.Events.Raise(new ModelDroppedEvent(qn, removed, sourceText));
 
@@ -1002,7 +1016,7 @@ internal sealed class RoutineRegistrar
         _procedures.TryGet(qn, out ProcedureDescriptor? before);
 
         _procedures.Register(descriptor, replace: create.OrReplace);
-        _catalogStore?.Save(_udfs, _procedures);
+        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
 
         if (before is null)
         {
@@ -1030,7 +1044,7 @@ internal sealed class RoutineRegistrar
         }
 
         _procedures.Unregister(proc.QualifiedName);
-        _catalogStore?.Save(_udfs, _procedures);
+        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
 
         _catalog.Events.Raise(new ProcedureDroppedEvent(proc.QualifiedName, proc, sourceText));
     }

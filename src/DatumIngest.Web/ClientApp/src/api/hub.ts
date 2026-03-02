@@ -15,12 +15,16 @@ import type {
   ModelDownloadStartedDto as ModelDownloadStarted,
   ModelDownloadProgressDto as ModelDownloadProgress,
   ModelDownloadCompleteDto as ModelDownloadComplete,
+  ModelInstallingDto as ModelInstalling,
+  ModelInstalledDto as ModelInstalled,
   ModelDownloadFailedDto as ModelDownloadFailed,
 } from './generated/hubs/DatumIngest.Web.Hubs';
 export type {
   ModelDownloadStarted,
   ModelDownloadProgress,
   ModelDownloadComplete,
+  ModelInstalling,
+  ModelInstalled,
   ModelDownloadFailed,
 };
 
@@ -59,6 +63,8 @@ const chatErrorHandlers: Set<Handler<string>> = new Set();
 const dlStartedHandlers: Set<Handler<ModelDownloadStarted>> = new Set();
 const dlProgressHandlers: Set<Handler<ModelDownloadProgress>> = new Set();
 const dlCompleteHandlers: Set<Handler<ModelDownloadComplete>> = new Set();
+const dlInstallingHandlers: Set<Handler<ModelInstalling>> = new Set();
+const dlInstalledHandlers: Set<Handler<ModelInstalled>> = new Set();
 const dlFailedHandlers: Set<Handler<ModelDownloadFailed>> = new Set();
 
 type CloseHandler = (err?: Error) => void;
@@ -91,6 +97,10 @@ export const onModelDownloadProgress = (handler: Handler<ModelDownloadProgress>)
   subscribe(dlProgressHandlers, handler);
 export const onModelDownloadComplete = (handler: Handler<ModelDownloadComplete>) =>
   subscribe(dlCompleteHandlers, handler);
+export const onModelInstalling = (handler: Handler<ModelInstalling>) =>
+  subscribe(dlInstallingHandlers, handler);
+export const onModelInstalled = (handler: Handler<ModelInstalled>) =>
+  subscribe(dlInstalledHandlers, handler);
 export const onModelDownloadFailed = (handler: Handler<ModelDownloadFailed>) =>
   subscribe(dlFailedHandlers, handler);
 
@@ -122,6 +132,12 @@ const dispatcher: IStreamHubClient = {
   },
   async onModelDownloadComplete(event: ModelDownloadComplete): Promise<void> {
     fanOut(dlCompleteHandlers, event);
+  },
+  async onModelInstalling(event: ModelInstalling): Promise<void> {
+    fanOut(dlInstallingHandlers, event);
+  },
+  async onModelInstalled(event: ModelInstalled): Promise<void> {
+    fanOut(dlInstalledHandlers, event);
   },
   async onModelDownloadFailed(event: ModelDownloadFailed): Promise<void> {
     fanOut(dlFailedHandlers, event);

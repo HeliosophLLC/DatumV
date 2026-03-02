@@ -24,6 +24,19 @@ public sealed record ModelDownloadProgress(
     long BytesReadTotal,       // across all files in this model
     long BytesTotalAcrossModel);
 
+// Files-on-disk phase finished successfully. For models with no installSql
+// this is the terminal success event; for models with installSql the
+// downloader will follow with ModelInstalling and either ModelInstalled or
+// ModelDownloadFailed.
 public sealed record ModelDownloadComplete(string ModelId);
+
+// Emitted between download-complete and installed for entries whose
+// CatalogModel.InstallSql is set. The UI uses this to flip the per-model
+// status badge to "installing…" while CREATE MODEL runs.
+public sealed record ModelInstalling(string ModelId);
+
+// Terminal success for models with installSql. The SQL has been executed
+// and the resulting SQL-defined model(s) are now registered in the catalog.
+public sealed record ModelInstalled(string ModelId);
 
 public sealed record ModelDownloadFailed(string ModelId, string Error);

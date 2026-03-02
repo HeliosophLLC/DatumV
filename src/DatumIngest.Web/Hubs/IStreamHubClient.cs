@@ -25,5 +25,10 @@ public interface IStreamHubClient
     Task OnModelDownloadStarted(ModelDownloadStartedDto started);
     Task OnModelDownloadProgress(ModelDownloadProgressDto progress);
     Task OnModelDownloadComplete(ModelDownloadCompleteDto complete);
+    // Emitted only for catalog entries with installSql set. Lifecycle:
+    // OnModelDownloadComplete -> OnModelInstalling -> OnModelInstalled (or
+    // OnModelDownloadFailed if the SQL install throws).
+    Task OnModelInstalling(ModelInstallingDto installing);
+    Task OnModelInstalled(ModelInstalledDto installed);
     Task OnModelDownloadFailed(ModelDownloadFailedDto failed);
 }

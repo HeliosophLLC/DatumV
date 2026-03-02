@@ -165,6 +165,16 @@ public static class WebHostExtensions
                     "DatumIngest", "models"));
         services.AddModelLibrary(modelLibraryOptions);
         services.AddSingleton<IDownloadProgressReporter, SignalRDownloadProgressReporter>();
+        // Replace the default NullModelInstaller (registered by
+        // AddModelLibrary) with the catalog-backed one. CREATE MODEL only
+        // makes sense when ManageLocalCatalog is true — without a
+        // TableCatalog singleton, the constructor can't resolve. Guarding
+        // here also keeps SaaS-mode hosts (where catalogs are remote) from
+        // crashing at resolve time on an entry with installSql.
+        if (options.ManageLocalCatalog)
+        {
+            services.AddSingleton<IModelInstaller, CatalogBackedModelInstaller>();
+        }
 
         services.AddControllers()
             .AddJsonOptions(o =>

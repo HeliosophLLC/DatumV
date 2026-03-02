@@ -3,7 +3,7 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { IStreamResult, Subject } from '@microsoft/signalr';
-import type { CatalogChangedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
+import type { CatalogChangedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
 
 export type ICatalogHub = {
     /**
@@ -78,6 +78,16 @@ export type IStreamHubClient = {
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onModelDownloadComplete(complete: ModelDownloadCompleteDto): Promise<void>;
+    /**
+    * @param installing Transpiled from DatumIngest.Web.Hubs.ModelInstallingDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onModelInstalling(installing: ModelInstallingDto): Promise<void>;
+    /**
+    * @param installed Transpiled from DatumIngest.Web.Hubs.ModelInstalledDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onModelInstalled(installed: ModelInstalledDto): Promise<void>;
     /**
     * @param failed Transpiled from DatumIngest.Web.Hubs.ModelDownloadFailedDto
     * @returns Transpiled from System.Threading.Tasks.Task

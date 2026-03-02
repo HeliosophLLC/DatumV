@@ -34,6 +34,25 @@ internal sealed class CatalogInitializationService : IHostedService
         _logger.LogInformation("Initialising local catalog.");
         MigrationRunner runner = new(_catalog, _loggerFactory.CreateLogger<MigrationRunner>());
         await runner.RunAsync(cancellationToken).ConfigureAwait(false);
+
+        // Re-apply every persisted CREATE MODEL. The inference dispatcher
+        // and models directory were both wired in the TableCatalog factory
+        // (see WebHostExtensions.AddDatumIngestWeb), so by the time this
+        // hosted service runs everything ApplyCreateModelAsync needs is
+        // in place. Per-entry failures are tolerated; the report's
+        // warnings make them visible.
+        ModelRehydrationReport report = await _catalog.RehydrateModelsAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (report.Loaded > 0 || report.Skipped > 0)
+        {
+            _logger.LogInformation(
+                "Rehydrated {Loaded} SQL-defined model(s); skipped {Skipped}.",
+                report.Loaded, report.Skipped);
+        }
+        foreach (string warning in report.Warnings)
+        {
+            _logger.LogWarning("{Warning}", warning);
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

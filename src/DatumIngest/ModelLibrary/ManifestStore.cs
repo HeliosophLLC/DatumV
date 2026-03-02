@@ -20,6 +20,7 @@ internal sealed class ManifestStore : IManifestStore
     };
 
     public CatalogManifest Manifest { get; }
+    public string ManifestDirectory { get; }
 
     // licenseId -> resolved absolute path to the textFile. Pre-resolved at
     // load time so GetLicenseText is a plain File.ReadAllText.
@@ -32,6 +33,7 @@ internal sealed class ManifestStore : IManifestStore
 
         string manifestPath = ResolveManifestPath();
         string manifestDir = Path.GetDirectoryName(manifestPath)!;
+        ManifestDirectory = manifestDir;
 
         _logger.LogInformation("Loading model catalog from {Path}", manifestPath);
 

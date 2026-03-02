@@ -30,6 +30,16 @@ internal sealed class SignalRDownloadProgressReporter(
             new ModelDownloadCompleteDto(e.ModelId))
             .ConfigureAwait(false);
 
+    public async ValueTask OnInstallingAsync(ModelInstalling e, CancellationToken ct)
+        => await hub.Clients.All.OnModelInstalling(
+            new ModelInstallingDto(e.ModelId))
+            .ConfigureAwait(false);
+
+    public async ValueTask OnInstalledAsync(ModelInstalled e, CancellationToken ct)
+        => await hub.Clients.All.OnModelInstalled(
+            new ModelInstalledDto(e.ModelId))
+            .ConfigureAwait(false);
+
     public async ValueTask OnFailedAsync(ModelDownloadFailed e, CancellationToken ct)
         => await hub.Clients.All.OnModelDownloadFailed(
             new ModelDownloadFailedDto(e.ModelId, e.Error))

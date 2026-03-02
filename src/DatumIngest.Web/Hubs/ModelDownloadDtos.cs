@@ -34,4 +34,10 @@ public sealed record ModelDownloadProgressDto(
 public sealed record ModelDownloadCompleteDto(string ModelId);
 
 [TranspilationSource]
+public sealed record ModelInstallingDto(string ModelId);
+
+[TranspilationSource]
+public sealed record ModelInstalledDto(string ModelId);
+
+[TranspilationSource]
 public sealed record ModelDownloadFailedDto(string ModelId, string Error);
