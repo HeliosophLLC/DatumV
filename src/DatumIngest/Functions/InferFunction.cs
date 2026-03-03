@@ -152,13 +152,19 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 + "USING file).");
         }
 
-        if (session.Outputs.Count != 1)
+        if (session.Outputs.Count == 0)
         {
             throw new InvalidOperationException(
-                $"Model '{model.QualifiedName.ToString()}': infer() v1 supports only "
-                + $"single-output sessions, but the bound session declares "
-                + $"{session.Outputs.Count} output(s). Multi-output support is a follow-up.");
+                $"Model '{model.QualifiedName.ToString()}': infer() bound session declares "
+                + "no outputs. The session implementation is misconfigured.");
         }
+        // v1 returns the FIRST output for multi-output sessions. The
+        // convention HuggingFace optimum, transformers ONNX export, and
+        // most tools follow is to list the primary output first (e.g.
+        // `last_hidden_state` ahead of `pooler_output` for BERT-family
+        // encoders). Named output selection (`infer(value, 'output_name')`)
+        // is a follow-up; structured multi-output return is a separate
+        // follow-up.
 
         ReadOnlySpan<ValueRef> args = arguments.Span;
         if (args.Length is < 1 or > 2)

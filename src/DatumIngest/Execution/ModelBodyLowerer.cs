@@ -118,6 +118,13 @@ public static class ModelBodyLowerer
                     // column" path the lowerer doesn't bother with.
                     if (decl.Initializer is null) return false;
                     if (ContainsMultiInputInfer(decl.Initializer)) return false;
+                    // Struct-typed locals push the body off the lowerer's
+                    // happy path: downstream `infer()` may reference the
+                    // struct by column-ref (no struct literal at the call
+                    // site) and InferOperator can't unpack a struct column
+                    // into per-input tensors. The MIO + adapter path
+                    // handles struct locals natively via VariableScope.
+                    if (IsStructTypeName(decl.TypeName)) return false;
                     break;
                 case ReturnStatement ret when i == body.Count - 1:
                     // Tail RETURN is the only valid terminator.
@@ -130,6 +137,22 @@ public static class ModelBodyLowerer
             }
         }
         return body[^1] is ReturnStatement;
+    }
+
+    /// <summary>
+    /// Cheap textual check for a struct typename annotation. Catches the
+    /// common surface forms (<c>Struct</c>, <c>STRUCT</c>, <c>Struct&lt;...&gt;</c>).
+    /// False negatives only occur when the body's struct local lacks a
+    /// type annotation entirely — caller's response is "lower this and
+    /// let the runtime decide", which is fine since unconstrained
+    /// inference still flows through MIO when the lowerer bails for a
+    /// different reason.
+    /// </summary>
+    private static bool IsStructTypeName(string? typeName)
+    {
+        if (string.IsNullOrEmpty(typeName)) return false;
+        return typeName.StartsWith("Struct", StringComparison.OrdinalIgnoreCase)
+            || typeName.StartsWith("STRUCT", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -147,11 +170,16 @@ public static class ModelBodyLowerer
         switch (expr)
         {
             case FunctionCallExpression fc:
-                if (IsInferCall(fc)
-                    && fc.Arguments.Count >= 1
-                    && fc.Arguments[0] is StructLiteralExpression)
+                if (IsInferCall(fc))
                 {
-                    return true;
+                    // Any struct-literal argument to infer() flags multi-
+                    // input dispatch — covers infer({...}) (1-arg, value
+                    // struct) and infer(value, {...}) (2-arg, shape struct
+                    // for either the single-input or multi-input form).
+                    for (int i = 0; i < fc.Arguments.Count; i++)
+                    {
+                        if (fc.Arguments[i] is StructLiteralExpression) return true;
+                    }
                 }
                 for (int i = 0; i < fc.Arguments.Count; i++)
                 {

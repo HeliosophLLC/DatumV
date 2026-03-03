@@ -250,6 +250,69 @@ public sealed class TokenizerDecodeBpeFunction : IFunction, IScalarFunction
 }
 
 /// <summary>
+/// <c>tokenizer.encode_bert(text, vocab_path) → Struct{input_ids: Int64[],
+/// attention_mask: Int64[], token_type_ids: Int64[]}</c>. Tokenizes
+/// the input text with a BERT/WordPiece tokenizer (vocab.txt one
+/// wordpiece per line, lowercase-uncased defaults) and packages the three
+/// tensors that BERT-family encoders expect into one struct. The output
+/// field names match the canonical ONNX input names so multi-input
+/// <c>infer({encoded}, {...})</c> in a SQL model body lines up by name.
+/// </summary>
+public sealed class TokenizerEncodeBertFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "encode_bert";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Encoding;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Encodes text with a BERT/WordPiece tokenizer (vocab.txt path) and returns "
+        + "a struct containing input_ids, attention_mask, and token_type_ids — the "
+        + "canonical BERT input bundle. Special tokens [CLS]/[SEP] are added; mask "
+        + "is all-1s (no padding); token_type_ids is all-0s (single sequence). "
+        + "Designed to feed multi-input infer() in a CREATE MODEL body directly.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("text",       DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("vocab_path", DataKindMatcher.Exact(DataKind.String)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<TokenizerEncodeBertFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args[0].IsNull || args[1].IsNull)
+        {
+            return new ValueTask<ValueRef>(ValueRef.NullStruct(0));
+        }
+
+        string text       = args[0].AsString();
+        string vocabPath  = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
+            args[1].AsString(), "tokenizer.encode_bert", frame);
+
+        BertTokenizer tokenizer = TokenizerCache.GetBertFromVocab(vocabPath);
+        return new ValueTask<ValueRef>(TokenizerOps.EncodeBertToValueRef(tokenizer, text, frame.Types));
+    }
+}
+
+/// <summary>
 /// Path resolution for the scalar tokenizer functions. Scalar evaluation
 /// frames don't carry a <c>ModelCatalog</c> reference today, so we can only
 /// honour the two non-catalog forms: <c>file://</c> URI and OS-absolute path.
@@ -268,11 +331,44 @@ internal static class TokenizerPath
         if (!Path.IsPathRooted(path))
         {
             throw new FunctionArgumentException(callerContext,
-                $"'{path}' is a relative path. Scalar tokenizer functions don't have access " +
-                "to the catalog's model directory; pass an absolute path or a 'file://'-prefixed URI. " +
-                "(Catalog-relative resolution is a planned EvaluationFrame extension.)");
+                $"'{path}' is a relative path. Scalar tokenizer functions called outside a " +
+                "CREATE MODEL body don't have access to the catalog's model directory; pass " +
+                "an absolute path or a 'file://'-prefixed URI. Inside a CREATE MODEL body, " +
+                "relative paths resolve against the directory of the model's USING file.");
         }
         return path;
+    }
+
+    /// <summary>
+    /// Same contract as <see cref="ResolveAbsolute(string, string)"/> but
+    /// also accepts a path relative to the calling model's resolved
+    /// <c>USING</c> directory (<c>frame.CurrentModel.ResolvedUsingPath</c>). The
+    /// canonical layout for a sentence-transformer entry is
+    /// <c>{ModelDirectory}/{catalog-id}/model.onnx</c> +
+    /// <c>vocab.txt</c> sibling — relative resolution here turns the SQL
+    /// body's <c>'vocab.txt'</c> into the absolute path without forcing
+    /// the body to hardcode <c>$DATUM_MODELS</c> or <c>file://</c>.
+    /// </summary>
+    internal static string ResolveAbsoluteOrCatalogRelative(
+        string path, string callerContext, EvaluationFrame frame)
+    {
+        if (path.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            return path["file://".Length..];
+        }
+        if (Path.IsPathRooted(path)) return path;
+
+        if (frame.CurrentModel is { ResolvedUsingPath: { } resolved })
+        {
+            string? modelDir = Path.GetDirectoryName(resolved);
+            if (!string.IsNullOrEmpty(modelDir))
+            {
+                return Path.GetFullPath(Path.Combine(modelDir, path));
+            }
+        }
+        throw new FunctionArgumentException(callerContext,
+            $"'{path}' is a relative path. Catalog-relative resolution requires a CREATE MODEL " +
+            "body frame; outside one, pass an absolute path or a 'file://'-prefixed URI.");
     }
 }
 
@@ -324,5 +420,58 @@ internal static class TokenizerOps
 
         string decoded = tokenizer.Decode(ids32) ?? string.Empty;
         return ValueRef.FromString(decoded);
+    }
+
+    /// <summary>
+    /// Runs the BERT tokenizer with special tokens enabled, then builds a
+    /// 3-field struct ValueRef carrying input_ids, attention_mask, and
+    /// token_type_ids — the bundle every BERT-family ONNX encoder expects.
+    /// The struct's TypeId is interned into <paramref name="types"/> when
+    /// supplied so downstream <c>infer({encoded}, {...})</c> can resolve
+    /// field names back to session input names.
+    /// </summary>
+    internal static ValueRef EncodeBertToValueRef(
+        BertTokenizer tokenizer, string text, TypeRegistry? types)
+    {
+        // BertTokenizer.EncodeToIds(addSpecialTokens=true) prepends [CLS]
+        // and appends [SEP]. For a single sequence with no padding, the
+        // attention mask is all-1s of the same length and token_type_ids
+        // is all-0s. Microsoft.ML.Tokenizers returns Int32 ids; the SQL
+        // surface (and ONNX BERT inputs) is Int64.
+        IReadOnlyList<int> ids = tokenizer.EncodeToIds(
+            text, addSpecialTokens: true, considerPreTokenization: true);
+        int n = ids.Count;
+
+        long[] inputIds = new long[n];
+        long[] attentionMask = new long[n];
+        long[] tokenTypeIds = new long[n];
+        for (int i = 0; i < n; i++)
+        {
+            inputIds[i] = ids[i];
+            attentionMask[i] = 1L;
+            // tokenTypeIds left at default 0L — single-sequence default.
+        }
+
+        ValueRef[] fields =
+        [
+            ValueRef.FromPrimitiveArray(inputIds,      DataKind.Int64),
+            ValueRef.FromPrimitiveArray(attentionMask, DataKind.Int64),
+            ValueRef.FromPrimitiveArray(tokenTypeIds,  DataKind.Int64),
+        ];
+
+        ushort typeId = 0;
+        if (types is not null)
+        {
+            int int64ArrayTypeId = types.InternArrayType(DataKind.Int64);
+            StructFieldDescriptor[] descriptors =
+            [
+                new("input_ids",      int64ArrayTypeId),
+                new("attention_mask", int64ArrayTypeId),
+                new("token_type_ids", int64ArrayTypeId),
+            ];
+            typeId = (ushort)types.InternStructType(descriptors);
+        }
+
+        return ValueRef.FromStruct(fields, typeId);
     }
 }

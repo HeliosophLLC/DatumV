@@ -80,6 +80,126 @@ public sealed class L2NormalizeFunction : IFunction, IScalarFunction
 }
 
 /// <summary>
+/// <c>mean_pool_masked(embeddings FLOAT32[], mask INT64[], embedding_dim INT32)
+/// → FLOAT32[embedding_dim]</c>. Mean-pools a flattened
+/// <c>[seq_len, embedding_dim]</c> token-embedding tensor along the seq_len
+/// axis, weighting each token by its attention mask (1 = keep, 0 = drop).
+/// The standard sentence-transformers pooling step for BERT-family encoders
+/// when the model emits per-token <c>last_hidden_state</c>.
+/// </summary>
+/// <remarks>
+/// Returns a zero vector when every mask entry is zero (all-padding input)
+/// rather than dividing by zero. The mask length tells us seq_len; the
+/// <c>embedding_dim</c> argument plus
+/// <c>embeddings.Length == seq_len * embedding_dim</c> nails down the
+/// layout — we don't need explicit per-row dimensions threaded through.
+/// </remarks>
+public sealed class MeanPoolMaskedFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "mean_pool_masked";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Vector;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Mean-pools a flattened [seq_len, embedding_dim] Float32 tensor along seq_len "
+        + "with attention-mask weighting: mean_pool_masked(embeddings FLOAT32[], "
+        + "mask INT64[], embedding_dim INT32) → FLOAT32[embedding_dim]. "
+        + "The canonical sentence-transformers pooling step. All-zero mask returns "
+        + "a zero vector (no divide-by-zero NaN).";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("embeddings",    DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("mask",          DataKindMatcher.Exact(DataKind.Int64),   IsArray: ArrayMatch.Array),
+                new ParameterSpec("embedding_dim", DataKindMatcher.Exact(DataKind.Int32),   IsArray: ArrayMatch.Scalar),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<MeanPoolMaskedFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args[0].IsNull || args[1].IsNull || args[2].IsNull)
+        {
+            return new(ValueRef.NullArray(DataKind.Float32));
+        }
+
+        float[] embeddings = ActivationOps.ReadFloat32Array(args[0]);
+        long[] mask = ReadInt64Array(args[1]);
+        int embeddingDim = args[2].ToInt32();
+
+        if (embeddingDim <= 0)
+        {
+            throw new FunctionArgumentException(Name,
+                $"embedding_dim must be positive; got {embeddingDim}.");
+        }
+
+        int seqLen = mask.Length;
+        long expectedFlatLength = (long)seqLen * embeddingDim;
+        if (embeddings.Length != expectedFlatLength)
+        {
+            throw new FunctionArgumentException(Name,
+                $"embeddings length {embeddings.Length} doesn't match mask.Length ({seqLen}) "
+                + $"* embedding_dim ({embeddingDim}) = {expectedFlatLength}. "
+                + "Pass the flattened [seq_len, embedding_dim] tensor directly from infer().");
+        }
+
+        float[] pooled = new float[embeddingDim];
+        if (seqLen == 0) return new(ValueRef.FromPrimitiveArray(pooled, DataKind.Float32));
+
+        long maskSum = 0;
+        for (int t = 0; t < seqLen; t++)
+        {
+            long m = mask[t];
+            if (m == 0) continue;
+            maskSum += m;
+            int rowOffset = t * embeddingDim;
+            for (int d = 0; d < embeddingDim; d++)
+            {
+                // m is an attention weight; treating as float is safe for
+                // 0/1 masks and natural for soft masks (rare for BERT).
+                pooled[d] += embeddings[rowOffset + d] * m;
+            }
+        }
+
+        if (maskSum == 0)
+        {
+            // All-padding input. Return zero-vector (already zero-init).
+            return new(ValueRef.FromPrimitiveArray(pooled, DataKind.Float32));
+        }
+
+        float inv = 1.0f / maskSum;
+        for (int d = 0; d < embeddingDim; d++) pooled[d] *= inv;
+        return new(ValueRef.FromPrimitiveArray(pooled, DataKind.Float32));
+    }
+
+    private static long[] ReadInt64Array(ValueRef arg)
+    {
+        if (arg.Materialized is long[] direct) return direct;
+        ReadOnlySpan<ValueRef> elements = arg.GetArrayElements();
+        long[] result = new long[elements.Length];
+        for (int i = 0; i < elements.Length; i++) result[i] = elements[i].ToInt64();
+        return result;
+    }
+}
+
+/// <summary>
 /// <c>cosine_similarity(a FLOAT32[], b FLOAT32[]) → FLOAT32</c>. Standard
 /// cosine similarity: <c>(a · b) / (||a|| * ||b||)</c>. Range is
 /// [-1, 1]; 1 means identical direction.

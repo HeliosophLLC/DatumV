@@ -742,6 +742,7 @@ internal sealed class RoutineRegistrar
             Parameters: create.Parameters,
             ReturnTypeName: create.ReturnTypeName,
             UsingPath: create.UsingPath,
+            ResolvedUsingPath: resolvedPath,
             StatementBody: create.StatementBody,
             BoundSessions: sessions,
             ReturnIsNotNull: create.ReturnIsNotNull,

@@ -610,6 +610,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Vector.ArgmaxFunction>();
         registry.RegisterScalar<Scalar.Vector.TopkFunction>();
         registry.RegisterScalar<Scalar.Vector.L2NormalizeFunction>();
+        registry.RegisterScalar<Scalar.Vector.MeanPoolMaskedFunction>();
         registry.RegisterScalar<Scalar.Vector.CosineSimilarityFunction>();
         registry.RegisterScalar<Scalar.Vector.NmsFunction>();
         registry.RegisterScalar<Scalar.Vector.MaskToPolygonFunction>();
@@ -621,6 +622,7 @@ public sealed class FunctionRegistry
         // vocab.json+merges.txt form. See Functions/Tokenization/.
         registry.RegisterScalar<Tokenization.TokenizerEncodeFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerEncodeBpeFunction>("tokenizer");
+        registry.RegisterScalar<Tokenization.TokenizerEncodeBertFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerDecodeFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerDecodeBpeFunction>("tokenizer");
 

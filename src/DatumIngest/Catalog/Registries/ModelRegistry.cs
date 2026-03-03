@@ -48,6 +48,13 @@ namespace DatumIngest.Catalog.Registries;
 /// this against the host's models directory (<c>file://</c>-prefixed paths
 /// are treated as absolute) before passing to the dispatcher.
 /// </param>
+/// <param name="ResolvedUsingPath">
+/// Absolute path after the registrar resolves <see cref="UsingPath"/>
+/// against the host's models directory. Lets the body's scalar functions
+/// (e.g. <c>tokenizer.encode_bert</c>) find sibling files like
+/// <c>vocab.txt</c> next to the bound ONNX without re-implementing the
+/// path-resolution rules.
+/// </param>
 /// <param name="StatementBody">
 /// Procedural body. Always non-null on a valid model (CREATE MODEL parser
 /// rejects expression bodies).
@@ -71,6 +78,7 @@ public sealed record ModelDescriptor(
     IReadOnlyList<UdfParameter> Parameters,
     string ReturnTypeName,
     string UsingPath,
+    string ResolvedUsingPath,
     IReadOnlyList<Statement> StatementBody,
     IReadOnlyDictionary<string, IInferenceSession> BoundSessions,
     bool ReturnIsNotNull = false,

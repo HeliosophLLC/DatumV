@@ -298,6 +298,7 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
         Parameters: Array.Empty<DatumIngest.Parsing.Ast.UdfParameter>(),
         ReturnTypeName: "Float32",
         UsingPath: usingPath,
+        ResolvedUsingPath: usingPath,
         StatementBody: Array.Empty<DatumIngest.Parsing.Ast.Statement>(),
         BoundSessions: new Dictionary<string, IInferenceSession>(StringComparer.Ordinal),
         ReturnIsNotNull: false,

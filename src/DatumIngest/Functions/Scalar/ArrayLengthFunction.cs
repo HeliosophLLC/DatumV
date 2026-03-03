@@ -51,6 +51,6 @@ public sealed class ArrayLengthFunction : IFunction, IScalarFunction
         if (arrayArg.IsNull)
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
 
-        return new ValueTask<ValueRef>(ValueRef.FromInt32(arrayArg.GetArrayElements().Length));
+        return new ValueTask<ValueRef>(ValueRef.FromInt32(arrayArg.GetArrayLength()));
     }
 }

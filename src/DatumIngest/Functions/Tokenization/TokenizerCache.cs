@@ -35,6 +35,35 @@ internal static class TokenizerCache
 {
     private static readonly ConcurrentDictionary<string, BpeTokenizer> _byTokenizerJson = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<(string Vocab, string Merges), BpeTokenizer> _byVocabMerges = new();
+    private static readonly ConcurrentDictionary<string, BertTokenizer> _byBertVocab = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns the BERT/WordPiece tokenizer for <paramref name="vocabPath"/>
+    /// (a vocab.txt with one wordpiece per line), loading it on first request
+    /// and caching the result. BERT defaults assumed: lowercase input, basic
+    /// tokenization on, CJK split, no accent stripping. Mirrors the
+    /// <c>BertTokenizer</c> behaviour in HuggingFace's <c>transformers</c>
+    /// for uncased English checkpoints — the most common case for the
+    /// sentence-transformer family (MiniLM, BGE, GTE, …).
+    /// </summary>
+    public static BertTokenizer GetBertFromVocab(string vocabPath)
+        => _byBertVocab.GetOrAdd(vocabPath, LoadBertFromVocab);
+
+    private static BertTokenizer LoadBertFromVocab(string path)
+    {
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException(
+                $"BERT vocab file not found at '{path}'.", path);
+        }
+        BertOptions options = new()
+        {
+            LowerCaseBeforeTokenization = true,
+            ApplyBasicTokenization = true,
+            IndividuallyTokenizeCjk = true,
+        };
+        return BertTokenizer.Create(path, options);
+    }
 
     /// <summary>
     /// Returns the tokenizer for <paramref name="tokenizerJsonPath"/>, loading

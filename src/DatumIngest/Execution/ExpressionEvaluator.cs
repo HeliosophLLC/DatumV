@@ -982,7 +982,11 @@ public sealed class ExpressionEvaluator
     /// handled by ValueRef itself.
     /// </summary>
     private static DataValue ToDataValue(ValueRef value, EvaluationFrame frame) =>
-        value.ToDataValue(frame.Target);
+        // Pass the ValueRef's own TypeId through so struct-shape metadata
+        // round-trips through DataValue. Without this, identity-cast on a
+        // struct (DECLARE encoded Struct = ...) strips the TypeId and
+        // breaks downstream `encoded['field']` index access.
+        value.ToDataValue(frame.Target, value.TypeId, frame.Types);
 
     private async ValueTask<DataValue> EvaluateInAsync(
         InExpression inExpr, EvaluationFrame frame, CancellationToken cancellationToken)

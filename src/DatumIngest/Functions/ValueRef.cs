@@ -566,6 +566,46 @@ public readonly struct ValueRef
     }
 
     /// <summary>
+    /// Returns the element count of an array value across both array
+    /// carrier shapes: the <c>ValueRef[]</c> form built by SQL array
+    /// literals and the typed primitive form (e.g. <c>long[]</c>,
+    /// <c>float[]</c>) built by <see cref="FromPrimitiveArray{T}"/>.
+    /// Callers that don't actually need element access (e.g. array_length)
+    /// should prefer this over <see cref="GetArrayElements"/>, which only
+    /// works for the ValueRef[] form.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The value is not an array.</exception>
+    public int GetArrayLength()
+    {
+        if (!_inline.IsArray)
+        {
+            throw new InvalidOperationException(
+                $"GetArrayLength called on a {_inline.Kind} value (expected an array).");
+        }
+        return _materialized switch
+        {
+            ValueRef[] refs => refs.Length,
+            byte[] bytes => bytes.Length,
+            sbyte[] sbytes => sbytes.Length,
+            short[] shorts => shorts.Length,
+            ushort[] ushorts => ushorts.Length,
+            int[] ints => ints.Length,
+            uint[] uints => uints.Length,
+            long[] longs => longs.Length,
+            ulong[] ulongs => ulongs.Length,
+            float[] floats => floats.Length,
+            double[] doubles => doubles.Length,
+            bool[] bools => bools.Length,
+            string[] strings => strings.Length,
+            null when IsNull => throw new InvalidOperationException(
+                "GetArrayLength called on a null array; check IsNull first."),
+            _ => throw new InvalidOperationException(
+                $"Array ValueRef payload is of unsupported runtime type "
+                + $"'{_materialized?.GetType().Name ?? "<null>"}'."),
+        };
+    }
+
+    /// <summary>
     /// The element kind for an array value. With the typed-array carrier
     /// (<see cref="Kind"/> = <c>elementKind</c>, <see cref="IsArray"/> = true),
     /// the element kind is simply <see cref="Kind"/>.

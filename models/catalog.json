@@ -146,6 +146,7 @@
       "attributions": ["sentence-transformers — Reimers & Gurevych (UKP Lab, TU Darmstadt)", "HuggingFace optimum (ONNX export)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
       "source": { "type": "huggingface", "repo": "optimum/all-MiniLM-L6-v2", "revision": "10244843eba3d9e479b27a4b81c94b56d8e9f4f2", "include": ["*.onnx", "*.json", "*.txt"] },
+      "installSql": "sql/all-minilm-l6-v2.sql",
       "approxSizeMb": 90
     },
     {
