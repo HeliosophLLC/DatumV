@@ -838,10 +838,15 @@ public sealed class InMemoryTableProvider : ITableProvider
     }
 
     /// <summary>
-    /// Converts a single raw cell into a <see cref="DataValue"/>. DataValue cells are
-    /// passed through unchanged (caller is responsible for arena lifetime). Strings
-    /// and byte arrays are stored into <paramref name="arena"/>; DataValue chooses
-    /// inline-vs-arena-backed storage for strings automatically based on UTF-8 length.
+    /// Converts a single raw cell into a <see cref="DataValue"/>. Cells are
+    /// expected to be plain CLR values; we materialise them into the
+    /// scan-time <paramref name="arena"/> so the resulting DataValue's
+    /// arena offsets are valid for downstream reads against
+    /// <see cref="RowBatch.Arena"/>. Pre-built DataValue cells are accepted
+    /// only when they carry no arena/sidecar dependency
+    /// (<see cref="DataValue.IsInline"/>, <see cref="DataValue.IsInlineArray"/>,
+    /// or null); non-inline DataValues from a foreign arena would silently
+    /// read garbage downstream so we reject them with a clear error.
     /// </summary>
     private static DataValue MaterializeCell(object? cell, DataKind expectedKind, Arena arena)
     {
@@ -852,7 +857,23 @@ public sealed class InMemoryTableProvider : ITableProvider
 
         if (cell is DataValue dv)
         {
-            return dv;
+            // Safe to pass through: null sentinels, inline scalars, and
+            // inline-array payloads all live entirely in the 16-byte
+            // DataValue itself with no offset into any arena. Anything
+            // arena- or sidecar-backed came from somewhere else and we'd
+            // need the source arena to stabilise — caller should hand us
+            // the raw CLR value instead so we own the arena identity.
+            if (dv.IsNull || dv.IsInline || dv.IsInlineArray)
+            {
+                return dv;
+            }
+            throw new ArgumentException(
+                "InMemoryTableProvider rejects non-inline DataValue cells: the value carries "
+                + $"arena/sidecar offsets ({(dv.IsInSidecar ? "sidecar" : "arena")}-backed "
+                + $"{dv.Kind}{(dv.IsArray ? "[]" : "")}) that would resolve against the wrong "
+                + "store after the row scans into a fresh RowBatch. Pass the raw CLR value "
+                + "(string / numeric / typed array / byte[]) and let the provider materialise "
+                + "it into the scan-time arena.");
         }
 
         return cell switch
@@ -878,14 +899,35 @@ public sealed class InMemoryTableProvider : ITableProvider
             TimeOnly time => DataValue.FromTime(time),
             TimeSpan ts => DataValue.FromDuration(ts),
             Guid g => DataValue.FromUuid(g),
+            // byte[] cells fan out by expectedKind for the media wrappers
+            // (Image/Audio/Video/Json), defaulting to UInt8[] for generic
+            // bytes. Listed before the typed-array branches so an Image
+            // column whose CLR cell is `byte[]` lands as a real Image, not
+            // a UInt8[].
             byte[] bytes when expectedKind == DataKind.Image => DataValue.FromImage(bytes, arena),
             byte[] bytes when expectedKind == DataKind.Audio => DataValue.FromAudio(bytes, arena),
             byte[] bytes when expectedKind == DataKind.Video => DataValue.FromVideo(bytes, arena),
             byte[] bytes when expectedKind == DataKind.Json => DataValue.FromJson(bytes, arena),
             byte[] bytes => DataValue.FromByteArray(bytes, arena),
+            // Typed primitive arrays. Each lands as a typed array
+            // (DataKind=elementKind + IsArray) in the scan-time arena.
+            // String arrays use the dedicated factory because String
+            // payload layout is sidecar-aware.
+            sbyte[] sbytes => DataValue.FromArenaArray(sbytes, DataKind.Int8, arena),
+            short[] shorts => DataValue.FromArenaArray(shorts, DataKind.Int16, arena),
+            ushort[] ushorts => DataValue.FromArenaArray(ushorts, DataKind.UInt16, arena),
+            int[] ints => DataValue.FromArenaArray(ints, DataKind.Int32, arena),
+            uint[] uints => DataValue.FromArenaArray(uints, DataKind.UInt32, arena),
+            long[] longs => DataValue.FromArenaArray(longs, DataKind.Int64, arena),
+            ulong[] ulongs => DataValue.FromArenaArray(ulongs, DataKind.UInt64, arena),
+            float[] floats => DataValue.FromArenaArray(floats, DataKind.Float32, arena),
+            double[] doubles => DataValue.FromArenaArray(doubles, DataKind.Float64, arena),
+            bool[] bools => DataValue.FromArenaArray(bools, DataKind.Boolean, arena),
+            string[] strings => DataValue.FromStringArray(strings, arena),
             _ => throw new ArgumentException(
                 $"InMemoryTableProvider cannot materialize cell of type {cell.GetType().FullName}. " +
-                "Pass a supported CLR primitive, a byte[], or a DataValue directly."),
+                "Pass a supported CLR primitive, typed primitive array, byte[], string[], or "
+                + "an inline DataValue."),
         };
     }
 
