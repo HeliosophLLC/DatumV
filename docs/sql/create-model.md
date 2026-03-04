@@ -169,7 +169,6 @@ WHERE body_scope <> 'none';
 
 ### Argument shape
 
-The v1 surface supports **single-input, single-output** ONNX sessions.
 The argument's runtime kind must match the session's input tensor's
 declared element kind. Three element kinds are wired today:
 
@@ -181,8 +180,50 @@ declared element kind. Three element kinds are wired today:
 
 A scalar argument is wrapped into a length-1 tensor; a primitive-array
 argument flows through as a 1-d tensor matching the array length. For
-sessions with a leading dynamic dim (`[?, 224, 224, 3]` for example),
+sessions with a single dynamic dim (`[?, 224, 224, 3]` for example),
 the dynamic dim absorbs whatever element count the input provides.
+
+### Explicit shapes for multi-dynamic-dim inputs
+
+When the session's input shape has **more than one dynamic dim**
+(e.g. PaddleOCR's `[-1, 3, -1, -1]` where batch + H + W are all
+dynamic), `infer()` can't pick a unique shape from the flat tensor
+length alone. The 2-arg form passes the shape explicitly:
+
+```sql
+DECLARE prob Float32[] = infer(tensor, [CAST(1 AS Int32), CAST(3 AS Int32), rh, rw]);
+```
+
+The shape array's product must equal the input tensor's element count.
+
+### Multi-input models
+
+For sessions with more than one input tensor (BERT-family transformers,
+multi-modal encoders), pass a **struct of tensors** with field names
+matching the ONNX input names case-insensitively:
+
+```sql
+-- 1-arg form: shapes resolved from each input's TensorSpec (works when
+-- each spec has at most one dynamic dim).
+DECLARE result Float32[] = infer({
+    input_ids:      ids,
+    attention_mask: mask,
+    token_type_ids: types
+});
+
+-- 2-arg form: parallel struct of explicit shapes per input. Required
+-- when every input has multiple dynamic dims, as is typical for
+-- BERT-family encoders ([batch, seq_len] on every input).
+DECLARE result Float32[] = infer(
+    {input_ids: ids, attention_mask: mask, token_type_ids: types},
+    {input_ids:      [CAST(1 AS Int32), n],
+     attention_mask: [CAST(1 AS Int32), n],
+     token_type_ids: [CAST(1 AS Int32), n]});
+```
+
+The shipped [`all-minilm-l6-v2`](../../models/sql/all-minilm-l6-v2.sql)
+model body is the canonical worked example — tokenize → multi-input
+`infer` → mean-pool → L2-normalize.
 
 ### Return shape
 
@@ -192,11 +233,18 @@ multi-element outputs surface as a primitive array. The body's `RETURN`
 coerces the value to the model's declared `RETURNS TYPE` if the kinds
 differ.
 
+Sessions with **more than one output** are accepted; `infer()` returns
+the **first** output. The convention HuggingFace optimum and most
+transformer-to-ONNX exporters follow is to list the primary output
+first (e.g. `last_hidden_state` ahead of `pooler_output` for BERT-family
+encoders). A struct-of-tensors return shape for multi-output sessions
+is a follow-up.
+
 ### What's deferred
 
-- **Multi-input / multi-output** models. The v1 surface is single-input
-  only; multi-tensor will likely take a struct-of-tensors argument shape
-  (`infer(struct{input_ids: ..., attention_mask: ...})`).
+- **Multi-output** models. v1 returns the first output; the
+  struct-of-tensors return shape lands when the first multi-output
+  model wants both.
 - **Multi-session bundles** (Florence-2, SD). The v1 surface assumes a
   single ONNX file; multi-session will likely take a session-name
   argument (`infer('decoder', struct{...})`).
@@ -367,14 +415,18 @@ rows: `name`, `backend = "sql"`, `file_name` (the raw `USING` path),
   vision-language pipelines) are not yet supported through `CREATE
   MODEL`. Built-ins handle multi-session today; the SQL surface inherits
   it when there's a first multi-session user.
-- **Single input + single output tensor.** `infer()` rejects sessions
-  with more than one input or output. Multi-tensor support is mechanical
-  but waits for a real model that needs it.
-- **Element kinds Float32 / Int32 / Int64 only.** Float16, Bool, UInt8,
-  and the rest are runtime errors today; each is one branch to add.
+- **Single output tensor.** Multi-output sessions are accepted but
+  `infer()` returns only the first output. Struct-of-tensors return
+  shape is a follow-up.
+- **Element kinds Float32 / Int32 / Int64 only** at the `infer()` boundary.
+  Float16, Bool, UInt8, and the rest are runtime errors today; each is
+  one branch to add.
 - **No persistence.** Re-issue `CREATE MODEL` after process restart.
-- **No CSE / batched dispatch for SQL-defined models.** Each call site
-  evaluates per row. See [Performance](#performance).
+- **No CSE / batched dispatch for SQL-defined models** under the per-row
+  scalar path. The lowerer-into-column-pipeline path covers straight-line
+  bodies (single-input `infer`); multi-input bodies (struct-arg
+  `infer`) route through the per-row procedural adapter — see
+  [Performance](#performance).
 - **Schema is fixed.** Models always live under `models.X` — no
   user-chosen schema.
 - **Body restrictions.** No `BREAK`/`CONTINUE`; no nested `SELECT`.

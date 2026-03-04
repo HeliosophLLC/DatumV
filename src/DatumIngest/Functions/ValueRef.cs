@@ -326,6 +326,7 @@ public readonly struct ValueRef
         return new(DataValue.NullArrayOf(elementKind), elements);
     }
 
+
     /// <summary>
     /// Bulk-constructor for a fixed-width primitive array. Stores the caller's
     /// <paramref name="values"/> array directly as the managed payload — zero
@@ -973,6 +974,20 @@ public readonly struct ValueRef
         {
             elementStructTypeId = (ushort)eid;
             elementFields = types.GetDescriptor(elementStructTypeId)?.Fields;
+        }
+        else if (elements.Length > 0 && elements[0]._inline.TypeId != 0)
+        {
+            // No Array<Struct> typeId was supplied (the caller is a dynamic-
+            // shape producer like a SQL-defined model body whose result
+            // ValueRef wraps an inline carrier without a TypeId — by design,
+            // since the inline-array TypeId getter is gated to arena-backed
+            // Array<Struct>). The per-element struct ValueRefs DO carry their
+            // shape TypeId via `FromStruct(fields, typeId)`, so peek at the
+            // first element's _inline.TypeId and use that as the element
+            // struct's stamp. Without this peek, dynamic-shape Array<Struct>
+            // outputs lose field names on the way out of MIO scatter.
+            elementStructTypeId = elements[0]._inline.TypeId;
+            elementFields = types?.GetDescriptor(elementStructTypeId)?.Fields;
         }
 
         DataValue[][] rows = new DataValue[elements.Length][];

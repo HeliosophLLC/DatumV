@@ -25,7 +25,7 @@ namespace DatumIngest.Execution.Operators;
 /// </para>
 /// <para>
 /// <strong>Batching</strong> — the model receives <c>batch.Count</c> rows in one
-/// <see cref="IModel.InferBatchAsync"/> call. Sub-batching for GPU memory limits
+/// <c>IModel.InferBatchAsync</c> call. Sub-batching for GPU memory limits
 /// is the model implementation's responsibility, not the operator's.
 /// </para>
 /// <para>
@@ -326,8 +326,15 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 {
                     if (streamingSink is null)
                     {
+                        // Pass context.Types so dynamic-shape models
+                        // (notably SQL-defined bodies via the procedural
+                        // adapter) intern their result struct/array shapes
+                        // into the caller's per-query registry. Without
+                        // this, the TypeIds stamped inside the body
+                        // resolve against a foreign registry and the
+                        // scatter step below loses struct field names.
                         modelOutputs = await model
-                            .InferBatchAsync(inputs, overrideValues, cancellationToken)
+                            .InferBatchAsync(inputs, overrideValues, context.Types, cancellationToken)
                             .ConfigureAwait(false);
                     }
                     else
@@ -411,6 +418,14 @@ public sealed class ModelInvocationOperator : IQueryOperator
                     }
                     else
                     {
+                        // No static schema (model.OutputFields is null) — the
+                        // model is a dynamic-shape producer like a SQL-defined
+                        // body via ProceduralModelAdapter. ToDataValue's
+                        // BuildStructArray path falls back to reading the
+                        // first element's TypeId when this rowTypeId is 0, so
+                        // dynamic-shape Array<Struct> outputs still get their
+                        // per-element struct stamps. Primitive outputs have
+                        // TypeId 0 anyway and don't lose anything.
                         rowTypeId = elementStructTypeId;
                     }
                     outValues[^1] = rowValue.ToDataValue(outputBatch.Arena, rowTypeId, context.Types);
@@ -433,7 +448,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
     }
 
     /// <summary>
-    /// Streaming-path replacement for <see cref="IModel.InferBatchAsync"/>.
+    /// Streaming-path replacement for <c>IModel.InferBatchAsync</c>.
     /// Drains the model's per-row <see cref="IAsyncEnumerable{ValueRef}"/>,
     /// forwards each yielded chunk to <paramref name="sink"/> as it arrives,
     /// and assembles a single output <see cref="ValueRef"/> for the row so

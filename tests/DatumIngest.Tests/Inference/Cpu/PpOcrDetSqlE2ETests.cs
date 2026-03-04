@@ -174,6 +174,89 @@ public sealed class PpOcrDetSqlE2ETests : ServiceTestBase
         return new EvaluationFrame(Row.Empty, arena, arena, types: new TypeRegistry());
     }
 
+    /// <summary>
+    /// Round-trips PP-OCR-det's <c>Array&lt;Struct&gt;</c> output through the
+    /// MIO scatter path and asserts the struct field names survive: <c>label,
+    /// score, x, y, w, h</c>. Regression for the TypeRegistry-not-shared bug
+    /// where the body's <c>ProceduralModelAdapter</c> interned struct shapes
+    /// into its own private registry, so MIO scattered the output with TypeIds
+    /// meaningless against <c>context.Types</c> and downstream consumers saw
+    /// f0..f5 instead of the declared field names.
+    /// </summary>
+    [Fact]
+    public async Task PpOcrDet_SelectThroughMIO_PreservesStructFieldNames()
+    {
+        string? onnxPath = await TryEnsureModelAvailableAsync();
+        if (onnxPath is null) return;
+
+        TableCatalog catalog = CreateCatalog();
+        catalog.Models = new ModelCatalog(modelDirectory: ModelsDirectory);
+        catalog.InferenceDispatcher = new InferenceDispatcher(
+            [new OnnxRuntimeBackend()],
+            NullLogger<InferenceDispatcher>.Instance);
+
+        catalog.Plan(LoadCanonicalSql());
+
+        // Encode the synth image to PNG bytes; InMemoryTableProvider treats
+        // `byte[]` cells with expectedKind = Image as a real Image DataValue
+        // materialised into the scan-time arena.
+        using SKBitmap bmp = MakeSyntheticImage();
+        using SKData encoded = SKImage.FromBitmap(bmp).Encode(SKEncodedImageFormat.Png, 90);
+        byte[] imageBytes = encoded.ToArray();
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(),
+            "data",
+            ["img"],
+            [DataKind.Image],
+            [new object?[] { imageBytes }]));
+
+        IQueryPlan plan = catalog.Plan("SELECT models.paddleocr_v4_det(img) FROM data");
+
+        bool sawRow = false;
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                sawRow = true;
+                DataValue cell = batch[i][0];
+                Assert.True(cell.IsArray, "expected Array<Struct> output cell");
+                Assert.Equal(DataKind.Struct, cell.Kind);
+
+                // The TypeId on the cell points at the Array descriptor in
+                // the query's TypeRegistry. ElementTypeId on that descriptor
+                // is the per-element struct's TypeId, whose Fields carry the
+                // load-bearing assertion target: the original SQL-declared
+                // field names from dbnet_postprocess.
+                Assert.NotNull(batch.Types);
+
+                // Array<Struct> values intentionally carry typeId=0 on the
+                // array carrier — element slots are self-describing via
+                // their per-element TypeId stamped by FromStructArray. So
+                // we read the first element's TypeId and look it up in
+                // batch.Types to recover the field names.
+                Assert.False(cell.IsNull, "expected non-null Array<Struct>");
+                DataValue[] elements = cell.AsStructArray(batch.Arena);
+                Assert.NotEmpty(elements);
+
+                DataValue first = elements[0];
+                Assert.Equal(DataKind.Struct, first.Kind);
+                Assert.NotEqual(0, first.TypeId);
+
+                TypeDescriptor? structDesc = batch.Types!.GetDescriptor(first.TypeId);
+                Assert.NotNull(structDesc);
+                Assert.Equal(DataKind.Struct, structDesc!.Kind);
+                Assert.NotNull(structDesc.Fields);
+
+                string[] fieldNames = structDesc.Fields!.Select(f => f.Name).ToArray();
+                Assert.Equal(
+                    new[] { "label", "score", "x", "y", "w", "h" },
+                    fieldNames);
+            }
+        }
+        Assert.True(sawRow, "expected at least one output row");
+    }
+
     private static float[] ImageNetMean() => [0.485f, 0.456f, 0.406f];
     private static float[] ImageNetStd() => [0.229f, 0.224f, 0.225f];
 

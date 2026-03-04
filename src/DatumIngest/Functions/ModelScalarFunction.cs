@@ -23,7 +23,7 @@ namespace DatumIngest.Functions;
 /// </para>
 /// <para>
 /// <strong>Per-row dispatch.</strong> Procedural bodies invoke this adapter
-/// once per row. Each call <see cref="IModel.InferBatchAsync"/> with a
+/// once per row. Each call <c>IModel.InferBatchAsync</c> with a
 /// single-row batch — no cross-row batching at this layer. Operators that
 /// want batched throughput stay on the hoister + <c>ModelInvocationOperator</c>
 /// path; this adapter is the fallback for unhoisted contexts where per-row
@@ -135,8 +135,13 @@ internal sealed class ModelScalarFunction : IScalarFunction
         }
 
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs = new[] { (IReadOnlyList<ValueRef>)rowInputs };
+        // Thread the caller's TypeRegistry through so dynamic-shape model
+        // outputs (procedural-adapter struct results) intern into the same
+        // registry the downstream evaluator reads against. Frame.Types is
+        // non-null for all real query paths; legacy callers with no
+        // registry get a no-op forward through the default overload.
         IReadOnlyList<ValueRef> result = await model
-            .InferBatchAsync(inputs, overrides, cancellationToken)
+            .InferBatchAsync(inputs, overrides, frame.Types, cancellationToken)
             .ConfigureAwait(false);
 
         if (result.Count == 0)

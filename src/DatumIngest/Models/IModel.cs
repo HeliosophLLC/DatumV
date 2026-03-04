@@ -82,7 +82,7 @@ public interface IModel
     /// </para>
     /// <para>
     /// Outputs are constructed in managed memory via <see cref="ValueRef.FromString"/>,
-    /// <see cref="ValueRef.FromStruct(ValueRef[])"/>, <see cref="ValueRef.FromArray"/>,
+    /// <see cref="ValueRef.FromStruct(ValueRef[])"/>, <c>ValueRef.FromArray</c>,
     /// etc. — the model never touches an arena. The operator's scatter step
     /// calls <see cref="ValueRef.ToDataValue"/> to materialise into the
     /// output batch's arena in one recursive pass. Nested structures (e.g.
@@ -109,6 +109,41 @@ public interface IModel
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Type-registry-aware batch dispatch. Same contract as the 3-arg
+    /// <see cref="InferBatchAsync(IReadOnlyList{IReadOnlyList{ValueRef}}, IReadOnlyList{IReadOnlyList{ValueRef}}, CancellationToken)"/>
+    /// with an extra <paramref name="types"/> parameter carrying the
+    /// caller's per-query <see cref="TypeRegistry"/>. Models that build
+    /// struct or typed-array outputs whose shape comes from runtime data
+    /// (rather than a static <see cref="OutputFields"/> schema) intern
+    /// their result shapes into this registry so the caller's
+    /// <c>ToDataValue</c> / struct-field-access paths can resolve the
+    /// stamped TypeIds without cross-registry translation.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Default: forwards to the 3-arg overload, ignoring
+    /// <paramref name="types"/>. Existing model implementations that
+    /// don't construct dynamic-shape outputs (the vast majority — every
+    /// model whose <see cref="OutputFields"/> is non-null, plus every
+    /// model that emits only primitive scalars or primitive arrays) need
+    /// no changes. SQL-defined models routed through
+    /// <c>ProceduralModelAdapter</c> override this method so struct
+    /// shapes built inside the body land in the caller's registry.
+    /// </para>
+    /// <para>
+    /// Callers from inside the engine (MIO, ModelScalarFunction) should
+    /// invoke this overload with <c>context.Types</c> / <c>frame.Types</c>
+    /// so the registry threading works for all model implementations.
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<ValueRef>> InferBatchAsync(
+        IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
+        IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
+        TypeRegistry? types,
+        CancellationToken cancellationToken)
+        => InferBatchAsync(inputs, overrides, cancellationToken);
+
+    /// <summary>
     /// Run inference for a single row, yielding the result as a stream of
     /// chunks. Each yielded <see cref="ValueRef"/> is a fragment of the same
     /// logical output value — for a string-emitting model, consumers
@@ -118,7 +153,7 @@ public interface IModel
     /// <para>
     /// <strong>Streaming is the wire protocol, not a type change.</strong>
     /// SQL semantics never see partial values — every <c>SELECT</c>,
-    /// <c>WHERE</c>, <c>GROUP BY</c>, etc. uses <see cref="InferBatchAsync"/>
+    /// <c>WHERE</c>, <c>GROUP BY</c>, etc. uses <c>InferBatchAsync</c>
     /// (which collects internally for streaming-capable models). Only an
     /// explicit streaming sink — currently <c>CALL &lt;model-call&gt;</c> to
     /// the terminal — consumes chunks incrementally.
@@ -127,15 +162,15 @@ public interface IModel
     /// <strong>Single-row by definition.</strong> Streaming output is
     /// per-row state (an LLM's KV cache); cross-row batching at the
     /// streaming layer doesn't compose. Operators that want batched
-    /// throughput stay on <see cref="InferBatchAsync"/>.
+    /// throughput stay on <c>InferBatchAsync</c>.
     /// </para>
     /// <para>
     /// <strong>Default implementation.</strong> Models that have no useful
     /// intermediate state (classifiers, vision, image generation) inherit
-    /// the default, which simply runs <see cref="InferBatchAsync"/> for the
+    /// the default, which simply runs <c>InferBatchAsync</c> for the
     /// single row and yields the one result. Models that do have
     /// intermediate state (LLMs) override and yield as the underlying
-    /// runtime produces tokens; their <see cref="InferBatchAsync"/> in
+    /// runtime produces tokens; their <c>InferBatchAsync</c> in
     /// turn collects over this method so the streaming path is exercised
     /// even on collected calls.
     /// </para>
@@ -179,7 +214,7 @@ public interface IModel
     /// Optional mini-batch size used by <c>ModelInvocationOperator</c> to
     /// stream results to the user. When non-<see langword="null"/>, the
     /// operator splits incoming <c>RowBatch</c>es into sub-batches of this
-    /// size, runs <see cref="InferBatchAsync"/> per sub-batch, and emits
+    /// size, runs <c>InferBatchAsync</c> per sub-batch, and emits
     /// one output batch per inference call — so the user sees results
     /// arrive incrementally rather than waiting for the full upstream
     /// batch (typically 1024 rows) to complete.

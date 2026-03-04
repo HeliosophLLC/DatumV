@@ -265,6 +265,56 @@ L2-normalising the output is the convention for embedding models — it
 lets `cosine_similarity(a, b)` reduce to a simple dot product, and
 makes cross-model distance comparisons fair.
 
+### Text embedding (BERT-family encoder)
+
+BERT-family encoders take three inputs (`input_ids`, `attention_mask`,
+`token_type_ids`) and emit per-token hidden states. The sentence
+embedding is the attention-mask-weighted mean over the seq_len axis,
+L2-normalised:
+
+```sql
+CREATE OR REPLACE MODEL embed_text(text String) RETURNS Float32[]
+USING 'all-minilm-l6-v2/model.onnx'
+AS BEGIN
+    -- WordPiece tokenize → Struct{input_ids, attention_mask, token_type_ids}
+    -- with field names matching the ONNX input names.
+    DECLARE encoded Struct = tokenizer.encode_bert(text, 'vocab.txt');
+    DECLARE n Int32 = array_length(encoded['input_ids']);
+
+    -- Multi-input infer: struct of tensors + parallel struct of shapes.
+    -- Every input has shape [1, seq_len] — two dynamic dims, so explicit
+    -- shapes are required.
+    DECLARE last_hidden_state Float32[] = infer(encoded, {
+        input_ids:      [CAST(1 AS Int32), n],
+        attention_mask: [CAST(1 AS Int32), n],
+        token_type_ids: [CAST(1 AS Int32), n]
+    });
+
+    -- Average per-token embeddings along seq_len, weighting by mask, then
+    -- project to the unit sphere. 384 = MiniLM-L6's hidden size.
+    DECLARE pooled Float32[] = mean_pool_masked(
+        last_hidden_state, encoded['attention_mask'], CAST(384 AS Int32));
+    RETURN l2_normalize(pooled)
+END
+```
+
+The shipped [`all-minilm-l6-v2`](../models/sql/all-minilm-l6-v2.sql) SQL
+body is this exact shape. Key pieces:
+
+- `tokenizer.encode_bert` returns the canonical BERT input bundle as one
+  struct so multi-input `infer()` can match by field name. Relative
+  paths inside a `CREATE MODEL` body resolve against the model's
+  directory; pass `'vocab.txt'` and the engine finds the sibling file.
+- The 2-arg `infer({values}, {shapes})` form is required for every BERT
+  input — both dims are dynamic, so the per-input shape can't be
+  inferred from a 1-d array length.
+- `mean_pool_masked` is the standard sentence-transformers pooler.
+  All-zero mask returns a zero vector instead of NaN.
+
+For BPE-tokenized models (GPT-family, RoBERTa-derived) use
+`tokenizer.encode` (unified `tokenizer.json`) or `tokenizer.encode_bpe`
+(separate `vocab.json` + `merges.txt`).
+
 ### LLM (text-to-text)
 
 ```sql
@@ -408,17 +458,38 @@ The shape solver couldn't reconcile your argument with the model's
 declared input shape. Common causes:
 
 - The model expects an image-sized tensor (`[1, 3, 224, 224]` = 150,528 floats) but your argument is a smaller flat vector. Use `image_to_tensor_chw` (NCHW) or `image_to_tensor_hwc` (NHWC) to produce the right shape.
-- The model has multiple dynamic dims (`[batch, sequence_length]`). v1's solver handles ≤1 dynamic dim cleanly; ≥2 throws. Workaround: re-export the model with a fixed sequence length, or wait for the multi-dim shape solver.
+- The model has multiple dynamic dims (`[batch, sequence_length]`).
+  Pass the shape explicitly via the 2-arg form:
+  `infer(value, [CAST(1 AS Int32), n])`. The shape array's product
+  must equal the tensor's element count.
+
+### Multi-input model errors
+
+- *"infer() inputs struct has no field matching session input 'X'"* —
+  Field names on the struct must match the ONNX input names (case-
+  insensitive). Inspect the model via
+  `SELECT name FROM inference.onnx_inspect('my-model/model.onnx') WHERE kind = 'input'`
+  to confirm the names. The shipped MiniLM body uses `input_ids /
+  attention_mask / token_type_ids` because that's what HuggingFace
+  optimum's BERT export declares.
+- *"single-output sessions only"* — Was a v1 restriction; lifted. v1
+  now picks the first output for multi-output sessions (which matches
+  HuggingFace optimum convention of listing the primary output first).
+  Struct-of-tensors return for multi-output is a follow-up.
 
 ### Tokenizer errors
 
-- *"`tokenizer.json` declares model.type='Unigram'"* — v1 of
-  `tokenizer.encode` supports BPE only. For SentencePiece/Unigram
-  models, look for separate `spiece.model` files (re-export options
-  vary by model family).
-- *"'tokenizer.json' is a relative path"* — scalar tokenizer functions
-  don't have access to the model directory yet. Pass an absolute path
-  or `file://` URI.
+- *"`tokenizer.json` declares model.type='Unigram'"* — `tokenizer.encode`
+  supports BPE only. For BERT/WordPiece models, use
+  `tokenizer.encode_bert(text, vocab_path)` which loads `vocab.txt` and
+  returns the canonical `Struct{input_ids, attention_mask, token_type_ids}`
+  bundle. For SentencePiece/Unigram models, look for separate
+  `spiece.model` files (re-export options vary by model family).
+- *"'tokenizer.json' is a relative path"* — scalar `tokenizer.encode` /
+  `encode_bpe` / `decode*` don't have model-directory access from the
+  scalar frame; pass an absolute path or `file://` URI. Inside a
+  `CREATE MODEL` body, `tokenizer.encode_bert` resolves relative paths
+  against the model's `USING` directory automatically.
 
 ## Looking up what's available
 

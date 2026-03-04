@@ -96,6 +96,57 @@ public sealed class InMemoryTableProvider : ITableProvider
     }
 
     /// <summary>
+    /// Variant of the column-name + rows constructor that lets the caller
+    /// declare explicit per-column <see cref="DataKind"/>s instead of
+    /// inferring them from cell CLR types. Required for kind disambiguation
+    /// where CLR type maps to several SQL kinds — most notably
+    /// <c>byte[]</c>, which defaults to <c>UInt8[]</c> but is also the
+    /// natural fixture for <see cref="DataKind.Image"/> /
+    /// <see cref="DataKind.Audio"/> / <see cref="DataKind.Video"/> /
+    /// <see cref="DataKind.Json"/> columns.
+    /// </summary>
+    /// <param name="pool">The buffer pool used to rent row batches.</param>
+    /// <param name="name">The logical table name.</param>
+    /// <param name="columns">The column names.</param>
+    /// <param name="columnKinds">
+    /// One <see cref="DataKind"/> per column, in the same order as
+    /// <paramref name="columns"/>. Used both for the published schema and
+    /// as the <c>expectedKind</c> passed to <c>MaterializeCell</c> so
+    /// kind-disambiguated factories (Image/Audio/Video/Json) fire.
+    /// </param>
+    /// <param name="rows">The rows to serve.</param>
+    /// <param name="indexEnabled">Whether to enable the lazy source index.</param>
+    public InMemoryTableProvider(
+        Pool pool,
+        string name,
+        string[] columns,
+        DataKind[] columnKinds,
+        object?[][] rows,
+        bool indexEnabled = true)
+    {
+        if (columns.Length != columnKinds.Length)
+        {
+            throw new ArgumentException(
+                $"columns ({columns.Length}) and columnKinds ({columnKinds.Length}) must have the same length.");
+        }
+        _pool = pool;
+        QualifiedName = QualifiedName.Parse(name);
+        _columns = columns;
+        _rows = rows;
+        ColumnInfo[] infos = new ColumnInfo[columns.Length];
+        for (int i = 0; i < columns.Length; i++)
+        {
+            infos[i] = new ColumnInfo(columns[i], columnKinds[i], nullable: true);
+        }
+        _schema = new Schema(infos);
+        _fullLookup = new ColumnLookup(_columns);
+        _indexEnabled = indexEnabled;
+        _lazySourceIndex = indexEnabled
+            ? new Lazy<SourceIndex?>(BuildIndex, LazyThreadSafetyMode.ExecutionAndPublication)
+            : null;
+    }
+
+    /// <summary>
     /// Creates an empty provider whose schema is declared up front — for
     /// <c>CREATE TEMP TABLE</c> bodies that need a table with declared
     /// types but zero rows. Subsequent <c>INSERT</c>s populate the rows.

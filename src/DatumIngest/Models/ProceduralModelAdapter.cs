@@ -14,7 +14,7 @@ namespace DatumIngest.Models;
 /// model is indistinguishable from an engine-baked built-in: same residency
 /// lease, same tracer hook, same <c>PreferredBatchSize</c> contract, same
 /// streaming-sink routing. The body still runs per row inside
-/// <see cref="InferBatchAsync"/> — this adapter doesn't lower the body to a
+/// <c>InferBatchAsync</c> — this adapter doesn't lower the body to a
 /// column pipeline (that's step 3, Option D). What it does buy is operator-
 /// boundary parity with built-ins: tracer / RowLimit short-circuit /
 /// streaming-sink awareness / sub-batching all light up immediately.
@@ -115,7 +115,7 @@ public sealed class ProceduralModelAdapter : IModel
     /// Per-call hyperparameter kinds (parameters with defaults). Surfaces
     /// on the <see cref="ModelCatalogEntry.OptionalArgKinds"/> when the
     /// adapter is registered so MIO routes trailing call-site args to the
-    /// <c>overrides</c> parameter of <see cref="InferBatchAsync"/>.
+    /// <c>overrides</c> parameter of <c>InferBatchAsync</c>.
     /// </summary>
     public IReadOnlyList<DataKind> OptionalKinds => _optionalKinds;
 
@@ -129,9 +129,22 @@ public sealed class ProceduralModelAdapter : IModel
     /// ValueRef-native end-to-end after step 1, so the only arena writes
     /// per row are the (rare) cast-on-RETURN slow path.
     /// </remarks>
+    public Task<IReadOnlyList<ValueRef>> InferBatchAsync(
+        IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
+        IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
+        CancellationToken cancellationToken)
+        // Legacy 3-arg overload: forwards to the registry-aware one with
+        // a fresh registry. This path runs only when a caller invokes the
+        // adapter directly without threading a TypeRegistry through —
+        // legacy / test scaffolding. Engine callers (MIO, ModelScalarFunction)
+        // always go through the 4-arg overload below.
+        => InferBatchAsync(inputs, overrides, types: null, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ValueRef>> InferBatchAsync(
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
         IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
+        TypeRegistry? types,
         CancellationToken cancellationToken)
     {
         int rowCount = inputs.Count;
@@ -142,10 +155,15 @@ public sealed class ProceduralModelAdapter : IModel
         // doesn't match the declared RETURNS T). Released on exit.
         Arena arena = new();
         arena.AddReference();
-        // One TypeRegistry per batch so struct literals inside the body
-        // (e.g. multi-input infer({...})) get a stable typeId that the
-        // scalar function path can resolve back to field descriptors.
-        TypeRegistry typeRegistry = new();
+        // Reuse the caller's TypeRegistry when supplied so struct shapes
+        // built inside the body (e.g. `Array<Struct{label, score, x, y, w, h}>`
+        // from a detector's post-processing function) intern into the
+        // outer query's registry. Without this, the body's TypeIds resolve
+        // against a private registry that MIO's scatter step doesn't see,
+        // and downstream struct-field projection loses field names. Fall
+        // back to a fresh registry only when there's no outer one
+        // (legacy / test scaffolding).
+        TypeRegistry typeRegistry = types ?? new TypeRegistry();
         try
         {
             ValueRef[] results = new ValueRef[rowCount];

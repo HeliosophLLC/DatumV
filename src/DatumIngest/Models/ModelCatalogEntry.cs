@@ -51,7 +51,7 @@ namespace DatumIngest.Models;
 /// <c>(prompt, temperature, max_tokens)</c>). Each is optional positionally:
 /// a call site may supply a prefix of this list, with later args defaulted by
 /// the model. The <see cref="IModel"/> implementation receives them as the
-/// <c>overrides</c> parameter to <see cref="IModel.InferBatchAsync"/>.
+/// <c>overrides</c> parameter to <c>IModel.InferBatchAsync</c>.
 /// Defaults to <see langword="null"/> (no per-call overrides).
 /// </param>
 /// <param name="EstimatedVramBytes">

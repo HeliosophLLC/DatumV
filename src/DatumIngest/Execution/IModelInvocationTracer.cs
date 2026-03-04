@@ -12,7 +12,7 @@ namespace DatumIngest.Execution;
 /// <remarks>
 /// <para>
 /// Invoked by <see cref="Operators.ModelInvocationOperator"/> immediately
-/// before and after each <see cref="Models.IModel.InferBatchAsync"/> call.
+/// before and after each <c>IModel.InferBatchAsync</c> call.
 /// Tracers should not throw; the operator does not catch tracer exceptions
 /// and a faulty tracer can fail the whole query.
 /// </para>

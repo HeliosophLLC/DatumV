@@ -111,32 +111,34 @@ SQL-defined models are **not** persisted across process restarts in v1. Bound `I
 Once a `ModelDescriptor` is in `DeclaredModels`, queries need to be able to *call* it. The adapter is an `IScalarFunction` registered in `FunctionRegistry` under the model's qualified name (always `models.X`):
 
 - `ValidateArguments` checks arity against `descriptor.Parameters` and returns the declared return kind.
-- `ExecuteAsync` runs the procedural body via the same interpreter `ProceduralUdfFunction` uses, with one differentiating tweak: the body frame is built via `EvaluationFrame.WithCurrentModel(_descriptor)` so the body's `infer()` calls can pull their bound `IInferenceSession` from `frame.CurrentModel`.
+- `ExecuteAsync` runs the procedural body via the same interpreter `ProceduralUdfFunction` uses, with one differentiating tweak: the body frame is built via `EvaluationFrame.WithCurrentModel(_descriptor)` so the body's `infer()` calls can pull their bound `IInferenceSession` from `frame.CurrentModel`. The body frame also inherits `frame.Types` so struct literals inside the body (`{input_ids: ids, attention_mask: mask}`) intern shapes into the caller's per-query `TypeRegistry`.
 - Cycle detection uses a separate `AsyncLocal<Stack<string>>` from UDFs — models can call UDFs and UDFs can call models without artificially tripping each other's cycle guards; cycles are only detected within each routine class.
 - `IsPure` is always `false` — model invocations are expensive and may exhibit non-determinism (sampling LLMs, cuDNN scheduler differences). The CSE pass treats each call site as its own evaluation.
 
 ---
 
-## Layer 4: the hoister Option A — SQL-defined models bypass MIO
+## Layer 4: the hoister — three-way dispatch
 
-**Location**: `src/DatumIngest/Execution/ModelInvocationHoister.cs`, `IsHoistableModelCall`
+**Location**: `src/DatumIngest/Execution/ModelInvocationHoister.cs`, `src/DatumIngest/Execution/ModelBodyLowerer.cs`, `src/DatumIngest/Models/ProceduralModelAdapter.cs`
 
-The planner's `ModelInvocationHoister` lifts every `models.X(...)` call out of expressions into dedicated `ModelInvocationOperator` nodes — batched dispatch, residency leases, output-struct shape stamping, etc. This works beautifully for built-in `IModel` implementations.
+The planner lifts every `models.X(...)` call out of expressions into a dedicated `ModelInvocationOperator` (MIO) node — batched dispatch, residency leases, output-struct shape stamping. The post-pass `ModelBodyLowerer` then either keeps MIO in place or rewrites it into a column pipeline of `ProjectOperator` + `InferOperator` nodes. Three resulting paths:
 
-It **doesn't** work for SQL-defined models, because `ModelInvocationOperator` is built around `IModel`'s shape:
+| Source shape | Hoister output | Lowerer post-pass | Result |
+|---|---|---|---|
+| Built-in `IModel` | MIO | leave (no descriptor in `DeclaredModels`) | MIO dispatches via `IModel.InferBatchAsync` with full batching + residency + tracer + RowLimit + streaming sink + `PreferredBatchSize` sub-batching. |
+| SQL-defined, **straight-line** body | MIO targeting `ProceduralModelAdapter` | rewrite to `Project(__decl_n = expr) → InferOperator → Project(__return = expr)` chain | Real batched `Session.Run` packing when shapes line up. This is the primary path for SQL-defined detectors. |
+| SQL-defined, **branchy** body (`IF`/`WHILE`/`SET`-after-`DECLARE`/struct DECLARE/multi-input `infer`) | MIO targeting `ProceduralModelAdapter` | leave | Adapter runs the procedural body per row inside `InferBatchAsync`, gets operator-boundary parity (tracer, residency lease, etc.) without unifying with the column pipeline. |
 
-| `IModel` (built-ins) | `ProceduralModelFunction` (SQL-defined) |
-|---|---|
-| Batched `InferBatchAsync(inputs[][], overrides[][], ct)` | Per-row `ExecuteAsync(args, frame, ct)` |
-| `PreferredBatchSize` | n/a |
-| `OutputFields` (struct shape) | declared via `RETURNS T`; no struct shape |
-| Residency lease via `ModelResidencyManager.AcquireAsync` | bound sessions live on the descriptor |
+`ModelBodyLowerer.BodyIsStraightLine` is the gating predicate. It rejects:
 
-Forcing SQL-defined models through MIO would require either wrapping `ProceduralModelFunction` as a fake `IModel` (Option C in the original plan — a real refactor) or forking MIO's execute path (Option B — bigger than the original "~50 LOC" estimate). Neither is justified yet; nobody has measured a need for batched dispatch at the SQL surface.
+- DECLARE with no initializer (typed-null DECLAREs).
+- Non-DECLARE / non-RETURN statements (IF/WHILE/SET/CALL/BLOCK/BREAK/CONTINUE/mid-body RETURN).
+- DECLAREs whose declared type annotation starts with `Struct` (cheap textual check). Struct-typed locals can be referenced by name in downstream expressions where the lowerer would need to thread struct metadata through column refs — easier to bail than to extend `InferOperator` to unpack struct columns.
+- Any `infer()` call with a struct-literal argument anywhere in its argument list. These signal multi-input dispatch, which the per-row scalar `InferFunction` path handles natively via `ExecuteMultiInputAsync` — the lowerer routes through MIO + adapter instead of trying to teach `InferOperator` multi-input.
 
-**Option A** (shipped): the hoister consults the built-in `ModelCatalog` via `catalog.TryGetEntry(name)`. SQL-defined models aren't there, so they're treated as non-hoistable — the call site stays as a `models.X(...)` AST node and the scalar pipeline routes it through the registered `ProceduralModelFunction`. We lose CSE + batched dispatch for SQL-defined models in exchange for actually being able to call them at all.
+The fourth residual path (Option A — scalar `ProceduralModelFunction` with no MIO at all) survives for **non-hoisted call sites**: `models.X(...)` inside a UDF body, inside an unhoisted clause, etc. Same per-row scalar adapter as before, no operator-boundary features. The hoister prefers MIO (and then the lowerer prefers Option D) for top-level `SELECT` call sites.
 
-The trade-off is captured in the [batched-SQL-defined-models follow-up memo](../../memory/project_batched_sql_defined_models.md) — pick Option B or C when there's measured throughput evidence post-`infer()`.
+Active follow-up list with effort estimates lives in [batched-SQL-defined-models memo](../../memory/project_batched_sql_defined_models.md). Read that before extending any of these paths.
 
 ---
 
@@ -148,24 +150,48 @@ Once the body is executing, the user's `RETURN infer(x)` needs to actually dispa
 
 1. Pull `frame.CurrentModel` (set by `ProceduralModelFunction`'s body frame). Throw if absent — the runtime guard.
 2. Resolve `model.BoundSessions["default"]`. Multi-session lookup (`infer('session-name', struct)`) is deferred.
-3. Validate single-input, single-output. Multi-tensor (struct-of-tensors arg + return) is deferred.
-4. Marshal the argument into a `TensorBag`:
+3. **Multi-input dispatch.** If the first argument is a `Struct` value, route to `ExecuteMultiInputAsync` — looks up the inputs struct's `TypeDescriptor` in `frame.Types`, matches each session input by case-insensitive field name, and feeds the tensor bag. Optional 2nd struct argument carries per-input explicit shapes for sessions whose inputs have ≥2 dynamic dims (BERT family — every input is `[batch, seq_len]`).
+4. **Single-input dispatch.** Single-input sessions accept scalar or primitive-array args directly, optionally with an Int32-array shape override.
+5. Marshal the argument(s) into a `TensorBag`:
    - `session.CreateInputBag()` for backend-allocated tensor storage.
    - Element kind dispatched on `TensorSpec.ElementKind`: Float32 / Int32 / Int64 in v1. Adding a kind = one new branch in `AddInputTensor` + `ReadOutputTensor`.
    - Scalar arg → length-1 tensor; primitive-array arg → 1-d tensor matching array length.
-5. `await session.RunAsync(bag, cancellationToken)`.
-6. Read the single output tensor via `AsSpan<T>()`; if shape product is 1 surface as a scalar `ValueRef`, otherwise `FromPrimitiveArray`.
-7. Return — the body's `RETURN` coercion handles any kind mismatch with the declared model return type.
+6. `await session.RunAsync(bag, cancellationToken)`.
+7. Read the **first** output tensor via `AsSpan<T>()`; if shape product is 1 surface as a scalar `ValueRef`, otherwise `FromPrimitiveArray`. Multi-output sessions are accepted; the convention HuggingFace optimum and most transformer-to-ONNX exporters follow is to list the primary output first (e.g. `last_hidden_state` ahead of `pooler_output` for BERT). Struct-of-tensors return shape for multi-output is a follow-up.
+8. Return — the body's `RETURN` coercion handles any kind mismatch with the declared model return type.
 
 `IsPure = false` (same reasoning as `ProceduralModelFunction`). Return type rule is `SameAs(0)` — a placeholder; the actual output kind comes from the runtime tensor and is coerced at the body's return boundary.
 
+### Signature variants
+
+Three `FunctionSignatureVariant` entries, matched in order so the most specific shape wins:
+
+| # | Parameters | Use case |
+|---|---|---|
+| 1 | `(inputs: Struct, shapes: Struct)` | Multi-input with explicit per-input shapes — required for BERT-family encoders. |
+| 2 | `(value, shape: Int<array>)` | Single-input with explicit shape — required when the session has ≥2 dynamic dims. |
+| 3 | `(value)` | Single-input or multi-input (struct) with shapes resolved from the session spec. |
+
 ### Shape solver
 
-Input tensors with dynamic dims (`null` entries in `TensorSpec.Shape`) are handled by `ResolveShape`:
+Input tensors with dynamic dims (`null` entries in `TensorSpec.Shape`) are handled by `ResolveShape` for the no-explicit-shape path:
 
 - 0 dynamic dims → use the declared shape.
 - 1 dynamic dim → it absorbs the element count after dividing out the fixed dims (most common case: a sole dynamic batch dim).
-- ≥2 dynamic dims → throws with a clear error. Real models with multiple unknown dims need explicit ergonomics (likely "default the leading dim to 1") that wants concrete examples to motivate.
+- ≥2 dynamic dims → throws with a clear error pointing at the 2-arg `infer(value, shape)` form (or the struct-of-shapes form for multi-input).
+
+### TypeRegistry threading
+
+`IModel.InferBatchAsync` has two overloads:
+
+- The original `(inputs, overrides, ct)` — kept as a default interface method for backward compat.
+- `(inputs, overrides, types: TypeRegistry?, ct)` — the path MIO and `ModelScalarFunction` call. `types` is the caller's per-query `TypeRegistry`. Models that build dynamic-shape struct outputs (`ProceduralModelAdapter` wrapping a SQL-defined body) intern result shapes into this registry so the caller's `ToDataValue` / struct-field-access paths can resolve the stamped TypeIds without cross-registry translation.
+
+This shape replaces an earlier design where `ProceduralModelAdapter` created its own per-batch `TypeRegistry` — that worked for evaluating the body but failed at the MIO scatter boundary: the body's TypeIds were meaningless in `context.Types`, and downstream consumers (struct field projection, `system.tables`) saw `f0..fN` instead of declared field names.
+
+### Field-name preservation in `BuildStructArray`
+
+`ValueRef.ToDataValue`'s array-of-struct path (`BuildStructArray`) accepts the *array* descriptor's TypeId, hops to its `ElementTypeId`, and stamps every slot's reserved bytes with the per-element struct TypeId via `FromStructArray`. The inline array carrier's `_inline.TypeId` returns 0 by design (the `TypeId` getter is gated to arena-backed struct arrays for layout reasons), so dynamic-shape producers can't stamp the array carrier directly. **Fallback**: when no Array<Struct> TypeId is supplied AND the array has ≥1 element, `BuildStructArray` reads the first element's struct TypeId off `elements[0]._inline.TypeId` and stamps every slot from that. Empty arrays from no-OutputFields producers lose field-name info — fine since there are no rows to render — but the load-bearing common case (PP-OCR-det returning `Array<Struct{label, score, x, y, w, h}>` via `dbnet_postprocess`) round-trips correctly.
 
 ---
 
@@ -230,7 +256,7 @@ The future `system.functions` (when `datum_catalog.*` consolidates) inherits the
 | Bundle signatures (SHA-256 verification) | [`plans/bundle-signatures.md`](../../plans/bundle-signatures.md) | New `WITH (sha256 = '...')` CREATE MODEL clause; three new `system.models` columns. |
 | ORT version bump | This doc, project memo | Currently 1.20.1 (IR ≤ 10, opset ≤ 21). Newer ONNX exports hit the cap. |
 | Body-scope Tier 2 completion (context-aware suggestions) | This doc | Show `infer()` in completion only when cursor is in a model body. Wants new `InsideModelBody` zone. |
-| Multi-tensor `infer()` (struct-of-tensors arg + return) | This doc | Single-input/single-output is the v1 scope. Multi-session bundles + `infer('session-name', struct)` deferred until first multi-tensor user. |
+| Multi-output `infer()` (struct-of-tensors return) | This doc | Multi-input via struct argument **shipped 2026-05-17**; multi-output (returning a struct of tensors, e.g. BERT's `{last_hidden_state, pooler_output}`) is still deferred. v1 picks the first output. Multi-session bundles + `infer('session-name', struct)` deferred until first multi-session user. |
 | More element kinds in `infer()` | This doc | Float16, Bool, UInt8 (image tensors). Each is a new branch in `AddInputTensor` + `ReadOutputTensor`. |
 | Residency-manager integration | This doc | Intercept session disposal to cache warm sessions; per-machine measured-bytes cache; VRAM budget cap. |
 | OpenVINO backend | This doc | Same interfaces as ORT backend; lift via `Intel.OpenVINO` NuGet. |
