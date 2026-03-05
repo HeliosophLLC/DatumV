@@ -49,10 +49,26 @@ public sealed class QueryStreamService
     /// can't recover from; everything else lands as an inline NDJSON
     /// <c>error</c> event.
     /// </summary>
+    public Task ExecuteAsync(
+        string sql,
+        int maxRows,
+        bool trace,
+        Stream output,
+        JsonSerializerOptions jsonOptions,
+        CancellationToken ct)
+        => ExecuteAsync(sql, maxRows, trace, parameters: null, output, jsonOptions, ct);
+
+    /// <summary>
+    /// Streams an NDJSON batch response, binding any <c>$name</c> parameter
+    /// references in the parsed statements against <paramref name="parameters"/>
+    /// before planning. Pass <see langword="null"/> or an empty dictionary
+    /// when no parameters are in play.
+    /// </summary>
     public async Task ExecuteAsync(
         string sql,
         int maxRows,
         bool trace,
+        IReadOnlyDictionary<string, ParameterValue>? parameters,
         Stream output,
         JsonSerializerOptions jsonOptions,
         CancellationToken ct)
@@ -87,6 +103,40 @@ public sealed class QueryStreamService
             await WriteEventAsync(output, jsonOptions, new ErrorEvent("error", null, "empty SQL input", null), ct).ConfigureAwait(false);
             await WriteEventAsync(output, jsonOptions, new CompleteEvent("complete", sw.Elapsed.TotalMilliseconds), ct).ConfigureAwait(false);
             return;
+        }
+
+        // Bind $name parameters across the whole batch. The binder validates
+        // that the union of referenced names matches the supplied names
+        // exactly — mismatches surface as an inline error event with the
+        // offending parameter name, identical to a parse failure in shape.
+        // A non-null but empty dictionary is the "no parameters supplied"
+        // signal from the multipart envelope; we still run the binder so
+        // SQL that mentions a `$name` without a value surfaces the
+        // canonical "parameter not supplied" error rather than a less
+        // helpful evaluator failure further down.
+        if (parameters is not null)
+        {
+            try
+            {
+                Statement[] bareStatements = new Statement[statements.Count];
+                for (int i = 0; i < statements.Count; i++)
+                    bareStatements[i] = statements[i].Statement;
+
+                IReadOnlyList<Statement> bound = ParameterBinder.Bind(bareStatements, parameters);
+
+                (Statement, string)[] reseated = new (Statement, string)[statements.Count];
+                for (int i = 0; i < statements.Count; i++)
+                    reseated[i] = (bound[i], statements[i].SourceText);
+
+                statements = reseated;
+            }
+            catch (ArgumentException ex)
+            {
+                if (traceCapture is not null) ExecutionTracer.EndCapture(traceCapture);
+                await WriteEventAsync(output, jsonOptions, new ErrorEvent("error", null, ex.Message, ex.ToString()), ct).ConfigureAwait(false);
+                await WriteEventAsync(output, jsonOptions, new CompleteEvent("complete", sw.Elapsed.TotalMilliseconds), ct).ConfigureAwait(false);
+                return;
+            }
         }
 
         string sessionId = Guid.NewGuid().ToString("N");

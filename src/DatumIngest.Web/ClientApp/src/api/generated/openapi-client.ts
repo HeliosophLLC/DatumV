@@ -664,18 +664,14 @@ export class QueryStreamClient {
         this.baseUrl = baseUrl ?? "";
     }
 
-    stream(request: QueryStreamRequest, signal?: AbortSignal): Promise<void> {
+    stream(signal?: AbortSignal): Promise<void> {
         let url_ = this.baseUrl + "/api/query/stream";
         url_ = url_.replace(/[?&]$/, "");
 
-        const content_ = JSON.stringify(request);
-
         let options_: RequestInit = {
-            body: content_,
             method: "POST",
             signal,
             headers: {
-                "Content-Type": "application/json",
             }
         };
 
@@ -952,12 +948,6 @@ export interface ProblemDetails {
     instance?: string | undefined;
 
     [key: string]: any;
-}
-
-export interface QueryStreamRequest {
-    sql?: string;
-    maxRows?: number | undefined;
-    trace?: boolean | undefined;
 }
 
 export interface SettingsDto {

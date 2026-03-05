@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DatumIngest.Execution;
 using DatumIngest.Web.Dtos.Execution;
 using DatumIngest.Web.Execution;
 using Microsoft.AspNetCore.Mvc;
@@ -25,6 +26,14 @@ namespace DatumIngest.Web.Api;
 /// (handled inside the service) so the client sees rows arrive as the
 /// engine produces them rather than at the end of the batch.
 /// </para>
+/// <para>
+/// Two request transports are accepted: <c>application/json</c> for inline-
+/// only parameters, and <c>multipart/form-data</c> when any parameter binds
+/// to a binary kind (<c>Image</c> / <c>Audio</c> / <c>Video</c> / <c>UInt8</c>
+/// array). The multipart shape carries a <c>request</c> JSON part with the
+/// <see cref="QueryStreamRequest"/> envelope plus one binary part per
+/// referenced parameter; see <see cref="QueryRequestBinding"/>.
+/// </para>
 /// </remarks>
 [ApiController]
 [Route("api/query")]
@@ -36,14 +45,40 @@ public sealed class QueryStreamController(QueryStreamService service) : Controll
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
+    /// <summary>Per-request body cap for the stream endpoint. Matches the multipart binary-part cap.</summary>
+    public const long MaxRequestBodyBytes = QueryRequestBinding.MaxBinaryPartBytes;
+
     [HttpPost("stream")]
-    public async Task Stream([FromBody] QueryStreamRequest request)
+    [Microsoft.AspNetCore.Mvc.RequestSizeLimit(MaxRequestBodyBytes)]
+    [Microsoft.AspNetCore.Mvc.RequestFormLimits(MultipartBodyLengthLimit = MaxRequestBodyBytes)]
+    public async Task Stream()
     {
+        QueryStreamEnvelope envelope;
+        try
+        {
+            envelope = await QueryRequestBinding.ReadAsync(
+                HttpContext.Request,
+                StreamingJson,
+                HttpContext.RequestAborted).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            HttpContext.Response.StatusCode = 400;
+            await HttpContext.Response.WriteAsJsonAsync(new { error = ex.Message }, StreamingJson).ConfigureAwait(false);
+            return;
+        }
+        catch (JsonException ex)
+        {
+            HttpContext.Response.StatusCode = 400;
+            await HttpContext.Response.WriteAsJsonAsync(new { error = $"Bad request: {ex.Message}" }, StreamingJson).ConfigureAwait(false);
+            return;
+        }
+
+        QueryStreamRequest request = envelope.Body;
         if (string.IsNullOrWhiteSpace(request.Sql))
         {
             HttpContext.Response.StatusCode = 400;
-            await HttpContext.Response.WriteAsJsonAsync(
-                new { error = "sql is required" });
+            await HttpContext.Response.WriteAsJsonAsync(new { error = "sql is required" }, StreamingJson).ConfigureAwait(false);
             return;
         }
 
@@ -56,8 +91,9 @@ public sealed class QueryStreamController(QueryStreamService service) : Controll
             request.Sql,
             maxRows,
             trace,
+            envelope.Parameters,
             HttpContext.Response.Body,
             StreamingJson,
-            HttpContext.RequestAborted);
+            HttpContext.RequestAborted).ConfigureAwait(false);
     }
 }
