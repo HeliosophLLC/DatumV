@@ -495,6 +495,13 @@ public enum SqlToken
     /// </summary>
     ColonEquals,
 
+    /// <summary>
+    /// The <c>::</c> postfix cast operator. PG-native sugar for
+    /// <c>CAST(expr AS type)</c>; <c>expr::TypeName</c> lowers to a
+    /// <see cref="Ast.CastExpression"/> at parse time.
+    /// </summary>
+    DoubleColon,
+
     /// <summary>The <c>ASSERT</c> keyword for row-level invariant checks.</summary>
     Assert,
 

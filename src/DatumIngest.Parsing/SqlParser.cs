@@ -956,24 +956,32 @@ public static class SqlParser
             .Or(ArrayLiteral);
 
     /// <summary>
-    /// Primary expression with optional postfix index-access subscripts: <c>expr[i]</c>.
-    /// Zero or more <c>[index]</c> suffixes are applied left-to-right, so
-    /// <c>a[0][1]</c> parses as <c>(a[0])[1]</c>.
+    /// Primary expression with optional postfix suffixes — <c>expr[i]</c>
+    /// index access and <c>expr::TypeName</c> PG-style cast. Suffixes are
+    /// applied left-to-right and may interleave freely, so <c>a[0]::int</c>
+    /// and <c>a::int[][0]</c> both parse as expected. The <c>::</c> form
+    /// lowers to the same <see cref="CastExpression"/> AST as
+    /// <c>CAST(expr AS type)</c>; it is pure syntactic sugar.
     /// The disambiguation from array literals is natural: an <c>ArrayLiteral</c> is
     /// consumed entirely by <see cref="PrimaryExpression"/>, and the postfix layer
     /// only applies <em>after</em> a primary has already been matched.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> PostfixPrimary =
         from primary in PrimaryExpression
-        from subscripts in (
-            from open in Token.EqualTo(SqlToken.LeftBracket)
-            from index in SP.Ref(() => ExpressionParser!)
-            from close in Token.EqualTo(SqlToken.RightBracket)
-            select (open, index)
-        ).Try().Many()
-        select subscripts.Aggregate(
-            primary,
-            (expr, sub) => (Expression)new IndexAccessExpression(expr, sub.index, ToSpan(sub.open)));
+        from suffixes in (
+            (from open in Token.EqualTo(SqlToken.LeftBracket)
+             from index in SP.Ref(() => ExpressionParser!)
+             from close in Token.EqualTo(SqlToken.RightBracket)
+             select (Func<Expression, Expression>)(e =>
+                 new IndexAccessExpression(e, index, ToSpan(open))))
+            .Try()
+            .Or(
+                from cc in Token.EqualTo(SqlToken.DoubleColon)
+                from targetType in SP.Ref(() => TypeNameParser!)
+                select (Func<Expression, Expression>)(e =>
+                    new CastExpression(e, targetType, ToSpan(cc))))
+        ).Many()
+        select suffixes.Aggregate(primary, (expr, build) => build(expr));
 
     // ───────────────────── Operator precedence layers ─────────────────────
     // Precedence (lowest to highest):

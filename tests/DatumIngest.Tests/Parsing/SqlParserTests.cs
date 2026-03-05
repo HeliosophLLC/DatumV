@@ -1122,6 +1122,64 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("Float32", cast.TargetType);
     }
 
+    [Fact]
+    public void PostfixCast_DesugarsToCastExpression()
+    {
+        // PG-style `x::Type` postfix cast lowers to the same AST as
+        // CAST(x AS Type) — pure syntactic sugar.
+        SelectStatement result = Parse("SELECT x::Float32 FROM t");
+
+        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("Float32", cast.TargetType);
+        Assert.IsType<ColumnReference>(cast.Expression);
+    }
+
+    [Fact]
+    public void PostfixCast_Chained_LeftAssociative()
+    {
+        // `x::Int32::String` parses as `(x::Int32)::String`.
+        SelectStatement result = Parse("SELECT x::Int32::String FROM t");
+
+        CastExpression outer = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("String", outer.TargetType);
+        CastExpression inner = Assert.IsType<CastExpression>(outer.Expression);
+        Assert.Equal("Int32", inner.TargetType);
+    }
+
+    [Fact]
+    public void PostfixCast_BindsTighterThanArithmetic()
+    {
+        // `a + b::Int32` is `a + (b::Int32)`, not `(a + b)::Int32`.
+        SelectStatement result = Parse("SELECT a + b::Int32 FROM t");
+
+        BinaryExpression bin = Assert.IsType<BinaryExpression>(result.Columns[0].Expression);
+        Assert.Equal(BinaryOperator.Add, bin.Operator);
+        CastExpression cast = Assert.IsType<CastExpression>(bin.Right);
+        Assert.Equal("Int32", cast.TargetType);
+    }
+
+    [Fact]
+    public void PostfixCast_AcceptsArrayTypeSugar()
+    {
+        // `x::Int32[]` flows through TypeNameParser's `T[]` postfix sugar
+        // and canonicalises to `Array<Int32>`.
+        SelectStatement result = Parse("SELECT x::Int32[] FROM t");
+
+        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("Array<Int32>", cast.TargetType);
+    }
+
+    [Fact]
+    public void PostfixCast_InterleavesWithIndexAccess()
+    {
+        // `a[0]::Int32` — index first, then cast.
+        SelectStatement result = Parse("SELECT a[0]::Int32 FROM t");
+
+        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("Int32", cast.TargetType);
+        Assert.IsType<IndexAccessExpression>(cast.Expression);
+    }
+
     // ───────────────────── Temporal constants ─────────────────────
 
     [Fact]

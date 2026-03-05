@@ -216,6 +216,7 @@ public static class SqlTokenizer
             .Match(Span.EqualTo("<>"), SqlToken.NotEquals)
             .Match(Span.EqualTo("||"), SqlToken.DoublePipe)
             .Match(Span.EqualTo("@@"), SqlToken.AtAt)
+            .Match(Span.EqualTo("::"), SqlToken.DoubleColon)
             .Match(Span.EqualTo(":="), SqlToken.ColonEquals)
 
             // Single-character symbols

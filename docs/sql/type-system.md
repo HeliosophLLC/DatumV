@@ -298,12 +298,19 @@ applies to each element independently.
 
 #### Explicit conversion (CAST)
 
-`CAST` converts between any supported type pair. Two equivalent syntaxes:
+`CAST` converts between any supported type pair. Three equivalent syntaxes:
 
 ```sql
 CAST(x AS Int32)     -- SQL-standard syntax
+x::Int32             -- PostgreSQL-style postfix cast
 cast(x, Int32)       -- function-call syntax with type literal
 ```
+
+The `::` form is pure syntactic sugar — it parses to the same AST as
+`CAST(x AS Int32)`. It binds tighter than any binary operator, so
+`a + b::Int32` is `a + (b::Int32)`. Chains left-to-right
+(`x::Int32::String` is `(x::Int32)::String`) and interleaves with array
+subscripts (`a[0]::Int32`, `x::Int32[]`).
 
 Supported conversions include:
 

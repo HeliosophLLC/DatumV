@@ -116,6 +116,16 @@ public class SqlTokenizerTests : ServiceTestBase
         Assert.Equal(SqlToken.ColonEquals, tokens[0].Kind);
     }
 
+    [Fact]
+    public void DoubleColon_TokenizesAsPostfixCastOperator()
+    {
+        // `::` is the PG postfix cast operator (`x::int`). Pulled as one
+        // token; must not split into two `:` tokens.
+        Token<SqlToken>[] tokens = Tokenize("::");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.DoubleColon, tokens[0].Kind);
+    }
+
     // ───────────────────── Identifiers ─────────────────────
 
     [Fact]
