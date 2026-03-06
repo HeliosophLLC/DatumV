@@ -16,11 +16,27 @@ import { proxy, subscribe } from 'valtio';
 // tab in a non-root leaf collapses the leaf into its sibling so a
 // pane never hangs around empty.
 
+/**
+ * Discriminator for what the tab body renders.
+ *  - `sql`: Monaco editor + results pane (the original tab shape).
+ *  - `function`: a kind-driven form for invoking a single scalar function
+ *    with named-parameter inputs (file upload for binary kinds). PR 3
+ *    ships the discriminator + a placeholder body; PR 4–5 build out the
+ *    form and wire execution.
+ */
+export type TabKind = 'sql' | 'function';
+
 export interface Tab {
   /** Stable identifier; used as Monaco model key and execution-state key. */
   id: string;
   /** Display name on the strip. Defaults to "Untitled-N" until renamed. */
   title: string;
+  /**
+   * What this tab represents. Older persisted state predates the field —
+   * the rehydrate path defaults to `'sql'` so existing workspaces keep
+   * working without migration.
+   */
+  kind: TabKind;
   /** Current editor text. Mirrors the Monaco model when the editor is mounted. */
   sql: string;
   /** True when `sql` differs from the last persisted-or-saved baseline. */
@@ -174,6 +190,12 @@ function findParent(
 interface PersistedTab {
   id: string;
   title: string;
+  /**
+   * Tab kind. Absent in workspaces persisted before PR 3 — the rehydrate
+   * path defaults missing/unknown values to `'sql'` so existing layouts
+   * load unchanged.
+   */
+  kind?: TabKind;
   sql: string;
   editorSize?: number;
 }
@@ -226,6 +248,7 @@ function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
         tabs.push({
           id: t.id,
           title: t.title,
+          kind: t.kind === 'function' ? 'function' : 'sql',
           sql: t.sql,
           dirty: false,
           editorSize:
@@ -285,6 +308,7 @@ function readSeedFromHash(): Tab | null {
     return {
       id: parsed.id,
       title: parsed.title,
+      kind: parsed.kind === 'function' ? 'function' : 'sql',
       sql: parsed.sql,
       dirty: false,
       editorSize:
@@ -331,6 +355,7 @@ function createInitialState(): PanesState {
   const firstTab: Tab = {
     id: newTabId(),
     title: 'Untitled-1',
+    kind: 'sql',
     sql: '',
     dirty: false,
   };
@@ -398,6 +423,7 @@ function serializeNode(node: PaneNode): PersistedNode {
       tabs: node.tabs.map((t) => ({
         id: t.id,
         title: t.title,
+        kind: t.kind,
         sql: t.sql,
         editorSize: t.editorSize,
       })),
@@ -469,13 +495,22 @@ function collapseIfEmpty(leaf: LeafPane): void {
 /**
  * Opens a new tab in the targeted leaf (focused leaf by default) and
  * makes it active. Returns the created tab.
+ *
+ * `kind` controls what the tab body renders: `'sql'` (the default) for
+ * a Monaco editor + results pane, `'function'` for the Execute-Function
+ * form.
  */
-export function openTab(initialSql = '', leafId?: string): Tab {
+export function openTab(
+  initialSql = '',
+  leafId?: string,
+  kind: TabKind = 'sql',
+): Tab {
   const leaf =
     (leafId ? findLeaf(panesState.root, leafId) : null) ?? getFocusedLeaf();
   const tab: Tab = {
     id: newTabId(),
     title: nextUntitledTitle(panesState.root),
+    kind,
     sql: initialSql,
     dirty: false,
   };
@@ -696,7 +731,13 @@ export function splitLeaf(
  */
 export function importTabIntoLeaf(
   targetLeafId: string,
-  tab: { id: string; title: string; sql: string; editorSize?: number },
+  tab: {
+    id: string;
+    title: string;
+    kind?: TabKind;
+    sql: string;
+    editorSize?: number;
+  },
   insertIndex?: number,
 ): void {
   const leaf = findLeaf(panesState.root, targetLeafId);
@@ -705,6 +746,7 @@ export function importTabIntoLeaf(
   const newTab: Tab = {
     id,
     title: tab.title,
+    kind: tab.kind === 'function' ? 'function' : 'sql',
     sql: tab.sql,
     dirty: false,
     editorSize: tab.editorSize,
@@ -725,7 +767,13 @@ export function importTabIntoLeaf(
  */
 export function importTabAsSplit(
   targetLeafId: string,
-  tab: { id: string; title: string; sql: string; editorSize?: number },
+  tab: {
+    id: string;
+    title: string;
+    kind?: TabKind;
+    sql: string;
+    editorSize?: number;
+  },
   side: SplitSide,
 ): void {
   const target = findLeaf(panesState.root, targetLeafId);
@@ -734,6 +782,7 @@ export function importTabAsSplit(
   const newTab: Tab = {
     id,
     title: tab.title,
+    kind: tab.kind === 'function' ? 'function' : 'sql',
     sql: tab.sql,
     dirty: false,
     editorSize: tab.editorSize,

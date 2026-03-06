@@ -1,4 +1,5 @@
 import {
+  FunctionCatalogClient,
   HealthClient,
   LanguageClient,
   ModelCatalogClient,
@@ -27,6 +28,7 @@ export function createApi(baseUrl = '') {
     settings: new SettingsClient(baseUrl, http),
     modelCatalog: new ModelCatalogClient(baseUrl, http),
     language: new LanguageClient(baseUrl, http),
+    functionCatalog: new FunctionCatalogClient(baseUrl, http),
   };
 }
 

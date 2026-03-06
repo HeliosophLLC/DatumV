@@ -34,6 +34,8 @@ export interface TabDragPayload {
   tab: {
     id: string;
     title: string;
+    /** Discriminator; absent on old drag payloads — the receiver defaults to `'sql'`. */
+    kind?: 'sql' | 'function';
     sql: string;
     editorSize?: number;
   };
@@ -77,6 +79,7 @@ export function parseTabDragData(dt: DataTransfer): TabDragPayload | null {
       tab: {
         id: parsed.tab.id,
         title: parsed.tab.title,
+        kind: parsed.tab.kind === 'function' ? 'function' : 'sql',
         sql: parsed.tab.sql,
         editorSize:
           typeof parsed.tab.editorSize === 'number'

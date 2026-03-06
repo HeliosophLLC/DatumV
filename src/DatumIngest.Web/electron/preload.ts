@@ -51,7 +51,13 @@ contextBridge.exposeInMainWorld('electronHost', {
   // coordinates and seeds it with the given tab. Used by the tear-out
   // gesture (drag a tab outside any window and release).
   spawnTabWindow: (payload: {
-    seed: { id: string; title: string; sql: string; editorSize?: number };
+    seed: {
+      id: string;
+      title: string;
+      kind?: 'sql' | 'function';
+      sql: string;
+      editorSize?: number;
+    };
     x: number;
     y: number;
   }) => ipcRenderer.invoke('tabwindow.spawn', payload),

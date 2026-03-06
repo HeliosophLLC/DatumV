@@ -65,6 +65,7 @@ export async function tearOutTabIfNoDrop(
     seed: {
       id: payload.tab.id,
       title: payload.tab.title,
+      kind: payload.tab.kind,
       sql: payload.tab.sql,
       editorSize: payload.tab.editorSize,
     },

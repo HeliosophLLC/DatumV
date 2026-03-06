@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useSnapshot } from 'valtio';
 import { panesState, findLeaf, type PaneNode } from '@/state/tabs';
 import { runTab } from '@/state/execution';
+import { runFunctionTab } from '@/state/functionForm';
 import { resolveRunSql } from '@/state/activeEditor';
 import {
   ResizableHandle,
@@ -38,6 +39,10 @@ export function QueryEditorView() {
       const tab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
       if (!tab) return;
       e.preventDefault();
+      if (tab.kind === 'function') {
+        void runFunctionTab(leaf.activeTabId);
+        return;
+      }
       void runTab(leaf.activeTabId, resolveRunSql(tab.sql, leafId));
     };
     window.addEventListener('keydown', handler);

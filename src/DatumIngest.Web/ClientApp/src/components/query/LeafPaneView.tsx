@@ -17,6 +17,8 @@ import {
 import { isCrossWindowDrop, notifySourceToRemove } from './tearOut';
 import { settingsState } from '@/state/settings';
 import { disposeTabExecution } from '@/state/execution';
+import { disposeFunctionForm } from '@/state/functionForm';
+import { FunctionForm } from './FunctionForm';
 import {
   setActiveEditor,
   clearActiveEditorForLeaf,
@@ -58,11 +60,18 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
   // set's contents.
   const knownTabsRef = useRef<Set<string>>(new Set());
 
-  // Imperative handle on the editor's ResizablePanel. Lets the tab-
-  // change effect call `resize()` to swap the editor / results split
-  // to whatever the newly-active tab had saved, without remounting the
-  // panel group (which would kill Monaco state and animate ugly).
+  // Imperative handles on each branch's top ResizablePanel. Separate
+  // refs (rather than one shared one) because the SQL and function
+  // branches use different ResizablePanelGroup trees with different
+  // panel ids (`editor-…` vs `form-…`). A shared ref survives across
+  // branch swaps and tries to `.resize()` a panel id that's no longer
+  // in the active layout — the lib throws "Layout not found for Panel".
+  //
+  // The tab-change effect picks the matching ref based on the active
+  // tab's kind, so within-kind tab switches still get the imperative
+  // resize to restore the saved split.
   const editorPanelRef = usePanelRef();
+  const formPanelRef = usePanelRef();
 
   // Drag-and-drop state for the split overlay. The overlay itself is
   // purely presentational — it has pointer-events: none even when
@@ -94,6 +103,7 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
       if (!liveHere.has(id) && !findTabAnywhere(id)) {
         releaseModel(id);
         disposeTabExecution(id);
+        disposeFunctionForm(id);
       }
     }
     knownTabsRef.current = liveHere;
@@ -127,18 +137,42 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
     const live = findLeaf(panesState.root, leafId);
     const tab = live?.tabs.find((t) => t.id === activeTabId);
     if (!tab) return;
-    editorPanelRef.current?.resize(`${tab.editorSize ?? 65}%`);
-  }, [activeTabId, leafId, editorPanelRef]);
+    const ref = tab.kind === 'function' ? formPanelRef : editorPanelRef;
+    try {
+      ref.current?.resize(`${tab.editorSize ?? 65}%`);
+    } catch {
+      // react-resizable-panels caches the imperative handle on the ref
+      // even after the underlying ResizablePanel unmounts. When the user
+      // switches between SQL ↔ Function tabs, the previous branch's
+      // ResizablePanelGroup unmounts and the ref's `.current` is briefly
+      // stale; `.resize()` throws "Layout not found for Panel <id>". The
+      // new branch's panel renders with its `defaultSize` taken from the
+      // active tab's `editorSize`, so missing the imperative resize on
+      // the cross-kind transition lands the user in the right place
+      // anyway — swallow.
+    }
+  }, [activeTabId, leafId, editorPanelRef, formPanelRef]);
 
   // Persist the editor's share of the split whenever the layout
   // settles (after a user drag, or after programmatic resize). We
   // attribute the change to whichever tab is *currently* active on
   // this leaf — read fresh through the proxy rather than captured.
   function onPanelLayoutChanged() {
-    const size = editorPanelRef.current?.getSize().asPercentage;
-    if (size === undefined) return;
     const live = findLeaf(panesState.root, leafId);
     if (!live || live.activeTabId === null) return;
+    const tab = live.tabs.find((t) => t.id === live.activeTabId);
+    if (!tab) return;
+    const ref = tab.kind === 'function' ? formPanelRef : editorPanelRef;
+    let size: number | undefined;
+    try {
+      size = ref.current?.getSize().asPercentage;
+    } catch {
+      // Same stale-handle gotcha as the tab-change effect. The other
+      // branch's PanelGroup fires its own layout-changed event for
+      // whichever panel is now mounted, so dropping this one is safe.
+      return;
+    }
+    if (size === undefined) return;
     setTabEditorSize(live.activeTabId, size);
   }
 
@@ -271,6 +305,10 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
     }
   }
 
+  const activeTab =
+    activeTabId !== null ? tabs.find((t) => t.id === activeTabId) ?? null : null;
+  const activeTabKind = activeTab?.kind ?? 'sql';
+
   return (
     <div
       onMouseDownCapture={onMouseDownCapture}
@@ -281,7 +319,33 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
       className="relative flex h-full flex-col overflow-hidden"
     >
       <TabStrip leafId={leafId} />
-      {activeTabId !== null ? (
+      {activeTab !== null && activeTabKind === 'function' ? (
+        <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">
+          <ResizablePanelGroup
+            orientation="vertical"
+            className="flex-1"
+            onLayoutChanged={onPanelLayoutChanged}
+          >
+            <ResizablePanel
+              panelRef={formPanelRef}
+              id={`form-${leafId}`}
+              defaultSize={`${activeTab.editorSize ?? 65}%`}
+              minSize="20%"
+              className="flex flex-col overflow-hidden"
+            >
+              <FunctionForm tabId={activeTab.id} />
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel
+              id={`fnresults-${leafId}`}
+              minSize="10%"
+              className="flex flex-col overflow-hidden"
+            >
+              <ResultsPane leafId={leafId} />
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
+      ) : activeTabId !== null ? (
         <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">
         <ResizablePanelGroup
           orientation="vertical"

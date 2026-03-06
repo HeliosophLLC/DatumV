@@ -217,6 +217,8 @@ function createMainWindow(loadUrl: string): BrowserWindow {
 interface TabSeed {
   id: string;
   title: string;
+  /** Discriminator; absent for SQL tabs (the renderer defaults missing values to `'sql'`). */
+  kind?: 'sql' | 'function';
   sql: string;
   editorSize?: number;
 }

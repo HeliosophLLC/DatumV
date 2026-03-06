@@ -360,8 +360,8 @@ app.MapPost("/api/lang/signature", async (HttpRequest request, CancellationToken
 // Monaco's built-in 'sql' tokenizer with one that knows about backtick
 // template strings (and all other DatumIngest extensions).
 // Catalog sidebar reads built-in function signatures from this endpoint.
-// `__`-prefixed internal helpers (e.g. __assert_not_null) are filtered out
-// the same way they are in completion.
+// `__`-prefixed internal helpers are filtered out the same way they are
+// in completion.
 app.MapGet("/api/lang/functions", () =>
 {
     var entries = languageManifest.Functions

@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { Play, Plus, Square, X } from 'lucide-react';
+import { Menu } from '@base-ui/react/menu';
+import { FunctionSquare, Play, Plus, SquareCode, Square, X } from 'lucide-react';
 import {
   panesState,
   openTab,
@@ -11,8 +12,10 @@ import {
   moveTab,
   findLeaf,
   importTabIntoLeaf,
+  type TabKind,
 } from '@/state/tabs';
 import { cancelTab, executionsState, runTab } from '@/state/execution';
+import { runFunctionTab } from '@/state/functionForm';
 import { resolveRunSql } from '@/state/activeEditor';
 import {
   TAB_DRAG_MIME,
@@ -59,6 +62,7 @@ export function TabStrip({ leafId }: { leafId: string }) {
               id={tab.id}
               index={index}
               title={tab.title}
+              kind={tab.kind}
               sql={tab.sql}
               editorSize={tab.editorSize}
               dirty={tab.dirty}
@@ -72,23 +76,14 @@ export function TabStrip({ leafId }: { leafId: string }) {
             />
           );
         })}
-        {/* End-of-strip drop sentinel + new-tab button. The sentinel
+        {/* End-of-strip drop sentinel + new-tab menu. The sentinel
             absorbs drops past the last tab so the user can move a tab to
-            the very end. The button stretches to fill remaining space so
-            the click target is forgiving. */}
+            the very end. The + button opens a dropdown — single-click on
+            "SQL Query" matches the prior single-click-to-add-tab UX,
+            "Execute Function" creates a function tab. */}
         <EndSentinel leafId={leafId} tabCount={leaf.tabs.length} />
-        <button
-          type="button"
-          onClick={() => openTab('', leafId)}
-          aria-label={t('newTab')}
-          title={t('newTab')}
-          className={cn(
-            'text-muted-foreground hover:bg-muted hover:text-foreground',
-            'border-border flex shrink-0 cursor-pointer items-center justify-center border-b px-3 transition-colors',
-          )}
-        >
-          <Plus className="size-4" />
-        </button>
+        <NewTabMenu leafId={leafId} />
+
         {/* Trailing filler that paints the strip's separator line in
             the empty area to the right of the + button. flex-1 with
             default shrink so it collapses to 0 when tabs overflow
@@ -105,6 +100,7 @@ function TabChip({
   id,
   index,
   title,
+  kind,
   sql,
   editorSize,
   dirty,
@@ -120,6 +116,7 @@ function TabChip({
   id: string;
   index: number;
   title: string;
+  kind: TabKind;
   sql: string;
   editorSize: number | undefined;
   dirty: boolean;
@@ -173,6 +170,14 @@ function TabChip({
       cancelTab(id);
       return;
     }
+    if (kind === 'function') {
+      // Function tabs synthesise their request from the form state on
+      // the tab; the Play button on the strip is a parity entry point
+      // with the form's own Run button + Ctrl+Enter. Form-level field
+      // errors get raised inside runFunctionTab.
+      void runFunctionTab(id);
+      return;
+    }
     // resolveRunSql honours the focused editor's current selection only
     // when that editor belongs to THIS tab's leaf. So clicking the
     // Play button on a tab in leaf B while you've been editing leaf B
@@ -204,7 +209,7 @@ function TabChip({
       // destination still sees the stale flag, which is the safer
       // direction (refuse rather than orphan an in-flight stream).
       isRunning: isStreaming,
-      tab: { id, title, sql, editorSize },
+      tab: { id, title, kind, sql, editorSize },
     };
     dragPayloadRef.current = payload;
     writeTabDragData(e.dataTransfer, payload);
@@ -341,6 +346,69 @@ function TabChip({
         <X className="size-3" />
       </button>
     </div>
+  );
+}
+
+/**
+ * The `+` control: a dropdown menu offering "SQL Query" (the legacy
+ * behaviour of single-click → new SQL tab) and "Execute Function" (a
+ * kind-driven form for invoking a scalar function). The menu is keyboard
+ * accessible (Enter / Space opens, arrow keys navigate, Esc closes) via
+ * the Base UI Menu primitive — same access semantics the rest of the
+ * app's menus pick up once they're wired through this component.
+ */
+function NewTabMenu({ leafId }: { leafId: string }) {
+  const { t } = useTranslation('query');
+
+  function openWithKind(kind: TabKind) {
+    openTab('', leafId, kind);
+  }
+
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        aria-label={t('newTab')}
+        title={t('newTab')}
+        className={cn(
+          'text-muted-foreground hover:bg-muted hover:text-foreground',
+          'border-border flex shrink-0 cursor-pointer items-center justify-center border-b px-3 transition-colors',
+          'data-[popup-open]:bg-muted data-[popup-open]:text-foreground',
+        )}
+      >
+        <Plus className="size-4" />
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner side="bottom" align="start" sideOffset={4}>
+          <Menu.Popup
+            className={cn(
+              'bg-popover text-popover-foreground border-border z-50 min-w-48',
+              'rounded-md border p-1 shadow-md outline-none',
+            )}
+          >
+            <Menu.Item
+              onClick={() => openWithKind('sql')}
+              className={cn(
+                'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm',
+                'outline-none data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
+              )}
+            >
+              <SquareCode className="size-4" />
+              {t('newTabSql')}
+            </Menu.Item>
+            <Menu.Item
+              onClick={() => openWithKind('function')}
+              className={cn(
+                'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm',
+                'outline-none data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
+              )}
+            >
+              <FunctionSquare className="size-4" />
+              {t('newTabFunction')}
+            </Menu.Item>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }
 

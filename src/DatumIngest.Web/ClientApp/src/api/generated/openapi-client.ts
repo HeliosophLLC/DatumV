@@ -8,6 +8,51 @@
 /* eslint-disable */
 // ReSharper disable InconsistentNaming
 
+export class FunctionCatalogClient {
+    private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
+    private baseUrl: string;
+    protected jsonParseReviver: ((key: string, value: any) => any) | undefined = undefined;
+
+    constructor(baseUrl?: string, http?: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> }) {
+        this.http = http ? http : window as any;
+        this.baseUrl = baseUrl ?? "";
+    }
+
+    listScalar(signal?: AbortSignal): Promise<ScalarFunctionListResponse> {
+        let url_ = this.baseUrl + "/api/functions/scalar";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processListScalar(_response);
+        });
+    }
+
+    protected processListScalar(response: Response): Promise<ScalarFunctionListResponse> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as ScalarFunctionListResponse;
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<ScalarFunctionListResponse>(null as any);
+    }
+}
+
 export class HealthClient {
     private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
     private baseUrl: string;
@@ -777,6 +822,51 @@ export class SettingsClient {
         }
         return Promise.resolve<SettingsDto>(null as any);
     }
+}
+
+export interface ScalarFunctionListResponse {
+    functions?: ScalarFunctionDto[];
+}
+
+export interface ScalarFunctionDto {
+    schema?: string;
+    name?: string;
+    aliases?: string[];
+    category?: string;
+    description?: string;
+    bodyScope?: string;
+    signatures?: ScalarFunctionSignatureDto[];
+}
+
+export interface ScalarFunctionSignatureDto {
+    parameters?: ScalarFunctionParameterDto[];
+    variadic?: ScalarFunctionVariadicDto | undefined;
+    returnType?: ScalarFunctionReturnTypeDto;
+}
+
+export interface ScalarFunctionParameterDto {
+    name?: string;
+    kindLabel?: string;
+    acceptedKinds?: string[];
+    acceptsAnyKind?: boolean;
+    isOptional?: boolean;
+    arrayMatch?: string;
+}
+
+export interface ScalarFunctionVariadicDto {
+    name?: string;
+    kindLabel?: string;
+    acceptedKinds?: string[];
+    acceptsAnyKind?: boolean;
+    minOccurrences?: number;
+    requireSameKindAcrossArgs?: boolean;
+    arrayMatch?: string;
+}
+
+export interface ScalarFunctionReturnTypeDto {
+    description?: string;
+    staticHint?: string | undefined;
+    producesArray?: boolean;
 }
 
 export interface HealthDto {

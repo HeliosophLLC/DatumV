@@ -1,5 +1,5 @@
 import { proxy } from 'valtio';
-import { postNdjson } from './ndjson';
+import { postNdjson, postNdjsonMultipart } from './ndjson';
 
 // Per-tab execution state. Lives in a side store rather than on the tab
 // itself because results / abort handles / status churn at a different
@@ -108,10 +108,40 @@ type StreamEvent =
 // ────────── Actions ──────────
 
 /**
+ * Wire shape for a single `$name` binding in the multipart envelope.
+ * Mirrors the server's `ParameterJson` DTO: inline scalars use `value`,
+ * binary kinds use `ref` to name a sibling multipart part. See
+ * `DatumIngest.Web.Dtos.Execution.ParameterJson` for the canonical
+ * definition.
+ */
+export interface ParameterBinding {
+  kind: string;
+  value?: unknown;
+  ref?: string;
+}
+
+/** Options for the multipart-bodied variant of `runTab`. */
+export interface RunMultipartOpts {
+  /** Named parameter bindings, with `ref` parameters pointing at `files` entries. */
+  parameters: Record<string, ParameterBinding>;
+  /**
+   * Files to attach as multipart parts, keyed by the part name referenced
+   * in a `parameters[name].ref` binding. The key must match the `ref` —
+   * the server looks up parts by name and rejects unresolved refs with a
+   * 400 carrying the offending parameter name.
+   */
+  files: Record<string, File>;
+}
+
+/**
  * Kicks off an NDJSON stream against `/api/query/stream` for the given
  * tab + SQL. If another run is in flight for the tab, this is a no-op —
  * the user has to cancel the running one first. Returns when the stream
  * terminates (complete or error) or the run is cancelled.
+ *
+ * `opts` is for the function-tab path: when provided, the request goes
+ * out as `multipart/form-data` with a JSON `request` part plus one
+ * binary part per entry in `opts.files`. Omit it for plain SQL runs.
  *
  * Mutation discipline: every state change goes through
  * `executionsState.byTabId[tabId]` rather than a captured local ref.
@@ -120,7 +150,11 @@ type StreamEvent =
  * notify subscribers, so React never re-renders. Always re-access
  * through the proxy.
  */
-export async function runTab(tabId: string, sql: string): Promise<void> {
+export async function runTab(
+  tabId: string,
+  sql: string,
+  opts?: RunMultipartOpts,
+): Promise<void> {
   const existing = executionsState.byTabId[tabId];
   if (existing && existing.status === 'streaming') {
     return; // already running; cancel first if you want to restart
@@ -140,11 +174,17 @@ export async function runTab(tabId: string, sql: string): Promise<void> {
 
   let terminated = false;
   try {
-    const iter = postNdjson<StreamEvent>(
-      '/api/query/stream',
-      { sql, maxRows: 1000, trace: false },
-      abort.signal,
-    );
+    const iter = opts
+      ? postNdjsonMultipart<StreamEvent>(
+          '/api/query/stream',
+          buildMultipartBody(sql, opts),
+          abort.signal,
+        )
+      : postNdjson<StreamEvent>(
+          '/api/query/stream',
+          { sql, maxRows: 1000, trace: false },
+          abort.signal,
+        );
 
     for await (const event of iter) {
       applyEvent(tabId, event);
@@ -183,6 +223,30 @@ export async function runTab(tabId: string, sql: string): Promise<void> {
       }
     }
   }
+}
+
+/**
+ * Builds the multipart body for a function-tab run. The `request` part
+ * carries the same JSON envelope a SQL run would send; one extra part
+ * is appended per File in `opts.files`, named by the multipart part
+ * name the server looks up.
+ */
+function buildMultipartBody(sql: string, opts: RunMultipartOpts): FormData {
+  const envelope = {
+    sql,
+    maxRows: 1000,
+    trace: false,
+    parameters: opts.parameters,
+  };
+  const formData = new FormData();
+  formData.append(
+    'request',
+    new Blob([JSON.stringify(envelope)], { type: 'application/json' }),
+  );
+  for (const [name, file] of Object.entries(opts.files)) {
+    formData.append(name, file, file.name);
+  }
+  return formData;
 }
 
 /**

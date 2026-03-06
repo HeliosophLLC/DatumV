@@ -60,7 +60,14 @@ declare global {
       // each method speaks; the renderer consumers live in the query
       // pane components (TabStrip / LeafPaneView).
       spawnTabWindow(payload: {
-        seed: { id: string; title: string; sql: string; editorSize?: number };
+        seed: {
+          id: string;
+          title: string;
+          /** Discriminator; absent for SQL tabs (the renderer defaults missing values to `'sql'`). */
+          kind?: 'sql' | 'function';
+          sql: string;
+          editorSize?: number;
+        };
         x: number;
         y: number;
       }): Promise<void>;

@@ -1,17 +1,21 @@
-// NDJSON-over-fetch reader. POSTs a body, then yields parsed JSON objects
-// one per line as they arrive. The endpoint sets `Content-Type:
-// application/x-ndjson` and flushes after every event; we don't buffer
-// past the next newline so rows appear in the UI as the engine produces
-// them.
+// NDJSON-over-fetch reader. Two entry points:
 //
-// Cancellation: pass an AbortSignal — when it fires, the fetch is
-// cancelled and the iterator throws `AbortError`. Callers translate
-// that into a "cancelled" status; the server sees `RequestAborted` and
-// emits a terminal `error{message:"cancelled"}` event (which we won't
-// receive after the abort, but the server-side cleanup still runs).
+//  - `postNdjson(url, body, signal)` — POSTs a JSON body and yields parsed
+//    events from the response stream. Used by SQL tabs.
 //
-// Generic over the event union — callers pass the discriminated event
-// type they expect so consumers get exhaustive switch checking.
+//  - `postNdjsonMultipart(url, formData, signal)` — POSTs a FormData body
+//    (the browser sets the multipart boundary itself) and yields events.
+//    Used by function tabs whose form has binary parameters; the server's
+//    QueryRequestBinding dispatches on Content-Type.
+//
+// Both share the same reader half: yield JSON-per-line as the engine
+// flushes, until either the body ends or the abort signal fires.
+//
+// Cancellation: when the AbortSignal fires, the fetch is cancelled and
+// the iterator throws `AbortError`. Callers translate that into a
+// "cancelled" status; the server sees `RequestAborted` and emits a
+// terminal `error{message:"cancelled"}` event (which we won't receive
+// after the abort, but the server-side cleanup still runs).
 
 export async function* postNdjson<TEvent>(
   url: string,
@@ -28,7 +32,34 @@ export async function* postNdjson<TEvent>(
     body: JSON.stringify(body),
     signal,
   });
+  yield* readNdjsonResponse<TEvent>(res, signal);
+}
 
+export async function* postNdjsonMultipart<TEvent>(
+  url: string,
+  formData: FormData,
+  signal: AbortSignal,
+): AsyncIterableIterator<TEvent> {
+  const res = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      // No Content-Type — the browser fills in
+      // `multipart/form-data; boundary=...` itself. Setting it manually
+      // drops the boundary and the server's MultipartReader rejects
+      // the request.
+      Accept: 'application/x-ndjson',
+    },
+    body: formData,
+    signal,
+  });
+  yield* readNdjsonResponse<TEvent>(res, signal);
+}
+
+async function* readNdjsonResponse<TEvent>(
+  res: Response,
+  signal: AbortSignal,
+): AsyncIterableIterator<TEvent> {
   if (!res.ok) {
     // Pre-stream failures (4xx/5xx with a JSON error body) — surface
     // the error so the caller can show it instead of a silent abort.

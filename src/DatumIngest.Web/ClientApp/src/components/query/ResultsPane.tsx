@@ -248,6 +248,17 @@ function CellBlock({
   tableMode: TableMode;
 }) {
   const hasTable = cell.schema !== null && cell.rows.length > 0;
+  // Single-value detection: 1 row × 1 column, and this is the only
+  // table in the pane (`tableMode === 'fill'`). Function-tab runs that
+  // return a single SELECT result land here, but the path is generic —
+  // a SQL tab that runs `SELECT 'hello'` gets the same treatment.
+  // Multi-row or multi-cell results stay in the data grid below.
+  const isSingleValue =
+    hasTable
+    && tableMode === 'fill'
+    && cell.rows.length === 1
+    && cell.rows[0].length === 1
+    && cell.schema!.length === 1;
   // Section is a flex column so the table area can `flex-1` into the
   // remaining height after errors / chunks. The section's own height
   // is constrained only when it carries a table — non-table cells
@@ -275,8 +286,128 @@ function CellBlock({
           {cell.chunks.map((c) => c.text).join('')}
         </pre>
       )}
-      {hasTable && <CellTable cell={cell} />}
+      {isSingleValue ? (
+        <SingleValueView
+          cell={cell.rows[0][0]}
+          column={cell.schema![0]}
+        />
+      ) : (
+        hasTable && <CellTable cell={cell} />
+      )}
     </section>
+  );
+}
+
+// ────────── Single-value rendering ──────────
+//
+// When the result is exactly one row × one column, we render the cell
+// at full pane size rather than in a 1×1 grid. The user gets:
+//   - large image / audio player / video player for media cells, no
+//     click-to-open modal indirection;
+//   - a centered card with the value as a large monospace block for
+//     scalars / JSON / null.
+// The column name + type still surfaces in a small header so the user
+// keeps the schema context they'd otherwise lose by hiding the grid.
+
+function SingleValueView({
+  cell,
+  column,
+}: {
+  cell: JsonCell;
+  column: { name: string; kind: string; isArray: boolean };
+}) {
+  return (
+    <div className="bg-table-pane flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="border-border bg-muted flex shrink-0 items-center gap-1.5 border-b px-3 py-1 text-xs font-medium">
+        <span className="truncate font-mono">{column.name}</span>
+        <Badge variant="muted" className="shrink-0 font-mono text-[10px] leading-none">
+          {column.kind}
+          {column.isArray ? '[]' : ''}
+        </Badge>
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+        <SingleValueBody cell={cell} />
+      </div>
+    </div>
+  );
+}
+
+function SingleValueBody({ cell }: { cell: JsonCell }) {
+  if (cell.kind === 'null') {
+    return (
+      <span className="text-muted-foreground font-mono text-2xl italic">
+        null
+      </span>
+    );
+  }
+  if (
+    cell.kind === 'media'
+    || cell.kind === 'image'
+    || cell.kind === 'audio'
+    || cell.kind === 'video'
+  ) {
+    const mime = cell.mime ?? '';
+    if (mime.startsWith('image/') || cell.kind === 'image') {
+      return (
+        <img
+          src={dataUriOf(cell)}
+          alt=""
+          className="max-h-full max-w-full object-contain"
+        />
+      );
+    }
+    if (mime.startsWith('audio/') || cell.kind === 'audio') {
+      return (
+        <audio
+          src={dataUriOf(cell)}
+          controls
+          className="w-full max-w-[600px]"
+        />
+      );
+    }
+    if (mime.startsWith('video/') || cell.kind === 'video') {
+      return (
+        <video
+          src={dataUriOf(cell)}
+          controls
+          className="max-h-full max-w-full"
+        />
+      );
+    }
+    const bytes = bytesFromBase64(cell.dataB64);
+    return (
+      <span className="text-muted-foreground font-mono text-sm">
+        [{cell.mime ?? 'binary'}, {formatBytes(bytes)}]
+      </span>
+    );
+  }
+  if (cell.kind === 'media_array' && cell.items) {
+    return (
+      <div className="grid w-full max-h-full grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2 overflow-auto">
+        {cell.items.map((it, i) => (
+          <img
+            key={i}
+            src={`data:${it.mime};base64,${it.dataB64}`}
+            alt=""
+            loading="lazy"
+            className="bg-muted/40 h-40 w-full rounded-xs object-contain"
+          />
+        ))}
+      </div>
+    );
+  }
+  // Scalar / JSON / catchall. Use a pre-wrap block so multi-line JSON
+  // bodies keep their formatting; large font so the value is readable
+  // without zooming.
+  return (
+    <pre
+      className={cn(
+        'text-foreground max-w-full overflow-auto font-mono text-2xl leading-relaxed',
+        'whitespace-pre-wrap break-words text-center',
+      )}
+    >
+      {cell.text ?? ''}
+    </pre>
   );
 }
 
