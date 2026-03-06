@@ -20,6 +20,37 @@ public sealed class TypeRegistry
     // Index 0 is the NoType sentinel (null). All registered descriptors start at index 1.
     private readonly List<TypeDescriptor?> _byId = [null];
 
+    // Name → TypeId index for the pre-interned named-type vocabulary
+    // (NamedTypeRegistry.Entries). Case-insensitive on lookup; the stored
+    // keys are the canonical names from the static registry. Anonymous
+    // struct values built at runtime don't appear here.
+    private readonly Dictionary<string, int> _byName =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Constructs a fresh per-query registry, pre-interning every entry in
+    /// <see cref="NamedTypeRegistry.Entries"/> in topological order so the
+    /// vocabulary is immediately resolvable by name. TypeIds are
+    /// deterministic per fresh registry — the i-th entry always lands at
+    /// the i-th interned TypeId.
+    /// </summary>
+    public TypeRegistry()
+    {
+        foreach (NamedTypeRegistry.NamedTypeDefinition def in NamedTypeRegistry.Entries)
+        {
+            int typeId = def.Build(this, _byName);
+            // Capture the resolved TypeId under the canonical name so
+            // later entries' Build callbacks (and downstream callers) can
+            // reference it. Names within a single vocabulary are unique;
+            // a collision here means a programming error in NamedTypeRegistry.
+            if (!_byName.TryAdd(def.Name, typeId))
+            {
+                throw new InvalidOperationException(
+                    $"NamedTypeRegistry has duplicate entry '{def.Name}'.");
+            }
+        }
+    }
+
     // ── public intern helpers ──────────────────────────────────────────────
 
     /// <summary>
@@ -116,6 +147,24 @@ public sealed class TypeRegistry
     {
         get { lock (_lock) return _byId.Count - 1; }
     }
+
+    /// <summary>
+    /// Looks up a named-type entry by name (case-insensitive). Returns
+    /// the pre-interned TypeId, or <see cref="NoType"/> when no entry
+    /// matches. Anonymous struct shapes built at runtime are not reachable
+    /// via this lookup — only the vocabulary in
+    /// <see cref="NamedTypeRegistry.Entries"/>.
+    /// </summary>
+    public int GetTypeIdByName(string name)
+        => _byName.TryGetValue(name, out int typeId) ? typeId : NoType;
+
+    /// <summary>
+    /// True when <paramref name="name"/> matches an entry in the
+    /// named-type vocabulary. Used by the type-annotation resolver to
+    /// disambiguate "this is a named type" from "this is an unknown
+    /// identifier."
+    /// </summary>
+    public bool IsNamedType(string name) => _byName.ContainsKey(name);
 
     // ── internals ──────────────────────────────────────────────────────────
 

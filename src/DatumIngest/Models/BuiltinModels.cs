@@ -171,6 +171,8 @@ public static class BuiltinModels
         tableCatalog.Models = modelCatalog;
         tableCatalog.Add(new ModelsTableProvider(
             tableCatalog.Pool, modelCatalog, tableCatalog.DeclaredModels));
+        tableCatalog.Add(new DatumIngest.Catalog.Providers.TypesTableProvider(
+            tableCatalog.Pool));
         return modelCatalog;
     }
 

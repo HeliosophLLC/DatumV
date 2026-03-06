@@ -36,7 +36,7 @@ public static class ExpressionTypeResolver
     /// Branches that may yield <c>IsArray = true</c>:
     /// <list type="bullet">
     ///   <item>Column references — from <see cref="ColumnInfo.IsArray"/>.</item>
-    ///   <item>Cast targets — from <see cref="TypeAnnotationResolver.TryParse"/>.</item>
+    ///   <item>Cast targets — from <c>TypeAnnotationResolver.TryParse</c>.</item>
     ///   <item>Function calls — from the matched signature variant's
     ///   <see cref="ReturnTypeRule.ProducesArray"/>.</item>
     ///   <item>Aggregate calls — from <see cref="IAggregateFunction.ReturnRule"/>.</item>

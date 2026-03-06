@@ -155,10 +155,26 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
 
             ReadOnlySpan<ValueRef> fields = element.GetStructFields();
 
-            float x = fields[indices.X].ToFloat();
-            float y = fields[indices.Y].ToFloat();
-            float w = fields[indices.W].ToFloat();
-            float h = fields[indices.H].ToFloat();
+            // Resolve x/y/w/h either from a nested `bbox: BoundingBox` field
+            // (named-type detection shapes — ScoredDetection, FaceDetection,
+            // OcrLine, RegionScore, etc.) or from flat x/y/w/h fields
+            // (legacy detection shapes pre-named-types).
+            float x, y, w, h;
+            if (indices.BBox >= 0)
+            {
+                ReadOnlySpan<ValueRef> bboxFields = fields[indices.BBox].GetStructFields();
+                x = bboxFields[indices.X].ToFloat();
+                y = bboxFields[indices.Y].ToFloat();
+                w = bboxFields[indices.W].ToFloat();
+                h = bboxFields[indices.H].ToFloat();
+            }
+            else
+            {
+                x = fields[indices.X].ToFloat();
+                y = fields[indices.Y].ToFloat();
+                w = fields[indices.W].ToFloat();
+                h = fields[indices.H].ToFloat();
+            }
 
             canvas.DrawRect(x, y, w, h, stroke);
 
@@ -255,23 +271,56 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
                 $"boxes argument's TypeId {typeId} is not registered as a struct shape.");
         }
 
-        // Case-insensitive name lookup. Reuse a small linear scan — typical
-        // detection structs have <10 fields, so a dictionary would be slower
-        // than the scan after lookup-amortisation overhead.
-        int x = FindField(fields, "x");
-        int y = FindField(fields, "y");
-        int w = FindField(fields, "w");
-        int h = FindField(fields, "h");
-
-        if (x < 0 || y < 0 || w < 0 || h < 0)
+        // Two acceptable shapes:
+        //   1. Nested bbox: element has a `bbox` field of struct type whose
+        //      own fields include x/y/w/h. The named-type vocabulary
+        //      (BoundingBox, ScoredDetection, FaceDetection, etc.) uses
+        //      this shape — bbox is composable as a sub-structure.
+        //   2. Flat: element has x/y/w/h as direct fields (legacy detector
+        //      shapes pre-named-types).
+        int bboxIndex = FindField(fields, "bbox");
+        int x, y, w, h;
+        if (bboxIndex >= 0)
         {
-            string have = string.Join(", ", fields.Select(f => f.Name));
-            throw new FunctionArgumentException(Name,
-                $"boxes argument's struct must have x, y, w, h fields; got [{have}]. "
-                + "Box-producing models declare these via OutputFields on the IModel.");
+            // Nested-bbox shape. Resolve the inner BoundingBox descriptor
+            // and lift its x/y/w/h indices.
+            int bboxTypeId = fields[bboxIndex].TypeId;
+            TypeDescriptor? bboxDesc = registry.GetDescriptor(bboxTypeId);
+            if (bboxDesc?.Fields is not { } bboxFields)
+            {
+                throw new FunctionArgumentException(Name,
+                    $"boxes argument's `bbox` field (TypeId {bboxTypeId}) is not a registered struct.");
+            }
+            x = FindField(bboxFields, "x");
+            y = FindField(bboxFields, "y");
+            w = FindField(bboxFields, "w");
+            h = FindField(bboxFields, "h");
+            if (x < 0 || y < 0 || w < 0 || h < 0)
+            {
+                string have = string.Join(", ", bboxFields.Select(f => f.Name));
+                throw new FunctionArgumentException(Name,
+                    $"boxes argument's `bbox` struct must have x, y, w, h fields; got [{have}]. "
+                    + "Use BoundingBox (or a struct with the same x/y/w/h fields) as the bbox type.");
+            }
+        }
+        else
+        {
+            // Flat shape — backward-compat path.
+            x = FindField(fields, "x");
+            y = FindField(fields, "y");
+            w = FindField(fields, "w");
+            h = FindField(fields, "h");
+            if (x < 0 || y < 0 || w < 0 || h < 0)
+            {
+                string have = string.Join(", ", fields.Select(f => f.Name));
+                throw new FunctionArgumentException(Name,
+                    $"boxes argument's struct must have either a nested `bbox: BoundingBox` field "
+                    + $"OR flat x, y, w, h fields; got [{have}].");
+            }
         }
 
         return new FieldIndices(
+            BBox: bboxIndex,
             X: x, Y: y, W: w, H: h,
             Label: FindField(fields, "label"),
             Score: FindField(fields, "score"));
@@ -290,9 +339,22 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
     }
 
     /// <summary>
-    /// Field indices into the boxes' element struct. -1 indicates a missing
-    /// optional field (<c>label</c>, <c>score</c>); required fields are
-    /// validated non-negative at lookup time.
+    /// Field indices into the boxes' element struct.
+    /// <para>
+    /// <paramref name="BBox"/> is -1 for flat shapes (legacy detector
+    /// outputs with x/y/w/h on the element struct) and ≥0 for the
+    /// nested-bbox shape used by every named-type detection contract
+    /// (<see cref="NamedTypeRegistry"/>'s <c>BoundingBox</c> nested into
+    /// <c>ScoredDetection</c> / <c>FaceDetection</c> / <c>OcrLine</c> /
+    /// <c>RegionScore</c>). When BBox ≥ 0, <paramref name="X"/> /
+    /// <paramref name="Y"/> / <paramref name="W"/> / <paramref name="H"/>
+    /// index into the *inner* BoundingBox's fields; otherwise into the
+    /// outer element struct directly.
+    /// </para>
+    /// <para>
+    /// <paramref name="Label"/> and <paramref name="Score"/> are -1 when
+    /// the optional field is absent.
+    /// </para>
     /// </summary>
-    private readonly record struct FieldIndices(int X, int Y, int W, int H, int Label, int Score);
+    private readonly record struct FieldIndices(int BBox, int X, int Y, int W, int H, int Label, int Score);
 }

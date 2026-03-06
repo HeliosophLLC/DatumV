@@ -222,17 +222,26 @@ public class TypeRegistryTests
     public void Count_ReflectsRegisteredShapes()
     {
         var reg = new TypeRegistry();
-        Assert.Equal(0, reg.Count);
+        // The constructor pre-interns NamedTypeRegistry.Entries, so a fresh
+        // registry isn't empty. Capture the baseline and assert deltas.
+        int baseline = reg.Count;
+        Assert.True(baseline >= NamedTypeRegistry.Entries.Count,
+            $"baseline {baseline} must include the {NamedTypeRegistry.Entries.Count} named-type vocabulary entries");
 
-        reg.InternScalarType(DataKind.Int32);
-        Assert.Equal(1, reg.Count);
+        // Int32 is a primitive that named-type recipes already intern via
+        // InternScalarType(Int32) — re-interning it is a no-op. Use a kind
+        // that none of the named types reference so the count actually
+        // moves: Decimal isn't in any vocabulary entry.
+        reg.InternScalarType(DataKind.Decimal);
+        Assert.Equal(baseline + 1, reg.Count);
 
-        reg.InternScalarType(DataKind.Float32);
-        Assert.Equal(2, reg.Count);
+        // Same shape again — no new registration.
+        reg.InternScalarType(DataKind.Decimal);
+        Assert.Equal(baseline + 1, reg.Count);
 
-        // Same shape again — no new registration
-        reg.InternScalarType(DataKind.Int32);
-        Assert.Equal(2, reg.Count);
+        // Different shape — count moves again.
+        reg.InternStructType([new("only_field", reg.InternScalarType(DataKind.Boolean))]);
+        Assert.Equal(baseline + 2, reg.Count);
     }
 
 }
