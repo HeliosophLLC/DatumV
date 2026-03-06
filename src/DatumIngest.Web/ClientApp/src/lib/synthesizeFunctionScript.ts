@@ -161,6 +161,18 @@ export function declaredKindFor(p: ScalarFunctionParameterDto): string {
   return kinds[0] ?? 'String';
 }
 
+/**
+ * Prefix applied to the DECLARE variable name so it can't collide with a
+ * built-in type name in expression position. SQL identifiers are
+ * case-insensitive, so a parameter named `image` would shadow / be
+ * shadowed by the `Image` type when later referenced in a SELECT,
+ * producing argument-kind errors like
+ * <c>"no matching signature for argument kinds [Type, Float64, …]"</c>.
+ * Prefixing dodges every type-name collision without restricting which
+ * parameter names the form accepts.
+ */
+const VARIABLE_PREFIX = 'arg_';
+
 export function synthesizeFunctionScript(
   fn: ScalarFunctionDto,
   variant: ScalarFunctionSignatureDto,
@@ -174,7 +186,7 @@ export function synthesizeFunctionScript(
     const name = p.name ?? '';
     if (!name) continue;
     const kind = declaredKindFor(p);
-    lines.push(`DECLARE ${name} ${kind} = $${name};`);
+    lines.push(`DECLARE ${VARIABLE_PREFIX}${name} ${kind} = $${name};`);
 
     if (isBinaryParameter(p)) {
       fields.push({
@@ -199,6 +211,7 @@ export function synthesizeFunctionScript(
   const callArgs = params
     .map((p) => p.name ?? '')
     .filter((n) => n.length > 0)
+    .map((n) => `${VARIABLE_PREFIX}${n}`)
     .join(', ');
   const fnSchema = fn.schema ?? 'system';
   const fnName = fn.name ?? '';
