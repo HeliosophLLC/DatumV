@@ -5,24 +5,17 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
-/// Internal helper used by <see cref="UdfInliner"/> to enforce
-/// <c>IS NOT NULL</c> on UDF parameters and on declared return values.
 /// Returns the first argument verbatim when it is non-null; throws an
 /// <see cref="InvalidOperationException"/> with the message from the
-/// second argument (a string literal injected by the inliner) when it
-/// is null.
+/// second argument when it is null. Used by <see cref="UdfInliner"/>
+/// to enforce <c>IS NOT NULL</c> on UDF parameters and on declared
+/// return values, and available as a normal scalar function for user
+/// SQL.
 /// </summary>
-/// <remarks>
-/// The leading underscore in the registered name (<c>__assert_not_null</c>)
-/// signals that user SQL is not expected to call this function directly —
-/// it's a compiler-generated wrapper. Calling it explicitly works (it's
-/// just a normal scalar function), but the user-facing surface is the
-/// <c>IS NOT NULL</c> annotation on UDF parameters and return types.
-/// </remarks>
 public sealed class AssertNotNullFunction : IFunction, IScalarFunction
 {
     /// <inheritdoc />
-    public static string Name => "__assert_not_null";
+    public static string Name => "assert_not_null";
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Conversion;

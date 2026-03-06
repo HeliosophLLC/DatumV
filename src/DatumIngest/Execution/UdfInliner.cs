@@ -37,12 +37,12 @@ namespace DatumIngest.Execution;
 /// <para>
 /// Validation wrapping — parameters declared with <c>IS NOT NULL</c>
 /// have their substituted argument expression wrapped with
-/// <c>__assert_not_null(arg, 'name')</c>; the entire substituted body
+/// <c>assert_not_null(arg, 'name')</c>; the entire substituted body
 /// is wrapped with <c>cast(body, ReturnType)</c> when <c>RETURNS T</c>
-/// is set, and with <c>__assert_not_null(body, 'return value of fn')</c>
+/// is set, and with <c>assert_not_null(body, 'return value of fn')</c>
 /// when <c>RETURNS T IS NOT NULL</c> is set. The wrappers compose: a
 /// declared-and-not-null return becomes
-/// <c>__assert_not_null(cast(body, T), '...')</c>.
+/// <c>assert_not_null(cast(body, T), '...')</c>.
 /// </para>
 /// </remarks>
 public static class UdfInliner
@@ -313,7 +313,7 @@ public static class UdfInliner
             }
 
             // Build the parameter → call-site-arg substitution map. Each
-            // argument is wrapped with __assert_not_null when the matching
+            // argument is wrapped with assert_not_null when the matching
             // parameter is declared IS NOT NULL — the wrapper fires at
             // evaluation time, after the argument has been computed but
             // before the body sees it. Missing trailing arguments are
@@ -389,15 +389,15 @@ public static class UdfInliner
         }
 
         /// <summary>
-        /// Wraps <paramref name="value"/> with a call to the internal
-        /// <c>__assert_not_null</c> scalar function, embedding
+        /// Wraps <paramref name="value"/> with a call to the
+        /// <c>assert_not_null</c> scalar function, embedding
         /// <paramref name="message"/> as a string-literal second argument.
         /// At evaluation time, the function returns the value when non-null
         /// and throws with the message when null.
         /// </summary>
         private static Expression WrapNotNull(Expression value, string message) =>
             new FunctionCallExpression(
-                "__assert_not_null",
+                "assert_not_null",
                 [value, new LiteralExpression(message)]);
 
         /// <summary>

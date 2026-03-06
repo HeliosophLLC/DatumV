@@ -293,17 +293,17 @@ public class UdfInlinerTests : ServiceTestBase
     public void Inline_NotNullParam_WrapsArgInAssertNotNull()
     {
         // When a parameter is declared IS NOT NULL, the substituted argument
-        // is wrapped with __assert_not_null at the inlining boundary so the
+        // is wrapped with assert_not_null at the inlining boundary so the
         // body never sees a null value for that parameter.
         Expression result = Inline(
             "shout(name)",
             "CREATE FUNCTION shout(s STRING IS NOT NULL) AS upper(s)");
 
-        // Result: upper(__assert_not_null(name, '...'))
+        // Result: upper(assert_not_null(name, '...'))
         FunctionCallExpression upper = Assert.IsType<FunctionCallExpression>(result);
         Assert.Equal("upper", upper.FunctionName);
         FunctionCallExpression guard = Assert.IsType<FunctionCallExpression>(upper.Arguments[0]);
-        Assert.Equal("__assert_not_null", guard.FunctionName);
+        Assert.Equal("assert_not_null", guard.FunctionName);
         Assert.Equal("name", Assert.IsType<ColumnReference>(guard.Arguments[0]).ColumnName);
     }
 
@@ -330,7 +330,7 @@ public class UdfInlinerTests : ServiceTestBase
         FunctionCallExpression concat = Assert.IsType<FunctionCallExpression>(result);
         // First arg: wrapped.
         FunctionCallExpression guard = Assert.IsType<FunctionCallExpression>(concat.Arguments[0]);
-        Assert.Equal("__assert_not_null", guard.FunctionName);
+        Assert.Equal("assert_not_null", guard.FunctionName);
         // Second arg: unwrapped column reference.
         Assert.IsType<ColumnReference>(concat.Arguments[1]);
     }
@@ -356,9 +356,9 @@ public class UdfInlinerTests : ServiceTestBase
             "parsed(s)",
             "CREATE FUNCTION parsed(s STRING) RETURNS INT32 IS NOT NULL AS try_cast(s, INT32)");
 
-        // Outer is __assert_not_null; its first arg is the CAST.
+        // Outer is assert_not_null; its first arg is the CAST.
         FunctionCallExpression guard = Assert.IsType<FunctionCallExpression>(result);
-        Assert.Equal("__assert_not_null", guard.FunctionName);
+        Assert.Equal("assert_not_null", guard.FunctionName);
         Assert.IsType<CastExpression>(guard.Arguments[0]);
     }
 
