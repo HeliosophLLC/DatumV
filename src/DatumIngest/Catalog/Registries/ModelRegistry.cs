@@ -72,6 +72,10 @@ namespace DatumIngest.Catalog.Registries;
 /// The original <c>CREATE MODEL</c> SQL text, captured verbatim for
 /// persistence and round-trip display.
 /// </param>
+/// <param name="ImplementsTaskName">
+/// Optional <c>IMPLEMENTS TaskName</c> task contract declaration. Surfaces
+/// on <c>system.models.task</c> for frontend dispatch routing.
+/// </param>
 public sealed record ModelDescriptor(
     string SchemaName,
     string Name,
@@ -82,7 +86,8 @@ public sealed record ModelDescriptor(
     IReadOnlyList<Statement> StatementBody,
     IReadOnlyDictionary<string, IInferenceSession> BoundSessions,
     bool ReturnIsNotNull = false,
-    string? SourceText = null)
+    string? SourceText = null,
+    string? ImplementsTaskName = null)
 {
     /// <summary>Canonical <c>(schema, name)</c> identity.</summary>
     public QualifiedName QualifiedName => new(SchemaName, Name);

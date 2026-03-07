@@ -1755,6 +1755,7 @@ public sealed record CreateFunctionStatement(
 /// <param name="Span">Source location for diagnostics.</param>
 /// <param name="ReturnIsNotNull">Adds a runtime null-assertion to <c>RETURN</c>ed values when true.</param>
 /// <param name="SchemaName">Optional schema qualifier; <see langword="null"/> walks search_path.</param>
+/// <param name="ImplementsTaskName">Optional <c>IMPLEMENTS TaskName</c> task contract declaration; the catalog enforces signature match against the named contract at registration time.</param>
 public sealed record CreateModelStatement(
     string Name,
     IReadOnlyList<UdfParameter> Parameters,
@@ -1765,7 +1766,8 @@ public sealed record CreateModelStatement(
     bool OrReplace = false,
     SourceSpan? Span = null,
     bool ReturnIsNotNull = false,
-    string? SchemaName = null) : Statement;
+    string? SchemaName = null,
+    string? ImplementsTaskName = null) : Statement;
 
 /// <summary>
 /// <c>DROP MODEL [IF EXISTS] name</c> — removes a previously registered

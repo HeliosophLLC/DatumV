@@ -32,6 +32,27 @@ public static class TypeAnnotationResolver
         => TryParse(annotation, types: null, out kind, out isArray, out _);
 
     /// <summary>
+    /// True when <paramref name="annotation"/> matches an entry in the
+    /// engine-defined named-type vocabulary (case-insensitive). Used by
+    /// the 2-arg <see cref="TryParse(string, out DataKind, out bool)"/>
+    /// fast path to recognize <c>RETURNS ScoredClass</c>-shaped
+    /// annotations without a per-query TypeRegistry — the vocabulary
+    /// itself is static.
+    /// </summary>
+    public static bool IsNamedType(string annotation)
+    {
+        if (string.IsNullOrEmpty(annotation)) return false;
+        foreach (NamedTypeRegistry.NamedTypeDefinition def in NamedTypeRegistry.Entries)
+        {
+            if (string.Equals(def.Name, annotation, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Registry-aware overload. Same contract as the 3-arg form plus:
     /// <list type="bullet">
     /// <item>When <paramref name="annotation"/> is a named-type identifier
@@ -75,22 +96,27 @@ public static class TypeAnnotationResolver
                 return true;
             }
 
-            // Named-type inside Array<...>. Resolve to the element struct's
-            // TypeId; the array's own TypeId would be a separate
-            // InternArrayType call, which the *caller* makes if it needs
-            // the array-shape TypeId (signature matching against
-            // RETURNS Array<ScoredClass> typically compares the element
-            // TypeId, not the array container's).
-            if (types is not null && types.IsNamedType(inner))
+            // Named-type inside Array<...>. Recognize the name from the
+            // static vocabulary; if a per-query registry was supplied,
+            // also resolve the element struct's TypeId. The array's own
+            // TypeId would be a separate InternArrayType call, which the
+            // *caller* makes if it needs the array-shape TypeId
+            // (signature matching against RETURNS Array<ScoredClass>
+            // typically compares the element TypeId, not the array
+            // container's).
+            if (IsNamedType(inner))
             {
-                int elementTypeId = types.GetTypeIdByName(inner);
-                if (elementTypeId != TypeRegistry.NoType)
+                kind = DataKind.Struct; // every named-type entry is Struct-kinded today
+                isArray = true;
+                if (types is not null)
                 {
-                    kind = DataKind.Struct; // every named-type entry is Struct-kinded today
-                    isArray = true;
-                    typeId = elementTypeId;
-                    return true;
+                    int elementTypeId = types.GetTypeIdByName(inner);
+                    if (elementTypeId != TypeRegistry.NoType)
+                    {
+                        typeId = elementTypeId;
+                    }
                 }
+                return true;
             }
 
             return false;
@@ -101,16 +127,21 @@ public static class TypeAnnotationResolver
             return true;
         }
 
-        // Bare named-type identifier — final fallback.
-        if (types is not null && types.IsNamedType(annotation))
+        // Bare named-type identifier — final fallback. Recognized purely
+        // from the static vocabulary; per-query TypeId resolution only
+        // happens when a registry was supplied.
+        if (IsNamedType(annotation))
         {
-            int namedTypeId = types.GetTypeIdByName(annotation);
-            if (namedTypeId != TypeRegistry.NoType)
+            kind = DataKind.Struct;
+            if (types is not null)
             {
-                kind = DataKind.Struct;
-                typeId = namedTypeId;
-                return true;
+                int namedTypeId = types.GetTypeIdByName(annotation);
+                if (namedTypeId != TypeRegistry.NoType)
+                {
+                    typeId = namedTypeId;
+                }
             }
+            return true;
         }
 
         return false;

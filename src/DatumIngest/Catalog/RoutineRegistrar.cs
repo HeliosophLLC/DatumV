@@ -702,6 +702,14 @@ internal sealed class RoutineRegistrar
                 "Wire an IInferenceDispatcher via TableCatalog.InferenceDispatcher before issuing CREATE MODEL.");
         }
 
+        // IMPLEMENTS validation happens before any inference-dispatcher work
+        // — fast fail if the signature doesn't match the declared contract,
+        // before paying load cost.
+        if (create.ImplementsTaskName is { } taskName)
+        {
+            ValidateImplementsContract(create, taskName);
+        }
+
         QualifiedName qn = new(ModelsSchema, create.Name);
 
         if (create.IfNotExists && _catalog.DeclaredModels.TryGet(qn, out _))
@@ -746,7 +754,8 @@ internal sealed class RoutineRegistrar
             StatementBody: create.StatementBody,
             BoundSessions: sessions,
             ReturnIsNotNull: create.ReturnIsNotNull,
-            SourceText: sourceText ?? $"CREATE MODEL {qn}");
+            SourceText: sourceText ?? $"CREATE MODEL {qn}",
+            ImplementsTaskName: create.ImplementsTaskName);
 
         ModelDescriptor? displaced = _catalog.DeclaredModels.Register(
             descriptor, replace: create.OrReplace);
@@ -848,6 +857,102 @@ internal sealed class RoutineRegistrar
     private string ResolveUsingPath(string usingPath, string modelName)
         => ModelCatalog.ResolveFilePath(
             usingPath, _catalog.Models, $"CREATE MODEL {modelName}");
+
+    /// <summary>
+    /// Validates that <paramref name="create"/>'s parameter list and return
+    /// type match the named task contract from
+    /// <see cref="TaskTypeRegistry"/>. Field-by-field comparison is
+    /// type-only (parameter names are documentation, not contract); named
+    /// types match by name through the type-annotation resolver.
+    /// </summary>
+    /// <remarks>
+    /// Throws <see cref="InvalidOperationException"/> with a clear message
+    /// printing both the contract's expected signature and the model's
+    /// declared signature when a mismatch fires. Errors surface at
+    /// <c>CREATE MODEL</c> time so users find out before any inference
+    /// dispatcher loads weights.
+    /// </remarks>
+    private static void ValidateImplementsContract(
+        CreateModelStatement create, string taskName)
+    {
+        TaskTypeRegistry.TaskContract? contract = TaskTypeRegistry.TryGet(taskName);
+        if (contract is null)
+        {
+            throw new InvalidOperationException(
+                $"CREATE MODEL {create.Name}: IMPLEMENTS '{taskName}' references an unknown task contract. "
+                + "See `SELECT name FROM datum_catalog.tasks` for the registered vocabulary.");
+        }
+
+        // Parameter arity.
+        if (create.Parameters.Count != contract.InputKinds.Count)
+        {
+            throw new InvalidOperationException(
+                $"CREATE MODEL {create.Name}: IMPLEMENTS {contract.Name} requires "
+                + $"{contract.InputKinds.Count} parameter(s) but the model declares {create.Parameters.Count}. "
+                + $"Expected signature: ({string.Join(", ", contract.InputKinds)}) → {contract.ReturnKind}.");
+        }
+
+        // Per-parameter type match. Names are documentation; only kinds matter.
+        for (int i = 0; i < create.Parameters.Count; i++)
+        {
+            UdfParameter param = create.Parameters[i];
+            if (param.TypeName is null
+                || !TypeAnnotationResolver.TryParse(param.TypeName, out DataKind kind, out bool isArray))
+            {
+                throw new InvalidOperationException(
+                    $"CREATE MODEL {create.Name}: IMPLEMENTS {contract.Name} parameter "
+                    + $"#{i + 1} ('{param.Name}') has unresolved type '{param.TypeName}'.");
+            }
+            string? namedTypeName = TypeAnnotationResolver.IsNamedType(StripArrayWrapperForName(param.TypeName))
+                ? StripArrayWrapperForName(param.TypeName)
+                : null;
+            if (!contract.InputKinds[i].Matches(kind, isArray, namedTypeName))
+            {
+                throw new InvalidOperationException(
+                    $"CREATE MODEL {create.Name}: IMPLEMENTS {contract.Name} parameter "
+                    + $"#{i + 1} expected {contract.InputKinds[i]}, got "
+                    + $"{(isArray ? $"Array<{namedTypeName ?? kind.ToString()}>" : namedTypeName ?? kind.ToString())}. "
+                    + $"Expected signature: ({string.Join(", ", contract.InputKinds)}) → {contract.ReturnKind}.");
+            }
+        }
+
+        // Return type match.
+        if (!TypeAnnotationResolver.TryParse(create.ReturnTypeName, out DataKind returnKind, out bool returnIsArray))
+        {
+            throw new InvalidOperationException(
+                $"CREATE MODEL {create.Name}: IMPLEMENTS {contract.Name} return type "
+                + $"'{create.ReturnTypeName}' is not a recognized type annotation.");
+        }
+        string? returnNamedTypeName = TypeAnnotationResolver.IsNamedType(StripArrayWrapperForName(create.ReturnTypeName))
+            ? StripArrayWrapperForName(create.ReturnTypeName)
+            : null;
+        if (!contract.ReturnKind.Matches(returnKind, returnIsArray, returnNamedTypeName))
+        {
+            throw new InvalidOperationException(
+                $"CREATE MODEL {create.Name}: IMPLEMENTS {contract.Name} return expected "
+                + $"{contract.ReturnKind}, got "
+                + $"{(returnIsArray ? $"Array<{returnNamedTypeName ?? returnKind.ToString()}>" : returnNamedTypeName ?? returnKind.ToString())}. "
+                + $"Expected signature: ({string.Join(", ", contract.InputKinds)}) → {contract.ReturnKind}.");
+        }
+    }
+
+    /// <summary>
+    /// Returns the inner identifier when <paramref name="annotation"/> is
+    /// wrapped in <c>Array&lt;...&gt;</c>, otherwise <paramref name="annotation"/>
+    /// unchanged. Used by contract validation to check whether an
+    /// annotation's element is a named type independent of array-ness.
+    /// </summary>
+    private static string StripArrayWrapperForName(string annotation)
+    {
+        const string Prefix = "Array<";
+        if (annotation.Length > Prefix.Length + 1
+            && annotation.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)
+            && annotation[^1] == '>')
+        {
+            return annotation[Prefix.Length..^1].Trim();
+        }
+        return annotation;
+    }
 
     /// <summary>
     /// Best-effort disposal of every bound session in a descriptor.

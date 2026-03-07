@@ -3662,6 +3662,18 @@ public static class SqlParser
             from nullKw in Token.EqualTo(SqlToken.Null)
             select true
         ).OptionalOrDefault()
+        // IMPLEMENTS is a contextual identifier (same pattern as USING),
+        // followed by a bare identifier naming the task contract this
+        // model satisfies (e.g. ImageClassifier, TextEmbedder). Optional;
+        // when absent the model registers with task = NULL and skips the
+        // contract enforcement. Listed before USING so the surface reads
+        // "interface metadata, then storage."
+        from implementsTask in (
+            from implementsKw in Token.EqualTo(SqlToken.Identifier)
+                .Where(t => GetTokenText(t).Equals("IMPLEMENTS", StringComparison.OrdinalIgnoreCase), "IMPLEMENTS")
+            from taskName in Token.EqualTo(SqlToken.Identifier)
+            select (string?)GetTokenText(taskName)
+        ).OptionalOrDefault()
         // USING is a contextual identifier (matches existing
         // CREATE INDEX USING pattern), followed by a single-quoted
         // string literal naming the path.
@@ -3684,7 +3696,8 @@ public static class SqlParser
             ifNotExists,
             orReplace,
             returnIsNotNull,
-            qualifiedName.SchemaName);
+            qualifiedName.SchemaName,
+            implementsTask);
 
     /// <summary>
     /// Constructs a <see cref="CreateModelStatement"/>, applying the same
@@ -3703,7 +3716,8 @@ public static class SqlParser
         bool ifNotExists,
         bool orReplace,
         bool returnIsNotNull,
-        string? schemaName)
+        string? schemaName,
+        string? implementsTaskName)
     {
         if (string.IsNullOrWhiteSpace(usingPath))
         {
@@ -3723,7 +3737,8 @@ public static class SqlParser
             OrReplace: orReplace,
             Span: null,
             ReturnIsNotNull: returnIsNotNull,
-            SchemaName: schemaName);
+            SchemaName: schemaName,
+            ImplementsTaskName: implementsTaskName);
     }
 
     /// <summary>
