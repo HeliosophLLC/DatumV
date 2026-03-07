@@ -41,6 +41,15 @@ public enum FunctionCategory
     Utility,
 
     /// <summary>
+    /// Runtime assertions (<c>assert_*</c>): return the checked value verbatim
+    /// on success, throw <see cref="System.InvalidOperationException"/> with a
+    /// caller-supplied or auto-generated message on violation. Null inputs
+    /// pass through unchecked — pair with <c>assert_not_null</c> when null is
+    /// itself a violation.
+    /// </summary>
+    Assertion,
+
+    /// <summary>
     /// Array-based operations.
     /// </summary>
     Array,

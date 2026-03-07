@@ -542,7 +542,29 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.TryCastFunction>();
         registry.RegisterScalar<Scalar.CanCastFunction>();
         registry.RegisterScalar<Scalar.TypeofFunction>();
-        registry.RegisterScalar<Scalar.AssertNotNullFunction>();
+        // Assertion family — assert_not_null is the inliner-injected guard;
+        // the rest are user-facing runtime checks that return the checked
+        // value on success and throw on violation.
+        registry.RegisterScalar<Scalar.Assertion.AssertNotNullFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertEqualFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertNotEqualFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertGreaterThanFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertGreaterOrEqualFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertLessThanFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertLessOrEqualFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertBetweenFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertTrueFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertFalseFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertFiniteFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertPositiveFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertNonNegativeFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertMatchesFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertStartsWithFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertEndsWithFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertNonEmptyFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertLengthFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertInFunction>();
+        registry.RegisterScalar<Scalar.Assertion.AssertNotInFunction>();
         registry.RegisterScalar<Scalar.CoalesceFunction>();
         // Phase 3b: infer() bridges a CREATE MODEL body to its bound
         // IInferenceSession. Lives in `system` so model bodies can call

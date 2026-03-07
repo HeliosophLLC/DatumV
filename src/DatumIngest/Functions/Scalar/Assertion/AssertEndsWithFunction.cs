@@ -5,25 +5,22 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar.Assertion;
 
 /// <summary>
-/// Returns the first argument verbatim when it is non-null; throws an
-/// <see cref="InvalidOperationException"/> when it is null. The optional
-/// second argument supplies the failure message; when omitted, a default
-/// message is used. <see cref="UdfInliner"/> always supplies an explicit
-/// message naming the parameter or return slot it's guarding.
+/// Returns the string input verbatim when it ends with the supplied suffix
+/// (ordinal comparison); throws otherwise. Null in either operand passes
+/// through unchecked.
 /// </summary>
-public sealed class AssertNotNullFunction : IFunction, IScalarFunction
+public sealed class AssertEndsWithFunction : IFunction, IScalarFunction
 {
     /// <inheritdoc />
-    public static string Name => "assert_not_null";
+    public static string Name => "assert_ends_with";
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Assertion;
 
     /// <inheritdoc />
     public static string Description =>
-        "Returns the input value when non-null; throws when null. " +
-        "Used by the UDF inliner to enforce IS NOT NULL annotations on " +
-        "parameters and return values.";
+        "Returns the string input when it ends with the supplied suffix; throws otherwise. " +
+        "Null inputs pass through unchecked.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -31,7 +28,8 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("value", DataKindMatcher.Any),
+                new ParameterSpec("value", DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("suffix", DataKindMatcher.Exact(DataKind.String)),
                 new ParameterSpec("message", DataKindMatcher.Exact(DataKind.String), IsOptional: true),
             ],
             VariadicTrailing: null,
@@ -40,7 +38,7 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
-        FunctionMetadata.Validate<AssertNotNullFunction>(argumentKinds);
+        FunctionMetadata.Validate<AssertEndsWithFunction>(argumentKinds);
 
     /// <inheritdoc />
     public ValueTask<ValueRef> ExecuteAsync(
@@ -50,10 +48,19 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
         ValueRef value = args[0];
-        if (!value.IsNull) return new ValueTask<ValueRef>(value);
+        ValueRef suffix = args[1];
+        if (value.IsNull || suffix.IsNull) return new ValueTask<ValueRef>(value);
 
-        string message = AssertHelpers.UserMessage(args, 1) ?? "value is null";
-        throw new InvalidOperationException(message);
+        string suffixText = suffix.AsString();
+        if (value.AsString().EndsWith(suffixText, StringComparison.Ordinal))
+        {
+            return new ValueTask<ValueRef>(value);
+        }
+
+        AssertHelpers.Throw(
+            AssertHelpers.UserMessage(args, 2),
+            $"value {AssertHelpers.Display(value)} did not end with '{suffixText}'");
+        return default;
     }
 
     /// <inheritdoc />

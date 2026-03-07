@@ -5,25 +5,22 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar.Assertion;
 
 /// <summary>
-/// Returns the first argument verbatim when it is non-null; throws an
-/// <see cref="InvalidOperationException"/> when it is null. The optional
-/// second argument supplies the failure message; when omitted, a default
-/// message is used. <see cref="UdfInliner"/> always supplies an explicit
-/// message naming the parameter or return slot it's guarding.
+/// Returns the numeric input verbatim when it is strictly greater than zero;
+/// throws otherwise. Null input passes through unchecked. For unsigned
+/// kinds, only zero fails.
 /// </summary>
-public sealed class AssertNotNullFunction : IFunction, IScalarFunction
+public sealed class AssertPositiveFunction : IFunction, IScalarFunction
 {
     /// <inheritdoc />
-    public static string Name => "assert_not_null";
+    public static string Name => "assert_positive";
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Assertion;
 
     /// <inheritdoc />
     public static string Description =>
-        "Returns the input value when non-null; throws when null. " +
-        "Used by the UDF inliner to enforce IS NOT NULL annotations on " +
-        "parameters and return values.";
+        "Returns the numeric input when it is strictly greater than zero; throws otherwise. " +
+        "Null inputs pass through unchecked.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -31,7 +28,7 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("value", DataKindMatcher.Any),
+                new ParameterSpec("value", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
                 new ParameterSpec("message", DataKindMatcher.Exact(DataKind.String), IsOptional: true),
             ],
             VariadicTrailing: null,
@@ -40,7 +37,7 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
-        FunctionMetadata.Validate<AssertNotNullFunction>(argumentKinds);
+        FunctionMetadata.Validate<AssertPositiveFunction>(argumentKinds);
 
     /// <inheritdoc />
     public ValueTask<ValueRef> ExecuteAsync(
@@ -50,10 +47,14 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
         ValueRef value = args[0];
-        if (!value.IsNull) return new ValueTask<ValueRef>(value);
+        if (value.IsNull) return new ValueTask<ValueRef>(value);
 
-        string message = AssertHelpers.UserMessage(args, 1) ?? "value is null";
-        throw new InvalidOperationException(message);
+        if (NumericSign.IsPositive(value)) return new ValueTask<ValueRef>(value);
+
+        AssertHelpers.Throw(
+            AssertHelpers.UserMessage(args, 1),
+            $"value {AssertHelpers.Display(value)} was not positive");
+        return default;
     }
 
     /// <inheritdoc />

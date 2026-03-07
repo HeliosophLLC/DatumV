@@ -5,25 +5,22 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar.Assertion;
 
 /// <summary>
-/// Returns the first argument verbatim when it is non-null; throws an
-/// <see cref="InvalidOperationException"/> when it is null. The optional
-/// second argument supplies the failure message; when omitted, a default
-/// message is used. <see cref="UdfInliner"/> always supplies an explicit
-/// message naming the parameter or return slot it's guarding.
+/// Returns the first argument verbatim when it lies within
+/// <c>[low, high]</c> inclusive; throws otherwise. Null in any operand
+/// passes through unchecked.
 /// </summary>
-public sealed class AssertNotNullFunction : IFunction, IScalarFunction
+public sealed class AssertBetweenFunction : IFunction, IScalarFunction
 {
     /// <inheritdoc />
-    public static string Name => "assert_not_null";
+    public static string Name => "assert_between";
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Assertion;
 
     /// <inheritdoc />
     public static string Description =>
-        "Returns the input value when non-null; throws when null. " +
-        "Used by the UDF inliner to enforce IS NOT NULL annotations on " +
-        "parameters and return values.";
+        "Returns the input value when it lies within [low, high] inclusive; throws otherwise. " +
+        "Null inputs pass through unchecked.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -32,6 +29,8 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
             Parameters:
             [
                 new ParameterSpec("value", DataKindMatcher.Any),
+                new ParameterSpec("low", DataKindMatcher.Any),
+                new ParameterSpec("high", DataKindMatcher.Any),
                 new ParameterSpec("message", DataKindMatcher.Exact(DataKind.String), IsOptional: true),
             ],
             VariadicTrailing: null,
@@ -40,7 +39,7 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
-        FunctionMetadata.Validate<AssertNotNullFunction>(argumentKinds);
+        FunctionMetadata.Validate<AssertBetweenFunction>(argumentKinds);
 
     /// <inheritdoc />
     public ValueTask<ValueRef> ExecuteAsync(
@@ -50,10 +49,20 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
         ValueRef value = args[0];
-        if (!value.IsNull) return new ValueTask<ValueRef>(value);
+        ValueRef low = args[1];
+        ValueRef high = args[2];
+        if (value.IsNull || low.IsNull || high.IsNull) return new ValueTask<ValueRef>(value);
 
-        string message = AssertHelpers.UserMessage(args, 1) ?? "value is null";
-        throw new InvalidOperationException(message);
+        if (ExpressionEvaluator.CompareValueRefs(value, low) >= 0
+            && ExpressionEvaluator.CompareValueRefs(value, high) <= 0)
+        {
+            return new ValueTask<ValueRef>(value);
+        }
+        AssertHelpers.Throw(
+            AssertHelpers.UserMessage(args, 3),
+            $"value {AssertHelpers.Display(value)} was not between "
+            + $"{AssertHelpers.Display(low)} and {AssertHelpers.Display(high)}");
+        return default;
     }
 
     /// <inheritdoc />

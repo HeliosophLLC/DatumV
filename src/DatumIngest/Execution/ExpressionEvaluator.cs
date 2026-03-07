@@ -1884,7 +1884,13 @@ public sealed class ExpressionEvaluator
     /// non-null is the contract — the binary handler short-circuits NULL
     /// before calling.
     /// </summary>
-    private static int CompareValueRefs(ValueRef left, ValueRef right)
+    /// <remarks>
+    /// Exposed as <c>internal</c> so the <c>assert_*</c> scalar function
+    /// family (<see cref="Functions.Scalar.Assertion"/>) can route through
+    /// the same cross-kind comparison rules used by SQL <c>&lt;</c> / <c>&gt;</c>
+    /// / <c>=</c> operators.
+    /// </remarks>
+    internal static int CompareValueRefs(ValueRef left, ValueRef right)
     {
         // Numeric coercion handles every cross-numeric pairing in one path.
         if (TryGetValueRefAsDouble(left, out double l) && TryGetValueRefAsDouble(right, out double r))

@@ -5,25 +5,22 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar.Assertion;
 
 /// <summary>
-/// Returns the first argument verbatim when it is non-null; throws an
-/// <see cref="InvalidOperationException"/> when it is null. The optional
-/// second argument supplies the failure message; when omitted, a default
-/// message is used. <see cref="UdfInliner"/> always supplies an explicit
-/// message naming the parameter or return slot it's guarding.
+/// Returns the first argument verbatim when it is greater than or equal to
+/// the threshold; throws otherwise. Null in either operand passes through
+/// unchecked.
 /// </summary>
-public sealed class AssertNotNullFunction : IFunction, IScalarFunction
+public sealed class AssertGreaterOrEqualFunction : IFunction, IScalarFunction
 {
     /// <inheritdoc />
-    public static string Name => "assert_not_null";
+    public static string Name => "assert_greater_or_equal";
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Assertion;
 
     /// <inheritdoc />
     public static string Description =>
-        "Returns the input value when non-null; throws when null. " +
-        "Used by the UDF inliner to enforce IS NOT NULL annotations on " +
-        "parameters and return values.";
+        "Returns the input value when it is greater than or equal to the threshold; throws otherwise. " +
+        "Null inputs pass through unchecked.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -32,6 +29,7 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
             Parameters:
             [
                 new ParameterSpec("value", DataKindMatcher.Any),
+                new ParameterSpec("threshold", DataKindMatcher.Any),
                 new ParameterSpec("message", DataKindMatcher.Exact(DataKind.String), IsOptional: true),
             ],
             VariadicTrailing: null,
@@ -40,7 +38,7 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
-        FunctionMetadata.Validate<AssertNotNullFunction>(argumentKinds);
+        FunctionMetadata.Validate<AssertGreaterOrEqualFunction>(argumentKinds);
 
     /// <inheritdoc />
     public ValueTask<ValueRef> ExecuteAsync(
@@ -50,10 +48,17 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
         ValueRef value = args[0];
-        if (!value.IsNull) return new ValueTask<ValueRef>(value);
+        ValueRef threshold = args[1];
+        if (value.IsNull || threshold.IsNull) return new ValueTask<ValueRef>(value);
 
-        string message = AssertHelpers.UserMessage(args, 1) ?? "value is null";
-        throw new InvalidOperationException(message);
+        if (ExpressionEvaluator.CompareValueRefs(value, threshold) >= 0)
+        {
+            return new ValueTask<ValueRef>(value);
+        }
+        AssertHelpers.Throw(
+            AssertHelpers.UserMessage(args, 2),
+            $"value {AssertHelpers.Display(value)} was not greater than or equal to {AssertHelpers.Display(threshold)}");
+        return default;
     }
 
     /// <inheritdoc />
