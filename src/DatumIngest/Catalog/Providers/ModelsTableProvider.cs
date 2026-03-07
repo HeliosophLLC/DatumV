@@ -241,6 +241,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         cells[11] = WriteOptionalString(entry.SourceUrl, arena);
         cells[12] = DataValue.FromString(status, arena);
         cells[13] = DataValue.FromString(ModelKind.Builtin, arena);
+        cells[14] = WriteOptionalString(entry.ImplementsTaskName, arena);
     }
 
     /// <summary>
@@ -275,6 +276,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         cells[11] = DataValue.Null(DataKind.String);          // source_url
         cells[12] = DataValue.FromString("available", arena); // session is loaded; see method remarks
         cells[13] = DataValue.FromString(ModelKind.Declared, arena);
+        cells[14] = WriteOptionalString(descriptor.ImplementsTaskName, arena);
     }
 
     /// <summary>
@@ -331,5 +333,6 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         new ColumnInfo("source_url",      DataKind.String, nullable: true),
         new ColumnInfo("status",          DataKind.String, nullable: false),
         new ColumnInfo("kind",            DataKind.String, nullable: false),
+        new ColumnInfo("task",            DataKind.String, nullable: true),
     ]);
 }

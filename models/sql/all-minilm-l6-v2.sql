@@ -24,6 +24,7 @@
 -- ============================================================================
 
 CREATE OR REPLACE MODEL all_minilm_l6_v2(text String) RETURNS Float32[]
+IMPLEMENTS TextEmbedder
 USING 'all-minilm-l6-v2/model.onnx'
 AS BEGIN
   -- Tokenize. The function returns the canonical BERT input bundle with

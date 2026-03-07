@@ -248,10 +248,20 @@ public sealed class PpOcrDetSqlE2ETests : ServiceTestBase
                 Assert.Equal(DataKind.Struct, structDesc!.Kind);
                 Assert.NotNull(structDesc.Fields);
 
+                // Post-named-types retrofit: the element struct is
+                // `RegionScore = Struct<bbox: BoundingBox, score: Float32>`,
+                // not the old flat `Struct<label, score, x, y, w, h>`.
                 string[] fieldNames = structDesc.Fields!.Select(f => f.Name).ToArray();
-                Assert.Equal(
-                    new[] { "label", "score", "x", "y", "w", "h" },
-                    fieldNames);
+                Assert.Equal(new[] { "bbox", "score" }, fieldNames);
+
+                // bbox field nests a BoundingBox struct; walk into it.
+                int bboxFieldTypeId = structDesc.Fields[0].TypeId;
+                TypeDescriptor? bboxDesc = batch.Types.GetDescriptor(bboxFieldTypeId);
+                Assert.NotNull(bboxDesc);
+                Assert.Equal(DataKind.Struct, bboxDesc!.Kind);
+                Assert.NotNull(bboxDesc.Fields);
+                string[] bboxFieldNames = bboxDesc.Fields!.Select(f => f.Name).ToArray();
+                Assert.Equal(new[] { "x", "y", "w", "h" }, bboxFieldNames);
             }
         }
         Assert.True(sawRow, "expected at least one output row");

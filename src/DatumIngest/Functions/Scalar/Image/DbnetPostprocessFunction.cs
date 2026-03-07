@@ -70,26 +70,14 @@ public sealed class DbnetPostprocessFunction : IFunction, IScalarFunction
 
     /// <summary>
     /// Output struct schema. Surfaced as the function's
-    /// <see cref="OutputFields"/> so downstream consumers (the per-query
-    /// <see cref="TypeRegistry"/>, the lowered Project's typeId resolution)
-    /// see the field names without inspecting individual values.
+    /// <see cref="NamedTypeRegistry"/>'s pre-interned <c>RegionScore</c>
+    /// shape — the canonical named type for "bounding box + confidence,
+    /// no class label." PP-OCR-det detects text *regions* without
+    /// recognizing the text; the <c>IMPLEMENTS TextDetector</c> clause
+    /// at the SQL surface tells the dispatch layer what those regions
+    /// are for.
     /// </summary>
-    public static IReadOnlyList<ColumnInfo> OutputFields { get; } =
-    [
-        new ColumnInfo("label", DataKind.String, nullable: false),
-        new ColumnInfo("score", DataKind.Float32, nullable: false),
-        new ColumnInfo("x",     DataKind.Float32, nullable: false),
-        new ColumnInfo("y",     DataKind.Float32, nullable: false),
-        new ColumnInfo("w",     DataKind.Float32, nullable: false),
-        new ColumnInfo("h",     DataKind.Float32, nullable: false),
-    ];
-
-    /// <summary>
-    /// Constant label cached once. Every detection carries it so downstream
-    /// SQL that joins/groups by class name works the same way it would for
-    /// a multi-class detector's output (where label varies per row).
-    /// </summary>
-    private static readonly ValueRef TextLabel = ValueRef.FromString("text");
+    public const string ResultNamedType = "RegionScore";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -307,40 +295,56 @@ public sealed class DbnetPostprocessFunction : IFunction, IScalarFunction
 
     /// <summary>
     /// Wraps the regions list as an <c>Array&lt;Struct&gt;</c> ValueRef.
-    /// Interns the struct schema in the per-query <see cref="TypeRegistry"/>
-    /// so the output's field names survive through the materialisation
-    /// boundary (downstream <c>det['label']</c> / <c>det['score']</c>
-    /// accesses resolve via the registry).
+    /// Builds the result <c>Array&lt;RegionScore&gt;</c> with nested bbox.
+    /// Resolves both the <c>RegionScore</c> (outer) and <c>BoundingBox</c>
+    /// (inner) TypeIds via <see cref="NamedTypeRegistry"/>'s pre-interned
+    /// vocabulary so downstream field-name access works and the contract
+    /// match against <c>IMPLEMENTS TextDetector</c> succeeds.
     /// </summary>
     private static ValueRef BuildDetectionArray(List<TextRegion> regions, TypeRegistry? types)
     {
+        ushort regionScoreTypeId = 0;
+        ushort boundingBoxTypeId = 0;
+        if (types is not null)
+        {
+            regionScoreTypeId = (ushort)types.GetTypeIdByName(ResultNamedType);
+            boundingBoxTypeId = (ushort)types.GetTypeIdByName("BoundingBox");
+        }
+
         if (regions.Count == 0)
         {
             return ValueRef.FromArray(DataKind.Struct, Array.Empty<ValueRef>());
-        }
-
-        ushort structTypeId = 0;
-        if (types is not null)
-        {
-            structTypeId = (ushort)types.InternStructFromColumnInfoFields(OutputFields);
         }
 
         ValueRef[] elements = new ValueRef[regions.Count];
         for (int i = 0; i < regions.Count; i++)
         {
             TextRegion r = regions[i];
-            ValueRef[] fields =
+
+            // Inner BoundingBox struct: x, y, w, h. Stamped with the
+            // BoundingBox typeId so nested-bbox consumers
+            // (e.g. ImageDrawBoundingBoxesFunction) resolve the field
+            // names through the registry.
+            ValueRef[] bboxFields =
             [
-                TextLabel,
-                ValueRef.FromFloat32(r.Score),
                 ValueRef.FromFloat32(r.X),
                 ValueRef.FromFloat32(r.Y),
                 ValueRef.FromFloat32(r.W),
                 ValueRef.FromFloat32(r.H),
             ];
-            elements[i] = structTypeId == 0
-                ? ValueRef.FromStruct(fields)
-                : ValueRef.FromStruct(fields, structTypeId);
+            ValueRef bbox = boundingBoxTypeId == 0
+                ? ValueRef.FromStruct(bboxFields)
+                : ValueRef.FromStruct(bboxFields, boundingBoxTypeId);
+
+            // Outer RegionScore struct: bbox + score.
+            ValueRef[] outerFields =
+            [
+                bbox,
+                ValueRef.FromFloat32(r.Score),
+            ];
+            elements[i] = regionScoreTypeId == 0
+                ? ValueRef.FromStruct(outerFields)
+                : ValueRef.FromStruct(outerFields, regionScoreTypeId);
         }
         return ValueRef.FromArray(DataKind.Struct, elements);
     }

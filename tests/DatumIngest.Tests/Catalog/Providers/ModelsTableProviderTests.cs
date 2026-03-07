@@ -47,7 +47,7 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
 
         Schema schema = provider.GetSchema();
 
-        Assert.Equal(14, schema.Columns.Count);
+        Assert.Equal(15, schema.Columns.Count);
 
         Assert.Equal("name", schema.Columns[0].Name);
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
@@ -77,6 +77,12 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
         Assert.Equal("kind", schema.Columns[13].Name);
         Assert.Equal(DataKind.String, schema.Columns[13].Kind);
         Assert.False(schema.Columns[13].Nullable);
+
+        // `task` (IMPLEMENTS contract name; nullable — populated for entries
+        // that declare an IMPLEMENTS clause, null otherwise).
+        Assert.Equal("task", schema.Columns[14].Name);
+        Assert.Equal(DataKind.String, schema.Columns[14].Kind);
+        Assert.True(schema.Columns[14].Nullable);
     }
 
     /// <summary>

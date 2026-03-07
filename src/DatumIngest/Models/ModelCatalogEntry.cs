@@ -118,6 +118,14 @@ namespace DatumIngest.Models;
 /// Distinct from <see cref="RelativePath"/>, which is the single
 /// "anchor" file the catalog uses for status checks.
 /// </param>
+/// <param name="ImplementsTaskName">
+/// Optional task contract this built-in satisfies (e.g.
+/// <c>"ImageClassifier"</c>, <c>"TextEmbedder"</c>). Mirrors the
+/// <c>IMPLEMENTS</c> clause on SQL-defined models. Surfaces on
+/// <c>system.models.task</c> alongside declared models so the frontend
+/// dispatch layer (Phase 2) can route uniformly across <c>kind = 'builtin'</c>
+/// and <c>kind = 'declared'</c> entries.
+/// </param>
 public sealed record ModelCatalogEntry(
     string Name,
     string Backend,
@@ -135,7 +143,8 @@ public sealed record ModelCatalogEntry(
     string? SourceUrl = null,
     string? Category = null,
     IReadOnlyList<string>? Modalities = null,
-    IReadOnlyList<string>? Files = null);
+    IReadOnlyList<string>? Files = null,
+    string? ImplementsTaskName = null);
 
 /// <summary>
 /// Context handed to a <see cref="ModelCatalogEntry.Loader"/> when first instantiating

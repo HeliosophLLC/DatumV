@@ -311,6 +311,120 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Contains("'models' schema", ex.Message);
     }
 
+    // ───────────────────── IMPLEMENTS contract enforcement ─────────────────────
+
+    [Fact]
+    public void CreateModel_Implements_MatchingSignature_RegistersWithTaskName()
+    {
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL talk(prompt String) RETURNS String "
+            + $"IMPLEMENTS TextGenerator "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN prompt END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "talk"), out ModelDescriptor? descriptor));
+        Assert.Equal("TextGenerator", descriptor!.ImplementsTaskName);
+    }
+
+    [Fact]
+    public void CreateModel_Implements_OmittedClause_HasNullTaskName()
+    {
+        // IMPLEMENTS is optional — without it, the descriptor's task name
+        // is null and signature enforcement is skipped.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL opaque(x INT32) RETURNS Float32[] "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN [CAST(1.0 AS Float32)] END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "opaque"), out ModelDescriptor? descriptor));
+        Assert.Null(descriptor!.ImplementsTaskName);
+    }
+
+    [Fact]
+    public void CreateModel_Implements_MismatchedReturn_ThrowsWithBothShapes()
+    {
+        // TextGenerator requires (String) → String; this declares
+        // (String) → Int32. Error message should print both shapes.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan(
+                $"CREATE MODEL bad_return(prompt String) RETURNS Int32 "
+                + $"IMPLEMENTS TextGenerator "
+                + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN 42 END"));
+        Assert.Contains("TextGenerator", ex.Message);
+        Assert.Contains("String", ex.Message); // contract's expected return
+        Assert.Contains("Int32", ex.Message);  // model's actual return
+    }
+
+    [Fact]
+    public void CreateModel_Implements_MismatchedParamArity_Throws()
+    {
+        // TextGenerator requires one parameter (String); this declares two.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan(
+                $"CREATE MODEL bad_arity(p String, n Int32) RETURNS String "
+                + $"IMPLEMENTS TextGenerator "
+                + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN p END"));
+        Assert.Contains("TextGenerator", ex.Message);
+        Assert.Contains("parameter", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CreateModel_Implements_MismatchedParamKind_Throws()
+    {
+        // TextGenerator requires String; this declares Int32 input.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan(
+                $"CREATE MODEL bad_input(n Int32) RETURNS String "
+                + $"IMPLEMENTS TextGenerator "
+                + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN CAST(n AS String) END"));
+        Assert.Contains("TextGenerator", ex.Message);
+        Assert.Contains("String", ex.Message);
+    }
+
+    [Fact]
+    public void CreateModel_Implements_UnknownTask_ThrowsWithVocabPointer()
+    {
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan(
+                $"CREATE MODEL bogus(x Int32) RETURNS Int32 "
+                + $"IMPLEMENTS NonExistentTask "
+                + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x END"));
+        Assert.Contains("NonExistentTask", ex.Message);
+        Assert.Contains("datum_catalog.tasks", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CreateModel_Implements_NamedTypeReturn_Matches()
+    {
+        // TextClassifier requires (String) → ScoredClass. The named-type
+        // resolution flows through TypeAnnotationResolver's static lookup
+        // — `RETURNS ScoredClass` resolves to (DataKind.Struct, IsArray=false,
+        // namedTypeName="ScoredClass"), which matches the contract.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL classify_text(t String) RETURNS ScoredClass "
+            + $"IMPLEMENTS TextClassifier "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN {{class: 1, score: CAST(0.5 AS Float32)}} END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "classify_text"), out ModelDescriptor? descriptor));
+        Assert.Equal("TextClassifier", descriptor!.ImplementsTaskName);
+        Assert.Equal("ScoredClass", descriptor.ReturnTypeName);
+    }
+
     // ───────────────────── infer() runtime bridge (Phase 3b) ─────────────────────
 
     [Fact]

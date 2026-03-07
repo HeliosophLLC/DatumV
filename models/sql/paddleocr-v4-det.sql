@@ -29,7 +29,8 @@
 --   unclip_ratio         = 1.5
 -- ============================================================================
 
-CREATE OR REPLACE MODEL paddleocr_v4_det(img Image) RETURNS Array<Struct>
+CREATE OR REPLACE MODEL paddleocr_v4_det(img Image) RETURNS Array<RegionScore>
+IMPLEMENTS TextDetector
 USING 'paddleocr-v4-det/ch_PP-OCRv4_det.onnx'
 AS BEGIN
   DECLARE resized Image    = image_resize_to_stride(img, 960, 32);
