@@ -325,6 +325,7 @@ public static class BuiltinModels
             // tail matters: `models.llama31_8b(p, NULL, NULL, true)`.
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Llama 3.1 8B Instruct",
+            ImplementsTaskName: "TextGenerator",
             Parameters: "8B",
             // Llama 3.1 ships under Meta's custom community license — broadly
             // permissive but with anti-misuse clauses and a >700M-MAU
@@ -387,6 +388,7 @@ public static class BuiltinModels
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Phi-3-mini-4k Instruct",
+            ImplementsTaskName: "TextGenerator",
             Parameters: "3.8B",
             License: "MIT",
             LicenseHolder: "Microsoft",
@@ -451,6 +453,7 @@ public static class BuiltinModels
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Phi-3.5-mini Instruct (128K)",
+            ImplementsTaskName: "TextGenerator",
             Parameters: "3.8B",
             License: "MIT",
             LicenseHolder: "Microsoft",
@@ -492,6 +495,7 @@ public static class BuiltinModels
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "TinyLlama 1.1B Chat v1.0",
+            ImplementsTaskName: "TextGenerator",
             Parameters: "1.1B",
             License: "Apache-2.0",
             LicenseHolder: "TinyLlama community",
@@ -535,6 +539,7 @@ public static class BuiltinModels
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Gemma 2 2B Instruct",
+            ImplementsTaskName: "TextGenerator",
             Parameters: "2B",
             License: "Gemma Terms",
             LicenseHolder: "Google",
@@ -697,6 +702,7 @@ public static class BuiltinModels
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "IBM Granite 3.1 1B A400M Instruct",
+            ImplementsTaskName: "TextGenerator",
             Parameters: "1B (400M active)",
             License: "Apache-2.0",
             LicenseHolder: "IBM",
@@ -739,6 +745,7 @@ public static class BuiltinModels
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Falcon3 1B Instruct",
+            ImplementsTaskName: "TextGenerator",
             Parameters: "1B",
             License: "Falcon LLM License 2.0",
             LicenseHolder: "TII",
@@ -786,6 +793,7 @@ public static class BuiltinModels
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Mistral 7B Instruct v0.3",
+            ImplementsTaskName: "TextGenerator",
             Parameters: "7B",
             License: "Apache-2.0",
             LicenseHolder: "Mistral AI",
@@ -846,6 +854,7 @@ public static class BuiltinModels
                 return new ViTGpt2CaptionModel(modelName, encoderPath, maxTokens);
             },
             DisplayName: "ViT-GPT2 Image Captioner",
+            ImplementsTaskName: "ImageCaptioner",
             Parameters: "239M",
             License: "Apache-2.0",
             LicenseHolder: "nlpconnect",
@@ -922,6 +931,7 @@ public static class BuiltinModels
                 return new TrOcrModel(modelName, encoderPath, maxTokens: maxTokens);
             },
             DisplayName: "TrOCR Printed (fp32)",
+            ImplementsTaskName: "TextRecognizer",
             Parameters: "334M",
             License: "MIT",
             LicenseHolder: "Microsoft",
@@ -974,6 +984,7 @@ public static class BuiltinModels
                     maxTokens: maxTokens);
             },
             DisplayName: "TrOCR Printed (fp16)",
+            ImplementsTaskName: "TextRecognizer",
             Parameters: "334M",
             License: "MIT",
             LicenseHolder: "Microsoft",
@@ -1051,6 +1062,7 @@ public static class BuiltinModels
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Stable Diffusion Turbo",
+            ImplementsTaskName: "TextToImage",
             Parameters: "865M",
             License: "Stability AI Community",
             LicenseHolder: "Stability AI",
@@ -1132,6 +1144,7 @@ public static class BuiltinModels
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Realistic Vision V6 + Hyper-SD",
+            ImplementsTaskName: "TextToImage",
             Parameters: "865M (UNet) + 123M (text encoder)",
             License: "CreativeML OpenRAIL-M",
             LicenseHolder: "SG161222 / ByteDance",
@@ -1212,6 +1225,7 @@ public static class BuiltinModels
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "DreamShaper 8 + Hyper-SD",
+            ImplementsTaskName: "TextToImage",
             Parameters: "865M (UNet) + 123M (text encoder)",
             License: "CreativeML OpenRAIL-M",
             LicenseHolder: "Lykon / ByteDance",
@@ -1293,6 +1307,7 @@ public static class BuiltinModels
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "epiCRealism + Hyper-SD",
+            ImplementsTaskName: "TextToImage",
             Parameters: "865M (UNet) + 123M (text encoder)",
             License: "CreativeML OpenRAIL-M",
             LicenseHolder: "emilianJR / ByteDance",
@@ -1373,6 +1388,7 @@ public static class BuiltinModels
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Openjourney v4 + Hyper-SD",
+            ImplementsTaskName: "TextToImage",
             Parameters: "865M (UNet) + 123M (text encoder)",
             License: "CreativeML OpenRAIL-M",
             LicenseHolder: "PromptHero / ByteDance",
@@ -1461,6 +1477,7 @@ public static class BuiltinModels
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Mo Di Diffusion + Hyper-SD",
+            ImplementsTaskName: "TextToImage",
             Parameters: "865M (UNet) + 123M (text encoder)",
             License: "CreativeML OpenRAIL-M",
             LicenseHolder: "nitrosocke / ByteDance",
@@ -1542,6 +1559,7 @@ public static class BuiltinModels
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "AbsoluteReality + Hyper-SD",
+            ImplementsTaskName: "TextToImage",
             Parameters: "865M (UNet) + 123M (text encoder)",
             License: "CreativeML OpenRAIL-M",
             LicenseHolder: "Lykon / ByteDance",
@@ -1611,6 +1629,7 @@ public static class BuiltinModels
                 return new SdxlTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Stable Diffusion XL Turbo",
+            ImplementsTaskName: "TextToImage",
             Parameters: "2.6B (UNet) + 1.4B (text encoders)",
             License: "Stability AI Community",
             LicenseHolder: "Stability AI",
@@ -1675,6 +1694,7 @@ public static class BuiltinModels
                 return new SdxlTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Juggernaut XL Lightning",
+            ImplementsTaskName: "TextToImage",
             Parameters: "2.6B (UNet) + 1.4B (text encoders)",
             License: "Stability AI Community",
             LicenseHolder: "RunDiffusion / Stability AI",
@@ -2079,6 +2099,7 @@ public static class BuiltinModels
             //   pixels than its architecture supports).
             OptionalArgKinds: [DataKind.Float64],
             DisplayName: "Real-ESRGAN General x4 (Compact)",
+            ImplementsTaskName: "ImageUpscaler",
             Parameters: "1.2M",
             License: "BSD-3-Clause",
             LicenseHolder: "Xintao Wang",
@@ -2142,6 +2163,7 @@ public static class BuiltinModels
                 return new U2NetModel(modelName, modelPath);
             },
             DisplayName: "U²-Net (salient object segmentation)",
+            ImplementsTaskName: "BackgroundRemover",
             Parameters: "176M",
             License: "Apache-2.0",
             LicenseHolder: "Xuebin Qin et al.",
@@ -2175,6 +2197,7 @@ public static class BuiltinModels
                 return new U2NetModel(modelName, modelPath);
             },
             DisplayName: "U²-Net Lite / u2netp (salient object segmentation)",
+            ImplementsTaskName: "BackgroundRemover",
             Parameters: "4.7M",
             License: "Apache-2.0",
             LicenseHolder: "Xuebin Qin et al.",
@@ -2235,6 +2258,7 @@ public static class BuiltinModels
                     channelStd: [0.229f, 0.224f, 0.225f]);
             },
             DisplayName: "MiDaS v2.1 small (relative depth)",
+            ImplementsTaskName: "DepthEstimator",
             Parameters: "21M",
             License: "MIT",
             LicenseHolder: "Intel ISL",
@@ -2279,6 +2303,7 @@ public static class BuiltinModels
                     channelStd: [0.5f, 0.5f, 0.5f]);
             },
             DisplayName: "DPT-Large v3.1 (relative depth)",
+            ImplementsTaskName: "DepthEstimator",
             Parameters: "344M",
             License: "MIT",
             LicenseHolder: "Intel ISL",
@@ -3046,6 +3071,7 @@ public static class BuiltinModels
                 return new Phi35VisionModel(modelName, bundleDirectory, maxTokens);
             },
             DisplayName: "Phi-3.5-vision (Vision-Language, ORT GenAI)",
+            ImplementsTaskName: "VisualQA",
             Parameters: "4.2B",
             License: "MIT",
             LicenseHolder: "Microsoft",
@@ -3090,6 +3116,7 @@ public static class BuiltinModels
                 return new Moondream2Model(modelName, visionPath, maxTokens: maxTokens);
             },
             DisplayName: "Moondream2 (Vision-Language)",
+            ImplementsTaskName: "VisualQA",
             Parameters: "1.9B",
             License: "Apache-2.0",
             LicenseHolder: "vikhyatk",
@@ -3227,6 +3254,7 @@ public static class BuiltinModels
             //   [1] speed (Float64) - playback speed override (0.5..2.0)
             OptionalArgKinds: [DataKind.String, DataKind.Float64],
             DisplayName: "Kokoro 82M TTS (Python-backed)",
+            ImplementsTaskName: "TextToAudio",
             Parameters: "82M",
             License: "Apache-2.0",
             LicenseHolder: "hexgrad",

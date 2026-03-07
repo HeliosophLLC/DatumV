@@ -179,6 +179,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         VirtualCatalog.Add(new Providers.InformationSchemaKeyColumnUsageProvider(pool, this));
         VirtualCatalog.Add(new Providers.DatumCatalogFunctionsProvider(pool, Functions));
         VirtualCatalog.Add(new Providers.DatumCatalogFunctionParametersProvider(pool, Functions));
+        VirtualCatalog.Add(new Providers.TasksTableProvider(pool));
         VirtualCatalog.Add(new Providers.DatumCatalogStatisticsProvider(pool, this));
         VirtualCatalog.Add(new Providers.DatumCatalogIndexesProvider(pool, this));
         VirtualCatalog.Add(new Providers.DatumCatalogInteractionsProvider(pool, this));
