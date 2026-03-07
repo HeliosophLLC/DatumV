@@ -549,6 +549,199 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             new QualifiedName("models", "via_decl"), out _));
     }
 
+    // ───────────────────── Pass B body-walk RETURN typecheck ─────────────────────
+
+    [Fact]
+    public void CreateModel_PassB_VariableRefReturn_WrongDeclareType_Throws()
+    {
+        // RETURNS ScoredClass + DECLARE r BoundingBox; RETURN r.
+        // The DECLARE's annotated type drives Pass B: BoundingBox ≠
+        // ScoredClass, so the registrar should throw at CREATE time.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+            () => catalog.Plan(
+                $"CREATE MODEL var_wrong_type(t String) RETURNS ScoredClass "
+                + $"USING '{_absoluteUsingPath}' "
+                + $"AS BEGIN DECLARE r BoundingBox; RETURN r END"));
+        Assert.Contains("ScoredClass", ex.Message);
+        Assert.Contains("BoundingBox", ex.Message);
+    }
+
+    [Fact]
+    public void CreateModel_PassB_VariableRefReturn_UnknownVariable_Skips()
+    {
+        // RETURN <unknown identifier> — Pass B can't resolve a type
+        // annotation, so it skips silently rather than false-positiving.
+        // Runtime evaluation will throw a clean "unbound variable" error
+        // at first row scan.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL var_unknown(t String) RETURNS ScoredClass "
+            + $"USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN nonexistent END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "var_unknown"), out _));
+    }
+
+    [Fact]
+    public void CreateModel_PassB_UdfCallReturn_MatchingNamedType_Registers()
+    {
+        // UDF whose declared return is ScoredClass; model's RETURNS is
+        // ScoredClass; body RETURNs the UDF call. Names match → passes.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            "CREATE FUNCTION make_class() RETURNS ScoredClass AS BEGIN "
+            + "RETURN {class: CAST(1 AS Int32), score: CAST(0.5 AS Float32)} END");
+
+        catalog.Plan(
+            $"CREATE MODEL via_udf(t String) RETURNS ScoredClass "
+            + $"USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN make_class() END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "via_udf"), out _));
+    }
+
+    [Fact]
+    public void CreateModel_PassB_UdfCallReturn_WrongNamedType_Throws()
+    {
+        // UDF returns BoundingBox; model RETURNS ScoredClass; body
+        // RETURNs the UDF. Mismatch → throws at CREATE.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            "CREATE FUNCTION make_bbox() RETURNS BoundingBox AS BEGIN "
+            + "RETURN {x: CAST(0 AS Float32), y: CAST(0 AS Float32), "
+            + "w: CAST(0 AS Float32), h: CAST(0 AS Float32)} END");
+
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+            () => catalog.Plan(
+                $"CREATE MODEL via_udf_wrong(t String) RETURNS ScoredClass "
+                + $"USING '{_absoluteUsingPath}' "
+                + $"AS BEGIN RETURN make_bbox() END"));
+        Assert.Contains("ScoredClass", ex.Message);
+        Assert.Contains("BoundingBox", ex.Message);
+    }
+
+    [Fact]
+    public void CreateModel_PassB_ModelCallReturn_MatchingNamedType_Registers()
+    {
+        // Model B returns ScoredClass; Model A RETURNs models.B(...)
+        // and declares RETURNS ScoredClass. Names match → passes.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL inner_class(t String) RETURNS ScoredClass "
+            + $"USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN {{class: CAST(1 AS Int32), score: CAST(0.5 AS Float32)}} END");
+
+        catalog.Plan(
+            $"CREATE MODEL outer_class(t String) RETURNS ScoredClass "
+            + $"USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN models.inner_class(t) END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "outer_class"), out _));
+    }
+
+    [Fact]
+    public void CreateModel_PassB_ModelCallReturn_WrongNamedType_Throws()
+    {
+        // Model B returns BoundingBox; Model A RETURNS ScoredClass and
+        // RETURNs models.B(...). Mismatch → throws.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL inner_bbox(t String) RETURNS BoundingBox "
+            + $"USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN {{x: CAST(0 AS Float32), y: CAST(0 AS Float32), "
+            + $"w: CAST(0 AS Float32), h: CAST(0 AS Float32)}} END");
+
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+            () => catalog.Plan(
+                $"CREATE MODEL outer_wrong(t String) RETURNS ScoredClass "
+                + $"USING '{_absoluteUsingPath}' "
+                + $"AS BEGIN RETURN models.inner_bbox(t) END"));
+        Assert.Contains("ScoredClass", ex.Message);
+        Assert.Contains("BoundingBox", ex.Message);
+    }
+
+    [Fact]
+    public void CreateModel_PassB_ArrayLiteralReturn_MatchingElementFields_Registers()
+    {
+        // RETURNS Array<RegionScore> + RETURN [{bbox: ..., score: ...}, ...].
+        // Pass B recurses into each element and applies the Pass A
+        // field-name check against the element's named-struct type.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL detect(t String) RETURNS Array<RegionScore> "
+            + $"USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN ["
+            + $"{{bbox: {{x: CAST(0 AS Float32), y: CAST(0 AS Float32), "
+            + $"w: CAST(1 AS Float32), h: CAST(1 AS Float32)}}, "
+            + $"score: CAST(0.9 AS Float32)}}"
+            + $"] END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "detect"), out _));
+    }
+
+    [Fact]
+    public void CreateModel_PassB_ArrayLiteralReturn_WrongElementFields_Throws()
+    {
+        // RETURNS Array<RegionScore> + RETURN [{wrong: 1}].
+        // Element field-names don't match RegionScore (bbox, score) →
+        // throws at CREATE.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+            () => catalog.Plan(
+                $"CREATE MODEL detect_wrong(t String) RETURNS Array<RegionScore> "
+                + $"USING '{_absoluteUsingPath}' "
+                + $"AS BEGIN RETURN [{{wrong: CAST(1 AS Int32)}}] END"));
+        Assert.Contains("RegionScore", ex.Message);
+        Assert.Contains("wrong", ex.Message);
+    }
+
+    [Fact]
+    public void CreateModel_PassB_ArrayLiteralReturn_Empty_Skips()
+    {
+        // Empty array literal — Pass B can't infer per-element shape from
+        // an empty array, so it skips. (Runtime returns an empty Array<T>
+        // which the executor will coerce to the declared type.)
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL detect_empty(t String) RETURNS Array<RegionScore> "
+            + $"USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN [] END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "detect_empty"), out _));
+    }
+
+    [Fact]
+    public void CreateModel_PassB_BuiltinCallReturn_ArrayVsScalar_Throws()
+    {
+        // RETURNS ScoredClass (scalar struct) + RETURN softmax([...])
+        // which returns Array<Float32>. Pass B's arity/array-ness check
+        // against the built-in's matched signature catches the
+        // array-vs-scalar mismatch.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+            () => catalog.Plan(
+                $"CREATE MODEL builtin_arr_scalar(t String) RETURNS ScoredClass "
+                + $"USING '{_absoluteUsingPath}' "
+                + $"AS BEGIN RETURN softmax([CAST(1.0 AS Float32), CAST(2.0 AS Float32)]) END"));
+        Assert.Contains("ScoredClass", ex.Message);
+    }
+
     // ───────────────────── infer() runtime bridge (Phase 3b) ─────────────────────
 
     [Fact]
