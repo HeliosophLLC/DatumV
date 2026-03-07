@@ -710,6 +710,15 @@ internal sealed class RoutineRegistrar
             ValidateImplementsContract(create, taskName);
         }
 
+        // Pass A body-walk typecheck: when the declared return type is a
+        // named struct AND the body's tail is a struct literal, verify the
+        // literal's field names match the declared struct's. Catches the
+        // common "RETURNS ScoredClass / RETURN { wrong: 1 }" mistake at
+        // CREATE time instead of first-row-scan time. Pass B (full
+        // type inference on function-call / variable-ref RETURNs) is a
+        // follow-up.
+        ValidateBodyReturnShape(create);
+
         QualifiedName qn = new(ModelsSchema, create.Name);
 
         if (create.IfNotExists && _catalog.DeclaredModels.TryGet(qn, out _))
@@ -878,7 +887,7 @@ internal sealed class RoutineRegistrar
         TaskTypeRegistry.TaskContract? contract = TaskTypeRegistry.TryGet(taskName);
         if (contract is null)
         {
-            throw new InvalidOperationException(
+            throw new QueryPlanException(
                 $"CREATE MODEL {create.Name}: IMPLEMENTS '{taskName}' references an unknown task contract. "
                 + "See `SELECT name FROM datum_catalog.tasks` for the registered vocabulary.");
         }
@@ -886,7 +895,7 @@ internal sealed class RoutineRegistrar
         // Parameter arity.
         if (create.Parameters.Count != contract.InputKinds.Count)
         {
-            throw new InvalidOperationException(
+            throw new QueryPlanException(
                 $"CREATE MODEL {create.Name}: IMPLEMENTS {contract.Name} requires "
                 + $"{contract.InputKinds.Count} parameter(s) but the model declares {create.Parameters.Count}. "
                 + $"Expected signature: ({string.Join(", ", contract.InputKinds)}) → {contract.ReturnKind}.");
@@ -899,7 +908,7 @@ internal sealed class RoutineRegistrar
             if (param.TypeName is null
                 || !TypeAnnotationResolver.TryParse(param.TypeName, out DataKind kind, out bool isArray))
             {
-                throw new InvalidOperationException(
+                throw new QueryPlanException(
                     $"CREATE MODEL {create.Name}: IMPLEMENTS {contract.Name} parameter "
                     + $"#{i + 1} ('{param.Name}') has unresolved type '{param.TypeName}'.");
             }
@@ -908,7 +917,7 @@ internal sealed class RoutineRegistrar
                 : null;
             if (!contract.InputKinds[i].Matches(kind, isArray, namedTypeName))
             {
-                throw new InvalidOperationException(
+                throw new QueryPlanException(
                     $"CREATE MODEL {create.Name}: IMPLEMENTS {contract.Name} parameter "
                     + $"#{i + 1} expected {contract.InputKinds[i]}, got "
                     + $"{(isArray ? $"Array<{namedTypeName ?? kind.ToString()}>" : namedTypeName ?? kind.ToString())}. "
@@ -919,7 +928,7 @@ internal sealed class RoutineRegistrar
         // Return type match.
         if (!TypeAnnotationResolver.TryParse(create.ReturnTypeName, out DataKind returnKind, out bool returnIsArray))
         {
-            throw new InvalidOperationException(
+            throw new QueryPlanException(
                 $"CREATE MODEL {create.Name}: IMPLEMENTS {contract.Name} return type "
                 + $"'{create.ReturnTypeName}' is not a recognized type annotation.");
         }
@@ -928,11 +937,93 @@ internal sealed class RoutineRegistrar
             : null;
         if (!contract.ReturnKind.Matches(returnKind, returnIsArray, returnNamedTypeName))
         {
-            throw new InvalidOperationException(
+            throw new QueryPlanException(
                 $"CREATE MODEL {create.Name}: IMPLEMENTS {contract.Name} return expected "
                 + $"{contract.ReturnKind}, got "
                 + $"{(returnIsArray ? $"Array<{returnNamedTypeName ?? returnKind.ToString()}>" : returnNamedTypeName ?? returnKind.ToString())}. "
                 + $"Expected signature: ({string.Join(", ", contract.InputKinds)}) → {contract.ReturnKind}.");
+        }
+    }
+
+    /// <summary>
+    /// Pass A body-walk typecheck. When the declared return type is a
+    /// named struct (e.g. <c>RETURNS ScoredClass</c>) AND the body's tail
+    /// RETURN is a struct literal (<c>RETURN { class: ..., score: ... }</c>),
+    /// verifies the literal's field names match the named type's. Catches
+    /// the typical wrong-field-name mistake at CREATE time rather than at
+    /// first row scan.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Scope.</strong> Field-name match only. Field-kind verification
+    /// is deferred to Pass B because the parser's literal-kind inference
+    /// has known quirks (small numeric literals parse to <c>Int8</c>, not
+    /// <c>Int32</c>; <c>RETURN { class: 1, score: 0.5 }</c> would flag a
+    /// false kind mismatch). Pass B will use the full
+    /// <c>ExpressionTypeResolver</c> path which handles function-call
+    /// returns and variable refs alongside literal-kind inference.
+    /// </para>
+    /// <para>
+    /// <strong>What doesn't fire here.</strong> Function-call returns
+    /// (<c>RETURN dbnet_postprocess(...)</c>), variable-ref returns
+    /// (<c>RETURN result</c> after a DECLARE), and array-literal returns
+    /// (<c>RETURN [{...}, {...}]</c>). Pass B picks those up.
+    /// </para>
+    /// </remarks>
+    private static void ValidateBodyReturnShape(CreateModelStatement create)
+    {
+        // Primitive returns have no struct shape to verify.
+        if (!TypeAnnotationResolver.IsNamedType(create.ReturnTypeName))
+        {
+            return;
+        }
+
+        // Resolve the expected struct shape via a fresh TypeRegistry — its
+        // constructor pre-interns the named-type vocabulary, so the lookup
+        // hits without any external state. The registry is scoped to this
+        // method and is discarded immediately.
+        TypeRegistry registry = new();
+        int expectedTypeId = registry.GetTypeIdByName(create.ReturnTypeName);
+        if (expectedTypeId == TypeRegistry.NoType)
+        {
+            // Defensive: IsNamedType returned true but the name didn't
+            // resolve in the registry. Means the static vocabulary and
+            // the resolver lookup are out of sync — a programming error,
+            // not a user error. Skip the check rather than throwing a
+            // confusing message.
+            return;
+        }
+        TypeDescriptor? expectedDesc = registry.GetDescriptor(expectedTypeId);
+        if (expectedDesc?.Fields is not { } expectedFields)
+        {
+            return;
+        }
+
+        // Find the tail RETURN. Bodies must end with RETURN (enforced by
+        // ValidateProceduralBody at parse time), but be defensive against
+        // an empty body — earlier validation should have caught it.
+        if (create.StatementBody.Count == 0) return;
+        if (create.StatementBody[^1] is not ReturnStatement ret) return;
+
+        // Pass A is struct-literal-only. Pass B handles function-call /
+        // variable-ref / array-literal returns.
+        if (ret.Value is not StructLiteralExpression literal) return;
+
+        // Field-name match (case-insensitive, order-insensitive per the
+        // locked-in decision from the planning conversation).
+        var expectedNameSet = new HashSet<string>(
+            expectedFields.Select(f => f.Name), StringComparer.OrdinalIgnoreCase);
+        var actualNameSet = new HashSet<string>(
+            literal.Fields.Select(f => f.Name), StringComparer.OrdinalIgnoreCase);
+
+        if (!expectedNameSet.SetEquals(actualNameSet))
+        {
+            string expectedList = string.Join(", ", expectedFields.Select(f => f.Name));
+            string actualList = string.Join(", ", literal.Fields.Select(f => f.Name));
+            throw new QueryPlanException(
+                $"CREATE MODEL {create.Name}: RETURN struct literal fields don't match declared "
+                + $"return type '{create.ReturnTypeName}'. "
+                + $"Expected fields: [{expectedList}]. Got: [{actualList}].");
         }
     }
 

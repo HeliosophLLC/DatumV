@@ -351,7 +351,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // (String) → Int32. Error message should print both shapes.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL bad_return(prompt String) RETURNS Int32 "
                 + $"IMPLEMENTS TextGenerator "
@@ -367,7 +367,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // TextGenerator requires one parameter (String); this declares two.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL bad_arity(p String, n Int32) RETURNS String "
                 + $"IMPLEMENTS TextGenerator "
@@ -382,7 +382,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // TextGenerator requires String; this declares Int32 input.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL bad_input(n Int32) RETURNS String "
                 + $"IMPLEMENTS TextGenerator "
@@ -396,7 +396,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL bogus(x Int32) RETURNS Int32 "
                 + $"IMPLEMENTS NonExistentTask "
@@ -423,6 +423,130 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             new QualifiedName("models", "classify_text"), out ModelDescriptor? descriptor));
         Assert.Equal("TextClassifier", descriptor!.ImplementsTaskName);
         Assert.Equal("ScoredClass", descriptor.ReturnTypeName);
+    }
+
+    // ───────────────────── Pass A body-walk RETURN typecheck ─────────────────────
+
+    [Fact]
+    public void CreateModel_PassA_StructLiteralReturn_MatchingFields_Registers()
+    {
+        // ScoredClass = Struct<class: Int32, score: Float32>. RETURN with
+        // matching field names succeeds even when the literal expressions
+        // are wrapped in CASTs (which is the typical user shape).
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL classify_text(t String) RETURNS ScoredClass "
+            + $"USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN {{class: CAST(1 AS Int32), score: CAST(0.5 AS Float32)}} END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "classify_text"), out _));
+    }
+
+    [Fact]
+    public void CreateModel_PassA_StructLiteralReturn_WrongFieldName_Throws()
+    {
+        // ScoredClass has fields (class, score). This literal has (label,
+        // score) — same arity but wrong name. Mismatch should fire at
+        // CREATE time with both sets printed.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+            () => catalog.Plan(
+                $"CREATE MODEL wrong_field(t String) RETURNS ScoredClass "
+                + $"USING '{_absoluteUsingPath}' "
+                + $"AS BEGIN RETURN {{label: 'cat', score: CAST(0.5 AS Float32)}} END"));
+        Assert.Contains("ScoredClass", ex.Message);
+        Assert.Contains("class", ex.Message);   // Expected field listed
+        Assert.Contains("label", ex.Message);   // Actual field listed
+    }
+
+    [Fact]
+    public void CreateModel_PassA_StructLiteralReturn_MissingField_Throws()
+    {
+        // ScoredClass has fields (class, score). This literal has only
+        // (class) — score is missing. Mismatch should fire.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+            () => catalog.Plan(
+                $"CREATE MODEL missing_field(t String) RETURNS ScoredClass "
+                + $"USING '{_absoluteUsingPath}' "
+                + $"AS BEGIN RETURN {{class: CAST(1 AS Int32)}} END"));
+        Assert.Contains("ScoredClass", ex.Message);
+        Assert.Contains("score", ex.Message);
+    }
+
+    [Fact]
+    public void CreateModel_PassA_StructLiteralReturn_ExtraField_Throws()
+    {
+        // ScoredClass has fields (class, score). This literal has an extra
+        // `confidence` field. Pass A treats this as a mismatch — exact
+        // contract, not lenient.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+            () => catalog.Plan(
+                $"CREATE MODEL extra_field(t String) RETURNS ScoredClass "
+                + $"USING '{_absoluteUsingPath}' "
+                + $"AS BEGIN RETURN {{class: CAST(1 AS Int32), score: CAST(0.5 AS Float32), confidence: CAST(0.9 AS Float32)}} END"));
+        Assert.Contains("ScoredClass", ex.Message);
+        Assert.Contains("confidence", ex.Message);
+    }
+
+    [Fact]
+    public void CreateModel_PassA_StructLiteralReturn_FieldsReordered_Accepts()
+    {
+        // Name-aware, order-insensitive matching (locked-in design decision).
+        // Reordered fields should still pass.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL reorder(t String) RETURNS ScoredClass "
+            + $"USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN {{score: CAST(0.5 AS Float32), class: CAST(1 AS Int32)}} END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "reorder"), out _));
+    }
+
+    [Fact]
+    public void CreateModel_PassA_PrimitiveReturn_SkipsBodyCheck()
+    {
+        // Pass A only checks named-struct returns. RETURNS Float32 with a
+        // body that returns a struct literal is wrong, but Pass A doesn't
+        // see it — that's Pass B's territory (full type inference).
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        // The cast inside the BEGIN/END body forces a Float32 return —
+        // this is well-formed, just exercising the "Pass A skips primitive
+        // returns" branch without surfacing an unrelated parse / cast error.
+        catalog.Plan(
+            $"CREATE MODEL primitive_return(x Float32) RETURNS Float32 "
+            + $"USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN RETURN x END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "primitive_return"), out _));
+    }
+
+    [Fact]
+    public void CreateModel_PassA_NonStructLiteralReturn_SkipsBodyCheck()
+    {
+        // Pass A is struct-literal-only. RETURN <function-call> doesn't
+        // fire Pass A (Pass B handles it). Use a no-op variable-pass body
+        // that's well-formed against the named-struct return: declare a
+        // typed null of the named type, then return it.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL via_decl(t String) RETURNS ScoredClass "
+            + $"USING '{_absoluteUsingPath}' "
+            + $"AS BEGIN DECLARE r ScoredClass; RETURN r END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "via_decl"), out _));
     }
 
     // ───────────────────── infer() runtime bridge (Phase 3b) ─────────────────────
