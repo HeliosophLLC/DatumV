@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { FunctionSquare, Paperclip, Play, Square, X } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  FunctionSquare,
+  Paperclip,
+  Play,
+  Square,
+  X,
+} from 'lucide-react';
 import type {
   ScalarFunctionDto,
   ScalarFunctionParameterDto,
@@ -10,6 +18,7 @@ import type {
 import {
   functionCatalogState,
   loadFunctionCatalog,
+  toggleCategoryExpanded,
 } from '@/state/functionCatalog';
 import {
   ensureFunctionForm,
@@ -63,23 +72,46 @@ export function FunctionForm({ tabId }: { tabId: string }) {
   const search = formSnap?.search ?? '';
   const selection = formSnap?.selection ?? null;
 
-  // Filter + sort the scalar functions for the picker. Hide body-scoped
+  // Group + filter the scalar functions for the picker. Hide body-scoped
   // entries (e.g. `infer` only valid inside CREATE MODEL bodies) — they
-  // belong in the SQL editor, not a standalone form.
-  const visibleFunctions = useMemo(() => {
+  // belong in the SQL editor, not a standalone form. Search only kicks
+  // in at ≥ 2 characters so a single keystroke doesn't snap-collapse
+  // every category.
+  const groupedFunctions = useMemo<CategoryGroup[]>(() => {
     const term = search.trim().toLowerCase();
-    const all = catalogSnap.entries
-      .filter((f) => f.bodyScope === 'None')
-      .filter((f) =>
-        term.length === 0
-          ? true
-          : (f.name ?? '').toLowerCase().includes(term)
-            || (f.aliases ?? []).some((a) => a.toLowerCase().includes(term)),
-      );
-    return all.slice().sort((a, b) =>
-      (a.name ?? '').localeCompare(b.name ?? ''),
-    );
+    const searchActive = term.length >= 2;
+    const matchPredicate = (f: ScalarFunctionDto) =>
+      !searchActive
+      || (f.name ?? '').toLowerCase().includes(term)
+      || (f.aliases ?? []).some((a) => a.toLowerCase().includes(term));
+
+    const buckets = new Map<string, ScalarFunctionDto[]>();
+    for (const fn of catalogSnap.entries as readonly ScalarFunctionDto[]) {
+      if (fn.bodyScope !== 'None') continue;
+      if (!matchPredicate(fn)) continue;
+      const category = fn.category ?? 'Other';
+      const list = buckets.get(category);
+      if (list) list.push(fn);
+      else buckets.set(category, [fn]);
+    }
+    // Sort each bucket alphabetically by function name, then return
+    // category groups in alphabetical order. The Map keeps insertion
+    // order; we sort the entries explicitly so the rendered order is
+    // stable across renders.
+    const groups: CategoryGroup[] = [];
+    for (const [category, fns] of buckets.entries()) {
+      groups.push({
+        category,
+        functions: fns
+          .slice()
+          .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+      });
+    }
+    groups.sort((a, b) => a.category.localeCompare(b.category));
+    return groups;
   }, [catalogSnap.entries, search]);
+
+  const searchActive = search.trim().length >= 2;
 
   // useSnapshot returns deep-readonly views which TypeScript can't
   // implicitly assign to the mutable generated DTOs. We `ref(entries)`
@@ -104,7 +136,9 @@ export function FunctionForm({ tabId }: { tabId: string }) {
       <FunctionPicker
         tabId={tabId}
         search={search}
-        functions={visibleFunctions as unknown as ScalarFunctionDto[]}
+        searchActive={searchActive}
+        groups={groupedFunctions}
+        expandedCategories={catalogSnap.expandedCategories}
         selection={selection}
         status={catalogSnap.status}
         error={catalogSnap.error}
@@ -138,17 +172,27 @@ export function FunctionForm({ tabId }: { tabId: string }) {
 
 // ───────────────────────── Function picker ─────────────────────────
 
+interface CategoryGroup {
+  category: string;
+  functions: ScalarFunctionDto[];
+}
+
 function FunctionPicker({
   tabId,
   search,
-  functions,
+  searchActive,
+  groups,
+  expandedCategories,
   selection,
   status,
   error,
 }: {
   tabId: string;
   search: string;
-  functions: ScalarFunctionDto[];
+  /** True when the search input has ≥ 2 chars and the function list is filtered. */
+  searchActive: boolean;
+  groups: CategoryGroup[];
+  expandedCategories: Readonly<Record<string, true>>;
   selection: ReturnType<typeof useSnapshot<typeof functionFormState>>['byTabId'][string]['selection'] | null;
   status: 'idle' | 'loading' | 'ready' | 'error';
   error: string | null;
@@ -201,17 +245,77 @@ function FunctionPicker({
             </button>
           </div>
         )}
-        {status === 'ready' && functions.length === 0 && (
+        {status === 'ready' && groups.length === 0 && (
           <div className="text-muted-foreground p-2 text-xs">
             {t('fnPickerEmpty')}
           </div>
         )}
-        <ul className="flex flex-col">
-          {functions.map((fn) => {
+        <div className="flex flex-col">
+          {groups.map((group) => (
+            <CategorySection
+              key={group.category}
+              group={group}
+              expanded={searchActive || !!expandedCategories[group.category]}
+              // Search overrides the user's expand state — the toggle
+              // would do nothing useful while a search is active, so
+              // the click is suppressed and the chevron hides.
+              clickable={!searchActive}
+              selection={selection}
+              onPick={onPick}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CategorySection({
+  group,
+  expanded,
+  clickable,
+  selection,
+  onPick,
+}: {
+  group: CategoryGroup;
+  expanded: boolean;
+  clickable: boolean;
+  selection: ReturnType<typeof useSnapshot<typeof functionFormState>>['byTabId'][string]['selection'] | null;
+  onPick: (fn: ScalarFunctionDto) => void;
+}) {
+  return (
+    <section className="flex flex-col">
+      <button
+        type="button"
+        onClick={clickable ? () => toggleCategoryExpanded(group.category) : undefined}
+        disabled={!clickable}
+        className={cn(
+          'text-muted-foreground hover:text-foreground flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-medium uppercase tracking-wide transition-colors',
+          'outline-none',
+          clickable && 'hover:bg-muted cursor-pointer',
+        )}
+      >
+        {clickable ? (
+          expanded ? (
+            <ChevronDown className="size-3.5" />
+          ) : (
+            <ChevronRight className="size-3.5" />
+          )
+        ) : (
+          <ChevronDown className="text-muted-foreground/60 size-3.5" />
+        )}
+        <span className="flex-1 truncate">{group.category}</span>
+        <span className="text-muted-foreground/80 font-mono text-[10px]">
+          {group.functions.length}
+        </span>
+      </button>
+      {expanded && (
+        <ul className="flex flex-col pl-2">
+          {group.functions.map((fn) => {
             const isSelected =
-              selection !== null &&
-              selection.schema === fn.schema &&
-              selection.name === fn.name;
+              selection !== null
+              && selection.schema === fn.schema
+              && selection.name === fn.name;
             return (
               <li key={`${fn.schema}.${fn.name}`}>
                 <button
@@ -241,8 +345,8 @@ function FunctionPicker({
             );
           })}
         </ul>
-      </div>
-    </div>
+      )}
+    </section>
   );
 }
 
