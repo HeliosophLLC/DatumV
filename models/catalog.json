@@ -271,7 +271,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "b05ce6aab8ced77534a361920a1459b8f73cce95", "include": ["yolox_s.onnx"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_s.onnx", "coco-classes.json"] },
       "approxSizeMb": 35
     },
     {
@@ -283,7 +283,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "b05ce6aab8ced77534a361920a1459b8f73cce95", "include": ["yolox_nano.onnx"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_nano.onnx", "coco-classes.json"] },
       "approxSizeMb": 4
     },
 
@@ -296,7 +296,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 2048, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "b05ce6aab8ced77534a361920a1459b8f73cce95", "include": ["yolox_x.onnx"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_x.onnx", "coco-classes.json"] },
       "approxSizeMb": 378
     },
     {
@@ -308,7 +308,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "b05ce6aab8ced77534a361920a1459b8f73cce95", "include": ["yolox_tiny.onnx"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_tiny.onnx", "coco-classes.json"] },
       "approxSizeMb": 20
     },
     {
@@ -320,7 +320,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "b05ce6aab8ced77534a361920a1459b8f73cce95", "include": ["yolox_m.onnx"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_m.onnx", "coco-classes.json"] },
       "approxSizeMb": 97
     },
     {
@@ -332,7 +332,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "b05ce6aab8ced77534a361920a1459b8f73cce95", "include": ["yolox_l.onnx"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_l.onnx", "coco-classes.json"] },
       "approxSizeMb": 207
     },
     {
@@ -344,7 +344,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "b05ce6aab8ced77534a361920a1459b8f73cce95", "include": ["yolox_darknet.onnx"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_darknet.onnx", "coco-classes.json"] },
       "approxSizeMb": 244
     },
     {
@@ -456,6 +456,19 @@
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/realesrgan-onnx", "revision": "488e5dda07333179f229a6205d92135eea4c25e9", "include": ["realesr-general-x4v3.onnx"] },
       "approxSizeMb": 5
+    },
+    {
+      "id": "mobilenetv2",
+      "displayName": "MobileNetV2 (ImageNet Classification)",
+      "description": "Tiny 1000-class ImageNet image classifier (~14 MB). CPU-friendly baseline for whole-image labelling, embedding extraction, or as a backbone for fine-tuning. Bundles the ImageNet-1K class label file.",
+      "task": "image-classification",
+      "tags": ["classification", "imagenet", "mobilenet", "edge"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Google AI Research — MobileNetV2 (Sandler, Howard, Zhu, Zhmoginov, Chen)", "ONNX Model Zoo (ONNX export)"],
+      "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/mobilenetv2-onnx", "revision": "c0ec47a7c78d4a60f37c2cd8c65d6bd5e5e6289c", "include": ["mobilenetv2-12.onnx", "imagenet-classes.json"] },
+      "approxSizeMb": 14,
+      "placeholder": true
     },
 
     {
