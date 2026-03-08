@@ -141,6 +141,12 @@ public static class TaskTypeRegistry
             [Scalar(DataKind.Image)],
             Named("ScoredClass"),
             "Image → single class with confidence."),
+        new("LabeledImageClassifier",
+            [Scalar(DataKind.Image)],
+            Named("ScoredLabel"),
+            "Image → single class-label string with confidence. "
+            + "Like ImageClassifier but emits a human-readable label (e.g. 'tabby cat') "
+            + "instead of an integer class id."),
         new("ImageMultiClassifier",
             [Scalar(DataKind.Image)],
             ArrayOfNamed("ScoredClass"),

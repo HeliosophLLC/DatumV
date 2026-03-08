@@ -475,7 +475,7 @@
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/mobilenetv2-onnx", "revision": "c0ec47a7c78d4a60f37c2cd8c65d6bd5e5e6289c", "include": ["mobilenetv2-12.onnx", "imagenet-classes.json"] },
       "approxSizeMb": 14,
-      "placeholder": true
+      "installSql": "sql/mobilenetv2.sql"
     },
 
     {

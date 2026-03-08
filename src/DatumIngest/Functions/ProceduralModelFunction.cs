@@ -181,6 +181,35 @@ public sealed class ProceduralModelFunction : IScalarFunction
             returnValue = await evaluator.EvaluateAsValueRefAsync(syntheticCast, bodyFrame, cancellationToken).ConfigureAwait(false);
         }
 
+        // Named-type TypeId stamping. When the descriptor declares a
+        // named-struct return (e.g. `RETURNS ScoredLabel`) and the body's
+        // RETURN evaluated a struct literal, the literal produces a
+        // struct value with TypeId=0 — the SQL evaluator doesn't intern
+        // a TypeId for ad-hoc struct literals. Downstream consumers
+        // (system.* renderers, ImageDrawBoundingBoxes, the catalog's
+        // schema resolution) all rely on TypeId to recover the
+        // BoundingBox/ScoredLabel/etc. shape. Stamp the named-type
+        // TypeId from the per-query registry here so the body's
+        // `RETURN {label: ..., score: ...}` carries the same shape
+        // metadata that a postprocess-function-built value would.
+        if (!returnValue.IsNull
+            && returnValue.Kind == DataKind.Struct
+            && !returnValue.IsArray
+            && returnValue.TypeId == 0
+            && frame.Types is { } types
+            && _descriptor.ReturnTypeName is { } returnTypeName
+            && TypeAnnotationResolver.IsNamedType(returnTypeName))
+        {
+            int namedTypeId = types.GetTypeIdByName(returnTypeName);
+            if (namedTypeId != TypeRegistry.NoType)
+            {
+                ReadOnlySpan<ValueRef> structFields = returnValue.GetStructFields();
+                ValueRef[] copy = new ValueRef[structFields.Length];
+                structFields.CopyTo(copy);
+                returnValue = ValueRef.FromStruct(copy, (ushort)namedTypeId);
+            }
+        }
+
         if (_descriptor.ReturnIsNotNull && returnValue.IsNull)
         {
             throw new InvalidOperationException(

@@ -25,7 +25,7 @@ public static class BuiltinModels
     /// <see cref="TableCatalog"/>. Builds a fresh <see cref="ModelCatalog"/>
     /// rooted at <paramref name="modelDirectory"/> (or the default —
     /// <c>DATUM_MODELS</c> env var, then per-user fallback), registers every
-    /// builtin model (<c>mobilenetv2</c>, <c>llama31_8b</c>,
+    /// builtin model (<c>llama31_8b</c>,
     /// <c>phi3_mini</c>), wires the model catalog onto
     /// <see cref="TableCatalog.Models"/>, and adds the <c>system_models</c>
     /// virtual table for runtime introspection.
@@ -73,12 +73,12 @@ public static class BuiltinModels
         ModelCatalog modelCatalog = new(modelDirectory, resolvedBudget, admissionTimeout: null);
 
         // Vision models
-        RegisterMobileNetV2(modelCatalog);
         RegisterScrfd10g(modelCatalog);
-        // PP-OCR-det was removed from built-ins; it now ships as a
-        // SQL-defined model (models/sql/paddleocr-v4-det.sql).
-        // YOLOX-{nano,tiny,s,m,l,x,darknet} likewise migrated to SQL-defined
-        // models (models/sql/yolox-*.sql).
+        // PP-OCR-det, MobileNetV2, and YOLOX-{nano,tiny,s,m,l,x,darknet}
+        // were previously registered here as built-in C# IModels; they
+        // shipped as SQL-defined models under models/sql/. Their catalog
+        // entries declare installSql so the downloader registers them
+        // after fetching weights.
         RegisterRealesrganGeneralX4(modelCatalog);
         RegisterU2Net(modelCatalog);
         RegisterU2Netp(modelCatalog);
@@ -177,78 +177,14 @@ public static class BuiltinModels
         return modelCatalog;
     }
 
-    /// <summary>
-    /// Default filename for the MobileNetV2 ONNX file (the canonical
-    /// <c>mobilenetv2-12.onnx</c> from the ONNX model zoo).
-    /// </summary>
-    public const string MobileNetV2DefaultFilename = "mobilenetv2-12.onnx";
-
-    /// <summary>
-    /// Default filename for the ImageNet-1k label vocabulary, looked up next to
-    /// the ONNX file. Format is a JSON array of 1000 strings —
-    /// <a href="https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json">imagenet-simple-labels.json</a>
-    /// is the recommended drop-in.
-    /// </summary>
-    public const string ImageNetLabelsDefaultFilename = "imagenet-classes.json";
-
-    /// <summary>
-    /// Registers MobileNetV2 under the catalog name <paramref name="modelName"/>
-    /// (defaults to <c>"mobilenetv2"</c>). The ONNX file is resolved as
-    /// <c>{ModelDirectory}/{modelFilename}</c>; ImageNet labels load from
-    /// <c>{ModelDirectory}/{labelsFilename}</c> if present, otherwise predictions
-    /// fall back to <c>class_&lt;index&gt;</c>.
-    /// </summary>
-    /// <param name="catalog">Catalog to register against.</param>
-    /// <param name="modelName">
-    /// SQL-visible name (the <c>X</c> in <c>models.X(image)</c>). Defaults to
-    /// <c>"mobilenetv2"</c> — the architecture name. The capability-level
-    /// <c>tasks.classify</c> namespace routes here (and to other classifiers)
-    /// once the task layer lands.
-    /// </param>
-    /// <param name="modelFilename">
-    /// ONNX filename relative to the catalog's <see cref="ModelCatalog.ModelDirectory"/>.
-    /// Defaults to <see cref="MobileNetV2DefaultFilename"/>.
-    /// </param>
-    /// <param name="labelsFilename">
-    /// JSON labels filename relative to the catalog's <see cref="ModelCatalog.ModelDirectory"/>.
-    /// Defaults to <see cref="ImageNetLabelsDefaultFilename"/>. Pass
-    /// <see langword="null"/> to skip labels entirely.
-    /// </param>
-    public static void RegisterMobileNetV2(
-        ModelCatalog catalog,
-        string modelName = "mobilenetv2",
-        string modelFilename = MobileNetV2DefaultFilename,
-        string? labelsFilename = ImageNetLabelsDefaultFilename)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: modelFilename,
-            InputKinds: [DataKind.Image],
-            // Struct{label: String, score: Float32}. The catalog entry's
-            // OutputKind currently captures only the top-level kind; field
-            // names land alongside the schema-layer struct-field plumbing.
-            OutputKind: DataKind.Struct,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
-                IReadOnlyList<string>? labels = labelsFilename is null
-                    ? null
-                    : TryLoadLabels(Path.Combine(ctx.ModelDirectory, labelsFilename));
-                return new MobileNetV2Model(modelName, modelPath, labels);
-            },
-            DisplayName: "MobileNetV2 ImageNet Classifier",
-            Parameters: "3.5M",
-            License: "Apache-2.0",
-            LicenseHolder: "ONNX Model Zoo",
-            SourceUrl: "https://github.com/onnx/models/tree/main/validated/vision/classification/mobilenet",
-            Category: "classifier",
-            Modalities: ["image", "text"],
-            Files: labelsFilename is null
-                ? [modelFilename]
-                : [modelFilename, labelsFilename]));
-    }
+    // MobileNetV2 was previously registered here as a built-in C# IModel
+    // (MobileNetV2Model.cs). It shipped as a SQL-defined model in
+    // models/sql/mobilenetv2.sql backed by `image_to_tensor_chw`,
+    // `softmax`, `argmax`, and `read_string_list('imagenet-classes.json')`
+    // — the C# class was deleted along with RegisterMobileNetV2,
+    // MobileNetV2DefaultFilename, and ImageNetLabelsDefaultFilename. The
+    // labels file now travels with the model bundle on HuggingFace
+    // (Heliosoph/mobilenetv2-onnx) and is loaded catalog-relative.
 
     /// <summary>
     /// Default filename for the Llama 3.1 8B Instruct GGUF (Q4_K_M
@@ -3180,37 +3116,4 @@ public static class BuiltinModels
         return File.Exists(candidate) ? candidate : null;
     }
 
-    /// <summary>
-    /// Loads a JSON-array label file. Returns <see langword="null"/> when the
-    /// file is missing — letting the model fall back to <c>class_&lt;index&gt;</c>
-    /// instead of failing the load. Throws when the file exists but is malformed:
-    /// silent fallback there would hide a genuine configuration error.
-    /// </summary>
-    private static IReadOnlyList<string>? TryLoadLabels(string path)
-    {
-        if (!File.Exists(path)) return null;
-
-        // Manual walk over JsonDocument keeps this trim-safe (the project is
-        // IsTrimmable=true, so the reflection-based JsonSerializer.Deserialize<T>
-        // would warn). The schema is intentionally narrow: a JSON array of strings.
-        using FileStream stream = File.OpenRead(path);
-        using JsonDocument doc = JsonDocument.Parse(stream);
-        if (doc.RootElement.ValueKind != JsonValueKind.Array)
-        {
-            throw new InvalidDataException(
-                $"Labels file '{path}' must be a JSON array of strings (e.g. [\"tench\", \"goldfish\", ...]).");
-        }
-
-        List<string> labels = new(doc.RootElement.GetArrayLength());
-        foreach (JsonElement element in doc.RootElement.EnumerateArray())
-        {
-            if (element.ValueKind != JsonValueKind.String)
-            {
-                throw new InvalidDataException(
-                    $"Labels file '{path}' contains a non-string element at index {labels.Count}.");
-            }
-            labels.Add(element.GetString() ?? string.Empty);
-        }
-        return labels;
-    }
 }

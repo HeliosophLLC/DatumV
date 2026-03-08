@@ -426,7 +426,15 @@ public sealed class ModelInvocationOperator : IQueryOperator
                         // dynamic-shape Array<Struct> outputs still get their
                         // per-element struct stamps. Primitive outputs have
                         // TypeId 0 anyway and don't lose anything.
-                        rowTypeId = elementStructTypeId;
+                        //
+                        // For scalar struct outputs (e.g. `RETURNS ScoredLabel`
+                        // from a SQL-defined classifier), the body already
+                        // stamped a TypeId on the inline carrier — prefer
+                        // that over elementStructTypeId so the cell's
+                        // shape resolves through the per-query registry.
+                        rowTypeId = elementStructTypeId != 0
+                            ? elementStructTypeId
+                            : rowValue.TypeId;
                     }
                     outValues[^1] = rowValue.ToDataValue(outputBatch.Arena, rowTypeId, context.Types);
                     outputBatch.Add(outValues);

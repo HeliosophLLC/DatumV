@@ -22,9 +22,10 @@ public sealed class OnnxSessionFactoryTests : ServiceTestBase
     [Fact]
     public void CudaProbe_ReportsAvailability()
     {
-        // Use MobileNetV2 — smallest registered ONNX file, fastest to load.
+        // Use YOLOX-nano — smallest registered ONNX file (~4 MB), fastest to load.
+        // Downloaded by catalog install at <ModelDirectory>/yolox-nano/yolox_nano.onnx.
         string modelPath = Path.Combine(
-            ModelCatalog.DefaultModelDirectory, BuiltinModels.MobileNetV2DefaultFilename);
+            ModelCatalog.DefaultModelDirectory, "yolox-nano", "yolox_nano.onnx");
         if (!File.Exists(modelPath)) return;
 
         // Trigger one session creation through the factory.
