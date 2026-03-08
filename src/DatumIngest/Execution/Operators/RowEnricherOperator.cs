@@ -154,6 +154,7 @@ public sealed class RowEnricherOperator : IQueryOperator
                         sourceRow,
                         sourceBatch.Arena,
                         outputBatch.Arena,
+                        context.Accountant,
                         context.OuterRow,
                         context.SidecarRegistry,
                         context.Types,

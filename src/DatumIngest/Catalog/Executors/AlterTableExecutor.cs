@@ -671,6 +671,7 @@ internal static class AlterTableExecutor
                         row,
                         scanArena,
                         workArena,
+                        evaluator.Accountant,
                         outerRow: null,
                         sidecarRegistry: catalog.SidecarRegistry,
                         types: null);

@@ -39,6 +39,7 @@ public sealed class MemoryAccountant : IDisposable
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
     private readonly Func<long>? _arenaBytesProbe;
     private long _residentBytes;
+    private long _peakResidentBytes;
     private Timer? _samplingTimer;
     private int _disposed;
 
@@ -71,6 +72,15 @@ public sealed class MemoryAccountant : IDisposable
     public long CurrentResidentBytes => Interlocked.Read(ref _residentBytes);
 
     /// <summary>
+    /// Highest <see cref="CurrentResidentBytes"/> reached since this accountant
+    /// was constructed. Updated lazily on every <see cref="NotifyMaterialized"/> —
+    /// transient peaks between matched materialize/release pairs are captured
+    /// even when the 1Hz sampler missed them. Used by tests and post-mortem
+    /// inspectors that want a single "how high did this query go" number.
+    /// </summary>
+    public long PeakResidentBytes => Interlocked.Read(ref _peakResidentBytes);
+
+    /// <summary>
     /// Returns <c>true</c> if applying <paramref name="pendingDelta"/> would
     /// push residency past <see cref="MemoryBudgetBytes"/>. Callers consult
     /// this to decide whether to spill before adding the next row to a
@@ -82,9 +92,24 @@ public sealed class MemoryAccountant : IDisposable
     /// <summary>
     /// Reports a held-state increase. Operators call this on hash-table
     /// insert, sort-buffer append, materialised-CTE cache add, etc.
+    /// Updates <see cref="PeakResidentBytes"/> when the new total exceeds the
+    /// prior peak.
     /// </summary>
     public void NotifyMaterialized(long deltaBytes)
-        => Interlocked.Add(ref _residentBytes, deltaBytes);
+    {
+        long current = Interlocked.Add(ref _residentBytes, deltaBytes);
+        // Lock-free max-update: read the prior peak, attempt CAS while the
+        // new total is higher. Loops at most as many times as concurrent
+        // bumps observed in the window.
+        long oldPeak = Volatile.Read(ref _peakResidentBytes);
+        while (current > oldPeak)
+        {
+            long witnessed = Interlocked.CompareExchange(
+                ref _peakResidentBytes, current, oldPeak);
+            if (witnessed == oldPeak) break;
+            oldPeak = witnessed;
+        }
+    }
 
     /// <summary>
     /// Reports a held-state release. Pair with <see cref="NotifyMaterialized"/>

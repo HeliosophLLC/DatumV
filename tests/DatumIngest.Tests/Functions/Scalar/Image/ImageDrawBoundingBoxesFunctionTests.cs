@@ -175,7 +175,7 @@ public sealed class ImageDrawBoundingBoxesFunctionTests : ServiceTestBase
         Arena arena = pool.Backing.RentArena();
         try
         {
-            EvaluationFrame frame = new(Row.Empty, arena, arena);  // no Types
+            EvaluationFrame frame = new(Row.Empty, arena, arena, new MemoryAccountant());  // no Types
 
             FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
                 await new ImageDrawBoundingBoxesFunction()
@@ -222,6 +222,6 @@ public sealed class ImageDrawBoundingBoxesFunctionTests : ServiceTestBase
     {
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, types: registry);
+        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: registry);
     }
 }

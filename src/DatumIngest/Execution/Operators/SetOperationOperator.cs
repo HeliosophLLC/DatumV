@@ -180,8 +180,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     private async IAsyncEnumerable<RowBatch> ExecuteUnionDistinctAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+        // Structural per-row residency. Lazy-init once we see the first row
+        // (need columnCount). DataValue cells + HashSet slot overhead; arena
+        // payloads referenced live in hashSetArena (mmap, OS-paged).
+        long perRowBytes = 0;
+        long residentBytesNotified = 0;
 
         // Long-lived arena for output-row stabilization. Lazily rented on first non-empty
         // batch (we need the schema). Output batches share this arena so consumers can
@@ -231,6 +234,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         if (columnCount == -1)
                         {
                             columnCount = row.FieldCount;
+                            perRowBytes = 20L * columnCount + 48L;
                             if (columnCount == 1)
                             {
                                 singleKeySet = new HashSet<DataValue>();
@@ -298,35 +302,24 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         if (isNew)
                         {
-                            if (estimator is not null)
+                            context.Accountant.NotifyMaterialized(perRowBytes);
+                            residentBytesNotified += perRowBytes;
+
+                            if (context.Accountant.WouldExceedBudget())
                             {
-                                if (estimator.ShouldSample())
-                                {
-                                    estimator.RecordSample(row);
-                                }
-
-                                estimator.IncrementRowCount();
-                                long estimatedMemory = estimator.EstimateTotalBytes();
-
-                                if (estimatedMemory > memoryBudget!.Value)
-                                {
-                                    SpillingTriggered = true;
-                                    // Initial-arena hint: half the budget, capped at int.MaxValue.
-                                    // Spilled rows' payloads accumulate in spiller.ConsolidatedArena.
-                                    int hint = (int)Math.Min(memoryBudget.Value / 2, int.MaxValue);
-                                    spiller = new SpillReaderWriter(
-                                        pool, schema!, context.SpillDirectory,
-                                        initialArenaCapacity: hint,
-                                        partitionCount: SpillPartitionCount);
-                                    partitionBuffers = new RowBatch?[SpillPartitionCount];
-                                    // The current row stays in the in-memory set + emitted
-                                    // path; subsequent rows hit the `if (SpillingTriggered)`
-                                    // branch above and go to spill only.
-                                }
-                                else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                                {
-                                    estimator.EscalateToEveryRow();
-                                }
+                                SpillingTriggered = true;
+                                // Initial-arena hint: half the budget, capped at int.MaxValue.
+                                // Spilled rows' payloads accumulate in spiller.ConsolidatedArena.
+                                long budget = context.Accountant.MemoryBudgetBytes ?? long.MaxValue;
+                                int hint = (int)Math.Min(budget / 2, int.MaxValue);
+                                spiller = new SpillReaderWriter(
+                                    pool, schema!, context.SpillDirectory,
+                                    initialArenaCapacity: hint,
+                                    partitionCount: SpillPartitionCount);
+                                partitionBuffers = new RowBatch?[SpillPartitionCount];
+                                // The current row stays in the in-memory set + emitted
+                                // path; subsequent rows hit the `if (SpillingTriggered)`
+                                // branch above and go to spill only.
                             }
 
                             outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
@@ -459,6 +452,14 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         }
         finally
         {
+            // Release the in-memory hash-set slot bytes notified during the
+            // scan. Set's arena payloads live in hashSetArena (mmap, OS-paged)
+            // and weren't separately accounted.
+            if (residentBytesNotified > 0)
+            {
+                context.Accountant.NotifyReleased(residentBytesNotified);
+            }
+
             // Defensive cleanup. By here partitionBuffers should already be flushed and
             // outputBatch already yielded, but on early dispose / cancellation we may have
             // unyielded state. Return everything we own to the pool; Dispose the spiller
@@ -511,8 +512,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     private async IAsyncEnumerable<RowBatch> ExecuteIntersectDistinctAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+        // Structural per-row residency. Lazy-init once we see the first row
+        // (need columnCount). DataValue cells + HashSet slot overhead; arena
+        // payloads referenced live in hashSetArena (mmap, OS-paged).
+        long perRowBytes = 0;
+        long residentBytesNotified = 0;
 
         Arena? hashSetArena = null;
         SpillReaderWriter? rightSpiller = null;
@@ -560,6 +564,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         if (columnCount == -1)
                         {
                             columnCount = row.FieldCount;
+                            perRowBytes = 20L * columnCount + 48L;
                             if (columnCount == 1)
                             {
                                 rightSingleSet = new HashSet<DataValue>();
@@ -619,32 +624,21 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             rightCompositeLookup.Add(compositeKeyScratch.AsSpan(0, columnCount));
                         }
 
-                        if (estimator is not null)
+                        context.Accountant.NotifyMaterialized(perRowBytes);
+                        residentBytesNotified += perRowBytes;
+
+                        if (context.Accountant.WouldExceedBudget())
                         {
-                            if (estimator.ShouldSample())
-                            {
-                                estimator.RecordSample(row);
-                            }
-
-                            estimator.IncrementRowCount();
-                            long estimatedMemory = estimator.EstimateTotalBytes();
-
-                            if (estimatedMemory > memoryBudget!.Value)
-                            {
-                                SpillingTriggered = true;
-                                int hint = (int)Math.Min(memoryBudget.Value / 2, int.MaxValue);
-                                rightSpiller = new SpillReaderWriter(
-                                    pool, schema!, context.SpillDirectory,
-                                    initialArenaCapacity: hint,
-                                    partitionCount: SpillPartitionCount);
-                                rightPartitionBuffers = new RowBatch?[SpillPartitionCount];
-                                // Subsequent rows hit the SpillingTriggered branch above;
-                                // the current row stays in the in-memory set.
-                            }
-                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                            {
-                                estimator.EscalateToEveryRow();
-                            }
+                            SpillingTriggered = true;
+                            long budget = context.Accountant.MemoryBudgetBytes ?? long.MaxValue;
+                            int hint = (int)Math.Min(budget / 2, int.MaxValue);
+                            rightSpiller = new SpillReaderWriter(
+                                pool, schema!, context.SpillDirectory,
+                                initialArenaCapacity: hint,
+                                partitionCount: SpillPartitionCount);
+                            rightPartitionBuffers = new RowBatch?[SpillPartitionCount];
+                            // Subsequent rows hit the SpillingTriggered branch above;
+                            // the current row stays in the in-memory set.
                         }
                     }
                 }
@@ -675,7 +669,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
             if (SpillingTriggered)
             {
-                int leftHint = (int)Math.Min(memoryBudget!.Value / 2, int.MaxValue);
+                int leftHint = (int)Math.Min((context.Accountant.MemoryBudgetBytes ?? long.MaxValue) / 2, int.MaxValue);
                 leftSpiller = new SpillReaderWriter(
                     pool, schema!, context.SpillDirectory,
                     initialArenaCapacity: leftHint,
@@ -918,6 +912,14 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         }
         finally
         {
+            // Release the right-side hash-set slot bytes accounted during
+            // Phase 1. The set's arena payloads live in hashSetArena and
+            // aren't separately tracked.
+            if (residentBytesNotified > 0)
+            {
+                context.Accountant.NotifyReleased(residentBytesNotified);
+            }
+
             if (rightPartitionBuffers is not null)
             {
                 for (int p = 0; p < rightPartitionBuffers.Length; p++)
@@ -971,8 +973,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     private async IAsyncEnumerable<RowBatch> ExecuteIntersectAllAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+        // Structural per-row residency. Lazy-init once we see the first row
+        // (need columnCount). DataValue cells + HashSet slot overhead; arena
+        // payloads referenced live in hashSetArena (mmap, OS-paged).
+        long perRowBytes = 0;
+        long residentBytesNotified = 0;
 
         Arena? hashSetArena = null;
         SpillReaderWriter? rightSpiller = null;
@@ -1014,6 +1019,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         if (columnCount == -1)
                         {
                             columnCount = row.FieldCount;
+                            perRowBytes = 20L * columnCount + 48L;
                             if (columnCount == 1)
                             {
                                 rightSingleCounts = new Dictionary<DataValue, int>();
@@ -1058,30 +1064,19 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         IncrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch);
 
-                        if (estimator is not null)
+                        context.Accountant.NotifyMaterialized(perRowBytes);
+                        residentBytesNotified += perRowBytes;
+
+                        if (context.Accountant.WouldExceedBudget())
                         {
-                            if (estimator.ShouldSample())
-                            {
-                                estimator.RecordSample(row);
-                            }
-
-                            estimator.IncrementRowCount();
-                            long estimatedMemory = estimator.EstimateTotalBytes();
-
-                            if (estimatedMemory > memoryBudget!.Value)
-                            {
-                                SpillingTriggered = true;
-                                int hint = (int)Math.Min(memoryBudget.Value / 2, int.MaxValue);
-                                rightSpiller = new SpillReaderWriter(
-                                    pool, schema!, context.SpillDirectory,
-                                    initialArenaCapacity: hint,
-                                    partitionCount: SpillPartitionCount);
-                                rightPartitionBuffers = new RowBatch?[SpillPartitionCount];
-                            }
-                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                            {
-                                estimator.EscalateToEveryRow();
-                            }
+                            SpillingTriggered = true;
+                            long budget = context.Accountant.MemoryBudgetBytes ?? long.MaxValue;
+                            int hint = (int)Math.Min(budget / 2, int.MaxValue);
+                            rightSpiller = new SpillReaderWriter(
+                                pool, schema!, context.SpillDirectory,
+                                initialArenaCapacity: hint,
+                                partitionCount: SpillPartitionCount);
+                            rightPartitionBuffers = new RowBatch?[SpillPartitionCount];
                         }
                     }
                 }
@@ -1110,7 +1105,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
             if (SpillingTriggered)
             {
-                int leftHint = (int)Math.Min(memoryBudget!.Value / 2, int.MaxValue);
+                int leftHint = (int)Math.Min((context.Accountant.MemoryBudgetBytes ?? long.MaxValue) / 2, int.MaxValue);
                 leftSpiller = new SpillReaderWriter(
                     pool, schema!, context.SpillDirectory,
                     initialArenaCapacity: leftHint,
@@ -1278,6 +1273,14 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         }
         finally
         {
+            // Release the right-side hash-set slot bytes accounted during
+            // Phase 1. The set's arena payloads live in hashSetArena and
+            // aren't separately tracked.
+            if (residentBytesNotified > 0)
+            {
+                context.Accountant.NotifyReleased(residentBytesNotified);
+            }
+
             if (rightPartitionBuffers is not null)
             {
                 for (int p = 0; p < rightPartitionBuffers.Length; p++)
@@ -1329,8 +1332,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     private async IAsyncEnumerable<RowBatch> ExecuteExceptDistinctAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+        // Structural per-row residency. Lazy-init once we see the first row
+        // (need columnCount). DataValue cells + HashSet slot overhead; arena
+        // payloads referenced live in hashSetArena (mmap, OS-paged).
+        long perRowBytes = 0;
+        long residentBytesNotified = 0;
 
         Arena? hashSetArena = null;
         SpillReaderWriter? rightSpiller = null;
@@ -1377,6 +1383,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         if (columnCount == -1)
                         {
                             columnCount = row.FieldCount;
+                            perRowBytes = 20L * columnCount + 48L;
                             InitDistinctSets(columnCount, ref rightSingleSet, ref rightCompositeSet,
                                 ref rightCompositeLookup, ref emittedSingleSet, ref emittedCompositeSet,
                                 ref emittedCompositeLookup, ref compositeComparer,
@@ -1426,30 +1433,19 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             rightCompositeLookup.Add(compositeKeyScratch.AsSpan(0, columnCount));
                         }
 
-                        if (estimator is not null)
+                        context.Accountant.NotifyMaterialized(perRowBytes);
+                        residentBytesNotified += perRowBytes;
+
+                        if (context.Accountant.WouldExceedBudget())
                         {
-                            if (estimator.ShouldSample())
-                            {
-                                estimator.RecordSample(row);
-                            }
-
-                            estimator.IncrementRowCount();
-                            long estimatedMemory = estimator.EstimateTotalBytes();
-
-                            if (estimatedMemory > memoryBudget!.Value)
-                            {
-                                SpillingTriggered = true;
-                                int hint = (int)Math.Min(memoryBudget.Value / 2, int.MaxValue);
-                                rightSpiller = new SpillReaderWriter(
-                                    pool, schema!, context.SpillDirectory,
-                                    initialArenaCapacity: hint,
-                                    partitionCount: SpillPartitionCount);
-                                rightPartitionBuffers = new RowBatch?[SpillPartitionCount];
-                            }
-                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                            {
-                                estimator.EscalateToEveryRow();
-                            }
+                            SpillingTriggered = true;
+                            long budget = context.Accountant.MemoryBudgetBytes ?? long.MaxValue;
+                            int hint = (int)Math.Min(budget / 2, int.MaxValue);
+                            rightSpiller = new SpillReaderWriter(
+                                pool, schema!, context.SpillDirectory,
+                                initialArenaCapacity: hint,
+                                partitionCount: SpillPartitionCount);
+                            rightPartitionBuffers = new RowBatch?[SpillPartitionCount];
                         }
                     }
                 }
@@ -1473,7 +1469,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
             if (SpillingTriggered)
             {
-                int leftHint = (int)Math.Min(memoryBudget!.Value / 2, int.MaxValue);
+                int leftHint = (int)Math.Min((context.Accountant.MemoryBudgetBytes ?? long.MaxValue) / 2, int.MaxValue);
                 leftSpiller = new SpillReaderWriter(
                     pool, schema!, context.SpillDirectory,
                     initialArenaCapacity: leftHint,
@@ -1502,6 +1498,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         if (columnCount == -1)
                         {
                             columnCount = row.FieldCount;
+                            perRowBytes = 20L * columnCount + 48L;
                             InitDistinctSets(columnCount, ref rightSingleSet, ref rightCompositeSet,
                                 ref rightCompositeLookup, ref emittedSingleSet, ref emittedCompositeSet,
                                 ref emittedCompositeLookup, ref compositeComparer,
@@ -1720,6 +1717,14 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         }
         finally
         {
+            // Release the right-side hash-set slot bytes accounted during
+            // Phase 1. The set's arena payloads live in hashSetArena and
+            // aren't separately tracked.
+            if (residentBytesNotified > 0)
+            {
+                context.Accountant.NotifyReleased(residentBytesNotified);
+            }
+
             if (rightPartitionBuffers is not null)
             {
                 for (int p = 0; p < rightPartitionBuffers.Length; p++)
@@ -1808,8 +1813,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     private async IAsyncEnumerable<RowBatch> ExecuteExceptAllAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+        // Structural per-row residency. Lazy-init once we see the first row
+        // (need columnCount). DataValue cells + HashSet slot overhead; arena
+        // payloads referenced live in hashSetArena (mmap, OS-paged).
+        long perRowBytes = 0;
+        long residentBytesNotified = 0;
 
         Arena? hashSetArena = null;
         SpillReaderWriter? rightSpiller = null;
@@ -1851,6 +1859,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         if (columnCount == -1)
                         {
                             columnCount = row.FieldCount;
+                            perRowBytes = 20L * columnCount + 48L;
                             InitCountedMultisets(columnCount, ref rightSingleCounts,
                                 ref rightCompositeCounts, ref compositeComparer,
                                 ref compositeKeyScratch, pool);
@@ -1888,30 +1897,19 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         IncrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch);
 
-                        if (estimator is not null)
+                        context.Accountant.NotifyMaterialized(perRowBytes);
+                        residentBytesNotified += perRowBytes;
+
+                        if (context.Accountant.WouldExceedBudget())
                         {
-                            if (estimator.ShouldSample())
-                            {
-                                estimator.RecordSample(row);
-                            }
-
-                            estimator.IncrementRowCount();
-                            long estimatedMemory = estimator.EstimateTotalBytes();
-
-                            if (estimatedMemory > memoryBudget!.Value)
-                            {
-                                SpillingTriggered = true;
-                                int hint = (int)Math.Min(memoryBudget.Value / 2, int.MaxValue);
-                                rightSpiller = new SpillReaderWriter(
-                                    pool, schema!, context.SpillDirectory,
-                                    initialArenaCapacity: hint,
-                                    partitionCount: SpillPartitionCount);
-                                rightPartitionBuffers = new RowBatch?[SpillPartitionCount];
-                            }
-                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                            {
-                                estimator.EscalateToEveryRow();
-                            }
+                            SpillingTriggered = true;
+                            long budget = context.Accountant.MemoryBudgetBytes ?? long.MaxValue;
+                            int hint = (int)Math.Min(budget / 2, int.MaxValue);
+                            rightSpiller = new SpillReaderWriter(
+                                pool, schema!, context.SpillDirectory,
+                                initialArenaCapacity: hint,
+                                partitionCount: SpillPartitionCount);
+                            rightPartitionBuffers = new RowBatch?[SpillPartitionCount];
                         }
                     }
                 }
@@ -1935,7 +1933,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
             if (SpillingTriggered)
             {
-                int leftHint = (int)Math.Min(memoryBudget!.Value / 2, int.MaxValue);
+                int leftHint = (int)Math.Min((context.Accountant.MemoryBudgetBytes ?? long.MaxValue) / 2, int.MaxValue);
                 leftSpiller = new SpillReaderWriter(
                     pool, schema!, context.SpillDirectory,
                     initialArenaCapacity: leftHint,
@@ -1962,6 +1960,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         if (columnCount == -1)
                         {
                             columnCount = row.FieldCount;
+                            perRowBytes = 20L * columnCount + 48L;
                             InitCountedMultisets(columnCount, ref rightSingleCounts,
                                 ref rightCompositeCounts, ref compositeComparer,
                                 ref compositeKeyScratch, pool);
@@ -2115,6 +2114,14 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         }
         finally
         {
+            // Release the right-side hash-set slot bytes accounted during
+            // Phase 1. The set's arena payloads live in hashSetArena and
+            // aren't separately tracked.
+            if (residentBytesNotified > 0)
+            {
+                context.Accountant.NotifyReleased(residentBytesNotified);
+            }
+
             if (rightPartitionBuffers is not null)
             {
                 for (int p = 0; p < rightPartitionBuffers.Length; p++)

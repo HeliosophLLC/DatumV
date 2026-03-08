@@ -156,7 +156,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
         CancellationToken cancellationToken)
     {
         DataValue[] keys = new DataValue[_orderByItems.Count];
-        EvaluationFrame frame = new(row, sourceArena, targetArena, outerRow: null, sidecarRegistry, types);
+        EvaluationFrame frame = new(row, sourceArena, targetArena, evaluator.Accountant, outerRow: null, sidecarRegistry, types);
         for (int i = 0; i < _orderByItems.Count; i++)
         {
             keys[i] = await evaluator.EvaluateAsync(_orderByItems[i].Expression, frame, cancellationToken).ConfigureAwait(false);
@@ -300,8 +300,12 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     private async IAsyncEnumerable<RowBatch> ExecuteUnboundedAsync(
         ExpressionEvaluator evaluator, ExecutionContext context, Pool pool)
     {
-        long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+        // Structural per-row residency for budget accounting. Computed lazily
+        // once we see the first batch (need fieldCount). The DataValue cells
+        // and key array are both GC-resident; arena payloads they reference
+        // live in `bufferArena` (file-backed mmap, OS-paged, out of budget).
+        long perRowBytes = 0;
+        long residentBytesNotified = 0;
 
         Arena? bufferArena = null;
         SidecarRegistry? sidecarRegistry = context.SidecarRegistry;
@@ -321,6 +325,9 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                     {
                         schema = inputBatch.ColumnLookup;
                         bufferArena = pool.RentArena();
+                        // 20 bytes per DataValue cell (overhead) × (field + key) cells
+                        // plus a ~64-byte KeyedRow / List slot per row.
+                        perRowBytes = 20L * schema.Count + 20L * _orderByItems.Count + 64L;
                     }
 
                     for (int i = 0; i < inputBatch.Count; i++)
@@ -335,44 +342,36 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                         DataValue[] keys = await EvaluateKeysAsync(
                             evaluator, stableRow, bufferArena!, bufferArena!, sidecarRegistry, context.Types, context.CancellationToken).ConfigureAwait(false);
                         buffer.Add(new KeyedRow(stableRow, keys));
+                        context.Accountant.NotifyMaterialized(perRowBytes);
+                        residentBytesNotified += perRowBytes;
 
-                        if (estimator is not null)
+                        // Adding this row may have pushed the plan-wide
+                        // residency over the budget. Spill the current
+                        // sorted chunk to disk and reset — the spilled
+                        // rows release their accounted bytes.
+                        if (context.Accountant.WouldExceedBudget())
                         {
-                            if (estimator.ShouldSample())
-                            {
-                                estimator.RecordSample(sourceRow);
-                            }
+                            buffer.Sort((left, right) =>
+                                CompareKeys(
+                                    left.Keys, bufferArena!, sidecarRegistry,
+                                    right.Keys, bufferArena!, sidecarRegistry));
+                            SpillReaderWriter run = SpillSortedBuffer(
+                                pool, schema!, context, bufferArena!, buffer);
+                            sortedRuns.Add(run);
+                            SpillingTriggered = true;
+                            SortedRunCount++;
 
-                            estimator.IncrementRowCount();
-                            long estimatedMemory = estimator.EstimateTotalBytes();
-
-                            if (estimatedMemory > memoryBudget!.Value)
-                            {
-                                // Sort the in-memory chunk and write it as a sorted run.
-                                buffer.Sort((left, right) =>
-                                    CompareKeys(
-                                        left.Keys, bufferArena!, sidecarRegistry,
-                                        right.Keys, bufferArena!, sidecarRegistry));
-                                SpillReaderWriter run = SpillSortedBuffer(
-                                    pool, schema!, context, bufferArena!, buffer);
-                                sortedRuns.Add(run);
-                                SpillingTriggered = true;
-                                SortedRunCount++;
-
-                                // Reset for next chunk: fresh arena, fresh estimator,
-                                // fresh buffer. Buffer rows' DataValue[]s were transferred
-                                // to the run batch and consumed by the spiller's Write
-                                // (which returned them to the pool); the buffer's list
-                                // entries are now stale slot references.
-                                buffer.Clear();
-                                pool.ReturnArena(bufferArena!);
-                                bufferArena = pool.RentArena();
-                                estimator = new MemoryEstimator();
-                            }
-                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                            {
-                                estimator.EscalateToEveryRow();
-                            }
+                            // Reset for next chunk: fresh arena, fresh
+                            // buffer, accounted bytes released. Buffer rows'
+                            // DataValue[]s were transferred to the run batch
+                            // and consumed by the spiller's Write (which
+                            // returned them to the pool); the buffer's list
+                            // entries are now stale slot references.
+                            buffer.Clear();
+                            context.Accountant.NotifyReleased(residentBytesNotified);
+                            residentBytesNotified = 0;
+                            pool.ReturnArena(bufferArena!);
+                            bufferArena = pool.RentArena();
                         }
                     }
                 }
@@ -427,6 +426,13 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                 sortedRuns.Add(finalRun);
                 SortedRunCount++;
                 buffer.Clear();
+                // Final chunk's rows are on disk; release the bytes we
+                // notified for them.
+                if (residentBytesNotified > 0)
+                {
+                    context.Accountant.NotifyReleased(residentBytesNotified);
+                    residentBytesNotified = 0;
+                }
             }
             // Buffer arena's last round — release it; merge phase uses a separate output arena.
             if (bufferArena is not null)
@@ -453,6 +459,14 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                 if (keyedRow.Row.RawValues is not null) pool.ReturnRow(keyedRow.Row);
             }
             buffer.Clear();
+
+            // Release any residency we notified for in-memory buffer rows
+            // that didn't go through the spill release path (the all-in-
+            // memory emit case + cancellation / error early exits).
+            if (residentBytesNotified > 0)
+            {
+                context.Accountant.NotifyReleased(residentBytesNotified);
+            }
 
             if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             foreach (SpillReaderWriter run in sortedRuns)

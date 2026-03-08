@@ -45,6 +45,9 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     private Pool? _pool;
     private SpillReaderWriter? _spiller;
     private ColumnLookup? _materializedSchema;
+    private MemoryAccountant? _accountant;
+    private long _perRowBytes;
+    private long _residentBytesNotified;
 
     /// <summary>
     /// Creates a recursive CTE operator.
@@ -168,8 +171,8 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     {
         Pool pool = context.Pool;
         _pool = pool;
+        _accountant = context.Accountant;
         _allBatches = [];
-        long? memoryBudget = context.MemoryBudgetBytes;
         int maxDepth = context.MaxRecursionDepth;
 
         // Anchor pass.
@@ -187,7 +190,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
         }
 
         // Possibly spill at the end of the anchor pass.
-        MaybeSpill(context, memoryBudget);
+        MaybeSpill(context);
 
         // Recursive iterations. At each step the working table is the slice
         //   [iterationStartRow, currentRowCount)
@@ -227,7 +230,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
             // read automatically routes through the spiller (BuildWorkingTableOperator picks
             // the backend based on IsSpilling at call time). The batch-index marker is no
             // longer meaningful once spilled — only the row marker matters.
-            MaybeSpill(context, memoryBudget);
+            MaybeSpill(context);
 
             iterationStartRow = nextIterationStartRow;
             iterationStartBatchIndex = IsSpilling ? 0 : nextIterationStartBatchIndex;
@@ -252,7 +255,19 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
         }
         else
         {
-            _allBatches!.Add(pool.RebindRowBatch(input, schema));
+            RowBatch cached = pool.RebindRowBatch(input, schema);
+            _allBatches!.Add(cached);
+
+            // Account structural per-row residency: DataValue cells + Row +
+            // List<RowBatch> slot. Arena payloads live in the batch's own
+            // arena (mmap, OS-paged) and aren't budgeted.
+            if (_perRowBytes == 0)
+            {
+                _perRowBytes = 20L * schema.Count + 32L;
+            }
+            long batchBytes = _perRowBytes * cached.Count;
+            _accountant!.NotifyMaterialized(batchBytes);
+            _residentBytesNotified += batchBytes;
         }
     }
 
@@ -269,32 +284,26 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     }
 
     /// <summary>
-    /// Estimates the in-memory footprint of the accumulated batches' arenas. Sum of arena
-    /// capacities — the dominant cost since DataValue arrays and Row[] entries are dwarfed
-    /// by arena bytes for any payload-heavy workload.
+    /// If the plan-wide accountant signals over-budget, transitions to spill
+    /// mode by handing every cached batch to a fresh
+    /// <see cref="SpillReaderWriter"/>. The in-memory accumulation's
+    /// accounted bytes are released back to the accountant since the rows
+    /// now live on disk.
     /// </summary>
-    private long EstimateInMemoryBytes()
+    private void MaybeSpill(ExecutionContext context)
     {
-        if (_allBatches is null) return 0;
-        long total = 0;
-        foreach (RowBatch b in _allBatches) total += b.Arena.Capacity;
-        return total;
-    }
+        if (IsSpilling || _allBatches is null) return;
+        if (!context.Accountant.WouldExceedBudget()) return;
 
-    /// <summary>
-    /// If a memory budget is configured and the in-memory footprint exceeds it, transitions
-    /// to spill mode by handing every cached batch to a fresh <see cref="SpillReaderWriter"/>.
-    /// </summary>
-    private void MaybeSpill(ExecutionContext context, long? memoryBudget)
-    {
-        if (IsSpilling || memoryBudget is null || _allBatches is null) return;
-
-        long inMemoryBytes = EstimateInMemoryBytes();
-        if (inMemoryBytes <= memoryBudget.Value) return;
-
-        // Initial-arena-capacity hint: sum of cached arena capacities, doubled for headroom
-        // (covers the recursive iterations still to come). Same heuristic as CTE.
-        long hintLong = inMemoryBytes * 2;
+        // Initial-arena-capacity hint: sum of cached arena capacities,
+        // doubled for headroom (covers the recursive iterations still to
+        // come). Same heuristic as CTE. Arena.Capacity is the right input
+        // here — the spiller's consolidated arena needs to absorb the bytes
+        // that were living in those per-batch arenas, regardless of whether
+        // those bytes counted toward the spill budget.
+        long inMemoryArenaBytes = 0;
+        foreach (RowBatch b in _allBatches) inMemoryArenaBytes += b.Arena.Capacity;
+        long hintLong = inMemoryArenaBytes * 2;
         int hint = hintLong > int.MaxValue ? int.MaxValue : (int)hintLong;
 
         _spiller = new SpillReaderWriter(
@@ -306,6 +315,13 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
         }
 
         _allBatches = null;
+
+        // Cached rows are now on disk; release their accounted bytes.
+        if (_residentBytesNotified > 0)
+        {
+            context.Accountant.NotifyReleased(_residentBytesNotified);
+            _residentBytesNotified = 0;
+        }
     }
 
     /// <summary>
@@ -361,6 +377,14 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
                 _pool.ReturnRowBatch(batch);
             }
             _allBatches = null;
+        }
+
+        // Release any residency we still hold (in-memory cache that wasn't
+        // spilled). After spill, _residentBytesNotified is already zero.
+        if (_residentBytesNotified > 0 && _accountant is not null)
+        {
+            _accountant.NotifyReleased(_residentBytesNotified);
+            _residentBytesNotified = 0;
         }
 
         _spiller?.Dispose();

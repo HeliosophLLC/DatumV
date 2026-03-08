@@ -28,6 +28,9 @@ internal sealed class BuildSideMaterializer
     private readonly Pool _pool;
     private readonly Arena _store;
     private readonly List<Row> _rows = new();
+    private MemoryAccountant? _accountant;
+    private long _perRowBytes;
+    private long _residentBytesNotified;
 
     public BuildSideMaterializer(Pool pool, Arena store)
     {
@@ -51,16 +54,23 @@ internal sealed class BuildSideMaterializer
     /// </summary>
     public async ValueTask MaterializeAsync(IQueryOperator source, ExecutionContext context)
     {
+        _accountant = context.Accountant;
         await foreach (RowBatch batch in source.ExecuteAsync(context).ConfigureAwait(false))
         {
             try
             {
+                if (_perRowBytes == 0 && batch.Count > 0)
+                {
+                    _perRowBytes = 20L * batch[0].FieldCount + 32L;
+                }
                 for (int i = 0; i < batch.Count; i++)
                 {
                     Row sourceRow = batch[i];
                     DataValue[] copy = _pool.RentAndCopyDataValues(
                         sourceRow, batch.Arena, _store);
                     _rows.Add(new Row(sourceRow.ColumnLookup, copy));
+                    _accountant.NotifyMaterialized(_perRowBytes);
+                    _residentBytesNotified += _perRowBytes;
                 }
             }
             finally
@@ -82,5 +92,12 @@ internal sealed class BuildSideMaterializer
             _pool.ReturnRow(row);
         }
         _rows.Clear();
+        // Release the accounted residency; safe to call repeatedly because
+        // we zero the counter after each release.
+        if (_residentBytesNotified > 0 && _accountant is not null)
+        {
+            _accountant.NotifyReleased(_residentBytesNotified);
+            _residentBytesNotified = 0;
+        }
     }
 }

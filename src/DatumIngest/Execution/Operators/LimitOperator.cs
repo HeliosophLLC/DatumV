@@ -293,6 +293,7 @@ public sealed class LimitOperator : IQueryOperator
             DatumIngest.Model.Row.Empty,
             context.Store,
             context.Store,
+            context.Accountant,
             outerRow: context.OuterRow,
             sidecarRegistry: context.SidecarRegistry,
             types: context.Types,

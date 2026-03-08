@@ -26,7 +26,7 @@ public sealed class YoloxFunctionsTests
     }
 
     private static EvaluationFrame Frame() =>
-        new(Row.Empty, new Arena(), new Arena(), types: new TypeRegistry());
+        new(Row.Empty, new Arena(), new Arena(), new MemoryAccountant(), types: new TypeRegistry());
 
     // ─── yolox_preprocess ────────────────────────────────────────────────────
 

@@ -18,6 +18,69 @@ public sealed class GroupBySpillTests : ServiceTestBase
     /// <summary>Tiny memory budget that forces spilling for even a few rows.</summary>
     private const long TinyBudget = 256;
 
+    /// <summary>
+    /// Plan-wide accounting regression: when an upstream materializing
+    /// operator has already consumed budget before GroupBy enters, GroupBy
+    /// must see that residency on <see cref="MemoryAccountant.CurrentResidentBytes"/>
+    /// and spill earlier than it would on a clean slate. Simulates a stacked
+    /// plan by pre-loading the accountant directly. Without the PR4 migration,
+    /// GroupBy's local estimator ignored upstream residency and every operator
+    /// treated the budget as its own — three operators stacked could each
+    /// consume 80%, OOM-ing at 240% of budget.
+    /// </summary>
+    [Fact]
+    public async Task GroupBy_RespectsPreExistingResidencyOnAccountant()
+    {
+        // Budget chosen so 100 groups easily fit on a clean slate (~16 KB).
+        // Pre-load brings it close to the cap so GroupBy must spill earlier.
+        const long Budget = 16 * 1024;
+        const long PreLoad = (long)(Budget * 0.85);
+
+        object?[][] rows = BuildManyGroupRows();
+        GroupByOperator groupBy = new(
+            CreateMockOperator(KeyValColumns, rows),
+            groupByExpressions: [new ColumnReference("key")],
+            aggregateColumns:
+            [
+                new AggregateColumn(new CountFunction(), [], "COUNT(*)", IsCountStar: true),
+                new AggregateColumn(new SumFunction(), [new ColumnReference("val")], "SUM(val)"),
+            ]);
+
+        ExecutionContext context = CreateContext(Budget);
+        // Simulate an upstream materializing operator that has parked
+        // PreLoad bytes on the accountant before GroupBy enters.
+        context.Accountant.NotifyMaterialized(PreLoad);
+
+        List<Row> results = await CollectAsync(groupBy, context);
+
+        // Results must still be correct — spill kicks in but every group
+        // ends up represented exactly once.
+        Assert.Equal(100, results.Count);
+
+        // After GroupBy returns, its own residency is released; the
+        // pre-loaded bytes (the simulated upstream operator) remain on the
+        // counter — caller is responsible for releasing them.
+        Assert.Equal(PreLoad, context.Accountant.CurrentResidentBytes);
+
+        // Peak must have exceeded the pre-load — GroupBy did add residency
+        // on top of upstream state, proving the counter is plan-wide.
+        Assert.True(
+            context.Accountant.PeakResidentBytes > PreLoad,
+            $"Expected peak > pre-load ({PreLoad}); got {context.Accountant.PeakResidentBytes}");
+
+        // Plan-wide peak must never have crossed the budget — the
+        // WouldExceedBudget check forced GroupBy to spill at the line where
+        // adding the next group would have pushed total residency past it.
+        // Allow a small overshoot because the check fires *before* the
+        // insert, and there's a one-row race where another worker could
+        // bump the counter between the check and the spill flip. We tolerate
+        // one per-group structural cost over budget.
+        const long PerGroupSlack = 256;
+        Assert.True(
+            context.Accountant.PeakResidentBytes <= Budget + PerGroupSlack,
+            $"Expected peak <= Budget + slack ({Budget + PerGroupSlack}); got {context.Accountant.PeakResidentBytes}");
+    }
+
     // ─────────────── Helpers ───────────────
 
     private ExecutionContext CreateContext(long? memoryBudgetBytes = null)

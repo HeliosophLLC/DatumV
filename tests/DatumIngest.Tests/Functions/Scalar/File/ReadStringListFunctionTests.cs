@@ -31,7 +31,7 @@ public sealed class ReadStringListFunctionTests : IDisposable
     }
 
     private static EvaluationFrame Frame() =>
-        new(Row.Empty, new Arena(), new Arena(), types: new TypeRegistry());
+        new(Row.Empty, new Arena(), new Arena(), new MemoryAccountant(), types: new TypeRegistry());
 
     private static async Task<string[]> InvokeAsync(string path, EvaluationFrame? frame = null)
     {

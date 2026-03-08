@@ -45,6 +45,15 @@ public readonly struct EvaluationFrame
     public IValueStore Target { get; }
 
     /// <summary>
+    /// Plan-wide memory accountant. Procedural UDF / model bodies that
+    /// construct an inner <see cref="VariableScope"/> wire it to this
+    /// accountant so DECLARE'd payloads count against the surrounding plan's
+    /// budget instead of an isolated per-call island. Future memory consumers
+    /// added below the frame boundary read from here.
+    /// </summary>
+    public MemoryAccountant Accountant { get; }
+
+    /// <summary>
     /// Optional outer row for correlated-subquery column resolution. Column references
     /// that cannot be resolved against <see cref="Row"/> fall back to this row.
     /// </summary>
@@ -111,6 +120,7 @@ public readonly struct EvaluationFrame
         Row row,
         IValueStore source,
         IValueStore target,
+        MemoryAccountant accountant,
         Row? outerRow = null,
         SidecarRegistry? sidecarRegistry = null,
         TypeRegistry? types = null,
@@ -120,6 +130,7 @@ public readonly struct EvaluationFrame
         Row = row;
         Source = source;
         Target = target;
+        Accountant = accountant;
         OuterRow = outerRow;
         SidecarRegistry = sidecarRegistry;
         Types = types;
@@ -129,12 +140,12 @@ public readonly struct EvaluationFrame
 
     /// <summary>
     /// Returns a new frame with a different <see cref="Row"/>, preserving the arenas,
-    /// outer-row context, sidecar registry, type registry, translation table, and
-    /// current-model binding. Used when the evaluator descends into a derived row
+    /// outer-row context, sidecar registry, type registry, translation table, accountant,
+    /// and current-model binding. Used when the evaluator descends into a derived row
     /// (e.g. a lambda body's augmented row).
     /// </summary>
     public EvaluationFrame WithRow(Row row) =>
-        new(row, Source, Target, OuterRow, SidecarRegistry, Types, TypeIdTranslations, CurrentModel);
+        new(row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, CurrentModel);
 
     /// <summary>
     /// Returns a new frame with a <see cref="CurrentModel"/> binding,
@@ -143,5 +154,5 @@ public readonly struct EvaluationFrame
     /// when leaving it.
     /// </summary>
     public EvaluationFrame WithCurrentModel(ModelDescriptor? currentModel) =>
-        new(Row, Source, Target, OuterRow, SidecarRegistry, Types, TypeIdTranslations, currentModel);
+        new(Row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, currentModel);
 }

@@ -86,6 +86,24 @@ public sealed class ExpressionEvaluator
     private readonly TypeRegistry? _typeRegistry;
 
     /// <summary>
+    /// Plan-wide accountant threaded into every <see cref="EvaluationFrame"/>
+    /// built by the convenience overloads. Sourced from
+    /// <see cref="ExecutionContext.Accountant"/> when the context ctor is
+    /// used; falls back to a private throwaway when the field-based ctor is
+    /// invoked without one (test code, evaluator instances built outside a
+    /// query plan).
+    /// </summary>
+    private readonly MemoryAccountant _accountant;
+
+    /// <summary>
+    /// The <see cref="MemoryAccountant"/> this evaluator threads into the
+    /// frames it constructs. Callers building their own frames (or wrapping
+    /// the evaluator in a different scope) read this to keep notifications
+    /// flowing into the same counter.
+    /// </summary>
+    public MemoryAccountant Accountant => _accountant;
+
+    /// <summary>
     /// Compiled regex cache for case-sensitive LIKE patterns. Avoids recompiling
     /// the same SQL LIKE pattern on every row comparison.
     /// </summary>
@@ -178,6 +196,12 @@ public sealed class ExpressionEvaluator
     /// at construction and struct field access uses the registry as the primary resolution
     /// path before falling back to schema/AST-based resolution.
     /// </param>
+    /// <param name="accountant">
+    /// Optional shared <see cref="MemoryAccountant"/>. Threaded into every
+    /// <see cref="EvaluationFrame"/> built by the convenience overloads. When
+    /// <see langword="null"/>, the evaluator allocates a private throwaway
+    /// (no Timer, no resources) so frames always carry a non-null reference.
+    /// </param>
     public ExpressionEvaluator(
         FunctionRegistry functions,
         QueryMeter? meter = null,
@@ -188,7 +212,8 @@ public sealed class ExpressionEvaluator
         SidecarRegistry? sidecarRegistry = null,
         VariableScope? variableScope = null,
         IValueStore? variableStore = null,
-        TypeRegistry? typeRegistry = null)
+        TypeRegistry? typeRegistry = null,
+        MemoryAccountant? accountant = null)
     {
         _functions = functions;
         _meter = meter;
@@ -200,6 +225,10 @@ public sealed class ExpressionEvaluator
         _variableScope = variableScope;
         _variableStore = variableStore;
         _typeRegistry = typeRegistry;
+        // Evaluators built without a context (tests, ad-hoc UDF bodies) get
+        // a private throwaway accountant. The frame builders below read this
+        // field, so frames produced by store-only overloads always carry one.
+        _accountant = accountant ?? new MemoryAccountant();
     }
 
     /// <summary>
@@ -225,7 +254,8 @@ public sealed class ExpressionEvaluator
             context.SidecarRegistry,
             context.VariableScope,
             context.VariableStore,
-            context.Types)
+            context.Types,
+            context.Accountant)
     {
     }
 
@@ -250,7 +280,7 @@ public sealed class ExpressionEvaluator
         IValueStore store = _store ?? ThrowStoreRequired();
         return EvaluateAsync(
             expression,
-            new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry, _typeRegistry),
+            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry),
             cancellationToken);
     }
 
@@ -264,7 +294,7 @@ public sealed class ExpressionEvaluator
         IValueStore store = _store ?? ThrowStoreRequired();
         return EvaluateAsBooleanAsync(
             expression,
-            new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry, _typeRegistry),
+            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry),
             cancellationToken);
     }
 
@@ -1063,7 +1093,7 @@ public sealed class ExpressionEvaluator
         // remain valid across batches. Falls back to the frame's target arena when
         // no persistent store is configured.
         IValueStore cacheStore = _store ?? frame.Target;
-        EvaluationFrame cacheFrame = new(frame.Row, frame.Source, cacheStore, frame.OuterRow, frame.SidecarRegistry, frame.Types);
+        EvaluationFrame cacheFrame = new(frame.Row, frame.Source, cacheStore, frame.Accountant, frame.OuterRow, frame.SidecarRegistry, frame.Types);
 
         foreach (Expression valueExpression in inExpr.Values)
         {

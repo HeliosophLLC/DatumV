@@ -322,7 +322,7 @@ public sealed class VariableScopeTests
             ColumnName: "tensor",
             TableName: null,
             Span: null);
-        EvaluationFrame frame = new(Row.Empty, store, store);
+        EvaluationFrame frame = new(Row.Empty, store, store, evaluator.Accountant);
 
         ValueRef result = await evaluator.EvaluateAsValueRefAsync(ref_, frame);
 

@@ -30,7 +30,8 @@ namespace DatumIngest.Catalog.Executors;
 /// </remarks>
 internal static class InsertExecutor
 {
-    public static async Task<IQueryPlan> ExecuteAsync(TableCatalog catalog, InsertStatement insert)
+    public static async Task<IQueryPlan> ExecuteAsync(
+        TableCatalog catalog, InsertStatement insert, BatchContext? batchContext = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(insert);
@@ -62,7 +63,7 @@ internal static class InsertExecutor
         {
             case InsertValuesSource values:
                 RowBatch? singleBatch = await ApplyValuesAsync(
-                    catalog, provider, targetSchema, insert.ColumnNames, values, captureRows)
+                    catalog, provider, targetSchema, insert.ColumnNames, values, captureRows, batchContext)
                     .ConfigureAwait(false);
                 captured = singleBatch is null ? null : [singleBatch];
                 break;
@@ -83,13 +84,13 @@ internal static class InsertExecutor
                 RowBatch? defaultBatch = await ApplyValuesAsync(
                     catalog, provider, targetSchema,
                     columnList: Array.Empty<string>(),
-                    synthesisedValues, captureRows).ConfigureAwait(false);
+                    synthesisedValues, captureRows, batchContext).ConfigureAwait(false);
                 captured = defaultBatch is null ? null : [defaultBatch];
                 break;
 
             case InsertQuerySource queryRow:
                 captured = await ApplySelectAsync(
-                    catalog, provider, targetSchema, insert.ColumnNames, queryRow, captureRows)
+                    catalog, provider, targetSchema, insert.ColumnNames, queryRow, captureRows, batchContext)
                     .ConfigureAwait(false);
                 break;
 
@@ -115,8 +116,11 @@ internal static class InsertExecutor
         Schema targetSchema,
         IReadOnlyList<string>? columnList,
         InsertValuesSource values,
-        bool captureRows = false)
+        bool captureRows,
+        BatchContext? batchContext)
     {
+        // See UpdateExecutor for the non-null fallback rationale.
+        MemoryAccountant accountant = batchContext is not null ? batchContext.Accountant : new MemoryAccountant();
         if (values.Rows.Count == 0)
         {
             // Nothing to insert. Don't open a session — keeps the
@@ -152,16 +156,22 @@ internal static class InsertExecutor
         Arena arena = new();
         ColumnLookup lookup = BuildTargetLookup(targetSchema);
         RowBatch batch = catalog.Pool.RentRowBatch(lookup, capacity: values.Rows.Count, arena: arena);
+        // Account the batch's GC-resident skeleton against the surrounding
+        // batch's budget: DataValue cells (~20 bytes each) plus a ~24-byte
+        // per-row header. Arena payload bytes are file-backed mmap and don't
+        // count. Released after session.WriteAsync flushes the batch.
+        long valuesBatchBytes = (long)values.Rows.Count * (targetSchema.Columns.Count * 20L + 24L);
+        if (valuesBatchBytes > 0) accountant.NotifyMaterialized(valuesBatchBytes);
 
         // Tableless evaluator: VALUES expressions can use binary operators,
         // function calls, and array / struct literals; they cannot reference
         // columns (no source row). Same arena for source and target so array
         // payloads materialised by array(...) land directly in the batch's
         // arena and ConvertSourceValue can pass them through without copy.
-        ExpressionEvaluator evaluator = new(catalog.Functions, store: arena);
+        ExpressionEvaluator evaluator = new(catalog.Functions, store: arena, accountant: accountant);
         ColumnLookup emptyLookup = new(Array.Empty<string>());
         Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
-        EvaluationFrame frame = new(emptyRow, arena, arena);
+        EvaluationFrame frame = new(emptyRow, arena, arena, accountant);
 
         for (int rowIndex = 0; rowIndex < values.Rows.Count; rowIndex++)
         {
@@ -267,6 +277,14 @@ internal static class InsertExecutor
         await session.WriteAsync(batch).ConfigureAwait(false);
         await session.CommitAsync().ConfigureAwait(false);
 
+        // The session has flushed the batch's rows into the table. The
+        // in-memory batch is about to be returned to the pool (or captured
+        // for RETURNING — but RETURNING capture is already accounted at the
+        // SELECT plan layer for SELECT-source INSERTs; for VALUES the capture
+        // is the same batch we just notified about, so a single release is
+        // correct).
+        if (valuesBatchBytes > 0) accountant.NotifyReleased(valuesBatchBytes);
+
         // Capture the resolved batch for RETURNING. The arena holds the
         // string / blob payloads for non-inline DataValues, so the plan
         // must keep both alive until the caller has iterated. RETURNING
@@ -291,8 +309,15 @@ internal static class InsertExecutor
         Schema targetSchema,
         IReadOnlyList<string>? columnList,
         InsertQuerySource source,
-        bool captureRows = false)
+        bool captureRows,
+        BatchContext? batchContext)
     {
+        // INSERT … SELECT streams batch-by-batch through the source plan and
+        // flushes each via session.WriteAsync — no held state of consequence to
+        // account. The source-side plan still routes through its own
+        // ExecutionContext and accounts there. The accountant here is only
+        // needed for the per-row DEFAULT-evaluation frames built below.
+        MemoryAccountant accountant = batchContext is not null ? batchContext.Accountant : new MemoryAccountant();
         IQueryPlan sourcePlan = catalog.PlanQuery(source.Query);
         ColumnLookup targetLookup = BuildTargetLookup(targetSchema);
 
@@ -333,10 +358,10 @@ internal static class InsertExecutor
                 // Tableless evaluator + empty frame for the per-row DEFAULT
                 // evaluation path. Built per batch because targetArena is
                 // batch-scoped; reused across every row in the batch.
-                ExpressionEvaluator defaultEvaluator = new(catalog.Functions, store: targetArena);
+                ExpressionEvaluator defaultEvaluator = new(catalog.Functions, store: targetArena, accountant: accountant);
                 ColumnLookup emptyLookup = new(Array.Empty<string>());
                 Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
-                EvaluationFrame defaultFrame = new(emptyRow, targetArena, targetArena);
+                EvaluationFrame defaultFrame = new(emptyRow, targetArena, targetArena, accountant);
 
                 for (int r = 0; r < sourceBatch.Count; r++)
                 {
@@ -814,7 +839,7 @@ internal static class InsertExecutor
         // computed values land directly in the batch.
         ExpressionEvaluator evaluator = new(catalog.Functions, store: arena);
         Row partialRow = new(targetLookup, targetRow);
-        EvaluationFrame frame = new(partialRow, arena, arena);
+        EvaluationFrame frame = new(partialRow, arena, arena, evaluator.Accountant);
 
         for (int i = 0; i < plan.OmittedFills.Length; i++)
         {

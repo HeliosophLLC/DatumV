@@ -137,7 +137,7 @@ public sealed class BatchContext : IDisposable
         IReadOnlyList<string>? structFieldNames = null)
     {
         EvaluationFrame frame = new(
-            Row.Empty, sourceStore, VariableStore,
+            Row.Empty, sourceStore, VariableStore, Accountant,
             outerRow: null, sidecarRegistry: null, types: Types);
         ValueRef bound = ExpressionEvaluator.ToValueRef(value, frame);
         VariableScope.Declare(name, bound, structFieldNames);
@@ -152,7 +152,7 @@ public sealed class BatchContext : IDisposable
     public void Set(string name, DataValue value, IValueStore sourceStore)
     {
         EvaluationFrame frame = new(
-            Row.Empty, sourceStore, VariableStore,
+            Row.Empty, sourceStore, VariableStore, Accountant,
             outerRow: null, sidecarRegistry: null, types: Types);
         ValueRef bound = ExpressionEvaluator.ToValueRef(value, frame);
         VariableScope.Set(name, bound);

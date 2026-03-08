@@ -207,6 +207,6 @@ public sealed class ApplyColormapFunctionTests : ServiceTestBase
     {
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, types: new TypeRegistry());
+        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

@@ -505,7 +505,13 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         AggregateArgumentBinder binder = new(_aggregateColumns);
 
         KeyedHashAggregator? aggregator = isGlobalAggregation ? null : new KeyedHashAggregator(
-            context, hashTable!, binder, spillCoordinator, memoryBudget, groupStateFactory);
+            context,
+            hashTable!,
+            binder,
+            spillCoordinator,
+            groupByKeyCount: _groupByExpressions.Count,
+            aggregateCount: _aggregateColumns.Count,
+            groupStateFactory);
 
         OutputBatchWriter? writer = null;
 
@@ -613,6 +619,14 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         }
         finally
         {
+            // Release the hash-table residency back to the plan-wide
+            // accountant — the in-memory groups survived until now (see
+            // KeyedHashAggregator's "post-spill memory stays flat" doc), and
+            // become unreachable as the operator returns.
+            if (aggregator is not null && aggregator.ResidentBytesNotified > 0)
+            {
+                context.Accountant.NotifyReleased(aggregator.ResidentBytesNotified);
+            }
             spillCoordinator?.Dispose();
             if (writer?.Flush() is RowBatch leftover) context.ReturnRowBatch(leftover);
             if (operatorArena is not null) pool.ReturnArena(operatorArena);

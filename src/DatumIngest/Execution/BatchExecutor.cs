@@ -476,7 +476,7 @@ public sealed class BatchExecutor
                     // CREATE PROCEDURE round-trip through catalog
                     // persistence.
                     {
-                        IQueryPlan plan = await _catalog.PlanAsync(stmt, sourceText).ConfigureAwait(false);
+                        IQueryPlan plan = await _catalog.PlanAsync(stmt, sourceText, batchContext).ConfigureAwait(false);
                         if (plan is not EmptyQueryPlan)
                         {
                             BatchEventStreamingSink sink = new(cellId, onEvent);
@@ -638,6 +638,7 @@ public sealed class BatchExecutor
             Row.Empty,
             batchContext.VariableStore,
             batchContext.VariableStore,
+            batchContext.Accountant,
             outerRow: null,
             sidecarRegistry: _catalog.SidecarRegistry,
             types: batchContext.Types);
@@ -895,7 +896,7 @@ public sealed class BatchExecutor
         BatchContext batchContext,
         CancellationToken ct)
     {
-        IQueryPlan plan = await _catalog.PlanAsync(statement).ConfigureAwait(false);
+        IQueryPlan plan = await _catalog.PlanAsync(statement, sourceText: null, batchContext).ConfigureAwait(false);
 
         await foreach (RowBatch batch in plan
             .ExecuteAsync(ct, streamingSink: null, batchContext)
@@ -913,7 +914,7 @@ public sealed class BatchExecutor
                     // managed-payload ValueRef so the binding survives the
                     // batch's recycle without going through VariableStore.
                     EvaluationFrame batchFrame = new(
-                        row, batch.Arena, batchContext.VariableStore,
+                        row, batch.Arena, batchContext.VariableStore, batchContext.Accountant,
                         outerRow: null,
                         sidecarRegistry: _catalog.SidecarRegistry,
                         types: batchContext.Types);
@@ -1116,7 +1117,7 @@ public sealed class BatchExecutor
         CancellationToken ct)
     {
         QueryStatement sourceQuery = new(forIn.Source);
-        IQueryPlan plan = await _catalog.PlanAsync(sourceQuery).ConfigureAwait(false);
+        IQueryPlan plan = await _catalog.PlanAsync(sourceQuery, sourceText: null, batchContext).ConfigureAwait(false);
 
         IReadOnlyList<string>? fieldNames = null;
         ushort rowTypeId = 0;
@@ -1143,7 +1144,7 @@ public sealed class BatchExecutor
                 // dependency and survives the batch recycle without
                 // touching VariableStore.
                 EvaluationFrame batchFrame = new(
-                    row, batch.Arena, batchContext.VariableStore,
+                    row, batch.Arena, batchContext.VariableStore, batchContext.Accountant,
                     outerRow: null,
                     sidecarRegistry: _catalog.SidecarRegistry,
                     types: batchContext.Types);
@@ -1395,7 +1396,7 @@ public sealed class BatchExecutor
         SubqueryExpression subquery, BatchContext batchContext, CancellationToken ct)
     {
         QueryStatement innerStatement = new(new SelectQueryExpression(subquery.Query));
-        IQueryPlan innerPlan = await _catalog.PlanAsync(innerStatement).ConfigureAwait(false);
+        IQueryPlan innerPlan = await _catalog.PlanAsync(innerStatement, sourceText: null, batchContext).ConfigureAwait(false);
 
         DataValue captured = default;
         bool haveValue = false;
@@ -1485,7 +1486,7 @@ public sealed class BatchExecutor
         QueryStatement synthetic = new(
             new SelectQueryExpression(
                 new SelectStatement(Columns: [new SelectColumn(rewritten)])));
-        IQueryPlan plan = await _catalog.PlanAsync(synthetic).ConfigureAwait(false);
+        IQueryPlan plan = await _catalog.PlanAsync(synthetic, sourceText: null, batchContext).ConfigureAwait(false);
 
         DataValue stable = default;
         bool captured = false;

@@ -131,6 +131,7 @@ internal sealed class DmlReturningPlan : IQueryPlan
                         capturedRow,
                         source: capturedBatch.Arena,
                         target: outArena,
+                        accountant: evaluator.Accountant,
                         sidecarRegistry: _catalog.SidecarRegistry);
 
                     DataValue[] outRow = _catalog.Pool.RentDataValues(projection.Count);

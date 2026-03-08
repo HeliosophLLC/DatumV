@@ -149,12 +149,10 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         // arena. They become unreachable when the caller's row batch
         // recycles, so no per-call cleanup is needed.
         IValueStore variableStore = frame.Target;
-        // Per-call accountant for the body's VariableScope. Procedural UDFs
-        // don't currently see the outer plan's accountant because
-        // EvaluationFrame doesn't carry one; the body's residency is
-        // accounted in this isolated island until that plumbing lands.
-        using MemoryAccountant bodyAccountant = new();
-        VariableScope scope = new(bodyAccountant);
+        // Procedural UDF body shares the surrounding plan's accountant via
+        // frame.Accountant — DECLARE'd payloads inside this body count
+        // against the outer budget the same way a top-level DECLARE would.
+        VariableScope scope = new(frame.Accountant);
 
         await BindParametersAsync(arguments, frame, variableStore, scope, cancellationToken).ConfigureAwait(false);
 
@@ -173,12 +171,14 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             sidecarRegistry: frame.SidecarRegistry,
             variableScope: scope,
             variableStore: variableStore,
-            typeRegistry: null);
+            typeRegistry: null,
+            accountant: frame.Accountant);
 
         EvaluationFrame bodyFrame = new(
             Row.Empty,
             variableStore,
             variableStore,
+            frame.Accountant,
             outerRow: null,
             sidecarRegistry: frame.SidecarRegistry,
             types: frame.Types);
@@ -258,11 +258,13 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                     _functions,
                     meter: null,
                     store: variableStore,
-                    sidecarRegistry: frame.SidecarRegistry);
+                    sidecarRegistry: frame.SidecarRegistry,
+                    accountant: frame.Accountant);
                 EvaluationFrame defaultFrame = new(
                     Row.Empty,
                     variableStore,
                     variableStore,
+                    frame.Accountant,
                     outerRow: null,
                     sidecarRegistry: frame.SidecarRegistry,
                     types: frame.Types);

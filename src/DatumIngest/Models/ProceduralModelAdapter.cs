@@ -164,6 +164,10 @@ public sealed class ProceduralModelAdapter : IModel
         // back to a fresh registry only when there's no outer one
         // (legacy / test scaffolding).
         TypeRegistry typeRegistry = types ?? new TypeRegistry();
+        // Per-call throwaway: IModel.InferBatchAsync does not yet thread
+        // a MemoryAccountant. The body's residency is accounted in this
+        // isolated island until the IModel API grows that parameter.
+        using MemoryAccountant accountant = new();
         try
         {
             ValueRef[] results = new ValueRef[rowCount];
@@ -185,6 +189,7 @@ public sealed class ProceduralModelAdapter : IModel
                     Row.Empty,
                     arena,
                     arena,
+                    accountant,
                     outerRow: null,
                     sidecarRegistry: null,
                     types: typeRegistry);

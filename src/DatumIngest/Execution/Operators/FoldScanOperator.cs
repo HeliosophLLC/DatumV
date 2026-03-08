@@ -67,18 +67,22 @@ public sealed class FoldScanOperator : IQueryOperator
     /// to the pool immediately instead of being pinned for the operator's lifetime.
     /// </para>
     /// <para>
-    /// <strong>Memory bound (Tier 2).</strong> A <see cref="MemoryEstimator"/> tracks
-    /// the materialised-row footprint when <see cref="ExecutionContext.MemoryBudgetBytes"/>
-    /// is set; if the budget is crossed, a <see cref="ExecutionException"/> is thrown
-    /// rather than silently OOMing. Spill-to-disk for the materialised rows + per-
-    /// partition external merge sort is on the roadmap (Tier 3 / Tier 4).
+    /// <strong>Memory bound (Tier 2).</strong> Reports each materialised row's
+    /// structural residency to the plan-wide <see cref="MemoryAccountant"/>;
+    /// when <see cref="MemoryAccountant.WouldExceedBudget"/> returns true, an
+    /// <see cref="ExecutionException"/> is thrown rather than silently OOMing.
+    /// Spill-to-disk for the materialised rows + per-partition external merge
+    /// sort is on the roadmap (Tier 3 / Tier 4).
     /// </para>
     /// </remarks>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+        // Structural per-row residency: DataValue cells (~20 bytes each) +
+        // ~32 bytes for the Row + List<Row> slot. Arena payloads live in
+        // context.Store (mmap, OS-paged) and aren't budgeted.
+        long perRowBytes = 0;
+        long residentBytesNotified = 0;
 
         // Under one-arena-per-query, all input/output values share `context.Store`.
         // RentAndCopyDataValues hits its same-store fast-path (no copy) when the input
@@ -99,6 +103,7 @@ public sealed class FoldScanOperator : IQueryOperator
                     if (sourceLookup is null && batch.Count > 0)
                     {
                         sourceLookup = batch.ColumnLookup;
+                        perRowBytes = 20L * sourceLookup.Count + 32L;
                     }
 
                     for (int i = 0; i < batch.Count; i++)
@@ -113,29 +118,23 @@ public sealed class FoldScanOperator : IQueryOperator
                         // different per-batch ColumnLookup references for the same
                         // logical schema, e.g. UNION ALL of two scans).
                         allRows.Add(new Row(sourceRow.ColumnLookup, copy));
+                        context.Accountant.NotifyMaterialized(perRowBytes);
+                        residentBytesNotified += perRowBytes;
 
-                        if (estimator is not null)
+                        // FoldScan has no spill mechanism — it buffers the
+                        // entire input in memory. When the plan-wide budget
+                        // is exhausted, throw rather than silently OOM. The
+                        // accountant sees upstream operators' residency too,
+                        // so this fires correctly when stacked under
+                        // materializing predecessors.
+                        if (context.Accountant.WouldExceedBudget())
                         {
-                            if (estimator.ShouldSample())
-                            {
-                                estimator.RecordSample(sourceRow);
-                            }
-
-                            estimator.IncrementRowCount();
-                            long estimatedMemory = estimator.EstimateTotalBytes();
-
-                            if (estimatedMemory > memoryBudget!.Value)
-                            {
-                                throw new ExecutionException(
-                                    $"FOLD/SCAN exceeded memory budget of {memoryBudget.Value} bytes "
-                                    + $"after materialising {allRows.Count} input rows. FOLD/SCAN currently "
-                                    + $"buffers the entire input in memory; spill-to-disk for this operator "
-                                    + $"is on the roadmap.");
-                            }
-                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                            {
-                                estimator.EscalateToEveryRow();
-                            }
+                            long budget = context.Accountant.MemoryBudgetBytes ?? 0;
+                            throw new ExecutionException(
+                                $"FOLD/SCAN exceeded memory budget of {budget} bytes "
+                                + $"after materialising {allRows.Count} input rows. FOLD/SCAN currently "
+                                + $"buffers the entire input in memory; spill-to-disk for this operator "
+                                + $"is on the roadmap.");
                         }
                     }
                 }
@@ -241,6 +240,14 @@ public sealed class FoldScanOperator : IQueryOperator
         }
         finally
         {
+            // Release the materialised-rows residency back to the plan-wide
+            // accountant; the List<Row> goes out of scope as this method
+            // returns.
+            if (residentBytesNotified > 0)
+            {
+                context.Accountant.NotifyReleased(residentBytesNotified);
+            }
+
             // Return the materialised rows' DataValue[] arrays. Each row's parts came
             // from pool.RentAndCopyDataValues during Step 1; symmetric ReturnRow here.
             foreach (Row row in allRows)

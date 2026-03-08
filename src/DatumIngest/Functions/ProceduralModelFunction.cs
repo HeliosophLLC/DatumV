@@ -128,12 +128,9 @@ public sealed class ProceduralModelFunction : IScalarFunction
         ReadOnlyMemory<ValueRef> arguments, EvaluationFrame frame, CancellationToken cancellationToken)
     {
         IValueStore variableStore = frame.Target;
-        // Per-call accountant for the body's VariableScope. Procedural model
-        // bodies don't currently see the outer plan's accountant because
-        // EvaluationFrame doesn't carry one; the body's residency is
-        // accounted in this isolated island until that plumbing lands.
-        using MemoryAccountant bodyAccountant = new();
-        VariableScope scope = new(bodyAccountant);
+        // Body shares the surrounding plan's accountant via frame.Accountant —
+        // DECLARE'd payloads inside this body count against the outer budget.
+        VariableScope scope = new(frame.Accountant);
 
         await BindParametersAsync(arguments, frame, variableStore, scope, cancellationToken).ConfigureAwait(false);
 
@@ -147,7 +144,8 @@ public sealed class ProceduralModelFunction : IScalarFunction
             sidecarRegistry: frame.SidecarRegistry,
             variableScope: scope,
             variableStore: variableStore,
-            typeRegistry: frame.Types);
+            typeRegistry: frame.Types,
+            accountant: frame.Accountant);
 
         // The load-bearing tweak vs ProceduralUdfFunction: body frame
         // carries this model's descriptor so infer() can resolve its
@@ -156,6 +154,7 @@ public sealed class ProceduralModelFunction : IScalarFunction
             Row.Empty,
             variableStore,
             variableStore,
+            frame.Accountant,
             outerRow: null,
             sidecarRegistry: frame.SidecarRegistry,
             types: frame.Types,
@@ -261,11 +260,13 @@ public sealed class ProceduralModelFunction : IScalarFunction
                     _functions,
                     meter: null,
                     store: variableStore,
-                    sidecarRegistry: frame.SidecarRegistry);
+                    sidecarRegistry: frame.SidecarRegistry,
+                    accountant: frame.Accountant);
                 EvaluationFrame defaultFrame = new(
                     Row.Empty,
                     variableStore,
                     variableStore,
+                    frame.Accountant,
                     outerRow: null,
                     sidecarRegistry: frame.SidecarRegistry,
                     types: frame.Types);

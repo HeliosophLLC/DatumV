@@ -24,7 +24,8 @@ namespace DatumIngest.Catalog.Executors;
 /// </remarks>
 internal static class DeleteExecutor
 {
-    public static async Task<IQueryPlan> ExecuteAsync(TableCatalog catalog, DeleteStatement delete)
+    public static async Task<IQueryPlan> ExecuteAsync(
+        TableCatalog catalog, DeleteStatement delete, BatchContext? batchContext = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(delete);
@@ -43,7 +44,7 @@ internal static class DeleteExecutor
                 "is read-only (CanDeleteRows = false).");
         }
 
-        IReadOnlyList<RowBatch>? captured = await ApplyAsync(catalog, provider, delete).ConfigureAwait(false);
+        IReadOnlyList<RowBatch>? captured = await ApplyAsync(catalog, provider, delete, batchContext).ConfigureAwait(false);
 
         if (captured is null || delete.Returning is null)
         {
@@ -60,8 +61,10 @@ internal static class DeleteExecutor
     }
 
     private static async Task<IReadOnlyList<RowBatch>?> ApplyAsync(
-        TableCatalog catalog, ITableProvider provider, DeleteStatement delete)
+        TableCatalog catalog, ITableProvider provider, DeleteStatement delete, BatchContext? batchContext)
     {
+        // See UpdateExecutor for the non-null fallback rationale.
+        MemoryAccountant accountant = batchContext is not null ? batchContext.Accountant : new MemoryAccountant();
         Expression? predicate = delete.Where;
         bool captureRows = delete.Returning is not null;
         Schema schema = provider.GetSchema();
@@ -126,6 +129,7 @@ internal static class DeleteExecutor
                                 row,
                                 sourceArena,
                                 sourceArena,
+                                accountant!,
                                 outerRow: null,
                                 sidecarRegistry: catalog.SidecarRegistry,
                                 types: null);
@@ -136,6 +140,10 @@ internal static class DeleteExecutor
 
                         if (!matches) continue;
                         matched.Add(rowIndex);
+                        // 8 bytes per index in the matched list. Accountant
+                        // notification keeps DELETE residency visible alongside
+                        // UPDATE/INSERT for batch-wide budgeting and profiling.
+                        accountant?.NotifyMaterialized(sizeof(long));
 
                         // RETURNING capture: pre-delete image. Stabilize each
                         // cell from the scan batch's arena into the capture
@@ -181,6 +189,10 @@ internal static class DeleteExecutor
         {
             provider.DeleteRows(matched);
         }
+
+        // Release the matched-index buffer's bytes from the accountant; the
+        // list goes out of scope when this method returns and is GC-eligible.
+        accountant?.NotifyReleased(matched.Count * sizeof(long));
 
         return capturedBatches;
     }

@@ -143,10 +143,14 @@ internal sealed class GraceHashJoinExecutor
             ExecutionTracer.Write($"JOIN Phase1a start  build={_label}  join={_joinType}  budget={ExecutionTracer.FormatBytes(_memoryBudgetBytes)}  partitions={partitionCount}");
         }
 
+        // Structural per-row residency in the in-memory build partitions.
+        // Declared outside the try so the finally block can release whatever
+        // we still hold accounted at scope end.
+        long perRowBytes = 0;
+        long residentBytesNotified = 0;
+
         try
         {
-            // ── Phase 1: Partition the build side ──
-            MemoryEstimator buildEstimator = new();
             Row? firstBuildRow = null;
             bool hasNullKey = false;
             long inMemoryRowCount = 0;
@@ -193,26 +197,21 @@ internal sealed class GraceHashJoinExecutor
                     if (!partitions[partitionIndex].IsBuildSpilled)
                     {
                         inMemoryRowCount++;
-                    }
+                        if (perRowBytes == 0)
+                        {
+                            perRowBytes = 20L * buildRow.FieldCount + 32L;
+                        }
+                        context.Accountant.NotifyMaterialized(perRowBytes);
+                        residentBytesNotified += perRowBytes;
 
-                    // Memory monitoring with sampling.
-                    if (buildEstimator.ShouldSample())
-                    {
-                        buildEstimator.RecordSample(buildRow);
-                    }
-
-                    buildEstimator.IncrementRowCount();
-
-                    // Estimate memory for in-memory rows only — spilled rows consume disk, not RAM.
-                    long estimatedMemory = buildEstimator.EstimateBytesForRowCount(inMemoryRowCount);
-
-                    if (estimatedMemory > _memoryBudgetBytes)
-                    {
-                        inMemoryRowCount -= SpillLargestPartition(partitions);
-                    }
-                    else if (estimatedMemory > (long)(_memoryBudgetBytes * MemoryEstimator.EscalationThreshold))
-                    {
-                        buildEstimator.EscalateToEveryRow();
+                        if (context.Accountant.WouldExceedBudget())
+                        {
+                            long spilled = SpillLargestPartition(partitions);
+                            inMemoryRowCount -= spilled;
+                            long released = spilled * perRowBytes;
+                            context.Accountant.NotifyReleased(released);
+                            residentBytesNotified -= released;
+                        }
                     }
                 }
                 context.ReturnRowBatch(buildBatch);
@@ -223,7 +222,7 @@ internal sealed class GraceHashJoinExecutor
                 int spilledPartitions = 0;
                 foreach (SpillPartition p in partitions) if (p.IsBuildSpilled) spilledPartitions++;
                 long processMemory = GC.GetTotalMemory(forceFullCollection: false);
-                ExecutionTracer.Write($"JOIN Phase1a done   build_rows={buildRowCount:N0}  in_memory={inMemoryRowCount:N0}  estimated_total={ExecutionTracer.FormatBytes(buildEstimator.EstimateTotalBytes())}  estimated_inmem={ExecutionTracer.FormatBytes(buildEstimator.EstimateBytesForRowCount(inMemoryRowCount))}  spilled={spilledPartitions}/{partitionCount}  process_mem={ExecutionTracer.FormatBytes(processMemory)}  elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
+                ExecutionTracer.Write($"JOIN Phase1a done   build_rows={buildRowCount:N0}  in_memory={inMemoryRowCount:N0}  in_mem_bytes={ExecutionTracer.FormatBytes(residentBytesNotified)}  spilled={spilledPartitions}/{partitionCount}  process_mem={ExecutionTracer.FormatBytes(processMemory)}  elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
             }
 
             // NOT IN null semantics: if any build-side key is NULL, the entire result is empty.
@@ -391,6 +390,14 @@ internal sealed class GraceHashJoinExecutor
         }
         finally
         {
+            // Release any residency we still hold for in-memory build
+            // partitions. After spill-driven release inside the loop this is
+            // only what survived in unspilled partitions.
+            if (residentBytesNotified > 0)
+            {
+                context.Accountant.NotifyReleased(residentBytesNotified);
+            }
+
             if (ExecutionTracer.IsEnabled)
             {
                 ExecutionTracer.Write($"JOIN complete       build={_label}  total_build={buildRowCount:N0}  total_probe={phase1bProbeCount:N0}  total_elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
@@ -661,8 +668,13 @@ internal sealed class GraceHashJoinExecutor
             CompositeKeyHashMap<List<(int Index, Row Row)>>? compositeKeyTable =
                 useSingleKey ? null : new(initialHashCapacity);
 
-            long buildSizeEstimate = 0;
-            MemoryEstimator partitionEstimator = new();
+            // Per-partition structural residency. NotifyMaterialized fires
+            // per buildRowList add; release at partition end so the next
+            // partition starts fresh. Arena payloads each row references
+            // live in the partition's retention arena (mmap, OS-paged) and
+            // aren't budgeted.
+            long perRowBytes = 0;
+            long partitionResidentBytes = 0;
             bool partitionBudgetExceeded = false;
 
             // Load build rows and build the hash table simultaneously.
@@ -676,13 +688,12 @@ internal sealed class GraceHashJoinExecutor
                 int buildIndex = buildRowList.Count;
                 buildRowList.Add(buildRow);
 
-                if (partitionEstimator.ShouldSample())
+                if (perRowBytes == 0)
                 {
-                    partitionEstimator.RecordSample(buildRow);
+                    perRowBytes = 20L * buildRow.FieldCount + 32L;
                 }
-
-                partitionEstimator.IncrementRowCount();
-                buildSizeEstimate = partitionEstimator.EstimateTotalBytes();
+                context.Accountant.NotifyMaterialized(perRowBytes);
+                partitionResidentBytes += perRowBytes;
 
                 if (partitionBudgetExceeded)
                 {
@@ -691,15 +702,10 @@ internal sealed class GraceHashJoinExecutor
                     continue;
                 }
 
-                if (buildSizeEstimate > _memoryBudgetBytes && recursionDepth < MaxRecursionDepth)
+                if (context.Accountant.WouldExceedBudget() && recursionDepth < MaxRecursionDepth)
                 {
                     partitionBudgetExceeded = true;
                     continue;
-                }
-
-                if (buildSizeEstimate > (long)(_memoryBudgetBytes * MemoryEstimator.EscalationThreshold))
-                {
-                    partitionEstimator.EscalateToEveryRow();
                 }
 
                 if (useSingleKey)
@@ -755,6 +761,13 @@ internal sealed class GraceHashJoinExecutor
                     yield return recursionBatch;
                 }
 
+                // Release this partition's accounted residency before moving
+                // on. Recursion's own accounting is self-contained.
+                if (partitionResidentBytes > 0)
+                {
+                    context.Accountant.NotifyReleased(partitionResidentBytes);
+                    partitionResidentBytes = 0;
+                }
                 continue;
             }
 
@@ -939,6 +952,14 @@ internal sealed class GraceHashJoinExecutor
                     }
                 }
             }
+
+            // End of partition processing — release this partition's
+            // build-row residency before moving to the next.
+            if (partitionResidentBytes > 0)
+            {
+                context.Accountant.NotifyReleased(partitionResidentBytes);
+                partitionResidentBytes = 0;
+            }
         }
 
         if (outputBatch is not null)
@@ -974,25 +995,43 @@ internal sealed class GraceHashJoinExecutor
 
         try
         {
-            // Re-partition build rows with shifted hash bits.
-            MemoryEstimator estimator = new();
+            // Re-partition build rows with shifted hash bits. Structural
+            // per-row residency tracked against the plan-wide accountant.
+            long perRowBytes = 0;
+            long residentBytesNotified = 0;
 
             foreach (Row buildRow in buildRows)
             {
                 int partitionIndex = await AssignPartitionAsync(buildRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
                 subPartitions[partitionIndex].AddBuildRow(buildRow, sourceArena);
 
-                if (estimator.ShouldSample())
+                if (perRowBytes == 0)
                 {
-                    estimator.RecordSample(buildRow);
+                    perRowBytes = 20L * buildRow.FieldCount + 32L;
                 }
-
-                estimator.IncrementRowCount();
-
-                if (estimator.EstimateTotalBytes() > _memoryBudgetBytes)
+                if (!subPartitions[partitionIndex].IsBuildSpilled)
                 {
-                    SpillLargestPartition(subPartitions);
+                    context.Accountant.NotifyMaterialized(perRowBytes);
+                    residentBytesNotified += perRowBytes;
+
+                    if (context.Accountant.WouldExceedBudget())
+                    {
+                        long spilled = SpillLargestPartition(subPartitions);
+                        long released = spilled * perRowBytes;
+                        context.Accountant.NotifyReleased(released);
+                        residentBytesNotified -= released;
+                    }
                 }
+            }
+
+            // After re-partitioning, the buildRows list is fully drained
+            // into subPartitions (in-memory or spilled). Release whatever
+            // we still hold accounted for in-memory sub-partitions; their
+            // bytes will be re-accounted when JoinAllPartitionsAsync probes
+            // them in Phase 2.
+            if (residentBytesNotified > 0)
+            {
+                context.Accountant.NotifyReleased(residentBytesNotified);
             }
 
             // Re-partition probe rows.

@@ -39,6 +39,8 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     private Pool? _pool;
     private SpillReaderWriter? _spiller;
     private ColumnLookup? _materializedSchema;
+    private MemoryAccountant? _accountant;
+    private long _residentBytesNotified;
 
     /// <summary>
     /// Creates a new CTE operator.
@@ -207,10 +209,14 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     {
         Pool pool = context.Pool;
         _pool = pool;
+        _accountant = context.Accountant;
         _materializedBatches = [];
 
-        long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+        // Per-row residency for the cached RowBatch: DataValue cells +
+        // a Row + List<RowBatch> slot. Arena payloads each batch references
+        // live in the batch's own arena (mmap, OS-paged) and aren't budgeted.
+        // Computed lazily once we know fieldCount.
+        long perRowBytes = 0;
 
         await foreach (RowBatch inputBatch in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
         {
@@ -234,19 +240,17 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
             RowBatch cacheBatch = pool.RebindRowBatch(inputBatch, _materializedSchema);
             _materializedBatches.Add(cacheBatch);
 
-            if (estimator is not null)
+            if (perRowBytes == 0)
             {
-                estimator.RecordBatch(cacheBatch);
-                long estimatedMemory = estimator.EstimateTotalBytes();
+                perRowBytes = 20L * _materializedSchema.Count + 32L;
+            }
+            long batchBytes = perRowBytes * cacheBatch.Count;
+            context.Accountant.NotifyMaterialized(batchBytes);
+            _residentBytesNotified += batchBytes;
 
-                if (estimatedMemory > memoryBudget!.Value)
-                {
-                    SpillCacheToDisk(context);
-                }
-                else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                {
-                    estimator.EscalateToEveryRow();
-                }
+            if (context.Accountant.WouldExceedBudget())
+            {
+                SpillCacheToDisk(context);
             }
         }
     }
@@ -287,6 +291,15 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
         }
 
         _materializedBatches = null;
+
+        // Cached rows are now on disk; release their accounted bytes from
+        // the plan-wide counter. Subsequent input batches bypass the cache
+        // and write straight through the spiller.
+        if (_residentBytesNotified > 0)
+        {
+            context.Accountant.NotifyReleased(_residentBytesNotified);
+            _residentBytesNotified = 0;
+        }
     }
 
     /// <summary>
@@ -322,6 +335,14 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
                 _pool.ReturnRowBatch(batch);
             }
             _materializedBatches = null;
+        }
+
+        // Release any residency we still hold (in-memory cache that wasn't
+        // spilled). After spill, _residentBytesNotified is already zero.
+        if (_residentBytesNotified > 0 && _accountant is not null)
+        {
+            _accountant.NotifyReleased(_residentBytesNotified);
+            _residentBytesNotified = 0;
         }
 
         _spiller?.Dispose();

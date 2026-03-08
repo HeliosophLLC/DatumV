@@ -509,7 +509,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <c>SELECT &lt;expr&gt;</c> for DECLARE / SET initialisers).
     /// </summary>
     public Task<IQueryPlan> PlanAsync(Statement statement)
-        => PlanAsync(statement, sourceText: null);
+        => PlanAsync(statement, sourceText: null, batchContext: null);
+
+    /// <summary>
+    /// Convenience overload accepting <paramref name="sourceText"/> but no
+    /// batch context — used by standalone planners (shell, web, migrations)
+    /// that don't run inside a procedural batch.
+    /// </summary>
+    public Task<IQueryPlan> PlanAsync(Statement statement, string? sourceText)
+        => PlanAsync(statement, sourceText, batchContext: null);
 
     /// <summary>
     /// Async statement dispatch — the canonical planning entry point. DDL
@@ -529,7 +537,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// have the per-statement slice; callers that built the AST
     /// programmatically pass <see langword="null"/>.
     /// </remarks>
-    public async Task<IQueryPlan> PlanAsync(Statement statement, string? sourceText)
+    public async Task<IQueryPlan> PlanAsync(Statement statement, string? sourceText, BatchContext? batchContext)
     {
         switch (statement)
         {
@@ -611,13 +619,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return await AlterTableExecutor.AlterColumnSetAsync(this, alterColumnSet, sourceText).ConfigureAwait(false);
 
             case InsertStatement insert:
-                return await InsertExecutor.ExecuteAsync(this, insert).ConfigureAwait(false);
+                return await InsertExecutor.ExecuteAsync(this, insert, batchContext).ConfigureAwait(false);
 
             case UpdateStatement update:
-                return await UpdateExecutor.ExecuteAsync(this, update).ConfigureAwait(false);
+                return await UpdateExecutor.ExecuteAsync(this, update, batchContext).ConfigureAwait(false);
 
             case DeleteStatement delete:
-                return await DeleteExecutor.ExecuteAsync(this, delete).ConfigureAwait(false);
+                return await DeleteExecutor.ExecuteAsync(this, delete, batchContext).ConfigureAwait(false);
 
             default:
                 throw new NotSupportedException(

@@ -29,7 +29,7 @@ public sealed class Tier3PostprocessTests : ServiceTestBase
     {
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, types: new TypeRegistry());
+        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 
     private static ValueRef F32(params float[] values) =>
@@ -37,7 +37,7 @@ public sealed class Tier3PostprocessTests : ServiceTestBase
 
     private static async Task<ValueRef> InvokeAsync(IScalarFunction fn, params ValueRef[] args)
         => await fn.ExecuteAsync(args.AsMemory(),
-            new EvaluationFrame(Row.Empty, new Arena(), new Arena(), types: new TypeRegistry()),
+            new EvaluationFrame(Row.Empty, new Arena(), new Arena(), new MemoryAccountant(), types: new TypeRegistry()),
             CancellationToken.None);
 
     private static float[] AsFloatArr(ValueRef v) => (float[])v.Materialized!;

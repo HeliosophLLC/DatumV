@@ -90,8 +90,12 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
         }
 
         Pool pool = context.Pool;
-        long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+        // Structural per-distinct-row residency. Computed lazily once we see
+        // the first row (need columnCount). 20 bytes per DataValue cell +
+        // ~48 bytes for the HashSet slot (hash, key, next). Arena payloads
+        // referenced by the keys live in context.Store (mmap, OS-paged).
+        long perRowBytes = 0;
+        long residentBytesNotified = 0;
 
         // Under one-arena-per-query, dedup keys + spill partition buffers + output
         // batches all share `context.Store`. The QueryPlan owns this arena's
@@ -134,6 +138,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                         if (columnCount == -1)
                         {
                             columnCount = row.FieldCount;
+                            perRowBytes = 20L * columnCount + 48L;
                             if (columnCount == 1)
                             {
                                 singleKeySet = new HashSet<DataValue>();
@@ -198,33 +203,26 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
 
                         if (isNew)
                         {
-                            if (estimator is not null)
+                            // Account for the in-memory hash-set slot for
+                            // this new distinct key. Subsequent budget check
+                            // can then see plan-wide residency (including any
+                            // upstream materializing operator's bytes).
+                            context.Accountant.NotifyMaterialized(perRowBytes);
+                            residentBytesNotified += perRowBytes;
+
+                            if (context.Accountant.WouldExceedBudget())
                             {
-                                if (estimator.ShouldSample())
-                                {
-                                    estimator.RecordSample(row);
-                                }
-
-                                estimator.IncrementRowCount();
-                                long estimatedMemory = estimator.EstimateTotalBytes();
-
-                                if (estimatedMemory > memoryBudget!.Value)
-                                {
-                                    SpillingTriggered = true;
-                                    int hint = (int)Math.Min(memoryBudget.Value / 2, int.MaxValue);
-                                    spiller = new SpillReaderWriter(
-                                        pool, schema!, context.SpillDirectory,
-                                        initialArenaCapacity: hint,
-                                        partitionCount: SpillPartitionCount);
-                                    partitionBuffers = new RowBatch?[SpillPartitionCount];
-                                    // The current row stays in the in-memory set + emitted
-                                    // path; subsequent rows hit the SpillingTriggered branch
-                                    // above and go to spill only.
-                                }
-                                else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                                {
-                                    estimator.EscalateToEveryRow();
-                                }
+                                SpillingTriggered = true;
+                                long budget = context.Accountant.MemoryBudgetBytes ?? long.MaxValue;
+                                int hint = (int)Math.Min(budget / 2, int.MaxValue);
+                                spiller = new SpillReaderWriter(
+                                    pool, schema!, context.SpillDirectory,
+                                    initialArenaCapacity: hint,
+                                    partitionCount: SpillPartitionCount);
+                                partitionBuffers = new RowBatch?[SpillPartitionCount];
+                                // The current row stays in the in-memory set + emitted
+                                // path; subsequent rows hit the SpillingTriggered branch
+                                // above and go to spill only.
                             }
 
                             outputBatch ??= context.RentRowBatch(schema!);
@@ -349,6 +347,15 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
         }
         finally
         {
+            // Release the in-memory hash-set slot bytes notified during
+            // the scan. The set's payloads live in context.Store (mmap)
+            // and are not separately accounted; only the slot residency
+            // counted toward the budget.
+            if (residentBytesNotified > 0)
+            {
+                context.Accountant.NotifyReleased(residentBytesNotified);
+            }
+
             if (partitionBuffers is not null)
             {
                 for (int p = 0; p < partitionBuffers.Length; p++)

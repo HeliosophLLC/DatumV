@@ -185,7 +185,7 @@ internal static class ColumnDefinitionResolver
         ExpressionEvaluator evaluator = new(catalog.Functions, store: probeArena);
         ColumnLookup emptyLookup = new(Array.Empty<string>());
         Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
-        EvaluationFrame frame = new(emptyRow, probeArena, probeArena);
+        EvaluationFrame frame = new(emptyRow, probeArena, probeArena, evaluator.Accountant);
 
         // Build a column-info shim with the target kind/nullable/array
         // shape so ConvertValueRefToTarget validates against the real

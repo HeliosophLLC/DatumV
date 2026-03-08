@@ -24,7 +24,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
     private static async Task<DataValue> EvalAsync(IndexAccessExpression access, Row row, Arena arena)
     {
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
-        EvaluationFrame frame = new(row, arena, arena);
+        EvaluationFrame frame = new(row, arena, arena, evaluator.Accountant);
         return await evaluator.EvaluateAsync(access, frame);
     }
 
@@ -32,7 +32,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
         IndexAccessExpression access, Row row, Arena arena, TypeRegistry registry)
     {
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), typeRegistry: registry);
-        EvaluationFrame frame = new(row, arena, arena);
+        EvaluationFrame frame = new(row, arena, arena, evaluator.Accountant);
         return await evaluator.EvaluateAsync(access, frame);
     }
 

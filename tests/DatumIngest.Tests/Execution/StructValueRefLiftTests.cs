@@ -47,7 +47,7 @@ public class StructValueRefLiftTests : ServiceTestBase
             DataValue array = DataValue.FromStructArray([s0, s1], arena, (ushort)structTypeId);
 
             ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), typeRegistry: registry);
-            EvaluationFrame frame = new(MakeRow(("detections", array)), arena, arena);
+            EvaluationFrame frame = new(MakeRow(("detections", array)), arena, arena, evaluator.Accountant);
 
             ValueRef lifted = await evaluator.EvaluateAsValueRefAsync(
                 new ColumnReference("detections"), frame);
@@ -108,7 +108,7 @@ public class StructValueRefLiftTests : ServiceTestBase
             DataValue array = DataValue.FromStructArray([det], arena, (ushort)detectionTypeId);
 
             ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), typeRegistry: registry);
-            EvaluationFrame frame = new(MakeRow(("faces", array)), arena, arena);
+            EvaluationFrame frame = new(MakeRow(("faces", array)), arena, arena, evaluator.Accountant);
 
             ValueRef lifted = await evaluator.EvaluateAsValueRefAsync(
                 new ColumnReference("faces"), frame);
@@ -149,7 +149,7 @@ public class StructValueRefLiftTests : ServiceTestBase
         {
             DataValue nullArray = DataValue.NullArrayOf(DataKind.Struct);
             ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
-            EvaluationFrame frame = new(MakeRow(("detections", nullArray)), arena, arena);
+            EvaluationFrame frame = new(MakeRow(("detections", nullArray)), arena, arena, evaluator.Accountant);
 
             ValueRef lifted = await evaluator.EvaluateAsValueRefAsync(
                 new ColumnReference("detections"), frame);
@@ -182,7 +182,7 @@ public class StructValueRefLiftTests : ServiceTestBase
             DataValue s = DataValue.FromStruct(fields, arena, (ushort)typeId);
 
             ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), typeRegistry: registry);
-            EvaluationFrame frame = new(MakeRow(("s", s)), arena, arena);
+            EvaluationFrame frame = new(MakeRow(("s", s)), arena, arena, evaluator.Accountant);
 
             ValueRef lifted = await evaluator.EvaluateAsValueRefAsync(
                 new ColumnReference("s"), frame);
