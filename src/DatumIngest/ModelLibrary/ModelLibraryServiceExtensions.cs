@@ -8,17 +8,29 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// DI registration for the model library: catalog manifest reader, HF Hub
-/// HTTP client, license-acceptance store, and the download orchestrator.
+/// DI registration for the model library: catalog manifest reader, the
+/// per-channel <see cref="IModelSourceClient"/>s, license-acceptance store,
+/// and the download orchestrator.
 /// </summary>
 public static class ModelLibraryServiceExtensions
 {
     /// <summary>
     /// Registers the model library services. The caller must separately
-    /// register an <see cref="IDownloadProgressReporter"/> â€” the Web host
+    /// register an <see cref="IDownloadProgressReporter"/> — the Web host
     /// registers a SignalR-backed implementation; tests and CLI consumers
     /// typically register <see cref="NullDownloadProgressReporter"/>.
     /// </summary>
+    /// <remarks>
+    /// One <see cref="IModelSourceClient"/> is registered per channel
+    /// (HuggingFace, GitHub release, plain HTTPS). The download
+    /// orchestrator resolves them as an <see cref="IEnumerable{T}"/> and
+    /// dispatches each catalog entry's <see cref="CatalogSource"/> to the
+    /// matching client by its <see cref="IModelSourceClient.SupportedType"/>.
+    /// Adding a new source kind = new record subtype on
+    /// <see cref="CatalogSource"/> + one <c>AddHttpClient&lt;T&gt;</c>
+    /// here + adding it to the dispatch switch in
+    /// <c>ModelDownloadService.ResolveClient</c>.
+    /// </remarks>
     public static IServiceCollection AddModelLibrary(
         this IServiceCollection services,
         ModelLibraryOptions options)
@@ -26,7 +38,20 @@ public static class ModelLibraryServiceExtensions
         services.AddSingleton(options);
         services.AddSingleton<IManifestStore, ManifestStore>();
         services.AddSingleton<ILicenseAcceptanceService, LicenseAcceptanceService>();
-        services.AddHttpClient<HfHubClient>();
+
+        // Each source client gets its own typed HttpClient so handler
+        // pools, BaseAddress, and default headers stay isolated.
+        services.AddHttpClient<HuggingFaceSourceClient>();
+        services.AddHttpClient<GithubReleaseSourceClient>();
+        services.AddHttpClient<HttpsSourceClient>();
+        // Expose each as IModelSourceClient so the download orchestrator
+        // resolves them as IEnumerable<IModelSourceClient> and dispatches
+        // by SupportedType. Singletons because the typed HttpClient factory
+        // itself manages handler lifetimes.
+        services.AddSingleton<IModelSourceClient>(sp => sp.GetRequiredService<HuggingFaceSourceClient>());
+        services.AddSingleton<IModelSourceClient>(sp => sp.GetRequiredService<GithubReleaseSourceClient>());
+        services.AddSingleton<IModelSourceClient>(sp => sp.GetRequiredService<HttpsSourceClient>());
+
         // Default to the no-op installer so tests and CLI consumers (no SQL
         // catalog) don't need to think about install state. The Web host
         // replaces this with a catalog-backed installer before resolving.

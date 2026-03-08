@@ -1,8 +1,9 @@
-﻿// TODO: fold proper XML doc comments + a JsonSerializerContext into a follow-up PR.
+// TODO: fold proper XML doc comments + a JsonSerializerContext into a follow-up PR.
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
 using System.Collections.Concurrent;
+using System.Text;
 
 using Microsoft.Extensions.Logging;
 
@@ -11,7 +12,7 @@ namespace DatumIngest.ModelLibrary;
 internal sealed class ModelDownloadService : IModelDownloadService
 {
     private readonly IManifestStore _store;
-    private readonly HfHubClient _hub;
+    private readonly IReadOnlyDictionary<string, IModelSourceClient> _sources;
     private readonly ILicenseAcceptanceService _licenses;
     private readonly IDownloadProgressReporter _reporter;
     private readonly IModelInstaller _installer;
@@ -25,7 +26,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
 
     public ModelDownloadService(
         IManifestStore store,
-        HfHubClient hub,
+        IEnumerable<IModelSourceClient> sourceClients,
         ILicenseAcceptanceService licenses,
         IDownloadProgressReporter reporter,
         IModelInstaller installer,
@@ -33,65 +34,84 @@ internal sealed class ModelDownloadService : IModelDownloadService
         ILogger<ModelDownloadService> logger)
     {
         _store = store;
-        _hub = hub;
         _licenses = licenses;
         _reporter = reporter;
         _installer = installer;
         _logger = logger;
         _modelsDirectory = options.ModelsDirectory;
+
+        // Build the per-type dispatch table once. Multiple clients with the
+        // same SupportedType is a DI misconfig — let it surface immediately
+        // instead of silently picking one.
+        Dictionary<string, IModelSourceClient> map = new(StringComparer.Ordinal);
+        foreach (IModelSourceClient client in sourceClients)
+        {
+            if (!map.TryAdd(client.SupportedType, client))
+            {
+                throw new InvalidOperationException(
+                    $"Multiple IModelSourceClient registrations for type '{client.SupportedType}'. " +
+                    "Each source type may have exactly one client implementation.");
+            }
+        }
+        _sources = map;
     }
 
     public async Task<ModelInstallState> ProbeAsync(string modelId, CancellationToken ct = default)
     {
         CatalogModel model = ResolveModel(modelId);
 
-        // Placeholders short-circuit before any I/O. Their HF repo doesn't
-        // exist yet (Heliosoph/* not uploaded), so a tree probe would 404
-        // and waste a network call. A local directory with the same name —
-        // empty leftover, prior failed download — doesn't change the fact
-        // that there's nothing to compare against.
+        // Placeholders short-circuit before any I/O. Their primary source
+        // doesn't exist yet (Heliosoph/* not uploaded), so a list probe
+        // would 404 and waste a network call. A local directory with the
+        // same name — empty leftover, prior failed download — doesn't
+        // change the fact that there's nothing to compare against.
         if (model.Placeholder) return ModelInstallState.NotDownloaded;
 
         string modelDir = Path.Combine(_modelsDirectory, model.Id);
-
         if (!Directory.Exists(modelDir)) return ModelInstallState.NotDownloaded;
 
-        // For ship-quality probes we'd cache the tree result. For v1 the
-        // probe-on-list-refresh case is acceptable; each probe is one HTTP
-        // call to HF and the response is ~10KB. We'd be over-engineering to
-        // cache before it's a hot path.
-        IReadOnlyList<HfTreeEntry> tree;
+        // Probe uses the first source's inventory as authoritative — for
+        // the on-disk presence check, we don't need to walk every source.
+        // If the first source can't list (network, gated repo without a
+        // token, deleted revision), we surface Partial rather than chasing
+        // the fallback list: probe is informational, the user can hit
+        // Install to trigger the real multi-source attempt.
+        CatalogSource primary = model.Sources[0];
+        IModelSourceClient client = ResolveClient(primary);
+
+        IReadOnlyList<SourceFile> inventory;
         try
         {
-            IReadOnlyList<HfTreeEntry> raw = await _hub.GetTreeAsync(
-                model.Source.Repo, model.Source.Revision, ct).ConfigureAwait(false);
-            tree = HfHubClient.FilterByIncludes(raw, model.Source.Include);
+            inventory = await client.ListFilesAsync(primary, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            // Network issue, gated repo, deleted revision — we can't tell
-            // installed-vs-not without the tree. Surface as Partial so the
-            // UI shows "needs attention" rather than a false-positive
-            // Downloaded.
-            _logger.LogWarning(ex, "Probe of {ModelId} could not reach HF tree", modelId);
+            _logger.LogWarning(
+                ex, "Probe of {ModelId} could not list files from primary source ({Type})",
+                modelId, client.SupportedType);
             return ModelInstallState.Partial;
         }
 
         int present = 0;
-        foreach (HfTreeEntry entry in tree)
+        foreach (SourceFile entry in inventory)
         {
             string localPath = Path.Combine(modelDir, entry.Path);
-            if (File.Exists(localPath) && new FileInfo(localPath).Length == entry.Size) present++;
+            if (!File.Exists(localPath)) continue;
+            // Size-of-zero in the inventory means "source didn't report a
+            // size" (github-release / https). We can't compare against
+            // anything, so trust the file's existence as proof of presence.
+            if (entry.Size == 0) { present++; continue; }
+            if (new FileInfo(localPath).Length == entry.Size) present++;
         }
 
         if (present == 0) return ModelInstallState.NotDownloaded;
-        if (present < tree.Count) return ModelInstallState.Partial;
+        if (present < inventory.Count) return ModelInstallState.Partial;
 
         // All files present on disk. For entries with no InstallSql,
         // NullModelInstaller answers true and we land at Installed — the
         // UI treats that as terminal ready-to-use. For entries with
         // InstallSql, the Web-side installer asks the SQL catalog whether
-        // the conventional model name (id with '-' → '_', schema "public")
+        // the conventional model name (id with '-' → '_', schema "models")
         // is registered. Missing registration means files-are-there-but-
         // install-hasn't-been-run; we surface that as Downloaded so the UI
         // can offer an Install affordance.
@@ -106,7 +126,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
         if (model.Placeholder)
         {
             throw new InvalidOperationException(
-                $"Model {modelId} is a placeholder — its HF repo has not been uploaded yet.");
+                $"Model {modelId} is a placeholder — its source repo has not been uploaded yet.");
         }
 
         // Gate: every license that requiresAcceptance must be accepted.
@@ -149,8 +169,8 @@ internal sealed class ModelDownloadService : IModelDownloadService
     public async Task<IReadOnlyDictionary<string, ModelInstallState>> ProbeAllAsync(
         CancellationToken ct = default)
     {
-        // Parallel probe. ProbeAsync short-circuits to NotInstalled when the
-        // model directory doesn't exist (no HF tree call), so for a fresh
+        // Parallel probe. ProbeAsync short-circuits to NotDownloaded when
+        // the model directory doesn't exist (no list call), so for a fresh
         // host with no installed models this is essentially N directory
         // existence checks — fast.
         IReadOnlyList<CatalogModel> models = _store.Manifest.Models;
@@ -225,64 +245,75 @@ internal sealed class ModelDownloadService : IModelDownloadService
         return Task.CompletedTask;
     }
 
+    // Sequential source-fallback loop. For each source in order:
+    //   1. Ask the client to list the file inventory.
+    //   2. Emit OnStarted with that inventory's totals (resets the UI's
+    //      progress bar for any prior failed-source attempt).
+    //   3. Download every file with per-file progress; verify sha256 if
+    //      the source surfaced one (HuggingFace LFS only today).
+    //   4. On any failure (list, download, hash mismatch) — log the
+    //      reason, append to the aggregate error, advance to the next
+    //      source. On final source's failure, emit OnFailed with the
+    //      collected reasons.
+    //   5. On success, emit OnComplete and (if InstallSql is set) the
+    //      OnInstalling / OnInstalled lifecycle around the SQL apply.
+    //
+    // Cancellation aborts the whole loop — no point trying the next source
+    // when the user pulled the plug.
     private async Task RunDownloadAsync(CatalogModel model, CancellationToken ct)
     {
         string modelDir = Path.Combine(_modelsDirectory, model.Id);
         Directory.CreateDirectory(modelDir);
 
+        StringBuilder failureLog = new();
+        bool anySourceSucceeded = false;
+
         try
         {
-            IReadOnlyList<HfTreeEntry> raw = await _hub.GetTreeAsync(
-                model.Source.Repo, model.Source.Revision, ct).ConfigureAwait(false);
-            IReadOnlyList<HfTreeEntry> files = HfHubClient.FilterByIncludes(raw, model.Source.Include);
-
-            long totalBytes = files.Sum(f => f.Size);
-            await _reporter.OnStartedAsync(
-                new ModelDownloadStarted(model.Id, files.Count, totalBytes), ct)
-                .ConfigureAwait(false);
-
-            long bytesAcrossModel = 0;
-            for (int i = 0; i < files.Count; i++)
+            for (int sourceIndex = 0; sourceIndex < model.Sources.Count; sourceIndex++)
             {
-                HfTreeEntry file = files[i];
-                string destPath = Path.Combine(modelDir, file.Path);
+                ct.ThrowIfCancellationRequested();
 
-                int index = i;
-                long fileSize = file.Size;
-                long bytesAtStart = bytesAcrossModel;
-                CancellationToken progressCt = ct;
-                var progress = new Progress<DownloadByteProgress>(p =>
+                CatalogSource source = model.Sources[sourceIndex];
+                IModelSourceClient client;
+                try
                 {
-                    // Fire-and-forget: convert to Task so a ValueTask backed
-                    // by IValueTaskSource (some custom reporter impls) isn't
-                    // discarded improperly. The Progress<T> callback is sync;
-                    // we don't want to block the download loop per emit.
-                    _ = _reporter.OnProgressAsync(new ModelDownloadProgress(
-                        ModelId: model.Id,
-                        CurrentFile: file.Path,
-                        FileIndex: index + 1,
-                        FileCount: files.Count,
-                        BytesReadInFile: p.BytesRead,
-                        BytesTotalInFile: p.BytesTotal ?? fileSize,
-                        BytesReadTotal: bytesAtStart + p.BytesRead,
-                        BytesTotalAcrossModel: totalBytes), progressCt).AsTask();
-                });
-
-                string actualSha = await _hub.DownloadFileAsync(
-                    model.Source.Repo, model.Source.Revision, file.Path,
-                    destPath, progress, ct).ConfigureAwait(false);
-
-                // Verify against the HF tree's lfs.sha256 if present. Small
-                // non-LFS files (config.json, tokenizer.json) have no
-                // sha256 in the tree response — we trust HTTPS for those.
-                if (file.Lfs is not null &&
-                    !string.Equals(file.Lfs.Sha256Hex, actualSha, StringComparison.OrdinalIgnoreCase))
+                    client = ResolveClient(source);
+                }
+                catch (Exception ex)
                 {
-                    throw new InvalidDataException(
-                        $"sha256 mismatch on {file.Path}: expected {file.Lfs.Sha256Hex}, got {actualSha}");
+                    failureLog.AppendLine($"source[{sourceIndex}] ({source.GetType().Name}): {ex.Message}");
+                    continue;
                 }
 
-                bytesAcrossModel += file.Size;
+                try
+                {
+                    await TryDownloadFromSourceAsync(
+                        model, modelDir, source, client, sourceIndex, ct).ConfigureAwait(false);
+                    anySourceSucceeded = true;
+                    break;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    string label = $"source[{sourceIndex}] ({client.SupportedType})";
+                    _logger.LogWarning(ex, "{ModelId}: {Label} failed; advancing to next source", model.Id, label);
+                    failureLog.AppendLine($"{label}: {ex.Message}");
+                }
+            }
+
+            if (!anySourceSucceeded)
+            {
+                string aggregate = failureLog.Length == 0
+                    ? "no sources configured"
+                    : "all sources failed: " + failureLog.ToString().TrimEnd();
+                await _reporter.OnFailedAsync(
+                    new ModelDownloadFailed(model.Id, aggregate), CancellationToken.None)
+                    .ConfigureAwait(false);
+                return;
             }
 
             await _reporter.OnCompleteAsync(
@@ -316,7 +347,10 @@ internal sealed class ModelDownloadService : IModelDownloadService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Download of {ModelId} failed", model.Id);
+            // Reaches here only for failures AFTER a source succeeded — i.e.
+            // install-SQL errors. Pre-success per-source errors are caught
+            // by the inner try and routed into failureLog above.
+            _logger.LogError(ex, "Post-download step failed for {ModelId}", model.Id);
             await _reporter.OnFailedAsync(
                 new ModelDownloadFailed(model.Id, ex.Message), CancellationToken.None)
                 .ConfigureAwait(false);
@@ -325,6 +359,100 @@ internal sealed class ModelDownloadService : IModelDownloadService
         {
             _active.TryRemove(model.Id, out _);
         }
+    }
+
+    // Single-source download attempt. Throws on any failure — the outer
+    // loop catches and advances to the next source.
+    private async Task TryDownloadFromSourceAsync(
+        CatalogModel model,
+        string modelDir,
+        CatalogSource source,
+        IModelSourceClient client,
+        int sourceIndex,
+        CancellationToken ct)
+    {
+        IReadOnlyList<SourceFile> files = await client.ListFilesAsync(source, ct).ConfigureAwait(false);
+        if (files.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"source[{sourceIndex}] returned an empty file inventory");
+        }
+
+        // Total bytes may be unknown for github-release / https sources
+        // (Size=0). The UI handles missing totals — leaves the percentage
+        // empty and shows elapsed-only. HF entries always have real sizes.
+        long totalBytes = files.Sum(f => f.Size);
+
+        await _reporter.OnStartedAsync(
+            new ModelDownloadStarted(model.Id, files.Count, totalBytes), ct)
+            .ConfigureAwait(false);
+
+        long bytesAcrossModel = 0;
+        for (int i = 0; i < files.Count; i++)
+        {
+            SourceFile file = files[i];
+            string destPath = Path.Combine(modelDir, file.Path);
+
+            int index = i;
+            long fileSize = file.Size;
+            long bytesAtStart = bytesAcrossModel;
+            CancellationToken progressCt = ct;
+            var progress = new Progress<DownloadByteProgress>(p =>
+            {
+                // Fire-and-forget: convert to Task so a ValueTask backed
+                // by IValueTaskSource (some custom reporter impls) isn't
+                // discarded improperly. The Progress<T> callback is sync;
+                // we don't want to block the download loop per emit.
+                _ = _reporter.OnProgressAsync(new ModelDownloadProgress(
+                    ModelId: model.Id,
+                    CurrentFile: file.Path,
+                    FileIndex: index + 1,
+                    FileCount: files.Count,
+                    BytesReadInFile: p.BytesRead,
+                    BytesTotalInFile: p.BytesTotal ?? fileSize,
+                    BytesReadTotal: bytesAtStart + p.BytesRead,
+                    BytesTotalAcrossModel: totalBytes), progressCt).AsTask();
+            });
+
+            string actualSha = await client.DownloadFileAsync(
+                source, file, destPath, progress, ct).ConfigureAwait(false);
+
+            // Verify only when the source advertised an expected hash.
+            // Null = source has no checksum API (github-release / https,
+            // and HF non-LFS files like config.json) — trust HTTPS.
+            if (file.Sha256 is { } expected &&
+                !string.Equals(expected, actualSha, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    $"sha256 mismatch on {file.Path}: expected {expected}, got {actualSha}");
+            }
+
+            // Accumulate using the known size from the inventory if present,
+            // otherwise approximate from observed bytes (the OnComplete will
+            // settle this; the bytesAcrossModel tracker is best-effort).
+            bytesAcrossModel += file.Size > 0 ? file.Size : 0;
+        }
+    }
+
+    private IModelSourceClient ResolveClient(CatalogSource source)
+    {
+        string type = source switch
+        {
+            HuggingFaceSource => "huggingface",
+            GithubReleaseSource => "github-release",
+            HttpsSource => "https",
+            _ => throw new InvalidOperationException(
+                $"Unknown CatalogSource subtype '{source.GetType().Name}'. " +
+                "Add the type to ModelDownloadService.ResolveClient's switch and register " +
+                "an IModelSourceClient for its discriminator.")
+        };
+        if (!_sources.TryGetValue(type, out IModelSourceClient? client))
+        {
+            throw new InvalidOperationException(
+                $"No IModelSourceClient registered for source type '{type}'. " +
+                "Check the IServiceCollection wiring in AddModelLibrary.");
+        }
+        return client;
     }
 
     private CatalogModel ResolveModel(string modelId)

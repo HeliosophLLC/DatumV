@@ -3,6 +3,7 @@
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace DatumIngest.ModelLibrary;
 
@@ -42,7 +43,14 @@ public sealed record CatalogModel(
     // the model card; HF READMEs inherit from this list.
     IReadOnlyList<string> Attributions,
     CatalogHardware Hardware,
-    CatalogSource Source,
+    // Ordered list of sources the downloader will try in sequence. The first
+    // source that can list + deliver every expected file wins. Subsequent
+    // entries are fallbacks tried on per-source failure (404, network, hash
+    // mismatch, partial file inventory). Policy is "Heliosoph-mirror first":
+    // the pinned-sha Heliosoph mirror leads for reproducibility, and (when
+    // present) the upstream channel trails as a hedge against mirror
+    // unavailability. Always at least one entry.
+    IReadOnlyList<CatalogSource> Sources,
     int ApproxSizeMb,
     // Marks entries whose Source.Repo is not yet uploaded. The downloader
     // refuses to install placeholders so a half-finished upload doesn't
@@ -70,11 +78,45 @@ public sealed record CatalogHardware(
     // Free-form for now: "cpu" | "gpu" | "any" — informational, not enforced.
     string Preferred);
 
-public sealed record CatalogSource(
-    // Today: only "huggingface". Future could add "github-release" etc.
-    string Type,
+// Discriminated union over source channels. JSON wire form carries a
+// `type` discriminator; STJ resolves the right concrete subtype per entry.
+// New source kinds are added by:
+//   1. Declaring a record deriving from CatalogSource,
+//   2. Adding it to the [JsonDerivedType] list below,
+//   3. Registering an IModelSourceClient implementation whose
+//      SupportedType returns the same discriminator string.
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(HuggingFaceSource), "huggingface")]
+[JsonDerivedType(typeof(GithubReleaseSource), "github-release")]
+[JsonDerivedType(typeof(HttpsSource), "https")]
+public abstract record CatalogSource;
+
+// Files come from a HuggingFace Hub model repo at the given revision.
+// `Include` is a glob list filtered against the tree API's file listing —
+// most catalog entries pin one or two files; whole-repo entries (SD
+// bundles) use ["**/*"].
+public sealed record HuggingFaceSource(
     string Repo,
-    // Either "main" or a 40-char commit sha. Pinned shas give reproducibility;
-    // "main" is the v1 default while the catalog is hand-maintained.
+    // Either "main" or a 40-char commit sha. Pinned shas give
+    // reproducibility; "main" is acceptable for placeholder entries that
+    // haven't been uploaded yet — the downloader treats `placeholder: true`
+    // on the parent CatalogModel as the gate.
     string Revision,
-    IReadOnlyList<string> Include);
+    IReadOnlyList<string> Include) : CatalogSource;
+
+// Files come from a GitHub release. `Repo` is "owner/name"; `Tag` is the
+// release tag (e.g. "v0.0.0"); `Files` is the literal asset filename list
+// (no globs — GitHub releases are flat). No hash verification beyond
+// HTTPS — GitHub releases don't surface a per-asset checksum API.
+public sealed record GithubReleaseSource(
+    string Repo,
+    string Tag,
+    IReadOnlyList<string> Files) : CatalogSource;
+
+// Files come from one-off HTTPS URLs (Qualcomm AI Hub S3, custom mirrors,
+// etc.). Each `HttpsFile` carries the full URL and the destination filename
+// (relative to the model directory). No hash verification beyond HTTPS.
+public sealed record HttpsSource(
+    IReadOnlyList<HttpsFile> Urls) : CatalogSource;
+
+public sealed record HttpsFile(string Url, string DestFile);

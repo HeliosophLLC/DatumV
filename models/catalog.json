@@ -32,13 +32,15 @@
     "which returns lfs.sha256 per file. The manifest does NOT bake per-file",
     "hashes — they come from HF at download time.",
     "",
-    "Mirror fallback (future): a model's `source` may optionally include",
-    "`mirrorRepo` — a Heliosoph-hosted copy of the same weights. The downloader",
-    "tries `source.repo` first; on 404 it falls back to `mirrorRepo`. Lets us",
-    "keep authoritative upstream as primary (so users get bug fixes / new",
-    "revisions) while having a safety net against repo deletions. Currently",
-    "no entries declare a `mirrorRepo` — populated as Heliosoph mirrors come",
-    "online (see models/upload-plan.json).",
+    "Multi-source download: every entry declares `sources` as an ordered list.",
+    "The downloader tries each in order; the first source that can list and",
+    "deliver every expected file wins. Each source has a `type` discriminator",
+    "(today: 'huggingface', 'github-release', 'https') that selects which",
+    "client knows how to fetch from it. Heliosoph-mirror first is the policy:",
+    "pinned-sha Heliosoph entries lead for reproducibility; upstream URLs",
+    "trail as fallbacks (where present) so a Heliosoph outage doesn't block",
+    "downloads. Today most entries declare a single Heliosoph source — adding",
+    "an upstream fallback per entry is a future per-model judgement call.",
     "",
     "Install SQL: a model entry may optionally include `installSql`, a path",
     "(relative to models/) pointing at a SQL file that contains the canonical",
@@ -145,7 +147,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["sentence-transformers — Reimers & Gurevych (UKP Lab, TU Darmstadt)", "HuggingFace optimum (ONNX export)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "optimum/all-MiniLM-L6-v2", "revision": "10244843eba3d9e479b27a4b81c94b56d8e9f4f2", "include": ["*.onnx", "*.json", "*.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "optimum/all-MiniLM-L6-v2", "revision": "10244843eba3d9e479b27a4b81c94b56d8e9f4f2", "include": ["*.onnx", "*.json", "*.txt"] }],
       "installSql": "sql/all-minilm-l6-v2.sql",
       "approxSizeMb": 90
     },
@@ -158,7 +160,7 @@
       "licenseIds": ["mit"],
       "attributions": ["BAAI — Beijing Academy of Artificial Intelligence"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "BAAI/bge-small-en-v1.5", "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a", "include": ["onnx/*", "config.json", "tokenizer*", "special_tokens_map.json", "vocab.txt", "1_Pooling/*", "sentence_bert_config.json"] },
+      "sources": [{ "type": "huggingface", "repo": "BAAI/bge-small-en-v1.5", "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a", "include": ["onnx/*", "config.json", "tokenizer*", "special_tokens_map.json", "vocab.txt", "1_Pooling/*", "sentence_bert_config.json"] }],
       "approxSizeMb": 130
     },
     {
@@ -170,7 +172,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Jina AI"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "jinaai/jina-embeddings-v2-base-en", "revision": "322d4d7e2f35e84137961a65af894fda0385eb7a", "include": ["onnx/*", "config.json", "tokenizer*", "special_tokens_map.json", "vocab.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "jinaai/jina-embeddings-v2-base-en", "revision": "322d4d7e2f35e84137961a65af894fda0385eb7a", "include": ["onnx/*", "config.json", "tokenizer*", "special_tokens_map.json", "vocab.txt"] }],
       "approxSizeMb": 330
     },
     {
@@ -182,7 +184,7 @@
       "licenseIds": ["mit"],
       "attributions": ["BAAI — Beijing Academy of Artificial Intelligence", "Joshua Lochner / Xenova (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Xenova/bge-reranker-base", "revision": "280bcc27a84e0b898c251e06fddb25171bd9b101", "include": ["onnx/*", "*.json", "*.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "Xenova/bge-reranker-base", "revision": "280bcc27a84e0b898c251e06fddb25171bd9b101", "include": ["onnx/*", "*.json", "*.txt"] }],
       "approxSizeMb": 280
     },
 
@@ -195,7 +197,7 @@
       "licenseIds": ["mit"],
       "attributions": ["Cardiff NLP — Cardiff University", "Joshua Lochner / Xenova (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Xenova/twitter-roberta-base-sentiment-latest", "revision": "f3ec4d0925f90c3ca7ee7814f52d6ee7cf180445", "include": ["onnx/*", "*.json", "*.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "Xenova/twitter-roberta-base-sentiment-latest", "revision": "f3ec4d0925f90c3ca7ee7814f52d6ee7cf180445", "include": ["onnx/*", "*.json", "*.txt"] }],
       "approxSizeMb": 500
     },
 
@@ -208,7 +210,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Unitary", "Joshua Lochner / Xenova (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Xenova/toxic-bert", "revision": "65cbc2607cb7fad64f98d1e8a5a3d1f8577895fd", "include": ["onnx/*", "*.json", "*.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "Xenova/toxic-bert", "revision": "65cbc2607cb7fad64f98d1e8a5a3d1f8577895fd", "include": ["onnx/*", "*.json", "*.txt"] }],
       "approxSizeMb": 440
     },
     {
@@ -220,7 +222,7 @@
       "licenseIds": ["cc-by-4.0"],
       "attributions": ["deepset", "Joshua Lochner / Xenova (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Xenova/roberta-base", "revision": "bb432e3f5502192ed482fae6a2bb0124ef61c51d", "include": ["onnx/*", "*.json", "*.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "Xenova/roberta-base", "revision": "bb432e3f5502192ed482fae6a2bb0124ef61c51d", "include": ["onnx/*", "*.json", "*.txt"] }],
       "approxSizeMb": 500
     },
 
@@ -233,7 +235,7 @@
       "licenseIds": ["mit"],
       "attributions": ["Microsoft Research"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-fp16-onnx", "revision": "2e11444f5ad958b10719bdefba8bbaf53bb20ac9", "include": ["*.onnx", "*.json", "*.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-fp16-onnx", "revision": "2e11444f5ad958b10719bdefba8bbaf53bb20ac9", "include": ["*.onnx", "*.json", "*.txt"] }],
       "approxSizeMb": 523
     },
     {
@@ -245,7 +247,7 @@
       "licenseIds": ["mit"],
       "attributions": ["Microsoft Research"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-quantized-onnx", "revision": "319f5a0a4cafca00d363aeecf43bcbe45e79f48e", "include": ["*.onnx", "*.json", "*.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-quantized-onnx", "revision": "319f5a0a4cafca00d363aeecf43bcbe45e79f48e", "include": ["*.onnx", "*.json", "*.txt"] }],
       "approxSizeMb": 266
     },
     {
@@ -257,7 +259,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["nlpconnect — Ankur Singh et al."],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/vit-gpt2-image-captioning-onnx", "revision": "3dad8333f9ccef7b81a5bc5e6d71a4a341944ce1", "include": ["*.onnx", "*.json", "*.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/vit-gpt2-image-captioning-onnx", "revision": "3dad8333f9ccef7b81a5bc5e6d71a4a341944ce1", "include": ["*.onnx", "*.json", "*.txt"] }],
       "approxSizeMb": 1100,
       "placeholder": true
     },
@@ -271,7 +273,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_s.onnx", "coco-classes.json"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_s.onnx", "coco-classes.json"] }],
       "approxSizeMb": 35,
       "installSql": "sql/yolox-s.sql"
     },
@@ -284,7 +286,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_nano.onnx", "coco-classes.json"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_nano.onnx", "coco-classes.json"] }],
       "approxSizeMb": 4,
       "installSql": "sql/yolox-nano.sql"
     },
@@ -298,7 +300,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 2048, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_x.onnx", "coco-classes.json"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_x.onnx", "coco-classes.json"] }],
       "approxSizeMb": 378,
       "installSql": "sql/yolox-x.sql"
     },
@@ -311,7 +313,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_tiny.onnx", "coco-classes.json"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_tiny.onnx", "coco-classes.json"] }],
       "approxSizeMb": 20,
       "installSql": "sql/yolox-tiny.sql"
     },
@@ -324,7 +326,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_m.onnx", "coco-classes.json"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_m.onnx", "coco-classes.json"] }],
       "approxSizeMb": 97,
       "installSql": "sql/yolox-m.sql"
     },
@@ -337,7 +339,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_l.onnx", "coco-classes.json"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_l.onnx", "coco-classes.json"] }],
       "approxSizeMb": 207,
       "installSql": "sql/yolox-l.sql"
     },
@@ -350,7 +352,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_darknet.onnx", "coco-classes.json"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_darknet.onnx", "coco-classes.json"] }],
       "approxSizeMb": 244,
       "installSql": "sql/yolox-darknet.sql"
     },
@@ -363,7 +365,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Baidu Inc. — RT-DETR (Lv, Xu, Zhao et al., PaddlePaddle team)", "PekingU (HuggingFace mirror)", "onnx-community (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "37122d8b9b89eb8384fba4d688d05051eaf7bb78", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "37122d8b9b89eb8384fba4d688d05051eaf7bb78", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] }],
       "approxSizeMb": 80
     },
     {
@@ -375,7 +377,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Baidu Inc. — RT-DETR (Lv, Xu, Zhao et al., PaddlePaddle team)", "PekingU (HuggingFace mirror)", "onnx-community (ONNX export + fp16 quantization)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "37122d8b9b89eb8384fba4d688d05051eaf7bb78", "include": ["onnx/model_fp16.onnx", "config.json", "preprocessor_config.json"] },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "37122d8b9b89eb8384fba4d688d05051eaf7bb78", "include": ["onnx/model_fp16.onnx", "config.json", "preprocessor_config.json"] }],
       "approxSizeMb": 41
     },
     {
@@ -387,7 +389,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Baidu Inc. — RT-DETR (Lv, Xu, Zhao et al., PaddlePaddle team)", "PekingU (HuggingFace mirror)", "onnx-community (ONNX export + INT8 quantization)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "37122d8b9b89eb8384fba4d688d05051eaf7bb78", "include": ["onnx/model_quantized.onnx", "config.json", "preprocessor_config.json"] },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "37122d8b9b89eb8384fba4d688d05051eaf7bb78", "include": ["onnx/model_quantized.onnx", "config.json", "preprocessor_config.json"] }],
       "approxSizeMb": 22
     },
 
@@ -400,7 +402,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Meta AI Research — Segment Anything (Kirillov, Mintun, Ravi et al.)", "Chaoning Zhang et al. — MobileSAM (Kyung Hee University)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/sam-onnx", "revision": "465be8e75889fea5afd37924f678ad6559ed5439", "include": ["mobile_sam_image_encoder.onnx", "sam_mask_decoder_single.onnx", "sam_mask_decoder_multi.onnx"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/sam-onnx", "revision": "465be8e75889fea5afd37924f678ad6559ed5439", "include": ["mobile_sam_image_encoder.onnx", "sam_mask_decoder_single.onnx", "sam_mask_decoder_multi.onnx"] }],
       "approxSizeMb": 60
     },
     {
@@ -412,7 +414,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Xuebin Qin, Zichen Zhang, Chenyang Huang, Masood Dehghan, Osmar R. Zaiane, Martin Jagersand — U²-Net (University of Alberta)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/u2net-onnx", "revision": "7fc34deee10329bc039c10a73b98090d0c6f5c59", "include": ["u2netp.onnx"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/u2net-onnx", "revision": "7fc34deee10329bc039c10a73b98090d0c6f5c59", "include": ["u2netp.onnx"] }],
       "approxSizeMb": 5
     },
     {
@@ -424,7 +426,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Xuebin Qin, Zichen Zhang, Chenyang Huang, Masood Dehghan, Osmar R. Zaiane, Martin Jagersand — U²-Net (University of Alberta)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/u2net-onnx", "revision": "7fc34deee10329bc039c10a73b98090d0c6f5c59", "include": ["u2net.onnx"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/u2net-onnx", "revision": "7fc34deee10329bc039c10a73b98090d0c6f5c59", "include": ["u2net.onnx"] }],
       "approxSizeMb": 170
     },
     {
@@ -436,7 +438,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Intel ISL — Ranftl, Bochkovskiy, Koltun (DPT / MiDaS)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/dpt-large-onnx", "revision": "b7927a19c25a7b855da2ce55c00bfbb63bc35641", "include": ["dpt_large_384.onnx"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/dpt-large-onnx", "revision": "b7927a19c25a7b855da2ce55c00bfbb63bc35641", "include": ["dpt_large_384.onnx"] }],
       "approxSizeMb": 1300,
       "installSql": "sql/dpt-large.sql"
     },
@@ -449,7 +451,7 @@
       "licenseIds": ["mit"],
       "attributions": ["Intel ISL — Ranftl, Lasinger, Hafner, Schindler, Koltun (MiDaS)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/midas-small-onnx", "revision": "f3a5a5e4c852c7bfac10517767e5b0636cb42b92", "include": ["midas_v21_small_256.onnx"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/midas-small-onnx", "revision": "f3a5a5e4c852c7bfac10517767e5b0636cb42b92", "include": ["midas_v21_small_256.onnx"] }],
       "approxSizeMb": 80,
       "installSql": "sql/midas-small.sql"
     },
@@ -462,7 +464,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Google MediaPipe team", "Zak Murez (MediaPipePyTorch PyTorch port)", "Qualcomm AI Hub (ONNX export)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/mediapipe-face-onnx", "revision": "40558a441d87663a533137cefb838e853ef491da", "include": ["float/*"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/mediapipe-face-onnx", "revision": "40558a441d87663a533137cefb838e853ef491da", "include": ["float/*"] }],
       "approxSizeMb": 3
     },
     {
@@ -474,7 +476,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Google MediaPipe team", "Zak Murez (MediaPipePyTorch PyTorch port)", "Qualcomm AI Hub (ONNX export + W8A8 quantization)"],
       "hardware": { "minRamMb": 64, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/mediapipe-face-onnx", "revision": "40558a441d87663a533137cefb838e853ef491da", "include": ["int8/*"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/mediapipe-face-onnx", "revision": "40558a441d87663a533137cefb838e853ef491da", "include": ["int8/*"] }],
       "approxSizeMb": 2
     },
     {
@@ -486,7 +488,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["PaddlePaddle Authors — Baidu Inc. (PaddleOCR contributors)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/paddleocr-v4-det-onnx", "revision": "e8454256830dd5e4eb08f9e6f6d8b84d7d1c9dab", "include": ["ch_PP-OCRv4_det.onnx"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/paddleocr-v4-det-onnx", "revision": "e8454256830dd5e4eb08f9e6f6d8b84d7d1c9dab", "include": ["ch_PP-OCRv4_det.onnx"] }],
       "approxSizeMb": 5,
       "installSql": "sql/paddleocr-v4-det.sql"
     },
@@ -499,7 +501,7 @@
       "licenseIds": ["bsd-3-clause"],
       "attributions": ["© 2021 Xintao Wang — Real-ESRGAN (Tencent ARC Lab)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/realesrgan-onnx", "revision": "488e5dda07333179f229a6205d92135eea4c25e9", "include": ["realesr-general-x4v3.onnx"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/realesrgan-onnx", "revision": "488e5dda07333179f229a6205d92135eea4c25e9", "include": ["realesr-general-x4v3.onnx"] }],
       "approxSizeMb": 5
     },
     {
@@ -511,7 +513,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Google AI Research — MobileNetV2 (Sandler, Howard, Zhu, Zhmoginov, Chen)", "ONNX Model Zoo (ONNX export)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/mobilenetv2-onnx", "revision": "c0ec47a7c78d4a60f37c2cd8c65d6bd5e5e6289c", "include": ["mobilenetv2-12.onnx", "imagenet-classes.json"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/mobilenetv2-onnx", "revision": "c0ec47a7c78d4a60f37c2cd8c65d6bd5e5e6289c", "include": ["mobilenetv2-12.onnx", "imagenet-classes.json"] }],
       "approxSizeMb": 14,
       "installSql": "sql/mobilenetv2.sql"
     },
@@ -525,7 +527,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["hexgrad — Kokoro author"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/kokoro-v1.0-onnx", "revision": "c5a2538d51dae0519689f84b89bb189ddeeea3c3", "include": ["kokoro-v1.0.onnx", "kokoro-voices/*"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/kokoro-v1.0-onnx", "revision": "c5a2538d51dae0519689f84b89bb189ddeeea3c3", "include": ["kokoro-v1.0.onnx", "kokoro-voices/*"] }],
       "approxSizeMb": 320
     },
 
@@ -538,7 +540,7 @@
       "licenseIds": ["creativeml-openrail-m"],
       "attributions": ["Lykon — AbsoluteReality (SD 1.5 fine-tune)", "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)", "CompVis / Stability AI — Stable Diffusion 1.5 base"],
       "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/absolute-reality-hyper-onnx", "revision": "991ad06804ea1e50c1c763c4034537b104a237ca", "include": ["**/*"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/absolute-reality-hyper-onnx", "revision": "991ad06804ea1e50c1c763c4034537b104a237ca", "include": ["**/*"] }],
       "approxSizeMb": 4096
     },
     {
@@ -550,7 +552,7 @@
       "licenseIds": ["creativeml-openrail-m"],
       "attributions": ["Lykon — DreamShaper (SD 1.5 fine-tune)", "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)", "CompVis / Stability AI — Stable Diffusion 1.5 base"],
       "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/dreamshaper-hyper-onnx", "revision": "688bcca73391b678eae25ad7020c9bb7fa297239", "include": ["**/*"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/dreamshaper-hyper-onnx", "revision": "688bcca73391b678eae25ad7020c9bb7fa297239", "include": ["**/*"] }],
       "approxSizeMb": 4096
     },
     {
@@ -562,7 +564,7 @@
       "licenseIds": ["creativeml-openrail-m"],
       "attributions": ["emilianJR — epiCRealism (SD 1.5 fine-tune)", "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)", "CompVis / Stability AI — Stable Diffusion 1.5 base"],
       "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/epicrealism-hyper-onnx", "revision": "e3431df3011a8b9a80cfd281e04f158b8ecbd4cc", "include": ["**/*"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/epicrealism-hyper-onnx", "revision": "e3431df3011a8b9a80cfd281e04f158b8ecbd4cc", "include": ["**/*"] }],
       "approxSizeMb": 4096
     },
     {
@@ -574,7 +576,7 @@
       "licenseIds": ["creativeml-openrail-m"],
       "attributions": ["Nitrosocke — Mo-Di Diffusion (SD 1.5 fine-tune)", "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)", "CompVis / Stability AI — Stable Diffusion 1.5 base"],
       "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/mo-di-hyper-onnx", "revision": "a67d98c917fcba4a93f99de56bb17986cb60a1d2", "include": ["**/*"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/mo-di-hyper-onnx", "revision": "a67d98c917fcba4a93f99de56bb17986cb60a1d2", "include": ["**/*"] }],
       "approxSizeMb": 4096
     },
     {
@@ -586,7 +588,7 @@
       "licenseIds": ["creativeml-openrail-m"],
       "attributions": ["PromptHero — Openjourney (SD 1.5 fine-tune)", "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)", "CompVis / Stability AI — Stable Diffusion 1.5 base"],
       "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/openjourney-hyper-onnx", "revision": "8dcbd8fcac0a7c79d2c793b08f07843b394f37a4", "include": ["**/*"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/openjourney-hyper-onnx", "revision": "8dcbd8fcac0a7c79d2c793b08f07843b394f37a4", "include": ["**/*"] }],
       "approxSizeMb": 4096
     },
     {
@@ -598,7 +600,7 @@
       "licenseIds": ["creativeml-openrail-m"],
       "attributions": ["SG161222 — Realistic Vision V6 (SD 1.5 fine-tune)", "Stability AI — sd-vae-ft-mse (paired VAE)", "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)", "CompVis / Stability AI — Stable Diffusion 1.5 base"],
       "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/realistic-vision-hyper-onnx", "revision": "03929f3369a4daa8e0e4c988fb90b39b15cf2274", "include": ["**/*"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/realistic-vision-hyper-onnx", "revision": "03929f3369a4daa8e0e4c988fb90b39b15cf2274", "include": ["**/*"] }],
       "approxSizeMb": 4096
     },
     {
@@ -610,7 +612,7 @@
       "licenseIds": ["creativeml-openrail-pp-m"],
       "attributions": ["RunDiffusion — JuggernautXL Lightning (SDXL fine-tune + Lightning distillation)", "Stability AI — Stable Diffusion XL base", "ByteDance — SDXL Lightning method (Lin, Wang, Yang)"],
       "hardware": { "minRamMb": 4096, "minVramMb": 8192, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/juggernaut-xl-lightning-onnx", "revision": "f05795f9eadf7692c2a16cf6eff57231033410e7", "include": ["**/*"] },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/juggernaut-xl-lightning-onnx", "revision": "f05795f9eadf7692c2a16cf6eff57231033410e7", "include": ["**/*"] }],
       "approxSizeMb": 13312
     },
 
@@ -623,7 +625,7 @@
       "licenseIds": ["mit"],
       "attributions": ["Microsoft Research — Phi-3.5", "bartowski (GGUF quantization)"],
       "hardware": { "minRamMb": 4096, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "bartowski/Phi-3.5-mini-instruct-GGUF", "revision": "6d70da17e749a471ccb62ade694486011a75cda3", "include": ["Phi-3.5-mini-instruct-Q4_K_M.gguf"] },
+      "sources": [{ "type": "huggingface", "repo": "bartowski/Phi-3.5-mini-instruct-GGUF", "revision": "6d70da17e749a471ccb62ade694486011a75cda3", "include": ["Phi-3.5-mini-instruct-Q4_K_M.gguf"] }],
       "approxSizeMb": 2200
     },
     {
@@ -635,7 +637,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Mistral AI", "bartowski (GGUF quantization)"],
       "hardware": { "minRamMb": 8192, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "bartowski/Mistral-7B-Instruct-v0.3-GGUF", "revision": "61fd4167fff3ab01ee1cfe0da183fa27a944db48", "include": ["Mistral-7B-Instruct-v0.3-Q5_K_M.gguf"] },
+      "sources": [{ "type": "huggingface", "repo": "bartowski/Mistral-7B-Instruct-v0.3-GGUF", "revision": "61fd4167fff3ab01ee1cfe0da183fa27a944db48", "include": ["Mistral-7B-Instruct-v0.3-Q5_K_M.gguf"] }],
       "approxSizeMb": 4800
     },
     {
@@ -647,7 +649,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Alibaba Cloud — Qwen Team", "bartowski (GGUF quantization)"],
       "hardware": { "minRamMb": 8192, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF", "revision": "1f629da0c8bed16b9e50cee91c70693650e66c35", "include": ["Qwen2.5-Coder-7B-Instruct-Q5_K_M.gguf"] },
+      "sources": [{ "type": "huggingface", "repo": "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF", "revision": "1f629da0c8bed16b9e50cee91c70693650e66c35", "include": ["Qwen2.5-Coder-7B-Instruct-Q5_K_M.gguf"] }],
       "approxSizeMb": 5100
     },
     {
@@ -659,7 +661,7 @@
       "licenseIds": ["llama-3.1-community"],
       "attributions": ["© Meta Platforms, Inc. — Llama 3.1", "bartowski (GGUF quantization)"],
       "hardware": { "minRamMb": 8192, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", "revision": "bf5b95e96dac0462e2a09145ec66cae9a3f12067", "include": ["Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"] },
+      "sources": [{ "type": "huggingface", "repo": "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", "revision": "bf5b95e96dac0462e2a09145ec66cae9a3f12067", "include": ["Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"] }],
       "approxSizeMb": 4700,
       "requiresHfLogin": true
     },
@@ -673,7 +675,7 @@
       "licenseIds": ["mit"],
       "attributions": ["OpenAI — Whisper (Radford, Kim, Xu et al.)", "onnx-community (ONNX export)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "onnx-community/whisper-base", "revision": "1846881b6b3a3024392c1eea3ad983695bc23925", "include": ["onnx/*", "*.json", "*.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/whisper-base", "revision": "1846881b6b3a3024392c1eea3ad983695bc23925", "include": ["onnx/*", "*.json", "*.txt"] }],
       "approxSizeMb": 290
     },
     {
@@ -685,7 +687,7 @@
       "licenseIds": ["mit"],
       "attributions": ["OpenAI — Whisper (Radford, Kim, Xu et al.)", "onnx-community (ONNX export)"],
       "hardware": { "minRamMb": 2048, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "onnx-community/whisper-small", "revision": "36050c46d777d46dc4b5f43f6d90574fc38f8732", "include": ["onnx/*", "*.json", "*.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/whisper-small", "revision": "36050c46d777d46dc4b5f43f6d90574fc38f8732", "include": ["onnx/*", "*.json", "*.txt"] }],
       "approxSizeMb": 970
     },
     {
@@ -697,7 +699,7 @@
       "licenseIds": ["mit"],
       "attributions": ["OpenAI — CLIP (Radford, Kim, Hallacy et al.)", "Joshua Lochner / Xenova (ONNX export)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Xenova/clip-vit-base-patch32", "revision": "d15189d7028b43f1d3e65039190477f6af591c2a", "include": ["onnx/*", "*.json", "*.txt"] },
+      "sources": [{ "type": "huggingface", "repo": "Xenova/clip-vit-base-patch32", "revision": "d15189d7028b43f1d3e65039190477f6af591c2a", "include": ["onnx/*", "*.json", "*.txt"] }],
       "approxSizeMb": 600
     }
   ]

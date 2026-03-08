@@ -48,15 +48,18 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
     <!--
       Microsoft.Extensions.Http supplies AddHttpClient<TClient> + the
-      IHttpClientFactory it registers. Required by ModelLibrary's HfHubClient
-      (one HttpClient with connection pooling, lifecycle-managed by the
-      framework instead of `new HttpClient()` per resolve).
+      IHttpClientFactory it registers. Required by ModelLibrary's source
+      clients (HuggingFaceSourceClient, GithubReleaseSourceClient,
+      HttpsSourceClient) — one HttpClient per type with connection pooling,
+      lifecycle-managed by the framework instead of `new HttpClient()` per
+      resolve.
     -->
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.5" />
     <!--
       Microsoft.Extensions.FileSystemGlobbing supplies the Matcher used by
-      HfHubClient.FilterByIncludes to apply `**/*`, `onnx/*`, etc. glob
-      patterns from catalog source.include against the HF tree listing.
+      HuggingFaceSourceClient.ListFilesAsync to apply `**/*`, `onnx/*`, etc.
+      glob patterns from a HuggingFaceSource.Include list against the HF
+      tree listing.
     -->
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.5" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.25.1" />

@@ -1,9 +1,7 @@
-﻿// TODO: fold proper XML doc comments + a JsonSerializerContext into a follow-up PR.
+// TODO: fold proper XML doc comments + a JsonSerializerContext into a follow-up PR.
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
-using System.Net;
-using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.FileSystemGlobbing;
@@ -11,16 +9,18 @@ using Microsoft.Extensions.Logging;
 
 namespace DatumIngest.ModelLibrary;
 
-// Thin client over the HuggingFace Hub HTTP API. No huggingface-cli / Python
-// dependency. Two operations matter:
+// IModelSourceClient implementation for HuggingFace Hub model repos. Two
+// operations matter:
 //
-//   1. GetTreeAsync(repo, revision)
+//   1. ListFilesAsync (was: GetTreeAsync)
 //        GET https://huggingface.co/api/models/{repo}/tree/{revision}?recursive=true
 //        Returns every file under the repo at that revision, with size and
 //        (for LFS files) sha256 inside `lfs.oid`. Non-LFS files use the git
 //        blob OID — verification falls back to size-only for those.
+//        Filtered against HuggingFaceSource.Include via the FileSystemGlobbing
+//        matcher.
 //
-//   2. DownloadFileAsync(repo, revision, path, dest, progress)
+//   2. DownloadFileAsync
 //        GET https://huggingface.co/{repo}/resolve/{revision}/{path}
 //        For LFS files HF responds with a 302 to an S3-presigned URL good
 //        for ~10 minutes. HttpClient follows redirects automatically so
@@ -44,12 +44,14 @@ namespace DatumIngest.ModelLibrary;
 //                          succeeds and we're done. If not, restart.
 // Because every catalog entry pins a commit SHA, the bytes at a given
 // revision are immutable — no sidecar metadata needed to detect drift.
-internal sealed class HfHubClient
+internal sealed class HuggingFaceSourceClient : IModelSourceClient
 {
-    private readonly HttpClient _http;
-    private readonly ILogger<HfHubClient> _logger;
+    public string SupportedType => "huggingface";
 
-    public HfHubClient(HttpClient http, ILogger<HfHubClient> logger)
+    private readonly HttpClient _http;
+    private readonly ILogger<HuggingFaceSourceClient> _logger;
+
+    public HuggingFaceSourceClient(HttpClient http, ILogger<HuggingFaceSourceClient> logger)
     {
         _http = http;
         _logger = logger;
@@ -61,10 +63,12 @@ internal sealed class HfHubClient
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("DatumIngest/0.1 (+https://github.com/Heliosoph)");
     }
 
-    public async Task<IReadOnlyList<HfTreeEntry>> GetTreeAsync(
-        string repo, string revision, CancellationToken ct)
+    public async ValueTask<IReadOnlyList<SourceFile>> ListFilesAsync(
+        CatalogSource source, CancellationToken ct)
     {
-        string url = $"api/models/{repo}/tree/{revision}?recursive=true";
+        HuggingFaceSource hf = Cast(source);
+
+        string url = $"api/models/{hf.Repo}/tree/{hf.Revision}?recursive=true";
         _logger.LogDebug("HF tree: {Url}", url);
 
         using HttpResponseMessage resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
@@ -73,44 +77,39 @@ internal sealed class HfHubClient
         await using Stream s = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         List<HfTreeEntry>? entries = await System.Text.Json.JsonSerializer.DeserializeAsync<List<HfTreeEntry>>(
             s, _jsonOptions, ct).ConfigureAwait(false);
-        return entries ?? new List<HfTreeEntry>();
-    }
+        IReadOnlyList<HfTreeEntry> tree = entries ?? new List<HfTreeEntry>();
 
-    // Filters tree-API entries against the manifest's include glob patterns.
-    // Microsoft.Extensions.FileSystemGlobbing handles `**`, `*`, and literal
-    // names correctly. Directory entries are dropped — we only want files.
-    public static IReadOnlyList<HfTreeEntry> FilterByIncludes(
-        IReadOnlyList<HfTreeEntry> tree, IEnumerable<string> includes)
-    {
+        // Filter against include globs (** / * / literal names handled
+        // correctly by FileSystemGlobbing). Drop directory entries.
         Matcher matcher = new();
-        foreach (string pattern in includes) matcher.AddInclude(pattern);
+        foreach (string pattern in hf.Include) matcher.AddInclude(pattern);
 
-        List<HfTreeEntry> matched = new();
+        List<SourceFile> result = new();
         foreach (HfTreeEntry entry in tree)
         {
             if (entry.Type != "file") continue;
-            PatternMatchingResult result = matcher.Match(new[] { entry.Path });
-            if (result.HasMatches) matched.Add(entry);
+            if (!matcher.Match(new[] { entry.Path }).HasMatches) continue;
+            result.Add(new SourceFile(
+                Path: entry.Path,
+                Size: entry.Size,
+                Sha256: entry.Lfs?.Sha256Hex));
         }
-        return matched;
+        return result;
     }
 
-    // Streams the file at {repo}/resolve/{revision}/{path} into destPath.
-    // Hashes via SHA256 during the stream (free — we touch every byte once).
-    // On success, returns the lowercase-hex sha256 of the downloaded bytes.
-    // Caller compares against the tree API's lfs.oid where available.
-    //
-    // Throws on:
-    //   - HTTP non-success (callers can map 401/403 to "needs HF token")
-    //   - cancellation (.part file is left on disk; future resume can pick it up)
-    public async Task<string> DownloadFileAsync(
-        string repo, string revision, string path, string destPath,
-        IProgress<DownloadByteProgress>? progress, CancellationToken ct)
+    public async ValueTask<string> DownloadFileAsync(
+        CatalogSource source,
+        SourceFile file,
+        string destPath,
+        IProgress<DownloadByteProgress>? progress,
+        CancellationToken ct)
     {
+        HuggingFaceSource hf = Cast(source);
+
         string partPath = destPath + ".part";
         Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
 
-        string url = $"{repo}/resolve/{revision}/{path}";
+        string url = $"{hf.Repo}/resolve/{hf.Revision}/{file.Path}";
 
         // How many bytes from a prior session are already on disk? Zero
         // means a fresh download.
@@ -226,9 +225,15 @@ internal sealed class HfHubClient
         return hex;
     }
 
+    private static HuggingFaceSource Cast(CatalogSource source) =>
+        source as HuggingFaceSource
+            ?? throw new InvalidOperationException(
+                $"HuggingFaceSourceClient cannot handle {source.GetType().Name}; " +
+                "the source registry routed this entry to the wrong client.");
+
     // Stream the existing .part bytes through the hash to seed it. Used
     // before sending a Range request so the final hash matches HF's hash
-    // of the full file. Kept private — only DownloadFileAsync calls it.
+    // of the full file.
     private static async Task SeedHashFromPartAsync(
         string partPath, IncrementalHash sha, CancellationToken ct)
     {
@@ -253,14 +258,14 @@ internal sealed class HfHubClient
 // for LFS-tracked files; small files (config.json, tokenizer.txt) ship as
 // plain git blobs and have no `lfs` field — `Oid` then holds the git blob
 // OID which we don't verify.
-public sealed record HfTreeEntry(
+internal sealed record HfTreeEntry(
     string Type,
     string Oid,
     long Size,
     string Path,
     HfLfsInfo? Lfs);
 
-public sealed record HfLfsInfo(
+internal sealed record HfLfsInfo(
     [property: JsonPropertyName("oid")] string Oid,
     [property: JsonPropertyName("size")] long Size)
 {
@@ -268,5 +273,3 @@ public sealed record HfLfsInfo(
     public string Sha256Hex =>
         Oid.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ? Oid[7..] : Oid;
 }
-
-public readonly record struct DownloadByteProgress(long BytesRead, long? BytesTotal);
