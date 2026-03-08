@@ -18,7 +18,8 @@ internal readonly record struct MutableBPlusTreeBytesHeader(
     uint PageCount,
     ushort TreeHeight,
     long EntryCount,
-    bool AllowDuplicates)
+    bool AllowDuplicates,
+    int PageSize)
 {
     /// <summary>
     /// File magic for bytes-keyed mutable B+Tree files ("BKBT" little-endian).
@@ -36,14 +37,15 @@ internal readonly record struct MutableBPlusTreeBytesHeader(
     /// with this state at <c>Create</c> time (gen=0 and gen=1) so reader open
     /// is deterministic regardless of which slot is sampled first.
     /// </summary>
-    internal static MutableBPlusTreeBytesHeader Empty(long commitGen, bool allowDuplicates = false) => new(
+    internal static MutableBPlusTreeBytesHeader Empty(long commitGen, bool allowDuplicates, int pageSize) => new(
         CommitGen: commitGen,
         RootPageId: MutableBPlusTreeConstants.NoLinkedPage,
         FreeListHead: MutableBPlusTreeConstants.NoLinkedPage,
         PageCount: 0,
         TreeHeight: 0,
         EntryCount: 0,
-        AllowDuplicates: allowDuplicates);
+        AllowDuplicates: allowDuplicates,
+        PageSize: pageSize);
 
     /// <summary>
     /// Encodes this header into the 256-byte slot buffer with a trailing CRC32
@@ -70,8 +72,9 @@ internal readonly record struct MutableBPlusTreeBytesHeader(
         BinaryPrimitives.WriteUInt16LittleEndian(destination[28..30], TreeHeight);
         BinaryPrimitives.WriteInt64LittleEndian(destination[30..38], EntryCount);
         destination[38] = AllowDuplicates ? (byte)1 : (byte)0;
+        BinaryPrimitives.WriteInt32LittleEndian(destination[39..43], PageSize);
 
-        // Bytes [39..251] are reserved; left zero by the Clear above.
+        // Bytes [43..251] are reserved; left zero by the Clear above.
 
         uint crc = Crc32.HashToUInt32(destination[..(MutableBPlusTreeConstants.HeaderSlotSize - 4)]);
         BinaryPrimitives.WriteUInt32LittleEndian(
@@ -110,7 +113,8 @@ internal readonly record struct MutableBPlusTreeBytesHeader(
             PageCount: BinaryPrimitives.ReadUInt32LittleEndian(source[24..28]),
             TreeHeight: BinaryPrimitives.ReadUInt16LittleEndian(source[28..30]),
             EntryCount: BinaryPrimitives.ReadInt64LittleEndian(source[30..38]),
-            AllowDuplicates: source[38] != 0);
+            AllowDuplicates: source[38] != 0,
+            PageSize: BinaryPrimitives.ReadInt32LittleEndian(source[39..43]));
 
         return true;
     }

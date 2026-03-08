@@ -15,8 +15,8 @@ public sealed class MutableBPlusTreeContractTests : BPlusTreeContractTests
 {
     protected override string FileExtension => ".datum-pkindex";
 
-    protected override IMutableBPlusTreeAdapter CreateTree(string path, DataKind keyKind, bool allowDuplicates = false) =>
-        new TypedAdapter(MutableBPlusTree.Create(path, keyKind, allowDuplicates));
+    protected override IMutableBPlusTreeAdapter CreateTree(string path, DataKind keyKind, bool allowDuplicates = false, int pageSize = 8192) =>
+        new TypedAdapter(MutableBPlusTree.Create(path, keyKind, allowDuplicates, pageSize));
 
     protected override IMutableBPlusTreeAdapter OpenTree(string path) =>
         new TypedAdapter(MutableBPlusTree.Open(path));

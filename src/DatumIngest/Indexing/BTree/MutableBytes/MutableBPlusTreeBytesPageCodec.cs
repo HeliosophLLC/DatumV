@@ -4,26 +4,26 @@ using DatumIngest.Indexing.BTree.Mutable;
 namespace DatumIngest.Indexing.BTree.MutableBytes;
 
 /// <summary>
-/// Encodes and decodes bytes-keyed B+Tree pages. Page size is shared with
-/// the typed tree (<see cref="MutableBPlusTreeConstants.PageSize"/> = 8 KiB);
-/// the difference is the key encoding inside leaf entries and internal
+/// Encodes and decodes bytes-keyed B+Tree pages. Page size is per-tree
+/// (configured by the caller's <see cref="PageGeometry"/>); the difference
+/// from the typed tree is the key encoding inside leaf entries and internal
 /// separators — variable-length byte arrays with a 4-byte length prefix
 /// instead of typed <c>DataValue</c> serialization.
 /// </summary>
 /// <remarks>
-/// <para>Leaf page layout (8192 bytes):</para>
+/// <para>Leaf page layout (PageSize bytes):</para>
 /// <code>
 /// [PageType: 1B] [EntryCount: 2B] [Reserved: 1B]              ← common header (4B)
 /// [PrevLeaf: 4B] [NextLeaf: 4B] [PayloadLength: 4B]           ← leaf header (12B)
 /// [Entries: each [KeyLen: 4B][KeyBytes][ChunkIdx: 4B][RowOff: 8B]]
-/// [Zero padding to 8192]
+/// [Zero padding to PageSize]
 /// </code>
-/// <para>Internal page layout (8192 bytes):</para>
+/// <para>Internal page layout (PageSize bytes):</para>
 /// <code>
 /// [PageType: 1B] [KeyCount: 2B] [Reserved: 1B]                ← common header (4B)
 /// [KeyCount × [KeyLen: 4B][KeyBytes]]                         ← separator keys
 /// [KeyCount + 1 × uint32]                                     ← child page ids
-/// [Zero padding to 8192]
+/// [Zero padding to PageSize]
 /// </code>
 /// </remarks>
 internal static class MutableBPlusTreeBytesPageCodec
@@ -35,7 +35,7 @@ internal static class MutableBPlusTreeBytesPageCodec
     private const int InternalKeyFixedOverhead = 4 /* keyLen */;
 
     /// <summary>
-    /// Encodes a leaf page into a fresh 8 KiB buffer. Callers own the
+    /// Encodes a leaf page into a fresh page-size buffer. Callers own the
     /// buffer and write it to disk at the appropriate page offset.
     /// </summary>
     /// <exception cref="InvalidOperationException">
@@ -43,11 +43,12 @@ internal static class MutableBPlusTreeBytesPageCodec
     /// Callers should split before reaching this codec.
     /// </exception>
     internal static byte[] EncodeLeafPage(
+        PageGeometry geom,
         ReadOnlySpan<BytesIndexEntry> entries,
         uint previousLeafPageId,
         uint nextLeafPageId)
     {
-        byte[] page = new byte[MutableBPlusTreeConstants.PageSize];
+        byte[] page = new byte[geom.PageSize];
         Span<byte> payload = page.AsSpan(MutableBPlusTreeConstants.LeafHeaderSize);
 
         int written = SerializeLeafEntries(entries, payload);
@@ -101,13 +102,13 @@ internal static class MutableBPlusTreeBytesPageCodec
         return offset;
     }
 
-    /// <summary>Decodes a leaf page from raw 8 KiB bytes.</summary>
-    internal static MutableBytesLeafPage DecodeLeafPage(byte[] pageBytes, uint pageId)
+    /// <summary>Decodes a leaf page from raw page-size bytes.</summary>
+    internal static MutableBytesLeafPage DecodeLeafPage(PageGeometry geom, byte[] pageBytes, uint pageId)
     {
-        if (pageBytes.Length != MutableBPlusTreeConstants.PageSize)
+        if (pageBytes.Length != geom.PageSize)
         {
             throw new InvalidDataException(
-                $"Page must be exactly {MutableBPlusTreeConstants.PageSize} bytes; got {pageBytes.Length}.");
+                $"Page must be exactly {geom.PageSize} bytes; got {pageBytes.Length}.");
         }
 
         if ((MutableBPlusTreePageType)pageBytes[0] != MutableBPlusTreePageType.Leaf)
@@ -121,10 +122,10 @@ internal static class MutableBPlusTreeBytesPageCodec
         uint nextLeaf = BinaryPrimitives.ReadUInt32LittleEndian(pageBytes.AsSpan(8, 4));
         int payloadLength = BinaryPrimitives.ReadInt32LittleEndian(pageBytes.AsSpan(12, 4));
 
-        if (payloadLength < 0 || payloadLength > MutableBPlusTreeConstants.LeafPayloadCapacity)
+        if (payloadLength < 0 || payloadLength > geom.LeafPayloadCapacity)
         {
             throw new InvalidDataException(
-                $"Invalid leaf payload length {payloadLength}; must be in [0, {MutableBPlusTreeConstants.LeafPayloadCapacity}].");
+                $"Invalid leaf payload length {payloadLength}; must be in [0, {geom.LeafPayloadCapacity}].");
         }
 
         BytesIndexEntry[] entries = new BytesIndexEntry[entryCount];
@@ -148,6 +149,7 @@ internal static class MutableBPlusTreeBytesPageCodec
 
     /// <summary>Encodes an internal page (separator keys + child page ids).</summary>
     internal static byte[] EncodeInternalPage(
+        PageGeometry geom,
         ReadOnlySpan<byte[]> keys,
         ReadOnlySpan<uint> childPageIds)
     {
@@ -158,7 +160,7 @@ internal static class MutableBPlusTreeBytesPageCodec
                 nameof(childPageIds));
         }
 
-        byte[] page = new byte[MutableBPlusTreeConstants.PageSize];
+        byte[] page = new byte[geom.PageSize];
 
         page[0] = (byte)MutableBPlusTreePageType.Internal;
         BinaryPrimitives.WriteUInt16LittleEndian(page.AsSpan(1, 2), (ushort)keys.Length);
@@ -170,10 +172,10 @@ internal static class MutableBPlusTreeBytesPageCodec
         {
             byte[] key = keys[i];
             int needed = InternalKeyFixedOverhead + key.Length;
-            if (offset + needed > MutableBPlusTreeConstants.PageSize)
+            if (offset + needed > geom.PageSize)
             {
                 throw new InvalidOperationException(
-                    $"Internal page payload ({offset + needed} bytes) exceeds page size ({MutableBPlusTreeConstants.PageSize} bytes).");
+                    $"Internal page payload ({offset + needed} bytes) exceeds page size ({geom.PageSize} bytes).");
             }
             BinaryPrimitives.WriteInt32LittleEndian(page.AsSpan(offset, 4), key.Length);
             offset += 4;
@@ -182,10 +184,10 @@ internal static class MutableBPlusTreeBytesPageCodec
         }
 
         int childrenBytes = childPageIds.Length * 4;
-        if (offset + childrenBytes > MutableBPlusTreeConstants.PageSize)
+        if (offset + childrenBytes > geom.PageSize)
         {
             throw new InvalidOperationException(
-                $"Internal page payload ({offset + childrenBytes} bytes) exceeds page size ({MutableBPlusTreeConstants.PageSize} bytes).");
+                $"Internal page payload ({offset + childrenBytes} bytes) exceeds page size ({geom.PageSize} bytes).");
         }
 
         for (int i = 0; i < childPageIds.Length; i++)
@@ -212,13 +214,13 @@ internal static class MutableBPlusTreeBytesPageCodec
         return total;
     }
 
-    /// <summary>Decodes an internal page from raw 8 KiB bytes.</summary>
-    internal static MutableBytesInternalPage DecodeInternalPage(byte[] pageBytes, uint pageId)
+    /// <summary>Decodes an internal page from raw page-size bytes.</summary>
+    internal static MutableBytesInternalPage DecodeInternalPage(PageGeometry geom, byte[] pageBytes, uint pageId)
     {
-        if (pageBytes.Length != MutableBPlusTreeConstants.PageSize)
+        if (pageBytes.Length != geom.PageSize)
         {
             throw new InvalidDataException(
-                $"Page must be exactly {MutableBPlusTreeConstants.PageSize} bytes; got {pageBytes.Length}.");
+                $"Page must be exactly {geom.PageSize} bytes; got {pageBytes.Length}.");
         }
 
         if ((MutableBPlusTreePageType)pageBytes[0] != MutableBPlusTreePageType.Internal)

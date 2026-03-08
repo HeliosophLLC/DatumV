@@ -7,50 +7,53 @@ using DatumIngest.Model;
 namespace DatumIngest.Indexing.BTree.Mutable;
 
 /// <summary>
-/// Encodes and decodes mutable B+Tree pages. Pages are 8192 bytes with the layout below;
-/// leaves are uncompressed (splits stay simple), leaves carry a payload-length field, and
-/// free pages encode a next-free-page-id link inline.
+/// Encodes and decodes mutable B+Tree pages. Page size is per-tree (configured by the
+/// caller's <see cref="PageGeometry"/>); leaves are uncompressed (splits stay simple),
+/// leaves carry a payload-length field, and free pages encode a next-free-page-id link
+/// inline.
 /// </summary>
 /// <remarks>
-/// <para>Leaf page layout (8192 bytes):</para>
+/// <para>Leaf page layout (PageSize bytes):</para>
 /// <code>
 /// [PageType: 1B] [EntryCount: 2B] [Reserved: 1B]            ← common header (4B)
 /// [PrevLeaf: 4B] [NextLeaf: 4B] [PayloadLength: 4B]         ← leaf header (12B)
 /// [Entries: PayloadLength bytes, DataValue + Int32 + Int64] ← uncompressed
-/// [Zero padding to 8192]
+/// [Zero padding to PageSize]
 /// </code>
-/// <para>Internal page layout (8192 bytes):</para>
+/// <para>Internal page layout (PageSize bytes):</para>
 /// <code>
 /// [PageType: 1B] [KeyCount: 2B] [Reserved: 1B]              ← common header (4B)
 /// [Key₀..Keyₙ₋₁: WriteDataValue format]                     ← separator keys
 /// [Child₀..Childₙ: uint32]                                  ← KeyCount + 1 child page ids
-/// [Zero padding to 8192]
+/// [Zero padding to PageSize]
 /// </code>
-/// <para>Free page layout (8192 bytes):</para>
+/// <para>Free page layout (PageSize bytes):</para>
 /// <code>
 /// [PageType: 1B] [0: 2B] [Reserved: 1B]                     ← common header (4B)
 /// [NextFreePageId: 4B]                                      ← linked-list pointer
-/// [Zero padding to 8192]
+/// [Zero padding to PageSize]
 /// </code>
 /// </remarks>
 internal static class MutablePageCodec
 {
     /// <summary>
-    /// Encodes a leaf page into an 8 KiB buffer. The buffer is created fresh; callers
-    /// own it and write it to disk at the appropriate page offset.
+    /// Encodes a leaf page into a buffer sized to <paramref name="geom"/>. The buffer
+    /// is created fresh; callers own it and write it to disk at the appropriate page
+    /// offset.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// Thrown when the entries don't fit in the leaf payload capacity. Callers should
     /// split before calling this.
     /// </exception>
     internal static byte[] EncodeLeafPage(
+        PageGeometry geom,
         ReadOnlySpan<ValueIndexEntry> entries,
         uint previousLeafPageId,
         uint nextLeafPageId)
     {
-        byte[] page = new byte[MutableBPlusTreeConstants.PageSize];
+        byte[] page = new byte[geom.PageSize];
         int payloadOffset = MutableBPlusTreeConstants.LeafHeaderSize;
-        int written = SerializeLeafEntries(entries, page.AsSpan(payloadOffset));
+        int written = SerializeLeafEntries(geom, entries, page.AsSpan(payloadOffset));
 
         page[0] = (byte)MutableBPlusTreePageType.Leaf;
         BinaryPrimitives.WriteUInt16LittleEndian(page.AsSpan(1, 2), (ushort)entries.Length);
@@ -67,9 +70,9 @@ internal static class MutablePageCodec
     /// serializing to a measurement stream. Used by the writer to test split
     /// boundaries without committing to a final page buffer.
     /// </summary>
-    internal static int MeasureLeafEntries(ReadOnlySpan<ValueIndexEntry> entries)
+    internal static int MeasureLeafEntries(PageGeometry geom, ReadOnlySpan<ValueIndexEntry> entries)
     {
-        using MemoryStream stream = new(MutableBPlusTreeConstants.LeafPayloadCapacity);
+        using MemoryStream stream = new(geom.LeafPayloadCapacity);
         using BufferedWriter writer = new(stream);
 
         foreach (ValueIndexEntry entry in entries)
@@ -84,16 +87,16 @@ internal static class MutablePageCodec
         return (int)stream.Position;
     }
 
-    private static int SerializeLeafEntries(ReadOnlySpan<ValueIndexEntry> entries, Span<byte> destination)
+    private static int SerializeLeafEntries(PageGeometry geom, ReadOnlySpan<ValueIndexEntry> entries, Span<byte> destination)
     {
-        if (destination.Length < MutableBPlusTreeConstants.LeafPayloadCapacity)
+        if (destination.Length < geom.LeafPayloadCapacity)
         {
             throw new ArgumentException(
-                $"Leaf payload destination must be at least {MutableBPlusTreeConstants.LeafPayloadCapacity} bytes; got {destination.Length}.",
+                $"Leaf payload destination must be at least {geom.LeafPayloadCapacity} bytes; got {destination.Length}.",
                 nameof(destination));
         }
 
-        using MemoryStream stream = new(MutableBPlusTreeConstants.LeafPayloadCapacity);
+        using MemoryStream stream = new(geom.LeafPayloadCapacity);
         using BufferedWriter writer = new(stream);
 
         foreach (ValueIndexEntry entry in entries)
@@ -119,14 +122,14 @@ internal static class MutablePageCodec
     }
 
     /// <summary>
-    /// Decodes a leaf page from raw 8 KiB bytes.
+    /// Decodes a leaf page from raw page-size bytes.
     /// </summary>
-    internal static MutableLeafPage DecodeLeafPage(byte[] pageBytes, uint pageId)
+    internal static MutableLeafPage DecodeLeafPage(PageGeometry geom, byte[] pageBytes, uint pageId)
     {
-        if (pageBytes.Length != MutableBPlusTreeConstants.PageSize)
+        if (pageBytes.Length != geom.PageSize)
         {
             throw new InvalidDataException(
-                $"Page must be exactly {MutableBPlusTreeConstants.PageSize} bytes; got {pageBytes.Length}.");
+                $"Page must be exactly {geom.PageSize} bytes; got {pageBytes.Length}.");
         }
 
         if ((MutableBPlusTreePageType)pageBytes[0] != MutableBPlusTreePageType.Leaf)
@@ -140,10 +143,10 @@ internal static class MutablePageCodec
         uint nextLeaf = BinaryPrimitives.ReadUInt32LittleEndian(pageBytes.AsSpan(8, 4));
         int payloadLength = BinaryPrimitives.ReadInt32LittleEndian(pageBytes.AsSpan(12, 4));
 
-        if (payloadLength < 0 || payloadLength > MutableBPlusTreeConstants.LeafPayloadCapacity)
+        if (payloadLength < 0 || payloadLength > geom.LeafPayloadCapacity)
         {
             throw new InvalidDataException(
-                $"Invalid leaf payload length {payloadLength}; must be in [0, {MutableBPlusTreeConstants.LeafPayloadCapacity}].");
+                $"Invalid leaf payload length {payloadLength}; must be in [0, {geom.LeafPayloadCapacity}].");
         }
 
         ValueIndexEntry[] entries = new ValueIndexEntry[entryCount];
@@ -166,12 +169,13 @@ internal static class MutablePageCodec
     }
 
     /// <summary>
-    /// Encodes an internal page (separator keys + child page ids) into an 8 KiB buffer.
+    /// Encodes an internal page (separator keys + child page ids) into a page-size buffer.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// Thrown when the encoded keys + child pointers exceed the page capacity.
     /// </exception>
     internal static byte[] EncodeInternalPage(
+        PageGeometry geom,
         ReadOnlySpan<DataValue> keys,
         ReadOnlySpan<uint> childPageIds)
     {
@@ -182,9 +186,9 @@ internal static class MutablePageCodec
                 nameof(childPageIds));
         }
 
-        byte[] page = new byte[MutableBPlusTreeConstants.PageSize];
+        byte[] page = new byte[geom.PageSize];
 
-        using MemoryStream stream = new(MutableBPlusTreeConstants.PageSize);
+        using MemoryStream stream = new(geom.PageSize);
         using BufferedWriter writer = new(stream);
 
         // Common header.
@@ -205,11 +209,11 @@ internal static class MutablePageCodec
         writer.Flush();
         long bytesWritten = stream.Position;
 
-        if (bytesWritten > MutableBPlusTreeConstants.PageSize)
+        if (bytesWritten > geom.PageSize)
         {
             throw new InvalidOperationException(
                 $"Internal page payload ({bytesWritten} bytes) exceeds page size " +
-                $"({MutableBPlusTreeConstants.PageSize} bytes) for {keys.Length} keys.");
+                $"({geom.PageSize} bytes) for {keys.Length} keys.");
         }
 
         stream.Position = 0;
@@ -222,9 +226,9 @@ internal static class MutablePageCodec
     /// Returns the encoded byte size for an internal page with the given key list
     /// (key count + 1 child pointers). Serializes to a measurement stream.
     /// </summary>
-    internal static int MeasureInternalPage(ReadOnlySpan<DataValue> keys)
+    internal static int MeasureInternalPage(PageGeometry geom, ReadOnlySpan<DataValue> keys)
     {
-        using MemoryStream stream = new(MutableBPlusTreeConstants.PageSize);
+        using MemoryStream stream = new(geom.PageSize);
         using BufferedWriter writer = new(stream);
 
         // Common header (always 4 bytes).
@@ -250,14 +254,14 @@ internal static class MutablePageCodec
     }
 
     /// <summary>
-    /// Decodes an internal page from raw 8 KiB bytes.
+    /// Decodes an internal page from raw page-size bytes.
     /// </summary>
-    internal static MutableInternalPage DecodeInternalPage(byte[] pageBytes, uint pageId)
+    internal static MutableInternalPage DecodeInternalPage(PageGeometry geom, byte[] pageBytes, uint pageId)
     {
-        if (pageBytes.Length != MutableBPlusTreeConstants.PageSize)
+        if (pageBytes.Length != geom.PageSize)
         {
             throw new InvalidDataException(
-                $"Page must be exactly {MutableBPlusTreeConstants.PageSize} bytes; got {pageBytes.Length}.");
+                $"Page must be exactly {geom.PageSize} bytes; got {pageBytes.Length}.");
         }
 
         if ((MutableBPlusTreePageType)pageBytes[0] != MutableBPlusTreePageType.Internal)
@@ -294,9 +298,9 @@ internal static class MutablePageCodec
     /// <summary>
     /// Encodes a free page (linked-list cell pointing at the next free page).
     /// </summary>
-    internal static byte[] EncodeFreePage(uint nextFreePageId)
+    internal static byte[] EncodeFreePage(PageGeometry geom, uint nextFreePageId)
     {
-        byte[] page = new byte[MutableBPlusTreeConstants.PageSize];
+        byte[] page = new byte[geom.PageSize];
         page[0] = (byte)MutableBPlusTreePageType.Free;
         BinaryPrimitives.WriteUInt32LittleEndian(page.AsSpan(4, 4), nextFreePageId);
 

@@ -8,9 +8,6 @@ namespace DatumIngest.Indexing.BTree.Mutable;
 /// </summary>
 internal static class MutableBPlusTreeConstants
 {
-    /// <summary>Page size in bytes — same 8 KiB as the bulk B+Tree.</summary>
-    internal const int PageSize = 8192;
-
     /// <summary>Common page header size (PageType + KeyCount + Reserved).</summary>
     internal const int CommonPageHeaderSize = 4;
 
@@ -22,12 +19,6 @@ internal static class MutableBPlusTreeConstants
 
     /// <summary>Total leaf header size including the common header.</summary>
     internal const int LeafHeaderSize = CommonPageHeaderSize + LeafExtraHeaderSize;
-
-    /// <summary>Maximum bytes available for leaf entries inside an 8 KiB page.</summary>
-    internal const int LeafPayloadCapacity = PageSize - LeafHeaderSize;
-
-    /// <summary>Maximum bytes available for internal page keys + child pointers.</summary>
-    internal const int InternalPayloadCapacity = PageSize - CommonPageHeaderSize;
 
     /// <summary>Sentinel page id meaning "no link" (empty root, empty free list, end of leaf chain).</summary>
     internal const uint NoLinkedPage = uint.MaxValue;

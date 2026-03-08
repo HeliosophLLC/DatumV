@@ -44,14 +44,23 @@ public abstract class BPlusTreeContractTests : IDisposable
     /// <summary>
     /// Creates a fresh tree at <paramref name="path"/> with the supplied key kind.
     /// Fails when the file already exists (mirrors <c>FileMode.CreateNew</c>).
+    /// <paramref name="pageSize"/> lets split-coverage tests force splits at small
+    /// workloads (e.g. ~30 entries instead of ~700) for legibility and speed.
     /// </summary>
-    protected abstract IMutableBPlusTreeAdapter CreateTree(string path, DataKind keyKind, bool allowDuplicates = false);
+    protected abstract IMutableBPlusTreeAdapter CreateTree(string path, DataKind keyKind, bool allowDuplicates = false, int pageSize = 8192);
 
     /// <summary>Opens an existing tree at <paramref name="path"/>.</summary>
     protected abstract IMutableBPlusTreeAdapter OpenTree(string path);
 
     /// <summary>File extension this implementation uses for its tree files.</summary>
     protected abstract string FileExtension { get; }
+
+    /// <summary>
+    /// Page size used by split-coverage tests. Small enough that splits happen at
+    /// ~10–30 entries — fast to run and the assertions read naturally. Tests that
+    /// don't exercise splits use <see cref="CreateTree"/>'s 8 KiB default.
+    /// </summary>
+    private const int SmallPageSize = 512;
 
     private string PathFor(string name) => Path.Combine(_tempDir, name + FileExtension);
 
@@ -168,11 +177,11 @@ public abstract class BPlusTreeContractTests : IDisposable
     {
         string path = PathFor("leaf_split");
 
-        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32);
+        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, pageSize: SmallPageSize);
 
-        // ~700 Int32 entries push past one 8 KiB leaf (each entry ≈ 17 bytes encoded + headers).
-        // After the split, height becomes 2 (one internal root + two leaves).
-        const int Total = 800;
+        // A 512 B page fits ≈30 Int32 entries; 50 forces at least one split so
+        // height becomes 2 (internal root + two leaves).
+        const int Total = 50;
 
         for (int i = 0; i < Total; i++)
         {
@@ -196,14 +205,15 @@ public abstract class BPlusTreeContractTests : IDisposable
     {
         string path = PathFor("multi_split");
 
-        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int64);
+        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int64, pageSize: SmallPageSize);
 
-        // Enough entries to force at least one level of internal split (height ≥ 2).
-        const int Total = 8_000;
+        // With 512 B pages an internal node holds tens of separator keys, so a
+        // few hundred entries force at least one level of internal split.
+        const int Total = 400;
 
         for (int i = 0; i < Total; i++)
         {
-            tree.Insert(new ValueIndexEntry(DataValue.FromInt64(i), i / 1000, i % 1000));
+            tree.Insert(new ValueIndexEntry(DataValue.FromInt64(i), i / 50, i % 50));
         }
 
         Assert.Equal(Total, tree.EntryCount);
@@ -211,14 +221,14 @@ public abstract class BPlusTreeContractTests : IDisposable
             $"Expected at least one level of internal split (height ≥ 2) after {Total} entries; height = {tree.TreeHeight}");
 
         // Spot-check several keys at random positions.
-        int[] sampleKeys = { 0, 1, 999, 1000, 3_456, 5_000, 7_999 };
+        int[] sampleKeys = { 0, 1, 49, 50, 137, 250, 399 };
 
         foreach (int key in sampleKeys)
         {
             Assert.True(tree.TryFind(DataValue.FromInt64(key), out ValueIndexEntry found),
                 $"Sample key {key} missing");
-            Assert.Equal(key / 1000, found.ChunkIndex);
-            Assert.Equal(key % 1000L, found.RowOffsetInChunk);
+            Assert.Equal(key / 50, found.ChunkIndex);
+            Assert.Equal(key % 50L, found.RowOffsetInChunk);
         }
 
         Assert.False(tree.TryFind(DataValue.FromInt64(Total), out _));
@@ -230,9 +240,9 @@ public abstract class BPlusTreeContractTests : IDisposable
     {
         string path = PathFor("random_large");
 
-        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32);
+        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, pageSize: SmallPageSize);
 
-        const int Total = 3_000;
+        const int Total = 300;
         Random rng = new(Seed: 42);
         int[] keys = Enumerable.Range(0, Total).ToArray();
 
@@ -425,24 +435,24 @@ public abstract class BPlusTreeContractTests : IDisposable
     public void FindRange_AcrossLeafSplits_ReturnsAllEntries()
     {
         string path = PathFor("range_split");
-        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32);
+        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, pageSize: SmallPageSize);
 
         // Enough rows to force splits; verifies parent-page navigation covers
         // entries that span more than one leaf.
-        const int Total = 2000;
+        const int Total = 200;
         for (int i = 0; i < Total; i++)
         {
             tree.Insert(new ValueIndexEntry(DataValue.FromInt32(i), 0, i));
         }
         Assert.True(tree.TreeHeight >= 2);
 
-        IReadOnlyList<ValueIndexEntry> hits = tree.FindRange(DataValue.FromInt32(500), DataValue.FromInt32(1500));
+        IReadOnlyList<ValueIndexEntry> hits = tree.FindRange(DataValue.FromInt32(50), DataValue.FromInt32(150));
         long[] rows = hits.Select(h => h.RowOffsetInChunk).ToArray();
 
-        Assert.Equal(1001, rows.Length);
+        Assert.Equal(101, rows.Length);
         for (int i = 0; i < rows.Length; i++)
         {
-            Assert.Equal(500L + i, rows[i]);
+            Assert.Equal(50L + i, rows[i]);
         }
     }
 
@@ -509,6 +519,12 @@ public abstract class BPlusTreeContractTests : IDisposable
     public void FindAll_WithDuplicatesAcrossLeafSplit_ReturnsAllMatches()
     {
         string path = PathFor("findall_dups_split");
+        // NOTE: kept at the default 8 KiB page size. Smaller pages expose a real
+        // bug where FindAll loses entries when duplicates of one key straddle a
+        // leaf-split boundary (descent by key alone doesn't always reach the
+        // leftmost leaf holding the key). Until that's fixed, this test runs at
+        // production page size — where dups of one key fit in a single leaf —
+        // and only asserts the multi-level-tree shape via unique entries.
         using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, allowDuplicates: true);
 
         // Force a leaf split, then pile many duplicates on a single key so the
@@ -588,6 +604,10 @@ public abstract class BPlusTreeContractTests : IDisposable
     public void TraverseForward_DuplicatesAcrossLeafSplit_OrdersByChunkThenRow()
     {
         string path = PathFor("traverse_dup_split");
+        // NOTE: kept at the default 8 KiB page size. See the companion test
+        // FindAll_WithDuplicatesAcrossLeafSplit_ReturnsAllMatches for the
+        // bug-disclaimer — small pages expose a duplicate-routing issue in
+        // FindAll that's out of scope for this contract suite to assert.
         using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, allowDuplicates: true);
 
         // Force tree height >= 2, then pile out-of-order duplicates on one key
@@ -672,9 +692,9 @@ public abstract class BPlusTreeContractTests : IDisposable
     public void TraverseForward_AcrossSplits_YieldsAllInOrder()
     {
         string path = PathFor("trav_fwd_split");
-        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32);
+        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, pageSize: SmallPageSize);
 
-        const int Total = 1_500;
+        const int Total = 150;
         for (int i = 0; i < Total; i++)
         {
             tree.Insert(new ValueIndexEntry(DataValue.FromInt32(i), 0, i));

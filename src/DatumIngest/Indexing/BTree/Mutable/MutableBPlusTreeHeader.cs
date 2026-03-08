@@ -18,16 +18,19 @@ internal readonly record struct MutableBPlusTreeHeader(
     ushort TreeHeight,
     long EntryCount,
     DataKind KeyKind,
-    bool AllowDuplicates)
+    bool AllowDuplicates,
+    int PageSize)
 {
     /// <summary>
     /// Returns the empty-tree header (no root, no pages, no entries). Used at file
     /// creation. Both slots are written with this state and gen=0/gen=1 so reader
     /// open is well-defined. <paramref name="allowDuplicates"/> (true for
     /// acceleration trees, false for PK-style) is captured in the header so
-    /// reopens know which Insert semantics to enforce.
+    /// reopens know which Insert semantics to enforce. <paramref name="pageSize"/>
+    /// captures the per-tree <see cref="PageGeometry.PageSize"/> so reopens use
+    /// matching page geometry.
     /// </summary>
-    internal static MutableBPlusTreeHeader Empty(DataKind keyKind, long commitGen, bool allowDuplicates = false) => new(
+    internal static MutableBPlusTreeHeader Empty(DataKind keyKind, long commitGen, bool allowDuplicates, int pageSize) => new(
         CommitGen: commitGen,
         RootPageId: MutableBPlusTreeConstants.NoLinkedPage,
         FreeListHead: MutableBPlusTreeConstants.NoLinkedPage,
@@ -35,7 +38,8 @@ internal readonly record struct MutableBPlusTreeHeader(
         TreeHeight: 0,
         EntryCount: 0,
         KeyKind: keyKind,
-        AllowDuplicates: allowDuplicates);
+        AllowDuplicates: allowDuplicates,
+        PageSize: pageSize);
 
     /// <summary>
     /// Encodes this header into the given 256-byte buffer. The CRC32 over the first
@@ -63,8 +67,9 @@ internal readonly record struct MutableBPlusTreeHeader(
         BinaryPrimitives.WriteInt64LittleEndian(destination[30..38], EntryCount);
         BinaryPrimitives.WriteUInt16LittleEndian(destination[38..40], (ushort)KeyKind);
         destination[40] = AllowDuplicates ? (byte)1 : (byte)0;
+        BinaryPrimitives.WriteInt32LittleEndian(destination[41..45], PageSize);
 
-        // Bytes [41..251] are reserved; left zero by the Clear above.
+        // Bytes [45..251] are reserved; left zero by the Clear above.
 
         uint crc = Crc32.HashToUInt32(destination[..(MutableBPlusTreeConstants.HeaderSlotSize - 4)]);
         BinaryPrimitives.WriteUInt32LittleEndian(
@@ -117,7 +122,8 @@ internal readonly record struct MutableBPlusTreeHeader(
             TreeHeight: BinaryPrimitives.ReadUInt16LittleEndian(source[28..30]),
             EntryCount: BinaryPrimitives.ReadInt64LittleEndian(source[30..38]),
             KeyKind: (DataKind)BinaryPrimitives.ReadUInt16LittleEndian(source[38..40]),
-            AllowDuplicates: source[40] != 0);
+            AllowDuplicates: source[40] != 0,
+            PageSize: BinaryPrimitives.ReadInt32LittleEndian(source[41..45]));
 
         return true;
     }

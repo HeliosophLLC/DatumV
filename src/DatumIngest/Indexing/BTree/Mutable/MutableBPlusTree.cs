@@ -25,6 +25,7 @@ namespace DatumIngest.Indexing.BTree.Mutable;
 internal sealed class MutableBPlusTree : IDisposable
 {
     private readonly FileStream _file;
+    private readonly PageGeometry _geometry;
     private MutableBPlusTreeHeader _activeHeader;
     private int _activeSlotIndex; // 0 or 1; next commit writes the OTHER slot.
 
@@ -33,6 +34,8 @@ internal sealed class MutableBPlusTree : IDisposable
         _file = file;
         _activeHeader = activeHeader;
         _activeSlotIndex = activeSlotIndex;
+        _geometry = new PageGeometry(activeHeader.PageSize);
+        _geometry.Validate();
     }
 
     /// <summary>Total number of entries currently in the tree.</summary>
@@ -70,14 +73,26 @@ internal sealed class MutableBPlusTree : IDisposable
     /// composite (Key, ChunkIndex, RowOffsetInChunk)); <see langword="false"/> for
     /// PK uniqueness (Insert throws on duplicate key).
     /// </param>
+    /// <param name="pageSize">
+    /// Page size in bytes for this tree. Defaults to 8 KiB. Persisted in the header
+    /// so reopens use the same geometry; contract tests can pick smaller values
+    /// (e.g. 512) to exercise split logic at legible workloads.
+    /// </param>
     /// <exception cref="IOException">If the file already exists.</exception>
-    internal static MutableBPlusTree Create(string path, DataKind keyKind, bool allowDuplicates = false)
+    internal static MutableBPlusTree Create(
+        string path,
+        DataKind keyKind,
+        bool allowDuplicates = false,
+        int pageSize = 8192)
     {
+        PageGeometry geometry = new(pageSize);
+        geometry.Validate();
+
         FileStream file = new(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
         try
         {
-            MutableBPlusTreeHeader empty = MutableBPlusTreeHeader.Empty(keyKind, commitGen: 0, allowDuplicates: allowDuplicates);
-            MutableBPlusTreeHeader emptyB = MutableBPlusTreeHeader.Empty(keyKind, commitGen: 1, allowDuplicates: allowDuplicates);
+            MutableBPlusTreeHeader empty = MutableBPlusTreeHeader.Empty(keyKind, commitGen: 0, allowDuplicates: allowDuplicates, pageSize: pageSize);
+            MutableBPlusTreeHeader emptyB = MutableBPlusTreeHeader.Empty(keyKind, commitGen: 1, allowDuplicates: allowDuplicates, pageSize: pageSize);
 
             byte[] slot = new byte[MutableBPlusTreeConstants.HeaderSlotSize];
 
@@ -425,7 +440,7 @@ internal sealed class MutableBPlusTree : IDisposable
 
         uint newLeafId = AllocatePage(ref newPageCount);
         byte[] leafBytes = MutablePageCodec.EncodeLeafPage(
-            newEntries, leaf.PreviousLeafPageId, leaf.NextLeafPageId);
+            _geometry, newEntries, leaf.PreviousLeafPageId, leaf.NextLeafPageId);
         WritePage(newLeafId, leafBytes);
 
         // Walk path[..] up rewriting parents to point at newLeafId.
@@ -590,6 +605,7 @@ internal sealed class MutableBPlusTree : IDisposable
     {
         ValueIndexEntry[] entries = new[] { entry };
         byte[] leafBytes = MutablePageCodec.EncodeLeafPage(
+            _geometry,
             entries,
             previousLeafPageId: MutableBPlusTreeConstants.NoLinkedPage,
             nextLeafPageId: MutableBPlusTreeConstants.NoLinkedPage);
@@ -619,13 +635,13 @@ internal sealed class MutableBPlusTree : IDisposable
         ushort newTreeHeight = _activeHeader.TreeHeight;
 
         // Try to fit in one leaf.
-        int payloadBytes = MutablePageCodec.MeasureLeafEntries(merged);
+        int payloadBytes = MutablePageCodec.MeasureLeafEntries(_geometry, merged);
 
-        if (payloadBytes <= MutableBPlusTreeConstants.LeafPayloadCapacity)
+        if (payloadBytes <= _geometry.LeafPayloadCapacity)
         {
             // No split needed. Rewrite leaf to new page id, then walk up rewriting parents.
             uint newLeafId = AllocatePage(ref newPageCount);
-            byte[] leafBytes = MutablePageCodec.EncodeLeafPage(merged, leaf.PreviousLeafPageId, leaf.NextLeafPageId);
+            byte[] leafBytes = MutablePageCodec.EncodeLeafPage(_geometry, merged, leaf.PreviousLeafPageId, leaf.NextLeafPageId);
             WritePage(newLeafId, leafBytes);
 
             // If this leaf has a "previous" sibling, we need to update its NextLeafPageId
@@ -651,8 +667,8 @@ internal sealed class MutableBPlusTree : IDisposable
         uint leftId = AllocatePage(ref newPageCount);
         uint rightId = AllocatePage(ref newPageCount);
 
-        byte[] leftBytes = MutablePageCodec.EncodeLeafPage(leftEntries, leaf.PreviousLeafPageId, rightId);
-        byte[] rightBytes = MutablePageCodec.EncodeLeafPage(rightEntries, leftId, leaf.NextLeafPageId);
+        byte[] leftBytes = MutablePageCodec.EncodeLeafPage(_geometry, leftEntries, leaf.PreviousLeafPageId, rightId);
+        byte[] rightBytes = MutablePageCodec.EncodeLeafPage(_geometry, rightEntries, leftId, leaf.NextLeafPageId);
         WritePage(leftId, leftBytes);
         WritePage(rightId, rightBytes);
 
@@ -682,7 +698,7 @@ internal sealed class MutableBPlusTree : IDisposable
             newChildIds[step.SlotIndex] = currentChildId;
 
             DataValue[] keys = step.Page.Keys.ToArray();
-            byte[] pageBytes = MutablePageCodec.EncodeInternalPage(keys, newChildIds);
+            byte[] pageBytes = MutablePageCodec.EncodeInternalPage(_geometry, keys, newChildIds);
 
             uint newId = AllocatePage(ref newPageCount);
             WritePage(newId, pageBytes);
@@ -732,11 +748,11 @@ internal sealed class MutableBPlusTree : IDisposable
             step.Page.ChildPageIds[(step.SlotIndex + 1)..].CopyTo(mergedChildren.AsSpan(step.SlotIndex + 2));
 
             // Try to fit.
-            int encodedSize = MutablePageCodec.MeasureInternalPage(mergedKeys);
+            int encodedSize = MutablePageCodec.MeasureInternalPage(_geometry, mergedKeys);
 
-            if (encodedSize <= MutableBPlusTreeConstants.PageSize)
+            if (encodedSize <= _geometry.PageSize)
             {
-                byte[] pageBytes = MutablePageCodec.EncodeInternalPage(mergedKeys, mergedChildren);
+                byte[] pageBytes = MutablePageCodec.EncodeInternalPage(_geometry, mergedKeys, mergedChildren);
                 uint newId = AllocatePage(ref newPageCount);
                 WritePage(newId, pageBytes);
 
@@ -755,8 +771,8 @@ internal sealed class MutableBPlusTree : IDisposable
             uint newLeftId = AllocatePage(ref newPageCount);
             uint newRightId = AllocatePage(ref newPageCount);
 
-            byte[] leftBytes = MutablePageCodec.EncodeInternalPage(leftKeys, leftChildren);
-            byte[] rightBytes = MutablePageCodec.EncodeInternalPage(rightKeys, rightChildren);
+            byte[] leftBytes = MutablePageCodec.EncodeInternalPage(_geometry, leftKeys, leftChildren);
+            byte[] rightBytes = MutablePageCodec.EncodeInternalPage(_geometry, rightKeys, rightChildren);
             WritePage(newLeftId, leftBytes);
             WritePage(newRightId, rightBytes);
 
@@ -768,7 +784,7 @@ internal sealed class MutableBPlusTree : IDisposable
         // Path exhausted — root split. Create a new root.
         DataValue[] rootKeys = { currentSeparator };
         uint[] rootChildren = { currentLeftId, currentRightId };
-        byte[] rootBytes = MutablePageCodec.EncodeInternalPage(rootKeys, rootChildren);
+        byte[] rootBytes = MutablePageCodec.EncodeInternalPage(_geometry, rootKeys, rootChildren);
         uint newRootId = AllocatePage(ref newPageCount);
         WritePage(newRootId, rootBytes);
         newTreeHeight++;
@@ -776,17 +792,17 @@ internal sealed class MutableBPlusTree : IDisposable
         return newRootId;
     }
 
-    private static int FindLeafSplitIndex(ReadOnlySpan<ValueIndexEntry> merged)
+    private int FindLeafSplitIndex(ReadOnlySpan<ValueIndexEntry> merged)
     {
         // Pick the index whose left half is closest to half the payload capacity.
         // Iterate from the middle outward — usually the natural midpoint works.
-        int target = MutableBPlusTreeConstants.LeafPayloadCapacity / 2;
+        int target = _geometry.LeafPayloadCapacity / 2;
         int currentBytes = 0;
         int lastIndex = 1;
 
         for (int i = 0; i < merged.Length; i++)
         {
-            int entrySize = MutablePageCodec.MeasureLeafEntries(merged.Slice(i, 1));
+            int entrySize = MutablePageCodec.MeasureLeafEntries(_geometry, merged.Slice(i, 1));
 
             if (currentBytes + entrySize > target && i > 0)
             {
@@ -799,23 +815,23 @@ internal sealed class MutableBPlusTree : IDisposable
         }
 
         // Validate both halves fit in a single leaf each.
-        int leftBytes = MutablePageCodec.MeasureLeafEntries(merged[..lastIndex]);
-        int rightBytes = MutablePageCodec.MeasureLeafEntries(merged[lastIndex..]);
+        int leftBytes = MutablePageCodec.MeasureLeafEntries(_geometry, merged[..lastIndex]);
+        int rightBytes = MutablePageCodec.MeasureLeafEntries(_geometry, merged[lastIndex..]);
 
-        if (leftBytes > MutableBPlusTreeConstants.LeafPayloadCapacity ||
-            rightBytes > MutableBPlusTreeConstants.LeafPayloadCapacity)
+        if (leftBytes > _geometry.LeafPayloadCapacity ||
+            rightBytes > _geometry.LeafPayloadCapacity)
         {
             // Single oversized entry — would be a bug since PK keys are bounded ≤ 16 bytes,
             // so two entries always fit. Surface clearly.
             throw new InvalidOperationException(
-                $"Cannot split leaf: left={leftBytes}, right={rightBytes} both must fit in {MutableBPlusTreeConstants.LeafPayloadCapacity} bytes. " +
+                $"Cannot split leaf: left={leftBytes}, right={rightBytes} both must fit in {_geometry.LeafPayloadCapacity} bytes. " +
                 "PK leaf keys must be ≤ 16 bytes (validated by catalog).");
         }
 
         return lastIndex;
     }
 
-    private static int FindInternalSplitIndex(ReadOnlySpan<DataValue> mergedKeys)
+    private int FindInternalSplitIndex(ReadOnlySpan<DataValue> mergedKeys)
     {
         // For internal split, we promote one key and split the rest. Try the midpoint
         // first, then walk down/up to find a split that fits both halves in a page.
@@ -836,11 +852,11 @@ internal sealed class MutableBPlusTree : IDisposable
                 ReadOnlySpan<DataValue> right = mergedKeys[(candidate + 1)..];
 
                 // Encoded-size estimate; if either half overflows, skip.
-                int leftBytes = MutablePageCodec.MeasureInternalPage(left);
-                int rightBytes = MutablePageCodec.MeasureInternalPage(right);
+                int leftBytes = MutablePageCodec.MeasureInternalPage(_geometry, left);
+                int rightBytes = MutablePageCodec.MeasureInternalPage(_geometry, right);
 
-                if (leftBytes <= MutableBPlusTreeConstants.PageSize &&
-                    rightBytes <= MutableBPlusTreeConstants.PageSize)
+                if (leftBytes <= _geometry.PageSize &&
+                    rightBytes <= _geometry.PageSize)
                 {
                     return candidate;
                 }
@@ -848,7 +864,7 @@ internal sealed class MutableBPlusTree : IDisposable
         }
 
         throw new InvalidOperationException(
-            $"Cannot split internal page with {mergedKeys.Length} keys; no balanced split fits in {MutableBPlusTreeConstants.PageSize} bytes.");
+            $"Cannot split internal page with {mergedKeys.Length} keys; no balanced split fits in {_geometry.PageSize} bytes.");
     }
 
     private uint AllocatePage(ref uint pageCount)
@@ -861,13 +877,13 @@ internal sealed class MutableBPlusTree : IDisposable
 
     private void WritePage(uint pageId, byte[] pageBytes)
     {
-        if (pageBytes.Length != MutableBPlusTreeConstants.PageSize)
+        if (pageBytes.Length != _geometry.PageSize)
         {
             throw new InvalidOperationException(
-                $"Encoded page must be exactly {MutableBPlusTreeConstants.PageSize} bytes; got {pageBytes.Length}.");
+                $"Encoded page must be exactly {_geometry.PageSize} bytes; got {pageBytes.Length}.");
         }
 
-        long offset = MutableBPlusTreeConstants.PagesBaseOffset + ((long)pageId * MutableBPlusTreeConstants.PageSize);
+        long offset = MutableBPlusTreeConstants.PagesBaseOffset + ((long)pageId * _geometry.PageSize);
         _file.Position = offset;
         _file.Write(pageBytes);
     }
@@ -880,8 +896,8 @@ internal sealed class MutableBPlusTree : IDisposable
                 $"Page id {pageId} out of range (page count = {_activeHeader.PageCount}).");
         }
 
-        long offset = MutableBPlusTreeConstants.PagesBaseOffset + ((long)pageId * MutableBPlusTreeConstants.PageSize);
-        byte[] buffer = new byte[MutableBPlusTreeConstants.PageSize];
+        long offset = MutableBPlusTreeConstants.PagesBaseOffset + ((long)pageId * _geometry.PageSize);
+        byte[] buffer = new byte[_geometry.PageSize];
         _file.Position = offset;
         _file.ReadExactly(buffer);
         return buffer;
@@ -889,12 +905,12 @@ internal sealed class MutableBPlusTree : IDisposable
 
     private MutableLeafPage ReadLeafPage(uint pageId)
     {
-        return MutablePageCodec.DecodeLeafPage(ReadPageBytes(pageId), pageId);
+        return MutablePageCodec.DecodeLeafPage(_geometry, ReadPageBytes(pageId), pageId);
     }
 
     private MutableInternalPage ReadInternalPage(uint pageId)
     {
-        return MutablePageCodec.DecodeInternalPage(ReadPageBytes(pageId), pageId);
+        return MutablePageCodec.DecodeInternalPage(_geometry, ReadPageBytes(pageId), pageId);
     }
 
     private void CommitNewHeader(
@@ -915,7 +931,8 @@ internal sealed class MutableBPlusTree : IDisposable
             TreeHeight: treeHeight,
             EntryCount: entryCount,
             KeyKind: _activeHeader.KeyKind,
-            AllowDuplicates: _activeHeader.AllowDuplicates);
+            AllowDuplicates: _activeHeader.AllowDuplicates,
+            PageSize: _activeHeader.PageSize);
 
         int targetSlot = 1 - _activeSlotIndex;
         long targetOffset = targetSlot == 0

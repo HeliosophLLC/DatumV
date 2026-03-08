@@ -22,8 +22,8 @@ public sealed class MutableBPlusTreeBytesContractTests : BPlusTreeContractTests
 {
     protected override string FileExtension => ".datum-bytespkindex";
 
-    protected override IMutableBPlusTreeAdapter CreateTree(string path, DataKind keyKind, bool allowDuplicates = false) =>
-        new BytesAdapter(MutableBPlusTreeBytes.Create(path, allowDuplicates));
+    protected override IMutableBPlusTreeAdapter CreateTree(string path, DataKind keyKind, bool allowDuplicates = false, int pageSize = 8192) =>
+        new BytesAdapter(MutableBPlusTreeBytes.Create(path, allowDuplicates, pageSize));
 
     protected override IMutableBPlusTreeAdapter OpenTree(string path) =>
         new BytesAdapter(MutableBPlusTreeBytes.Open(path));
