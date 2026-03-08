@@ -582,6 +582,9 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.File.PathConcatFunction>();
         registry.RegisterScalar<Scalar.File.GetFilenameNoExtFunction>();
         registry.RegisterScalar<Scalar.File.ChangeFilenameExtFunction>();
+        registry.RegisterScalar<Scalar.File.ReadStringListFunction>();
+        registry.RegisterScalar<Scalar.Image.YoloxPreprocessFunction>();
+        registry.RegisterScalar<Scalar.Image.YoloxPostprocessFunction>();
         registry.RegisterScalar<Scalar.RandomChoiceFunction>();
         registry.RegisterScalar<Scalar.RandomFunction>();
         registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();

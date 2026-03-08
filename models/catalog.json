@@ -272,7 +272,8 @@
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_s.onnx", "coco-classes.json"] },
-      "approxSizeMb": 35
+      "approxSizeMb": 35,
+      "installSql": "sql/yolox-s.sql"
     },
     {
       "id": "yolox-nano",
@@ -284,7 +285,8 @@
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_nano.onnx", "coco-classes.json"] },
-      "approxSizeMb": 4
+      "approxSizeMb": 4,
+      "installSql": "sql/yolox-nano.sql"
     },
 
     {
@@ -297,7 +299,8 @@
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 2048, "preferred": "gpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_x.onnx", "coco-classes.json"] },
-      "approxSizeMb": 378
+      "approxSizeMb": 378,
+      "installSql": "sql/yolox-x.sql"
     },
     {
       "id": "yolox-tiny",
@@ -309,7 +312,8 @@
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_tiny.onnx", "coco-classes.json"] },
-      "approxSizeMb": 20
+      "approxSizeMb": 20,
+      "installSql": "sql/yolox-tiny.sql"
     },
     {
       "id": "yolox-m",
@@ -321,7 +325,8 @@
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_m.onnx", "coco-classes.json"] },
-      "approxSizeMb": 97
+      "approxSizeMb": 97,
+      "installSql": "sql/yolox-m.sql"
     },
     {
       "id": "yolox-l",
@@ -333,7 +338,8 @@
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_l.onnx", "coco-classes.json"] },
-      "approxSizeMb": 207
+      "approxSizeMb": 207,
+      "installSql": "sql/yolox-l.sql"
     },
     {
       "id": "yolox-darknet",
@@ -345,7 +351,8 @@
       "attributions": ["Megvii Inc. — YOLOX (Ge, Liu, Wang, Li, Sun)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122", "include": ["yolox_darknet.onnx", "coco-classes.json"] },
-      "approxSizeMb": 244
+      "approxSizeMb": 244,
+      "installSql": "sql/yolox-darknet.sql"
     },
     {
       "id": "rtdetr-r18",

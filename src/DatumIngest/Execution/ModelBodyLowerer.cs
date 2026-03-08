@@ -125,10 +125,20 @@ public static class ModelBodyLowerer
                     // into per-input tensors. The MIO + adapter path
                     // handles struct locals natively via VariableScope.
                     if (IsStructTypeName(decl.TypeName)) return false;
+                    // Catalog-relative-path functions read state off
+                    // `frame.CurrentModel`, which the lowered operator
+                    // pipeline doesn't carry today (operators run outside
+                    // the model body's frame). Bail so the MIO + adapter
+                    // path takes the body — that path runs the body
+                    // through `ProceduralModelFunction` which constructs
+                    // a frame with `currentModel` set. Long-term fix:
+                    // plumb the descriptor into lowered operators.
+                    if (ContainsCatalogRelativeCall(decl.Initializer)) return false;
                     break;
                 case ReturnStatement ret when i == body.Count - 1:
                     // Tail RETURN is the only valid terminator.
                     if (ContainsMultiInputInfer(ret.Value)) return false;
+                    if (ContainsCatalogRelativeCall(ret.Value)) return false;
                     break;
                 default:
                     // SET, IF, WHILE, BLOCK, BREAK, CONTINUE, mid-body RETURN,
@@ -229,6 +239,73 @@ public static class ModelBodyLowerer
                 return ContainsMultiInputInfer(atz.Expression) || ContainsMultiInputInfer(atz.TimeZone);
             case LambdaExpression lam:
                 return ContainsMultiInputInfer(lam.Body);
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Functions that resolve catalog-relative paths (or otherwise read
+    /// state off <c>frame.CurrentModel</c>) and therefore can't run
+    /// through the lowered operator pipeline, which constructs frames
+    /// without a <c>currentModel</c> binding. Bodies that call any of
+    /// these fall through to the MIO + <c>ProceduralModelAdapter</c>
+    /// path, which runs the body through <c>ProceduralModelFunction</c>
+    /// and builds a frame with <c>currentModel</c> set.
+    /// </summary>
+    /// <remarks>
+    /// Long-term: plumb the descriptor into the lowered
+    /// <see cref="Operators.ProjectOperator"/> / <see cref="Operators.InferOperator"/>
+    /// so they construct frames with <c>currentModel</c>. Until then,
+    /// the bail list is the safe path.
+    /// </remarks>
+    private static readonly HashSet<string> CatalogRelativeFunctions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // system schema
+        "read_string_list",
+        // tokenizer schema — relative paths resolve against the model's USING dir
+        "tokenizer.encode_bert",
+    };
+
+    /// <summary>
+    /// True when <paramref name="expr"/> (or any sub-expression) calls a
+    /// catalog-relative-path function — see
+    /// <see cref="CatalogRelativeFunctions"/> for the bail list.
+    /// </summary>
+    private static bool ContainsCatalogRelativeCall(Expression? expr)
+    {
+        if (expr is null) return false;
+        switch (expr)
+        {
+            case FunctionCallExpression fc:
+                if (CatalogRelativeFunctions.Contains(fc.CallName)) return true;
+                for (int i = 0; i < fc.Arguments.Count; i++)
+                {
+                    if (ContainsCatalogRelativeCall(fc.Arguments[i])) return true;
+                }
+                return false;
+            case BinaryExpression b:
+                return ContainsCatalogRelativeCall(b.Left) || ContainsCatalogRelativeCall(b.Right);
+            case UnaryExpression u:
+                return ContainsCatalogRelativeCall(u.Operand);
+            case CastExpression c:
+                return ContainsCatalogRelativeCall(c.Expression);
+            case IndexAccessExpression ia:
+                return ContainsCatalogRelativeCall(ia.Source) || ContainsCatalogRelativeCall(ia.Index);
+            case StructLiteralExpression sl:
+                for (int k = 0; k < sl.Fields.Count; k++)
+                {
+                    if (ContainsCatalogRelativeCall(sl.Fields[k].Value)) return true;
+                }
+                return false;
+            case CaseExpression ce:
+                if (ce.Operand is not null && ContainsCatalogRelativeCall(ce.Operand)) return true;
+                for (int k = 0; k < ce.WhenClauses.Count; k++)
+                {
+                    if (ContainsCatalogRelativeCall(ce.WhenClauses[k].Condition)) return true;
+                    if (ContainsCatalogRelativeCall(ce.WhenClauses[k].Result)) return true;
+                }
+                return ce.ElseResult is not null && ContainsCatalogRelativeCall(ce.ElseResult);
             default:
                 return false;
         }

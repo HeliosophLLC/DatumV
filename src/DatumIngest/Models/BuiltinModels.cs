@@ -25,7 +25,7 @@ public static class BuiltinModels
     /// <see cref="TableCatalog"/>. Builds a fresh <see cref="ModelCatalog"/>
     /// rooted at <paramref name="modelDirectory"/> (or the default —
     /// <c>DATUM_MODELS</c> env var, then per-user fallback), registers every
-    /// builtin model (<c>mobilenetv2</c>, <c>yolox_s</c>, <c>llama31_8b</c>,
+    /// builtin model (<c>mobilenetv2</c>, <c>llama31_8b</c>,
     /// <c>phi3_mini</c>), wires the model catalog onto
     /// <see cref="TableCatalog.Models"/>, and adds the <c>system_models</c>
     /// virtual table for runtime introspection.
@@ -74,10 +74,11 @@ public static class BuiltinModels
 
         // Vision models
         RegisterMobileNetV2(modelCatalog);
-        RegisterAllYoloX(modelCatalog);  // 7 entries: nano/tiny/s/m/l/x/darknet
         RegisterScrfd10g(modelCatalog);
         // PP-OCR-det was removed from built-ins; it now ships as a
         // SQL-defined model (models/sql/paddleocr-v4-det.sql).
+        // YOLOX-{nano,tiny,s,m,l,x,darknet} likewise migrated to SQL-defined
+        // models (models/sql/yolox-*.sql).
         RegisterRealesrganGeneralX4(modelCatalog);
         RegisterU2Net(modelCatalog);
         RegisterU2Netp(modelCatalog);
@@ -2456,122 +2457,14 @@ public static class BuiltinModels
             Files: [encoderFilename, decoderFilename]));
     }
 
-    // ────────────────────────── YOLOX (Apache-2.0) ──────────────────────────
-    //
-    // Megvii's YOLOX detector family — license-clean object detector.
-    // Seven sibling registrations spanning the full speed/accuracy ladder.
-    // Same architecture, same COCO-80 vocab, different parameter counts.
-    // Pre-built ONNX files available directly from the Megvii GitHub release
-    // page; no Python conversion needed.
-
-    /// <summary>Default filename for YOLOX-Nano (smallest, ~3 MB, 416×416 input).</summary>
-    public const string YoloXNanoFilename = "yolox_nano.onnx";
-
-    /// <summary>Default filename for YOLOX-Tiny (~20 MB, 416×416 input).</summary>
-    public const string YoloXTinyFilename = "yolox_tiny.onnx";
-
-    /// <summary>Default filename for YOLOX-S (~36 MB, 640×640 input).</summary>
-    public const string YoloXSFilename = "yolox_s.onnx";
-
-    /// <summary>Default filename for YOLOX-M (~98 MB, 640×640 input).</summary>
-    public const string YoloXMFilename = "yolox_m.onnx";
-
-    /// <summary>Default filename for YOLOX-L (~200 MB, 640×640 input).</summary>
-    public const string YoloXLFilename = "yolox_l.onnx";
-
-    /// <summary>Default filename for YOLOX-X (~378 MB, 640×640 input).</summary>
-    public const string YoloXXFilename = "yolox_x.onnx";
-
-    /// <summary>
-    /// Default filename for YOLOX-Darknet53 — uses Darknet53 backbone
-    /// instead of YOLOX's CSPNet. Sits roughly between YOLOX-L and YOLOX-X
-    /// in size; its niche is "what if we kept YOLOv3's backbone but
-    /// applied YOLOX's anchor-free head." Useful for academic
-    /// comparisons.
-    /// </summary>
-    public const string YoloXDarknetFilename = "yolox_darknet.onnx";
-
-    /// <summary>
-    /// Common backbone for the seven YOLOX size registrations. EachS
-    /// caller supplies the catalog name, the ONNX filename, the
-    /// architectural parameter count, and a one-line description.
-    /// </summary>
-    private static void RegisterYoloXVariant(
-        ModelCatalog catalog,
-        string modelName,
-        string modelFilename,
-        string parameters,
-        string sizeLabel)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: modelFilename,
-            InputKinds: [DataKind.Image],
-            OutputKind: DataKind.Struct,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
-                return new YoloXModel(modelName, modelPath, labels: null);
-            },
-            // Optional thresholding shape (forward-compat; not yet wired
-            // into per-call overrides).
-            OptionalArgKinds: [DataKind.Float64, DataKind.Float64],
-            DisplayName: $"YOLOX-{sizeLabel} Detector",
-            Parameters: parameters,
-            License: "Apache-2.0",
-            LicenseHolder: "Megvii",
-            SourceUrl: "https://github.com/Megvii-BaseDetection/YOLOX",
-            Category: "detector",
-            Modalities: ["image"],
-            Files: [modelFilename]));
-    }
-
-    /// <summary>Registers YOLOX-Nano (smallest, fastest, lowest accuracy).</summary>
-    public static void RegisterYoloXNano(ModelCatalog catalog) =>
-        RegisterYoloXVariant(catalog, "yolox_n", YoloXNanoFilename, "0.91M", "Nano");
-
-    /// <summary>Registers YOLOX-Tiny (small, fast).</summary>
-    public static void RegisterYoloXTiny(ModelCatalog catalog) =>
-        RegisterYoloXVariant(catalog, "yolox_t", YoloXTinyFilename, "5.06M", "Tiny");
-
-    /// <summary>Registers YOLOX-S (small, balanced).</summary>
-    public static void RegisterYoloXSmall(ModelCatalog catalog) =>
-        RegisterYoloXVariant(catalog, "yolox_s", YoloXSFilename, "9.0M", "S");
-
-    /// <summary>Registers YOLOX-M (medium).</summary>
-    public static void RegisterYoloXMedium(ModelCatalog catalog) =>
-        RegisterYoloXVariant(catalog, "yolox_m", YoloXMFilename, "25.3M", "M");
-
-    /// <summary>Registers YOLOX-L (large, quality bias).</summary>
-    public static void RegisterYoloXLarge(ModelCatalog catalog) =>
-        RegisterYoloXVariant(catalog, "yolox_l", YoloXLFilename, "54.2M", "L");
-
-    /// <summary>Registers YOLOX-X (extra-large, maximum accuracy).</summary>
-    public static void RegisterYoloXExtraLarge(ModelCatalog catalog) =>
-        RegisterYoloXVariant(catalog, "yolox_x", YoloXXFilename, "99.1M", "X");
-
-    /// <summary>Registers YOLOX-Darknet53 (Darknet backbone variant).</summary>
-    public static void RegisterYoloXDarknet(ModelCatalog catalog) =>
-        RegisterYoloXVariant(catalog, "yolox_darknet", YoloXDarknetFilename, "63.7M", "Darknet53");
-
-    /// <summary>
-    /// Convenience: registers all seven YOLOX size variants at once.
-    /// Call this in addition to <see cref="AttachStandardModels"/> if
-    /// you want the full speed/accuracy cascade available — the default
-    /// <c>AttachStandardModels</c> registers every YOLOX variant already.
-    /// </summary>
-    public static void RegisterAllYoloX(ModelCatalog catalog)
-    {
-        RegisterYoloXNano(catalog);
-        RegisterYoloXTiny(catalog);
-        RegisterYoloXSmall(catalog);
-        RegisterYoloXMedium(catalog);
-        RegisterYoloXLarge(catalog);
-        RegisterYoloXExtraLarge(catalog);
-        RegisterYoloXDarknet(catalog);
-    }
+    // YOLOX-{nano,tiny,s,m,l,x,darknet} previously registered here as built-in
+    // C# IModels (YoloXModel.cs + CocoLabels.cs). They shipped as SQL-defined
+    // models in models/sql/yolox-{nano,tiny,s,m,l,x,darknet}.sql backed by the
+    // three new scalar functions (yolox_preprocess, yolox_postprocess,
+    // read_string_list). The C# class was deleted along with the seven
+    // RegisterYoloX* methods. Each variant's catalog.json entry declares
+    // installSql so the downloader runs CREATE MODEL after fetching the
+    // ONNX + coco-classes.json bundle.
 
     // ────────────────────── Python-backed models (TTS / music gen / cloning) ──────────────────────
     //

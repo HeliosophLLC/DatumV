@@ -167,6 +167,12 @@ public static class TaskTypeRegistry
             [Scalar(DataKind.Image)],
             ArrayOfNamed("ScoredDetection"),
             "Image → bounding boxes with classes + confidences."),
+        new("LabeledObjectDetector",
+            [Scalar(DataKind.Image)],
+            ArrayOfNamed("LabeledDetection"),
+            "Image → bounding boxes with class-label strings + confidences. "
+            + "Like ObjectDetector but emits human-readable labels (e.g. 'person', 'car') "
+            + "instead of integer class ids."),
         new("RegionLocalizer",
             [Scalar(DataKind.Image)],
             ArrayOfNamed("RegionScore"),
