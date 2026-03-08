@@ -161,7 +161,8 @@
       "attributions": ["BAAI — Beijing Academy of Artificial Intelligence"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "BAAI/bge-small-en-v1.5", "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a", "include": ["onnx/*", "config.json", "tokenizer*", "special_tokens_map.json", "vocab.txt", "1_Pooling/*", "sentence_bert_config.json"] }],
-      "approxSizeMb": 130
+      "approxSizeMb": 130,
+      "installSql": "sql/bge-small-en-v1.5.sql"
     },
     {
       "id": "jina-embeddings-v2-base-en",
@@ -172,8 +173,9 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Jina AI"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "jinaai/jina-embeddings-v2-base-en", "revision": "322d4d7e2f35e84137961a65af894fda0385eb7a", "include": ["onnx/*", "config.json", "tokenizer*", "special_tokens_map.json", "vocab.txt"] }],
-      "approxSizeMb": 330
+      "sources": [{ "type": "huggingface", "repo": "jinaai/jina-embeddings-v2-base-en", "revision": "322d4d7e2f35e84137961a65af894fda0385eb7a", "include": ["model.onnx", "vocab.txt"] }],
+      "approxSizeMb": 330,
+      "installSql": "sql/jina-embeddings-v2-base-en.sql"
     },
     {
       "id": "bge-reranker-base",
@@ -504,7 +506,8 @@
       "attributions": ["© 2021 Xintao Wang — Real-ESRGAN (Tencent ARC Lab)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/realesrgan-onnx", "revision": "488e5dda07333179f229a6205d92135eea4c25e9", "include": ["realesr-general-x4v3.onnx"] }],
-      "approxSizeMb": 5
+      "approxSizeMb": 5,
+      "installSql": "sql/realesrgan-x4v3.sql"
     },
     {
       "id": "mobilenetv2",

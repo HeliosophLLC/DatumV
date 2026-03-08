@@ -8,7 +8,7 @@ namespace DatumIngest.Models.Onnx;
 /// <summary>
 /// Abstract <see cref="IModel"/> base for ONNX Runtime backed models. Holds the
 /// loaded <see cref="InferenceSession"/> and orchestrates the per-batch dispatch;
-/// concrete subclasses (e.g. <c>SuperResolutionModel</c>) supply the
+/// concrete subclasses (e.g. <c>Florence2Model</c>) supply the
 /// model-specific preprocessing (DataValue → input tensors) and postprocessing
 /// (output tensors → DataValue).
 /// </summary>

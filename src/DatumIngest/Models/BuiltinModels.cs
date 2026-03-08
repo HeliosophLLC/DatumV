@@ -79,9 +79,9 @@ public static class BuiltinModels
         // entries declare installSql so the downloader registers them
         // after fetching weights. SCRFD-10G was removed entirely
         // (InsightFace weights aren't openly licensed).
-        RegisterRealesrganGeneralX4(modelCatalog);
-        // U²-Net (full + lite) + MiDaS-small + DPT-Large migrated to
-        // SQL-defined models (models/sql/{u2net,u2netp,midas-small,dpt-large}.sql).
+        // Real-ESRGAN + U²-Net (full + lite) + MiDaS-small + DPT-Large
+        // migrated to SQL-defined models (models/sql/{realesrgan-x4v3,u2net,
+        // u2netp,midas-small,dpt-large}.sql).
         RegisterMobileSamPrompted(modelCatalog);
         RegisterMobileSam(modelCatalog);
         RegisterViTGpt2Caption(modelCatalog);
@@ -1918,71 +1918,14 @@ public static class BuiltinModels
     // deletion is the success metric for the "registry replaces builtins"
     // arc — every model that lands as SQL retires the bespoke C# version.
 
-    // ──────────────────── Real-ESRGAN-General x4 (BSD-3) ────────────────────
-    //
-    // Xintao Wang's Real-ESRGAN-Compact (SRVGGNet) general-content variant.
-    // 4× super-resolution, ~10 MB ONNX. Trained on real-world degradations
-    // (not anime); the lightweight Compact backbone keeps it fast enough
-    // to run per-row in a SQL pipeline without tiling for typical photos.
-
-    /// <summary>
-    /// Default filename for Real-ESRGAN-General x4 (the v3 single-input
-    /// ONNX export from the OwlMaster/AllFilesRope HuggingFace mirror).
-    /// </summary>
-    public const string RealesrganGeneralX4DefaultFilename = "realesr-general-x4v3.onnx";
-
-    /// <summary>
-    /// Registers Real-ESRGAN-General x4 under the catalog name
-    /// <paramref name="modelName"/> (defaults to <c>"realesrgan_general_x4"</c>).
-    /// Image-in / image-out: PNG-encoded 4× upscale of the input.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Upstream is <a href="https://github.com/xinntao/Real-ESRGAN">xinntao/Real-ESRGAN</a>;
-    /// xinntao only ships <c>.pth</c> weights and a PyTorch conversion script,
-    /// so the practical download is the OwlMaster/AllFilesRope HuggingFace mirror
-    /// at <c>https://huggingface.co/OwlMaster/AllFilesRope/blob/main/realesr-general-x4v3.onnx</c>.
-    /// </para>
-    /// <para>
-    /// V1 runs whole-image inference. Memory cost scales with the output
-    /// resolution: a 1024×1024 input at 4× costs ~210 MB of intermediate
-    /// floats. Tile-based inference is the right follow-up for high-res
-    /// inputs; not implemented yet.
-    /// </para>
-    /// </remarks>
-    public static void RegisterRealesrganGeneralX4(
-        ModelCatalog catalog,
-        string modelName = "realesrgan_general_x4",
-        string modelFilename = RealesrganGeneralX4DefaultFilename)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: modelFilename,
-            InputKinds: [DataKind.Image],
-            OutputKind: DataKind.Image,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
-                return new SuperResolutionModel(modelName, modelPath, scaleFactor: 4);
-            },
-            // Per-call hyperparameter override:
-            //   [0] outscale (Float64) — output scale relative to input.
-            //   Defaults to the native 4× scale. Valid range [1.0, 4.0];
-            //   values above 4 are rejected (the model can't produce more
-            //   pixels than its architecture supports).
-            OptionalArgKinds: [DataKind.Float64],
-            DisplayName: "Real-ESRGAN General x4 (Compact)",
-            ImplementsTaskName: "ImageUpscaler",
-            Parameters: "1.2M",
-            License: "BSD-3-Clause",
-            LicenseHolder: "Xintao Wang",
-            SourceUrl: "https://github.com/xinntao/Real-ESRGAN",
-            Category: "enhancer",
-            Modalities: ["image"],
-            Files: [modelFilename]));
-    }
+    // Real-ESRGAN-General x4 was previously registered here as a built-in
+    // C# IModel (SuperResolutionModel.cs). It shipped as a SQL-defined
+    // model in models/sql/realesrgan-x4v3.sql backed by existing scalars
+    // (image_to_tensor_chw + infer + tensor_to_image_chw) — pure
+    // composition, zero new model-specific functions. The per-call
+    // `outscale` Float64 override was dropped in the migration; users
+    // wanting <4× output can compose with a downstream image_resize
+    // primitive once that lands.
 
     /// <summary>Default filename for the MobileSAM (TinyViT) image encoder.</summary>
     public const string MobileSamEncoderFilename = "mobile_sam_image_encoder.onnx";
