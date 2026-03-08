@@ -415,7 +415,8 @@
       "attributions": ["Xuebin Qin, Zichen Zhang, Chenyang Huang, Masood Dehghan, Osmar R. Zaiane, Martin Jagersand — U²-Net (University of Alberta)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/u2net-onnx", "revision": "7fc34deee10329bc039c10a73b98090d0c6f5c59", "include": ["u2netp.onnx"] }],
-      "approxSizeMb": 5
+      "approxSizeMb": 5,
+      "installSql": "sql/u2netp.sql"
     },
     {
       "id": "u2net",
@@ -427,7 +428,8 @@
       "attributions": ["Xuebin Qin, Zichen Zhang, Chenyang Huang, Masood Dehghan, Osmar R. Zaiane, Martin Jagersand — U²-Net (University of Alberta)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/u2net-onnx", "revision": "7fc34deee10329bc039c10a73b98090d0c6f5c59", "include": ["u2net.onnx"] }],
-      "approxSizeMb": 170
+      "approxSizeMb": 170,
+      "installSql": "sql/u2net.sql"
     },
     {
       "id": "dpt-large",

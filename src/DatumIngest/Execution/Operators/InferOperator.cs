@@ -140,14 +140,22 @@ public sealed class InferOperator : IQueryOperator
                 $"Model '{_descriptor.QualifiedName}': InferOperator can't find session '{_sessionName}'. " +
                 "Sessions are bound at CREATE MODEL time; missing here means the descriptor and operator went out of sync.");
         }
-        if (session.Inputs.Count != 1 || session.Outputs.Count != 1)
+        if (session.Inputs.Count != 1)
         {
             throw new InvalidOperationException(
-                $"Model '{_descriptor.QualifiedName}': InferOperator v1 supports single-input/single-output sessions " +
-                $"but the bound session declares {session.Inputs.Count} input(s) and {session.Outputs.Count} output(s).");
+                $"Model '{_descriptor.QualifiedName}': InferOperator v1 supports single-input sessions " +
+                $"but the bound session declares {session.Inputs.Count} input(s). " +
+                "Multi-input bodies bail to MIO + ProceduralModelAdapter via the lowerer's struct-DECLARE check.");
         }
 
         TensorSpec inputSpec = session.Inputs[0];
+        // Multi-output sessions are allowed; we pick the first declared
+        // output, matching the documented v1 behavior (`infer()` returns
+        // the primary output, by HuggingFace optimum convention listed
+        // first) and the scalar `InferFunction`'s read path. U²-Net's
+        // seven deep-supervision tensors d0..d6 are the canonical case —
+        // d0 is the final fused saliency map and the only one downstream
+        // consumers care about.
         TensorSpec outputSpec = session.Outputs[0];
         // When the body supplies explicit shapes per row, force per-row
         // dispatch — cross-row packing isn't safe when each row may have

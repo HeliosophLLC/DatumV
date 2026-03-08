@@ -18,9 +18,12 @@ model that bypasses the built-in single-message wrapper.
 
 To register your own ONNX file as a model — without writing C# — see
 [CREATE MODEL](sql/create-model.md). User-registered models surface in
-the same `models.X` namespace as the built-ins documented here; the
-`kind` column on `system.models` distinguishes the two (`builtin` for
-entries on this page, `declared` for `CREATE MODEL` registrations).
+the same `models.X` namespace as the catalog entries documented here.
+The `kind` column on `system.models` distinguishes engine-baked
+implementations (`builtin`, e.g. LLMs via LlamaSharp, multi-session
+diffusion bundles) from SQL-defined registrations (`declared` — both
+your own `CREATE MODEL` entries and the catalog-installed ONNX models
+on this page whose entries carry an `installSql` field).
 
 For an introspectable view of the same information, query the
 `system_models` virtual table:
@@ -292,11 +295,15 @@ The C# implementation lives under
 
 | File | Role |
 |------|------|
-| `CatalogManifest.cs` | POCOs for the JSON shape. |
+| `CatalogManifest.cs` | POCOs for the JSON shape, including the polymorphic `CatalogSource` hierarchy (`HuggingFaceSource` / `GithubReleaseSource` / `HttpsSource`). |
 | `IManifestStore.cs` / `ManifestStore.cs` | Singleton loader for `catalog.json` + license texts. |
-| `HfHubClient.cs` | `HttpClient`-based wrapper for the HF tree + resolve APIs. Streams + verifies. |
+| `IModelSourceClient.cs` | Per-channel download contract. One implementation per source `type` discriminator. |
+| `HuggingFaceSourceClient.cs` | `HttpClient`-based wrapper for the HF tree + resolve APIs. Streams + verifies LFS sha256s. |
+| `GithubReleaseSourceClient.cs` | Fetches GitHub-release assets directly. No upstream checksum API — HTTPS trust. |
+| `HttpsSourceClient.cs` | Escape hatch for one-off URLs (Qualcomm AI Hub S3, vendor mirrors). HTTPS trust. |
+| `HttpFileDownloader.cs` | Shared resume/hash streaming core for the github + https clients. |
 | `ILicenseAcceptanceService.cs` / `LicenseAcceptanceService.cs` | JSON-file persistence of accepted license IDs. |
-| `IModelDownloadService.cs` / `ModelDownloadService.cs` | Orchestrator. Probe / install / uninstall. Pushes events via SignalR. |
+| `IModelDownloadService.cs` / `ModelDownloadService.cs` | Orchestrator. Probe / install / uninstall + sequential source-fallback loop. Pushes events via SignalR. |
 | `ModelDownloadEvents.cs` | Records broadcast over the hub. |
 
 The controller lives at
@@ -348,162 +355,102 @@ after editing `catalog.json`.
 
 ### `mobilenetv2` — image classifier
 
-- **What it does**: Top-1 ImageNet classification. Returns
-  `Struct{label: String, score: Float32}`.
-- **License**: Apache-2.0 (ONNX Model Zoo)
+- **What it does**: Top-1 ImageNet-1k classification. Returns
+  `ScoredLabel` (`Struct<label: String, score: Float32>`).
+  `IMPLEMENTS LabeledImageClassifier`.
+- **License**: Apache-2.0 (Google AI Research / ONNX Model Zoo)
 - **Source**: [github.com/onnx/models](https://github.com/onnx/models/tree/main/validated/vision/classification/mobilenet)
-- **Files**:
-  - `mobilenetv2-12.onnx` (~13 MB) — the ONNX weights
-  - `imagenet-classes.json` (optional, ~30 KB) — label vocabulary;
-    download
-    [imagenet-simple-labels.json](https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json)
-    and rename
-- **Setup**:
-  ```powershell
-  Invoke-WebRequest "https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx" `
-    -OutFile $env:DATUM_MODELS\mobilenetv2-12.onnx
-  Invoke-WebRequest "https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json" `
-    -OutFile $env:DATUM_MODELS\imagenet-classes.json
-  ```
+  — re-hosted on HuggingFace at `Heliosoph/mobilenetv2-onnx` with the
+  ImageNet-1k label JSON alongside the ONNX file.
+- **Install**: catalog id `mobilenetv2`. Installs through the Model
+  Manager — the downloader fetches `mobilenetv2-12.onnx` +
+  `imagenet-classes.json` and runs
+  [`models/sql/mobilenetv2.sql`](../models/sql/mobilenetv2.sql) to
+  register `models.mobilenetv2`.
+- **SQL body**: `image_to_tensor_chw` (224×224, ImageNet stats) →
+  `infer` → `softmax` → `argmax` → `read_string_list('imagenet-classes.json')`
+  → return `{label: labels[top], score: probs[top]}`.
 
 ### YOLOX — object detector ladder
 
-Megvii's YOLOX detector family registered as seven sibling entries
-spanning the full speed/accuracy spectrum. Same architecture, same
-COCO-80 vocabulary, different parameter counts. The default detector
-for `tasks.detect` once that namespace lands.
+Megvii's YOLOX detector family registered as seven sibling catalog
+entries spanning the full speed/accuracy spectrum. Same architecture,
+same COCO-80 vocabulary, different parameter counts. Each variant is a
+SQL-defined model registered via its own `installSql` entry; all
+declare `IMPLEMENTS LabeledObjectDetector RETURNS Array<LabeledDetection>`
+(`Struct<bbox: BoundingBox, label: String, score: Float32>`).
 
 - **License**: Apache-2.0 (Megvii)
 - **Source**: [github.com/Megvii-BaseDetection/YOLOX](https://github.com/Megvii-BaseDetection/YOLOX)
-- **Setup**: Pre-built ONNX files attached to the GitHub releases
-  page — no Python conversion needed. Direct download:
-  ```powershell
-  $base = "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0"
-  foreach ($file in @("yolox_nano.onnx","yolox_tiny.onnx","yolox_s.onnx","yolox_m.onnx","yolox_l.onnx","yolox_x.onnx","yolox_darknet.onnx")) {
-    Invoke-WebRequest "$base/$file" -OutFile "$env:DATUM_MODELS\$file"
-  }
-  ```
+  — re-hosted on HuggingFace at `Heliosoph/yolox-onnx` with
+  `coco-classes.json` bundled alongside the ONNX files.
+- **Install**: catalog ids `yolox-nano`, `yolox-tiny`, `yolox-s`,
+  `yolox-m`, `yolox-l`, `yolox-x`, `yolox-darknet`. Each catalog entry
+  carries an `installSql` field pointing at
+  [`models/sql/yolox-*.sql`](../models/sql/) so the downloader registers
+  the SQL-defined model after fetching weights.
+- **SQL body**: `yolox_preprocess` (letterbox + BGR + raw 0-255 NCHW) →
+  `infer` → `read_string_list('coco-classes.json')` → `yolox_postprocess`
+  (decoder + class-aware NMS + reverse letterbox + label lookup).
 
-| Catalog name | File | Params | Input size | Disk |
-|---|---|---|---|---|
-| `yolox_n` | `yolox_nano.onnx` | 0.91M | 416×416 | ~3 MB |
-| `yolox_t` | `yolox_tiny.onnx` | 5.06M | 416×416 | ~20 MB |
-| `yolox_s` | `yolox_s.onnx` | 9.0M | 640×640 | ~36 MB |
-| `yolox_m` | `yolox_m.onnx` | 25.3M | 640×640 | ~98 MB |
-| `yolox_l` | `yolox_l.onnx` | 54.2M | 640×640 | ~200 MB |
-| `yolox_x` | `yolox_x.onnx` | 99.1M | 640×640 | ~378 MB |
-| `yolox_darknet` | `yolox_darknet.onnx` | 63.7M | 640×640 | ~250 MB |
+| Catalog id | Model name (in SQL) | File | Params | Input size | Disk |
+|---|---|---|---|---|---|
+| `yolox-nano` | `yolox_nano` | `yolox_nano.onnx` | 0.91M | 416×416 | ~3 MB |
+| `yolox-tiny` | `yolox_tiny` | `yolox_tiny.onnx` | 5.06M | 416×416 | ~20 MB |
+| `yolox-s` | `yolox_s` | `yolox_s.onnx` | 9.0M | 640×640 | ~36 MB |
+| `yolox-m` | `yolox_m` | `yolox_m.onnx` | 25.3M | 640×640 | ~98 MB |
+| `yolox-l` | `yolox_l` | `yolox_l.onnx` | 54.2M | 640×640 | ~200 MB |
+| `yolox-x` | `yolox_x` | `yolox_x.onnx` | 99.1M | 640×640 | ~378 MB |
+| `yolox-darknet` | `yolox_darknet` | `yolox_darknet.onnx` | 63.7M | 640×640 | ~250 MB |
 
-Note that nano and tiny use 416×416 input (smaller, faster); the
-others use 640×640. The `YoloXModel` class auto-detects input size
-from the ONNX metadata so a single class handles both. Output format
-is identical across all sizes.
+Nano and tiny use 416×416 input (smaller, faster); the others use
+640×640. The `yolox_preprocess` + `yolox_postprocess` scalars pick up
+the right anchor count from the `target_size` arg, so a single pair
+of functions serves all seven variants.
 
-### `scrfd_10g` — face detector
+### Face detection — see `mediapipe-face`
 
-- **What it does**: Bounding-box face detection with 5 facial landmarks
-  (left eye, right eye, nose tip, left mouth corner, right mouth corner)
-  per face. Returns
-  `Array<Struct{label, score, x, y, w, h, landmarks: Array<Struct{x, y}>}>`.
-  `label` is always the constant string `"face"` — present so SCRFD output
-  shares the leading `(label, score, x, y, w, h)` shape used by general
-  object detectors like YOLOX.
-- **License**: MIT (InsightFace)
-- **Source**: [github.com/deepinsight/insightface](https://github.com/deepinsight/insightface/tree/master/detection/scrfd)
-  — distributed in the `buffalo_l` model pack alongside sibling face
-  recognition / age-gender / landmark models.
-- **Files**:
-  - `det_10g.onnx` (~17 MB) — single ONNX, NCHW input, 640×640
-    letterboxed
-- **Setup**: easiest path is the `insightface` Python package, which
-  auto-downloads the model pack on first use. Copy the file out of the
-  cache:
-  ```powershell
-  pip install insightface
-  python -c "from insightface.app import FaceAnalysis; FaceAnalysis(name='buffalo_l').prepare(ctx_id=-1)"
-  Copy-Item ~/.insightface/models/buffalo_l/det_10g.onnx $env:DATUM_MODELS\
-  ```
-  `ctx_id=-1` forces CPU during the prepare call so the download works
-  on machines without CUDA. The same `buffalo_l` pack ships face
-  recognition (`w600k_r50.onnx`), age/gender (`genderage.onnx`), and
-  2D/3D landmarks (`2d106det.onnx`, `1k3d68.onnx`) — drop those into
-  `$DATUM_MODELS` too if you plan to chain a face pipeline.
-- **Per-call overrides**:
-  - `[0] confidence_threshold` (Float64) — drop detections below this
-    score pre-NMS. Default `0.5`.
-  - `[1] iou_threshold` (Float64) — NMS overlap threshold. Default `0.4`.
-  - Example for higher recall: `models.scrfd_10g(image, 0.3)`.
-- **Architecture**: SCRFD ("Sample and Computation Redistribution for
-  Face Detection") is the InsightFace successor to RetinaFace. Same
-  general FPN-with-anchors shape as other modern detectors but with
-  distance-based bbox regression (the four predictions are
-  left/top/right/bottom distances from the anchor centre, not
-  centre+delta+exp) and single-channel sigmoid scores instead of
-  background/foreground softmax pairs. Preprocessing is
-  `(RGB - 127.5) / 128`, NCHW, letterboxed to 640×640 with top-left
-  placement.
-- **Demo**:
-  ```sql
-  SELECT
-    photo_id,
-    models.scrfd_10g(photo) AS faces
-  FROM family_photos LIMIT 5;
-  ```
+SCRFD-10G was previously registered here. **Removed 2026-05-17** after a
+license review: InsightFace's repo is MIT for *code* only — the
+pretrained ONNX weights aren't openly licensed for redistribution.
+Same constraint applies to RetinaFace (sibling InsightFace project).
 
-### `ppocr_det_v4` — text detector (pairs with TrOCR)
+Use `mediapipe-face` (BlazeFace-based, Apache-2.0 throughout) from the
+catalog for face detection — install it via the Model Manager.
 
-PaddleOCR's PP-OCRv4 detection model — DBNet++-style segmentation
+### `paddleocr_v4_det` — text detector (pairs with TrOCR)
+
+PaddleOCR's PP-OCRv4 detection model — DBNet-style segmentation
 network that finds bounding boxes around lines of printed text.
 Detection only; pair with a recognizer like `trocr_printed` for a
 two-stage OCR pipeline.
 
-- **What it does**: Returns
-  `Array<Struct{label: String, score: Float32, x, y, w, h: Float32}>`.
-  `label` is always the constant `"text"` so output shares the leading
-  `(label, score, x, y, w, h)` shape with general-purpose detectors
-  (YOLOX, SCRFD). Boxes are sorted top-to-bottom, left-to-right
-  (natural reading order for receipt-style documents).
+- **What it does**: Returns `Array<RegionScore>`
+  (`Struct<bbox: BoundingBox, score: Float32>`). Boxes are in
+  original-image pixel coordinates. `IMPLEMENTS TextDetector`.
 - **License**: Apache-2.0 (PaddlePaddle)
 - **Source**: [github.com/PaddlePaddle/PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
-  — upstream ships Paddle weights only. The practical download is
-  [RapidAI/RapidOCR](https://github.com/RapidAI/RapidOCR/releases),
-  which mirrors PaddleOCR's official ONNX export and tracks new
-  releases.
-- **Files**:
-  - `ch_PP-OCRv4_det.onnx` (~4.7 MB) — single ONNX file
-- **Setup**: download from a RapidOCR release into `$DATUM_MODELS`:
-  ```powershell
-  # Browse https://github.com/RapidAI/RapidOCR/releases for the
-  # current release URL; the filename is ch_PP-OCRv4_det.onnx
-  Invoke-WebRequest "<release-url>/ch_PP-OCRv4_det.onnx" `
-    -OutFile $env:DATUM_MODELS\ch_PP-OCRv4_det.onnx
-  ```
-- **Per-call overrides**:
-  - `[0] pixel_threshold` (Float64) — per-pixel sigmoid threshold for
-    the binary mask. Default `0.3`. Lower → more permissive, catches
-    faint text but produces more false positives.
-  - `[1] box_score_threshold` (Float64) — per-region mean-probability
-    threshold. Default `0.6`. Filters out blurry or partial text even
-    when the pixel mask is large.
-  - `[2] unclip_ratio` (Float64) — DBNet polygon-offset ratio. Default
-    `1.5`. Larger → boxes are dilated more, useful when the recognizer
-    needs extra margin around glyphs.
-- **Architecture**: DBNet++ — a U-Net-style backbone produces a
+  — re-hosted on HuggingFace at `Heliosoph/paddleocr-v4-det-onnx`.
+- **Install**: catalog id `paddleocr-v4-det`. The catalog entry's
+  `installSql` points at
+  [`models/sql/paddleocr-v4-det.sql`](../models/sql/paddleocr-v4-det.sql);
+  the downloader fetches `ch_PP-OCRv4_det.onnx` and registers
+  `models.paddleocr_v4_det`.
+- **SQL body**: `image_resize_to_stride` (longest side ≤ 960, multiples
+  of 32) → `image_to_tensor_chw` (ImageNet stats) → `infer` →
+  `dbnet_postprocess` (threshold + connected-components BFS + DBNet
+  polygon unclip + scale back to original-image pixel space).
+- **Hyperparameter defaults** (PaddleOCR canonical): `pixel_threshold=0.3`,
+  `box_score_threshold=0.6`, `min_size=3` px, `unclip_ratio=1.5`. The
+  defaults are baked into the SQL body; for different values, copy the
+  SQL file and create your own `CREATE MODEL` variant.
+- **Architecture**: DBNet — a U-Net-style backbone produces a
   single-channel sigmoid probability map at the input resolution.
-  Postprocessing thresholds the map, runs BFS connected-components
+  `dbnet_postprocess` thresholds the map, runs BFS connected-components
   (4-connectivity), accepts each component with mean probability ≥
-  `box_score_threshold` and tight bbox ≥ 3 px on each side, and
+  `box_score_threshold` and tight bbox ≥ `min_size` px on each side, and
   unclips each axis-aligned bbox by
-  `distance = area × unclip_ratio / perimeter` (DBNet's polygon-offset
-  formula reduced to the rectangle case). Boxes are then mapped back
-  to original-image coordinates by inverting the per-axis resize
-  ratio.
-- **Preprocessing**: aspect-preserving resize so the longer side is
-  at most 960 px, both dims rounded to nearest multiple of 32 (the
-  network's stride). ImageNet per-channel normalisation
-  (`mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225]`), NCHW RGB
-  float32. The ONNX accepts dynamic spatial dims, so each image runs
-  at its own per-image shape — no fixed letterbox.
+  `distance = area × unclip_ratio / perimeter`.
 - **Detect-only model.** This finds *where* the text is, not *what*
   it says. For receipt-style transcription, pair with `trocr_printed`
   / `trocr_printed_fp16` via `image_crop`:
@@ -514,23 +461,17 @@ two-stage OCR pipeline.
     receipt_id,
     det.score AS detect_confidence,
     models.trocr_printed_fp16(
-      image_crop(photo, det.x, det.y, det.w, det.h)) AS line
+      image_crop(photo, det.bbox.x, det.bbox.y, det.bbox.w, det.bbox.h)) AS line
   FROM receipts
-  CROSS APPLY UNNEST(models.ppocr_det_v4(photo)) AS det
+  CROSS APPLY UNNEST(models.paddleocr_v4_det(photo)) AS det
   WHERE det.score > 0.7
-  ORDER BY receipt_id, det.y, det.x;
+  ORDER BY receipt_id, det.bbox.y, det.bbox.x;
 
   -- Just the detector — visualise box counts per image.
   SELECT
     photo_id,
-    array_length(models.ppocr_det_v4(photo)) AS line_count
+    array_length(models.paddleocr_v4_det(photo)) AS line_count
   FROM scanned_pages;
-
-  -- Tighter detection (catch faint text on low-contrast scans).
-  SELECT
-    photo_id,
-    models.ppocr_det_v4(photo, 0.2, 0.5) AS boxes
-  FROM faded_documents;
   ```
 
 ### `realesrgan_general_x4` — image super-resolution
@@ -605,15 +546,14 @@ two-stage OCR pipeline.
 ### `u2net`, `u2netp` — salient-object segmentation (background masking)
 
 Xuebin Qin's U²-Net detects the dominant ("salient") object in an image and
-emits a single-channel mask sized to match the input. Two sibling exports
-share the same architecture, the same fixed 320×320 internal input, and the
-same seven-output deep-supervision head — the loader handles either file
-through one model class.
+emits a single-channel mask sized to match the input. Two SQL-defined model
+registrations sharing the same pipeline (only the ONNX file differs); both
+declare `IMPLEMENTS BackgroundRemover RETURNS Image`.
 
-| Catalog name | File | Params | Disk |
-|---|---|---|---|
-| `u2net` | `u2net.onnx` | 176M | ~170 MB |
-| `u2netp` | `u2netp.onnx` | 4.7M | ~4.7 MB |
+| Catalog id | Model name (in SQL) | File | Params | Disk |
+|---|---|---|---|---|
+| `u2net` | `u2net` | `u2net.onnx` | 176M | ~170 MB |
+| `u2netp` | `u2netp` | `u2netp.onnx` | 4.7M | ~4.7 MB |
 
 - **What it does**: Returns an `Image` whose pixel intensity is the
   per-pixel saliency (white = foreground / object, black = background).
@@ -623,27 +563,22 @@ through one model class.
   uses the mask as an alpha channel.
 - **License**: Apache-2.0 (Xuebin Qin et al.)
 - **Source**: [github.com/xuebinqin/U-2-Net](https://github.com/xuebinqin/U-2-Net)
-  — upstream ships PyTorch `.pth` weights; pre-built ONNX exports are
-  widely mirrored.
-- **Setup**: drop the file(s) directly into `$DATUM_MODELS`. Common mirrors:
-  ```powershell
-  # Lite (4.7 MB) — recommended starting point.
-  Invoke-WebRequest "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx" `
-    -OutFile $env:DATUM_MODELS\u2netp.onnx
-
-  # Full (170 MB) — sharper edges on fine detail (hair, fur, foliage).
-  Invoke-WebRequest "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx" `
-    -OutFile $env:DATUM_MODELS\u2net.onnx
-  ```
+  — re-hosted on HuggingFace at `Heliosoph/u2net-onnx` (both variants
+  live in the same repo, differentiated by file include).
+- **Install**: catalog ids `u2net` and `u2netp`. Each entry's `installSql`
+  points at [`models/sql/u2net.sql`](../models/sql/u2net.sql) /
+  [`models/sql/u2netp.sql`](../models/sql/u2netp.sql).
+- **SQL body**: `image_to_tensor_chw` (320×320, ImageNet stats) → `infer` →
+  `depth_map_to_image` (per-image min-max normalize + grayscale-pack +
+  bilinear resize to original image dims). **Zero new model-specific
+  scalars** — the body is pure composition, sharing the
+  `depth_map_to_image` post-processor with MiDaS / DPT.
 - **Architecture**: Nested U-shaped encoder/decoder of "ReSidual U-blocks"
   (RSUs) — each level is itself a small U-Net, hence the U². The full and
   lite variants share the topology; `u2netp` swaps the heavy 3×3 conv stacks
-  for cheaper depthwise-separable equivalents. Preprocessing is stretch-
-  resize to 320×320 RGB with ImageNet normalisation
-  (`mean=[0.485,0.456,0.406]`, `std=[0.229,0.224,0.225]`); post-processing
-  takes the first output (the fused saliency map d0), min-max normalises
-  per image to `[0, 1]` (matching the upstream `normPRED` step), and resizes
-  back to the input's original dimensions.
+  for cheaper depthwise-separable equivalents. The ONNX export emits seven
+  deep-supervision tensors (d0..d6); `infer()` picks d0 (the final fused
+  saliency map), matching the v1 "first output" convention.
 - **Memory**: input bitmap + 320×320×3 float NCHW (~1.2 MB) + 320×320 float
   output (~0.4 MB) + a pair of mask bitmaps for the resize-back. Per-row
   cost is essentially fixed regardless of input resolution, since the
@@ -753,19 +688,19 @@ object it finds, suitable for building a per-photo segment library.
   needed.
 - **Demos**:
   ```sql
-  -- Prompted: cut a face out of a photo using SCRFD's bounding-box
-  -- centre as the SAM prompt. The output is just the face region;
-  -- everything else is masked away.
+  -- Prompted: cut a face out of a photo using MediaPipe Face's
+  -- bounding-box centre as the SAM prompt. The output is just the
+  -- face region; everything else is masked away.
   SELECT
     photo_id,
     image_cutout(
       photo,
       models.mobilesam_prompted(
         photo,
-        face.x + face.w / 2,
-        face.y + face.h / 2)) AS face_only
+        face.bbox.x + face.bbox.w / 2,
+        face.bbox.y + face.bbox.h / 2)) AS face_only
   FROM photos
-  CROSS APPLY UNNEST(models.scrfd_10g(photo)) AS face
+  CROSS APPLY UNNEST(models.mediapipe_face(photo)) AS face
   LIMIT 5;
 
   -- Everything mode: one row per detected segment, ~5-30 segments per
@@ -788,15 +723,15 @@ object it finds, suitable for building a per-photo segment library.
 
 ### `midas_small`, `dpt_large` — monocular depth estimation
 
-Intel ISL's MiDaS / DPT depth-estimation family. Two registrations driven by
-the same `DepthEstimationModel` class — they share architecture-style
-(transformer-decoder over a vision backbone) and output kind, differing in
-input resolution, channel order, and normalisation stats.
+Intel ISL's MiDaS / DPT depth-estimation family. Two SQL-defined model
+registrations sharing the same pipeline shape but differing in input
+resolution, channel order, and normalisation stats. Both declare
+`IMPLEMENTS DepthEstimator RETURNS Image`.
 
-| Catalog name | File | Params | Input | Disk |
-|---|---|---|---|---|
-| `midas_small` | `midas_v21_small_256.onnx` | 21M | 256×256 | ~83 MB |
-| `dpt_large` | `dpt_large_384.onnx` | 344M | 384×384 | ~1.4 GB |
+| Catalog id | Model name (in SQL) | File | Params | Input | Disk |
+|---|---|---|---|---|---|
+| `midas-small` | `midas_small` | `midas_v21_small_256.onnx` | 21M | 256×256 | ~83 MB |
+| `dpt-large` | `dpt_large` | `dpt_large_384.onnx` | 344M | 384×384 | ~1.4 GB |
 
 - **What it does**: Returns an `Image` whose pixel intensity is **relative
   depth** — bigger value = closer to the camera. Single-channel grayscale
@@ -806,17 +741,16 @@ input resolution, channel order, and normalisation stats.
   internal working size (256 / 384) doesn't leak through.
 - **License**: MIT (Intel ISL)
 - **Source**: [github.com/isl-org/MiDaS](https://github.com/isl-org/MiDaS)
-- **Setup**: pre-built ONNX exports attached to the GitHub releases page —
-  no Python conversion needed. Drop the file(s) directly into `$DATUM_MODELS`:
-  ```powershell
-  # MiDaS small (recommended starting point — 80 MB, fast)
-  Invoke-WebRequest "https://github.com/isl-org/MiDaS/releases/download/v2_1/midas_v21_small_256.onnx" `
-    -OutFile $env:DATUM_MODELS\midas_v21_small_256.onnx
-
-  # DPT-Large (sharper boundaries, 1.4 GB, ~16× more params)
-  Invoke-WebRequest "https://github.com/isl-org/MiDaS/releases/download/v3_1/dpt_large_384.onnx" `
-    -OutFile $env:DATUM_MODELS\dpt_large_384.onnx
-  ```
+  — re-hosted on HuggingFace at `Heliosoph/midas-small-onnx` and
+  `Heliosoph/dpt-large-onnx`.
+- **Install**: catalog ids `midas-small` and `dpt-large`. Each entry's
+  `installSql` points at
+  [`models/sql/midas-small.sql`](../models/sql/midas-small.sql) /
+  [`models/sql/dpt-large.sql`](../models/sql/dpt-large.sql).
+- **SQL body**: `image_to_tensor_chw` (for DPT — RGB, 0.5/0.5 norm) or
+  `image_to_tensor_chw_bgr` (for MiDaS — BGR, ImageNet stats) → `infer`
+  → `depth_map_to_image` (per-image min-max normalise + grayscale-as-RGBA
+  pack + bilinear resize to original image dims).
 - **Architecture**: MiDaS-small v2.1 is an EfficientNet-Lite3 encoder + lightweight
   decoder; DPT-Large is a ViT-Large encoder + DPT (dense-prediction transformer)
   decoder. Both are trained on a mixture of depth datasets via the MiDaS
@@ -824,12 +758,8 @@ input resolution, channel order, and normalisation stats.
   in arbitrary units** — not metric. Preprocessing differs between the two:
   MiDaS-small uses BGR + ImageNet stats (`mean=[0.485,0.456,0.406]`,
   `std=[0.229,0.224,0.225]`); DPT uses RGB + half/half stats
-  (`mean=[0.5,0.5,0.5]`, `std=[0.5,0.5,0.5]`). The model class encodes both
-  conventions; registration picks per architecture.
-- **Post-processing**: per-image min-max normalise to `[0, 1]` (matching the
-  upstream Python reference's depth_min/depth_max rescale), write a
-  grayscale-as-RGBA bitmap, resize back to the input's original dimensions
-  via SkiaSharp's bilinear sampler.
+  (`mean=[0.5,0.5,0.5]`, `std=[0.5,0.5,0.5]`). The two SQL bodies pick the
+  matching preprocess scalar.
 - **Memory**: input bitmap + (256² or 384²) × 3 float NCHW input + same-size
   float output — ~1 MB per side at 256×256, ~2 MB at 384×384. Per-row cost is
   fixed regardless of input resolution since the network always operates at
@@ -878,7 +808,7 @@ input resolution, channel order, and normalisation stats.
   wired up yet; if you want one, file an issue or add it directly.
 
   Bigger input intensity → warmer output colour, which matches the
-  near-is-bright convention `DepthEstimationModel` produces — a
+  near-is-bright convention the depth bodies produce — a
   `turbo`-coloured MiDaS depth map shows nearby objects in red and far
   objects in blue without any inversion.
 - **Demo**:
