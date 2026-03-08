@@ -47,11 +47,17 @@ public sealed class BatchContext : IDisposable
 
     /// <summary>
     /// Creates a fresh batch context: allocates a new procedure-lifetime
-    /// <see cref="VariableStore"/> arena (with a baseline reference), and
-    /// an empty <see cref="VariableScope"/> with one root frame already
-    /// pushed.
+    /// <see cref="VariableStore"/> arena (with a baseline reference), an
+    /// empty <see cref="VariableScope"/> with one root frame already
+    /// pushed, and a <see cref="MemoryAccountant"/> shared by every child
+    /// <see cref="ExecutionContext"/> spawned for queries inside the
+    /// batch.
     /// </summary>
-    public BatchContext()
+    /// <param name="memoryBudgetBytes">Spill-trigger threshold applied to
+    /// the residency of <em>everything</em> in the batch: all child query
+    /// state plus the bytes <see cref="VariableScope"/> bindings hold onto
+    /// across queries. <c>null</c> disables the budget check.</param>
+    public BatchContext(long? memoryBudgetBytes = null)
     {
         VariableStore = new Arena();
         // Baseline reference owned by this batch context. Released exactly
@@ -59,6 +65,9 @@ public sealed class BatchContext : IDisposable
         VariableStore.AddReference();
         VariableScope = new VariableScope();
         Types = new TypeRegistry();
+        Accountant = new MemoryAccountant(
+            memoryBudgetBytes: memoryBudgetBytes,
+            arenaBytesProbe: () => VariableStore.BytesWritten);
     }
 
     /// <summary>
@@ -85,6 +94,16 @@ public sealed class BatchContext : IDisposable
     /// struct appears in a downstream query within the same procedural batch.
     /// </summary>
     public TypeRegistry Types { get; }
+
+    /// <summary>
+    /// Procedure-lifetime memory accountant. The single budget / residency
+    /// counter for everything in the batch — child query operators,
+    /// <see cref="VariableScope"/>-bound managed payloads, DML buffers — so a
+    /// runaway DECLARE in iteration N forces query N+1 to spill earlier. Each
+    /// child <see cref="DatumIngest.Execution.ExecutionContext"/> borrows
+    /// this reference rather than constructing its own. Disposed at batch end.
+    /// </summary>
+    public MemoryAccountant Accountant { get; }
 
     /// <summary>
     /// Number of procedure-call frames currently above this context's
@@ -137,14 +156,16 @@ public sealed class BatchContext : IDisposable
     }
 
     /// <summary>
-    /// Releases the baseline reference on <see cref="VariableStore"/>.
-    /// Idempotent. Idiomatic use is <c>using BatchContext ctx = new();</c>
+    /// Releases the baseline reference on <see cref="VariableStore"/> and
+    /// disposes the batch's <see cref="Accountant"/> (stopping its sampling
+    /// timer). Idempotent. Idiomatic use is <c>using BatchContext ctx = new();</c>
     /// at the procedural-executor's outermost scope.
     /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        Accountant.Dispose();
         VariableStore.ReleaseReference();
     }
 }

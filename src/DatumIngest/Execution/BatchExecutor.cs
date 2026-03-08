@@ -169,6 +169,10 @@ public sealed class BatchExecutor
         CancellationToken cancellationToken)
     {
         using BatchContext batchContext = new();
+        // 1Hz residency sampling for the whole batch. Each child query
+        // borrows this accountant so the timer ticks during every query
+        // inside the batch.
+        batchContext.Accountant.StartProfiling();
         await RunInternalAsync(statements, batchContext, NoOpEventHandler, cancellationToken)
             .ConfigureAwait(false);
 
@@ -230,6 +234,8 @@ public sealed class BatchExecutor
         CancellationToken cancellationToken)
     {
         using BatchContext batchContext = new();
+        // 1Hz residency sampling for the whole batch. See ExecuteAsync for the rationale.
+        batchContext.Accountant.StartProfiling();
         await RunInternalAsync(statements, batchContext, onEvent, cancellationToken)
             .ConfigureAwait(false);
     }

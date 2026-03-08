@@ -61,4 +61,73 @@ public sealed class ExecutionContextTests : ServiceTestBase
 
         Assert.Equal(1000, cloned.MaxRecursionDepth);
     }
+
+    /// <summary>
+    /// A primary-constructed context owns its accountant and disposes it.
+    /// </summary>
+    [Fact]
+    public void Dispose_OwnedAccountant_IsReleased()
+    {
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            CreateCatalog(),
+            GetService<Pool>());
+
+        MemoryAccountant accountant = context.Accountant;
+        context.Dispose();
+
+        // Idempotent — second dispose must not throw.
+        accountant.Dispose();
+    }
+
+    /// <summary>
+    /// Copy-constructed contexts borrow the parent's accountant; disposing the
+    /// child must not tear down the parent's accountant.
+    /// </summary>
+    [Fact]
+    public void WithOuterRow_ChildContextSharesAccountant_AndDoesNotDisposeIt()
+    {
+        Row outerRow = MakeRow(["x"], DataValue.FromFloat32(1f));
+        using ExecutionContext parent = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            CreateCatalog(),
+            GetService<Pool>(),
+            memoryBudgetBytes: 1000);
+
+        ExecutionContext child = parent.WithOuterRow(outerRow);
+        Assert.Same(parent.Accountant, child.Accountant);
+
+        parent.Accountant.NotifyMaterialized(500);
+        Assert.Equal(500, child.Accountant.CurrentResidentBytes);
+
+        child.Dispose();
+        // Parent's accountant must still be usable.
+        parent.Accountant.NotifyMaterialized(100);
+        Assert.Equal(600, parent.Accountant.CurrentResidentBytes);
+    }
+
+    /// <summary>
+    /// When a context is given an existing accountant it borrows rather than owns;
+    /// disposing the context leaves the caller's accountant intact.
+    /// </summary>
+    [Fact]
+    public void Dispose_BorrowedAccountant_IsNotReleased()
+    {
+        using MemoryAccountant borrowed = new(memoryBudgetBytes: 1000);
+        borrowed.NotifyMaterialized(200);
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            CreateCatalog(),
+            GetService<Pool>(),
+            accountant: borrowed);
+        context.Dispose();
+
+        // Borrowed accountant is still alive.
+        borrowed.NotifyMaterialized(100);
+        Assert.Equal(300, borrowed.CurrentResidentBytes);
+    }
 }

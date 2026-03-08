@@ -12,8 +12,12 @@ namespace DatumIngest.Execution;
 /// Carries the cancellation token, function registry, table catalog, and
 /// optional query meter for cost tracking.
 /// </summary>
-public sealed class ExecutionContext
+public sealed class ExecutionContext : IDisposable
 {
+    private readonly bool _ownsStore;
+    private readonly bool _ownsAccountant;
+    private int _disposed;
+
     /// <summary>
     /// Creates a new execution context from an existing context, copying all properties. Useful for creating a child
     /// </summary>
@@ -25,11 +29,16 @@ public sealed class ExecutionContext
         Pool = context.Pool;
         Store = context.Store;
         QueryMeter = context.QueryMeter;
-        MemoryBudgetBytes = context.MemoryBudgetBytes;
+        Accountant = context.Accountant;
         BatchSize = context.BatchSize;
         AssertionDiagnostics = context.AssertionDiagnostics;
         MaxStratifyClasses = context.MaxStratifyClasses;
         Types = context.Types;
+        // Copy contexts borrow both the Store baseline and the accountant from
+        // the parent — disposing a child must not tear down the parent's
+        // resources.
+        _ownsStore = false;
+        _ownsAccountant = false;
     }
 
   /// <summary>
@@ -43,6 +52,7 @@ public sealed class ExecutionContext
   /// Optional memory budget in bytes for operators that support spill-to-disk.
   /// When <see langword="null"/>, operators keep all intermediate state in memory.
   /// When set, operators spill to temporary files when estimated memory exceeds this budget.
+  /// Ignored when <paramref name="accountant"/> is non-null — the supplied accountant carries its own budget.
   /// Supported operators: hash join, ORDER BY, GROUP BY, DISTINCT, PIVOT, UNION/INTERSECT/EXCEPT,
   /// and materialised CTEs.
   /// </param>
@@ -56,6 +66,12 @@ public sealed class ExecutionContext
   /// queries within a single procedural batch). When <see langword="null"/>, a fresh registry
   /// is allocated per context.
   /// </param>
+  /// <param name="accountant">
+  /// Optional existing <see cref="MemoryAccountant"/> to share with the surrounding scope
+  /// (typically a <see cref="BatchContext"/>'s accountant). When <see langword="null"/>, the
+  /// context constructs and owns its own; the owned accountant is disposed when this
+  /// context is disposed.
+  /// </param>
   public ExecutionContext(
         CancellationToken cancellationToken,
         FunctionRegistry functionRegistry,
@@ -64,7 +80,8 @@ public sealed class ExecutionContext
         QueryMeter? queryMeter = null,
         long? memoryBudgetBytes = null,
         Arena? store = null,
-        TypeRegistry? types = null)
+        TypeRegistry? types = null,
+        MemoryAccountant? accountant = null)
     {
         CancellationToken = cancellationToken;
         FunctionRegistry = functionRegistry;
@@ -80,13 +97,26 @@ public sealed class ExecutionContext
             // adds the baseline for its `_hoistStore`).
             Store = new Arena();
             Store.AddReference();
+            _ownsStore = true;
         }
         else
         {
             Store = store;
+            _ownsStore = false;
         }
         QueryMeter = queryMeter;
-        MemoryBudgetBytes = memoryBudgetBytes;
+        if (accountant is null)
+        {
+            Accountant = new MemoryAccountant(
+                memoryBudgetBytes: memoryBudgetBytes,
+                arenaBytesProbe: () => Store.BytesWritten);
+            _ownsAccountant = true;
+        }
+        else
+        {
+            Accountant = accountant;
+            _ownsAccountant = false;
+        }
         // When a caller passes a TypeRegistry (typically a procedural BatchContext
         // sharing one across loop iterations), reuse it so type-ids stamped on
         // values in one query remain resolvable in downstream queries.
@@ -201,14 +231,23 @@ public sealed class ExecutionContext
     public QueryMeter? QueryMeter { get; }
 
     /// <summary>
-    /// Optional memory budget in bytes for operators that support spill-to-disk.
-    /// When <see langword="null"/>, operators keep all intermediate state in memory.
-    /// When set, operators spill intermediate state to temporary files when estimated
-    /// memory usage exceeds this budget. Covered operators: hash join, ORDER BY
-    /// (external sort), GROUP BY (partitioned re-aggregation), DISTINCT, PIVOT,
-    /// UNION/INTERSECT/EXCEPT (hash-partitioned), and materialised CTEs.
+    /// Plan-wide memory accountant shared with every materializing operator,
+    /// <see cref="VariableScope"/>, and DML executor in this query. Forwards the
+    /// budget check (<see cref="MemoryAccountant.WouldExceedBudget"/>) and
+    /// residency notifications. Lifetime: owned by this context when constructed
+    /// without an accountant argument; borrowed from a <see cref="BatchContext"/>
+    /// when a procedural batch is in scope. See <see cref="MemoryAccountant"/>
+    /// for the full residency / arena-bytes / sampling model.
     /// </summary>
-    public long? MemoryBudgetBytes { get; }
+    public MemoryAccountant Accountant { get; }
+
+    /// <summary>
+    /// Optional memory budget in bytes for operators that support spill-to-disk.
+    /// Forwards to <see cref="MemoryAccountant.MemoryBudgetBytes"/> on
+    /// <see cref="Accountant"/>; provided as a shortcut for read sites that
+    /// only need the budget value.
+    /// </summary>
+    public long? MemoryBudgetBytes => Accountant.MemoryBudgetBytes;
 
     /// <summary>
     /// Directory where spill operators write their temp files (data.spill, data.arena).
@@ -290,8 +329,10 @@ public sealed class ExecutionContext
             Catalog,
             Pool,
             QueryMeter,
-            MemoryBudgetBytes,
-            Store)
+            memoryBudgetBytes: null,
+            Store,
+            types: Types,
+            accountant: Accountant)
         {
             OuterRow = outerRow,
             RowLimit = RowLimit,
@@ -398,4 +439,18 @@ public sealed class ExecutionContext
         init => _modelsOverride = value;
     }
     private readonly DatumIngest.Models.ModelCatalog? _modelsOverride;
+
+    /// <summary>
+    /// Releases context-owned resources. Idempotent. Disposes the accountant
+    /// when this context constructed its own; releases the per-query
+    /// <see cref="Store"/> baseline when this context allocated it. Borrowed
+    /// resources (parent's accountant, caller-supplied store) are left
+    /// untouched.
+    /// </summary>
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (_ownsAccountant) Accountant.Dispose();
+        if (_ownsStore) Store.ReleaseReference();
+    }
 }

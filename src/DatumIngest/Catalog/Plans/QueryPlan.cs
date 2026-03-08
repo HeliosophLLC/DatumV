@@ -51,7 +51,7 @@ internal sealed class QueryPlan : IQueryPlan
         // _hoistStore) can do so via the well-known ExecutionContext.Store handle.
         // Without this, hoisted string literals >16 bytes are stranded in
         // _hoistStore and unreachable to operators downstream of the planner.
-        DatumIngest.Execution.ExecutionContext context = new(
+        using DatumIngest.Execution.ExecutionContext context = new(
             cancellationToken, _functions, _catalog, _catalog.Pool,
             store: _hoistStore)
         {
@@ -61,6 +61,9 @@ internal sealed class QueryPlan : IQueryPlan
             // running keep the tracer they captured at execution start.
             ModelTracer = _catalog.ModelTracer,
         };
+        // Owned accountant — start 1Hz sampling so the per-query
+        // MemoryProfile is populated for inspection.
+        context.Accountant.StartProfiling();
 
         await foreach (RowBatch batch in instrumented.ExecuteAsync(context).WithCancellation(cancellationToken))
         {
@@ -82,10 +85,14 @@ internal sealed class QueryPlan : IQueryPlan
         // _hoistStore) can do so via the well-known ExecutionContext.Store handle.
         // Without this, hoisted string literals >16 bytes are stranded in
         // _hoistStore and unreachable to operators downstream of the planner.
-        DatumIngest.Execution.ExecutionContext context = new(
+        using DatumIngest.Execution.ExecutionContext context = new(
             cancellationToken, _functions, _catalog, _catalog.Pool,
             store: _hoistStore,
-            types: batchContext?.Types)
+            types: batchContext?.Types,
+            // Inside a procedural batch, share the batch-scoped accountant so
+            // every query's residency rolls up under one budget. Standalone
+            // queries get an owned accountant constructed by the context.
+            accountant: batchContext?.Accountant)
         {
             // Pull the catalog-level tracer (if any) into the per-query
             // context. Setting / clearing _catalog.ModelTracer at runtime
@@ -103,6 +110,13 @@ internal sealed class QueryPlan : IQueryPlan
             VariableScope = batchContext?.VariableScope,
             VariableStore = batchContext?.VariableStore,
         };
+        // Standalone query owns its accountant — start 1Hz sampling here.
+        // Inside a batch, the batch is responsible for starting sampling on
+        // its shared accountant, so we don't start it twice.
+        if (batchContext is null)
+        {
+            context.Accountant.StartProfiling();
+        }
 
         // Auto-return the previous batch when the consumer asks for the next one.
         // Consumers must finish using the current batch before iterating; in practice
