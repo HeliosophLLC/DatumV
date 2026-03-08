@@ -73,12 +73,12 @@ public static class BuiltinModels
         ModelCatalog modelCatalog = new(modelDirectory, resolvedBudget, admissionTimeout: null);
 
         // Vision models
-        RegisterScrfd10g(modelCatalog);
         // PP-OCR-det, MobileNetV2, and YOLOX-{nano,tiny,s,m,l,x,darknet}
         // were previously registered here as built-in C# IModels; they
         // shipped as SQL-defined models under models/sql/. Their catalog
         // entries declare installSql so the downloader registers them
-        // after fetching weights.
+        // after fetching weights. SCRFD-10G was removed entirely
+        // (InsightFace weights aren't openly licensed).
         RegisterRealesrganGeneralX4(modelCatalog);
         RegisterU2Net(modelCatalog);
         RegisterU2Netp(modelCatalog);
@@ -1906,73 +1906,13 @@ public static class BuiltinModels
             // the generation budget generous without runaway latency.
             maxTokens: 1024);
 
-    /// <summary>
-    /// Default filename for the SCRFD-10G ONNX file (InsightFace's
-    /// successor to RetinaFace, distributed in the <c>buffalo_l</c> model
-    /// pack as <c>det_10g.onnx</c>, ~17 MB).
-    /// </summary>
-    public const string Scrfd10gDefaultFilename = "det_10g.onnx";
-
-    /// <summary>
-    /// Registers SCRFD-10G face detection under the catalog name
-    /// <paramref name="modelName"/> (defaults to <c>"scrfd_10g"</c>).
-    /// Returns one detection-array per image, where each detection is
-    /// <c>Struct{label, score, x, y, w, h, landmarks: Array&lt;Struct{x, y}&gt;}</c>
-    /// — <c>label</c> is the constant string <c>"face"</c> so the leading
-    /// <c>(label, score, x, y, w, h)</c> tuple lines up with general object
-    /// detectors like YOLOX. Sibling to YOLOX but face-specialised, with the 5 facial
-    /// landmarks (eye centres, nose tip, mouth corners) that downstream
-    /// face-pipeline tasks (alignment, recognition) need.
-    /// </summary>
-    /// <remarks>
-    /// SCRFD ("Sample and Computation Redistribution for Face Detection")
-    /// is the modern InsightFace successor to RetinaFace. Same general
-    /// FPN-with-anchors architecture; the differences are
-    /// distance-based bbox regression instead of prior-box exp/delta
-    /// encoding, single-channel sigmoid scores instead of softmaxed
-    /// background/foreground pairs, and a quietly-tuned anchor schedule
-    /// across strides 8/16/32. This registration assumes the buffalo_l
-    /// export at 640×640 input — re-exports at 320×320 or 1024×1024 will
-    /// fail the K-count check at construction time.
-    /// </remarks>
-    /// <param name="catalog">Catalog to register against.</param>
-    /// <param name="modelName">SQL-visible name (the <c>X</c> in <c>models.X(image)</c>). Defaults to <c>"scrfd_10g"</c>.</param>
-    /// <param name="modelFilename">ONNX filename relative to <see cref="ModelCatalog.ModelDirectory"/>. Defaults to <see cref="Scrfd10gDefaultFilename"/>.</param>
-    /// <param name="confidenceThreshold">Construction-time default score threshold below which a detection is dropped pre-NMS. Per-call callers can override via the optional first arg. Defaults to 0.5 — the standard InsightFace cutoff.</param>
-    /// <param name="iouThreshold">Construction-time default IoU threshold for NMS. Per-call callers can override via the optional second arg. Defaults to 0.4.</param>
-    public static void RegisterScrfd10g(
-        ModelCatalog catalog,
-        string modelName = "scrfd_10g",
-        string modelFilename = Scrfd10gDefaultFilename,
-        float confidenceThreshold = 0.5f,
-        float iouThreshold = 0.4f)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: modelFilename,
-            InputKinds: [DataKind.Image],
-            OutputKind: DataKind.Struct,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
-                return new ScrfdModel(modelName, modelPath, confidenceThreshold, iouThreshold);
-            },
-            // Per-call hyperparameter overrides:
-            //   [0] confidence_threshold (Float64) — drop detections below this score pre-NMS
-            //   [1] iou_threshold        (Float64) — NMS overlap threshold
-            // Both are threaded through to ScrfdModel.InferBatchAsync.
-            OptionalArgKinds: [DataKind.Float64, DataKind.Float64],
-            DisplayName: "SCRFD-10G Face Detector",
-            Parameters: "3.86M",
-            License: "MIT",
-            LicenseHolder: "InsightFace",
-            SourceUrl: "https://github.com/deepinsight/insightface/tree/master/detection/scrfd",
-            Category: "detector",
-            Modalities: ["image"],
-            Files: [modelFilename]));
-    }
+    // SCRFD-10G was previously registered here as a built-in C# IModel
+    // (ScrfdModel.cs). Removed 2026-05-17 after a license review:
+    // InsightFace's repo is MIT for the *code* only; the model weights /
+    // pretrained ONNX bundle don't carry an open license, so we can't
+    // redistribute them as a built-in. Use MediaPipe Face (Apache-2.0
+    // throughout) for face detection. RetinaFace would face the same
+    // license issue.
 
     // PP-OCRv4-det was previously a built-in C# IModel registered here. It
     // shipped as a SQL-defined model in models/sql/paddleocr-v4-det.sql

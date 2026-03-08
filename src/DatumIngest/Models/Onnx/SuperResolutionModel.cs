@@ -38,7 +38,7 @@ namespace DatumIngest.Models.Onnx;
 /// resolutions, so each row runs its own <see cref="InferenceSession.Run(IReadOnlyCollection{NamedOnnxValue})"/>
 /// call. The base <see cref="OnnxModel"/> template-method pattern assumes
 /// uniform shapes across the batch; we override <see cref="InferBatchAsync"/>
-/// directly (mirroring <see cref="ScrfdModel"/>'s approach).
+/// directly.
 /// </para>
 /// <para>
 /// <strong>Memory.</strong> Whole-image inference: the float NCHW
