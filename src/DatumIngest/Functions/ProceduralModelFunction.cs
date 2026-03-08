@@ -128,7 +128,12 @@ public sealed class ProceduralModelFunction : IScalarFunction
         ReadOnlyMemory<ValueRef> arguments, EvaluationFrame frame, CancellationToken cancellationToken)
     {
         IValueStore variableStore = frame.Target;
-        VariableScope scope = new();
+        // Per-call accountant for the body's VariableScope. Procedural model
+        // bodies don't currently see the outer plan's accountant because
+        // EvaluationFrame doesn't carry one; the body's residency is
+        // accounted in this isolated island until that plumbing lands.
+        using MemoryAccountant bodyAccountant = new();
+        VariableScope scope = new(bodyAccountant);
 
         await BindParametersAsync(arguments, frame, variableStore, scope, cancellationToken).ConfigureAwait(false);
 

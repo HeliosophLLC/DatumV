@@ -149,7 +149,12 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         // arena. They become unreachable when the caller's row batch
         // recycles, so no per-call cleanup is needed.
         IValueStore variableStore = frame.Target;
-        VariableScope scope = new();
+        // Per-call accountant for the body's VariableScope. Procedural UDFs
+        // don't currently see the outer plan's accountant because
+        // EvaluationFrame doesn't carry one; the body's residency is
+        // accounted in this isolated island until that plumbing lands.
+        using MemoryAccountant bodyAccountant = new();
+        VariableScope scope = new(bodyAccountant);
 
         await BindParametersAsync(arguments, frame, variableStore, scope, cancellationToken).ConfigureAwait(false);
 

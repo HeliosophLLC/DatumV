@@ -63,11 +63,14 @@ public sealed class BatchContext : IDisposable
         // Baseline reference owned by this batch context. Released exactly
         // once on Dispose. Mirrors the QueryPlan._hoistStore pattern.
         VariableStore.AddReference();
-        VariableScope = new VariableScope();
         Types = new TypeRegistry();
         Accountant = new MemoryAccountant(
             memoryBudgetBytes: memoryBudgetBytes,
             arenaBytesProbe: () => VariableStore.BytesWritten);
+        // VariableScope reports declare/set/pop into the same accountant so
+        // long-lived DECLARE'd managed payloads count against the batch
+        // budget across query boundaries.
+        VariableScope = new VariableScope(Accountant);
     }
 
     /// <summary>

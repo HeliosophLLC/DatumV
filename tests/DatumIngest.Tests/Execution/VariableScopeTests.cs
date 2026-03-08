@@ -15,14 +15,16 @@ public sealed class VariableScopeTests
     [Fact]
     public void NewScope_HasOneRootFrame()
     {
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         Assert.Equal(1, scope.FrameCount);
     }
 
     [Fact]
     public void PushFrame_IncreasesFrameCount()
     {
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         scope.PushFrame();
         Assert.Equal(2, scope.FrameCount);
         scope.PushFrame();
@@ -32,7 +34,8 @@ public sealed class VariableScopeTests
     [Fact]
     public void PopFrame_DecreasesFrameCount()
     {
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         scope.PushFrame();
         scope.PushFrame();
         scope.PopFrame();
@@ -42,7 +45,8 @@ public sealed class VariableScopeTests
     [Fact]
     public void PopRootFrame_Throws()
     {
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => scope.PopFrame());
         Assert.Contains("root", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -50,7 +54,8 @@ public sealed class VariableScopeTests
     [Fact]
     public void Declare_BindsInTopFrame_LookupReturnsValue()
     {
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         ValueRef val = ValueRef.FromBoolean(true);
         scope.Declare("flag", val);
         Assert.True(scope.TryGet("flag", out ValueRef retrieved));
@@ -60,7 +65,8 @@ public sealed class VariableScopeTests
     [Fact]
     public void Declare_TwiceInSameFrame_Throws()
     {
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         scope.Declare("x", ValueRef.FromInt32(1));
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => scope.Declare("x", ValueRef.FromInt32(2)));
@@ -70,7 +76,8 @@ public sealed class VariableScopeTests
     [Fact]
     public void Declare_InOuter_VisibleFromInner()
     {
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         scope.Declare("x", ValueRef.FromInt32(42));
         scope.PushFrame();
         Assert.True(scope.TryGet("x", out ValueRef val));
@@ -83,7 +90,8 @@ public sealed class VariableScopeTests
         // Outer x = 1; inner x = 2 — inner shadows outer for the lifetime
         // of the inner block. Both bindings exist; the lookup returns the
         // inner one because TryGet walks innermost-first.
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         scope.Declare("x", ValueRef.FromInt32(1));
         scope.PushFrame();
         scope.Declare("x", ValueRef.FromInt32(2));
@@ -101,7 +109,8 @@ public sealed class VariableScopeTests
     {
         // Variable declared in outer; SET from inner should mutate the
         // outer binding, not create a new one in the inner frame.
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         scope.Declare("counter", ValueRef.FromInt32(0));
         scope.PushFrame();
         scope.Set("counter", ValueRef.FromInt32(5));
@@ -114,7 +123,8 @@ public sealed class VariableScopeTests
     [Fact]
     public void Set_UndeclaredName_Throws()
     {
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => scope.Set("never_declared", ValueRef.FromInt32(1)));
         Assert.Contains("not declared", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -123,14 +133,16 @@ public sealed class VariableScopeTests
     [Fact]
     public void TryGet_UndeclaredName_ReturnsFalse()
     {
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         Assert.False(scope.TryGet("missing", out ValueRef _));
     }
 
     [Fact]
     public void Get_UndeclaredName_Throws()
     {
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => scope.Get("missing"));
         Assert.Contains("not declared", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -141,7 +153,8 @@ public sealed class VariableScopeTests
     {
         // X and x resolve to the same binding — matches how the codebase
         // handles UDF names and SQL identifiers generally.
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         scope.Declare("Counter", ValueRef.FromInt32(7));
 
         Assert.True(scope.TryGet("counter", out ValueRef lower));
@@ -153,7 +166,8 @@ public sealed class VariableScopeTests
     [Fact]
     public void Pop_RemovesInnerBindings()
     {
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         scope.PushFrame();
         scope.Declare("temp", ValueRef.FromInt32(123));
         scope.PopFrame();
@@ -169,11 +183,114 @@ public sealed class VariableScopeTests
         float[] tensor = new float[1024];
         for (int i = 0; i < tensor.Length; i++) tensor[i] = i * 0.5f;
 
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         scope.Declare("tensor", ValueRef.FromPrimitiveArray(tensor, DataKind.Float32));
         Assert.True(scope.TryGet("tensor", out ValueRef retrieved));
         Assert.True(retrieved.IsArray);
         Assert.Same(tensor, retrieved.Materialized);
+    }
+
+    [Fact]
+    public void Declare_LargeManagedPayload_NotifiesAccountant()
+    {
+        // 1M Float32 elements = 4 MB managed payload bound to a variable.
+        // Declare must push that byte count into the accountant so the
+        // plan-wide budget sees it.
+        float[] tensor = new float[1_000_000];
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
+
+        Assert.Equal(0, accountant.CurrentResidentBytes);
+        scope.Declare("tensor", ValueRef.FromPrimitiveArray(tensor, DataKind.Float32));
+        Assert.Equal(tensor.Length * 4L, accountant.CurrentResidentBytes);
+    }
+
+    [Fact]
+    public void Declare_InlineValue_DoesNotChangeResidency()
+    {
+        // Inline carriers (int, bool, float scalar) have zero managed payload.
+        // Their declare must not move the accountant counter.
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
+
+        scope.Declare("flag", ValueRef.FromBoolean(true));
+        scope.Declare("count", ValueRef.FromInt32(42));
+        scope.Declare("ratio", ValueRef.FromFloat32(1.5f));
+
+        Assert.Equal(0, accountant.CurrentResidentBytes);
+    }
+
+    [Fact]
+    public void PopFrame_ReleasesAllBindingsBytes()
+    {
+        // Declares in a pushed frame, pops the frame, accountant returns to baseline.
+        float[] tensor = new float[100_000];
+        byte[] blob = new byte[8_192];
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
+
+        scope.PushFrame();
+        scope.Declare("tensor", ValueRef.FromPrimitiveArray(tensor, DataKind.Float32));
+        scope.Declare("blob", ValueRef.FromBytes(DataKind.UInt8, blob, isArray: true));
+        long peak = accountant.CurrentResidentBytes;
+        Assert.Equal(tensor.Length * 4L + blob.Length, peak);
+
+        scope.PopFrame();
+        Assert.Equal(0, accountant.CurrentResidentBytes);
+    }
+
+    [Fact]
+    public void Set_ReplacingPayload_AdjustsAccountantByDelta()
+    {
+        // Declare with a small payload, SET to a larger one — delta is the
+        // difference, not the absolute size of either operand.
+        float[] small = new float[1_000];
+        float[] large = new float[10_000];
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
+
+        scope.Declare("x", ValueRef.FromPrimitiveArray(small, DataKind.Float32));
+        long afterDeclare = accountant.CurrentResidentBytes;
+        Assert.Equal(small.Length * 4L, afterDeclare);
+
+        scope.Set("x", ValueRef.FromPrimitiveArray(large, DataKind.Float32));
+        Assert.Equal(large.Length * 4L, accountant.CurrentResidentBytes);
+    }
+
+    [Fact]
+    public void Set_ReplacingLargerWithSmaller_ReleasesDelta()
+    {
+        float[] large = new float[10_000];
+        float[] small = new float[1_000];
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
+
+        scope.Declare("x", ValueRef.FromPrimitiveArray(large, DataKind.Float32));
+        scope.Set("x", ValueRef.FromPrimitiveArray(small, DataKind.Float32));
+
+        Assert.Equal(small.Length * 4L, accountant.CurrentResidentBytes);
+    }
+
+    [Fact]
+    public void DeclareInLoop_PopInLoop_AccountantStaysBounded()
+    {
+        // Models the "11 MB tensor per FOR iteration" pattern from the
+        // VariableScope docstring: each iteration declares the tensor,
+        // pops the frame, accountant returns to zero. Verifies the
+        // declare-pop cycle doesn't accumulate.
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
+
+        for (int i = 0; i < 50; i++)
+        {
+            float[] tensor = new float[100_000];  // ~400 KB
+            scope.PushFrame();
+            scope.Declare("tensor", ValueRef.FromPrimitiveArray(tensor, DataKind.Float32));
+            Assert.Equal(tensor.Length * 4L, accountant.CurrentResidentBytes);
+            scope.PopFrame();
+            Assert.Equal(0, accountant.CurrentResidentBytes);
+        }
     }
 
     [Fact]
@@ -187,7 +304,8 @@ public sealed class VariableScopeTests
         float[] tensor = new float[1_000_000];
         for (int i = 0; i < tensor.Length; i++) tensor[i] = i * 0.001f;
 
-        VariableScope scope = new();
+        using MemoryAccountant accountant = new();
+        VariableScope scope = new(accountant);
         scope.Declare("tensor", ValueRef.FromPrimitiveArray(tensor, DataKind.Float32));
 
         Arena store = new();

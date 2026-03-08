@@ -1090,6 +1090,83 @@ public readonly struct ValueRef
     /// is rejected at construction (<see cref="FromPrimitiveArray{T}"/>); other
     /// 8-byte temporal kinds (Time, Duration) accept <c>long[]</c> ticks.
     /// </remarks>
+    /// <summary>
+    /// Returns the approximate size in bytes of the GC-resident payload behind
+    /// this <see cref="ValueRef"/>. Used by <see cref="DatumIngest.Execution.VariableScope"/>
+    /// (and other holders of long-lived ValueRefs) to report bytes into the
+    /// shared <see cref="DatumIngest.Execution.MemoryAccountant"/> on bind/release.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Counts the payload bytes only — strings as <c>2 × Length</c>, primitive
+    /// arrays as <c>Length × sizeof(element)</c>, <see cref="SKBitmap"/> via
+    /// <see cref="SKBitmap.ByteCount"/>. Object headers and array headers are
+    /// not added — they're a small constant-per-allocation overhead that
+    /// doesn't materially affect the spill threshold, and counting them
+    /// across nested <c>ValueRef[]</c> trees would over-attribute.
+    /// </para>
+    /// <para>
+    /// Returns zero for inline-or-null carriers (no managed payload to track),
+    /// for arena-backed values (their bytes live in the file-backed mmap,
+    /// not in the GC heap), and for unrecognised payload shapes. Add a new
+    /// arm to the switch when a new payload kind ships rather than letting
+    /// it silently account as zero in a steady-state path.
+    /// </para>
+    /// </remarks>
+    public static long ManagedPayloadBytes(ValueRef value)
+    {
+        object? mat = value.Materialized;
+        if (mat is null) return 0;
+        return mat switch
+        {
+            string s => 2L * s.Length,
+            byte[] arr => arr.Length,
+            sbyte[] arr => arr.Length,
+            bool[] arr => arr.Length,
+            short[] arr => arr.Length * 2L,
+            ushort[] arr => arr.Length * 2L,
+            Half[] arr => arr.Length * 2L,
+            int[] arr => arr.Length * 4L,
+            uint[] arr => arr.Length * 4L,
+            long[] arr => arr.Length * 8L,
+            ulong[] arr => arr.Length * 8L,
+            float[] arr => arr.Length * 4L,
+            double[] arr => arr.Length * 8L,
+            decimal[] arr => arr.Length * 16L,
+            Int128[] arr => arr.Length * 16L,
+            UInt128[] arr => arr.Length * 16L,
+            Guid[] arr => arr.Length * 16L,
+            Vector2[] arr => arr.Length * 8L,
+            Vector3[] arr => arr.Length * 12L,
+            string[] arr => SumStringBytes(arr),
+            ArraySegment<byte> seg => seg.Count,
+            SKBitmap bmp => bmp.ByteCount,
+            ValueRef[] children => SumChildPayloadBytes(children),
+            _ => 0,
+        };
+    }
+
+    private static long SumStringBytes(string[] arr)
+    {
+        long total = 0;
+        for (int i = 0; i < arr.Length; i++)
+        {
+            string? s = arr[i];
+            if (s is not null) total += 2L * s.Length;
+        }
+        return total;
+    }
+
+    private static long SumChildPayloadBytes(ValueRef[] children)
+    {
+        long total = 0;
+        for (int i = 0; i < children.Length; i++)
+        {
+            total += ManagedPayloadBytes(children[i]);
+        }
+        return total;
+    }
+
     private static DataValue BuildPrimitiveArray(DataKind elementKind, Array values, IValueStore target)
     {
         return elementKind switch

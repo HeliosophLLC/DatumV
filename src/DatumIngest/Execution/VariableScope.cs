@@ -41,14 +41,18 @@ namespace DatumIngest.Execution;
 public sealed class VariableScope
 {
     private readonly Stack<Dictionary<string, Binding>> _frames = new();
+    private readonly MemoryAccountant _accountant;
 
     /// <summary>
-    /// Internal per-binding shape: the bound <see cref="ValueRef"/>
-    /// plus optional struct field names. Keeping these together avoids
-    /// a parallel dictionary and keeps lookup atomic.
+    /// Internal per-binding shape: the bound <see cref="ValueRef"/>, its
+    /// already-computed managed-payload byte count (so <c>Set</c>/<c>PopFrame</c>
+    /// can release without re-walking the value), and optional struct field
+    /// names. Keeping these together avoids a parallel dictionary and keeps
+    /// lookup atomic.
     /// </summary>
     private readonly record struct Binding(
         ValueRef Value,
+        long PayloadBytes,
         IReadOnlyList<string>? StructFieldNames);
 
     /// <summary>
@@ -57,8 +61,16 @@ public sealed class VariableScope
     /// the procedure's top level live here. Sub-blocks push additional
     /// frames on top.
     /// </summary>
-    public VariableScope()
+    /// <param name="accountant">
+    /// Borrowed accountant the scope reports binding bytes into.
+    /// <see cref="Declare"/> calls <see cref="MemoryAccountant.NotifyMaterialized"/>
+    /// with the bound value's managed-payload bytes; <see cref="Set"/>
+    /// releases the prior value's bytes and notifies the new one;
+    /// <see cref="PopFrame"/> releases every binding in the popped frame.
+    /// </param>
+    public VariableScope(MemoryAccountant accountant)
     {
+        _accountant = accountant;
         _frames.Push(NewFrame());
     }
 
@@ -77,8 +89,9 @@ public sealed class VariableScope
     public void PushFrame() => _frames.Push(NewFrame());
 
     /// <summary>
-    /// Pops the topmost frame. Throws if the root frame is the only one
-    /// left — the executor must never pop more than it pushed.
+    /// Pops the topmost frame and releases every binding in it from the
+    /// shared <see cref="MemoryAccountant"/>. Throws if the root frame is
+    /// the only one left — the executor must never pop more than it pushed.
     /// </summary>
     public void PopFrame()
     {
@@ -87,7 +100,16 @@ public sealed class VariableScope
             throw new InvalidOperationException(
                 "Cannot pop the root variable scope frame; check that BEGIN/END nesting is balanced.");
         }
-        _frames.Pop();
+        Dictionary<string, Binding> top = _frames.Pop();
+        long releasedBytes = 0;
+        foreach (Binding binding in top.Values)
+        {
+            releasedBytes += binding.PayloadBytes;
+        }
+        if (releasedBytes != 0)
+        {
+            _accountant.NotifyReleased(releasedBytes);
+        }
     }
 
     /// <summary>
@@ -109,7 +131,12 @@ public sealed class VariableScope
             throw new InvalidOperationException(
                 $"Variable '@{name}' is already declared in the current block.");
         }
-        top[name] = new Binding(value, structFieldNames);
+        long payloadBytes = ValueRef.ManagedPayloadBytes(value);
+        top[name] = new Binding(value, payloadBytes, structFieldNames);
+        if (payloadBytes != 0)
+        {
+            _accountant.NotifyMaterialized(payloadBytes);
+        }
     }
 
     /// <summary>
@@ -125,7 +152,11 @@ public sealed class VariableScope
         {
             if (frame.TryGetValue(name, out Binding existing))
             {
-                frame[name] = new Binding(value, existing.StructFieldNames);
+                long newBytes = ValueRef.ManagedPayloadBytes(value);
+                frame[name] = new Binding(value, newBytes, existing.StructFieldNames);
+                long delta = newBytes - existing.PayloadBytes;
+                if (delta > 0) _accountant.NotifyMaterialized(delta);
+                else if (delta < 0) _accountant.NotifyReleased(-delta);
                 return;
             }
         }
