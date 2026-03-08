@@ -351,6 +351,30 @@
         { "name": "LICENSE", "source": "https://huggingface.co/Intel/dpt-large/raw/main/LICENSE" }
       ]
     },
+    {
+      "repoSuffix": "midas-small-onnx",
+      "sourceFolder": "${DATUM_MODELS}",
+      "expectedSizeMb": 80,
+      "exportedBy": "downloaded — Intel ISL MiDaS v2.1 small (GitHub release v2_1)",
+      "expectedContents": ["midas_v21_small_256.onnx"],
+      "uploadStaging": "Fetch from https://github.com/isl-org/MiDaS/releases/download/v2_1/midas_v21_small_256.onnx . Place into a single staging folder with README.md + LICENSE, then upload.",
+      "provenance": {
+        "baseModel": "isl-org/MiDaS v2.1 small (EfficientNet-Lite3 encoder + lightweight depth decoder)",
+        "exportToolchain": "n/a — checkpoint published directly in isl-org/MiDaS GitHub release v2_1",
+        "precision": "fp32",
+        "notes": "Input: NCHW [1, 3, 256, 256] float32, **BGR** (not RGB — distinct from DPT-Large), normalized with ImageNet mean/std (mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225]). Output: [1, 256, 256] single-channel relative depth (higher = closer). ~21M params, ~50 ms / image on consumer CPU. Pair with DPT-Large in the same catalog as the small / large tradeoff for the depth task."
+      },
+      "license": {
+        "spdx": "MIT",
+        "url": "https://github.com/isl-org/MiDaS/blob/master/LICENSE",
+        "confidence": "high",
+        "requiresAcceptance": false,
+        "notes": "isl-org/MiDaS GitHub repo is MIT. Distinct from Intel/dpt-large on HuggingFace which Intel re-released under Apache-2.0 — same family, different distribution path, different licenses. The v2_1 GitHub release inherits MIT from the upstream repo."
+      },
+      "licenseFiles": [
+        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/isl-org/MiDaS/master/LICENSE" }
+      ]
+    },
 
     {
       "repoSuffix": "paddleocr-v4-det-onnx",

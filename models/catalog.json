@@ -412,8 +412,21 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Intel ISL — Ranftl, Bochkovskiy, Koltun (DPT / MiDaS)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/dpt-large-onnx", "revision": "e4bc550a25abca23bad79d15df94cd668740f206", "include": ["dpt_large_384.onnx"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/dpt-large-onnx", "revision": "b7927a19c25a7b855da2ce55c00bfbb63bc35641", "include": ["dpt_large_384.onnx"] },
       "approxSizeMb": 1300
+    },
+    {
+      "id": "midas-small",
+      "displayName": "MiDaS v2.1 Small (Monocular Depth)",
+      "description": "Lightweight EfficientNet-Lite3 + depth-decoder monocular depth estimator. ~21M params, 256×256 BGR input. ~50ms per image on consumer CPU. Sibling to DPT-Large but ~16× smaller — pick this when latency / disk matter more than absolute quality.",
+      "task": "depth-estimation",
+      "tags": ["depth", "midas", "edge"],
+      "licenseIds": ["mit"],
+      "attributions": ["Intel ISL — Ranftl, Lasinger, Hafner, Schindler, Koltun (MiDaS)"],
+      "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/midas-small-onnx", "revision": "f3a5a5e4c852c7bfac10517767e5b0636cb42b92", "include": ["midas_v21_small_256.onnx"] },
+      "approxSizeMb": 80,
+      "placeholder": true
     },
     {
       "id": "mediapipe-face",

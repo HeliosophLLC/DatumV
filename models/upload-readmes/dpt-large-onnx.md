@@ -1,5 +1,5 @@
 ---
-license: mit
+license: apache-2.0
 library_name: onnx
 tags:
   - depth-estimation
@@ -66,4 +66,7 @@ For real-time or edge use, prefer `dpt-hybrid` or `midas-small` — not in this 
 
 ## License
 
-**MIT** — same as upstream. `LICENSE` file included.
+**Apache-2.0** — same as [Intel's published checkpoint on HuggingFace](https://huggingface.co/Intel/dpt-large). `LICENSE` file included.
+
+Note: the original [isl-org/MiDaS](https://github.com/isl-org/MiDaS) GitHub repo (where the DPT architecture was first released) is **MIT**. Intel re-released the trained DPT-Large weights on HuggingFace under **Apache-2.0**, which is what this repo mirrors. Same model family, different distribution channel, different licenses. The `midas-small` Heliosoph repo (sourced from the GitHub release) inherits MIT.
+
