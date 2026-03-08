@@ -329,6 +329,30 @@
       ]
     },
     {
+      "repoSuffix": "u2net-onnx",
+      "sourceFolder": "${DATUM_MODELS}",
+      "expectedSizeMb": 175,
+      "exportedBy": "downloaded — Qin et al. U²-Net ONNX weights via danielgatis/rembg release",
+      "expectedContents": ["u2net.onnx", "u2netp.onnx"],
+      "uploadStaging": "Fetch both: https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx (~170 MB) and https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx (~4.7 MB). Place both files + README.md + LICENSE into a single staging folder, then upload. Bundled into one repo so users get the small/large pair in a single download.",
+      "provenance": {
+        "baseModel": "xuebinqin/U-2-Net — Apache-2.0 academic release (Qin et al., Pattern Recognition 2020)",
+        "exportToolchain": "n/a — ONNX checkpoints republished by danielgatis/rembg from the original U²-Net release",
+        "precision": "fp32",
+        "notes": "Two-variant pair. Input: NCHW [1, 3, 320, 320] float32, RGB, normalized with mean=[0.485,0.456,0.406] / std=[0.229,0.224,0.225] (ImageNet). Output: 7 saliency maps at decreasing resolution (d0..d6); d0 is the final fused mask. Both files share the same input/output tensor signature so code can swap variants without changes. Trained on DUTS-TR (academic-public dataset). The separate u2net_portrait variant exists upstream but is explicitly excluded here — it inherits non-commercial restrictions from the APDrawing training data."
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE",
+        "confidence": "high",
+        "requiresAcceptance": false,
+        "notes": "Original Apache-2.0 from xuebinqin/U-2-Net is the authoritative license. The danielgatis/rembg release just bundles those weights — no relicensing. Excluding u2net_portrait keeps the bundle commercially clean (its APDrawing training data has non-commercial restrictions)."
+      },
+      "licenseFiles": [
+        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/xuebinqin/U-2-Net/master/LICENSE" }
+      ]
+    },
+    {
       "repoSuffix": "dpt-large-onnx",
       "sourceFolder": "${DATUM_MODELS}",
       "expectedSizeMb": 1300,

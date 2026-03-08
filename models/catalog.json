@@ -404,6 +404,30 @@
       "approxSizeMb": 60
     },
     {
+      "id": "u2netp",
+      "displayName": "U²-Net Lite / u2netp (Salient Object Segmentation)",
+      "description": "Distilled U²-Net for binary salient-object (foreground) segmentation. 4.7M params, ~4.7 MB, 320×320 input. Output is a single-channel mask separating subject from background — pair with image_cutout() for background removal. Recommended default; full u2net is only worth the disk hit on tricky fine-edge cases (hair, fur).",
+      "task": "image-segmentation",
+      "tags": ["segmentation", "salient-object", "background-removal", "u2net", "edge"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Xuebin Qin, Zichen Zhang, Chenyang Huang, Masood Dehghan, Osmar R. Zaiane, Martin Jagersand — U²-Net (University of Alberta)"],
+      "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/u2net-onnx", "revision": "7fc34deee10329bc039c10a73b98090d0c6f5c59", "include": ["u2netp.onnx"] },
+      "approxSizeMb": 5
+    },
+    {
+      "id": "u2net",
+      "displayName": "U²-Net Full (Salient Object Segmentation)",
+      "description": "Full U²-Net (176M params, ~170 MB, 320×320 input). Same task as u2netp but with sharper edges on hair / fur / lace / thin structures. Pick this over u2netp only when fine-detail boundaries matter and disk + latency aren't constrained.",
+      "task": "image-segmentation",
+      "tags": ["segmentation", "salient-object", "background-removal", "u2net"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Xuebin Qin, Zichen Zhang, Chenyang Huang, Masood Dehghan, Osmar R. Zaiane, Martin Jagersand — U²-Net (University of Alberta)"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/u2net-onnx", "revision": "7fc34deee10329bc039c10a73b98090d0c6f5c59", "include": ["u2net.onnx"] },
+      "approxSizeMb": 170
+    },
+    {
       "id": "dpt-large",
       "displayName": "DPT-Large (Monocular Depth)",
       "description": "Intel ISL Dense Prediction Transformer for monocular depth estimation. 384×384 input. Outputs relative depth (not metric).",
@@ -413,7 +437,8 @@
       "attributions": ["Intel ISL — Ranftl, Bochkovskiy, Koltun (DPT / MiDaS)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/dpt-large-onnx", "revision": "b7927a19c25a7b855da2ce55c00bfbb63bc35641", "include": ["dpt_large_384.onnx"] },
-      "approxSizeMb": 1300
+      "approxSizeMb": 1300,
+      "installSql": "sql/dpt-large.sql"
     },
     {
       "id": "midas-small",
@@ -426,7 +451,7 @@
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/midas-small-onnx", "revision": "f3a5a5e4c852c7bfac10517767e5b0636cb42b92", "include": ["midas_v21_small_256.onnx"] },
       "approxSizeMb": 80,
-      "placeholder": true
+      "installSql": "sql/midas-small.sql"
     },
     {
       "id": "mediapipe-face",

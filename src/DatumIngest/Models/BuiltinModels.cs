@@ -82,8 +82,8 @@ public static class BuiltinModels
         RegisterRealesrganGeneralX4(modelCatalog);
         RegisterU2Net(modelCatalog);
         RegisterU2Netp(modelCatalog);
-        RegisterMidasSmall(modelCatalog);
-        RegisterDptLarge(modelCatalog);
+        // MiDaS-small + DPT-Large migrated to SQL-defined models
+        // (models/sql/{midas-small,dpt-large}.sql).
         RegisterMobileSamPrompted(modelCatalog);
         RegisterMobileSam(modelCatalog);
         RegisterViTGpt2Caption(modelCatalog);
@@ -2084,111 +2084,14 @@ public static class BuiltinModels
             Files: [modelFilename]));
     }
 
-    // ───────────────────── MiDaS / DPT depth (MIT) ──────────────────────────
-    //
-    // Intel ISL's monocular depth-estimation family. Two registrations driven
-    // by the same DepthEstimationModel class:
-    //   • midas_v21_small_256.onnx — MiDaS v2.1 small (~21M params, 256×256, BGR + ImageNet)
-    //   • dpt_large_384.onnx       — DPT-Large v3.1   (~344M params, 384×384, RGB + 0.5/0.5)
-    //
-    // Output is a single-channel relative depth map sized to match the input
-    // image. Inverse depth — bigger value = closer — min-max normalised per
-    // image; absolute scale is discarded.
-
-    /// <summary>Default filename for MiDaS v2.1 small (~21M params, 256×256 input).</summary>
-    public const string MidasSmall256Filename = "midas_v21_small_256.onnx";
-
-    /// <summary>Default filename for DPT-Large v3.1 (~344M params, 384×384 input).</summary>
-    public const string DptLarge384Filename = "dpt_large_384.onnx";
-
-    /// <summary>
-    /// Registers Intel MiDaS v2.1 small under the catalog name <paramref name="modelName"/>
-    /// (defaults to <c>"midas_small"</c>). Image-in / image-out: a single-channel
-    /// relative depth map sized to match the input.
-    /// </summary>
-    /// <remarks>
-    /// MiDaS-small v2.1 expects BGR input with ImageNet normalisation. Lightweight
-    /// (21M params, ~83 MB) and fast enough to run per-row in a SQL pipeline.
-    /// Upstream: <a href="https://github.com/isl-org/MiDaS">isl-org/MiDaS</a>.
-    /// </remarks>
-    public static void RegisterMidasSmall(
-        ModelCatalog catalog,
-        string modelName = "midas_small",
-        string modelFilename = MidasSmall256Filename)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: modelFilename,
-            InputKinds: [DataKind.Image],
-            OutputKind: DataKind.Image,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
-                return new DepthEstimationModel(
-                    name: modelName,
-                    modelFilePath: modelPath,
-                    inputSize: 256,
-                    bgr: true,
-                    channelMean: [0.485f, 0.456f, 0.406f],
-                    channelStd: [0.229f, 0.224f, 0.225f]);
-            },
-            DisplayName: "MiDaS v2.1 small (relative depth)",
-            ImplementsTaskName: "DepthEstimator",
-            Parameters: "21M",
-            License: "MIT",
-            LicenseHolder: "Intel ISL",
-            SourceUrl: "https://github.com/isl-org/MiDaS",
-            Category: "depth",
-            Modalities: ["image"],
-            Files: [modelFilename]));
-    }
-
-    /// <summary>
-    /// Registers Intel DPT-Large under the catalog name <paramref name="modelName"/>
-    /// (defaults to <c>"dpt_large"</c>). Same image-in / image-out signature as
-    /// <see cref="RegisterMidasSmall"/>; substantially more accurate at the cost
-    /// of ~16× more parameters (344M, ~1.4 GB).
-    /// </summary>
-    /// <remarks>
-    /// DPT-Large expects RGB input normalised to <c>[-1, 1]</c>
-    /// (<c>mean=[0.5,0.5,0.5]</c>, <c>std=[0.5,0.5,0.5]</c>) at 384×384.
-    /// Upstream: <a href="https://github.com/isl-org/MiDaS">isl-org/MiDaS</a>.
-    /// </remarks>
-    public static void RegisterDptLarge(
-        ModelCatalog catalog,
-        string modelName = "dpt_large",
-        string modelFilename = DptLarge384Filename)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: modelFilename,
-            InputKinds: [DataKind.Image],
-            OutputKind: DataKind.Image,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
-                return new DepthEstimationModel(
-                    name: modelName,
-                    modelFilePath: modelPath,
-                    inputSize: 384,
-                    bgr: false,
-                    channelMean: [0.5f, 0.5f, 0.5f],
-                    channelStd: [0.5f, 0.5f, 0.5f]);
-            },
-            DisplayName: "DPT-Large v3.1 (relative depth)",
-            ImplementsTaskName: "DepthEstimator",
-            Parameters: "344M",
-            License: "MIT",
-            LicenseHolder: "Intel ISL",
-            SourceUrl: "https://github.com/isl-org/MiDaS",
-            Category: "depth",
-            Modalities: ["image"],
-            Files: [modelFilename]));
-    }
+    // MiDaS v2.1 small + DPT-Large were previously registered here as
+    // built-in C# IModels (DepthEstimationModel.cs). They shipped as
+    // SQL-defined models in models/sql/midas-small.sql and models/sql/
+    // dpt-large.sql backed by two new scalars: image_to_tensor_chw_bgr
+    // (BGR sibling of image_to_tensor_chw, for MiDaS-small's cv2 BGR
+    // convention) and depth_map_to_image (per-image min-max normalize +
+    // grayscale pack + resize). Both declare IMPLEMENTS DepthEstimator
+    // RETURNS Image.
 
     // ─────────────────────── MobileSAM prompted (Apache-2.0) ─────────────────
     //

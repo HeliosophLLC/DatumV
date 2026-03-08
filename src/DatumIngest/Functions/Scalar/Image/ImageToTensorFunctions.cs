@@ -130,6 +130,54 @@ public sealed class ImageToTensorHwcFunction : IFunction, IScalarFunction
         => ImageToTensorShared.ExecuteAsync(Name, arguments, layout: TensorLayout.Hwc);
 }
 
+/// <summary>
+/// BGR sibling of <see cref="ImageToTensorChwFunction"/>. Same stretch
+/// resize and per-channel normalisation, but emits the tensor in BGR
+/// channel order. Used by legacy detectors and depth estimators trained
+/// against cv2-loaded BGR images (MiDaS-small v2.1, some YOLO variants).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Mean / std ordering.</strong> The <c>mean</c> and <c>std</c>
+/// arrays are indexed in <em>output channel</em> order — i.e. BGR. Pass
+/// <c>[meanB, meanG, meanR]</c> if the upstream Python reference cites
+/// the values in BGR; pass <c>[meanR, meanG, meanB]</c> with a manual
+/// swap if it cites RGB. MiDaS-small uses symmetric-enough ImageNet
+/// stats that the order rarely matters in practice; for asymmetric
+/// statistics it matters a lot.
+/// </para>
+/// </remarks>
+public sealed class ImageToTensorChwBgrFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "image_to_tensor_chw_bgr";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Image;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "BGR sibling of image_to_tensor_chw. Stretch-resizes an image and packs BGR "
+        + "(not RGB) pixels into a normalized NCHW Float32 tensor: "
+        + "image_to_tensor_chw_bgr(img, target_size [, mean, std]). Use for models trained "
+        + "on cv2-loaded BGR images (MiDaS-small v2.1, some YOLO exports).";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+        ImageToTensorShared.BuildSignatures();
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<ImageToTensorChwBgrFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+        => ImageToTensorShared.ExecuteAsync(Name, arguments, layout: TensorLayout.Chw, bgr: true);
+}
+
 /// <summary>Tensor memory layout selector for the shared image-to-tensor helper.</summary>
 internal enum TensorLayout
 {
@@ -175,7 +223,8 @@ internal static class ImageToTensorShared
     public static ValueTask<ValueRef> ExecuteAsync(
         string fnName,
         ReadOnlyMemory<ValueRef> arguments,
-        TensorLayout layout)
+        TensorLayout layout,
+        bool bgr = false)
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
         ValueRef imgArg = args[0];
@@ -219,6 +268,13 @@ internal static class ImageToTensorShared
         unsafe
         {
             byte* p = (byte*)pixelPtr;
+            // BGR swaps channel-0 and channel-2 reads from the source buffer
+            // (which is always RGBA after the Resize call above). The mean/std
+            // arrays are still indexed [0]=channel-0, [1]=channel-1, [2]=channel-2
+            // in the *output* order — i.e. BGR callers pass mean/std in BGR
+            // order. MiDaS-small v2.1's ImageNet stats happen to be symmetric
+            // (~0.45 each) so the difference is small, but the contract is
+            // explicit: index follows the output channel order.
             if (layout == TensorLayout.Chw)
             {
                 for (int y = 0; y < height; y++)
@@ -227,14 +283,14 @@ internal static class ImageToTensorShared
                     for (int x = 0; x < width; x++)
                     {
                         int srcOffset = (rowBase + x) * 4;
-                        byte r = p[srcOffset + 0];
-                        byte g = p[srcOffset + 1];
-                        byte b = p[srcOffset + 2];
+                        byte c0 = bgr ? p[srcOffset + 2] : p[srcOffset + 0];
+                        byte c1 = p[srcOffset + 1];
+                        byte c2 = bgr ? p[srcOffset + 0] : p[srcOffset + 2];
 
                         int dstIdx = rowBase + x;
-                        output[0 * plane + dstIdx] = (r / 255f - meanR) / stdR;
-                        output[1 * plane + dstIdx] = (g / 255f - meanG) / stdG;
-                        output[2 * plane + dstIdx] = (b / 255f - meanB) / stdB;
+                        output[0 * plane + dstIdx] = (c0 / 255f - meanR) / stdR;
+                        output[1 * plane + dstIdx] = (c1 / 255f - meanG) / stdG;
+                        output[2 * plane + dstIdx] = (c2 / 255f - meanB) / stdB;
                     }
                 }
             }
@@ -246,14 +302,14 @@ internal static class ImageToTensorShared
                     for (int x = 0; x < width; x++)
                     {
                         int srcOffset = (rowBase + x) * 4;
-                        byte r = p[srcOffset + 0];
-                        byte g = p[srcOffset + 1];
-                        byte b = p[srcOffset + 2];
+                        byte c0 = bgr ? p[srcOffset + 2] : p[srcOffset + 0];
+                        byte c1 = p[srcOffset + 1];
+                        byte c2 = bgr ? p[srcOffset + 0] : p[srcOffset + 2];
 
                         int dstIdx = (rowBase + x) * 3;
-                        output[dstIdx]     = (r / 255f - meanR) / stdR;
-                        output[dstIdx + 1] = (g / 255f - meanG) / stdG;
-                        output[dstIdx + 2] = (b / 255f - meanB) / stdB;
+                        output[dstIdx]     = (c0 / 255f - meanR) / stdR;
+                        output[dstIdx + 1] = (c1 / 255f - meanG) / stdG;
+                        output[dstIdx + 2] = (c2 / 255f - meanB) / stdB;
                     }
                 }
             }
