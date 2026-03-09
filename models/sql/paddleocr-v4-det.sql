@@ -22,14 +22,19 @@
 --                               DBNet polygon unclip + scale back to
 --                               original-image pixel space.
 --
--- Hyperparameter defaults (PaddleOCR canonical):
---   pixel_threshold      = 0.3
---   box_score_threshold  = 0.6
---   min_size             = 3   (pixels in resized space)
---   unclip_ratio         = 1.5
+-- Hyperparameter defaults (PaddleOCR canonical) exposed as optional
+-- call-site arguments. Override per call:
+--   SELECT models.paddleocr_v4_det(img, 0.2) FROM faded_pages           -- looser pixel mask
+--   SELECT models.paddleocr_v4_det(img, 0.3, 0.5) FROM low_contrast     -- looser box-score too
 -- ============================================================================
 
-CREATE OR REPLACE MODEL paddleocr_v4_det(img Image) RETURNS Array<RegionScore>
+CREATE OR REPLACE MODEL paddleocr_v4_det(
+  img                 Image,
+  pixel_threshold     Float32 = CAST(0.3 AS Float32),
+  box_score_threshold Float32 = CAST(0.6 AS Float32),
+  min_size            Int32   = 3,
+  unclip_ratio        Float32 = CAST(1.5 AS Float32)
+) RETURNS Array<RegionScore>
 IMPLEMENTS TextDetector
 USING 'paddleocr-v4-det/ch_PP-OCRv4_det.onnx'
 AS BEGIN
@@ -47,8 +52,8 @@ AS BEGIN
     prob, rh, rw,
     CAST(image_width(img)  AS Float32) / CAST(rw AS Float32),
     CAST(image_height(img) AS Float32) / CAST(rh AS Float32),
-    CAST(0.3 AS Float32),
-    CAST(0.6 AS Float32),
-    3,
-    CAST(1.5 AS Float32))
+    pixel_threshold,
+    box_score_threshold,
+    min_size,
+    unclip_ratio)
 END

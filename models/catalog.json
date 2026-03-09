@@ -160,7 +160,7 @@
       "licenseIds": ["mit"],
       "attributions": ["BAAI — Beijing Academy of Artificial Intelligence"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "BAAI/bge-small-en-v1.5", "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a", "include": ["onnx/*", "config.json", "tokenizer*", "special_tokens_map.json", "vocab.txt", "1_Pooling/*", "sentence_bert_config.json"] }],
+      "sources": [{ "type": "huggingface", "repo": "BAAI/bge-small-en-v1.5", "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a", "include": ["onnx/model.onnx", "vocab.txt"] }],
       "approxSizeMb": 130,
       "installSql": "sql/bge-small-en-v1.5.sql"
     },
@@ -199,8 +199,9 @@
       "licenseIds": ["mit"],
       "attributions": ["Cardiff NLP — Cardiff University", "Joshua Lochner / Xenova (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "Xenova/twitter-roberta-base-sentiment-latest", "revision": "f3ec4d0925f90c3ca7ee7814f52d6ee7cf180445", "include": ["onnx/*", "*.json", "*.txt"] }],
-      "approxSizeMb": 500
+      "sources": [{ "type": "huggingface", "repo": "Xenova/twitter-roberta-base-sentiment-latest", "revision": "f3ec4d0925f90c3ca7ee7814f52d6ee7cf180445", "include": ["onnx/model.onnx", "tokenizer.json"] }],
+      "approxSizeMb": 500,
+      "installSql": "sql/twitter-roberta-sentiment.sql"
     },
 
     {
@@ -212,8 +213,9 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Unitary", "Joshua Lochner / Xenova (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "Xenova/toxic-bert", "revision": "65cbc2607cb7fad64f98d1e8a5a3d1f8577895fd", "include": ["onnx/*", "*.json", "*.txt"] }],
-      "approxSizeMb": 440
+      "sources": [{ "type": "huggingface", "repo": "Xenova/toxic-bert", "revision": "65cbc2607cb7fad64f98d1e8a5a3d1f8577895fd", "include": ["onnx/model.onnx", "vocab.txt"] }],
+      "approxSizeMb": 440,
+      "installSql": "sql/toxic-bert.sql"
     },
     {
       "id": "roberta-base",

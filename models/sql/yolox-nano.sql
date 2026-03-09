@@ -7,12 +7,16 @@
 -- the detailed pipeline notes.
 -- ============================================================================
 
-CREATE OR REPLACE MODEL yolox_nano(img Image) RETURNS Array<LabeledDetection>
+CREATE OR REPLACE MODEL yolox_nano(
+  img Image,
+  conf_thresh Float32 = CAST(0.25 AS Float32),
+  iou_thresh  Float32 = CAST(0.45 AS Float32)
+) RETURNS Array<LabeledDetection>
 IMPLEMENTS LabeledObjectDetector
 USING 'yolox-nano/yolox_nano.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = yolox_preprocess(img, 416);
   DECLARE raw    Float32[] = infer(tensor, [CAST(1 AS Int32), CAST(3 AS Int32), CAST(416 AS Int32), CAST(416 AS Int32)]);
   DECLARE labels Array<String> = read_string_list('coco-classes.json');
-  RETURN yolox_postprocess(raw, labels, img, 416, CAST(0.25 AS Float32), CAST(0.45 AS Float32))
+  RETURN yolox_postprocess(raw, labels, img, 416, conf_thresh, iou_thresh)
 END

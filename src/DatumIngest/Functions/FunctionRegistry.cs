@@ -632,6 +632,7 @@ public sealed class FunctionRegistry
         // ONNX export).
         registry.RegisterScalar<Scalar.Activation.SoftmaxFunction>();
         registry.RegisterScalar<Scalar.Activation.SigmoidFunction>();
+        registry.RegisterScalar<Scalar.Activation.MultilabelClassifyFunction>();
 
         // Vector reductions + normalization + detection postprocess.
         registry.RegisterScalar<Scalar.Vector.ArgmaxFunction>();
@@ -650,6 +651,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Tokenization.TokenizerEncodeFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerEncodeBpeFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerEncodeBertFunction>("tokenizer");
+        registry.RegisterScalar<Tokenization.TokenizerEncodeRobertaFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerDecodeFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerDecodeBpeFunction>("tokenizer");
 

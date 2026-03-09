@@ -99,10 +99,23 @@ public static class TaskTypeRegistry
             [Scalar(DataKind.String)],
             Named("ScoredClass"),
             "Text → single class with confidence."),
+        new("LabeledTextClassifier",
+            [Scalar(DataKind.String)],
+            Named("ScoredLabel"),
+            "Text → single class-label string with confidence. "
+            + "Like TextClassifier but emits a human-readable label (e.g. 'positive', "
+            + "'toxic') instead of an integer class id."),
         new("TextMultiClassifier",
             [Scalar(DataKind.String)],
             ArrayOfNamed("ScoredClass"),
             "Text → multiple classes with confidence (multi-label)."),
+        new("LabeledTextMultiClassifier",
+            [Scalar(DataKind.String)],
+            ArrayOfNamed("ScoredLabel"),
+            "Text → multiple class-label strings with confidence (multi-label). "
+            + "Like TextMultiClassifier but emits human-readable labels (e.g. 'toxic', "
+            + "'severe_toxic') instead of integer class ids. Each label is scored "
+            + "independently (sigmoid head, not softmax)."),
         new("BinaryTextClassifier",
             [Scalar(DataKind.String)],
             Named("BinaryScore"),

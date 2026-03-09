@@ -892,17 +892,31 @@ internal sealed class RoutineRegistrar
                 + "See `SELECT name FROM datum_catalog.tasks` for the registered vocabulary.");
         }
 
-        // Parameter arity.
-        if (create.Parameters.Count != contract.InputKinds.Count)
+        // Parameter arity check: the model's required (non-default) parameters
+        // must match the contract's input list exactly. Models may declare
+        // *additional* optional parameters (defaults at the tail) beyond the
+        // contract — those are extra runtime knobs the model exposes, like
+        // YOLOX's confidence/IoU thresholds. The contract still defines the
+        // minimum invocation shape; optional params are additive.
+        int requiredCount = 0;
+        foreach (UdfParameter p in create.Parameters)
+        {
+            if (p.Default is null) requiredCount++;
+            else break; // Defaults are contiguous at the tail (enforced elsewhere).
+        }
+        if (requiredCount != contract.InputKinds.Count)
         {
             throw new QueryPlanException(
                 $"CREATE MODEL {create.Name}: IMPLEMENTS {contract.Name} requires "
-                + $"{contract.InputKinds.Count} parameter(s) but the model declares {create.Parameters.Count}. "
+                + $"{contract.InputKinds.Count} required parameter(s) but the model declares {requiredCount}. "
                 + $"Expected signature: ({string.Join(", ", contract.InputKinds)}) → {contract.ReturnKind}.");
         }
 
-        // Per-parameter type match. Names are documentation; only kinds matter.
-        for (int i = 0; i < create.Parameters.Count; i++)
+        // Per-parameter type match against the contract — applies only to
+        // the required (leading) parameters. Names are documentation; only
+        // kinds matter. Optional trailing parameters are model-specific
+        // knobs and aren't validated against the contract.
+        for (int i = 0; i < contract.InputKinds.Count; i++)
         {
             UdfParameter param = create.Parameters[i];
             if (param.TypeName is null

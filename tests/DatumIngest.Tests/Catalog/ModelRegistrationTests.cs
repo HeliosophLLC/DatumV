@@ -377,6 +377,45 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     }
 
     [Fact]
+    public void CreateModel_Implements_RequiredParamsMatch_OptionalParamsAdditive_Registers()
+    {
+        // TextGenerator requires 1 param (String). Model declares 1 required
+        // + 1 optional (Float32 with default) — the contract still matches
+        // on the required slot; optional params are additive runtime knobs
+        // (e.g. temperature, top_p) that aren't part of the contract.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL gen_with_knob(prompt String, temperature Float32 = CAST(0.7 AS Float32)) RETURNS String "
+            + $"IMPLEMENTS TextGenerator "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN prompt END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "gen_with_knob"), out ModelDescriptor? descriptor));
+        Assert.Equal("TextGenerator", descriptor!.ImplementsTaskName);
+        Assert.Equal(2, descriptor.Parameters.Count);
+        Assert.Null(descriptor.Parameters[0].Default);
+        Assert.NotNull(descriptor.Parameters[1].Default);
+    }
+
+    [Fact]
+    public void CreateModel_Implements_OptionalParamInsteadOfRequired_Throws()
+    {
+        // TextGenerator requires 1 required param. If the model marks its
+        // single param as optional (with a default), the contract is
+        // violated — required-param-count (0) ≠ contract-input-count (1).
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+            () => catalog.Plan(
+                $"CREATE MODEL bad_optional(prompt String = 'default') RETURNS String "
+                + $"IMPLEMENTS TextGenerator "
+                + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN prompt END"));
+        Assert.Contains("TextGenerator", ex.Message);
+        Assert.Contains("required", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void CreateModel_Implements_MismatchedParamKind_Throws()
     {
         // TextGenerator requires String; this declares Int32 input.

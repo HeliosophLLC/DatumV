@@ -313,6 +313,84 @@ public sealed class TokenizerEncodeBertFunction : IFunction, IScalarFunction
 }
 
 /// <summary>
+/// <c>tokenizer.encode_roberta(text, tokenizer_json_path) → Struct{input_ids: Int64[],
+/// attention_mask: Int64[]}</c>. Tokenizes the input text with a RoBERTa-family
+/// BPE tokenizer (loaded from a HuggingFace <c>tokenizer.json</c>) and packages
+/// the two-tensor bundle that RoBERTa-family ONNX encoders expect.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Why a separate function from <c>encode_bert</c>.</strong> RoBERTa
+/// uses byte-level BPE (not WordPiece), has different special tokens
+/// (<c>&lt;s&gt;=0</c> / <c>&lt;/s&gt;=2</c> instead of [CLS]/[SEP]), and the
+/// ONNX export takes only two inputs — <c>input_ids</c> + <c>attention_mask</c>
+/// — without the third <c>token_type_ids</c> tensor BERT requires. Bundling
+/// those differences behind <c>encode_roberta</c> keeps the SQL bodies for
+/// RoBERTa-based classifiers (sentiment, NER, etc.) one-liner-clean.
+/// </para>
+/// <para>
+/// <strong>Special tokens.</strong> Hard-codes the canonical RoBERTa special
+/// token ids (<c>&lt;s&gt;=0</c> prepended, <c>&lt;/s&gt;=2</c> appended).
+/// Every standard RoBERTa fine-tune uses these. Models that redefine the
+/// special-token ids in their <c>tokenizer.json</c> would need a per-call
+/// parameter; defer until a real consumer needs that flexibility.
+/// </para>
+/// </remarks>
+public sealed class TokenizerEncodeRobertaFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "encode_roberta";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Encoding;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Encodes text with a RoBERTa-family BPE tokenizer (tokenizer.json path) and returns "
+        + "a struct containing input_ids and attention_mask — the two-tensor bundle RoBERTa "
+        + "ONNX encoders expect (no token_type_ids). Special tokens <s> (id 0) and </s> "
+        + "(id 2) are prepended/appended. Designed to feed multi-input infer() in a "
+        + "CREATE MODEL body directly.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("text",                DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("tokenizer_json_path", DataKindMatcher.Exact(DataKind.String)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<TokenizerEncodeRobertaFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args[0].IsNull || args[1].IsNull)
+        {
+            return new ValueTask<ValueRef>(ValueRef.NullStruct(0));
+        }
+
+        string text             = args[0].AsString();
+        string tokenizerJsonPath = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
+            args[1].AsString(), "tokenizer.encode_roberta", frame);
+
+        BpeTokenizer tokenizer = TokenizerCache.GetFromTokenizerJson(tokenizerJsonPath);
+        return new ValueTask<ValueRef>(TokenizerOps.EncodeRobertaToValueRef(tokenizer, text, frame.Types));
+    }
+}
+
+/// <summary>
 /// Path resolution for the scalar tokenizer functions. Scalar evaluation
 /// frames don't carry a <c>ModelCatalog</c> reference today, so we can only
 /// honour the two non-catalog forms: <c>file://</c> URI and OS-absolute path.
@@ -468,6 +546,61 @@ internal static class TokenizerOps
                 new("input_ids",      int64ArrayTypeId),
                 new("attention_mask", int64ArrayTypeId),
                 new("token_type_ids", int64ArrayTypeId),
+            ];
+            typeId = (ushort)types.InternStructType(descriptors);
+        }
+
+        return ValueRef.FromStruct(fields, typeId);
+    }
+
+    /// <summary>
+    /// Runs the BPE tokenizer on <paramref name="text"/>, prepends/appends the
+    /// canonical RoBERTa special-token ids (<c>&lt;s&gt;=0</c> / <c>&lt;/s&gt;=2</c>),
+    /// and packages a 2-field struct ValueRef carrying input_ids and
+    /// attention_mask — the bundle every RoBERTa-family ONNX encoder expects
+    /// (no token_type_ids). The struct's TypeId is interned into
+    /// <paramref name="types"/> when supplied so downstream multi-input
+    /// <c>infer({encoded}, {...})</c> resolves field names back to session
+    /// input names.
+    /// </summary>
+    internal static ValueRef EncodeRobertaToValueRef(
+        BpeTokenizer tokenizer, string text, TypeRegistry? types)
+    {
+        // BpeTokenizer.EncodeToIds doesn't add special tokens automatically.
+        // Wrap the raw segmentation with the canonical RoBERTa BOS/EOS pair:
+        // every standard RoBERTa fine-tune (and Xenova's exports) uses
+        // <s>=0 at the start, </s>=2 at the end. Attention mask is all-1s
+        // for the wrapped sequence; no padding for batch=1.
+        IReadOnlyList<int> ids = tokenizer.EncodeToIds(text);
+        int n = ids.Count + 2; // +2 for <s> and </s>
+
+        long[] inputIds = new long[n];
+        long[] attentionMask = new long[n];
+        inputIds[0] = 0L; // <s>
+        for (int i = 0; i < ids.Count; i++)
+        {
+            inputIds[i + 1] = ids[i];
+        }
+        inputIds[n - 1] = 2L; // </s>
+        for (int i = 0; i < n; i++)
+        {
+            attentionMask[i] = 1L;
+        }
+
+        ValueRef[] fields =
+        [
+            ValueRef.FromPrimitiveArray(inputIds,      DataKind.Int64),
+            ValueRef.FromPrimitiveArray(attentionMask, DataKind.Int64),
+        ];
+
+        ushort typeId = 0;
+        if (types is not null)
+        {
+            int int64ArrayTypeId = types.InternArrayType(DataKind.Int64);
+            StructFieldDescriptor[] descriptors =
+            [
+                new("input_ids",      int64ArrayTypeId),
+                new("attention_mask", int64ArrayTypeId),
             ];
             typeId = (ushort)types.InternStructType(descriptors);
         }

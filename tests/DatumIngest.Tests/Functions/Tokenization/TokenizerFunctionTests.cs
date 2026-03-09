@@ -232,6 +232,50 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
+    public async Task EncodeRoberta_TokenizerJson_WrapsWithSpecialTokens()
+    {
+        // Encode "abc" — 3 alphabet tokens — and verify the RoBERTa wrapping:
+        //   input_ids = [<s>=0, ...3 char tokens..., </s>=2]   length 5
+        //   attention_mask = [1, 1, 1, 1, 1]                    length 5
+        // Field names match RoBERTa ONNX inputs (input_ids + attention_mask
+        // only — no token_type_ids unlike BERT).
+        TableCatalog catalog = CreateCatalog();
+        IQueryPlan idsPlan = catalog.Plan(
+            $"SELECT tokenizer.encode_roberta('abc', 'file://{_tokenizerJsonPath}')['input_ids']");
+        long[] inputIds = await CollectFirstArrayAsync(idsPlan);
+
+        Assert.Equal(5, inputIds.Length);
+        Assert.Equal(0L, inputIds[0]);     // <s>
+        Assert.Equal(2L, inputIds[^1]);    // </s>
+        // Middle 3 ids are the BPE tokens for 'a', 'b', 'c'. The fixture
+        // assigns ids 1..26 to 'a'..'z'.
+        Assert.Equal(1L, inputIds[1]); // 'a'
+        Assert.Equal(2L, inputIds[2]); // 'b'
+        Assert.Equal(3L, inputIds[3]); // 'c'
+
+        IQueryPlan maskPlan = catalog.Plan(
+            $"SELECT tokenizer.encode_roberta('abc', 'file://{_tokenizerJsonPath}')['attention_mask']");
+        long[] mask = await CollectFirstArrayAsync(maskPlan);
+
+        Assert.Equal(5, mask.Length);
+        foreach (long m in mask) Assert.Equal(1L, m);
+    }
+
+    [Fact]
+    public async Task EncodeRoberta_EmptyText_StillEmitsBosEosOnly()
+    {
+        TableCatalog catalog = CreateCatalog();
+        IQueryPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_roberta('', 'file://{_tokenizerJsonPath}')['input_ids']");
+        long[] inputIds = await CollectFirstArrayAsync(plan);
+
+        // Empty input → just <s> + </s>.
+        Assert.Equal(2, inputIds.Length);
+        Assert.Equal(0L, inputIds[0]);
+        Assert.Equal(2L, inputIds[1]);
+    }
+
+    [Fact]
     public async Task Encode_UnsupportedModelType_ThrowsClearError()
     {
         string unigramPath = Path.Combine(_tmpDir, "unigram.json");

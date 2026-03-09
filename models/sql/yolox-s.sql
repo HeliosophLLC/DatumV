@@ -26,12 +26,20 @@
 --                               label + score in original-image pixel
 --                               coordinates).
 --
--- Hyperparameter defaults:
---   conf_thresh = 0.25
---   iou_thresh  = 0.45
+-- Hyperparameter defaults exposed as optional call-site arguments:
+--   conf_thresh Float32 = 0.25    Confidence threshold (objectness × max-class).
+--                                  Per-detection filter applied pre-NMS.
+--   iou_thresh  Float32 = 0.45    NMS IoU overlap threshold.
+-- Override per call:
+--   SELECT models.yolox_s(img, 0.5) FROM photos          -- stricter conf
+--   SELECT models.yolox_s(img, 0.5, 0.6) FROM photos     -- both
 -- ============================================================================
 
-CREATE OR REPLACE MODEL yolox_s(img Image) RETURNS Array<LabeledDetection>
+CREATE OR REPLACE MODEL yolox_s(
+  img Image,
+  conf_thresh Float32 = CAST(0.25 AS Float32),
+  iou_thresh  Float32 = CAST(0.45 AS Float32)
+) RETURNS Array<LabeledDetection>
 IMPLEMENTS LabeledObjectDetector
 USING 'yolox-s/yolox_s.onnx'
 AS BEGIN
@@ -40,8 +48,5 @@ AS BEGIN
   -- (no dynamic batch); the 2-arg infer() form keeps the shape unambiguous.
   DECLARE raw    Float32[] = infer(tensor, [CAST(1 AS Int32), CAST(3 AS Int32), CAST(640 AS Int32), CAST(640 AS Int32)]);
   DECLARE labels Array<String> = read_string_list('coco-classes.json');
-  RETURN yolox_postprocess(
-    raw, labels, img, 640,
-    CAST(0.25 AS Float32),
-    CAST(0.45 AS Float32))
+  RETURN yolox_postprocess(raw, labels, img, 640, conf_thresh, iou_thresh)
 END
