@@ -70,6 +70,31 @@ public sealed record CellChunkBatchEvent(string CellId, string ModelName, string
 public sealed record CellPrintBatchEvent(string CellId, string? Text) : BatchEvent;
 
 /// <summary>
+/// One in-RAM residency sample from the plan-wide <see cref="MemoryAccountant"/>.
+/// Emitted on a 1Hz cadence by the streaming layer while a cell runs so the
+/// UI can render a live memory-pressure indicator alongside the row stream.
+/// Read-only telemetry — consumers must not mutate query state in response.
+/// </summary>
+/// <param name="CellId">Cell this sample belongs to.</param>
+/// <param name="ElapsedMs">Milliseconds since the accountant started.</param>
+/// <param name="RowBytes">GC-resident residency (operator hash tables,
+/// sort buffers, <c>VariableScope</c> payloads, DML buffers). The number
+/// the spill budget compares against.</param>
+/// <param name="ArenaBytes">Bytes written into the per-query / per-batch
+/// arena. Anonymous and file-backed arenas alike are mmap-backed and
+/// OS-paged, so this is informational only and does NOT count against the
+/// spill budget.</param>
+/// <param name="PeakRowBytes">Highest <see cref="RowBytes"/> seen so far.</param>
+/// <param name="BudgetBytes">Spill budget if configured, otherwise <c>null</c>.</param>
+public sealed record CellMemorySampleBatchEvent(
+    string CellId,
+    double ElapsedMs,
+    long RowBytes,
+    long ArenaBytes,
+    long PeakRowBytes,
+    long? BudgetBytes) : BatchEvent;
+
+/// <summary>
 /// Executes a parsed procedural batch — a list of <see cref="Statement"/>s
 /// — against a <see cref="TableCatalog"/>, threading a single
 /// <see cref="BatchContext"/> through every child statement so procedural
@@ -141,6 +166,58 @@ public sealed class BatchExecutor
     public BatchExecutor(TableCatalog catalog)
     {
         _catalog = catalog;
+    }
+
+    /// <summary>
+    /// Minimum interval between <see cref="CellMemorySampleBatchEvent"/>
+    /// emissions during a cell's row-streaming loop. 1Hz matches the
+    /// <see cref="MemoryAccountant"/>'s own sampling cadence; emitting more
+    /// often would just bus duplicate samples to the UI. Emissions at cell
+    /// start and end are unconditional and bypass this throttle.
+    /// </summary>
+    private static readonly TimeSpan MemorySampleInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Default in-RAM residency budget applied when
+    /// <see cref="RunWithEventsAsync(IReadOnlyList{ValueTuple{Statement, string?}}, Func{BatchEvent, ValueTask}, CancellationToken, long?)"/>
+    /// isn't given an explicit budget. 2 GiB. Sized for desktop / server
+    /// hosts: large enough that small interactive queries never hit it,
+    /// small enough that a single runaway statement can't OOM the host.
+    /// Streaming consumers (the Web app's query pane) rely on a non-null
+    /// budget for the pressure-indicator percentage and threshold line
+    /// to render meaningfully — without one the live indicator has no
+    /// denominator.
+    /// </summary>
+    public const long DefaultMemoryBudgetBytes = 2L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Emits one <see cref="CellMemorySampleBatchEvent"/> by reading the
+    /// accountant's current residency, peak, and budget. The
+    /// <paramref name="stopwatch"/> measures elapsed-since-cell-start so
+    /// the UI can align samples on its own timeline without needing the
+    /// accountant's internal stopwatch. Arena bytes sum the batch's
+    /// VariableStore (procedural-batch lifetime) and the in-flight query's
+    /// per-batch arena (when one is supplied) — both are mmap-backed and
+    /// OS-paged, but together give the UI a useful snapshot of arena
+    /// growth across the whole batch.
+    /// </summary>
+    private static ValueTask EmitMemorySampleAsync(
+        BatchContext batchContext,
+        string cellId,
+        Stopwatch stopwatch,
+        Func<BatchEvent, ValueTask> onEvent,
+        Arena? currentBatchArena = null)
+    {
+        MemoryAccountant accountant = batchContext.Accountant;
+        long arenaBytes = batchContext.VariableStore.BytesWritten
+            + (currentBatchArena?.BytesWritten ?? 0);
+        return onEvent(new CellMemorySampleBatchEvent(
+            cellId,
+            stopwatch.Elapsed.TotalMilliseconds,
+            accountant.CurrentResidentBytes,
+            arenaBytes,
+            accountant.PeakResidentBytes,
+            accountant.MemoryBudgetBytes));
     }
 
     /// <summary>
@@ -219,7 +296,7 @@ public sealed class BatchExecutor
         IReadOnlyList<Statement> statements,
         Func<BatchEvent, ValueTask> onEvent,
         CancellationToken cancellationToken)
-        => RunWithEventsAsync(WithoutSourceText(statements), onEvent, cancellationToken);
+        => RunWithEventsAsync(WithoutSourceText(statements), onEvent, cancellationToken, memoryBudgetBytes: DefaultMemoryBudgetBytes);
 
     /// <summary>
     /// Variant of <see cref="RunWithEventsAsync(IReadOnlyList{Statement}, Func{BatchEvent, ValueTask}, CancellationToken)"/>
@@ -231,13 +308,122 @@ public sealed class BatchExecutor
     public async Task RunWithEventsAsync(
         IReadOnlyList<(Statement Statement, string? SourceText)> statements,
         Func<BatchEvent, ValueTask> onEvent,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long? memoryBudgetBytes = null)
     {
-        using BatchContext batchContext = new();
+        // Defaulting null → DefaultMemoryBudgetBytes (2 GiB) means the
+        // streaming UI's pressure indicator always has a denominator and
+        // a single runaway statement can't OOM the host. Callers that
+        // truly need unbounded behaviour pass long.MaxValue explicitly.
+        using BatchContext batchContext = new(memoryBudgetBytes ?? DefaultMemoryBudgetBytes);
         // 1Hz residency sampling for the whole batch. See ExecuteAsync for the rationale.
         batchContext.Accountant.StartProfiling();
-        await RunInternalAsync(statements, batchContext, onEvent, cancellationToken)
-            .ConfigureAwait(false);
+
+        // Sidecar 1Hz memory-sample emitter. The row-streaming path emits
+        // throttled samples between batch yields, but a long-running operator
+        // that doesn't yield rows (large GROUP BY accumulation, ORDER BY
+        // buffer, hash-join build) would otherwise leave the UI's live
+        // indicator frozen for the whole accumulation phase. This sidecar
+        // ticks regardless of row cadence; both producers serialize through
+        // `emitLock` so the wire stays in event order.
+        string? currentCellId = null;
+        Stopwatch? currentCellStopwatch = null;
+        // Tracks the most-recent row batch's arena so sidecar samples report
+        // per-query arena bytes (not just VariableStore, which stays empty
+        // for non-procedural queries). Updated on each CellRowBatchEvent;
+        // cleared on cell completion.
+        Arena? currentRowBatchArena = null;
+        SemaphoreSlim emitLock = new(1, 1);
+
+        async ValueTask SerializedOnEvent(BatchEvent ev)
+        {
+            // Track which cell the sidecar should stamp on its samples.
+            // Updated under the lock so the sidecar can never observe a
+            // half-updated (id, stopwatch) pair.
+            await emitLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                switch (ev)
+                {
+                    case CellStartedBatchEvent started:
+                        currentCellId = started.CellId;
+                        currentCellStopwatch = Stopwatch.StartNew();
+                        currentRowBatchArena = null;
+                        break;
+                    case CellRowBatchEvent rowEvent:
+                        currentRowBatchArena = rowEvent.Batch.Arena;
+                        break;
+                    case CellCompletedBatchEvent:
+                    case CellFailedBatchEvent:
+                        currentCellId = null;
+                        currentCellStopwatch = null;
+                        currentRowBatchArena = null;
+                        break;
+                }
+                await onEvent(ev).ConfigureAwait(false);
+            }
+            finally
+            {
+                emitLock.Release();
+            }
+        }
+
+        using CancellationTokenSource sidecarCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task sidecarTask = Task.Run(async () =>
+        {
+            using PeriodicTimer timer = new(MemorySampleInterval);
+            try
+            {
+                while (await timer.WaitForNextTickAsync(sidecarCts.Token).ConfigureAwait(false))
+                {
+                    await emitLock.WaitAsync(sidecarCts.Token).ConfigureAwait(false);
+                    try
+                    {
+                        if (currentCellId is string cellId && currentCellStopwatch is Stopwatch sw)
+                        {
+                            MemoryAccountant accountant = batchContext.Accountant;
+                            // Sum VariableStore (procedural-batch lifetime)
+                            // and the running query's most-recent batch arena.
+                            // The latter is null during operator accumulation
+                            // phases that haven't yielded a batch yet — those
+                            // phases still allocate into operator-local arenas
+                            // we can't observe from here, so the chart will
+                            // under-report arena bytes during such phases.
+                            long arenaBytes = batchContext.VariableStore.BytesWritten
+                                + (currentRowBatchArena?.BytesWritten ?? 0);
+                            await onEvent(new CellMemorySampleBatchEvent(
+                                cellId,
+                                sw.Elapsed.TotalMilliseconds,
+                                accountant.CurrentResidentBytes,
+                                arenaBytes,
+                                accountant.PeakResidentBytes,
+                                accountant.MemoryBudgetBytes)).ConfigureAwait(false);
+                        }
+                    }
+                    finally
+                    {
+                        emitLock.Release();
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected on completion / cancellation.
+            }
+        }, sidecarCts.Token);
+
+        try
+        {
+            await RunInternalAsync(statements, batchContext, SerializedOnEvent, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            sidecarCts.Cancel();
+            try { await sidecarTask.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            emitLock.Dispose();
+        }
     }
 
     private static readonly Func<BatchEvent, ValueTask> NoOpEventHandler =
@@ -297,6 +483,10 @@ public sealed class BatchExecutor
         string cellId = nextCellId();
         Stopwatch sw = Stopwatch.StartNew();
         await onEvent(new CellStartedBatchEvent(cellId, KindOf(stmt))).ConfigureAwait(false);
+        // Cell-entry memory sample (immediate, bypasses the sidecar's 1s
+        // wait) — gives the UI a baseline so the sparkline doesn't start
+        // blank during the first second of a cell.
+        await EmitMemorySampleAsync(batchContext, cellId, sw, onEvent).ConfigureAwait(false);
 
         try
         {
@@ -485,12 +675,19 @@ public sealed class BatchExecutor
                                 .ConfigureAwait(false))
                             {
                                 await onEvent(new CellRowBatchEvent(cellId, batch)).ConfigureAwait(false);
+                                // Memory samples flow from the sidecar timer in
+                                // RunWithEventsAsync at 1Hz regardless of batch
+                                // cadence; no per-batch sample needed here.
                             }
                         }
                         break;
                     }
             }
 
+            // Cell-end memory sample (always emitted, bypasses throttle) — gives
+            // the UI a frozen final value so post-mortem inspection shows the
+            // last-known state.
+            await EmitMemorySampleAsync(batchContext, cellId, sw, onEvent).ConfigureAwait(false);
             await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
                 .ConfigureAwait(false);
         }

@@ -4,6 +4,7 @@ import { useSnapshot } from 'valtio';
 import { AlertCircle, Ban, Check, Film, Loader2, Music } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { MediaPreview } from './MediaPreview';
+import { MemoryChip } from './MemoryChip';
 import {
   executionsState,
   type CellResult,
@@ -87,10 +88,15 @@ export function ResultsPane({ leafId }: { leafId: string }) {
           `bg-table-pane` is the surface visible around / behind the
           grids — slightly darker than the rows in dark mode, the
           regular page bg in light mode. */}
-      <div className="bg-table-pane flex-1 overflow-auto">
+      {/* Flex column so the banner / trace claim their own height via
+          `shrink-0` and the fill-mode section can `flex-1 min-h-0` to
+          take the remainder. A plain block container made the section's
+          `h-full` overflow by the banner's height, producing a second
+          scrollbar alongside the inner table. */}
+      <div className="bg-table-pane flex min-h-0 flex-1 flex-col overflow-auto">
         {exec.error !== null && (
-          <div className="text-destructive border-destructive/40 bg-destructive/10 border-b px-3 py-2 font-mono text-xs whitespace-pre-wrap">
-            {exec.error}
+          <div className="text-destructive border-destructive/40 bg-destructive/10 shrink-0 border-b px-3 py-2 font-mono text-xs whitespace-pre-wrap">
+            {exec.status === 'cancelled' ? t('resultsCancelledBanner') : exec.error}
           </div>
         )}
         {visibleCells.map((cell) => (
@@ -103,7 +109,7 @@ export function ResultsPane({ leafId }: { leafId: string }) {
           />
         ))}
         {exec.trace !== null && (
-          <pre className="text-muted-foreground border-t p-2 font-mono text-xs whitespace-pre-wrap">
+          <pre className="text-muted-foreground shrink-0 border-t p-2 font-mono text-xs whitespace-pre-wrap">
             {exec.trace}
           </pre>
         )}
@@ -135,36 +141,41 @@ function StatusBar({ exec }: { exec: TabExecution | null }) {
   // render once a second so the "Executing…" duration ticks. After
   // termination we lock to exec.elapsedMs (the server's measurement,
   // not our client clock). Pre-run state shows 0ms.
+  const status = exec?.status ?? 'idle';
+  const startedAt = exec?.startedAt ?? null;
+  const elapsedMsLocked = exec?.elapsedMs ?? 0;
   const [tickMs, setTickMs] = useState<number>(() =>
-    exec && exec.status === 'streaming' && exec.startedAt !== null
-      ? Date.now() - exec.startedAt
-      : exec?.elapsedMs ?? 0,
+    status === 'streaming' && startedAt !== null
+      ? Date.now() - startedAt
+      : elapsedMsLocked,
   );
+  // Depend on the primitive `status` and `startedAt` only — NOT on the
+  // whole `exec` snapshot. Valtio returns a fresh snapshot reference on
+  // every memory_sample event (the profile's samples array mutates at
+  // 1Hz). If `exec` is in the deps, the effect re-runs on each sample,
+  // clears the just-scheduled setInterval, and the duration timer never
+  // ticks. Status + startedAt are the actual signals that warrant
+  // reconciling the timer.
   useEffect(() => {
-    if (!exec || exec.status !== 'streaming' || exec.startedAt === null) return;
-    const start = exec.startedAt;
+    if (status !== 'streaming' || startedAt === null) return;
     const id = window.setInterval(() => {
-      setTickMs(Date.now() - start);
+      setTickMs(Date.now() - startedAt);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [exec?.status, exec?.startedAt, exec]);
+  }, [status, startedAt]);
 
   // Idle path: no execution has started yet (or the slot was cleared
   // when the tab closed and reopened). Show a "Ready" message + 0ms
   // duration + 0 rows so the bar's three-panel layout stays stable
-  // from first paint through every subsequent run.
-  const status = exec?.status ?? 'idle';
+  // from first paint through every subsequent run. `status` and
+  // `startedAt` were already declared above for the ticker effect.
   const hasError =
     exec !== null &&
     (exec.error !== null || exec.cells.some((c) => c.error !== null));
   const totalRows = exec
     ? exec.cells.reduce((sum, c) => sum + c.rowCount, 0)
     : 0;
-  const elapsedMs = !exec
-    ? 0
-    : exec.status === 'streaming'
-      ? tickMs
-      : exec.elapsedMs ?? tickMs;
+  const elapsedMs = status === 'streaming' ? tickMs : elapsedMsLocked;
 
   let leftMessage: string;
   if (status === 'idle') leftMessage = t('statusBarReady');
@@ -173,19 +184,23 @@ function StatusBar({ exec }: { exec: TabExecution | null }) {
   else if (hasError) leftMessage = t('statusBarError');
   else leftMessage = t('statusBarSuccess');
 
-  // Three panels separated by a faint divider in the foreground colour:
-  // status message (grows), duration (fixed), row count (fixed). Each
-  // owns its padding so the dividers sit cleanly between sections. All
-  // panels truncate on overflow rather than wrap — `min-w-0` on the
+  // Panels separated by a faint divider in the foreground colour:
+  // status message (grows), optional memory chip, duration, row count.
+  // Each owns its padding so the dividers sit cleanly between sections.
+  // All panels truncate on overflow rather than wrap — `min-w-0` on the
   // grow-panel is required to let its content shrink below its natural
   // width (flex items default to min-width: auto, which prevents
   // ellipsis on long status messages).
+  const memoryProfile = exec?.memoryProfile ?? null;
   return (
     <div className="bg-status-bar text-status-bar-foreground border-border flex shrink-0 items-stretch overflow-hidden border-t text-xs">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3 py-1">
         <StatusIcon status={status} hasError={hasError} />
         <span className="truncate">{leftMessage}</span>
       </div>
+      {memoryProfile && memoryProfile.latest && (
+        <MemoryChip profile={memoryProfile} status={status} />
+      )}
       <div className="border-status-bar-foreground/25 flex shrink-0 items-center whitespace-nowrap border-l px-3 py-1 font-mono">
         {formatDuration(elapsedMs)}
       </div>
@@ -266,7 +281,7 @@ function CellBlock({
   // 200 px slab they wouldn't use.
   const heightClass = hasTable
     ? tableMode === 'fill'
-      ? 'h-full'
+      ? 'min-h-0 flex-1'
       : 'min-h-[200px] max-h-[50%]'
     : '';
   return (

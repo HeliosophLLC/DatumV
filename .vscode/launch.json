@@ -18,6 +18,19 @@
 			"preLaunchTask": "Dev: Electron + Backend"
 		},
 		{
+			// Same as "App: Dev (F5)" but spawns the .NET backend with
+			// -c Release via DOTNET_CONFIGURATION=Release set in the
+			// preLaunchTask. Use when measuring allocation / memory
+			// behaviour — POOL_DIAGNOSTICS is Debug-only, and the per-
+			// pool-return stack-trace capture it enables can dominate
+			// realistic allocation profiles otherwise.
+			"name": "App: Release",
+			"type": "node-terminal",
+			"request": "launch",
+			"command": "exit 0",
+			"preLaunchTask": "Release: Electron + Backend"
+		},
+		{
 			"name": "IndexOnce: Debug",
 			"type": "coreclr",
 			"request": "launch",
@@ -90,72 +103,6 @@
 			"stopAtEntry": false,
 			"preLaunchTask": "Release: Build ExecuteOnce"
 		},
-		{
-			"name": "Shell: Debug",
-			"type": "coreclr",
-			"request": "launch",
-			"program": "${workspaceFolder}/src/DatumIngest.Shell/bin/Debug/net10.0/datum-shell.dll",
-			"args": [
-				"${input:shellDatumPath}"
-			],
-			"cwd": "${workspaceFolder}",
-			"console": "integratedTerminal",
-			"justMyCode": false,
-			"stopAtEntry": false,
-			"preLaunchTask": "Debug: Build Shell"
-		},
-		{
-			"name": "Shell: Release",
-			"type": "coreclr",
-			"request": "launch",
-			"program": "${workspaceFolder}/src/DatumIngest.Shell/bin/Release/net10.0/datum-shell.dll",
-			"args": [
-				"${input:shellDatumPath}"
-			],
-			"cwd": "${workspaceFolder}",
-			"console": "integratedTerminal",
-			"justMyCode": false,
-			"stopAtEntry": false,
-			"preLaunchTask": "Release: Build Shell"
-		},
-		{
-			"name": "DevWeb: Debug",
-			"type": "coreclr",
-			"request": "launch",
-			"program": "${workspaceFolder}/src/DatumIngest.DevWeb/bin/Debug/net10.0/datum-devweb.dll",
-			"args": [
-				"--port", "${input:devWebPort}",
-				"${input:devWebDataPath}"
-			],
-			"cwd": "${workspaceFolder}",
-			"console": "integratedTerminal",
-			"justMyCode": false,
-			"stopAtEntry": false,
-			"serverReadyAction": {
-				"action": "openExternally",
-				"pattern": "DatumIngest DevWeb listening on (https?://\\S+)"
-			},
-			"preLaunchTask": "Debug: Build DevWeb"
-		},
-		{
-			"name": "DevWeb: Release",
-			"type": "coreclr",
-			"request": "launch",
-			"program": "${workspaceFolder}/src/DatumIngest.DevWeb/bin/Release/net10.0/datum-devweb.dll",
-			"args": [
-				"--port", "${input:devWebPort}",
-				"${input:devWebDataPath}"
-			],
-			"cwd": "${workspaceFolder}",
-			"console": "integratedTerminal",
-			"justMyCode": false,
-			"stopAtEntry": false,
-			"serverReadyAction": {
-				"action": "openExternally",
-				"pattern": "DatumIngest DevWeb listening on (https?://\\S+)"
-			},
-			"preLaunchTask": "Release: Build DevWeb"
-		},
 	],
 	"inputs": [
 		{
@@ -194,23 +141,5 @@
 			"description": "SQL to explain (quote spaces)",
 			"default": "SELECT * LIMIT 10"
 		},
-		{
-			"id": "shellDatumPath",
-			"type": "promptString",
-			"description": "Path to a .datum file or directory of .datum files",
-			"default": "E:\\Datasets\\Chicago Crimes Dataset\\Crimes_-_2001_to_Present_20260331.datum"
-		},
-		{
-			"id": "devWebDataPath",
-			"type": "promptString",
-			"description": "Path to a .datum file or directory of .datum files",
-			"default": "E:\\Datasets\\Chicago Crimes Dataset\\Crimes_-_2001_to_Present_20260331.datum"
-		},
-		{
-			"id": "devWebPort",
-			"type": "promptString",
-			"description": "HTTP port for the DevWeb server",
-			"default": "5005"
-		}
 	]
 }

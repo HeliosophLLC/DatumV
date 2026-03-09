@@ -95,8 +95,12 @@ internal sealed class CatalogBackedModelInstaller : IModelInstaller
     }
 
     // catalog id is kebab-case (paddleocr-v4-det); SQL identifiers are
-    // snake_case (paddleocr_v4_det). The convention is hard — if a SQL
-    // author registers a different name, the probe will see Downloaded
-    // forever after a successful install (clearly broken; fix the SQL).
-    private static string ToConventionalModelName(string id) => id.Replace('-', '_');
+    // snake_case (paddleocr_v4_det). Dashes and dots both become
+    // underscores: `bge-small-en-v1.5` → `bge_small_en_v1_5`, since dots
+    // would otherwise be parsed as a schema-qualified name. The
+    // convention is hard — if a SQL author registers a different name,
+    // the probe will see Downloaded forever after a successful install
+    // (clearly broken; fix the SQL).
+    private static string ToConventionalModelName(string id) =>
+        id.Replace('-', '_').Replace('.', '_');
 }

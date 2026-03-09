@@ -73,6 +73,15 @@ public sealed class PoolBacking
     private readonly ConcurrentDictionary<int, CountedPool<IAggregateAccumulator[]>> accumulatorArrayPools = new();
     private readonly CountedPool<Arena> arenaPools = new();
 
+    // Set of arenas currently rented out (refcount > 0). Used by the
+    // streaming memory profile to report a query's total in-flight arena
+    // bytes — including operator-local arenas (OrderBy bufferArena, spill
+    // consolidated arenas) that aren't otherwise visible to the
+    // BatchExecutor sidecar. ConcurrentDictionary acts as a thread-safe
+    // set; the byte value is a placeholder. Add on rent paths, remove
+    // when the arena's refcount drops to zero (TryReturn).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Arena, byte> _liveArenas = new();
+
     // Per-instance leak counters — Interlocked-incremented at every public Rent/Return call site.
     // Always-on (Interlocked is cheap; not gated on DATUM_DIAGNOSTICS so leak tests work in any
     // configuration). Per-instance avoids the cross-test race that the global DatumDiagnostics
@@ -278,6 +287,7 @@ public sealed class PoolBacking
         }
 
         arena.AddReference();
+        _liveArenas.TryAdd(arena, 0);
         DatumDiagnostics.RecordPoolArenaRent(fromPool);
 
         return arena;
@@ -301,6 +311,7 @@ public sealed class PoolBacking
 
         Arena arena = Arena.CreateFileBacked(filePath, initialCapacity);
         arena.AddReference();
+        _liveArenas.TryAdd(arena, 0);
         DatumDiagnostics.RecordPoolArenaRent(fromPool: false);
 
         return arena;
@@ -447,7 +458,14 @@ public sealed class PoolBacking
             DatumDiagnostics.RecordPoolArenaReturn(pooled: false, disposedOverCap: false);
             return false;
         }
-        else if (arena.IsFileBacked)
+
+        // Refcount hit zero. Either disposed or pooled — in all three branches
+        // below, the arena is no longer "live" from the profile's perspective
+        // (disposed = gone; pooled = position reset to 0). Remove from the
+        // live set unconditionally here so we don't repeat it in each branch.
+        _liveArenas.TryRemove(arena, out _);
+
+        if (arena.IsFileBacked)
         {
             // File-backed arenas don't go into the anonymous pool — they have file identity
             // tied to a specific spill operation. Terminal release deletes the file via
@@ -474,6 +492,31 @@ public sealed class PoolBacking
         DatumDiagnostics.RecordPoolArenaReturn(pooled: true, disposedOverCap: false);
 
         return true;
+    }
+
+    /// <summary>
+    /// Sums <see cref="Arena.BytesWritten"/> across every arena currently
+    /// rented from this pool (refcount &gt; 0). Used by the streaming memory
+    /// profile's Arena sparkline to report the total in-flight arena bytes
+    /// for a running query — including operator-local arenas that the
+    /// BatchExecutor sidecar can't otherwise observe (OrderBy's bufferArena
+    /// during accumulation, hash-join build arenas, SpillReaderWriter
+    /// consolidated arenas).
+    /// </summary>
+    /// <remarks>
+    /// Iteration over the concurrent dictionary is approximate under
+    /// concurrent rent/return — that's fine for sampling at 1 Hz. The
+    /// alternative (per-write counter) would add overhead to every arena
+    /// write; this approach pays only at sample time.
+    /// </remarks>
+    public long TotalLiveArenaBytes()
+    {
+        long total = 0;
+        foreach (KeyValuePair<Arena, byte> kvp in _liveArenas)
+        {
+            total += kvp.Key.BytesWritten;
+        }
+        return total;
     }
 
     /// <summary>

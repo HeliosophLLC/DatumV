@@ -269,6 +269,23 @@ public sealed class QueryStreamService
                     await WriteEventAsync(output, jsonOptions, new ChunkWireEvent("chunk", chunkEvent.CellId, chunkEvent.ModelName, chunkEvent.Text), ct).ConfigureAwait(false);
                     break;
 
+                case CellMemorySampleBatchEvent memEvent:
+                    // 1Hz residency sample. Translates to a wire `memory_sample`
+                    // event the UI feeds into its sparkline + chip.
+                    await WriteEventAsync(
+                        output,
+                        jsonOptions,
+                        new MemorySampleEvent(
+                            "memory_sample",
+                            memEvent.CellId,
+                            memEvent.ElapsedMs,
+                            memEvent.RowBytes,
+                            memEvent.ArenaBytes,
+                            memEvent.PeakRowBytes,
+                            memEvent.BudgetBytes),
+                        ct).ConfigureAwait(false);
+                    break;
+
                 case CellCompletedBatchEvent completed:
                     if (cellTruncated)
                     {
@@ -299,7 +316,13 @@ public sealed class QueryStreamService
 
         try
         {
-            await executor.RunWithEventsAsync(pairs, OnEvent, ct).ConfigureAwait(false);
+            // Web-app default budget: 300 MiB. Tighter than the engine's 2 GiB
+            // default so interactive desktop queries see spill behavior trigger
+            // on moderately large workloads rather than running for tens of
+            // minutes before the budget engages. Hosted / server deployments
+            // can override via configuration once that's wired up.
+            const long WebQueryBudgetBytes = 300L * 1024 * 1024;
+            await executor.RunWithEventsAsync(pairs, OnEvent, ct, memoryBudgetBytes: WebQueryBudgetBytes).ConfigureAwait(false);
         }
         catch when (cellErrorEmitted)
         {

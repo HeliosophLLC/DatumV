@@ -23,3 +23,16 @@ internal sealed record TraceEvent(string Type, string Cell, string Text);
 internal sealed record CellCompletedEvent(string Type, string Cell, double ElapsedMs);
 internal sealed record CompleteEvent(string Type, double ElapsedMs);
 internal sealed record ErrorEvent(string Type, string? Cell, string Message, string? Detail);
+
+// One 1Hz memory-residency sample for the running cell. `rowBytes` is the
+// budgeted in-RAM total (operator state + variable-scope payloads + DML
+// buffers); `arenaBytes` is informational (mmap, OS-paged); `budgetBytes`
+// is null when the query has no configured spill budget.
+internal sealed record MemorySampleEvent(
+    string Type,
+    string Cell,
+    double ElapsedMs,
+    long RowBytes,
+    long ArenaBytes,
+    long PeakRowBytes,
+    long? BudgetBytes);

@@ -1008,7 +1008,7 @@ export interface CatalogModel {
     licenseIds?: string[];
     attributions?: string[];
     hardware?: CatalogHardware;
-    source?: CatalogSource;
+    sources?: CatalogSource[];
     approxSizeMb?: number;
     placeholder?: boolean;
     requiresHfLogin?: boolean;
@@ -1022,10 +1022,28 @@ export interface CatalogHardware {
 }
 
 export interface CatalogSource {
-    type?: string;
+    type: string;
+}
+
+export interface HuggingFaceSource extends CatalogSource {
     repo?: string;
     revision?: string;
     include?: string[];
+}
+
+export interface GithubReleaseSource extends CatalogSource {
+    repo?: string;
+    tag?: string;
+    files?: string[];
+}
+
+export interface HttpsSource extends CatalogSource {
+    urls?: HttpsFile[];
+}
+
+export interface HttpsFile {
+    url?: string;
+    destFile?: string;
 }
 
 export type ModelInstallState = "notDownloaded" | "partial" | "downloaded" | "installed";

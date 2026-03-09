@@ -44,6 +44,26 @@ export interface CellResult {
   chunks: { model: string; text: string }[];
 }
 
+// One memory-residency sample emitted at ~1Hz by the server's
+// `MemoryAccountant` while a cell streams. `rowBytes` is what the spill
+// budget compares against (GC-resident operator + variable state).
+// `arenaBytes` is informational only — mmap, OS-paged, doesn't count.
+export interface MemorySample {
+  elapsedMs: number;
+  rowBytes: number;
+  arenaBytes: number;
+}
+
+// Per-batch memory profile (one accountant feeds all cells in a batch, so
+// samples land here regardless of which cell emitted them). The status-bar
+// chip reads `latest`; the click-to-expand popover reads `samples`.
+export interface MemoryProfile {
+  samples: MemorySample[];
+  latest: MemorySample | null;
+  peakRowBytes: number;
+  budgetBytes: number | null;
+}
+
 export type ExecutionStatus =
   | 'idle'
   | 'streaming'
@@ -60,6 +80,8 @@ export interface TabExecution {
   elapsedMs: number | null;
   /** Optional batch-wide trace text (only when the request enabled tracing). */
   trace: string | null;
+  /** Memory profile assembled from `memory_sample` events. `null` until the first sample arrives. */
+  memoryProfile: MemoryProfile | null;
 }
 
 // AbortControllers don't go in the proxy — they're non-serialisable and
@@ -81,6 +103,7 @@ function freshExecution(): TabExecution {
     startedAt: null,
     elapsedMs: null,
     trace: null,
+    memoryProfile: null,
   };
 }
 
@@ -103,7 +126,16 @@ type StreamEvent =
   | { type: 'trace'; cell: string; text: string }
   | { type: 'cell_completed'; cell: string; elapsedMs: number }
   | { type: 'complete'; elapsedMs: number }
-  | { type: 'error'; cell: string | null; message: string; detail: string | null };
+  | { type: 'error'; cell: string | null; message: string; detail: string | null }
+  | {
+      type: 'memory_sample';
+      cell: string;
+      elapsedMs: number;
+      rowBytes: number;
+      arenaBytes: number;
+      peakRowBytes: number;
+      budgetBytes: number | null;
+    };
 
 // ────────── Actions ──────────
 
@@ -170,6 +202,7 @@ export async function runTab(
     startedAt: Date.now(),
     elapsedMs: null,
     trace: null,
+    memoryProfile: null,
   };
 
   let terminated = false;
@@ -351,6 +384,37 @@ function applyEvent(tabId: string, event: StreamEvent): void {
       // happens once, after applyEvent returns. We leave it as a no-op
       // here so exhaustive checks across the union still hold.
       break;
+
+    case 'memory_sample': {
+      const sample: MemorySample = {
+        elapsedMs: event.elapsedMs,
+        rowBytes: event.rowBytes,
+        arenaBytes: event.arenaBytes,
+      };
+      // Server's JsonIgnoreCondition.WhenWritingNull omits the budget
+      // field entirely when the budget is null. JSON.parse hands us
+      // `undefined` for an omitted property; normalise to `null` on
+      // receipt so downstream `!== null` checks behave consistently.
+      const budgetBytes = event.budgetBytes ?? null;
+      if (!exec.memoryProfile) {
+        exec.memoryProfile = {
+          samples: [sample],
+          latest: sample,
+          peakRowBytes: event.peakRowBytes,
+          budgetBytes,
+        };
+      } else {
+        exec.memoryProfile.samples.push(sample);
+        exec.memoryProfile.latest = sample;
+        exec.memoryProfile.peakRowBytes = event.peakRowBytes;
+        // Budget can become known mid-stream if the server only computes it
+        // after the first plan step. Take the non-null value once it appears.
+        if (budgetBytes !== null && exec.memoryProfile.budgetBytes === null) {
+          exec.memoryProfile.budgetBytes = budgetBytes;
+        }
+      }
+      break;
+    }
   }
 }
 

@@ -38,5 +38,18 @@
   "statusBarRunning": "Executing…",
   "statusBarSuccess": "Query executed successfully",
   "statusBarError": "One or more errors occurred",
-  "statusBarCancelled": "Cancelled"
+  "statusBarCancelled": "Cancelled",
+  "resultsCancelledBanner": "Execution was cancelled",
+  "memoryChipLabel": "Memory",
+  "memoryChipTooltip": "Click for detail",
+  "memoryPopoverTitle": "Memory",
+  "memoryRowBytesLabel": "Row (budgeted)",
+  "memoryArenaBytesLabel": "Arena (mmap, OS-paged)",
+  "memoryCurrentLabel": "current",
+  "memoryPeakLabel": "peak",
+  "memoryBudgetLabel": "budget",
+  "memoryBudgetNone": "no budget set",
+  "memoryAtTimeLabel": "at time",
+  "memoryRowShortLabel": "row",
+  "memoryArenaShortLabel": "arena"
 }

@@ -324,7 +324,20 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                     if (schema is null && inputBatch.Count > 0)
                     {
                         schema = inputBatch.ColumnLookup;
-                        bufferArena = pool.RentArena();
+                        // Pre-size the bufferArena to the budget. Without
+                        // this, the arena grows from 1 MB → ~budget through
+                        // ~10 power-of-two doublings each spill cycle; each
+                        // doubling creates a fresh pagefile-backed mmap and
+                        // releases the old, leaving the OS to reclaim pages
+                        // that haven't been needed yet. For a 12-spill query
+                        // that's ~10 GB of transient commit charge. Sizing
+                        // up-front means one mmap allocation per cycle.
+                        // Cap at int.MaxValue (Arena uses int internally)
+                        // and use a sensible 64 MB default when no budget is
+                        // configured.
+                        long budget = context.Accountant.MemoryBudgetBytes ?? 64L * 1024 * 1024;
+                        int bufferArenaCapacity = (int)Math.Min(budget, int.MaxValue);
+                        bufferArena = pool.RentArena(bufferArenaCapacity);
                         // 20 bytes per DataValue cell (overhead) × (field + key) cells
                         // plus a ~64-byte KeyedRow / List slot per row.
                         perRowBytes = 20L * schema.Count + 20L * _orderByItems.Count + 64L;
@@ -371,7 +384,10 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                             context.Accountant.NotifyReleased(residentBytesNotified);
                             residentBytesNotified = 0;
                             pool.ReturnArena(bufferArena!);
-                            bufferArena = pool.RentArena();
+                            // Pre-size the fresh arena (see schema-init
+                            // comment above for the budget rationale).
+                            long postSpillBudget = context.Accountant.MemoryBudgetBytes ?? 64L * 1024 * 1024;
+                            bufferArena = pool.RentArena((int)Math.Min(postSpillBudget, int.MaxValue));
                         }
                     }
                 }

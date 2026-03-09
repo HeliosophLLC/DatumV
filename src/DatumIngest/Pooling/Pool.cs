@@ -174,6 +174,17 @@ public sealed class Pool
     public bool ReturnArena(Arena arena) => Backing.TryReturn(arena);
 
     /// <summary>
+    /// Total <see cref="Arena.BytesWritten"/> summed across every arena
+    /// currently rented from this pool (refcount &gt; 0). Used by the
+    /// streaming memory profile to report a query's in-flight arena bytes
+    /// — including operator-local arenas like OrderBy's bufferArena and
+    /// spill consolidated arenas that the BatchExecutor sidecar can't
+    /// observe directly. Iteration is at-most-1Hz from the sidecar; the
+    /// approximate snapshot is fine for visualisation.
+    /// </summary>
+    public long TotalLiveArenaBytes() => Backing.TotalLiveArenaBytes();
+
+    /// <summary>
     /// Rents a <see cref="GroupState"/> with the specified number of accumulators.
     /// </summary>
     public GroupState RentGroupState(int accumulatorCount) => Backing.RentGroupState(accumulatorCount);

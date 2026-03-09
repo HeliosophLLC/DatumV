@@ -53,11 +53,18 @@ async function startDotnetBackend(): Promise<string> {
 
   // Dev: dotnet run on the source csproj. Prod: the published binary
   // bundled as extraResources by electron-builder (Day 6).
+  //
+  // DOTNET_CONFIGURATION env var (Debug | Release) lets the "App: Release"
+  // launch profile spawn the backend in Release config so POOL_DIAGNOSTICS
+  // is off and per-pool-return stack-trace capture doesn't dominate
+  // allocation profiles. Unset → defaults to Debug, matching dotnet run's
+  // default and the prior behaviour.
   const projectDir = path.resolve(__dirname, '..', '..');
+  const dotnetConfig = process.env.DOTNET_CONFIGURATION ?? 'Debug';
   const cmd = isDev
     ? 'dotnet'
     : path.join(process.resourcesPath, 'backend', 'DatumIngest.Web.exe');
-  const args = isDev ? ['run', '--project', projectDir] : [];
+  const args = isDev ? ['run', '--project', projectDir, '-c', dotnetConfig] : [];
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,

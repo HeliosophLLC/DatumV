@@ -56,6 +56,49 @@
 			}
 		},
 		{
+			// Release variant of "Dev: Electron + Backend". Same Vite +
+			// Electron pipeline, but DOTNET_CONFIGURATION=Release flips the
+			// spawned .NET backend out of Debug — POOL_DIAGNOSTICS is gated
+			// to Debug, so per-pool-return stack-trace capture (which can
+			// dominate allocation traces) goes away. Use this when measuring
+			// memory / CPU under realistic conditions.
+			"label": "Release: Electron + Backend",
+			"type": "shell",
+			"command": "npm",
+			"args": ["run", "electron:dev"],
+			"options": {
+				"cwd": "${workspaceFolder}/src/DatumIngest.Web/electron",
+				"env": {
+					"DOTNET_CONFIGURATION": "Release"
+				},
+				"shell": {
+					"executable": "powershell.exe",
+					"args": ["-NoProfile", "-Command"]
+				}
+			},
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			},
+			"problemMatcher": {
+				"owner": "dev-electron",
+				"pattern": {
+					"regexp": "^([^\\s].*)\\((\\d+|\\d+,\\d+|\\d+,\\d+,\\d+,\\d+)\\):\\s+(error|warning|info)\\s+(.*)$",
+					"file": 1,
+					"location": 2,
+					"severity": 3,
+					"message": 4
+				},
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": ".",
+					"endsPattern": "DatumIngest listening at"
+				}
+			}
+		},
+		{
 			"label": "Debug: Build IndexOnce",
 			"type": "shell",
 			"command": "dotnet",
