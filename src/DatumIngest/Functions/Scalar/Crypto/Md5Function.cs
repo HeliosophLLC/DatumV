@@ -65,7 +65,7 @@ public sealed class Md5Function : IFunction, IScalarFunction
         Span<byte> digest = stackalloc byte[16];
         if (input.Kind == DataKind.String)
         {
-            byte[] utf8 = Encoding.UTF8.GetBytes(input.AsString());
+            byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(input.AsString());
             MD5.HashData(utf8, digest);
         }
         else

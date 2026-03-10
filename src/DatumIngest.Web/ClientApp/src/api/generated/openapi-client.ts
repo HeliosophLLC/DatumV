@@ -851,6 +851,49 @@ export interface ScalarFunctionParameterDto {
     acceptsAnyKind?: boolean;
     isOptional?: boolean;
     arrayMatch?: string;
+    defaultExpression?: string | undefined;
+    check?: ParameterCheckDto | undefined;
+    step?: number | undefined;
+    unit?: string | undefined;
+    description?: string | undefined;
+}
+
+export interface ParameterCheckDto {
+    kind: string;
+}
+
+export interface BetweenCheckDto extends ParameterCheckDto {
+    min?: number;
+    max?: number;
+}
+
+export interface RangeCheckDto extends ParameterCheckDto {
+    min?: number | undefined;
+    max?: number | undefined;
+    minInclusive?: boolean;
+    maxInclusive?: boolean;
+}
+
+export interface GreaterThanCheckDto extends ParameterCheckDto {
+    min?: number;
+    inclusive?: boolean;
+}
+
+export interface LessThanCheckDto extends ParameterCheckDto {
+    max?: number;
+    inclusive?: boolean;
+}
+
+export interface InCheckDto extends ParameterCheckDto {
+    values?: string[];
+}
+
+export interface RegexCheckDto extends ParameterCheckDto {
+    pattern?: string;
+}
+
+export interface CustomCheckDto extends ParameterCheckDto {
+    sourceText?: string;
 }
 
 export interface ScalarFunctionVariadicDto {

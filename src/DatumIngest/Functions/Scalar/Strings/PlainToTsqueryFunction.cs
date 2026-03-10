@@ -2,7 +2,7 @@ using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Fulltext;
 
 /// <summary>
 /// Constructs an AND-of-terms query from plain user text. In v1 the engine

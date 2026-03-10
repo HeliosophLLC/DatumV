@@ -2,7 +2,7 @@ using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Strings;
 
 /// <summary>
 /// Returns the input string with all characters converted to upper case

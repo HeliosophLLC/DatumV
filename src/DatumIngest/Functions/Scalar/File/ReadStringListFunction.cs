@@ -64,7 +64,9 @@ public sealed class ReadStringListFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("path", DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("path", DataKindMatcher.Exact(DataKind.String),
+                    Metadata: new ParameterMetadata(
+                        Description: "File path to a JSON array of strings. 'file://' URI, absolute path, or — inside a CREATE MODEL body — relative to the model's USING directory.")),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.String))),

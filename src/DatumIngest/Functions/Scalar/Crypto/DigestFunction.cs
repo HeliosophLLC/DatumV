@@ -72,7 +72,7 @@ public sealed class DigestFunction : IFunction, IScalarFunction
         string algorithm = NormaliseAlgorithm(alg.AsString());
 
         ReadOnlySpan<byte> input = data.Kind == DataKind.String
-            ? Encoding.UTF8.GetBytes(data.AsString())
+            ? System.Text.Encoding.UTF8.GetBytes(data.AsString())
             : data.AsByteSpan();
 
         byte[] digest = algorithm switch

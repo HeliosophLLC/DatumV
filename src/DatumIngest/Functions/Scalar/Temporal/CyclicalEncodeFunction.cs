@@ -2,7 +2,7 @@ using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Temporal;
 
 /// <summary>
 /// Encodes a scalar value as a two-element Float32 array using sine and cosine

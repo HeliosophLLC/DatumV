@@ -55,9 +55,17 @@ public sealed class MultilabelClassifyFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("logits",    DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
-                new ParameterSpec("labels",    DataKindMatcher.Exact(DataKind.String),  IsArray: ArrayMatch.Array),
-                new ParameterSpec("threshold", DataKindMatcher.Exact(DataKind.Float32)),
+                new ParameterSpec("logits",    DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array,
+                    Metadata: new ParameterMetadata(
+                        Description: "Per-label logit vector from the classifier head. Length must match labels array length.")),
+                new ParameterSpec("labels",    DataKindMatcher.Exact(DataKind.String),  IsArray: ArrayMatch.Array,
+                    Metadata: new ParameterMetadata(
+                        Description: "Label vocabulary. labels[i] is the human-readable name for logit i.")),
+                new ParameterSpec("threshold", DataKindMatcher.Exact(DataKind.Float32),
+                    Metadata: new ParameterMetadata(
+                        Check: new BetweenCheck(0.0m, 1.0m),
+                        Step: 0.05m,
+                        Description: "Sigmoid-space threshold (probability, not logit). 0.5 typical for production; 0.0 emits every label; >=1.0 emits none.")),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Struct))),

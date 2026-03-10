@@ -83,12 +83,29 @@ public sealed class YoloxPostprocessFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("raw",         DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
-                new ParameterSpec("labels",      DataKindMatcher.Exact(DataKind.String),  IsArray: ArrayMatch.Array),
-                new ParameterSpec("img",         DataKindMatcher.Exact(DataKind.Image)),
-                new ParameterSpec("input_size",  DataKindMatcher.Family(DataKindFamily.IntegerFamily)),
-                new ParameterSpec("conf_thresh", DataKindMatcher.Exact(DataKind.Float32)),
-                new ParameterSpec("iou_thresh",  DataKindMatcher.Exact(DataKind.Float32)),
+                new ParameterSpec("raw",         DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array,
+                    Metadata: new ParameterMetadata(
+                        Description: "Flat YOLOX output tensor of shape [anchors × 85] (4 bbox + 1 objectness + 80 class scores per anchor).")),
+                new ParameterSpec("labels",      DataKindMatcher.Exact(DataKind.String),  IsArray: ArrayMatch.Array,
+                    Metadata: new ParameterMetadata(
+                        Description: "Class label vocabulary indexed by class id. Must have one entry per class (80 for COCO).")),
+                new ParameterSpec("img",         DataKindMatcher.Exact(DataKind.Image),
+                    Metadata: new ParameterMetadata(
+                        Description: "Original input image. Used to recover the letterbox scale and clip bbox coords to image bounds.")),
+                new ParameterSpec("input_size",  DataKindMatcher.Family(DataKindFamily.IntegerFamily),
+                    Metadata: new ParameterMetadata(
+                        Check: new InCheck(["416", "640"]),
+                        Description: "Square ONNX input dimension. 416 for nano/tiny variants; 640 for s/m/l/x/darknet.")),
+                new ParameterSpec("conf_thresh", DataKindMatcher.Exact(DataKind.Float32),
+                    Metadata: new ParameterMetadata(
+                        Check: new BetweenCheck(0.0m, 1.0m),
+                        Step: 0.05m,
+                        Description: "Confidence threshold (objectness × max class score). Drops detections below this value pre-NMS.")),
+                new ParameterSpec("iou_thresh",  DataKindMatcher.Exact(DataKind.Float32),
+                    Metadata: new ParameterMetadata(
+                        Check: new BetweenCheck(0.0m, 1.0m),
+                        Step: 0.05m,
+                        Description: "IoU overlap threshold for class-aware NMS. Higher values keep more overlapping boxes.")),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Struct))),

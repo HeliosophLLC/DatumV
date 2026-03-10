@@ -36,7 +36,12 @@ public sealed class RoundFunction : IFunction, IScalarFunction
             Parameters:
             [
                 new ParameterSpec("value", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
-                new ParameterSpec("decimals", DataKindMatcher.Family(DataKindFamily.IntegerFamily)),
+                new ParameterSpec(
+                    "decimals",
+                    DataKindMatcher.Family(DataKindFamily.IntegerFamily),
+                    Metadata: new ParameterMetadata(
+                        new RangeCheck(0, 10)
+                    )),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.SameAs(0)),

@@ -46,7 +46,7 @@ public sealed class Sha256Function : IFunction, IScalarFunction
         byte[] digest = new byte[32];
         if (input.Kind == DataKind.String)
         {
-            byte[] utf8 = Encoding.UTF8.GetBytes(input.AsString());
+            byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(input.AsString());
             SHA256.HashData(utf8, digest);
         }
         else

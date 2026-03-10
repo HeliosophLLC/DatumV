@@ -19,7 +19,7 @@ namespace DatumIngest.Execution.Operators;
 /// tokenization through the index's analyzer. No scoring, no top-k —
 /// matching rows stream out in source-row order. An empty query (all
 /// stop words, or only short tokens) yields zero rows; the
-/// <see cref="DatumIngest.Functions.Scalar.TsqueryMatchFunction"/>
+/// <see cref="DatumIngest.Functions.Scalar.Fulltext.TsqueryMatchFunction"/>
 /// equivalent returns true for any haystack, so the planner is
 /// responsible for not injecting this operator for an empty-token
 /// query.</para>

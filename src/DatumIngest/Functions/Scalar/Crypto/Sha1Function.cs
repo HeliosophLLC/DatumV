@@ -48,7 +48,7 @@ public sealed class Sha1Function : IFunction, IScalarFunction
         byte[] digest = new byte[20];
         if (input.Kind == DataKind.String)
         {
-            byte[] utf8 = Encoding.UTF8.GetBytes(input.AsString());
+            byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(input.AsString());
             SHA1.HashData(utf8, digest);
         }
         else

@@ -3,7 +3,7 @@ using DatumIngest.Indexing.Fts;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Fulltext;
 
 /// <summary>
 /// Backs the <c>@@</c> operator: <c>haystack @@ needle</c> returns

@@ -75,14 +75,49 @@ public sealed class FunctionCatalogController(FunctionRegistry registry) : Contr
     private static ScalarFunctionParameterDto ToDto(ParameterSpec spec)
     {
         (IReadOnlyList<string> kinds, bool acceptsAny) = EnumerateAcceptedKinds(spec.Kind);
+        // Metadata is null for parameters without declared hints; the DTO
+        // forwards null straight through so clients see "no constraint"
+        // rather than empty-string sentinels.
+        ParameterMetadata? meta = spec.Metadata;
         return new ScalarFunctionParameterDto(
             Name: spec.Name,
             KindLabel: spec.Kind.Describe(),
             AcceptedKinds: kinds,
             AcceptsAnyKind: acceptsAny,
             IsOptional: spec.IsOptional,
-            ArrayMatch: spec.IsArray.ToString());
+            ArrayMatch: spec.IsArray.ToString(),
+            // Built-in scalars don't carry defaults today (defaults live on
+            // procedural UDFs / models); reserved field for future SQL-model
+            // surface integration.
+            DefaultExpression: null,
+            Check: ToCheckDto(meta?.Check),
+            Step: meta?.Step,
+            Unit: meta?.Unit,
+            Description: meta?.Description);
     }
+
+    /// <summary>
+    /// Engine → DTO mapping for the discriminated <see cref="ParameterCheck"/>
+    /// hierarchy. The C# pattern-match runs exactly once per parameter at
+    /// request time; the DTO records carry the same field shapes so
+    /// projection is a direct construction call per branch. <c>CustomCheck</c>
+    /// crosses the engine/wire boundary as a pretty-printed SQL string
+    /// (the <c>Expression</c> AST itself doesn't serialise).
+    /// </summary>
+    private static ParameterCheckDto? ToCheckDto(ParameterCheck? check) => check switch
+    {
+        null => null,
+        BetweenCheck b => new BetweenCheckDto(b.Min, b.Max),
+        RangeCheck r => new RangeCheckDto(r.Min, r.Max, r.MinInclusive, r.MaxInclusive),
+        GreaterThanCheck g => new GreaterThanCheckDto(g.Min, g.Inclusive),
+        LessThanCheck l => new LessThanCheckDto(l.Max, l.Inclusive),
+        InCheck i => new InCheckDto(i.Values),
+        RegexCheck rx => new RegexCheckDto(rx.Pattern),
+        CustomCheck c => new CustomCheckDto(c.Expr.ToString() ?? string.Empty),
+        _ => throw new InvalidOperationException(
+            $"Unmapped ParameterCheck subclass '{check.GetType().Name}'. "
+            + "Add a switch arm in FunctionCatalogController.ToCheckDto."),
+    };
 
     private static ScalarFunctionVariadicDto ToDto(VariadicSpec spec)
     {

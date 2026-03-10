@@ -2,7 +2,7 @@ using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Arrays;
 
 /// <summary>
 /// Returns one element of an array selected uniformly at random. The element

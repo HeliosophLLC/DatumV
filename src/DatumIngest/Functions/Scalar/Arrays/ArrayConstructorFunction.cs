@@ -2,7 +2,7 @@ using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Arrays;
 
 /// <summary>
 /// Constructs a typed array from zero or more homogeneous arguments.

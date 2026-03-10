@@ -14,6 +14,7 @@ import {
   isBinaryParameter,
   synthesizeFunctionScript,
 } from './synthesizeFunctionScript';
+import { validateCheck } from './parameterCheck';
 
 // Assembles the wire payload a function tab will send to /api/query/stream.
 // Splits the form into:
@@ -92,6 +93,16 @@ export function buildFunctionRequest(
     if ('error' in coerced) {
       fieldErrors[name] = coerced.error;
       continue;
+    }
+    // Structured-constraint check. The server re-validates definitively
+    // at execution time; this is a UX shortcut so the user gets a
+    // per-field message before the request goes out.
+    if (param.check) {
+      const checkError = validateCheck(param.check, coerced.value);
+      if (checkError !== null) {
+        fieldErrors[name] = checkError;
+        continue;
+      }
     }
     parameters[name] = { kind, value: coerced.value };
   }

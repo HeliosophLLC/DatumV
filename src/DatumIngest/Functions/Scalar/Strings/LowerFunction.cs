@@ -1,25 +1,24 @@
-using System.Text;
 using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Strings;
 
 /// <summary>
-/// Returns the length of a string in UTF-8 bytes (matching the engine's
-/// canonical string encoding). Null input propagates to a null result.
+/// Returns the input string with all characters converted to lower case
+/// using the invariant culture. Null input propagates to null output.
 /// </summary>
-public sealed class LenFunction : IFunction, IScalarFunction
+public sealed class LowerFunction : IFunction, IScalarFunction
 {
     /// <inheritdoc />
-    public static string Name => "len";
+    public static string Name => "lower";
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.String;
 
     /// <inheritdoc />
     public static string Description =>
-        "Returns the length of a string in UTF-8 bytes.";
+        "Returns the input string with all characters converted to lower case (invariant culture).";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -30,12 +29,12 @@ public sealed class LenFunction : IFunction, IScalarFunction
                 new ParameterSpec("value", DataKindMatcher.Exact(DataKind.String)),
             ],
             VariadicTrailing: null,
-            ReturnType: ReturnTypeRule.Constant(DataKind.Int32)),
+            ReturnType: ReturnTypeRule.Constant(DataKind.String)),
     ];
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
-        FunctionMetadata.Validate<LenFunction>(argumentKinds);
+        FunctionMetadata.Validate<LowerFunction>(argumentKinds);
 
     /// <inheritdoc />
     public ValueTask<ValueRef> ExecuteAsync(
@@ -46,8 +45,9 @@ public sealed class LenFunction : IFunction, IScalarFunction
         ReadOnlySpan<ValueRef> args = arguments.Span;
         ValueRef input = args[0];
         if (input.IsNull)
-            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
-
-        return new ValueTask<ValueRef>(ValueRef.FromInt32(Encoding.UTF8.GetByteCount(input.AsString())));
+        {
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.String));
+        }
+        return new ValueTask<ValueRef>(ValueRef.FromString(input.AsString().ToLowerInvariant()));
     }
 }

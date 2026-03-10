@@ -141,11 +141,11 @@ public sealed class HashSplitFunction : IFunction, IScalarFunction
             case DataKind.String:
             {
                 string s = key.AsString();
-                int byteCount = Encoding.UTF8.GetByteCount(s);
+                int byteCount = System.Text.Encoding.UTF8.GetByteCount(s);
                 Span<byte> bytes = byteCount <= 256
                     ? stackalloc byte[byteCount]
                     : new byte[byteCount];
-                Encoding.UTF8.GetBytes(s, bytes);
+                System.Text.Encoding.UTF8.GetBytes(s, bytes);
                 return XxHash64.HashToUInt64(bytes, seed);
             }
             default:

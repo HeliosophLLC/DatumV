@@ -60,11 +60,29 @@ public sealed class DepthMapToImageFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("values",   DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
-                new ParameterSpec("source_h", DataKindMatcher.Family(DataKindFamily.IntegerFamily)),
-                new ParameterSpec("source_w", DataKindMatcher.Family(DataKindFamily.IntegerFamily)),
-                new ParameterSpec("target_h", DataKindMatcher.Family(DataKindFamily.IntegerFamily)),
-                new ParameterSpec("target_w", DataKindMatcher.Family(DataKindFamily.IntegerFamily)),
+                new ParameterSpec("values",   DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array,
+                    Metadata: new ParameterMetadata(
+                        Description: "Flat Float32 grid of inverse-depth or mask values, row-major at (source_h × source_w).")),
+                new ParameterSpec("source_h", DataKindMatcher.Family(DataKindFamily.IntegerFamily),
+                    Metadata: new ParameterMetadata(
+                        Check: new GreaterThanCheck(0m),
+                        Unit: "pixels",
+                        Description: "Source grid height — must equal the network's output resolution.")),
+                new ParameterSpec("source_w", DataKindMatcher.Family(DataKindFamily.IntegerFamily),
+                    Metadata: new ParameterMetadata(
+                        Check: new GreaterThanCheck(0m),
+                        Unit: "pixels",
+                        Description: "Source grid width — must equal the network's output resolution.")),
+                new ParameterSpec("target_h", DataKindMatcher.Family(DataKindFamily.IntegerFamily),
+                    Metadata: new ParameterMetadata(
+                        Check: new GreaterThanCheck(0m),
+                        Unit: "pixels",
+                        Description: "Output image height after bilinear resize. Pass the original image's height to align.")),
+                new ParameterSpec("target_w", DataKindMatcher.Family(DataKindFamily.IntegerFamily),
+                    Metadata: new ParameterMetadata(
+                        Check: new GreaterThanCheck(0m),
+                        Unit: "pixels",
+                        Description: "Output image width after bilinear resize. Pass the original image's width to align.")),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Image)),

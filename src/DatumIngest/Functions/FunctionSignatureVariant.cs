@@ -52,11 +52,17 @@ public enum ArrayMatch
 /// must reject arrays — used together to dispatch between scalar/array
 /// shapes (see <c>image_crop</c>'s rect/rect-array variants).
 /// </param>
+/// <param name="Metadata">
+/// Optional UI-facing metadata (range constraint, step, unit, description).
+/// Defaults to <c>null</c> for parameters with no per-parameter hints. See
+/// <see cref="ParameterMetadata"/> for the field semantics.
+/// </param>
 public sealed record ParameterSpec(
     string Name,
     DataKindMatcher Kind,
     bool IsOptional = false,
-    ArrayMatch IsArray = ArrayMatch.Either);
+    ArrayMatch IsArray = ArrayMatch.Either,
+    ParameterMetadata? Metadata = null);
 
 /// <summary>
 /// Trailing variadic specification.

@@ -3,7 +3,7 @@ using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Arrays;
 
 /// <summary>
 /// Joins a <c>String[]</c> into a single string using the specified delimiter.

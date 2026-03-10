@@ -1,6 +1,6 @@
 using DatumIngest.Execution;
 using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar;
+using DatumIngest.Functions.Scalar.Strings;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 

@@ -95,8 +95,8 @@ public sealed class FunctionRegistryQualifiedTests
         FunctionRegistry registry = new();
         // Two registrations of the same name under different schemas;
         // the search path decides which one resolves.
-        registry.RegisterScalar<DatumIngest.Functions.Scalar.LenFunction>(schema: "system");
-        registry.RegisterScalar<DatumIngest.Functions.Scalar.LenFunction>(schema: "public");
+        registry.RegisterScalar<DatumIngest.Functions.Scalar.Strings.LenFunction>(schema: "system");
+        registry.RegisterScalar<DatumIngest.Functions.Scalar.Strings.LenFunction>(schema: "public");
 
         IScalarFunction? systemFirst = registry.TryGetScalar(
             explicitSchema: null, "len", new[] { "system", "public" });
@@ -137,7 +137,7 @@ public sealed class FunctionRegistryQualifiedTests
         FunctionRegistry registry = new();
         registry.RegisterScalarInstance(
             "udf.my_udf",
-            new DatumIngest.Functions.Scalar.LenFunction());
+            new DatumIngest.Functions.Scalar.Strings.LenFunction());
 
         Assert.NotNull(registry.TryGetScalar("udf.my_udf"));
         Assert.NotNull(registry.TryGetScalar(new QualifiedName("udf", "my_udf")));
@@ -165,7 +165,7 @@ public sealed class FunctionRegistryQualifiedTests
         FunctionRegistry registry = new();
         registry.RegisterScalarInstance(
             "udf.tmp",
-            new DatumIngest.Functions.Scalar.LenFunction(),
+            new DatumIngest.Functions.Scalar.Strings.LenFunction(),
             descriptor: new FunctionDescriptor(
                 "tmp",
                 Array.Empty<string>(),

@@ -54,8 +54,14 @@ public sealed class YoloxPreprocessFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("img",         DataKindMatcher.Exact(DataKind.Image)),
-                new ParameterSpec("target_size", DataKindMatcher.Family(DataKindFamily.IntegerFamily)),
+                new ParameterSpec("img",         DataKindMatcher.Exact(DataKind.Image),
+                    Metadata: new ParameterMetadata(
+                        Description: "Source image (any size, any colour type — SkiaSharp handles the conversion).")),
+                new ParameterSpec("target_size", DataKindMatcher.Family(DataKindFamily.IntegerFamily),
+                    Metadata: new ParameterMetadata(
+                        Check: new InCheck(["416", "640"]),
+                        Unit: "pixels",
+                        Description: "Square ONNX input dimension. 416 for nano/tiny variants; 640 for s/m/l/x/darknet.")),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),

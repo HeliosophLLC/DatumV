@@ -35,6 +35,11 @@ import {
   isFormableVariant,
   synthesizeFunctionScript,
 } from '@/lib/synthesizeFunctionScript';
+import {
+  describeCheck,
+  isInCheck,
+  numericBoundsFor,
+} from '@/lib/parameterCheck';
 import { cn } from '@/lib/utils';
 
 // Execute-Function tab body. Three regions, top-to-bottom:
@@ -542,12 +547,16 @@ function ParameterField({
   const { t } = useTranslation('query');
   const name = param.name ?? '';
   const binary = isBinaryParameter(param);
+  // Constraint hint — compact one-liner next to the input ("0 – 1",
+  // "≥ 0", "one of 416, 640", …). Renders only when the parameter
+  // declared a Check.
+  const constraintHint = param.check ? describeCheck(param.check) : null;
 
   return (
     <div className="flex flex-col gap-1">
       <label
         htmlFor={`fn-${tabId}-${name}`}
-        className="text-foreground flex items-baseline gap-2 text-sm"
+        className="text-foreground flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm"
       >
         <span className="font-mono">{name}</span>
         <span className="text-muted-foreground text-xs">{param.kindLabel}</span>
@@ -556,21 +565,44 @@ function ParameterField({
             {t('fnFieldOptional')}
           </span>
         )}
+        {constraintHint && (
+          <span
+            className="text-muted-foreground/80 font-mono text-xs"
+            title={constraintHint}
+          >
+            {constraintHint}
+          </span>
+        )}
       </label>
       {binary ? (
         <BinaryField tabId={tabId} paramName={name} fileName={fileName} />
       ) : (
-        <InlineField
-          id={`fn-${tabId}-${name}`}
-          tabId={tabId}
-          paramName={name}
-          text={text}
-          param={param}
-        />
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <InlineField
+              id={`fn-${tabId}-${name}`}
+              tabId={tabId}
+              paramName={name}
+              text={text}
+              param={param}
+            />
+          </div>
+          {param.unit && (
+            <span className="text-muted-foreground shrink-0 text-xs">
+              {param.unit}
+            </span>
+          )}
+        </div>
       )}
-      {error && (
-        <p className="text-destructive text-xs">{error}</p>
+      {param.description && (
+        <p className="text-muted-foreground text-xs">{param.description}</p>
       )}
+      {param.defaultExpression && param.isOptional && !text && !binary && (
+        <p className="text-muted-foreground/80 font-mono text-[11px]">
+          defaults to <span className="italic">{param.defaultExpression}</span>
+        </p>
+      )}
+      {error && <p className="text-destructive text-xs">{error}</p>}
     </div>
   );
 }
@@ -642,16 +674,45 @@ function InlineField({
   const isBoolean =
     acceptedKinds.length === 1 && acceptedKinds[0] === 'Boolean';
 
+  const inputClass = cn(
+    'bg-input/30 w-full rounded-md px-2 py-1.5 font-mono text-sm',
+    'outline-none focus:ring-2 focus:ring-ring',
+  );
+  const selectClass = cn(
+    'bg-input/30 w-full rounded-md px-2 py-1.5 text-sm',
+    'outline-none focus:ring-2 focus:ring-ring',
+  );
+
+  // InCheck wins over the kind-based dispatch — even a numeric slot with
+  // an enumerated allowed set wants a dropdown. The check's values are
+  // strings; coercion back to the declared numeric kind happens at
+  // submit time in `buildFunctionRequest`.
+  if (param.check && isInCheck(param.check)) {
+    const values = param.check.values ?? [];
+    return (
+      <select
+        id={id}
+        value={text}
+        onChange={(e) => setFunctionFormText(tabId, paramName, e.target.value)}
+        className={selectClass}
+      >
+        <option value="">…</option>
+        {values.map((v) => (
+          <option key={v} value={v}>
+            {v}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
   if (isBoolean) {
     return (
       <select
         id={id}
         value={text}
         onChange={(e) => setFunctionFormText(tabId, paramName, e.target.value)}
-        className={cn(
-          'bg-input/30 rounded-md px-2 py-1.5 text-sm',
-          'outline-none focus:ring-2 focus:ring-ring',
-        )}
+        className={selectClass}
       >
         <option value="">…</option>
         <option value="true">true</option>
@@ -661,31 +722,44 @@ function InlineField({
   }
 
   if (isStringy) {
+    // RegexCheck → wire the pattern attr so the browser surfaces an
+    // invalid hint on submit even before our validator runs.
+    const pattern =
+      param.check && param.check.kind === 'regex'
+        ? (param.check as { pattern?: string }).pattern
+        : undefined;
     return (
       <textarea
         id={id}
         value={text}
         rows={2}
         onChange={(e) => setFunctionFormText(tabId, paramName, e.target.value)}
+        // textareas don't support `pattern`, so we tuck the regex on a
+        // data-attr and rely on `validateCheck` for definitive checking.
+        data-pattern={pattern}
         className={cn(
-          'bg-input/30 resize-y rounded-md px-2 py-1.5 font-mono text-sm',
+          'bg-input/30 w-full resize-y rounded-md px-2 py-1.5 font-mono text-sm',
           'outline-none focus:ring-2 focus:ring-ring',
         )}
       />
     );
   }
 
+  // Numeric or polymorphic fallback. Pull min/max from any range check
+  // and the explicit `step` declared by the parameter metadata.
+  const bounds = param.check ? numericBoundsFor(param.check) : {};
+  const stepAttr = param.step !== undefined ? String(param.step) : undefined;
   return (
     <input
       id={id}
-      type="text"
-      inputMode={isNumeric ? 'numeric' : undefined}
+      type={isNumeric ? 'number' : 'text'}
+      inputMode={isNumeric ? 'decimal' : undefined}
+      step={isNumeric ? stepAttr ?? 'any' : undefined}
+      min={isNumeric ? bounds.min ?? undefined : undefined}
+      max={isNumeric ? bounds.max ?? undefined : undefined}
       value={text}
       onChange={(e) => setFunctionFormText(tabId, paramName, e.target.value)}
-      className={cn(
-        'bg-input/30 rounded-md px-2 py-1.5 font-mono text-sm',
-        'outline-none focus:ring-2 focus:ring-ring',
-      )}
+      className={inputClass}
     />
   );
 }

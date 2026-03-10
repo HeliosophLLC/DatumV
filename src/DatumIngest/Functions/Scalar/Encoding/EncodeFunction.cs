@@ -3,7 +3,7 @@ using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Encoding;
 
 /// <summary>
 /// PostgreSQL-compatible <c>encode(bytes, format)</c>. Renders a byte array

@@ -67,13 +67,46 @@ public sealed record ScalarFunctionSignatureDto(
 /// One of <c>"Either"</c>, <c>"Scalar"</c>, <c>"Array"</c> — scalar vs typed-
 /// array filter on the slot. <c>Either</c> is the default.
 /// </param>
+/// <param name="DefaultExpression">
+/// Verbatim SQL text of the default expression when the parameter is
+/// optional and has a default value (e.g. <c>"CAST(0.25 AS Float32)"</c>).
+/// <c>null</c> for required parameters and for scalar functions that
+/// don't currently support defaults. The client renders this as
+/// display-only — it doesn't evaluate the expression.
+/// </param>
+/// <param name="Check">
+/// Structured constraint on the parameter value (typed discriminated
+/// union — see <see cref="ParameterCheckDto"/>). Clients dispatch on the
+/// <c>kind</c> discriminator to pick a rendering widget: <c>"between"</c>
+/// → range slider, <c>"in"</c> → dropdown, <c>"custom"</c> → text input
+/// with server-side validation. <c>null</c> when no constraint is
+/// declared.
+/// </param>
+/// <param name="Step">
+/// UI slider/spinbox granularity hint. Decimal so common values like
+/// <c>0.05</c> stay exact on the server side (JS clients will round to
+/// double anyway). <c>null</c> means "infer from constraint and type."
+/// </param>
+/// <param name="Unit">
+/// Display-only unit suffix (<c>"pixels"</c>, <c>"seconds"</c>, <c>"%"</c>).
+/// <c>null</c> when the parameter is unitless.
+/// </param>
+/// <param name="Description">
+/// Per-parameter one-line description for tooltips and hover hints.
+/// <c>null</c> when no description was declared.
+/// </param>
 public sealed record ScalarFunctionParameterDto(
     string Name,
     string KindLabel,
     IReadOnlyList<string> AcceptedKinds,
     bool AcceptsAnyKind,
     bool IsOptional,
-    string ArrayMatch);
+    string ArrayMatch,
+    string? DefaultExpression = null,
+    ParameterCheckDto? Check = null,
+    decimal? Step = null,
+    string? Unit = null,
+    string? Description = null);
 
 /// <summary>
 /// Trailing variadic specification.

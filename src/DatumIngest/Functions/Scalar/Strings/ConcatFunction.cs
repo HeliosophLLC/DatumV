@@ -3,36 +3,31 @@ using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Strings;
 
 /// <summary>
-/// Strict, null-propagating string concatenation. Returns <see langword="NULL"/>
-/// when any argument is null; otherwise concatenates all arguments. The
-/// <c>||</c> operator parses to this function so its semantics match the
-/// SQL-standard string-concatenation operator (SQL-92 §6.27).
+/// Concatenates two or more strings into a single string.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Variadic over <see cref="DataKind.String"/> with a minimum of 2 arguments —
-/// same shape as <see cref="ConcatFunction"/>, but where <c>concat()</c> skips
-/// nulls (PostgreSQL convention), <c>concat_strict()</c> propagates them
-/// (SQL-92 convention). Pick the one that matches your intent:
-/// <c>concat('a', NULL, 'b')</c> returns <c>'ab'</c>, while
-/// <c>concat_strict('a', NULL, 'b')</c> returns <c>NULL</c>.
+/// Variadic over <see cref="DataKind.String"/> with a minimum of 2 arguments.
+/// Null arguments are skipped (matches PostgreSQL <c>concat()</c> semantics):
+/// <c>concat('a', NULL, 'b')</c> returns <c>'ab'</c>. The strict
+/// null-propagating form (which backs the <c>||</c> operator) is
+/// <see cref="ConcatStrictFunction"/>.
 /// </para>
 /// </remarks>
-public sealed class ConcatStrictFunction : IFunction, IScalarFunction
+public sealed class ConcatFunction : IFunction, IScalarFunction
 {
     /// <inheritdoc />
-    public static string Name => "concat_strict";
+    public static string Name => "concat";
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.String;
 
     /// <inheritdoc />
     public static string Description =>
-        "Concatenates two or more strings with strict null propagation: any null argument yields NULL. "
-        + "Backs the SQL-standard `||` operator.";
+        "Concatenates two or more strings. Null arguments are skipped.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -48,7 +43,7 @@ public sealed class ConcatStrictFunction : IFunction, IScalarFunction
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
-        FunctionMetadata.Validate<ConcatStrictFunction>(argumentKinds);
+        FunctionMetadata.Validate<ConcatFunction>(argumentKinds);
 
     /// <inheritdoc />
     public ValueTask<ValueRef> ExecuteAsync(
@@ -57,16 +52,13 @@ public sealed class ConcatStrictFunction : IFunction, IScalarFunction
         CancellationToken cancellationToken)
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
+        StringBuilder builder = new();
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i].IsNull)
             {
-                return new ValueTask<ValueRef>(ValueRef.Null(DataKind.String));
+                continue;
             }
-        }
-        StringBuilder builder = new();
-        for (int i = 0; i < args.Length; i++)
-        {
             builder.Append(args[i].AsString());
         }
         return new ValueTask<ValueRef>(ValueRef.FromString(builder.ToString()));

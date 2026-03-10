@@ -1,7 +1,7 @@
 using System.Text;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar;
+using DatumIngest.Functions.Scalar.Encoding;
 using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Scalar;

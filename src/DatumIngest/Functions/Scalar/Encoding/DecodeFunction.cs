@@ -2,7 +2,7 @@ using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Encoding;
 
 /// <summary>
 /// PostgreSQL-compatible <c>decode(text, format)</c>. Parses a text value

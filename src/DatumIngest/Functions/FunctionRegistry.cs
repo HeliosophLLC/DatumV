@@ -527,21 +527,25 @@ public sealed class FunctionRegistry
         FunctionRegistry registry = new();
 
         // ── Scalar ────────────────────────────────────────────────────────
-        // Demand-pulled rebuild: each function lands when a stage delivers it.
-        // Stage 4: concat. Stage 5: upper / lower. Stage 6: cast / try_cast /
-        // typeof. Anything beyond is added back when a demo demands it.
-        registry.RegisterScalar<Scalar.ConcatFunction>();
-        registry.RegisterScalar<Scalar.ConcatStrictFunction>();
-        registry.RegisterScalar<Scalar.ConcatWsFunction>();
-        registry.RegisterScalar<Scalar.PlainToTsqueryFunction>();
-        registry.RegisterScalar<Scalar.TsqueryMatchFunction>();
-        registry.RegisterScalar<Scalar.UpperFunction>();
-        registry.RegisterScalar<Scalar.LowerFunction>();
-        registry.RegisterScalar<Scalar.LenFunction>();
+        // System functions
         registry.RegisterScalar<Scalar.CastFunction>();
         registry.RegisterScalar<Scalar.TryCastFunction>();
         registry.RegisterScalar<Scalar.CanCastFunction>();
         registry.RegisterScalar<Scalar.TypeofFunction>();
+        registry.RegisterScalar<Scalar.CoalesceFunction>();
+
+        // String
+        registry.RegisterScalar<Scalar.Strings.ConcatFunction>();
+        registry.RegisterScalar<Scalar.Strings.ConcatStrictFunction>();
+        registry.RegisterScalar<Scalar.Strings.ConcatWsFunction>();
+        registry.RegisterScalar<Scalar.Strings.UpperFunction>();
+        registry.RegisterScalar<Scalar.Strings.LowerFunction>();
+        registry.RegisterScalar<Scalar.Strings.LenFunction>();
+
+        // Fulltext family
+        registry.RegisterScalar<Scalar.Fulltext.PlainToTsqueryFunction>();
+        registry.RegisterScalar<Scalar.Fulltext.TsqueryMatchFunction>();
+
         // Assertion family — assert_not_null is the inliner-injected guard;
         // the rest are user-facing runtime checks that return the checked
         // value on success and throw on violation.
@@ -565,17 +569,19 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Assertion.AssertLengthFunction>();
         registry.RegisterScalar<Scalar.Assertion.AssertInFunction>();
         registry.RegisterScalar<Scalar.Assertion.AssertNotInFunction>();
-        registry.RegisterScalar<Scalar.CoalesceFunction>();
-        // Phase 3b: infer() bridges a CREATE MODEL body to its bound
-        // IInferenceSession. Lives in `system` so model bodies can call
-        // it as the unqualified `infer(...)`.
-        registry.RegisterScalar<InferFunction>();
+
+        // Math/Numerics
         registry.RegisterScalar<Scalar.Math.AbsFunction>();
         registry.RegisterScalar<Scalar.Math.RoundFunction>();
         registry.RegisterScalar<Scalar.Math.FloorFunction>();
         registry.RegisterScalar<Scalar.Math.CeilFunction>();
         registry.RegisterScalarAlias<Scalar.Math.CeilFunction>("ceiling");
         registry.RegisterScalar<Scalar.Math.SqrtFunction>();
+
+        registry.RegisterScalar<Scalar.RandomFunction>();
+        registry.RegisterScalar<Scalar.HashSplitFunction>();
+
+        // File
         registry.RegisterScalar<Scalar.File.GetFilenameFunction>();
         registry.RegisterScalar<Scalar.File.GetFilenameExtFunction>();
         registry.RegisterScalar<Scalar.File.GetDirectoryFunction>();
@@ -583,31 +589,26 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.File.GetFilenameNoExtFunction>();
         registry.RegisterScalar<Scalar.File.ChangeFilenameExtFunction>();
         registry.RegisterScalar<Scalar.File.ReadStringListFunction>();
-        registry.RegisterScalar<Scalar.Image.YoloxPreprocessFunction>();
-        registry.RegisterScalar<Scalar.Image.YoloxPostprocessFunction>();
-        registry.RegisterScalar<Scalar.Image.ImageToTensorChwBgrFunction>();
-        registry.RegisterScalar<Scalar.Image.DepthMapToImageFunction>();
-        registry.RegisterScalar<Scalar.RandomChoiceFunction>();
-        registry.RegisterScalar<Scalar.RandomFunction>();
+
+        // Array
+        registry.RegisterScalar<Scalar.Arrays.RandomChoiceFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayConstructorFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayToStringFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayLengthFunction>();
+
+        // UUID
         registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();
         registry.RegisterScalarAlias<Scalar.Uuid.UuidV4Function>("gen_random_uuid");
         registry.RegisterScalar<Scalar.Uuid.UuidV7Function>();
         registry.RegisterScalar<Scalar.Uuid.UuidStrFunction>();
         registry.RegisterScalar<Scalar.Uuid.UuidExtractTimestampFunction>();
         registry.RegisterScalar<Scalar.Uuid.UuidExtractVersionFunction>();
-        registry.RegisterScalar<Scalar.CyclicalEncodeFunction>();
-        registry.RegisterScalar<Scalar.HashSplitFunction>();
-        registry.RegisterScalar<Scalar.Crypto.Md5Function>();
-        registry.RegisterScalar<Scalar.Crypto.Sha1Function>();
-        registry.RegisterScalar<Scalar.Crypto.Sha256Function>();
-        registry.RegisterScalar<Scalar.Crypto.Sha384Function>();
-        registry.RegisterScalar<Scalar.Crypto.Sha512Function>();
-        registry.RegisterScalar<Scalar.Crypto.DigestFunction>();
-        registry.RegisterScalar<Scalar.EncodeFunction>();
-        registry.RegisterScalar<Scalar.DecodeFunction>();
-        registry.RegisterScalar<Scalar.ArrayConstructorFunction>();
-        registry.RegisterScalar<Scalar.ArrayToStringFunction>();
-        registry.RegisterScalar<Scalar.ArrayLengthFunction>();
+
+        // Image
+        registry.RegisterScalar<Scalar.Image.YoloxPreprocessFunction>();
+        registry.RegisterScalar<Scalar.Image.YoloxPostprocessFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageToTensorChwBgrFunction>();
+        registry.RegisterScalar<Scalar.Image.DepthMapToImageFunction>();
         registry.RegisterScalar<Scalar.Image.ImageCropFunction>();
         registry.RegisterScalar<Scalar.Image.ImageCutoutFunction>();
         registry.RegisterScalar<Scalar.Image.ImageDrawBoundingBoxesFunction>();
@@ -626,6 +627,18 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ImagenetStdFunction>();
         registry.RegisterScalar<Scalar.Image.ClipMeanFunction>();
         registry.RegisterScalar<Scalar.Image.ClipStdFunction>();
+
+        // Encoding
+        registry.RegisterScalar<Scalar.Encoding.EncodeFunction>();
+        registry.RegisterScalar<Scalar.Encoding.DecodeFunction>();
+
+        // Crypto
+        registry.RegisterScalar<Scalar.Crypto.Md5Function>();
+        registry.RegisterScalar<Scalar.Crypto.Sha1Function>();
+        registry.RegisterScalar<Scalar.Crypto.Sha256Function>();
+        registry.RegisterScalar<Scalar.Crypto.Sha384Function>();
+        registry.RegisterScalar<Scalar.Crypto.Sha512Function>();
+        registry.RegisterScalar<Scalar.Crypto.DigestFunction>();
 
         // Activations — softmax / sigmoid. ReLU + GELU + tanh land when a
         // model actually needs them post-graph (most are baked into the
@@ -657,6 +670,7 @@ public sealed class FunctionRegistry
 
         // Temporal — current time, date/time arithmetic, extraction.
         registry.RegisterScalar<Scalar.Temporal.NowFunction>();
+        registry.RegisterScalar<Scalar.Temporal.CyclicalEncodeFunction>();
 
         // Spatial — Point2D/Point3D construction, component access, distance.
         registry.RegisterScalar<Scalar.Spatial.Point2DFunction>();
@@ -674,6 +688,9 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Json.JsonValueFunction>();
         registry.RegisterScalar<Scalar.Json.JsonQueryFunction>();
         registry.RegisterScalar<Scalar.Json.JsonToTextFunction>();
+
+        // ONNX
+        registry.RegisterScalar<InferFunction>();
 
         // Templates — per-LLM-family chat-template primitives. Three
         // functions per family (open / msg / assistant_turn) for

@@ -3,7 +3,7 @@ using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar.Strings;
 
 /// <summary>
 /// Concatenates values with a separator, skipping null arguments.

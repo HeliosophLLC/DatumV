@@ -7,6 +7,7 @@ using DatumIngest.Catalog.Registries;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution;
 
@@ -195,27 +196,24 @@ public sealed class BatchExecutor
     /// accountant's current residency, peak, and budget. The
     /// <paramref name="stopwatch"/> measures elapsed-since-cell-start so
     /// the UI can align samples on its own timeline without needing the
-    /// accountant's internal stopwatch. Arena bytes sum the batch's
-    /// VariableStore (procedural-batch lifetime) and the in-flight query's
-    /// per-batch arena (when one is supplied) — both are mmap-backed and
-    /// OS-paged, but together give the UI a useful snapshot of arena
-    /// growth across the whole batch.
+    /// accountant's internal stopwatch. Arena bytes sums every arena
+    /// currently rented from <paramref name="pool"/> — operator-local
+    /// arenas included — so blocking operators (OrderBy buffer, hash-join
+    /// build) show up in the chart even before they yield rows.
     /// </summary>
     private static ValueTask EmitMemorySampleAsync(
         BatchContext batchContext,
+        Pool pool,
         string cellId,
         Stopwatch stopwatch,
-        Func<BatchEvent, ValueTask> onEvent,
-        Arena? currentBatchArena = null)
+        Func<BatchEvent, ValueTask> onEvent)
     {
         MemoryAccountant accountant = batchContext.Accountant;
-        long arenaBytes = batchContext.VariableStore.BytesWritten
-            + (currentBatchArena?.BytesWritten ?? 0);
         return onEvent(new CellMemorySampleBatchEvent(
             cellId,
             stopwatch.Elapsed.TotalMilliseconds,
             accountant.CurrentResidentBytes,
-            arenaBytes,
+            pool.TotalLiveArenaBytes(),
             accountant.PeakResidentBytes,
             accountant.MemoryBudgetBytes));
     }
@@ -382,15 +380,16 @@ public sealed class BatchExecutor
                         if (currentCellId is string cellId && currentCellStopwatch is Stopwatch sw)
                         {
                             MemoryAccountant accountant = batchContext.Accountant;
-                            // Sum VariableStore (procedural-batch lifetime)
-                            // and the running query's most-recent batch arena.
-                            // The latter is null during operator accumulation
-                            // phases that haven't yielded a batch yet — those
-                            // phases still allocate into operator-local arenas
-                            // we can't observe from here, so the chart will
-                            // under-report arena bytes during such phases.
-                            long arenaBytes = batchContext.VariableStore.BytesWritten
-                                + (currentRowBatchArena?.BytesWritten ?? 0);
+                            // Total arena bytes = sum across every Arena
+                            // currently rented from the pool. This captures
+                            // operator-internal arenas (OrderBy bufferArena,
+                            // hash-join build arenas, spill consolidated
+                            // arenas) that don't yield batches up to the
+                            // BatchExecutor — exactly the cases where the
+                            // earlier "VariableStore + last batch arena"
+                            // approach reported zero for the entire
+                            // accumulation phase of a blocking operator.
+                            long arenaBytes = _catalog.Pool.TotalLiveArenaBytes();
                             await onEvent(new CellMemorySampleBatchEvent(
                                 cellId,
                                 sw.Elapsed.TotalMilliseconds,
@@ -486,7 +485,7 @@ public sealed class BatchExecutor
         // Cell-entry memory sample (immediate, bypasses the sidecar's 1s
         // wait) — gives the UI a baseline so the sparkline doesn't start
         // blank during the first second of a cell.
-        await EmitMemorySampleAsync(batchContext, cellId, sw, onEvent).ConfigureAwait(false);
+        await EmitMemorySampleAsync(batchContext, _catalog.Pool, cellId, sw, onEvent).ConfigureAwait(false);
 
         try
         {
@@ -687,7 +686,7 @@ public sealed class BatchExecutor
             // Cell-end memory sample (always emitted, bypasses throttle) — gives
             // the UI a frozen final value so post-mortem inspection shows the
             // last-known state.
-            await EmitMemorySampleAsync(batchContext, cellId, sw, onEvent).ConfigureAwait(false);
+            await EmitMemorySampleAsync(batchContext, _catalog.Pool, cellId, sw, onEvent).ConfigureAwait(false);
             await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
                 .ConfigureAwait(false);
         }

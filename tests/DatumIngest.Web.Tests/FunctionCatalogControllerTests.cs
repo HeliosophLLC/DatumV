@@ -110,6 +110,119 @@ public sealed class FunctionCatalogControllerTests
     }
 
     [Fact]
+    public void ListScalar_MetadataFlowsThroughDto_BetweenCheckAndStep()
+    {
+        // multilabel_classify.threshold declares BetweenCheck(0, 1) with
+        // step 0.05 + a description. The DTO should surface a typed
+        // BetweenCheckDto (no client-side string parsing required).
+        ScalarFunctionListResponse response = List();
+        ScalarFunctionDto fn = response.Functions.First(f =>
+            string.Equals(f.Name, "multilabel_classify", StringComparison.OrdinalIgnoreCase));
+        ScalarFunctionParameterDto threshold = fn.Signatures[0].Parameters.First(p =>
+            string.Equals(p.Name, "threshold", StringComparison.OrdinalIgnoreCase));
+
+        BetweenCheckDto between = Assert.IsType<BetweenCheckDto>(threshold.Check);
+        Assert.Equal(0.0m, between.Min);
+        Assert.Equal(1.0m, between.Max);
+        Assert.Equal(0.05m, threshold.Step);
+        Assert.False(string.IsNullOrEmpty(threshold.Description));
+    }
+
+    [Fact]
+    public void ListScalar_MetadataFlowsThroughDto_GreaterThanAndUnit()
+    {
+        // depth_map_to_image.source_h declares GreaterThanCheck(0) +
+        // pixels unit. Verifies the typed check and unit round-trip.
+        ScalarFunctionListResponse response = List();
+        ScalarFunctionDto fn = response.Functions.First(f =>
+            string.Equals(f.Name, "depth_map_to_image", StringComparison.OrdinalIgnoreCase));
+        ScalarFunctionParameterDto sourceH = fn.Signatures[0].Parameters.First(p =>
+            string.Equals(p.Name, "source_h", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Equal("pixels", sourceH.Unit);
+        GreaterThanCheckDto gt = Assert.IsType<GreaterThanCheckDto>(sourceH.Check);
+        Assert.Equal(0m, gt.Min);
+        Assert.False(gt.Inclusive);
+    }
+
+    [Fact]
+    public void ListScalar_MetadataFlowsThroughDto_InCheck()
+    {
+        // yolox_preprocess.target_size declares InCheck(['416', '640']).
+        // Verifies the InCheckDto surfaces with the value list intact.
+        ScalarFunctionListResponse response = List();
+        ScalarFunctionDto fn = response.Functions.First(f =>
+            string.Equals(f.Name, "yolox_preprocess", StringComparison.OrdinalIgnoreCase));
+        ScalarFunctionParameterDto targetSize = fn.Signatures[0].Parameters.First(p =>
+            string.Equals(p.Name, "target_size", StringComparison.OrdinalIgnoreCase));
+
+        InCheckDto inCheck = Assert.IsType<InCheckDto>(targetSize.Check);
+        Assert.Equal(new[] { "416", "640" }, inCheck.Values);
+    }
+
+    [Fact]
+    public void ListScalar_ParameterWithoutMetadata_LeavesFieldsNull()
+    {
+        // `concat` parameters have no metadata declared. Every optional
+        // field must come through as null — the DTO must not synthesise
+        // empty-string placeholders.
+        ScalarFunctionListResponse response = List();
+        ScalarFunctionDto concat = response.Functions.First(f =>
+            string.Equals(f.Name, "concat", StringComparison.OrdinalIgnoreCase));
+        foreach (ScalarFunctionSignatureDto sig in concat.Signatures)
+        {
+            foreach (ScalarFunctionParameterDto p in sig.Parameters)
+            {
+                Assert.Null(p.Check);
+                Assert.Null(p.Step);
+                Assert.Null(p.Unit);
+                Assert.Null(p.Description);
+                Assert.Null(p.DefaultExpression);
+            }
+        }
+    }
+
+    [Fact]
+    public void ListScalar_CheckDto_SerialisesWithKindDiscriminator()
+    {
+        // The whole point of the polymorphic DTO is that JSON consumers
+        // can dispatch on a stable "kind" discriminator. Verify the
+        // round-trip preserves the discriminator on a real check value
+        // pulled from the live registry.
+        ScalarFunctionListResponse response = List();
+        ScalarFunctionDto fn = response.Functions.First(f =>
+            string.Equals(f.Name, "multilabel_classify", StringComparison.OrdinalIgnoreCase));
+        ScalarFunctionParameterDto threshold = fn.Signatures[0].Parameters.First(p =>
+            string.Equals(p.Name, "threshold", StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotNull(threshold.Check);
+
+        // Serialise + parse the JSON. The discriminator must land as the
+        // "kind" property at the top level so JS clients can switch on it.
+        string json = System.Text.Json.JsonSerializer.Serialize<ParameterCheckDto>(
+            threshold.Check!,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+            });
+        using System.Text.Json.JsonDocument doc = System.Text.Json.JsonDocument.Parse(json);
+        Assert.Equal("between", doc.RootElement.GetProperty("kind").GetString());
+        Assert.Equal(0.0m, doc.RootElement.GetProperty("min").GetDecimal());
+        Assert.Equal(1.0m, doc.RootElement.GetProperty("max").GetDecimal());
+
+        // Round-trip back through the polymorphic deserialiser.
+        ParameterCheckDto? roundTripped = System.Text.Json.JsonSerializer.Deserialize<ParameterCheckDto>(
+            json,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+            });
+        BetweenCheckDto between = Assert.IsType<BetweenCheckDto>(roundTripped);
+        Assert.Equal(0.0m, between.Min);
+        Assert.Equal(1.0m, between.Max);
+    }
+
+    [Fact]
     public void ListScalar_BodyScopeIsReported()
     {
         ScalarFunctionListResponse response = List();
