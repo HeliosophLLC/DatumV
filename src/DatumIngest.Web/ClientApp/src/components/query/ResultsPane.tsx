@@ -554,18 +554,20 @@ function CellTable({ cell }: { cell: CellResult }) {
     overscan: 12,
   });
 
-  // Content-based column widths. Memoised on the schema + row-count so
-  // a streaming query that's still appending rows re-measures each
-  // chunk; once the stream completes, the dep stops changing and we
-  // hold a stable width set. Re-measurement is O(rows * cols) up to
-  // SAMPLE_ROWS, capped — single-digit ms even for wide schemas.
+  // Content-based column widths. Memoised on the schema + sample-bounded
+  // row count: we only ever look at the first SAMPLE_ROWS rows, so once
+  // the stream has produced that many rows the dep stops changing and we
+  // hold a stable width set for the rest of the run. Without the cap, a
+  // 2000-row stream would re-measure on every appended row (O(cols *
+  // SAMPLE_ROWS) per render = millions of canvas measureText calls).
+  const sampleSize = Math.min(cell.rows.length, SAMPLE_ROWS);
   const colWidths = useMemo(() => {
     if (cell.schema === null) return [] as number[];
     return cell.schema.map((col, idx) =>
       measureColumnWidth(col.name, cell.rows, idx),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cell.schema, cell.rows.length]);
+  }, [cell.schema, sampleSize]);
 
   if (cell.schema === null) return null;
 

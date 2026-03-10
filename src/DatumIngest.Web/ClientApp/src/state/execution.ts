@@ -89,6 +89,85 @@ export interface TabExecution {
 // in a plain Map keyed by tab id.
 const abortByTab = new Map<string, AbortController>();
 
+// Per-tab row-event coalescing buffer. `row` events arrive at whatever
+// rate the NDJSON stream flushes (often many per ms for a wide-table
+// SELECT). Mutating the valtio proxy once per row triggers a re-render
+// per row, which combined with column re-measurement freezes the UI
+// for streams of a few thousand rows. We instead buffer pending rows
+// per (tabId, cellId) here and flush all of them inside a single rAF
+// callback — one mutation, one notification, one render per frame.
+//
+// The buffer lives outside the proxy on purpose (non-serialisable, no
+// reason to deep-wrap). Terminal events (`complete`, `error`,
+// `cell_completed`) flush synchronously so the final state is correct
+// the moment the caller observes it.
+interface PendingRows {
+  cells: Map<string, JsonCell[][]>;
+  rafHandle: number | null;
+}
+const pendingByTab = new Map<string, PendingRows>();
+
+function getPending(tabId: string): PendingRows {
+  let p = pendingByTab.get(tabId);
+  if (!p) {
+    p = { cells: new Map(), rafHandle: null };
+    pendingByTab.set(tabId, p);
+  }
+  return p;
+}
+
+function cancelScheduled(handle: number): void {
+  if (typeof cancelAnimationFrame === 'undefined') {
+    window.clearTimeout(handle);
+  } else {
+    cancelAnimationFrame(handle);
+  }
+}
+
+function flushPendingRows(tabId: string): void {
+  const pending = pendingByTab.get(tabId);
+  if (!pending) return;
+  if (pending.rafHandle !== null) {
+    cancelScheduled(pending.rafHandle);
+    pending.rafHandle = null;
+  }
+  if (pending.cells.size === 0) return;
+  const exec = executionsState.byTabId[tabId];
+  if (!exec) {
+    pending.cells.clear();
+    return;
+  }
+  for (const [cellId, rows] of pending.cells) {
+    const cell = findCell(exec, cellId);
+    if (!cell) continue;
+    // Single bulk push per cell per frame. push(...rows) is fine for the
+    // ~hundreds-per-frame counts we expect; if it ever grew into the
+    // tens of thousands range we'd switch to assigning a fresh array.
+    cell.rows.push(...rows);
+    cell.rowCount = cell.rows.length;
+  }
+  pending.cells.clear();
+}
+
+function scheduleRowFlush(tabId: string): void {
+  const pending = getPending(tabId);
+  if (pending.rafHandle !== null) return;
+  // Fallback to setTimeout when rAF isn't available (Node test
+  // environment); in the browser rAF gives us a natural ~60Hz cadence
+  // that aligns flushes with frame paint.
+  if (typeof requestAnimationFrame === 'undefined') {
+    pending.rafHandle = window.setTimeout(() => {
+      pending.rafHandle = null;
+      flushPendingRows(tabId);
+    }, 16) as unknown as number;
+    return;
+  }
+  pending.rafHandle = requestAnimationFrame(() => {
+    pending.rafHandle = null;
+    flushPendingRows(tabId);
+  });
+}
+
 interface ExecutionsState {
   byTabId: Record<string, TabExecution>;
 }
@@ -231,6 +310,11 @@ export async function runTab(
       }
     }
   } catch (err) {
+    // Make sure any rows still sitting in the rAF buffer land before
+    // we flip status to cancelled/error — otherwise the user sees the
+    // terminal banner pop up with a partial table that's still missing
+    // its last frame of streamed rows.
+    flushPendingRows(tabId);
     const exec = executionsState.byTabId[tabId];
     if (exec) {
       if ((err as { name?: string }).name === 'AbortError') {
@@ -244,6 +328,8 @@ export async function runTab(
     terminated = true;
   } finally {
     abortByTab.delete(tabId);
+    flushPendingRows(tabId);
+    pendingByTab.delete(tabId);
     const exec = executionsState.byTabId[tabId];
     if (exec) {
       if (!terminated && exec.status === 'streaming') {
@@ -297,6 +383,11 @@ export function cancelTab(tabId: string): void {
  */
 export function disposeTabExecution(tabId: string): void {
   cancelTab(tabId);
+  const pending = pendingByTab.get(tabId);
+  if (pending && pending.rafHandle !== null) {
+    cancelScheduled(pending.rafHandle);
+  }
+  pendingByTab.delete(tabId);
   delete executionsState.byTabId[tabId];
 }
 
@@ -305,6 +396,12 @@ export function disposeTabExecution(tabId: string): void {
 function applyEvent(tabId: string, event: StreamEvent): void {
   const exec = executionsState.byTabId[tabId];
   if (!exec) return;
+  // Preserve arrival order: any non-row event that depends on rows
+  // already having landed (truncated/cell_completed flags, error
+  // banners, completion timestamps) must see the buffered rows in
+  // the proxy first. Skipped for `row` events themselves — those
+  // append to the buffer and the rAF tick handles the flush.
+  if (event.type !== 'row') flushPendingRows(tabId);
   switch (event.type) {
     case 'session':
       // Session id is informational — nothing to display yet. Could
@@ -333,10 +430,18 @@ function applyEvent(tabId: string, event: StreamEvent): void {
     }
 
     case 'row': {
-      const cell = findCell(exec, event.cell);
-      if (!cell) break;
-      cell.rows.push(event.cells);
-      cell.rowCount = cell.rows.length;
+      // Hot path. Buffer into the per-tab side map; the rAF flush
+      // applies all rows accumulated this frame in a single proxy
+      // mutation. See `flushPendingRows` / `scheduleRowFlush` above
+      // for the rationale.
+      const pending = getPending(tabId);
+      let buf = pending.cells.get(event.cell);
+      if (!buf) {
+        buf = [];
+        pending.cells.set(event.cell, buf);
+      }
+      buf.push(event.cells);
+      scheduleRowFlush(tabId);
       break;
     }
 
