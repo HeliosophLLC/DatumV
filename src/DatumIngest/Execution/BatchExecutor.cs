@@ -269,9 +269,7 @@ public sealed class BatchExecutor
     /// <summary>
     /// Streaming variant: runs <paramref name="statements"/> and forwards
     /// per-cell lifecycle events to <paramref name="onEvent"/> as each
-    /// statement enters / produces rows / completes. Used by the DevWeb
-    /// streaming endpoint to translate procedural batches into NDJSON
-    /// cell events on the wire.
+    /// statement enters / produces rows / completes.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1780,10 +1778,7 @@ public sealed class BatchExecutor
 /// <strong>Sync-over-async contract.</strong> The sink interface is
 /// synchronous (called from inside the operator's await chain), so the
 /// adapter blocks on the consumer's <c>ValueTask</c> if it doesn't
-/// complete synchronously. DevWeb's NDJSON sink writes synchronously
-/// to the response stream and returns <see cref="ValueTask.CompletedTask"/>,
-/// so the block is a no-op. Other consumers should follow the same
-/// rule for chunk events or buffer.
+/// complete synchronously.
 /// </remarks>
 internal sealed class BatchEventStreamingSink : IModelStreamingSink
 {

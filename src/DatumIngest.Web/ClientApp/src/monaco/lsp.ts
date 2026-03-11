@@ -56,10 +56,9 @@ export async function initLsp(): Promise<void> {
 
 function registerCompletionProvider(): void {
   monaco.languages.registerCompletionItemProvider('sql', {
-    // ' ' and '.' match what DevWeb used. The base set Monaco invokes on
-    // typed identifiers covers the rest; trigger chars are for cases the
-    // automatic invocation doesn't catch (after a space, after a dot
-    // qualifier).
+    // The base set Monaco invokes on typed identifiers covers the rest;
+    // trigger chars are for cases the automatic invocation doesn't catch
+    // (after a space, after a dot qualifier).
     triggerCharacters: [' ', '.'],
 
     async provideCompletionItems(model, position) {

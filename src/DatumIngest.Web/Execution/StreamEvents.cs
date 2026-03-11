@@ -2,8 +2,7 @@ namespace DatumIngest.Web.Execution;
 
 // NDJSON event payloads emitted by the query-stream endpoint. Each event
 // is JSON-serialised + a trailing newline; the client parses a line at a
-// time and switches on the `type` field. Names + shapes mirror DevWeb so
-// the client-side NDJSON parser is identical.
+// time and switches on the `type` field.
 //
 // Cell IDs are monotonic per batch. A "cell" is one statement in a script
 // (a single SELECT, one CALL, one DDL command). The lifecycle is:

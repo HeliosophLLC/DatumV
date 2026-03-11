@@ -92,8 +92,7 @@ public static class ExecutionTracer
     /// </summary>
     /// <remarks>
     /// Designed for hosts that want per-request trace capture without leaving
-    /// trace I/O always-on. The DevWeb host wraps each query in
-    /// <c>BeginCapture</c> / <c>EndCapture</c> so non-trace runs pay zero cost.
+    /// trace I/O always-on. 
     /// </remarks>
     public static StringWriter? BeginCapture()
     {

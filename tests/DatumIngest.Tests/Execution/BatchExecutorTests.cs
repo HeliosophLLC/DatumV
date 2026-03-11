@@ -657,7 +657,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // The struct DataValue assigned to row must carry a TypeId that resolves to
         // a TypeDescriptor with the source query's column names. Without this, downstream
-        // renderers (DevWeb formatter, anywhere a Struct value is displayed) fall back to
+        // renderers (anywhere a Struct value is displayed) fall back to
         // "f0..fN" because they have no schema to consult. Pins the registry-stamping
         // contract in ExecuteForInAsync at the place where the row struct is materialised.
         TableCatalog catalog = CreateCatalog("orders",

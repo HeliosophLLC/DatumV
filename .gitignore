@@ -16,10 +16,6 @@ traces/
 .venv/**
 tests/DatumIngest.Tests/TestResults/**
 
-# DevWeb frontend build outputs
-src/DatumIngest.DevWeb/web/node_modules/
-src/DatumIngest.DevWeb/wwwroot/dist/
-
 # DatumIngest.Web frontend build outputs (Vite owns wwwroot/)
 src/DatumIngest.Web/ClientApp/node_modules/
 src/DatumIngest.Web/wwwroot/

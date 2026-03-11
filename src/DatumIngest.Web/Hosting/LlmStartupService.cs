@@ -71,11 +71,9 @@ internal sealed class LlmStartupService : IHostedService
         return Task.CompletedTask;
     }
 
-    // Map model-catalog name → chat-template family. Mirrors DevWeb's
-    // AssistantService.FamilyForModel; ported here to keep DatumIngest.Web
-    // self-contained. When ModelCatalogEntry gains a TemplateFamily field
-    // (see project_message_graph_design follow-ups), replace this with a
-    // direct lookup.
+    // Map model-catalog name → chat-template family. When ModelCatalogEntry
+    // gains a TemplateFamily field (see project_message_graph_design follow-ups),
+    // replace this with a direct lookup.
     private static LlamaChatTemplate ResolveTemplate(string modelName)
     {
         if (modelName.StartsWith("llama", StringComparison.OrdinalIgnoreCase)) return LlamaChatTemplate.Llama31;

@@ -552,8 +552,8 @@ END
 CALL summarize()
 ```
 
-produces two cells in the host (terminal table or DevWeb pane), just as
-if the user had written the two `SELECT`s inline.
+produces two cells in the host, just as if the user had written the two
+`SELECT`s inline.
 
 ### Introspection — `system.procedures`
 
@@ -616,9 +616,8 @@ DECLARE prompt STRING = 'summarise the last quarter'
 CALL models.llama_3_8b(prompt)
 ```
 
-For LLM models, an `CALL` cell forwards token chunks live to the host
-(terminal or DevWeb pane) as they arrive. See [Models](../models.md) for
-streaming details.
+For LLM models, an `CALL` cell forwards token chunks live to the host as they
+arrive. See [Models](../models.md) for streaming details.
 
 ## Statement Separators
 

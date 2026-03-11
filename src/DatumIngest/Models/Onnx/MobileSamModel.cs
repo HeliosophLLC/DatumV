@@ -232,9 +232,8 @@ public sealed class MobileSamModel : OnnxModel
     /// <c>gridSize = 32</c> takes ≈1k decoder dispatches. Setting
     /// <c>PreferredBatchSize = 1</c> surfaces results to the consumer
     /// row-by-row instead of waiting for the whole upstream batch, which
-    /// makes streaming consumers (<c>CALL</c>, devweb's live pane)
-    /// usable. Prompted mode is fast enough that the default unbatched
-    /// dispatch is fine.
+    /// makes streaming consumers usable. Prompted mode is fast enough
+    /// that the default unbatched dispatch is fine.
     /// </remarks>
     public int? PreferredBatchSize => _mode == MobileSamMode.Everything ? 1 : null;
 

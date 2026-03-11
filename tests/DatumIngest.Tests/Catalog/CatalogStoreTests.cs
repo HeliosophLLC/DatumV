@@ -314,7 +314,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     [Fact]
     public async Task Reopen_ProceduralUdfRegisteredViaBatchExecutor_RoundTripsBody()
     {
-        // Regression test: the batch executor path (used by datum-devweb)
+        // Regression test: the batch executor path
         // parses via ParseBatchWithText and passes per-statement source
         // slices through BatchExecutor → Plan(Statement, sourceText) so
         // the catalog file captures the body verbatim. Without the slice,

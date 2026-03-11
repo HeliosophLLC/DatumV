@@ -14,9 +14,7 @@ namespace DatumIngest.Web.Execution;
 /// <summary>
 /// Runs SQL batches through the <see cref="BatchExecutor"/> and streams
 /// per-cell events (schema, rows, truncation, completion, errors,
-/// model-token chunks) as NDJSON to an output stream. Mirrors DevWeb's
-/// streaming contract one-to-one so the client-side NDJSON parser is
-/// identical to what DevWeb's editor consumes.
+/// model-token chunks) as NDJSON to an output stream.
 /// </summary>
 /// <remarks>
 /// <para>

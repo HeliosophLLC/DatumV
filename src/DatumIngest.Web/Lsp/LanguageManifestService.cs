@@ -14,11 +14,6 @@ namespace DatumIngest.Web.Lsp;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This replaces the DevWeb pattern of refreshing the manifest on every
-/// LSP request. Events fire only on actual DDL commits, so the manifest
-/// stays current without paying a rebuild on every keystroke.
-/// </para>
-/// <para>
 /// <strong>Concurrency.</strong> Rebuilds happen on the DDL caller's
 /// thread (Events fire synchronously, see <see cref="CatalogEvents"/>
 /// remarks). A monitor lock serialises rebuilds with each other so two

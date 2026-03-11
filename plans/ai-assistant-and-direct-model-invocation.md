@@ -4,7 +4,7 @@
 
 Two use cases sharing one architecture:
 
-1. **DevWeb dev-loop**: front-end invokes any model in the catalog directly
+1. **Web dev-loop**: front-end invokes any model in the catalog directly
    (image → depth map, prompt → LLM response, image → caption, etc.) and
    hosts a docked AI assistant panel.
 2. **Production inference orchestration service**: containerized DatumIngest
