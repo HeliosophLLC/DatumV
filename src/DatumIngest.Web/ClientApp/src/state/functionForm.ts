@@ -50,6 +50,15 @@ export interface FunctionFormState {
    * disappears as soon as the user starts addressing it).
    */
   fieldErrors: Record<string, string>;
+  /**
+   * Per-parameter manual kind override, keyed by parameter name. When
+   * set, takes precedence over `declaredKindFor`'s value-driven
+   * inference so the user can force a specific kind from the slot's
+   * accepted set (e.g. typing `100` into `abs(x)` infers `Int8`, but
+   * an Int64 override sticks even as the value changes). Cleared on
+   * function/variant change with the rest of the field state.
+   */
+  kindOverrides: Record<string, string>;
 }
 
 interface FunctionFormStore {
@@ -82,6 +91,7 @@ export function ensureFunctionForm(tabId: string): FunctionFormState {
       textValues: {},
       fileNames: {},
       fieldErrors: {},
+      kindOverrides: {},
     };
     functionFormState.byTabId[tabId] = state;
   }
@@ -111,6 +121,7 @@ export function setFunctionFormSelection(
     state.textValues = {};
     state.fileNames = {};
     state.fieldErrors = {};
+    state.kindOverrides = {};
     filesByTabId.delete(tabId);
   }
   state.selection = selection;
@@ -147,6 +158,24 @@ export function setFunctionFormFile(
     tabFiles.set(paramName, file);
     state.fileNames = { ...state.fileNames, [paramName]: file.name };
   }
+  clearFieldError(state, paramName);
+}
+
+/**
+ * Pins `paramName` to `kind` regardless of what value-driven inference
+ * would otherwise pick. No-op when `kind` already matches the existing
+ * override (so calling this on the currently-selected pill is harmless).
+ * The override survives text edits — clears only on function/variant
+ * change (handled in `setFunctionFormSelection`).
+ */
+export function setFunctionFormKindOverride(
+  tabId: string,
+  paramName: string,
+  kind: string,
+): void {
+  const state = ensureFunctionForm(tabId);
+  if (state.kindOverrides[paramName] === kind) return;
+  state.kindOverrides = { ...state.kindOverrides, [paramName]: kind };
   clearFieldError(state, paramName);
 }
 

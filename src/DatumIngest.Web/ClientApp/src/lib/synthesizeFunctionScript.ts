@@ -107,18 +107,90 @@ function isFormableParameter(p: ScalarFunctionParameterDto): boolean {
   return kinds.some((k) => FORMABLE_INLINE_KINDS.has(k));
 }
 
-// Preference order for inline kinds when a slot accepts more than one.
-// Float64 first so a user can type negative or fractional values into a
-// slot that nominally accepts {UInt8, Int8, …, Float32, Float64} without
-// the form rejecting them at coercion time. Signed widths come before
-// unsigned so negative input doesn't fall through to a UInt slot. Wider
-// types come before narrower so the user can type a value outside the
-// narrow type's range and still have it land somewhere valid.
+// ───────────────────────── Kind inference ─────────────────────────
 //
-// `abs(x)` is the motivating case: the function accepts every numeric
-// kind, AcceptedKinds is in DataKind enum order (UInt8 first), and
-// without a preference list the form would declare a UInt8 slot and
-// reject `-23243434` with "UInt8 must be a non-negative integer."
+// Two ordered tables walked narrowest-first to pick the smallest kind
+// that (a) the slot accepts and (b) the typed value fits in. Integer
+// rows are paired signed-before-unsigned at each width so the common
+// case (`100` → Int8) lands on the signed type; the unsigned variant
+// only wins when the value exceeds the signed half-range (`200` →
+// UInt8 because Int8 maxes at 127).
+//
+// Float32 carries a precision check, not just a range check: a slot
+// that accepts both Float32 and Float64 picks Float32 only when the
+// value round-trips exactly through `Math.fround` — otherwise typing
+// `0.1` into a polymorphic slot would silently lose precision.
+
+interface KindRange {
+  kind: string;
+  min: number;
+  max: number;
+  /** Extra precision check beyond the range. Float32 uses this. */
+  fits?: (n: number) => boolean;
+}
+
+const INTEGER_TABLE: readonly KindRange[] = [
+  { kind: 'Int8',   min: -128,                    max: 127 },
+  { kind: 'UInt8',  min: 0,                       max: 255 },
+  { kind: 'Int16',  min: -32768,                  max: 32767 },
+  { kind: 'UInt16', min: 0,                       max: 65535 },
+  { kind: 'Int32',  min: -2147483648,             max: 2147483647 },
+  { kind: 'UInt32', min: 0,                       max: 4294967295 },
+  { kind: 'Int64',  min: Number.MIN_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER },
+  { kind: 'UInt64', min: 0,                       max: Number.MAX_SAFE_INTEGER },
+];
+
+const FLOAT_TABLE: readonly KindRange[] = [
+  {
+    kind: 'Float32',
+    min: -3.4028235e38,
+    max: 3.4028235e38,
+    // `Math.fround` rounds to the nearest Float32; comparing equal back
+    // to the source means no precision was lost.
+    fits: (n) => Math.fround(n) === n,
+  },
+  {
+    kind: 'Float64',
+    min: -Number.MAX_VALUE,
+    max: Number.MAX_VALUE,
+  },
+];
+
+/**
+ * Picks the narrowest kind in <paramref name="accepted"/> that fits the
+ * typed value. Returns null when the text isn't a finite number, or when
+ * no row in the relevant table is acceptable + fitting. The caller falls
+ * back to the static preference list in that case.
+ *
+ * The integer-vs-float branch is driven by the TEXT, not the parsed JS
+ * Number — `1e3` and `100.` go to the float table even though their
+ * parsed values are integers, because the user's input shape signals
+ * "I want a float."
+ */
+function inferKindFromText(
+  text: string,
+  accepted: ReadonlySet<string>,
+): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return null;
+  const looksFloat = /[.eE]/.test(trimmed);
+  const table = looksFloat ? FLOAT_TABLE : INTEGER_TABLE;
+  for (const row of table) {
+    if (!accepted.has(row.kind)) continue;
+    if (n < row.min || n > row.max) continue;
+    if (row.fits && !row.fits(n)) continue;
+    return row.kind;
+  }
+  return null;
+}
+
+// Fallback preference for empty fields (no user input yet) or values that
+// don't fit any row in the inference tables. Float64 first so a slot that
+// accepts the full numeric family lands on the most permissive type when
+// the user hasn't yet typed anything. The previous static-only behaviour
+// stays as the safety net.
 const INLINE_KIND_PREFERENCE = [
   'Float64',
   'Float32',
@@ -135,25 +207,53 @@ const INLINE_KIND_PREFERENCE = [
 ];
 
 /**
- * Picks the kind to declare a parameter as. For a slot that accepts a
- * single inline kind, that kind is returned unchanged; for multi-kind
- * slots, the most permissive entry from <see cref="INLINE_KIND_PREFERENCE"/>
- * that the slot actually accepts wins. Binary slots return the first
- * accepted binary kind (most accept exactly one).
+ * Picks the kind to declare a parameter as. Resolution order:
+ *
+ *  1. <paramref name="override"/> — when the user clicked a specific
+ *     kind pill, that choice wins as long as the slot still accepts it.
+ *  2. Value-driven inference from <paramref name="currentText"/> — walk
+ *     the INTEGER/FLOAT table narrowest-first (signed before unsigned
+ *     at each width) and pick the first row the slot accepts and the
+ *     value fits.
+ *  3. Static preference fallback (INLINE_KIND_PREFERENCE) — used when
+ *     the field is empty or the text isn't a finite number; lands on
+ *     the most permissive kind the slot accepts.
+ *
+ * Binary slots return the first accepted binary kind (most accept exactly
+ * one).
  */
-export function declaredKindFor(p: ScalarFunctionParameterDto): string {
+export function declaredKindFor(
+  p: ScalarFunctionParameterDto,
+  currentText?: string,
+  override?: string,
+): string {
   const kinds = p.acceptedKinds ?? [];
   if (isBinaryParameter(p)) {
-    // Binary slots: declare as the first accepted binary kind. Most
-    // binary slots accept exactly one; the rare ones that accept e.g.
-    // "Image or Video" fall back to the first.
     return kinds[0] ?? 'Image';
   }
   const accepted = new Set(kinds);
+
+  // Manual override — only honoured when the slot still accepts the
+  // pinned kind. A pin can become stale if the user changes the variant
+  // to one whose accepted set no longer includes the previous choice;
+  // we fall through to inference rather than serve an invalid kind.
+  if (override !== undefined && accepted.has(override)) {
+    return override;
+  }
+
+  // Value-driven inference: a typed number narrows to the smallest
+  // fitting kind so `abs(100)` declares Int8, not Float64. Falls through
+  // when there's no usable text (empty / non-numeric) — the static
+  // preference still picks a permissive default.
+  if (currentText !== undefined) {
+    const inferred = inferKindFromText(currentText, accepted);
+    if (inferred !== null) return inferred;
+  }
+
   for (const k of INLINE_KIND_PREFERENCE) {
     if (accepted.has(k)) return k;
   }
-  // Defensive fallback: the slot accepts a formable kind that's not in
+  // Defensive fallback: the slot accepts a formable kind not in
   // INLINE_KIND_PREFERENCE. `isFormableVariant` already filters out
   // anything outside FORMABLE_INLINE_KINDS, so this is unreachable —
   // but if a new kind lands on the server before this list is updated,
@@ -185,7 +285,14 @@ export function synthesizeFunctionScript(
   for (const p of params) {
     const name = p.name ?? '';
     if (!name) continue;
-    const kind = declaredKindFor(p);
+    // Pass the typed text + any manual override so the DECLARE matches
+    // whatever the user has pinned or, failing that, narrows to the
+    // smallest fitting kind as they type. Binary params don't have a
+    // text value or override; declaredKindFor short-circuits on the
+    // binary branch before reading either.
+    const text = form.textValues[name];
+    const override = form.kindOverrides[name];
+    const kind = declaredKindFor(p, text, override);
     lines.push(`DECLARE ${VARIABLE_PREFIX}${name} ${kind} = $${name};`);
 
     if (isBinaryParameter(p)) {

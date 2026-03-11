@@ -62,7 +62,13 @@ export function buildFunctionRequest(
   for (const param of variant.parameters ?? []) {
     const name = param.name ?? '';
     if (!name) continue;
-    const kind = declaredKindFor(param);
+    // Pull the typed text + override into kind selection so the wire
+    // payload's kind matches whatever the synthesized DECLARE shows in
+    // the preview. Binary params don't have text or overrides;
+    // declaredKindFor short-circuits before reading either.
+    const text = form.textValues[name];
+    const override = form.kindOverrides[name];
+    const kind = declaredKindFor(param, text, override);
 
     if (isBinaryParameter(param)) {
       const file = getFunctionFormFile(tabId, name);

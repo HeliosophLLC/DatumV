@@ -25,12 +25,14 @@ import {
   functionFormState,
   runFunctionTab,
   setFunctionFormFile,
+  setFunctionFormKindOverride,
   setFunctionFormSearch,
   setFunctionFormSelection,
   setFunctionFormText,
 } from '@/state/functionForm';
 import { cancelTab, executionsState } from '@/state/execution';
 import {
+  declaredKindFor,
   isBinaryParameter,
   isFormableVariant,
   synthesizeFunctionScript,
@@ -40,6 +42,7 @@ import {
   isInCheck,
   numericBoundsFor,
 } from '@/lib/parameterCheck';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
 // Execute-Function tab body. Three regions, top-to-bottom:
@@ -160,6 +163,7 @@ export function FunctionForm({ tabId }: { tabId: string }) {
             textValues={formSnap.textValues}
             fileNames={formSnap.fileNames}
             fieldErrors={formSnap.fieldErrors}
+            kindOverrides={formSnap.kindOverrides}
           />
         )}
       </div>
@@ -365,6 +369,7 @@ function FormBody({
   textValues,
   fileNames,
   fieldErrors,
+  kindOverrides,
 }: {
   tabId: string;
   fn: ScalarFunctionDto;
@@ -373,6 +378,7 @@ function FormBody({
   textValues: Record<string, string>;
   fileNames: Record<string, string>;
   fieldErrors: Record<string, string>;
+  kindOverrides: Record<string, string>;
 }) {
   const { t } = useTranslation('query');
   const variants = fn.signatures ?? [];
@@ -443,6 +449,7 @@ function FormBody({
                   text={textValues[p.name ?? ''] ?? ''}
                   fileName={fileNames[p.name ?? ''] ?? null}
                   error={fieldErrors[p.name ?? ''] ?? null}
+                  kindOverride={kindOverrides[p.name ?? '']}
                 />
               ))}
             </div>
@@ -461,6 +468,7 @@ function FormBody({
             variant={variant}
             textValues={textValues}
             fileNames={fileNames}
+            kindOverrides={kindOverrides}
           />
         </section>
       </div>
@@ -537,12 +545,14 @@ function ParameterField({
   text,
   fileName,
   error,
+  kindOverride,
 }: {
   tabId: string;
   param: ScalarFunctionParameterDto;
   text: string;
   fileName: string | null;
   error: string | null;
+  kindOverride: string | undefined;
 }) {
   const { t } = useTranslation('query');
   const name = param.name ?? '';
@@ -551,15 +561,31 @@ function ParameterField({
   // "≥ 0", "one of 416, 640", …). Renders only when the parameter
   // declared a Check.
   const constraintHint = param.check ? describeCheck(param.check) : null;
+  // The kind currently in use: override wins, else value-inferred, else
+  // static fallback. Highlighting the matching pill keeps the UI honest
+  // about which kind the synthesized DECLARE will actually use.
+  const activeKind = binary
+    ? null
+    : declaredKindFor(param, text, kindOverride);
 
   return (
     <div className="flex flex-col gap-1">
       <label
         htmlFor={`fn-${tabId}-${name}`}
-        className="text-foreground flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm"
+        className="text-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
       >
         <span className="font-mono">{name}</span>
-        <span className="text-muted-foreground text-xs">{param.kindLabel}</span>
+        <KindChips
+          kinds={param.acceptedKinds ?? []}
+          acceptsAny={param.acceptsAnyKind === true}
+          fallbackLabel={param.kindLabel ?? ''}
+          activeKind={activeKind}
+          onPick={
+            binary
+              ? undefined
+              : (kind) => setFunctionFormKindOverride(tabId, name, kind)
+          }
+        />
         {param.isOptional && (
           <span className="text-muted-foreground text-xs">
             {t('fnFieldOptional')}
@@ -604,6 +630,90 @@ function ParameterField({
       )}
       {error && <p className="text-destructive text-xs">{error}</p>}
     </div>
+  );
+}
+
+/**
+ * Renders the accepted-kinds set as a row of compact pills. Single-kind
+ * slots show one pill; polymorphic slots (`Any`) show a single "Any"
+ * pill rather than a 15-row dump. Multi-kind slots show one pill per
+ * kind, wrapped onto subsequent label rows when needed.
+ *
+ * When `onPick` is provided, pills become interactive: clicking a pill
+ * pins the parameter to that kind (overriding value-driven inference).
+ * The currently-active kind (`activeKind`) renders highlighted with a
+ * default cursor — it's the current state, no action available; the
+ * other pills render with a pointer cursor on hover and dispatch
+ * `onPick` on click.
+ *
+ * When `onPick` is omitted (binary slots), all pills are static labels.
+ */
+function KindChips({
+  kinds,
+  acceptsAny,
+  fallbackLabel,
+  activeKind,
+  onPick,
+}: {
+  kinds: readonly string[];
+  acceptsAny: boolean;
+  fallbackLabel: string;
+  activeKind: string | null;
+  onPick: ((kind: string) => void) | undefined;
+}) {
+  if (acceptsAny) {
+    return (
+      <Badge variant="muted" className="font-mono text-[10px] leading-none">
+        Any
+      </Badge>
+    );
+  }
+  if (kinds.length === 0) {
+    // No structured kind list AND not Any-kind. Fall back to the textual
+    // label so we still show something rather than a silent gap; in
+    // practice this branch is unreachable because `isFormableVariant`
+    // already filtered out empty-matcher parameters.
+    if (!fallbackLabel) return null;
+    return (
+      <span className="text-muted-foreground text-xs">{fallbackLabel}</span>
+    );
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {kinds.map((k) => (
+        <KindChip
+          key={k}
+          kind={k}
+          selected={k === activeKind}
+          onPick={onPick}
+        />
+      ))}
+    </span>
+  );
+}
+
+function KindChip({
+  kind,
+  selected,
+  onPick,
+}: {
+  kind: string;
+  selected: boolean;
+  onPick: ((kind: string) => void) | undefined;
+}) {
+  const interactive = !!onPick && !selected;
+  return (
+    <Badge
+      variant={selected ? 'default' : 'muted'}
+      onClick={interactive ? () => onPick!(kind) : undefined}
+      className={cn(
+        'font-mono text-[10px] leading-none',
+        interactive && 'cursor-pointer hover:brightness-110',
+        selected && 'cursor-default',
+      )}
+    >
+      {kind}
+    </Badge>
   );
 }
 
@@ -834,11 +944,13 @@ function ScriptPreview({
   variant,
   textValues,
   fileNames,
+  kindOverrides,
 }: {
   fn: ScalarFunctionDto;
   variant: ScalarFunctionSignatureDto | null;
   textValues: Record<string, string>;
   fileNames: Record<string, string>;
+  kindOverrides: Record<string, string>;
 }) {
   const { t } = useTranslation('query');
 
@@ -854,6 +966,7 @@ function ScriptPreview({
     textValues,
     fileNames,
     fieldErrors: {},
+    kindOverrides,
   });
 
   return (
