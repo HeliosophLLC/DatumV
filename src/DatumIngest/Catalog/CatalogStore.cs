@@ -527,7 +527,11 @@ public sealed class CatalogStore
                         p.Name!,
                         p.Type!,
                         p.IsNotNull,
-                        p.Default is null ? null : ParseExpressionFragment(p.Default)))
+                        p.Default is null ? null : ParseExpressionFragment(p.Default),
+                        p.Check is null ? null : ParseExpressionFragment(p.Check),
+                        p.Step,
+                        p.Unit,
+                        p.Description))
                     .ToList();
         }
         catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException)
@@ -593,6 +597,12 @@ public sealed class CatalogStore
                                 Default = p.Default is null
                                     ? null
                                     : QueryExplainer.FormatExpression(p.Default),
+                                Check = p.Check is null
+                                    ? null
+                                    : QueryExplainer.FormatExpression(p.Check),
+                                Step = p.Step,
+                                Unit = p.Unit,
+                                Description = p.Description,
                             })
                             .ToList(),
                         ReturnType = e.ReturnTypeName,
@@ -828,6 +838,24 @@ internal sealed class CatalogFileUdfParameterEntry
     /// <see langword="null"/> when the parameter has no default.
     /// </summary>
     public string? Default { get; set; }
+
+    /// <summary>
+    /// Persisted <c>CHECK</c> expression, rendered as a SQL fragment the
+    /// same way as <see cref="Default"/>. Re-parsed on load and walked by
+    /// <c>ParameterCheckWalker</c> at registration time into a typed
+    /// <c>ParameterCheck</c>. <see langword="null"/> when no constraint
+    /// was declared.
+    /// </summary>
+    public string? Check { get; set; }
+
+    /// <summary>Persisted UI granularity hint (<c>STEP</c> clause).</summary>
+    public decimal? Step { get; set; }
+
+    /// <summary>Persisted display unit (<c>UNIT</c> clause).</summary>
+    public string? Unit { get; set; }
+
+    /// <summary>Persisted per-parameter description (<c>COMMENT</c> clause).</summary>
+    public string? Description { get; set; }
 }
 
 /// <summary>

@@ -58,6 +58,16 @@ public sealed class ProceduralModelFunction : IScalarFunction
     private readonly DataKind _returnKind;
 
     /// <summary>
+    /// One slot per declared parameter, in the same order as
+    /// <see cref="ModelDescriptor.Parameters"/>. Entries are <see langword="null"/>
+    /// when the parameter has no declared <c>CHECK</c> clause; non-null entries
+    /// are the canonicalised typed check evaluated against each bound value
+    /// before the body runs. Resolved once at construction time so per-row
+    /// parameter binding stays a single array lookup.
+    /// </summary>
+    private readonly ParameterCheck?[] _parameterChecks;
+
+    /// <summary>
     /// Creates an adapter for <paramref name="descriptor"/>. The
     /// descriptor's <see cref="ModelDescriptor.ReturnTypeName"/> must
     /// parse to a known <see cref="DataKind"/> — the parser already
@@ -73,6 +83,15 @@ public sealed class ProceduralModelFunction : IScalarFunction
             throw new ArgumentException(
                 $"Model '{descriptor.QualifiedName}': cannot resolve return type '{descriptor.ReturnTypeName}'.",
                 nameof(descriptor));
+        }
+
+        _parameterChecks = new ParameterCheck?[descriptor.Parameters.Count];
+        for (int i = 0; i < descriptor.Parameters.Count; i++)
+        {
+            UdfParameter p = descriptor.Parameters[i];
+            _parameterChecks[i] = p.Check is null
+                ? null
+                : ParameterCheckWalker.Canonicalise(p.Check, p.Name);
         }
     }
 
@@ -282,6 +301,18 @@ public sealed class ProceduralModelFunction : IScalarFunction
             {
                 throw new InvalidOperationException(
                     $"Model '{_descriptor.QualifiedName}' parameter '@{param.Name}' must not be null.");
+            }
+
+            ParameterCheck? check = _parameterChecks[i];
+            if (check is not null)
+            {
+                string? error = check.Validate(value);
+                if (error is not null)
+                {
+                    throw new FunctionArgumentException(
+                        _descriptor.QualifiedName.ToString(),
+                        $"parameter '@{param.Name}': {error}");
+                }
             }
 
             scope.Declare(param.Name, value);

@@ -53,6 +53,15 @@ public sealed class ProceduralUdfFunction : IScalarFunction
     private readonly DataKind _returnKind;
 
     /// <summary>
+    /// One slot per declared parameter, in the same order as
+    /// <see cref="UdfDescriptor.Parameters"/>. Non-null entries are the
+    /// canonicalised typed check evaluated against each bound value
+    /// before the body runs. Resolved once at construction time so per-row
+    /// parameter binding stays a single array lookup.
+    /// </summary>
+    private readonly ParameterCheck?[] _parameterChecks;
+
+    /// <summary>
     /// Creates an adapter for <paramref name="descriptor"/>. The descriptor
     /// must be procedural (<see cref="UdfDescriptor.IsProcedural"/> is
     /// <see langword="true"/>) and carry a non-null
@@ -84,6 +93,15 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             throw new ArgumentException(
                 $"Procedural UDF '{descriptor.Name}': cannot resolve return type '{descriptor.ReturnTypeName}'.",
                 nameof(descriptor));
+        }
+
+        _parameterChecks = new ParameterCheck?[descriptor.Parameters.Count];
+        for (int i = 0; i < descriptor.Parameters.Count; i++)
+        {
+            UdfParameter p = descriptor.Parameters[i];
+            _parameterChecks[i] = p.Check is null
+                ? null
+                : ParameterCheckWalker.Canonicalise(p.Check, p.Name);
         }
     }
 
@@ -283,6 +301,18 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             {
                 throw new InvalidOperationException(
                     $"UDF 'udf.{_descriptor.Name}' parameter '@{param.Name}' must not be null.");
+            }
+
+            ParameterCheck? check = _parameterChecks[i];
+            if (check is not null)
+            {
+                string? error = check.Validate(value);
+                if (error is not null)
+                {
+                    throw new FunctionArgumentException(
+                        _descriptor.Name,
+                        $"parameter '@{param.Name}': {error}");
+                }
             }
 
             scope.Declare(param.Name, value);

@@ -116,7 +116,15 @@ public static class SqlParser
     /// still be used as names in non-expression contexts.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Token<SqlToken>> IdentifierLike =
-        Token.EqualTo(SqlToken.Identifier).Or(Token.EqualTo(SqlToken.TypeKeyword));
+        Token.EqualTo(SqlToken.Identifier)
+            .Or(Token.EqualTo(SqlToken.TypeKeyword))
+            // Parameter-clause keywords (STEP/UNIT/COMMENT/CHECK) — reserved
+            // only on UDF/model parameter declarations but otherwise usable as
+            // bare names (column aliases, SCAN accumulators, etc.).
+            .Or(Token.EqualTo(SqlToken.Step))
+            .Or(Token.EqualTo(SqlToken.Unit))
+            .Or(Token.EqualTo(SqlToken.Comment))
+            .Or(Token.EqualTo(SqlToken.Check));
 
     // ───────────────────── Atomic expressions ─────────────────────
 
@@ -572,7 +580,16 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Primary))
             .Or(Token.EqualTo(SqlToken.If))
             .Or(Token.EqualTo(SqlToken.Analyze))
-            .Or(Token.EqualTo(SqlToken.Reindex));
+            .Or(Token.EqualTo(SqlToken.Reindex))
+            // STEP / UNIT / COMMENT are reserved as parameter-clause keywords
+            // but still permitted as bare function names — existing UDF tests
+            // freely name their helpers `step`/`unit`/`comment`. Letting them
+            // through here preserves that surface without making the keywords
+            // ambiguous inside the parameter parser, which has a fixed sequence.
+            .Or(Token.EqualTo(SqlToken.Step))
+            .Or(Token.EqualTo(SqlToken.Unit))
+            .Or(Token.EqualTo(SqlToken.Comment))
+            .Or(Token.EqualTo(SqlToken.Check));
 
     private static readonly TokenListParser<SqlToken, (string? Namespace, Superpower.Model.Token<SqlToken> Name)> NamespacedFunctionName =
         (from ns in Token.EqualTo(SqlToken.Identifier)
@@ -580,7 +597,14 @@ public static class SqlParser
          from name in FunctionNameToken
          select ((string?)GetTokenText(ns), name))
         .Try()
-        .Or(Token.EqualTo(SqlToken.Identifier).Select(name => ((string?)null, name)));
+        .Or(Token.EqualTo(SqlToken.Identifier).Select(name => ((string?)null, name)))
+        // Allow keyword tokens that can also serve as bare function names
+        // (matches FunctionNameToken's permissive list for the unqualified
+        // case — qualifier path still requires an Identifier namespace).
+        .Or(Token.EqualTo(SqlToken.Step).Select(name => ((string?)null, name)))
+        .Or(Token.EqualTo(SqlToken.Unit).Select(name => ((string?)null, name)))
+        .Or(Token.EqualTo(SqlToken.Comment).Select(name => ((string?)null, name)))
+        .Or(Token.EqualTo(SqlToken.Check).Select(name => ((string?)null, name)));
 
     /// <summary>
     /// Function call: identifier ( [DISTINCT] arg1, arg2, ... [ORDER BY ...] )
@@ -2511,6 +2535,15 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Reindex).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.Generated).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.Always).Select(t => t.ToStringValue()))
+            // STEP / UNIT / COMMENT / CHECK are reserved on UDF / model
+            // parameter declarations but still allowed as bare identifiers
+            // elsewhere (variable names, column names, …); listing them here
+            // keeps the regression-test suites that use `step`/`comment` as
+            // table or column names working.
+            .Or(Token.EqualTo(SqlToken.Step).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Unit).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Comment).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Check).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.TypeKeyword).Select(t => t.ToStringValue()));
 
     /// <summary>
@@ -3245,11 +3278,47 @@ public static class SqlParser
             from expr in SP.Ref(() => ExpressionParser!)
             select expr
         ).AsNullable().OptionalOrDefault()
+        from checkExpr in (
+            from kw in Token.EqualTo(SqlToken.Check)
+            from openParen in Token.EqualTo(SqlToken.LeftParen)
+            from expr in SP.Ref(() => ExpressionParser!)
+            from closeParen in Token.EqualTo(SqlToken.RightParen)
+            select expr
+        ).AsNullable().OptionalOrDefault()
+        from step in (
+            from kw in Token.EqualTo(SqlToken.Step)
+            from token in Token.EqualTo(SqlToken.NumberLiteral)
+            select (decimal?)ParseDecimalLiteral(token.ToStringValue())
+        ).OptionalOrDefault()
+        from unit in (
+            from kw in Token.EqualTo(SqlToken.Unit)
+            from token in Token.EqualTo(SqlToken.StringLiteral)
+            select (string?)UnquoteString(token)
+        ).OptionalOrDefault()
+        from description in (
+            from kw in Token.EqualTo(SqlToken.Comment)
+            from token in Token.EqualTo(SqlToken.StringLiteral)
+            select (string?)UnquoteString(token)
+        ).OptionalOrDefault()
         select new UdfParameter(
             name,
             typeName,
             isNotNull,
-            defaultValue);
+            defaultValue,
+            checkExpr,
+            step,
+            unit,
+            description);
+
+    /// <summary>
+    /// Parses a numeric literal token's text directly to <see cref="decimal"/>.
+    /// Used by parameter-metadata clauses (<c>STEP 0.05</c>) where the
+    /// surrounding parser already constrains the token shape; keeps the
+    /// decimal exact through to the AST so author intent (e.g. <c>0.1</c>)
+    /// survives round-tripping the catalog.
+    /// </summary>
+    private static decimal ParseDecimalLiteral(string text) =>
+        decimal.Parse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Parses <c>OR REPLACE</c> or <c>OR ALTER</c> as an optional overwrite

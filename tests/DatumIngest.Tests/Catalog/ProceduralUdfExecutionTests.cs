@@ -443,4 +443,65 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         Assert.Single(rendered);
         Assert.Equal("rewrite: describe a forest", rendered[0]);
     }
+
+    // ───────────────────── Parameter CHECK clauses (Slice C + D) ─────────────────────
+
+    [Fact]
+    public async Task CheckClause_InRange_Passes()
+    {
+        // BetweenCheck on a procedural UDF parameter — in-range argument
+        // dispatches to the body normally.
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["v"],
+            new object?[] { 0.5f });
+
+        catalog.Plan(
+            "CREATE FUNCTION clamp01(x FLOAT32 CHECK (x BETWEEN 0 AND 1)) " +
+            "RETURNS FLOAT32 BEGIN RETURN x END");
+        IQueryPlan plan = catalog.Plan("SELECT clamp01(v) FROM data");
+
+        List<DataValue> values = await CollectFirstColumnAsync(plan);
+        Assert.Equal(0.5f, values[0].AsFloat32());
+    }
+
+    [Fact]
+    public async Task CheckClause_OutOfRange_ThrowsWithDescriptiveMessage()
+    {
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["v"],
+            new object?[] { 1.5f });
+
+        catalog.Plan(
+            "CREATE FUNCTION clamp01(x FLOAT32 CHECK (x BETWEEN 0 AND 1)) " +
+            "RETURNS FLOAT32 BEGIN RETURN x END");
+        IQueryPlan plan = catalog.Plan("SELECT clamp01(v) FROM data");
+
+        Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+        });
+
+        // Message should mention the parameter, the value, and the bounds.
+        Assert.Contains("clamp01", ex.Message);
+        Assert.Contains("outside", ex.Message);
+    }
+
+    [Fact]
+    public async Task CheckClause_NullValue_PassesWithoutChecking()
+    {
+        // SQL CHECK semantics: NULL passes any check (use IS NOT NULL for
+        // null enforcement). Verifies the dispatch path doesn't reject
+        // legitimate NULLs.
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["v"],
+            new object?[] { null });
+
+        catalog.Plan(
+            "CREATE FUNCTION clamp01(x FLOAT32 CHECK (x BETWEEN 0 AND 1)) " +
+            "RETURNS FLOAT32 BEGIN RETURN x END");
+        IQueryPlan plan = catalog.Plan("SELECT clamp01(v) FROM data");
+
+        List<DataValue> values = await CollectFirstColumnAsync(plan);
+        Assert.True(values[0].IsNull);
+    }
 }

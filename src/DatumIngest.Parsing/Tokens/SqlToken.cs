@@ -528,4 +528,21 @@ public enum SqlToken
 
     /// <summary>A type keyword (Int32, Float64, String, Boolean, etc.) used as a type literal in expressions.</summary>
     TypeKeyword,
+
+    /// <summary>
+    /// The <c>CHECK</c> keyword. Today this appears only on UDF / model
+    /// parameter declarations (<c>@p TYPE [= default] CHECK (expr)</c>) —
+    /// table-level CHECK constraints are not yet implemented but will reuse
+    /// this token when they land.
+    /// </summary>
+    Check,
+
+    /// <summary>The <c>STEP</c> keyword (UI granularity hint on parameter declarations).</summary>
+    Step,
+
+    /// <summary>The <c>UNIT</c> keyword (display-only unit suffix on parameter declarations).</summary>
+    Unit,
+
+    /// <summary>The <c>COMMENT</c> keyword (per-parameter description on UDF / model parameter declarations).</summary>
+    Comment,
 }

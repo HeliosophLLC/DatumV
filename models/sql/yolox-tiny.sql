@@ -7,8 +7,12 @@
 
 CREATE OR REPLACE MODEL yolox_tiny(
   img Image,
-  conf_thresh Float32 = CAST(0.25 AS Float32),
+  conf_thresh Float32 = CAST(0.25 AS Float32)
+    CHECK (conf_thresh BETWEEN 0.0 AND 1.0) STEP 0.05
+    COMMENT 'Objectness × class-score floor applied pre-NMS.',
   iou_thresh  Float32 = CAST(0.45 AS Float32)
+    CHECK (iou_thresh BETWEEN 0.0 AND 1.0) STEP 0.05
+    COMMENT 'NMS IoU overlap threshold.'
 ) RETURNS Array<LabeledDetection>
 IMPLEMENTS LabeledObjectDetector
 USING 'yolox-tiny/yolox_tiny.onnx'

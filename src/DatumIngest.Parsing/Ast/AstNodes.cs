@@ -1633,11 +1633,40 @@ public sealed record ReindexTableStatement(string TableName, string? SchemaName 
 /// <c>IS NOT NULL</c> precedes <c>= expr</c> because <c>expr IS NOT NULL</c>
 /// is itself a valid scalar predicate.
 /// </param>
+/// <param name="Check">
+/// Optional boolean <c>CHECK (expr)</c> clause. The expression's free
+/// variable is the parameter name; at bind time the executor evaluates
+/// the canonical form of the expression against the bound value (typed
+/// shapes — BETWEEN, comparison, IN — short-circuit to direct
+/// <c>ParameterCheck</c> subclasses, anything else is wrapped as a
+/// custom check). Defaults to <see langword="null"/> (no constraint).
+/// </param>
+/// <param name="Step">
+/// UI slider / spinbox granularity hint, surfaced via the function and
+/// model catalogs. Decimal so author-written values like <c>0.05</c>
+/// stay exact through the catalog round-trip. <see langword="null"/>
+/// means "let the UI infer from type + check."
+/// </param>
+/// <param name="Unit">
+/// Display-only unit suffix (<c>"pixels"</c>, <c>"seconds"</c>,
+/// <c>"%"</c>). Has no runtime semantics; consumed only by the catalog
+/// surface. <see langword="null"/> when the parameter is unitless.
+/// </param>
+/// <param name="Description">
+/// One-line per-parameter description for tooltips and hover hints.
+/// The model-level description lives on <c>CreateModelStatement</c>;
+/// this is the per-parameter docstring. <see langword="null"/> when
+/// no description was declared.
+/// </param>
 public sealed record UdfParameter(
     string Name,
     string TypeName,
     bool IsNotNull = false,
-    Expression? Default = null);
+    Expression? Default = null,
+    Expression? Check = null,
+    decimal? Step = null,
+    string? Unit = null,
+    string? Description = null);
 
 /// <summary>
 /// <c>CREATE [OR REPLACE] [PURE] FUNCTION [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL], @p2 TYPE [IS NOT NULL]) [RETURNS TYPE [IS NOT NULL]] {AS expression | BEGIN ... RETURN expr; ... END}</c>

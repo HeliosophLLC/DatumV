@@ -539,7 +539,11 @@ internal sealed class RoutineRegistrar
         for (int i = 0; i < udf.Parameters.Count; i++)
         {
             UdfParameter p = udf.Parameters[i];
-            parameters[i] = new ParameterSpec(p.Name, DataKindMatcher.Any, IsOptional: p.Default is not null);
+            parameters[i] = new ParameterSpec(
+                p.Name,
+                DataKindMatcher.Any,
+                IsOptional: p.Default is not null,
+                Metadata: BuildParameterMetadata(p));
         }
 
         return new FunctionDescriptor(
@@ -1488,7 +1492,11 @@ internal sealed class RoutineRegistrar
         for (int i = 0; i < model.Parameters.Count; i++)
         {
             UdfParameter p = model.Parameters[i];
-            parameters[i] = new ParameterSpec(p.Name, DataKindMatcher.Any, IsOptional: p.Default is not null);
+            parameters[i] = new ParameterSpec(
+                p.Name,
+                DataKindMatcher.Any,
+                IsOptional: p.Default is not null,
+                Metadata: BuildParameterMetadata(p));
         }
 
         return new FunctionDescriptor(
@@ -1659,6 +1667,31 @@ internal sealed class RoutineRegistrar
             default:
                 break;
         }
+    }
+
+    /// <summary>
+    /// Lifts the four UI-facing fields on a <see cref="UdfParameter"/>
+    /// (<c>Check</c>, <c>Step</c>, <c>Unit</c>, <c>Description</c>) into a
+    /// <see cref="ParameterMetadata"/> record, canonicalising the raw
+    /// CHECK expression through <see cref="ParameterCheckWalker"/> so the
+    /// catalog surfaces a typed constraint shape. Returns <see langword="null"/>
+    /// when no field is set — keeps the registered <see cref="ParameterSpec"/>
+    /// clean for parameters without any declared hints.
+    /// </summary>
+    private static ParameterMetadata? BuildParameterMetadata(UdfParameter p)
+    {
+        if (p.Check is null && p.Step is null && p.Unit is null && p.Description is null)
+        {
+            return null;
+        }
+        ParameterCheck? check = p.Check is null
+            ? null
+            : ParameterCheckWalker.Canonicalise(p.Check, p.Name);
+        return new ParameterMetadata(
+            Check: check,
+            Step: p.Step,
+            Unit: p.Unit,
+            Description: p.Description);
     }
 
     // ───────────────────── Shared validation ─────────────────────

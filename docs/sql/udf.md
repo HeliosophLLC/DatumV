@@ -29,12 +29,24 @@ The two shapes coexist in the same catalog and are called identically from SQL.
 ```sql
 -- Macro UDF
 CREATE [OR REPLACE] [PURE] FUNCTION [IF NOT EXISTS] [schema.]name(
-    param TYPE [IS NOT NULL] [= default] [, ...]
+    param TYPE [IS NOT NULL]
+          [= default]
+          [CHECK (boolean_expr)]
+          [STEP decimal_literal]
+          [UNIT 'string_literal']
+          [COMMENT 'string_literal']
+          [, ...]
 ) [RETURNS TYPE [IS NOT NULL]] AS expression;
 
 -- Procedural UDF
 CREATE [OR REPLACE] [PURE] FUNCTION [IF NOT EXISTS] [schema.]name(
-    param TYPE [IS NOT NULL] [= default] [, ...]
+    param TYPE [IS NOT NULL]
+          [= default]
+          [CHECK (boolean_expr)]
+          [STEP decimal_literal]
+          [UNIT 'string_literal']
+          [COMMENT 'string_literal']
+          [, ...]
 ) RETURNS TYPE [IS NOT NULL]
 BEGIN
     [DECLARE var TYPE [= expr] ;]
@@ -283,6 +295,41 @@ SELECT add(2, 10); -- 12
 ```sql
 CREATE FUNCTION shout(name STRING IS NOT NULL = 'world') AS upper(name);
 ```
+
+### Parameter constraints (CHECK)
+
+A parameter may carry a `CHECK (expr)` clause plus optional `STEP`,
+`UNIT`, and `COMMENT` UI hints — same grammar as [CREATE MODEL
+parameters](create-model.md#parameter-constraints-check). The expression's
+free variable is the parameter name; recognised shapes
+(`BETWEEN`, comparisons, `IN`) canonicalise to a typed constraint and
+surface through the function-catalog endpoint with a `kind` discriminator
+so a UI can pick the right widget.
+
+```sql
+CREATE FUNCTION clamp01(t FLOAT32 = 0.5
+    CHECK (t BETWEEN 0.0 AND 1.0)
+    STEP 0.05
+    COMMENT 'Sigmoid-space threshold.')
+RETURNS FLOAT32
+BEGIN RETURN t END
+```
+
+**Enforcement differs by body shape:**
+
+- **Procedural UDFs** — `CHECK` runs at parameter binding, before the body
+  executes. A failing value throws a `FunctionArgumentException` naming
+  the parameter and describing the violation. Identical to `CREATE MODEL`
+  enforcement.
+- **Macro UDFs** — the inliner substitutes the parameter expression at
+  plan time; there's no per-row binding step where the check could fire.
+  The clauses still parse, persist, and surface in `system.udfs` /
+  `/api/functions/scalar` (so the function-executor UI shows the slider /
+  dropdown / tooltip), but the constraint is **descriptive, not
+  enforced**. If you need enforcement, use the procedural body shape.
+
+`NULL` always passes any `CHECK` (mirrors SQL `CHECK`-constraint
+semantics); use `IS NOT NULL` on the parameter for NULL rejection.
 
 ### RETURNS
 

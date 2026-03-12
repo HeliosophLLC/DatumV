@@ -28,6 +28,8 @@
 CREATE OR REPLACE MODEL toxic_bert(
   text      String,
   threshold Float32 = CAST(0.5 AS Float32)
+    CHECK (threshold BETWEEN 0.0 AND 1.0) STEP 0.05
+    COMMENT 'Per-label sigmoid-probability floor for emitting that label.'
 ) RETURNS Array<ScoredLabel>
 IMPLEMENTS LabeledTextMultiClassifier
 USING 'toxic-bert/onnx/model.onnx'

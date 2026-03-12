@@ -341,18 +341,32 @@ DECLARE ids Int64[] = tokenizer.encode(prompt, '/path/tokenizer.json');
 ### Object detection (bounding boxes)
 
 ```sql
-CREATE MODEL detect(img Image) RETURNS Int32[]
+CREATE MODEL detect(img Image,
+                    conf_thresh Float32 = CAST(0.25 AS Float32)
+                        CHECK (conf_thresh BETWEEN 0.0 AND 1.0)
+                        STEP 0.05
+                        COMMENT 'Per-box confidence floor.',
+                    iou_thresh  Float32 = CAST(0.45 AS Float32)
+                        CHECK (iou_thresh BETWEEN 0.0 AND 1.0)
+                        STEP 0.05
+                        COMMENT 'NMS IoU overlap threshold.')
+    RETURNS Int32[]
 USING 'file:///e:/models/yolo/model.onnx'
 AS BEGIN
     DECLARE tensor Float32[] = image_to_tensor_chw(img, [640, 640]);
     DECLARE raw    Float32[] = infer(tensor);
     -- Assume the model returns [N_boxes * 4] flat + [N_boxes] scores
     -- (model-specific layout; check inference.onnx_inspect output).
-    RETURN nms(raw, [...scores...], CAST(0.5 AS Float32))
+    RETURN nms(raw, [...scores...], conf_thresh, iou_thresh)
 END
 ```
 
 `nms` returns the indices of boxes that survive non-maximum suppression.
+The `CHECK` clauses surface as range sliders in the function-executor
+UI and reject out-of-band call sites at runtime before any inference
+work runs — see
+[`docs/sql/create-model.md`](sql/create-model.md#parameter-constraints-check)
+for the full clause grammar.
 
 ### Segmentation (mask to polygon)
 
@@ -476,6 +490,14 @@ declared input shape. Common causes:
   now picks the first output for multi-output sessions (which matches
   HuggingFace optimum convention of listing the primary output first).
   Struct-of-tensors return for multi-output is a follow-up.
+
+### Parameter constraint errors
+
+- *"parameter 'x': value 1.5 is outside [0.0, 1.0]"* — a call site passed
+  a value that fails the parameter's declared `CHECK` clause. The check
+  runs before any inference work — fix the call site or relax the
+  declaration. NULL values always pass any `CHECK`; use `IS NOT NULL` on
+  the parameter to reject NULL.
 
 ### Tokenizer errors
 

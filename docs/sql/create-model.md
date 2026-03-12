@@ -18,7 +18,13 @@ download the file, point `USING` at it, write a one-line body, and
 
 ```sql
 CREATE [OR REPLACE] MODEL [IF NOT EXISTS] [models.]name(
-    param TYPE [IS NOT NULL] [= default] [, ...]
+    param TYPE [IS NOT NULL]
+          [= default]
+          [CHECK (boolean_expr)]
+          [STEP decimal_literal]
+          [UNIT 'string_literal']
+          [COMMENT 'string_literal']
+          [, ...]
 ) RETURNS TYPE [IS NOT NULL]
   USING 'file://...'
 [AS] BEGIN
@@ -324,6 +330,51 @@ CREATE MODEL classify(x Float32[], threshold Float32 = 0.5)
     USING 'file://...'
 AS BEGIN RETURN infer(x) END;
 ```
+
+### Parameter constraints (CHECK)
+
+A parameter may carry a `CHECK (expr)` clause that's enforced on every
+call. The expression's free variable is the parameter name; passing a
+value that fails the check raises a `FunctionArgumentException` with
+the parameter name and the constraint description before the body runs.
+
+```sql
+CREATE MODEL clamp01(t Float32 = CAST(0.25 AS Float32)
+    CHECK (t BETWEEN 0.0 AND 1.0)
+    STEP 0.05
+    UNIT '%'
+    COMMENT 'Sigmoid-space threshold.')
+    RETURNS Float32
+    USING 'file:///opt/datum/models/clamp.onnx'
+AS BEGIN RETURN infer(t) END;
+
+-- t = 1.5 — rejected before any inference work happens:
+-- clamp01(): parameter '@t': value 1.5 is outside [0.0, 1.0].
+SELECT models.clamp01(CAST(1.5 AS Float32)) FROM (VALUES (1)) v(d);
+```
+
+The engine canonicalises recognised expression shapes into a typed
+constraint that's both enforced at runtime and surfaced through the
+function-catalog endpoint (`GET /api/functions/scalar`) as a
+discriminated `kind` field — front-end forms can pick a slider, a
+dropdown, or a generic text input without re-implementing the SQL
+grammar:
+
+| Expression                          | `kind`         | Renders as           |
+|-------------------------------------|----------------|----------------------|
+| `t BETWEEN 0.0 AND 1.0`             | `between`      | Range slider         |
+| `t > 0` / `t >= 0`                  | `greaterThan`  | Bounded spinbox      |
+| `t < 1024` / `t <= 1024`            | `lessThan`     | Bounded spinbox      |
+| `v IN ('small','medium','large')`   | `in`           | Dropdown             |
+| Anything else                       | `custom`       | Text + server-validate |
+
+`NULL` always passes a `CHECK` (mirrors SQL `CHECK`-constraint semantics);
+use `IS NOT NULL` on the parameter declaration if NULL should be rejected.
+
+The optional `STEP`, `UNIT`, and `COMMENT` clauses carry UI hints that
+don't affect runtime behaviour — they ride along on the catalog payload
+so the executor form can pick a granularity, append a suffix, and show a
+per-parameter tooltip.
 
 ### DROP MODEL
 

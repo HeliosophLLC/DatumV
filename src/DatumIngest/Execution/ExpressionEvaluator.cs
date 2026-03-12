@@ -146,6 +146,22 @@ public sealed class ExpressionEvaluator
     private readonly HashSet<FunctionCallExpression> _validatedScalarCalls = new();
 
     /// <summary>
+    /// Per-call-site cache of resolved <see cref="ParameterCheck"/> bindings. Populated
+    /// at the same time as <see cref="_validatedScalarCalls"/> — when we first match a
+    /// call site to a signature variant we walk that variant's <see cref="ParameterSpec"/>
+    /// list and pre-resolve only the slots that carry a <see cref="ParameterCheck"/>.
+    /// An empty array means "matched, no checks to run"; the key being present at all
+    /// signals "no need to re-resolve on subsequent invocations." Per-row dispatch
+    /// just walks the cached array and invokes <see cref="ParameterCheck.Validate"/>.
+    /// </summary>
+    private readonly Dictionary<FunctionCallExpression, ParameterCheckBinding[]> _siteParameterChecks = new();
+
+    /// <summary>
+    /// Resolved binding for a single parameter slot that declared a <see cref="ParameterCheck"/>.
+    /// </summary>
+    private readonly record struct ParameterCheckBinding(int ArgIndex, string ParamName, ParameterCheck Check);
+
+    /// <summary>
     /// Creates an evaluator that can resolve function calls.
     /// </summary>
     /// <param name="functions">Registry of available functions.</param>
@@ -468,6 +484,92 @@ public sealed class ExpressionEvaluator
     /// <see cref="ExpressionEvaluationException"/> so the user sees a clean
     /// <c>[Line N, Col C] foo(): expects ...</c> error.
     /// </summary>
+    /// <summary>
+    /// One-shot resolution of <see cref="ParameterCheck"/> bindings for a call site.
+    /// Walks the registry descriptor, picks the variant whose parameter kinds match
+    /// the arguments, and caches the (slot, name, check) tuples for the parameters
+    /// that declared a check. Empty array is cached when nothing needs checking —
+    /// the per-row dispatch still does a single dictionary lookup but skips the walk.
+    /// </summary>
+    private void ResolveParameterCheckBindings(
+        FunctionCallExpression function,
+        ReadOnlySpan<ValueRef> arguments)
+    {
+        FunctionDescriptor? descriptor = _functions.TryGetScalarDescriptor(function.CallName);
+        if (descriptor is null || descriptor.Signatures.Count == 0)
+        {
+            _siteParameterChecks[function] = Array.Empty<ParameterCheckBinding>();
+            return;
+        }
+
+        DataKind[] kindsBuf = ArrayPool<DataKind>.Shared.Rent(arguments.Length);
+        try
+        {
+            for (int i = 0; i < arguments.Length; i++)
+            {
+                kindsBuf[i] = arguments[i].Kind;
+            }
+            FunctionSignatureVariant? variant = FunctionMetadata.MatchVariant(
+                descriptor.Signatures, kindsBuf.AsSpan(0, arguments.Length));
+            if (variant is null)
+            {
+                // No variant matched — kinds-validation should have already
+                // thrown above; defensive bail.
+                _siteParameterChecks[function] = Array.Empty<ParameterCheckBinding>();
+                return;
+            }
+
+            // Only the fixed-parameter prefix carries per-slot checks; variadic
+            // slots use VariadicSpec which has no Metadata today.
+            int fixedCount = Math.Min(arguments.Length, variant.Parameters.Count);
+            List<ParameterCheckBinding>? bindings = null;
+            for (int i = 0; i < fixedCount; i++)
+            {
+                ParameterCheck? check = variant.Parameters[i].Metadata?.Check;
+                if (check is null) continue;
+                bindings ??= [];
+                bindings.Add(new ParameterCheckBinding(i, variant.Parameters[i].Name, check));
+            }
+
+            _siteParameterChecks[function] = bindings is null
+                ? Array.Empty<ParameterCheckBinding>()
+                : bindings.ToArray();
+        }
+        finally
+        {
+            ArrayPool<DataKind>.Shared.Return(kindsBuf);
+        }
+    }
+
+    /// <summary>
+    /// Per-row validation pass over the cached <see cref="ParameterCheck"/> bindings.
+    /// Throws an <see cref="ExpressionEvaluationException"/> on the first failure,
+    /// prefixed with the call site's line/column so the editor underlines the right
+    /// place. NULL values pass any check (mirrors SQL <c>CHECK</c> semantics).
+    /// </summary>
+    private static void ValidateParameterChecksOrThrow(
+        FunctionCallExpression function,
+        ParameterCheckBinding[] bindings,
+        ReadOnlySpan<ValueRef> arguments)
+    {
+        for (int i = 0; i < bindings.Length; i++)
+        {
+            ParameterCheckBinding binding = bindings[i];
+            if (binding.ArgIndex >= arguments.Length) continue;
+            string? error = binding.Check.Validate(arguments[binding.ArgIndex]);
+            if (error is null) continue;
+
+            SourceSpan? span = function.Span;
+            string prefix = span is not null
+                ? $"[Line {span.Line}, Col {span.Column}] "
+                : string.Empty;
+            FunctionArgumentException inner = new(
+                function.CallName,
+                $"parameter '{binding.ParamName}': {error}");
+            throw new ExpressionEvaluationException($"{prefix}{inner.Message}", span, inner);
+        }
+    }
+
     private static void ValidateScalarCallSiteOrThrow(
         IScalarFunction scalarFunction,
         FunctionCallExpression function,
@@ -780,6 +882,13 @@ public sealed class ExpressionEvaluator
             if (_validatedScalarCalls.Add(function))
             {
                 ValidateScalarCallSiteOrThrow(scalarFunction, function, arguments.AsSpan(0, argumentCount));
+                ResolveParameterCheckBindings(function, arguments.AsSpan(0, argumentCount));
+            }
+
+            if (_siteParameterChecks.TryGetValue(function, out ParameterCheckBinding[]? bindings)
+                && bindings.Length > 0)
+            {
+                ValidateParameterChecksOrThrow(function, bindings, arguments.AsSpan(0, argumentCount));
             }
 
             ValueRef result = await scalarFunction.ExecuteAsync(arguments.AsMemory(0, argumentCount), frame, cancellationToken).ConfigureAwait(false);

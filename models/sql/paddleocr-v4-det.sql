@@ -30,10 +30,18 @@
 
 CREATE OR REPLACE MODEL paddleocr_v4_det(
   img                 Image,
-  pixel_threshold     Float32 = CAST(0.3 AS Float32),
-  box_score_threshold Float32 = CAST(0.6 AS Float32),
-  min_size            Int32   = 3,
+  pixel_threshold     Float32 = CAST(0.3 AS Float32)
+    CHECK (pixel_threshold BETWEEN 0.0 AND 1.0) STEP 0.05
+    COMMENT 'Per-pixel probability cutoff for the binary mask.',
+  box_score_threshold Float32 = CAST(0.6 AS Float32)
+    CHECK (box_score_threshold BETWEEN 0.0 AND 1.0) STEP 0.05
+    COMMENT 'Mean-probability score floor for keeping a detected region.',
+  min_size            Int32   = 3
+    CHECK (min_size >= 1) UNIT 'pixels'
+    COMMENT 'Smallest accepted side length of a detected box (in resized space).',
   unclip_ratio        Float32 = CAST(1.5 AS Float32)
+    CHECK (unclip_ratio > 0.0) STEP 0.1
+    COMMENT 'DBNet polygon-expansion factor; higher values keep more margin.'
 ) RETURNS Array<RegionScore>
 IMPLEMENTS TextDetector
 USING 'paddleocr-v4-det/ch_PP-OCRv4_det.onnx'

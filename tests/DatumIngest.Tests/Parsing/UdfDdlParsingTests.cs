@@ -593,4 +593,81 @@ public class UdfDdlParsingTests : ServiceTestBase
         Assert.NotNull(stmt.Span);
         Assert.Equal(1, stmt.Span!.Column);
     }
+
+    // ───────────────────── Parameter metadata clauses (CHECK / STEP / UNIT / COMMENT) ─────────────────────
+
+    [Fact]
+    public void Create_ParamWithCheckBetween_PopulatesCheckExpression()
+    {
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION clamp01(x FLOAT32 CHECK (x BETWEEN 0 AND 1)) AS x");
+
+        Assert.Single(create.Parameters);
+        UdfParameter p = create.Parameters[0];
+        Assert.NotNull(p.Check);
+        Assert.IsType<BetweenExpression>(p.Check);
+    }
+
+    [Fact]
+    public void Create_ParamWithDefaultAndCheck_CarriesBoth()
+    {
+        // CHECK must come AFTER the default in source order — exercises the
+        // parser's clause ordering.
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION clamp01(x FLOAT32 = 0.5 CHECK (x BETWEEN 0 AND 1)) AS x");
+
+        UdfParameter p = create.Parameters[0];
+        Assert.NotNull(p.Default);
+        Assert.NotNull(p.Check);
+    }
+
+    [Fact]
+    public void Create_ParamWithStep_ParsesDecimalExactly()
+    {
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION grid(t FLOAT32 STEP 0.05) AS t");
+
+        Assert.Equal(0.05m, create.Parameters[0].Step);
+    }
+
+    [Fact]
+    public void Create_ParamWithUnitAndComment_RoundTripsStringValues()
+    {
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION resize(w INT32 UNIT 'pixels' COMMENT 'target width') AS w");
+
+        UdfParameter p = create.Parameters[0];
+        Assert.Equal("pixels", p.Unit);
+        Assert.Equal("target width", p.Description);
+    }
+
+    [Fact]
+    public void Create_ParamWithAllClauses_PreservesOrderAndValues()
+    {
+        // Full stack: type + default + CHECK + STEP + UNIT + COMMENT.
+        // Validates the parser's left-to-right consumption.
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION conf(t FLOAT32 = 0.25 " +
+            "CHECK (t BETWEEN 0 AND 1) STEP 0.01 UNIT '%' COMMENT 'confidence threshold') AS t");
+
+        UdfParameter p = create.Parameters[0];
+        Assert.NotNull(p.Default);
+        Assert.NotNull(p.Check);
+        Assert.Equal(0.01m, p.Step);
+        Assert.Equal("%", p.Unit);
+        Assert.Equal("confidence threshold", p.Description);
+    }
+
+    [Fact]
+    public void Create_ParamWithoutMetadata_LeavesFieldsNull()
+    {
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION identity_fn(x INT32) AS x");
+
+        UdfParameter p = create.Parameters[0];
+        Assert.Null(p.Check);
+        Assert.Null(p.Step);
+        Assert.Null(p.Unit);
+        Assert.Null(p.Description);
+    }
 }
