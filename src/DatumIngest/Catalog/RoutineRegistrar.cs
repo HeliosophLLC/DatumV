@@ -723,6 +723,15 @@ internal sealed class RoutineRegistrar
         // the registries.
         ValidateBodyReturnShape(create);
 
+        // Slice-D registration-time pre-flight: a CHECK that the parameter's
+        // default value already violates should fail CREATE MODEL, not wait
+        // for the first call site that happens to omit the override. Runs
+        // before the (expensive) ONNX dispatcher load.
+        await ValidateDefaultsAgainstChecksAsync(
+            create.Parameters,
+            $"CREATE MODEL {create.Name}",
+            CancellationToken.None).ConfigureAwait(false);
+
         QualifiedName qn = new(ModelsSchema, create.Name);
 
         if (create.IfNotExists && _catalog.DeclaredModels.TryGet(qn, out _))
@@ -1666,6 +1675,75 @@ internal sealed class RoutineRegistrar
                     $"Nested DROP PROCEDURE '{dropProc.Name}' is not allowed inside a procedure body.");
             default:
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Registration-time pre-flight: evaluates each parameter's default
+    /// expression once against an empty scope and runs the canonicalised
+    /// <c>CHECK</c> against it, so an out-of-range default (e.g. a typo'd
+    /// <c>0.25</c> that should have been <c>0.025</c>) surfaces as a
+    /// CREATE-time error instead of waiting for the first call site that
+    /// happens to omit the override. Skips parameters without a default
+    /// (nothing to evaluate) or without a check (nothing to enforce).
+    /// </summary>
+    /// <remarks>
+    /// Parameter defaults in real catalog SQL are constant expressions —
+    /// <c>CAST(0.25 AS Float32)</c>, literals, simple arithmetic — so the
+    /// evaluator never blocks. The evaluator is built against the same
+    /// <see cref="FunctionRegistry"/> the body uses, so a default that
+    /// invokes a registered function (rare, but legal) still resolves.
+    /// </remarks>
+    private async ValueTask ValidateDefaultsAgainstChecksAsync(
+        IReadOnlyList<UdfParameter> parameters,
+        string contextLabel,
+        CancellationToken cancellationToken)
+    {
+        Arena scratch = new();
+        MemoryAccountant accountant = new();
+        ExpressionEvaluator evaluator = new(
+            _functions,
+            meter: null,
+            store: scratch,
+            sidecarRegistry: _catalog.SidecarRegistry,
+            accountant: accountant);
+        EvaluationFrame frame = new(
+            Row.Empty,
+            scratch,
+            scratch,
+            accountant,
+            outerRow: null,
+            sidecarRegistry: _catalog.SidecarRegistry,
+            types: null);
+
+        for (int i = 0; i < parameters.Count; i++)
+        {
+            UdfParameter p = parameters[i];
+            if (p.Default is null || p.Check is null) continue;
+
+            ParameterCheck typed = ParameterCheckWalker.Canonicalise(p.Check, p.Name);
+            ValueRef defaultValue;
+            try
+            {
+                defaultValue = await evaluator.EvaluateAsValueRefAsync(p.Default, frame, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Don't pretend a broken default is a constraint failure — surface
+                // the underlying evaluation error with the registration context
+                // wrapped around it so the caller knows which CREATE site to fix.
+                throw new InvalidOperationException(
+                    $"{contextLabel}: default expression for parameter '@{p.Name}' failed to evaluate at registration time. {ex.Message}",
+                    ex);
+            }
+
+            string? error = typed.Validate(defaultValue);
+            if (error is not null)
+            {
+                throw new FunctionArgumentException(
+                    contextLabel,
+                    $"default value for parameter '@{p.Name}' violates CHECK: {error}");
+            }
         }
     }
 

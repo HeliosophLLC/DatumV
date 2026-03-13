@@ -416,6 +416,65 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     }
 
     [Fact]
+    public void CreateModel_DefaultInsideCheckRange_RegistersCleanly()
+    {
+        // Sanity check: a default value that satisfies the CHECK lets
+        // CREATE MODEL succeed normally. Without this, the failing-default
+        // test below wouldn't prove anything about the new behaviour.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL clamp_ok(t Float32 = CAST(0.5 AS Float32) "
+            + $"CHECK (t BETWEEN 0.0 AND 1.0)) RETURNS Float32 "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN t END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "clamp_ok"), out ModelDescriptor? _));
+    }
+
+    [Fact]
+    public void CreateModel_DefaultViolatesCheck_FailsRegistration()
+    {
+        // The default 1.5 is outside [0, 1]; the new registration-time
+        // pre-flight should catch this and reject CREATE MODEL with a
+        // recognisable error mentioning both the parameter and the bounds.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+
+        // FunctionArgumentException is an ExecutionException subclass — same
+        // boundary semantics as the kind validation that fires before it.
+        DatumIngest.Functions.FunctionArgumentException ex = Assert.Throws<DatumIngest.Functions.FunctionArgumentException>(
+            () => catalog.Plan(
+                $"CREATE MODEL bad_default(t Float32 = CAST(1.5 AS Float32) "
+                + $"CHECK (t BETWEEN 0.0 AND 1.0)) RETURNS Float32 "
+                + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN t END"));
+
+        Assert.Contains("bad_default", ex.Message);
+        Assert.Contains("@t", ex.Message);
+        Assert.Contains("CHECK", ex.Message);
+        // ONNX dispatcher should NOT have been hit — pre-flight runs first.
+        Assert.Equal(0, dispatcher.LoadCallCount);
+        // Registry should not have been touched either.
+        Assert.False(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "bad_default"), out _));
+    }
+
+    [Fact]
+    public void CreateModel_DefaultPassesAndNoCheck_StillRegisters()
+    {
+        // A parameter with a default but no CHECK skips the pre-flight
+        // entirely — nothing to enforce. Guards against the validator
+        // accidentally rejecting unconstrained-default parameters.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL no_check(t Float32 = CAST(42.0 AS Float32)) RETURNS Float32 "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN t END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "no_check"), out _));
+    }
+
+    [Fact]
     public void CreateModel_Implements_MismatchedParamKind_Throws()
     {
         // TextGenerator requires String; this declares Int32 input.
