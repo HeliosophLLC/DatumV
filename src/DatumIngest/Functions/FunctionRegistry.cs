@@ -577,6 +577,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Math.CeilFunction>();
         registry.RegisterScalarAlias<Scalar.Math.CeilFunction>("ceiling");
         registry.RegisterScalar<Scalar.Math.SqrtFunction>();
+        registry.RegisterScalar<Scalar.Math.LeastFunction>();
+        registry.RegisterScalar<Scalar.Math.GreatestFunction>();
 
         registry.RegisterScalar<Scalar.RandomFunction>();
         registry.RegisterScalar<Scalar.HashSplitFunction>();
