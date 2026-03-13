@@ -2,6 +2,7 @@ import type {
   ScalarFunctionDto,
   ScalarFunctionParameterDto,
   ScalarFunctionSignatureDto,
+  ScalarFunctionVariadicDto,
 } from '@/api/generated/openapi-client';
 import type { FunctionFormState } from '@/state/functionForm';
 
@@ -82,18 +83,20 @@ const FORMABLE_INLINE_KINDS = new Set([
 ]);
 
 /**
- * True when every parameter of `variant` can be rendered in the v1
- * function form — i.e. is binary (file upload) OR matches at least one
- * formable inline kind. Variants with Struct / Array<Struct> / other
- * un-form-able kinds get greyed out in the overload picker.
+ * True when every parameter of `variant` (fixed + trailing variadic)
+ * can be rendered in the v2 function form — i.e. is binary (file
+ * upload) OR matches at least one formable inline kind, AND any
+ * trailing variadic is itself formable. Variants with Struct /
+ * Array&lt;Struct&gt; / other un-formable kinds get greyed out in the
+ * overload picker.
  */
 export function isFormableVariant(variant: ScalarFunctionSignatureDto): boolean {
-  // Variadics aren't form-able in v1 — the variable-arity input control
-  // is its own design problem. Variant is rejected if it has one.
-  if (variant.variadic) return false;
   const params = variant.parameters ?? [];
   for (const p of params) {
     if (!isFormableParameter(p)) return false;
+  }
+  if (variant.variadic && !isFormableVariadic(variant.variadic)) {
+    return false;
   }
   return true;
 }
@@ -104,6 +107,24 @@ function isFormableParameter(p: ScalarFunctionParameterDto): boolean {
   if (isBinaryParameter(p)) return true;
   const kinds = p.acceptedKinds ?? [];
   if (kinds.length === 0) return false; // Any-kind or empty matcher — see isBinaryParameter.
+  return kinds.some((k) => FORMABLE_INLINE_KINDS.has(k));
+}
+
+/**
+ * Mirror of `isFormableParameter` for the trailing variadic slot:
+ * binary kinds always pass; inline kinds must include at least one
+ * formable kind; `Array`-only variadics are out.
+ */
+function isFormableVariadic(v: ScalarFunctionVariadicDto): boolean {
+  if (v.arrayMatch === 'Array') return false;
+  const kinds = v.acceptedKinds ?? [];
+  if (kinds.length === 0) {
+    // Any-kind variadic — defer in v2 along with polymorphic fixed
+    // slots. (`coalesce` lands here; we'd need a kind picker that
+    // applies across all occurrences.)
+    return false;
+  }
+  if (kinds.every((k) => BINARY_KINDS.has(k))) return true;
   return kinds.some((k) => FORMABLE_INLINE_KINDS.has(k));
 }
 
@@ -315,11 +336,52 @@ export function synthesizeFunctionScript(
     }
   }
 
-  const callArgs = params
+  // Variadic expansion. Each occurrence becomes its own DECLARE with a
+  // synthetic `${variadicName}_${i}` $-binding name; the same key is
+  // used as the field id throughout the form so text/file/override
+  // lookups stay direct. Slot count defaults to `max(1, minOccurrences)`
+  // — there's always at least one row to type into.
+  const variadicCallArgs: string[] = [];
+  const variadicSpec = variant.variadic ?? null;
+  if (variadicSpec) {
+    const variadicName = variadicSpec.name ?? '';
+    const minOccurrences = variadicSpec.minOccurrences ?? 0;
+    const count = explicitVariadicCount(form, variadicName, minOccurrences);
+    const isBinary = isBinaryVariadic(variadicSpec);
+    for (let i = 0; i < count; i++) {
+      const slotKey = `${variadicName}_${i}`;
+      const text = form.textValues[slotKey];
+      const override = form.kindOverrides[slotKey];
+      const slotKind = declaredKindForVariadicSlot(variadicSpec, text, override);
+      lines.push(`DECLARE ${VARIABLE_PREFIX}${slotKey} ${slotKind} = $${slotKey};`);
+      variadicCallArgs.push(`${VARIABLE_PREFIX}${slotKey}`);
+      if (isBinary) {
+        fields.push({
+          paramName: slotKey,
+          missing: !form.fileNames[slotKey],
+          isBinary: true,
+        });
+      } else {
+        const v = text ?? '';
+        fields.push({
+          paramName: slotKey,
+          // Variadic slots are required up to minOccurrences; trailing
+          // user-added slots can be left blank without blocking Run,
+          // but the user-visible expectation is "if you added a row,
+          // fill it." Mark each row required so an unfilled add gets
+          // surfaced rather than silently dropped at the call site.
+          missing: v.trim().length === 0,
+          isBinary: false,
+        });
+      }
+    }
+  }
+
+  const fixedCallArgs = params
     .map((p) => p.name ?? '')
     .filter((n) => n.length > 0)
-    .map((n) => `${VARIABLE_PREFIX}${n}`)
-    .join(', ');
+    .map((n) => `${VARIABLE_PREFIX}${n}`);
+  const callArgs = [...fixedCallArgs, ...variadicCallArgs].join(', ');
   const fnSchema = fn.schema ?? 'system';
   const fnName = fn.name ?? '';
   lines.push(`SELECT ${fnSchema}.${fnName}(${callArgs});`);
@@ -329,4 +391,56 @@ export function synthesizeFunctionScript(
     fields,
     ready: fields.every((f) => !f.missing),
   };
+}
+
+/**
+ * Internal mirror of `variadicSlotCount` in state/functionForm; reading
+ * from the proxy directly would create a state ↔ lib circular import,
+ * so the synth helper inlines the same default rule.
+ */
+function explicitVariadicCount(
+  form: FunctionFormState,
+  variadicName: string,
+  minOccurrences: number,
+): number {
+  const explicit = form.variadicCounts[variadicName];
+  if (typeof explicit === 'number') return explicit;
+  return Math.max(1, minOccurrences);
+}
+
+/**
+ * Picks the declared kind for a single variadic occurrence — same shape
+ * as `declaredKindFor` for a fixed parameter, but reads the matcher off
+ * a <see cref="ScalarFunctionVariadicDto"/> instead of a
+ * <see cref="ScalarFunctionParameterDto"/>. The override and value-driven
+ * inference paths reuse the same helpers.
+ */
+export function declaredKindForVariadicSlot(
+  v: ScalarFunctionVariadicDto,
+  currentText?: string,
+  override?: string,
+): string {
+  const kinds = v.acceptedKinds ?? [];
+  if (isBinaryVariadic(v)) {
+    return kinds[0] ?? 'Image';
+  }
+  const accepted = new Set(kinds);
+  if (override !== undefined && accepted.has(override)) {
+    return override;
+  }
+  if (currentText !== undefined) {
+    const inferred = inferKindFromText(currentText, accepted);
+    if (inferred !== null) return inferred;
+  }
+  for (const k of INLINE_KIND_PREFERENCE) {
+    if (accepted.has(k)) return k;
+  }
+  return kinds[0] ?? 'String';
+}
+
+/** True when every kind a variadic accepts is a multipart-binary kind. */
+export function isBinaryVariadic(v: ScalarFunctionVariadicDto): boolean {
+  const kinds = v.acceptedKinds ?? [];
+  if (kinds.length === 0) return false;
+  return kinds.every((k) => BINARY_KINDS.has(k));
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import {
@@ -7,6 +7,7 @@ import {
   FunctionSquare,
   Paperclip,
   Play,
+  Plus,
   Square,
   X,
 } from 'lucide-react';
@@ -21,22 +22,31 @@ import {
   toggleCategoryExpanded,
 } from '@/state/functionCatalog';
 import {
+  addVariadicSlot,
   ensureFunctionForm,
   functionFormState,
+  removeVariadicSlot,
   runFunctionTab,
   setFunctionFormFile,
   setFunctionFormKindOverride,
   setFunctionFormSearch,
   setFunctionFormSelection,
   setFunctionFormText,
+  setFunctionFormVariadicKindOverride,
+  variadicSlotCount,
 } from '@/state/functionForm';
 import { cancelTab, executionsState } from '@/state/execution';
 import {
   declaredKindFor,
+  declaredKindForVariadicSlot,
   isBinaryParameter,
+  isBinaryVariadic,
   isFormableVariant,
   synthesizeFunctionScript,
 } from '@/lib/synthesizeFunctionScript';
+import type {
+  ScalarFunctionVariadicDto,
+} from '@/api/generated/openapi-client';
 import {
   describeCheck,
   isInCheck,
@@ -164,6 +174,7 @@ export function FunctionForm({ tabId }: { tabId: string }) {
             fileNames={formSnap.fileNames}
             fieldErrors={formSnap.fieldErrors}
             kindOverrides={formSnap.kindOverrides}
+            variadicCounts={formSnap.variadicCounts}
           />
         )}
       </div>
@@ -370,6 +381,7 @@ function FormBody({
   fileNames,
   fieldErrors,
   kindOverrides,
+  variadicCounts,
 }: {
   tabId: string;
   fn: ScalarFunctionDto;
@@ -379,6 +391,7 @@ function FormBody({
   fileNames: Record<string, string>;
   fieldErrors: Record<string, string>;
   kindOverrides: Record<string, string>;
+  variadicCounts: Record<string, number>;
 }) {
   const { t } = useTranslation('query');
   const variants = fn.signatures ?? [];
@@ -452,6 +465,17 @@ function FormBody({
                   kindOverride={kindOverrides[p.name ?? '']}
                 />
               ))}
+              {variant.variadic && (
+                <VariadicField
+                  tabId={tabId}
+                  variadic={variant.variadic}
+                  textValues={textValues}
+                  fileNames={fileNames}
+                  fieldErrors={fieldErrors}
+                  kindOverrides={kindOverrides}
+                  variadicCounts={variadicCounts}
+                />
+              )}
             </div>
           )}
         </section>
@@ -469,6 +493,7 @@ function FormBody({
             textValues={textValues}
             fileNames={fileNames}
             kindOverrides={kindOverrides}
+            variadicCounts={variadicCounts}
           />
         </section>
       </div>
@@ -717,6 +742,253 @@ function KindChip({
   );
 }
 
+/**
+ * Trailing variadic slot — renders as a "label + (shared kind chip row
+ * when same-kind-required) + N value rows + Add button" group. Each
+ * row is the same input control a fixed parameter would render, but
+ * keyed by `${variadicName}_${index}` and accompanied by a remove
+ * button (suppressed when removing would drop count below 1 — there's
+ * always at least one row).
+ *
+ * For `requireSameKindAcrossArgs` variadics, a single kind-chip row
+ * sits above the slots; clicking a chip broadcasts the override to
+ * every occurrence so the synthesized DECLAREs stay in lock-step.
+ * Non-same-kind variants get per-slot chips inside each row instead.
+ */
+function VariadicField({
+  tabId,
+  variadic,
+  textValues,
+  fileNames,
+  fieldErrors,
+  kindOverrides,
+  variadicCounts,
+}: {
+  tabId: string;
+  variadic: ScalarFunctionVariadicDto;
+  textValues: Record<string, string>;
+  fileNames: Record<string, string>;
+  fieldErrors: Record<string, string>;
+  kindOverrides: Record<string, string>;
+  variadicCounts: Record<string, number>;
+}) {
+  const { t } = useTranslation('query');
+  const name = variadic.name ?? '';
+  const minOccurrences = variadic.minOccurrences ?? 0;
+  const count = variadicSlotCount(
+    { textValues, fileNames, fieldErrors, kindOverrides, variadicCounts,
+      search: '', selection: null },
+    name,
+    minOccurrences,
+  );
+  const sameKind = variadic.requireSameKindAcrossArgs === true;
+  const binary = isBinaryVariadic(variadic);
+
+  // The shared kind chip row (same-kind case) renders once and
+  // broadcasts clicks across every slot. The "selected" chip mirrors
+  // slot 0's resolved kind — slots 1..N either follow via broadcast or
+  // already share a kind via inference, so slot 0 is the authoritative
+  // anchor.
+  const slot0Text = textValues[`${name}_0`];
+  const slot0Override = kindOverrides[`${name}_0`];
+  const sharedActiveKind =
+    !binary && sameKind
+      ? declaredKindForVariadicSlot(variadic, slot0Text, slot0Override)
+      : null;
+
+  // Auto-focus the freshly-added slot. The state mutation lands on the
+  // proxy synchronously in `addVariadicSlot`, but the new input doesn't
+  // mount until the next render — so we record the index here and look
+  // it up by DOM id from a passive effect, which fires after layout.
+  // Cleared once focus has been applied so a later re-render (e.g. text
+  // edit on the new slot) doesn't snap focus back.
+  const [pendingFocusIndex, setPendingFocusIndex] = useState<number | null>(null);
+  useEffect(() => {
+    if (pendingFocusIndex === null) return;
+    const el = document.getElementById(
+      `fn-${tabId}-${name}_${pendingFocusIndex}`,
+    );
+    if (el && el instanceof HTMLElement) {
+      el.focus();
+    }
+    setPendingFocusIndex(null);
+  }, [pendingFocusIndex, tabId, name]);
+
+  function onAdd() {
+    // `count` here is the pre-add count; the new slot's index equals it.
+    addVariadicSlot(tabId, name, minOccurrences);
+    setPendingFocusIndex(count);
+  }
+  function onRemove(i: number) {
+    removeVariadicSlot(tabId, name, minOccurrences, i);
+  }
+  function onSharedKindPick(kind: string) {
+    // Read the current count fresh; this handler doesn't need to be
+    // closed over because the broadcaster walks 0..count itself.
+    setFunctionFormVariadicKindOverride(tabId, name, count, kind);
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <span className="font-mono">{name}</span>
+        {sameKind ? (
+          <KindChips
+            kinds={variadic.acceptedKinds ?? []}
+            acceptsAny={variadic.acceptsAnyKind === true}
+            fallbackLabel={variadic.kindLabel ?? ''}
+            activeKind={sharedActiveKind}
+            onPick={binary ? undefined : onSharedKindPick}
+          />
+        ) : (
+          // Non-same-kind: show the matcher label statically. Per-slot
+          // chips live inside each row below.
+          <span className="text-muted-foreground text-xs">
+            {variadic.kindLabel}
+          </span>
+        )}
+        {minOccurrences > 0 && (
+          <span className="text-muted-foreground/80 font-mono text-xs">
+            {t('fnVariadicMin', { count: minOccurrences })}
+          </span>
+        )}
+      </div>
+      {Array.from({ length: count }, (_, i) => {
+        const slotKey = `${name}_${i}`;
+        return (
+          <VariadicSlot
+            key={slotKey}
+            tabId={tabId}
+            variadic={variadic}
+            slotKey={slotKey}
+            slotIndex={i}
+            text={textValues[slotKey] ?? ''}
+            fileName={fileNames[slotKey] ?? null}
+            error={fieldErrors[slotKey] ?? null}
+            kindOverride={kindOverrides[slotKey]}
+            showKindChips={!sameKind && !binary}
+            canRemove={count > 1}
+            onRemove={() => onRemove(i)}
+          />
+        );
+      })}
+      <button
+        type="button"
+        onClick={onAdd}
+        className={cn(
+          'text-muted-foreground hover:text-foreground inline-flex w-fit cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs',
+          'hover:bg-muted outline-none focus:ring-2 focus:ring-ring',
+        )}
+      >
+        <Plus className="size-3.5" />
+        {t('fnVariadicAdd')}
+      </button>
+    </div>
+  );
+}
+
+function VariadicSlot({
+  tabId,
+  variadic,
+  slotKey,
+  slotIndex,
+  text,
+  fileName,
+  error,
+  kindOverride,
+  showKindChips,
+  canRemove,
+  onRemove,
+}: {
+  tabId: string;
+  variadic: ScalarFunctionVariadicDto;
+  slotKey: string;
+  slotIndex: number;
+  text: string;
+  fileName: string | null;
+  error: string | null;
+  kindOverride: string | undefined;
+  showKindChips: boolean;
+  canRemove: boolean;
+  onRemove: () => void;
+}) {
+  const { t } = useTranslation('query');
+  const binary = isBinaryVariadic(variadic);
+  const activeKind = binary
+    ? null
+    : declaredKindForVariadicSlot(variadic, text, kindOverride);
+
+  // VariadicSlot reuses the same input controls as a fixed parameter
+  // but doesn't have a real `ScalarFunctionParameterDto` to feed
+  // `InlineField` / `BinaryField`. We pass a synthetic one built from
+  // the variadic's matcher fields; the inputs only read kind metadata
+  // off it so the synthesised shape is enough.
+  const syntheticParam = {
+    name: slotKey,
+    kindLabel: variadic.kindLabel,
+    acceptedKinds: variadic.acceptedKinds,
+    acceptsAnyKind: variadic.acceptsAnyKind,
+    isOptional: false,
+    arrayMatch: variadic.arrayMatch,
+    // Variadics don't carry per-slot checks / units / descriptions;
+    // those would live on each occurrence's declaration, not on the
+    // variadic. Leave them unset.
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-start gap-2">
+        <span className="text-muted-foreground/80 mt-1.5 w-6 shrink-0 text-right font-mono text-[10px]">
+          {slotIndex}
+        </span>
+        <div className="min-w-0 flex-1 flex-col">
+          {binary ? (
+            <BinaryField tabId={tabId} paramName={slotKey} fileName={fileName} />
+          ) : (
+            <InlineField
+              id={`fn-${tabId}-${slotKey}`}
+              tabId={tabId}
+              paramName={slotKey}
+              text={text}
+              param={syntheticParam}
+            />
+          )}
+        </div>
+        {showKindChips && (
+          <div className="shrink-0">
+            <KindChips
+              kinds={variadic.acceptedKinds ?? []}
+              acceptsAny={variadic.acceptsAnyKind === true}
+              fallbackLabel={variadic.kindLabel ?? ''}
+              activeKind={activeKind}
+              onPick={
+                binary
+                  ? undefined
+                  : (kind) => setFunctionFormKindOverride(tabId, slotKey, kind)
+              }
+            />
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={!canRemove}
+          aria-label={t('fnVariadicRemove')}
+          title={t('fnVariadicRemove')}
+          className={cn(
+            'text-muted-foreground hover:text-foreground rounded-xs p-1 transition-colors',
+            'outline-none focus:ring-2 focus:ring-ring',
+            canRemove ? 'cursor-pointer hover:bg-muted' : 'cursor-not-allowed opacity-30',
+          )}
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+      {error && <p className="text-destructive pl-8 text-xs">{error}</p>}
+    </div>
+  );
+}
+
 function RunButton({ tabId, disabled }: { tabId: string; disabled: boolean }) {
   const { t } = useTranslation('query');
   const { byTabId } = useSnapshot(executionsState);
@@ -945,12 +1217,14 @@ function ScriptPreview({
   textValues,
   fileNames,
   kindOverrides,
+  variadicCounts,
 }: {
   fn: ScalarFunctionDto;
   variant: ScalarFunctionSignatureDto | null;
   textValues: Record<string, string>;
   fileNames: Record<string, string>;
   kindOverrides: Record<string, string>;
+  variadicCounts: Record<string, number>;
 }) {
   const { t } = useTranslation('query');
 
@@ -967,6 +1241,7 @@ function ScriptPreview({
     fileNames,
     fieldErrors: {},
     kindOverrides,
+    variadicCounts,
   });
 
   return (

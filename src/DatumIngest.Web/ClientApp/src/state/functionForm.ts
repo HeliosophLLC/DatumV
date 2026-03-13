@@ -57,8 +57,25 @@ export interface FunctionFormState {
    * accepted set (e.g. typing `100` into `abs(x)` infers `Int8`, but
    * an Int64 override sticks even as the value changes). Cleared on
    * function/variant change with the rest of the field state.
+   *
+   * For variadic slots, per-occurrence keys (`${name}_${i}`) hold each
+   * slot's override. `RequireSameKindAcrossArgs` variadics broadcast a
+   * single click to every slot at action time, so all keys end up with
+   * the same value — no separate "shared" entry to keep in sync.
    */
   kindOverrides: Record<string, string>;
+  /**
+   * Per-variadic occurrence count, keyed by the variadic's name. Drives
+   * the number of input rows the form renders for the trailing variadic
+   * slot. Missing entry → `max(1, minOccurrences)` so there's always at
+   * least one row visible to type into.
+   *
+   * Per-slot values live in `textValues` / `fileNames` / `fieldErrors`
+   * under synthetic keys `${variadicName}_${index}` (0-based). Removing
+   * a slot at index `i` shifts every entry with index `> i` down by one
+   * so keys stay contiguous.
+   */
+  variadicCounts: Record<string, number>;
 }
 
 interface FunctionFormStore {
@@ -92,6 +109,7 @@ export function ensureFunctionForm(tabId: string): FunctionFormState {
       fileNames: {},
       fieldErrors: {},
       kindOverrides: {},
+      variadicCounts: {},
     };
     functionFormState.byTabId[tabId] = state;
   }
@@ -122,6 +140,7 @@ export function setFunctionFormSelection(
     state.fileNames = {};
     state.fieldErrors = {};
     state.kindOverrides = {};
+    state.variadicCounts = {};
     filesByTabId.delete(tabId);
   }
   state.selection = selection;
@@ -177,6 +196,143 @@ export function setFunctionFormKindOverride(
   if (state.kindOverrides[paramName] === kind) return;
   state.kindOverrides = { ...state.kindOverrides, [paramName]: kind };
   clearFieldError(state, paramName);
+}
+
+/**
+ * Broadcasts <paramref name="kind"/> across every slot of a
+ * same-kind-required variadic. Mirrors `setFunctionFormKindOverride` but
+ * fans out to `${variadicName}_0`, `${variadicName}_1`, … so the kind
+ * stays consistent across all occurrences even if the slot count
+ * changes later.
+ */
+export function setFunctionFormVariadicKindOverride(
+  tabId: string,
+  variadicName: string,
+  count: number,
+  kind: string,
+): void {
+  const state = ensureFunctionForm(tabId);
+  const next = { ...state.kindOverrides };
+  let changed = false;
+  for (let i = 0; i < count; i++) {
+    const key = `${variadicName}_${i}`;
+    if (next[key] !== kind) {
+      next[key] = kind;
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  state.kindOverrides = next;
+}
+
+/**
+ * Returns the number of slots currently rendered for <paramref name="variadicName"/>.
+ * Defaults to `max(1, minOccurrences)` so a fresh variadic always has at
+ * least one input row to type into — the user can remove it if the
+ * function genuinely allows zero arguments.
+ */
+export function variadicSlotCount(
+  form: FunctionFormState,
+  variadicName: string,
+  minOccurrences: number,
+): number {
+  const explicit = form.variadicCounts[variadicName];
+  if (typeof explicit === 'number') return explicit;
+  return Math.max(1, minOccurrences);
+}
+
+/** Appends one new occurrence to the variadic slot list. */
+export function addVariadicSlot(
+  tabId: string,
+  variadicName: string,
+  minOccurrences: number,
+): void {
+  const state = ensureFunctionForm(tabId);
+  const current = variadicSlotCount(state, variadicName, minOccurrences);
+  // Copy the override (if any) from slot 0 forward so a same-kind
+  // variadic's new slot inherits the existing pin. Slot-0 lookup also
+  // works for non-same-kind because the broadcast helper above already
+  // wrote slot 0 when the user clicked the chip.
+  const newKey = `${variadicName}_${current}`;
+  const slot0 = state.kindOverrides[`${variadicName}_0`];
+  if (slot0 !== undefined && state.kindOverrides[newKey] === undefined) {
+    state.kindOverrides = { ...state.kindOverrides, [newKey]: slot0 };
+  }
+  state.variadicCounts = {
+    ...state.variadicCounts,
+    [variadicName]: current + 1,
+  };
+}
+
+/**
+ * Removes the occurrence at <paramref name="index"/>, shifting every
+ * higher-indexed slot's values + filenames + errors + override down by
+ * one so keys stay contiguous. No-op when the slot doesn't exist or
+ * removing it would drop count below 1 (we always keep at least one
+ * row visible).
+ */
+export function removeVariadicSlot(
+  tabId: string,
+  variadicName: string,
+  minOccurrences: number,
+  index: number,
+): void {
+  const state = ensureFunctionForm(tabId);
+  const current = variadicSlotCount(state, variadicName, minOccurrences);
+  if (index < 0 || index >= current) return;
+  if (current <= 1) return;
+
+  const shiftedTextValues = { ...state.textValues };
+  const shiftedFileNames = { ...state.fileNames };
+  const shiftedFieldErrors = { ...state.fieldErrors };
+  const shiftedKindOverrides = { ...state.kindOverrides };
+  for (let i = index; i < current - 1; i++) {
+    const from = `${variadicName}_${i + 1}`;
+    const to = `${variadicName}_${i}`;
+    copyOrDelete(shiftedTextValues, from, to);
+    copyOrDelete(shiftedFileNames, from, to);
+    copyOrDelete(shiftedFieldErrors, from, to);
+    copyOrDelete(shiftedKindOverrides, from, to);
+  }
+  // Drop the now-orphan trailing key for each map.
+  const tailKey = `${variadicName}_${current - 1}`;
+  delete shiftedTextValues[tailKey];
+  delete shiftedFileNames[tailKey];
+  delete shiftedFieldErrors[tailKey];
+  delete shiftedKindOverrides[tailKey];
+
+  // Shift File handles too — file map mirrors fileNames but isn't
+  // proxied.
+  const tabFiles = filesByTabId.get(tabId);
+  if (tabFiles) {
+    for (let i = index; i < current - 1; i++) {
+      const from = `${variadicName}_${i + 1}`;
+      const to = `${variadicName}_${i}`;
+      const f = tabFiles.get(from);
+      if (f !== undefined) tabFiles.set(to, f);
+      else tabFiles.delete(to);
+    }
+    tabFiles.delete(tailKey);
+  }
+
+  state.textValues = shiftedTextValues;
+  state.fileNames = shiftedFileNames;
+  state.fieldErrors = shiftedFieldErrors;
+  state.kindOverrides = shiftedKindOverrides;
+  state.variadicCounts = {
+    ...state.variadicCounts,
+    [variadicName]: current - 1,
+  };
+}
+
+function copyOrDelete(
+  map: Record<string, string>,
+  from: string,
+  to: string,
+): void {
+  const v = map[from];
+  if (v === undefined) delete map[to];
+  else map[to] = v;
 }
 
 function clearFieldError(state: FunctionFormState, paramName: string): void {
