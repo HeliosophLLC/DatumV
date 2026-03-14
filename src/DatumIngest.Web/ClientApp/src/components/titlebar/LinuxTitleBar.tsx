@@ -2,7 +2,6 @@ import { useSnapshot } from 'valtio';
 import { useTranslation } from 'react-i18next';
 import { Minus, Square, Copy, X } from 'lucide-react';
 import { windowState, minimize, toggleMaximize, close } from '@/state/window';
-import { AppNav } from '@/components/nav/AppNav';
 import { cn } from '@/lib/utils';
 
 // GNOME-flavored: 36px tall, title centered, controls right. GNOME tends to
@@ -18,9 +17,6 @@ export function LinuxTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
 
   return (
     <header className="app-drag relative flex h-9 items-center border-b bg-background select-none">
-      <div className="px-3">
-        <AppNav dialog={dialog} />
-      </div>
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
         {t('app.name')}
       </div>

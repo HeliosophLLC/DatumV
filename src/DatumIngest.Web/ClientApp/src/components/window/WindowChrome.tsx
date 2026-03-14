@@ -1,4 +1,5 @@
 import { TitleBar } from '@/components/titlebar/TitleBar';
+import { AppDock } from '@/components/nav/AppDock';
 
 // Outer chrome shared across every Electron window in the app:
 //
@@ -17,9 +18,10 @@ import { TitleBar } from '@/components/titlebar/TitleBar';
 // Electron's `frame: false` keeps the Windows thickFrame border for
 // native edge resize. No JS gesture wiring required.
 //
-// What we DELIBERATELY don't include:
-//   - SideNav (main-window-only — dialogs don't have nav)
-//   - Any content-aware routing (children decide what to render)
+// AppDock (the VS Code-style activity bar) self-gates on `dialog` and
+// `isTornOutWindow`, so it renders nothing in modal/torn-out windows
+// even though it's mounted unconditionally here.
+//
 // `dialog` hides minimize/maximize on the titlebar — modal child windows
 // shouldn't be minimizable (Electron minimizes them to the taskbar where
 // they can't be restored because the parent owns focus), and maximize on a
@@ -34,7 +36,10 @@ export function WindowChrome({
   return (
     <div className="bg-background text-foreground border-border flex h-screen flex-col border">
       <TitleBar dialog={dialog} />
-      <div className="flex flex-1 overflow-hidden">{children}</div>
+      <div className="flex flex-1 overflow-hidden">
+        <AppDock dialog={dialog} />
+        {children}
+      </div>
     </div>
   );
 }

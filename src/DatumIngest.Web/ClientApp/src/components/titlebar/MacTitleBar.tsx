@@ -1,6 +1,5 @@
 import { useTranslation } from 'react-i18next';
 import { minimize, toggleMaximize, close } from '@/state/window';
-import { AppNav } from '@/components/nav/AppNav';
 
 // macOS-flavored: 28px tall, three circular "traffic lights" left
 // (close/minimize/zoom), title centered to the full bar (not the remaining
@@ -38,7 +37,6 @@ export function MacTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
           </>
         )}
       </div>
-      <AppNav dialog={dialog} />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
         {t('app.name')}
       </div>
