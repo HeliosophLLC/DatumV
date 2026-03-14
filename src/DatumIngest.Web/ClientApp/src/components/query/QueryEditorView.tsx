@@ -38,6 +38,10 @@ export function QueryEditorView() {
       if (!leaf || leaf.activeTabId === null) return;
       const tab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
       if (!tab) return;
+      // Models tab has nothing to run — let the keystroke fall through
+      // without preventDefault so the user's browser shortcut (e.g.
+      // refresh on F5) isn't suppressed without doing anything in return.
+      if (tab.kind === 'models') return;
       e.preventDefault();
       if (tab.kind === 'function') {
         void runFunctionTab(leaf.activeTabId);

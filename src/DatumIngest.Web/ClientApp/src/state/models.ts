@@ -28,10 +28,12 @@ interface ModelsState {
   loading: boolean;
   error: string | null;
   tier: TierFilter;
-  // Single-select task; null = all tasks.
-  task: string | null;
-  // Multi-select tags; empty = no tag filter (matches every model).
-  tags: string[];
+  // Free-text search term; matched against id + displayName + description.
+  // Empty string = no search filter.
+  query: string;
+  // Id of the model whose detail pane is showing in the right column.
+  // Null = no selection (show the empty/prompt state).
+  selectedId: string | null;
 }
 
 export const modelsState = proxy<ModelsState>({
@@ -39,8 +41,8 @@ export const modelsState = proxy<ModelsState>({
   loading: false,
   error: null,
   tier: 'all',
-  task: null,
-  tags: [],
+  query: '',
+  selectedId: null,
 });
 
 export async function loadModelsCatalog(): Promise<void> {
@@ -62,23 +64,17 @@ export function setTier(tier: TierFilter): void {
   modelsState.tier = tier;
 }
 
-export function setTask(task: string | null): void {
-  modelsState.task = task;
+export function setQuery(query: string): void {
+  modelsState.query = query;
 }
 
-export function toggleTag(tag: string): void {
-  const idx = modelsState.tags.indexOf(tag);
-  if (idx === -1) {
-    modelsState.tags.push(tag);
-  } else {
-    modelsState.tags.splice(idx, 1);
-  }
+export function setSelectedId(id: string | null): void {
+  modelsState.selectedId = id;
 }
 
 export function clearFilters(): void {
   modelsState.tier = 'all';
-  modelsState.task = null;
-  modelsState.tags = [];
+  modelsState.query = '';
 }
 
 // Pure filter — applied at render time. Doesn't mutate state. Caller passes
@@ -86,42 +82,24 @@ export function clearFilters(): void {
 export function filterModels(
   manifest: CatalogManifestSnapshot,
   tier: TierFilter,
-  task: string | null,
-  tags: readonly string[],
+  query: string,
 ): readonly CatalogModelSnapshot[] {
   const models = manifest.models ?? [];
   const tierIds = tier === 'all'
     ? null
     : new Set(manifest.tiers?.[tier] ?? []);
+  const needle = query.trim().toLowerCase();
 
   return models.filter((m) => {
     if (tierIds && !tierIds.has(m.id ?? '')) return false;
-    if (task !== null && m.task !== task) return false;
-    if (tags.length > 0) {
-      const modelTags = m.tags ?? [];
-      // ALL selected tags must be present (AND semantics) — feels more
-      // useful than OR for narrowing a long list.
-      for (const required of tags) {
-        if (!modelTags.includes(required)) return false;
-      }
+    if (needle.length > 0) {
+      const hay = [
+        m.id ?? '',
+        m.displayName ?? '',
+        m.description ?? '',
+      ].join(' ').toLowerCase();
+      if (!hay.includes(needle)) return false;
     }
     return true;
   });
-}
-
-// Derive the unique task / tag sets from the manifest for filter chips.
-export function collectTasks(manifest: CatalogManifestSnapshot): readonly string[] {
-  const set = new Set<string>();
-  for (const m of manifest.models ?? []) {
-    if (m.task) set.add(m.task);
-  }
-  return [...set].sort();
-}
-
-export function collectTags(manifest: CatalogManifestSnapshot): readonly string[] {
-  const set = new Set<string>();
-  for (const m of manifest.models ?? []) {
-    for (const t of m.tags ?? []) set.add(t);
-  }
-  return [...set].sort();
 }

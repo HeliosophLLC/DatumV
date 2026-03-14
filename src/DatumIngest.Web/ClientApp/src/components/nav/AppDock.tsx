@@ -1,6 +1,6 @@
 import { useSnapshot } from 'valtio';
 import { useTranslation } from 'react-i18next';
-import { MessageSquare, SquareTerminal, Boxes, Settings as SettingsIcon } from 'lucide-react';
+import { Settings as SettingsIcon } from 'lucide-react';
 import { navState, setView, type ActiveView } from '@/state/nav';
 import { isTornOutWindow } from '@/state/tabs';
 import { cn } from '@/lib/utils';
@@ -17,14 +17,13 @@ import { cn } from '@/lib/utils';
 
 interface DockItem {
   id: ActiveView;
-  icon: typeof MessageSquare;
+  icon: typeof SettingsIcon;
 }
 
-const PRIMARY: readonly DockItem[] = [
-  { id: 'chat', icon: MessageSquare },
-  { id: 'query', icon: SquareTerminal },
-  { id: 'models', icon: Boxes },
-];
+// Top of the dock — reserved for future navigator surfaces (Tables,
+// Files, etc.). Empty for now; the spacer below pushes Settings to the
+// bottom regardless.
+const PRIMARY: readonly DockItem[] = [];
 
 const UTILITY: readonly DockItem[] = [
   { id: 'settings', icon: SettingsIcon },
@@ -54,10 +53,13 @@ function DockButton({ item, active }: { item: DockItem; active: boolean }) {
   const { t } = useTranslation();
   const Icon = item.icon;
   const label = t(`nav.${item.id}`);
+  // Active dock item toggles back to the workspace (query/tab editor)
+  // — VS Code-style activity bar behavior: clicking the highlighted
+  // item closes its surface and returns to the editor.
   return (
     <button
       type="button"
-      onClick={() => setView(item.id)}
+      onClick={() => setView(active ? 'query' : item.id)}
       aria-current={active ? 'page' : undefined}
       aria-label={label}
       title={label}

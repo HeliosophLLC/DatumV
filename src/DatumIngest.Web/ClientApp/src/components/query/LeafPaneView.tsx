@@ -19,6 +19,7 @@ import { settingsState } from '@/state/settings';
 import { disposeTabExecution } from '@/state/execution';
 import { disposeFunctionForm } from '@/state/functionForm';
 import { FunctionForm } from './FunctionForm';
+import { ModelsView } from '@/components/models/ModelsView';
 import {
   setActiveEditor,
   clearActiveEditorForLeaf,
@@ -319,7 +320,15 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
       className="relative flex h-full flex-col overflow-hidden"
     >
       <TabStrip leafId={leafId} />
-      {activeTab !== null && activeTabKind === 'function' ? (
+      {activeTab !== null && activeTabKind === 'models' ? (
+        // Pinned Models tab — no editor + results split, no Monaco. The
+        // wrapping body div keeps the drag-and-drop overlay region the
+        // same size as the editor branch so the user can still drop
+        // other tabs onto this leaf.
+        <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">
+          <ModelsView />
+        </div>
+      ) : activeTab !== null && activeTabKind === 'function' ? (
         <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">
           <ResizablePanelGroup
             orientation="vertical"

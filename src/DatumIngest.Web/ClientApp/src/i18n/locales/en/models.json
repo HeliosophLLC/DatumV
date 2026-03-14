@@ -4,15 +4,16 @@
   "error": "Couldn't load the model catalog: {message}",
   "empty": "No models match the current filters.",
   "filters": {
-    "tier": "Tier",
     "tierAll": "All",
     "tierStarter": "Starter",
     "tierRecommended": "Recommended",
-    "task": "Task",
-    "taskAll": "All tasks",
-    "tags": "Tags",
     "clear": "Clear filters"
   },
+  "search": {
+    "placeholder": "Search models"
+  },
+  "selectPrompt": "Select a model on the left to see details.",
+  "noMatches": "No models match your search.",
   "card": {
     "size": "~{size} MB",
     "attributions": "Credits:",

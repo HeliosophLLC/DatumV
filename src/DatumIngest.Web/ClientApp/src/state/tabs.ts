@@ -20,22 +20,27 @@ import { proxy, subscribe } from 'valtio';
  * Discriminator for what the tab body renders.
  *  - `sql`: Monaco editor + results pane (the original tab shape).
  *  - `function`: a kind-driven form for invoking a single scalar function
- *    with named-parameter inputs (file upload for binary kinds). PR 3
- *    ships the discriminator + a placeholder body; PR 4–5 build out the
- *    form and wire execution.
+ *    with named-parameter inputs (file upload for binary kinds).
+ *  - `models`: the model catalog browser. Always present as a pinned tab
+ *    in the main window's first leaf — see `MODELS_TAB_ID` + the boot
+ *    path's `ensureModelsTab` injection.
  */
-export type TabKind = 'sql' | 'function';
+export type TabKind = 'sql' | 'function' | 'models';
+
+/**
+ * Well-known id for the permanent Models tab. Stable across boots so the
+ * persisted tree round-trips without duplication, and so guards
+ * (`closeTab`, `moveTab`, `splitLeaf`) can short-circuit by id check as
+ * well as by `pinned`.
+ */
+export const MODELS_TAB_ID = 'pinned-models';
 
 export interface Tab {
   /** Stable identifier; used as Monaco model key and execution-state key. */
   id: string;
   /** Display name on the strip. Defaults to "Untitled-N" until renamed. */
   title: string;
-  /**
-   * What this tab represents. Older persisted state predates the field —
-   * the rehydrate path defaults to `'sql'` so existing workspaces keep
-   * working without migration.
-   */
+  /** What this tab represents. */
   kind: TabKind;
   /** Current editor text. Mirrors the Monaco model when the editor is mounted. */
   sql: string;
@@ -47,6 +52,13 @@ export interface Tab {
    * so the layout survives reload.
    */
   editorSize?: number;
+  /**
+   * Pinned tabs can't be closed, moved between leaves, split off, or
+   * dragged out into a torn-out window. Used today only by the permanent
+   * Models tab; the field is general so future pinned surfaces (e.g.
+   * "Tables", "Files") can reuse the same guards.
+   */
+  pinned?: boolean;
 }
 
 export interface LeafPane {
@@ -190,14 +202,10 @@ function findParent(
 interface PersistedTab {
   id: string;
   title: string;
-  /**
-   * Tab kind. Absent in workspaces persisted before PR 3 — the rehydrate
-   * path defaults missing/unknown values to `'sql'` so existing layouts
-   * load unchanged.
-   */
   kind?: TabKind;
   sql: string;
   editorSize?: number;
+  pinned?: boolean;
 }
 
 type PersistedNode =
@@ -248,7 +256,12 @@ function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
         tabs.push({
           id: t.id,
           title: t.title,
-          kind: t.kind === 'function' ? 'function' : 'sql',
+          kind:
+            t.kind === 'function'
+              ? 'function'
+              : t.kind === 'models'
+                ? 'models'
+                : 'sql',
           sql: t.sql,
           dirty: false,
           editorSize:
@@ -257,6 +270,7 @@ function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
             t.editorSize < 100
               ? t.editorSize
               : undefined,
+          pinned: t.pinned === true ? true : undefined,
         });
       }
     }
@@ -339,6 +353,9 @@ export const isTornOutWindow: boolean = readSeedFromHash() !== null;
 function createInitialState(): PanesState {
   const seed = readSeedFromHash();
   if (seed) {
+    // Torn-out windows are single-purpose editor surfaces — no pinned
+    // tabs, no AppDock chrome. The Models tab lives only in the main
+    // window.
     const leaf: LeafPane = {
       kind: 'leaf',
       id: newLeafId(),
@@ -349,10 +366,15 @@ function createInitialState(): PanesState {
   }
 
   const persisted = readPersisted();
-  if (persisted) return persisted;
+  if (persisted) {
+    ensureModelsTab(persisted);
+    return persisted;
+  }
 
-  // First-ever boot: one leaf with one Untitled-1 tab.
-  const firstTab: Tab = {
+  // First-ever boot: pinned Models tab + one Untitled-1 SQL tab.
+  // Models takes index 0 so it sits to the LEFT of user-created tabs on
+  // the strip, matching VS Code's "pinned tabs at the front" convention.
+  const firstUntitled: Tab = {
     id: newTabId(),
     title: 'Untitled-1',
     kind: 'sql',
@@ -362,10 +384,38 @@ function createInitialState(): PanesState {
   const leaf: LeafPane = {
     kind: 'leaf',
     id: newLeafId(),
-    tabs: [firstTab],
-    activeTabId: firstTab.id,
+    tabs: [createModelsTab(), firstUntitled],
+    activeTabId: firstUntitled.id,
   };
   return { root: leaf, focusedLeafId: leaf.id };
+}
+
+function createModelsTab(): Tab {
+  return {
+    id: MODELS_TAB_ID,
+    title: 'Models',
+    kind: 'models',
+    sql: '',
+    dirty: false,
+    pinned: true,
+  };
+}
+
+/**
+ * Walk the tree; if no Models tab is present, prepend a fresh one to
+ * the first leaf. Idempotent on already-Models-bearing trees. Called on
+ * every boot from persisted state so the invariant "main window always
+ * has Models in the first leaf, at index 0" holds even if the user's
+ * persisted localStorage predates this feature.
+ */
+function ensureModelsTab(state: PanesState): void {
+  let found = false;
+  forEachTab(state.root, (t) => {
+    if (t.kind === 'models') found = true;
+  });
+  if (found) return;
+  const first = firstLeaf(state.root);
+  first.tabs.unshift(createModelsTab());
 }
 
 export const panesState = proxy<PanesState>(createInitialState());
@@ -426,6 +476,7 @@ function serializeNode(node: PaneNode): PersistedNode {
         kind: t.kind,
         sql: t.sql,
         editorSize: t.editorSize,
+        pinned: t.pinned,
       })),
       activeTabId: node.activeTabId,
     };
@@ -477,6 +528,17 @@ function replaceNode(target: PaneNode, replacement: PaneNode): void {
  * untouched — an empty root is allowed (renders a blank surface, see
  * QueryEditorView's null-activeTab branch).
  */
+/**
+ * Returns the smallest valid insert index for a non-pinned tab — i.e.
+ * the count of leading pinned tabs in `leaf`. Used to clamp drop targets
+ * so the user can't drop a regular tab to the left of Models.
+ */
+function firstNonPinnedIndex(leaf: LeafPane): number {
+  let i = 0;
+  while (i < leaf.tabs.length && leaf.tabs[i].pinned) i++;
+  return i;
+}
+
 function collapseIfEmpty(leaf: LeafPane): void {
   if (leaf.tabs.length > 0) return;
   const found = findParent(panesState.root, leaf);
@@ -523,6 +585,9 @@ export function openTab(
 export function closeTab(tabId: string): void {
   const found = findTab(panesState.root, tabId);
   if (!found) return;
+  // Pinned tabs (Models) can't be closed. Guard rather than throw so
+  // the keybind / middle-click paths can fire unconditionally.
+  if (found.tab.pinned) return;
   const { leaf, index } = found;
 
   leaf.tabs.splice(index, 1);
@@ -602,16 +667,20 @@ export function moveTab(
   const sourceFound = findTab(panesState.root, tabId);
   const target = findLeaf(panesState.root, toLeafId);
   if (!sourceFound || !target) return;
+  // Pinned tabs stay anchored to their original leaf at index 0.
+  if (sourceFound.tab.pinned) return;
 
   const { leaf: source, index: fromIndex } = sourceFound;
 
   if (source === target) {
     // Same-leaf reorder. Splice out + back in. Adjust insertIndex when
     // it's past the removed slot so the user-visible destination matches
-    // where the drop indicator was.
+    // where the drop indicator was, then clamp away from the pinned
+    // prefix so the user can't drop in front of Models.
     const [moved] = source.tabs.splice(fromIndex, 1);
     const adjusted = insertIndex > fromIndex ? insertIndex - 1 : insertIndex;
-    const clamped = Math.max(0, Math.min(adjusted, source.tabs.length));
+    const minIndex = firstNonPinnedIndex(source);
+    const clamped = Math.max(minIndex, Math.min(adjusted, source.tabs.length));
     source.tabs.splice(clamped, 0, moved);
     source.activeTabId = moved.id;
     panesState.focusedLeafId = source.id;
@@ -619,7 +688,8 @@ export function moveTab(
   }
 
   const [moved] = source.tabs.splice(fromIndex, 1);
-  const clamped = Math.max(0, Math.min(insertIndex, target.tabs.length));
+  const minIndex = firstNonPinnedIndex(target);
+  const clamped = Math.max(minIndex, Math.min(insertIndex, target.tabs.length));
   target.tabs.splice(clamped, 0, moved);
   target.activeTabId = moved.id;
 
@@ -654,6 +724,9 @@ export function splitLeaf(
   const target = findLeaf(panesState.root, targetLeafId);
   const sourceFound = findTab(panesState.root, tabId);
   if (!target || !sourceFound) return;
+  // Splitting peels the tab off into a new sibling leaf — same lifecycle
+  // as moveTab from a pinning perspective.
+  if (sourceFound.tab.pinned) return;
   const { leaf: source, index: fromIndex } = sourceFound;
 
   // Pulling the only tab into a split of its own leaf is a no-op — the
@@ -742,6 +815,9 @@ export function importTabIntoLeaf(
 ): void {
   const leaf = findLeaf(panesState.root, targetLeafId);
   if (!leaf) return;
+  // Refuse incoming pinned-kind tabs — every window owns its own Models
+  // surface; importing one would create a duplicate.
+  if (tab.kind === 'models') return;
   const id = findTab(panesState.root, tab.id) ? newTabId() : tab.id;
   const newTab: Tab = {
     id,
@@ -751,9 +827,10 @@ export function importTabIntoLeaf(
     dirty: false,
     editorSize: tab.editorSize,
   };
+  const minIndex = firstNonPinnedIndex(leaf);
   const index =
     insertIndex !== undefined
-      ? Math.max(0, Math.min(insertIndex, leaf.tabs.length))
+      ? Math.max(minIndex, Math.min(insertIndex, leaf.tabs.length))
       : leaf.tabs.length;
   leaf.tabs.splice(index, 0, newTab);
   leaf.activeTabId = newTab.id;
@@ -778,6 +855,7 @@ export function importTabAsSplit(
 ): void {
   const target = findLeaf(panesState.root, targetLeafId);
   if (!target) return;
+  if (tab.kind === 'models') return;
   const id = findTab(panesState.root, tab.id) ? newTabId() : tab.id;
   const newTab: Tab = {
     id,

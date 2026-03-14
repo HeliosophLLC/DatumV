@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { Menu } from '@base-ui/react/menu';
-import { FunctionSquare, Play, Plus, SquareCode, Square, X } from 'lucide-react';
+import { Boxes, FunctionSquare, Play, Plus, SquareCode, Square, X } from 'lucide-react';
 import {
   panesState,
   openTab,
@@ -66,6 +66,7 @@ export function TabStrip({ leafId }: { leafId: string }) {
               sql={tab.sql}
               editorSize={tab.editorSize}
               dirty={tab.dirty}
+              pinned={tab.pinned === true}
               active={tab.id === leaf.activeTabId}
               isStreaming={isStreaming}
               renameLabel={t('renameTab')}
@@ -104,6 +105,7 @@ function TabChip({
   sql,
   editorSize,
   dirty,
+  pinned,
   active,
   isStreaming,
   renameLabel,
@@ -120,6 +122,7 @@ function TabChip({
   sql: string;
   editorSize: number | undefined;
   dirty: boolean;
+  pinned: boolean;
   active: boolean;
   isStreaming: boolean;
   renameLabel: string;
@@ -128,6 +131,7 @@ function TabChip({
   runLabel: string;
   cancelLabel: string;
 }) {
+  const { t: tModels } = useTranslation('models');
   // 'before' = drop indicator on the left edge; 'after' = right edge.
   // null while no drag is over this chip.
   const [dropSide, setDropSide] = useState<'before' | 'after' | null>(null);
@@ -137,6 +141,7 @@ function TabChip({
   }
 
   function onRename() {
+    if (pinned) return;
     const next = window.prompt(renamePromptLabel, title);
     if (next === null) return;
     renameTab(id, next);
@@ -148,15 +153,13 @@ function TabChip({
   }
 
   function onMouseDown(e: React.MouseEvent) {
-    // Middle-click closes the tab (browser-style). preventDefault on
-    // mousedown is required to suppress Chromium's middle-click
-    // autoscroll cursor — without it, releasing the button anywhere
-    // else on the page enters autoscroll mode, which is jarring in
-    // an Electron shell.
+    // Middle-click closes the tab (browser-style). Pinned tabs ignore
+    // it (closeTab itself short-circuits, but suppressing the autoscroll
+    // cursor swap matters even when the close is a no-op).
     if (e.button === 1) {
       e.preventDefault();
       e.stopPropagation();
-      closeTab(id);
+      if (!pinned) closeTab(id);
     }
   }
 
@@ -194,6 +197,15 @@ function TabChip({
   const dragPayloadRef = useRef<TabDragPayload | null>(null);
 
   function onDragStart(e: React.DragEvent) {
+    // Pinned tabs (Models) can't be dragged — abort the drag instead of
+    // populating a payload the import-time guards would refuse anyway.
+    // `draggable={!pinned}` on the chip element below is the primary
+    // gate; this is a defense in case a stylesheet or future change
+    // re-enables the draggable attribute on a pinned chip.
+    if (pinned) {
+      e.preventDefault();
+      return;
+    }
     // SYNCHRONOUS. The HTML5 spec freezes dataTransfer after dragstart's
     // synchronous body returns; any await before writeTabDragData would
     // post the writes past the freeze and a cross-window drop would see
@@ -201,6 +213,10 @@ function TabChip({
     // pre-resolves it on load) — see electron/preload.ts.
     const host = window.electronHost;
     const sourceWindowId = host?.isElectron ? host.windowId() : null;
+    // `kind` is widened to include 'models', but pinned tabs are gated
+    // out above — a 'models' value can't reach here. Narrow defensively
+    // so the wire payload's type stays 'sql' | 'function'.
+    const dragKind: 'sql' | 'function' = kind === 'function' ? 'function' : 'sql';
     const payload: TabDragPayload = {
       fromLeafId: leafId,
       tabId: id,
@@ -209,7 +225,7 @@ function TabChip({
       // destination still sees the stale flag, which is the safer
       // direction (refuse rather than orphan an in-flight stream).
       isRunning: isStreaming,
-      tab: { id, title, kind, sql, editorSize },
+      tab: { id, title, kind: dragKind, sql, editorSize },
     };
     dragPayloadRef.current = payload;
     writeTabDragData(e.dataTransfer, payload);
@@ -271,11 +287,13 @@ function TabChip({
     }
   }
 
+  const displayTitle = kind === 'models' ? tModels('title') : title;
+
   return (
     <div
       role="tab"
       aria-selected={active}
-      draggable
+      draggable={!pinned}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
@@ -284,7 +302,7 @@ function TabChip({
       onClick={onSelect}
       onMouseDown={onMouseDown}
       onDoubleClick={onRename}
-      title={renameLabel}
+      title={pinned ? displayTitle : renameLabel}
       className={cn(
         'group border-border relative flex shrink-0 cursor-pointer items-center gap-2 border-r px-3 py-1.5 text-sm transition-colors',
         active
@@ -310,41 +328,49 @@ function TabChip({
       {dropSide === 'after' && (
         <div className="bg-primary pointer-events-none absolute inset-y-0 right-0 w-0.5" />
       )}
-      <button
-        type="button"
-        onClick={onPlayOrStop}
-        aria-label={isStreaming ? cancelLabel : runLabel}
-        title={isStreaming ? cancelLabel : runLabel}
-        className={cn(
-          'flex shrink-0 cursor-pointer items-center justify-center rounded-xs p-0.5 transition-colors',
-          isStreaming
-            ? 'text-destructive hover:bg-destructive/15'
-            : 'text-primary hover:bg-primary/15',
-        )}
-      >
-        {isStreaming ? (
-          <Square className="size-3" />
-        ) : (
-          <Play className="size-3" />
-        )}
-      </button>
+      {kind === 'models' ? (
+        // Pinned Models tab — no play button (nothing to run), distinct
+        // icon, and no close button below.
+        <Boxes className="text-primary size-3.5 shrink-0" />
+      ) : (
+        <button
+          type="button"
+          onClick={onPlayOrStop}
+          aria-label={isStreaming ? cancelLabel : runLabel}
+          title={isStreaming ? cancelLabel : runLabel}
+          className={cn(
+            'flex shrink-0 cursor-pointer items-center justify-center rounded-xs p-0.5 transition-colors',
+            isStreaming
+              ? 'text-destructive hover:bg-destructive/15'
+              : 'text-primary hover:bg-primary/15',
+          )}
+        >
+          {isStreaming ? (
+            <Square className="size-3" />
+          ) : (
+            <Play className="size-3" />
+          )}
+        </button>
+      )}
       <span className="max-w-[160px] truncate">
-        {title}
+        {displayTitle}
         {dirty ? ' •' : ''}
       </span>
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label={closeLabel}
-        title={closeLabel}
-        className={cn(
-          'cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground rounded-xs p-0.5 opacity-0 transition-opacity',
-          'group-hover:opacity-100',
-          active && 'opacity-100',
-        )}
-      >
-        <X className="size-3" />
-      </button>
+      {!pinned && (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={closeLabel}
+          title={closeLabel}
+          className={cn(
+            'cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground rounded-xs p-0.5 opacity-0 transition-opacity',
+            'group-hover:opacity-100',
+            active && 'opacity-100',
+          )}
+        >
+          <X className="size-3" />
+        </button>
+      )}
     </div>
   );
 }
