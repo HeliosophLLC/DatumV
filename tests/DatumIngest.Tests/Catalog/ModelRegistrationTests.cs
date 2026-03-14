@@ -1018,6 +1018,153 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Equal(7.0f, values[0].AsFloat32()); // 7L * 1L = 7
     }
 
+    [Fact]
+    public async Task InferOutputs_MultiOutput_ReturnsStructKeyedByOutputName()
+    {
+        // infer_outputs() surfaces ALL session outputs as a Struct keyed by
+        // ONNX output name. The stub emits two Float32 arrays — "logits"
+        // and "boxes" — and the body destructures both. Tests the typical
+        // multi-output shape: detector with separate classification + box outputs.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        dispatcher.NextSession = StubSession.MultiOutputDual();
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"], [new object?[] { 2.0f }]));
+
+        // Body picks the SECOND output ('boxes') by name, proving the field
+        // lookup uses the session's output names — not just the first slot.
+        catalog.Plan(
+            $"CREATE MODEL pick_boxes(x Float32) RETURNS Float32 USING '{_absoluteUsingPath}' "
+            + "AS BEGIN "
+            + "  DECLARE outputs Struct = infer_outputs(x); "
+            + "  DECLARE boxes Float32[] = outputs['boxes']; "
+            + "  RETURN boxes[0] "
+            + "END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.pick_boxes(v) FROM data");
+
+        List<DataValue> values = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][0]);
+            }
+        }
+        Assert.Single(values);
+        // Stub: boxes[0] = input * 10 = 20.0
+        Assert.Equal(20.0f, values[0].AsFloat32());
+    }
+
+    [Fact]
+    public async Task InferOutputs_PositionalAccess_PicksFirstOutput()
+    {
+        // outputs[0] grabs the first declared output via the struct's
+        // positional-access path. Useful when the output names are
+        // unstable across exports (PyTorch's numeric default names like
+        // "1992" / "out_0").
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        dispatcher.NextSession = StubSession.MultiOutputDual();
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"], [new object?[] { 2.0f }]));
+
+        catalog.Plan(
+            $"CREATE MODEL pick_first(x Float32) RETURNS Float32 USING '{_absoluteUsingPath}' "
+            + "AS BEGIN "
+            + "  DECLARE outputs Struct = infer_outputs(x); "
+            + "  DECLARE logits Float32[] = outputs[0]; "
+            + "  RETURN logits[0] "
+            + "END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.pick_first(v) FROM data");
+
+        List<DataValue> values = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][0]);
+            }
+        }
+        Assert.Single(values);
+        // Stub: logits[0] = input * 2 = 4.0
+        Assert.Equal(4.0f, values[0].AsFloat32());
+    }
+
+    [Fact]
+    public async Task Infer_SingleOutput_StillEmitsArrayNotStruct()
+    {
+        // Regression guard: plain infer() on a single-output session keeps
+        // emitting a primitive array / scalar (compat with all the existing
+        // SQL models that DECLARE the result as Float32[] / Float32). The
+        // struct emit is opt-in via infer_outputs().
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        dispatcher.NextSession = StubSession.Float32Doubler();
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"], [new object?[] { 3.0f }]));
+
+        catalog.Plan(
+            $"CREATE MODEL doubler_compat(x Float32) RETURNS Float32 USING '{_absoluteUsingPath}' "
+            + "AS BEGIN RETURN infer(x) END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.doubler_compat(v) FROM data");
+
+        List<DataValue> values = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][0]);
+            }
+        }
+        Assert.Equal(DataKind.Float32, values[0].Kind);
+        Assert.Equal(6.0f, values[0].AsFloat32());
+    }
+
+    [Fact]
+    public async Task Infer_MultiOutputSession_StillEmitsFirstOutputOnly()
+    {
+        // Compat path: plain infer() against a multi-output session keeps
+        // returning the FIRST declared output (the U²-Net / all-MiniLM
+        // expectation). The struct emit is reserved for infer_outputs().
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        dispatcher.NextSession = StubSession.MultiOutputDual();
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"], [new object?[] { 2.0f }]));
+
+        catalog.Plan(
+            $"CREATE MODEL first_only(x Float32) RETURNS Float32 USING '{_absoluteUsingPath}' "
+            + "AS BEGIN "
+            + "  DECLARE logits Float32[] = infer(x); "
+            + "  RETURN logits[0] "
+            + "END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.first_only(v) FROM data");
+
+        List<DataValue> values = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][0]);
+            }
+        }
+        Assert.Single(values);
+        // Stub: logits[0] = input * 2 = 4.0 (first declared output)
+        Assert.Equal(4.0f, values[0].AsFloat32());
+    }
+
     // ───────────────────── Stubs ─────────────────────
 
     /// <summary>
@@ -1145,6 +1292,31 @@ public sealed class ModelRegistrationTests : ServiceTestBase
                 float sum = a + b;
                 StubTensorBag output = new();
                 output.Add<float>("output", DataKind.Float32, [1], new[] { sum }.AsSpan());
+                return output;
+            });
+
+        /// <summary>
+        /// Single Float32-input, two-Float32-output stub: emits
+        /// <c>logits = [input * 2, input * 3]</c> and
+        /// <c>boxes  = [input * 10, input * 20]</c>. Smallest viable shape
+        /// for exercising the multi-output struct-emit path: distinct
+        /// output names, distinct values, both >1 element so the
+        /// array-vs-scalar branch is exercised.
+        /// </summary>
+        public static StubSession MultiOutputDual() => new(
+            inputs: [new TensorSpec("input", DataKind.Float32, [1])],
+            outputs:
+            [
+                new TensorSpec("logits", DataKind.Float32, [2]),
+                new TensorSpec("boxes",  DataKind.Float32, [2]),
+            ],
+            run: bag =>
+            {
+                ReadOnlySpan<float> incoming = bag["input"].AsSpan<float>();
+                float v = incoming[0];
+                StubTensorBag output = new();
+                output.Add<float>("logits", DataKind.Float32, [2], new[] { v * 2f, v * 3f }.AsSpan());
+                output.Add<float>("boxes",  DataKind.Float32, [2], new[] { v * 10f, v * 20f }.AsSpan());
                 return output;
             });
 

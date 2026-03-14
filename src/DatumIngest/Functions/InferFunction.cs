@@ -10,19 +10,28 @@ namespace DatumIngest.Functions;
 /// <see cref="IInferenceSession"/>. Resolves the current model from the
 /// evaluation frame, marshals the call-site argument into a
 /// <see cref="TensorBag"/>, dispatches to the session, and converts the
-/// single output tensor back to a <see cref="ValueRef"/>.
+/// first declared output tensor back to a <see cref="ValueRef"/>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <strong>Scope.</strong> Single-output sessions only. Multi-input is
-/// supported via a struct argument: <c>infer({a: x, b: y})</c> binds
-/// each session input by name (case-insensitive). For multi-input sessions
-/// with multiple dynamic dimensions per input — BERT-family transformers
-/// where every input is <c>[batch, seq_len]</c> — pass a parallel
-/// struct of shape arrays as the second argument:
+/// <strong>Output.</strong> Surfaces the first declared output as a
+/// primitive array (or a scalar when shape product is 1). Multi-output
+/// sessions are common — BERT-family encoders emit
+/// <c>last_hidden_state</c> + <c>pooler_output</c>, U²-Net emits seven
+/// deep-supervision tensors, RT-DETR emits <c>logits</c> + <c>pred_boxes</c>.
+/// For these, <c>infer()</c> returns the first by convention (HuggingFace
+/// optimum, transformers ONNX export, and most tooling list the primary
+/// output first). When you need every output, use
+/// <see cref="InferOutputsFunction">infer_outputs()</see>, which returns
+/// the full <see cref="DataKind.Struct"/> keyed by ONNX output name.
+/// </para>
+/// <para>
+/// <strong>Multi-input.</strong> Pass a struct argument: <c>infer({a: x, b: y})</c>
+/// binds each session input by name (case-insensitive). For multi-input
+/// sessions with multiple dynamic dimensions per input — BERT-family
+/// transformers where every input is <c>[batch, seq_len]</c> — pass a
+/// parallel struct of shape arrays as the second argument:
 /// <c>infer({a: x, b: y}, {a: [1, n], b: [1, n]})</c>.
-/// Multi-output bundles still need a struct-of-tensors return shape and
-/// land when the first multi-output model demands them.
 /// </para>
 /// <para>
 /// <strong>Argument marshalling.</strong>
@@ -60,9 +69,9 @@ public sealed class InferFunction : IFunction, IScalarFunction
 
     /// <inheritdoc />
     public static string Description =>
-        "Dispatches the currently-bound model session on its input. Only "
-        + "callable from inside a CREATE MODEL body — outside a model "
-        + "frame there is no session to dispatch to. "
+        "Dispatches the currently-bound model session on its input and returns "
+        + "the FIRST declared output. Only callable from inside a CREATE MODEL "
+        + "body — outside a model frame there is no session to dispatch to. "
         + "infer(value) resolves the tensor shape from the session's input "
         + "spec (works when ≤1 dynamic dim). "
         + "infer(value, shape Int32[]) overrides the shape explicitly — required "
@@ -70,8 +79,8 @@ public sealed class InferFunction : IFunction, IScalarFunction
         + "[-1, 3, -1, -1] where batch + H + W are all dynamic). "
         + "infer({a: x, b: y}) and infer({a: x, b: y}, {a: [..], b: [..]}) "
         + "feed a multi-input session by matching struct field names to session "
-        + "input names case-insensitively. v1 supports single-output sessions; "
-        + "multi-output bundles are a follow-up.";
+        + "input names case-insensitively. For multi-output sessions where you "
+        + "need every output, use infer_outputs() instead.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -129,15 +138,56 @@ public sealed class InferFunction : IFunction, IScalarFunction
     public bool IsPure => false;
 
     /// <inheritdoc />
-    public async ValueTask<ValueRef> ExecuteAsync(
+    public ValueTask<ValueRef> ExecuteAsync(
         ReadOnlyMemory<ValueRef> arguments,
         EvaluationFrame frame,
+        CancellationToken cancellationToken)
+        => DispatchAndReadAsync(
+            arguments, frame, "infer",
+            (session, bag, _, modelName) => ReadFirstOutput(session, bag, modelName),
+            cancellationToken);
+
+    /// <summary>
+    /// Reader delegate for the multi-step <see cref="DispatchAndReadAsync"/>
+    /// helper — decides how to package the post-Run output bag into a
+    /// <see cref="ValueRef"/>. <see cref="InferFunction"/> uses
+    /// <see cref="ReadFirstOutput"/>; <see cref="InferOutputsFunction"/>
+    /// uses <see cref="ReadAllOutputsAsStruct"/>.
+    /// </summary>
+    internal delegate ValueRef OutputReader(
+        IInferenceSession session,
+        TensorBag outputBag,
+        TypeRegistry? types,
+        string modelName);
+
+    /// <summary>
+    /// Shared dispatch core for <c>infer()</c> and <c>infer_outputs()</c>.
+    /// Resolves the bound session from the frame, marshals arguments into
+    /// the input bag (handling the single-input / multi-input / explicit-
+    /// shape forms uniformly), runs the session, and hands the output bag
+    /// to <paramref name="reader"/> which decides what shape to surface
+    /// back to the SQL author.
+    /// </summary>
+    /// <param name="arguments">Call-site argument list (1 or 2 values).</param>
+    /// <param name="frame">Evaluation frame carrying the current model + types registry.</param>
+    /// <param name="functionName">
+    /// Surface name (<c>"infer"</c> or <c>"infer_outputs"</c>) used in error
+    /// messages so a body-scope mismatch points at the actual call site
+    /// the user wrote.
+    /// </param>
+    /// <param name="reader">Output-bag → ValueRef strategy.</param>
+    /// <param name="cancellationToken">Cooperative cancellation.</param>
+    internal static async ValueTask<ValueRef> DispatchAndReadAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        string functionName,
+        OutputReader reader,
         CancellationToken cancellationToken)
     {
         if (frame.CurrentModel is not { } model)
         {
             throw new InvalidOperationException(
-                "infer() is only callable from inside a CREATE MODEL body. "
+                $"{functionName}() is only callable from inside a CREATE MODEL body. "
                 + "Outside a model frame there is no IInferenceSession bound to "
                 + "dispatch to. Move the call into a model body, or use the "
                 + "scalar-function form for the underlying computation.");
@@ -155,22 +205,15 @@ public sealed class InferFunction : IFunction, IScalarFunction
         if (session.Outputs.Count == 0)
         {
             throw new InvalidOperationException(
-                $"Model '{model.QualifiedName.ToString()}': infer() bound session declares "
+                $"Model '{model.QualifiedName.ToString()}': {functionName}() bound session declares "
                 + "no outputs. The session implementation is misconfigured.");
         }
-        // v1 returns the FIRST output for multi-output sessions. The
-        // convention HuggingFace optimum, transformers ONNX export, and
-        // most tools follow is to list the primary output first (e.g.
-        // `last_hidden_state` ahead of `pooler_output` for BERT-family
-        // encoders). Named output selection (`infer(value, 'output_name')`)
-        // is a follow-up; structured multi-output return is a separate
-        // follow-up.
 
         ReadOnlySpan<ValueRef> args = arguments.Span;
         if (args.Length is < 1 or > 2)
         {
             throw new InvalidOperationException(
-                $"infer() expects 1 or 2 arguments (value [, shape]); got {args.Length}.");
+                $"{functionName}() expects 1 or 2 arguments (value [, shape]); got {args.Length}.");
         }
 
         ValueRef arg = args[0];
@@ -183,17 +226,18 @@ public sealed class InferFunction : IFunction, IScalarFunction
         {
             ValueRef? shapeStructArg = args.Length == 2 ? args[1] : null;
             return await ExecuteMultiInputAsync(
-                session, arg, shapeStructArg, frame, model.QualifiedName.ToString(), cancellationToken)
+                session, arg, shapeStructArg, frame, model.QualifiedName.ToString(),
+                functionName, reader, cancellationToken)
                 .ConfigureAwait(false);
         }
 
         if (session.Inputs.Count != 1)
         {
             throw new InvalidOperationException(
-                $"Model '{model.QualifiedName.ToString()}': scalar infer() requires a "
+                $"Model '{model.QualifiedName.ToString()}': scalar {functionName}() requires a "
                 + $"single-input session, but the bound session declares "
                 + $"{session.Inputs.Count} input(s). Use the struct form "
-                + "infer({{field_name := value, ...}}) to bind multiple inputs by name.");
+                + $"{functionName}({{{{field_name := value, ...}}}}) to bind multiple inputs by name.");
         }
 
         int[]? explicitShape = null;
@@ -202,12 +246,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
             explicitShape = ReadShapeArray(args[1], model.QualifiedName.ToString());
         }
         TensorSpec inputSpec = session.Inputs[0];
-        TensorSpec outputSpec = session.Outputs[0];
 
-        // Build the input tensor on the session's allocator. We bag-add
-        // exactly one tensor because we've already validated single-input
-        // above; the bag is owned by us and disposed once we've read the
-        // output back.
         TensorBag inputBag = session.CreateInputBag();
         TensorBag? outputBag = null;
         try
@@ -218,16 +257,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 .RunAsync(inputBag, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (!outputBag.TryGet(outputSpec.Name, out IInferenceTensor outputTensor))
-            {
-                throw new InvalidOperationException(
-                    $"Model '{model.QualifiedName.ToString()}': session returned no tensor named "
-                    + $"'{outputSpec.Name}' (declared output). The session implementation "
-                    + "is misconfigured — its output bag must contain every name in "
-                    + "Outputs.");
-            }
-
-            return ReadOutputTensor(outputTensor, model.QualifiedName.ToString());
+            return reader(session, outputBag, frame.Types, model.QualifiedName.ToString());
         }
         finally
         {
@@ -250,6 +280,8 @@ public sealed class InferFunction : IFunction, IScalarFunction
         ValueRef? shapesStruct,
         EvaluationFrame frame,
         string modelName,
+        string functionName,
+        OutputReader reader,
         CancellationToken cancellationToken)
     {
         if (frame.Types is null)
@@ -345,22 +377,36 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 .RunAsync(inputBag, cancellationToken)
                 .ConfigureAwait(false);
 
-            TensorSpec outputSpec = session.Outputs[0];
-            if (!outputBag.TryGet(outputSpec.Name, out IInferenceTensor outputTensor))
-            {
-                throw new InvalidOperationException(
-                    $"Model '{modelName}': session returned no tensor named '{outputSpec.Name}' "
-                    + "(declared output). The session implementation is misconfigured — "
-                    + "its output bag must contain every name in Outputs.");
-            }
-
-            return ReadOutputTensor(outputTensor, modelName);
+            return reader(session, outputBag, frame.Types, modelName);
         }
         finally
         {
             inputBag.Dispose();
             outputBag?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Reads the first declared output tensor from <paramref name="outputBag"/>.
+    /// For multi-output sessions the convention HuggingFace optimum, transformers
+    /// ONNX export, and most tooling follow is to list the primary output first
+    /// (e.g. <c>last_hidden_state</c> ahead of <c>pooler_output</c> for BERT-
+    /// family encoders, <c>d0</c> ahead of the deep-supervision aux outputs
+    /// for U²-Net). Callers that need every output as a struct use
+    /// <see cref="InferOutputsFunction"/> instead.
+    /// </summary>
+    internal static ValueRef ReadFirstOutput(
+        IInferenceSession session, TensorBag outputBag, string modelName)
+    {
+        TensorSpec outputSpec = session.Outputs[0];
+        if (!outputBag.TryGet(outputSpec.Name, out IInferenceTensor outputTensor))
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}': session returned no tensor named "
+                + $"'{outputSpec.Name}' (declared output). The session implementation "
+                + "is misconfigured — its output bag must contain every name in Outputs.");
+        }
+        return ReadOutputTensor(outputTensor, modelName);
     }
 
     /// <summary>
@@ -675,4 +721,159 @@ public sealed class InferFunction : IFunction, IScalarFunction
                     + $"{tensor.ElementKind}; extend ReadOutputTensor to add a converter.");
         }
     }
+
+    /// <summary>
+    /// Reads every output tensor in <paramref name="outputBag"/> and packages
+    /// the result as a <see cref="DataKind.Struct"/> keyed by output name —
+    /// the dispatch reader used by <see cref="InferOutputsFunction"/>.
+    /// The struct's <see cref="ValueRef.TypeId"/> is interned in
+    /// <paramref name="types"/> so downstream <c>result['logits']</c> field
+    /// access by name resolves without a plan-time schema. Positional access
+    /// (<c>result[0]</c>) also works because struct field access falls back
+    /// to ordinal lookup on integer indices.
+    /// </summary>
+    /// <remarks>
+    /// Element-kind heterogeneity is allowed across outputs — RT-DETR-style
+    /// detectors emit Float32 logits alongside Float32 boxes, but transformers
+    /// regularly emit Int64 token-id outputs next to Float32 logits. Each
+    /// field is built independently via <see cref="ReadOutputTensor"/>, so
+    /// field kinds are whatever each tensor demands.
+    /// </remarks>
+    internal static ValueRef ReadAllOutputsAsStruct(
+        IInferenceSession session,
+        TensorBag outputBag,
+        TypeRegistry? types,
+        string modelName)
+    {
+        IReadOnlyList<TensorSpec> outputs = session.Outputs;
+        ValueRef[] fields = new ValueRef[outputs.Count];
+        for (int i = 0; i < outputs.Count; i++)
+        {
+            TensorSpec spec = outputs[i];
+            if (!outputBag.TryGet(spec.Name, out IInferenceTensor tensor))
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer_outputs() session returned no tensor named "
+                    + $"'{spec.Name}' (declared output {i}). The session implementation "
+                    + "is misconfigured — its output bag must contain every name in Outputs.");
+            }
+            fields[i] = ReadOutputTensor(tensor, modelName);
+        }
+
+        ushort typeId = 0;
+        if (types is not null)
+        {
+            StructFieldDescriptor[] descriptors = new StructFieldDescriptor[outputs.Count];
+            for (int i = 0; i < outputs.Count; i++)
+            {
+                // Field TypeId mirrors the runtime ValueRef shape: a Float32[]
+                // field interns as an array-of-Float32 type, a scalar Int64 as
+                // the bare Int64 type. The plan-time SQL surface only uses
+                // the field's NAME for `result[fieldname]` lookups; the typed
+                // descriptor is for catalog inspection and shape rendering.
+                int fieldTypeId = fields[i].IsArray
+                    ? types.InternArrayType(fields[i].ArrayElementKind)
+                    : (int)fields[i].Kind;
+                descriptors[i] = new StructFieldDescriptor(outputs[i].Name, fieldTypeId);
+            }
+            typeId = (ushort)types.InternStructType(descriptors);
+        }
+
+        return ValueRef.FromStruct(fields, typeId);
+    }
+}
+
+/// <summary>
+/// <c>infer_outputs(value [, shape])</c> — sibling to <see cref="InferFunction"/>
+/// that surfaces ALL declared outputs of the bound session as a
+/// <see cref="DataKind.Struct"/> keyed by ONNX output name. Use this for
+/// multi-output models where you need more than just the first declared
+/// output (RT-DETR's <c>logits</c> + <c>pred_boxes</c>, RoBERTa-QA's
+/// <c>start_logits</c> + <c>end_logits</c>, BlazeFace's boxes + scores).
+/// The single-output / first-output-of-many shortcut stays on
+/// <see cref="InferFunction"/> so existing SQL bodies continue to work
+/// unchanged.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Input marshalling is identical to <see cref="InferFunction"/> — same
+/// 1-arg / 2-arg / multi-input struct / multi-input struct + shapes
+/// dispatch shapes. The only difference is the output reading step.
+/// </para>
+/// <para>
+/// SQL usage:
+/// <code>
+/// CREATE MODEL detect(img Image) RETURNS Array&lt;LabeledDetection&gt;
+/// USING 'rtdetr/model.onnx'
+/// AS BEGIN
+///     DECLARE tensor Float32[] = image_to_tensor_chw(img, [640, 640]);
+///     DECLARE outputs Struct = infer_outputs(tensor);
+///     DECLARE logits Float32[] = outputs['logits'];
+///     DECLARE boxes  Float32[] = outputs['pred_boxes'];
+///     RETURN rtdetr_postprocess(logits, boxes, img)
+/// END
+/// </code>
+/// </para>
+/// </remarks>
+public sealed class InferOutputsFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "infer_outputs";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Vector;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Same dispatch surface as infer() but returns a Struct of every declared "
+        + "output keyed by ONNX output name (instead of just the first output). "
+        + "Use for multi-output sessions — RT-DETR (logits + pred_boxes), RoBERTa "
+        + "extractive QA (start_logits + end_logits), BlazeFace (boxes + scores). "
+        + "Access fields via result['output_name'] or result[0] for positional. "
+        + "Only callable from inside a CREATE MODEL body.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("inputs", DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("shapes", DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Scalar),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("value", DataKindMatcher.Any),
+                new ParameterSpec("shape", DataKindMatcher.Family(DataKindFamily.IntegerFamily), IsArray: ArrayMatch.Array),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
+        new FunctionSignatureVariant(
+            Parameters: [new ParameterSpec("value", DataKindMatcher.Any)],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
+    ];
+
+    /// <inheritdoc />
+    public static BodyScopeRequirement BodyScope => BodyScopeRequirement.ModelBody;
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<InferOutputsFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public bool IsPure => false;
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+        => InferFunction.DispatchAndReadAsync(
+            arguments, frame, "infer_outputs",
+            InferFunction.ReadAllOutputsAsStruct,
+            cancellationToken);
 }

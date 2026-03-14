@@ -694,6 +694,7 @@ public sealed class FunctionRegistry
 
         // ONNX
         registry.RegisterScalar<InferFunction>();
+        registry.RegisterScalar<InferOutputsFunction>();
 
         // Templates — per-LLM-family chat-template primitives. Three
         // functions per family (open / msg / assistant_turn) for
