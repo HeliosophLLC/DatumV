@@ -504,4 +504,64 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.True(values[0].IsNull);
     }
+
+    // ───────────────────── CustomCheck (escape-hatch CHECK shapes) ─────────────────────
+
+    [Fact]
+    public async Task CustomCheck_DisjunctiveExpression_PassesAllowedValue()
+    {
+        // `x = 7 OR x = 42` doesn't match any of the walker's canonical shapes
+        // (no BETWEEN / single comparison / IN), so it falls into CustomCheck
+        // and is evaluated at runtime against the scope-bound evaluator.
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["v"],
+            new object?[] { 42 });
+
+        catalog.Plan(
+            "CREATE FUNCTION lucky(x INT32 CHECK (x = 7 OR x = 42)) " +
+            "RETURNS INT32 BEGIN RETURN x END");
+        IQueryPlan plan = catalog.Plan("SELECT lucky(v) FROM data");
+
+        List<DataValue> values = await CollectFirstColumnAsync(plan);
+        Assert.Equal(42, values[0].AsInt32());
+    }
+
+    [Fact]
+    public async Task CustomCheck_DisjunctiveExpression_RejectsDisallowedValue()
+    {
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["v"],
+            new object?[] { 13 });
+
+        catalog.Plan(
+            "CREATE FUNCTION lucky(x INT32 CHECK (x = 7 OR x = 42)) " +
+            "RETURNS INT32 BEGIN RETURN x END");
+        IQueryPlan plan = catalog.Plan("SELECT lucky(v) FROM data");
+
+        Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+        });
+        Assert.Contains("lucky", ex.Message);
+        Assert.Contains("CHECK", ex.Message);
+    }
+
+    [Fact]
+    public async Task CustomCheck_NullValue_PassesWithoutEvaluation()
+    {
+        // Same NULL-passes-any-check rule as typed checks. The CustomCheck
+        // dispatch arm must short-circuit on NULL to avoid evaluating against
+        // a value the predicate isn't designed to handle.
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["v"],
+            new object?[] { null });
+
+        catalog.Plan(
+            "CREATE FUNCTION lucky(x INT32 CHECK (x = 7 OR x = 42)) " +
+            "RETURNS INT32 BEGIN RETURN x END");
+        IQueryPlan plan = catalog.Plan("SELECT lucky(v) FROM data");
+
+        List<DataValue> values = await CollectFirstColumnAsync(plan);
+        Assert.True(values[0].IsNull);
+    }
 }

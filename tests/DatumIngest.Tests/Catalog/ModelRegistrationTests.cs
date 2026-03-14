@@ -459,6 +459,37 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     }
 
     [Fact]
+    public void CreateModel_CustomCheckDefaultViolation_FailsRegistration()
+    {
+        // `x = 7 OR x = 42` falls into CustomCheck (non-canonical shape).
+        // Default 3 doesn't satisfy it; registration pre-flight should
+        // evaluate the predicate against the default and reject CREATE.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+
+        DatumIngest.Functions.FunctionArgumentException ex = Assert.Throws<DatumIngest.Functions.FunctionArgumentException>(
+            () => catalog.Plan(
+                $"CREATE MODEL bad_custom(x Int32 = 3 CHECK (x = 7 OR x = 42)) RETURNS Int32 "
+                + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x END"));
+
+        Assert.Contains("bad_custom", ex.Message);
+        Assert.Contains("@x", ex.Message);
+        Assert.Equal(0, dispatcher.LoadCallCount);
+    }
+
+    [Fact]
+    public void CreateModel_CustomCheckDefaultSatisfies_RegistersCleanly()
+    {
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+
+        catalog.Plan(
+            $"CREATE MODEL good_custom(x Int32 = 7 CHECK (x = 7 OR x = 42)) RETURNS Int32 "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x END");
+
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "good_custom"), out _));
+    }
+
+    [Fact]
     public void CreateModel_DefaultPassesAndNoCheck_StillRegisters()
     {
         // A parameter with a default but no CHECK skips the pre-flight

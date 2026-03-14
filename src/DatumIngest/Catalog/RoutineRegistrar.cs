@@ -1701,11 +1701,21 @@ internal sealed class RoutineRegistrar
     {
         Arena scratch = new();
         MemoryAccountant accountant = new();
+        VariableScope checkScope = new(accountant);
+        // Scope-bound evaluator so CustomCheck expressions resolve the
+        // parameter name to the just-evaluated default value (and any
+        // earlier parameter to its evaluated default).
         ExpressionEvaluator evaluator = new(
             _functions,
             meter: null,
+            outerRow: null,
+            sourceSchema: null,
+            letBindingExpressions: null,
             store: scratch,
             sidecarRegistry: _catalog.SidecarRegistry,
+            variableScope: checkScope,
+            variableStore: scratch,
+            typeRegistry: null,
             accountant: accountant);
         EvaluationFrame frame = new(
             Row.Empty,
@@ -1719,9 +1729,8 @@ internal sealed class RoutineRegistrar
         for (int i = 0; i < parameters.Count; i++)
         {
             UdfParameter p = parameters[i];
-            if (p.Default is null || p.Check is null) continue;
+            if (p.Default is null) continue;
 
-            ParameterCheck typed = ParameterCheckWalker.Canonicalise(p.Check, p.Name);
             ValueRef defaultValue;
             try
             {
@@ -1735,6 +1744,28 @@ internal sealed class RoutineRegistrar
                 throw new InvalidOperationException(
                     $"{contextLabel}: default expression for parameter '@{p.Name}' failed to evaluate at registration time. {ex.Message}",
                     ex);
+            }
+
+            // Declare into scope so subsequent parameters' CustomChecks can
+            // reference this one — mirrors the runtime BindParametersAsync
+            // ordering. Cheap; the scratch arena + accountant are torn down
+            // with this method.
+            checkScope.Declare(p.Name, defaultValue);
+
+            if (p.Check is null) continue;
+            ParameterCheck typed = ParameterCheckWalker.Canonicalise(p.Check, p.Name);
+
+            if (typed is CustomCheck cc)
+            {
+                if (defaultValue.IsNull) continue;
+                bool ok = await evaluator.EvaluateAsBooleanAsync(cc.Expr, frame, cancellationToken).ConfigureAwait(false);
+                if (!ok)
+                {
+                    throw new FunctionArgumentException(
+                        contextLabel,
+                        $"default value for parameter '@{p.Name}' violates CHECK constraint.");
+                }
+                continue;
             }
 
             string? error = typed.Validate(defaultValue);

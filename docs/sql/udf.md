@@ -318,7 +318,12 @@ BEGIN RETURN t END
 **Enforcement differs by body shape:**
 
 - **Procedural UDFs** — `CHECK` runs at parameter binding, before the body
-  executes. A failing value throws a `FunctionArgumentException` naming
+  executes. Typed shapes (`BETWEEN`, comparisons, `IN`) compile to fast
+  direct comparisons; non-canonical expressions (e.g. `x = 7 OR x = 42`,
+  `is_finite(x)`, `max >= min`) fall into the `custom` shape and are
+  evaluated by the SQL evaluator against a scope-bound frame so the
+  parameter name — and any earlier parameter — resolves to its bound
+  value. A failing value throws a `FunctionArgumentException` naming
   the parameter and describing the violation. Identical to `CREATE MODEL`
   enforcement.
 - **Macro UDFs** — the inliner substitutes the parameter expression at

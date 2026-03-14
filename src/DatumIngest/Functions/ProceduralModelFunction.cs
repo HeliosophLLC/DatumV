@@ -68,6 +68,13 @@ public sealed class ProceduralModelFunction : IScalarFunction
     private readonly ParameterCheck?[] _parameterChecks;
 
     /// <summary>
+    /// Cached "any parameter carries a <see cref="CustomCheck"/>" flag — the
+    /// dispatch path skips the (slightly more expensive) scope-bound
+    /// evaluator construction when no parameter needs it.
+    /// </summary>
+    private readonly bool _hasCustomChecks;
+
+    /// <summary>
     /// Creates an adapter for <paramref name="descriptor"/>. The
     /// descriptor's <see cref="ModelDescriptor.ReturnTypeName"/> must
     /// parse to a known <see cref="DataKind"/> — the parser already
@@ -86,13 +93,16 @@ public sealed class ProceduralModelFunction : IScalarFunction
         }
 
         _parameterChecks = new ParameterCheck?[descriptor.Parameters.Count];
+        bool hasCustom = false;
         for (int i = 0; i < descriptor.Parameters.Count; i++)
         {
             UdfParameter p = descriptor.Parameters[i];
             _parameterChecks[i] = p.Check is null
                 ? null
                 : ParameterCheckWalker.Canonicalise(p.Check, p.Name);
+            if (_parameterChecks[i] is CustomCheck) hasCustom = true;
         }
+        _hasCustomChecks = hasCustom;
     }
 
     /// <inheritdoc/>
@@ -265,6 +275,38 @@ public sealed class ProceduralModelFunction : IScalarFunction
         ValueRef[] supplied = new ValueRef[suppliedCount];
         arguments.Span.CopyTo(supplied);
 
+        // Custom checks need an evaluator with the scope wired in so the
+        // parameter name resolves to its just-declared value (and earlier
+        // params resolve to theirs). Constructed lazily — only if any
+        // parameter's check fell into the CustomCheck escape hatch, which
+        // is rare in practice; typed checks (BetweenCheck, InCheck, …)
+        // don't need it.
+        ExpressionEvaluator? checkEvaluator = null;
+        EvaluationFrame checkFrame = default;
+        if (_hasCustomChecks)
+        {
+            checkEvaluator = new ExpressionEvaluator(
+                _functions,
+                meter: null,
+                outerRow: null,
+                sourceSchema: null,
+                letBindingExpressions: null,
+                store: variableStore,
+                sidecarRegistry: frame.SidecarRegistry,
+                variableScope: scope,
+                variableStore: variableStore,
+                typeRegistry: frame.Types,
+                accountant: frame.Accountant);
+            checkFrame = new EvaluationFrame(
+                Row.Empty,
+                variableStore,
+                variableStore,
+                frame.Accountant,
+                outerRow: null,
+                sidecarRegistry: frame.SidecarRegistry,
+                types: frame.Types);
+        }
+
         for (int i = 0; i < paramCount; i++)
         {
             UdfParameter param = _descriptor.Parameters[i];
@@ -303,8 +345,30 @@ public sealed class ProceduralModelFunction : IScalarFunction
                     $"Model '{_descriptor.QualifiedName}' parameter '@{param.Name}' must not be null.");
             }
 
+            // Declare into scope BEFORE running the check so any CustomCheck
+            // expression can reference the just-bound parameter (and any
+            // earlier parameter) through the evaluator's variable lookup.
+            // Typed checks don't need the scope, but the ordering is uniform.
+            scope.Declare(param.Name, value);
+
             ParameterCheck? check = _parameterChecks[i];
-            if (check is not null)
+            if (check is null) continue;
+
+            if (check is CustomCheck cc)
+            {
+                // NULL passes any check (matches typed-check semantics).
+                if (value.IsNull) continue;
+                bool ok = await checkEvaluator!
+                    .EvaluateAsBooleanAsync(cc.Expr, checkFrame, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!ok)
+                {
+                    throw new FunctionArgumentException(
+                        _descriptor.QualifiedName.ToString(),
+                        $"parameter '@{param.Name}': value violates CHECK constraint.");
+                }
+            }
+            else
             {
                 string? error = check.Validate(value);
                 if (error is not null)
@@ -314,8 +378,6 @@ public sealed class ProceduralModelFunction : IScalarFunction
                         $"parameter '@{param.Name}': {error}");
                 }
             }
-
-            scope.Declare(param.Name, value);
         }
     }
 

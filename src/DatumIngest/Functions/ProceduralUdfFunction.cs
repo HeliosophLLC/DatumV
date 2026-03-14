@@ -62,6 +62,13 @@ public sealed class ProceduralUdfFunction : IScalarFunction
     private readonly ParameterCheck?[] _parameterChecks;
 
     /// <summary>
+    /// Cached "any parameter carries a <see cref="CustomCheck"/>" flag — the
+    /// dispatch path only constructs the scope-bound check evaluator when
+    /// at least one parameter needs it.
+    /// </summary>
+    private readonly bool _hasCustomChecks;
+
+    /// <summary>
     /// Creates an adapter for <paramref name="descriptor"/>. The descriptor
     /// must be procedural (<see cref="UdfDescriptor.IsProcedural"/> is
     /// <see langword="true"/>) and carry a non-null
@@ -96,13 +103,16 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         }
 
         _parameterChecks = new ParameterCheck?[descriptor.Parameters.Count];
+        bool hasCustom = false;
         for (int i = 0; i < descriptor.Parameters.Count; i++)
         {
             UdfParameter p = descriptor.Parameters[i];
             _parameterChecks[i] = p.Check is null
                 ? null
                 : ParameterCheckWalker.Canonicalise(p.Check, p.Name);
+            if (_parameterChecks[i] is CustomCheck) hasCustom = true;
         }
+        _hasCustomChecks = hasCustom;
     }
 
     /// <inheritdoc/>
@@ -258,6 +268,36 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         ValueRef[] supplied = new ValueRef[suppliedCount];
         arguments.Span.CopyTo(supplied);
 
+        // Same lazy-evaluator pattern as ProceduralModelFunction — only
+        // constructed when at least one CHECK fell into the CustomCheck
+        // escape hatch (rare; typed checks short-circuit through
+        // ParameterCheck.Validate directly).
+        ExpressionEvaluator? checkEvaluator = null;
+        EvaluationFrame checkFrame = default;
+        if (_hasCustomChecks)
+        {
+            checkEvaluator = new ExpressionEvaluator(
+                _functions,
+                meter: null,
+                outerRow: null,
+                sourceSchema: null,
+                letBindingExpressions: null,
+                store: variableStore,
+                sidecarRegistry: frame.SidecarRegistry,
+                variableScope: scope,
+                variableStore: variableStore,
+                typeRegistry: frame.Types,
+                accountant: frame.Accountant);
+            checkFrame = new EvaluationFrame(
+                Row.Empty,
+                variableStore,
+                variableStore,
+                frame.Accountant,
+                outerRow: null,
+                sidecarRegistry: frame.SidecarRegistry,
+                types: frame.Types);
+        }
+
         for (int i = 0; i < paramCount; i++)
         {
             UdfParameter param = _descriptor.Parameters[i];
@@ -303,8 +343,28 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                     $"UDF 'udf.{_descriptor.Name}' parameter '@{param.Name}' must not be null.");
             }
 
+            // Declare before the check so any CustomCheck expression can
+            // resolve the just-bound parameter (and any earlier parameter)
+            // through the scope-bound evaluator's variable lookup.
+            scope.Declare(param.Name, value);
+
             ParameterCheck? check = _parameterChecks[i];
-            if (check is not null)
+            if (check is null) continue;
+
+            if (check is CustomCheck cc)
+            {
+                if (value.IsNull) continue;
+                bool ok = await checkEvaluator!
+                    .EvaluateAsBooleanAsync(cc.Expr, checkFrame, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!ok)
+                {
+                    throw new FunctionArgumentException(
+                        _descriptor.Name,
+                        $"parameter '@{param.Name}': value violates CHECK constraint.");
+                }
+            }
+            else
             {
                 string? error = check.Validate(value);
                 if (error is not null)
@@ -314,8 +374,6 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                         $"parameter '@{param.Name}': {error}");
                 }
             }
-
-            scope.Declare(param.Name, value);
         }
     }
 

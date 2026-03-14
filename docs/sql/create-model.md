@@ -368,6 +368,15 @@ grammar:
 | `v IN ('small','medium','large')`   | `in`           | Dropdown             |
 | Anything else                       | `custom`       | Text + server-validate |
 
+The `custom` shape is the escape hatch — any boolean expression that
+doesn't match a canonical form lands here. It carries the original
+expression AST, and the engine evaluates it at runtime against a
+scope-bound evaluator so the parameter name (and any earlier parameter)
+resolves to its bound value. Disjunctive predicates (`t = 7 OR t = 42`),
+multi-parameter constraints (`max >= min`), and function-call predicates
+(`is_finite(t)`) all work; the front-end falls back to a free-text input
+plus server-side validation.
+
 `NULL` always passes a `CHECK` (mirrors SQL `CHECK`-constraint semantics);
 use `IS NOT NULL` on the parameter declaration if NULL should be rejected.
 
@@ -375,6 +384,14 @@ The optional `STEP`, `UNIT`, and `COMMENT` clauses carry UI hints that
 don't affect runtime behaviour — they ride along on the catalog payload
 so the executor form can pick a granularity, append a suffix, and show a
 per-parameter tooltip.
+
+**Defaults are validated at registration time.** A parameter that
+declares both a default and a `CHECK` has its default evaluated and
+checked once when `CREATE MODEL` runs — a default that already violates
+the constraint fails the registration with a recognisable error, before
+the ONNX file is even opened. This catches authored typos (`= CAST(0.025 AS Float32)`
+intended as `0.25`) at install time instead of at the first call that
+omits the override.
 
 ### DROP MODEL
 
