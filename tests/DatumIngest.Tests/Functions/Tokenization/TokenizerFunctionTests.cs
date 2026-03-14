@@ -275,6 +275,125 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         Assert.Equal(2L, inputIds[1]);
     }
 
+    /// <summary>
+    /// Writes a minimal BERT-style <c>vocab.txt</c> at <paramref name="path"/>:
+    /// the five canonical special tokens (<c>[PAD]</c>, <c>[UNK]</c>,
+    /// <c>[CLS]</c>, <c>[SEP]</c>, <c>[MASK]</c>) followed by the lowercase
+    /// alphabet (one-char word starts) and the <c>##</c>-prefixed continuation
+    /// pieces (one per letter) needed for WordPiece to segment multi-char
+    /// tokens without falling back to <c>[UNK]</c>. BertTokenizer keys off
+    /// line number for the id, so <c>[CLS]=2</c>, <c>[SEP]=3</c>,
+    /// <c>a=5</c>..<c>z=30</c>, <c>##a=31</c>..<c>##z=56</c>.
+    /// </summary>
+    private static void WriteBertVocab(string path)
+    {
+        StringBuilder sb = new();
+        sb.AppendLine("[PAD]");
+        sb.AppendLine("[UNK]");
+        sb.AppendLine("[CLS]");
+        sb.AppendLine("[SEP]");
+        sb.AppendLine("[MASK]");
+        for (char c = 'a'; c <= 'z'; c++) sb.AppendLine(c.ToString());
+        for (char c = 'a'; c <= 'z'; c++) sb.AppendLine("##" + c);
+        File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
+    }
+
+    [Fact]
+    public async Task EncodeBertPair_AssemblesQueryAndPassageWithSeparator()
+    {
+        // Pair-encode "ab" + "cd". With WordPiece + ##-continuation pieces in
+        // the fixture vocab, "ab" segments as [a=5, ##b=32] and "cd" as
+        // [c=7, ##d=34]. Expected layout:
+        //   input_ids      = [2, 5, 32, 3, 7, 34, 3]   ; [CLS] a ##b [SEP] c ##d [SEP]
+        //   attention_mask = [1, 1, 1, 1, 1, 1, 1]
+        //   token_type_ids = [0, 0, 0, 0, 1, 1, 1]    ; query segment then passage segment
+        string bertVocab = Path.Combine(_tmpDir, "bert-pair-vocab.txt");
+        WriteBertVocab(bertVocab);
+
+        TableCatalog catalog = CreateCatalog();
+        IQueryPlan idsPlan = catalog.Plan(
+            $"SELECT tokenizer.encode_bert_pair('ab', 'cd', 'file://{bertVocab}')['input_ids']");
+        long[] ids = await CollectFirstArrayAsync(idsPlan);
+        Assert.Equal(new long[] { 2, 5, 32, 3, 7, 34, 3 }, ids);
+
+        IQueryPlan maskPlan = catalog.Plan(
+            $"SELECT tokenizer.encode_bert_pair('ab', 'cd', 'file://{bertVocab}')['attention_mask']");
+        long[] mask = await CollectFirstArrayAsync(maskPlan);
+        Assert.Equal(new long[] { 1, 1, 1, 1, 1, 1, 1 }, mask);
+
+        IQueryPlan typePlan = catalog.Plan(
+            $"SELECT tokenizer.encode_bert_pair('ab', 'cd', 'file://{bertVocab}')['token_type_ids']");
+        long[] types = await CollectFirstArrayAsync(typePlan);
+        Assert.Equal(new long[] { 0, 0, 0, 0, 1, 1, 1 }, types);
+    }
+
+    [Fact]
+    public async Task EncodeBertPair_SingleCharPair_StillHasFiveTokens()
+    {
+        // Smallest non-empty pair: each side is one token. Layout has the
+        // five specials/glue + the two content tokens.
+        string bertVocab = Path.Combine(_tmpDir, "bert-pair-min-vocab.txt");
+        WriteBertVocab(bertVocab);
+
+        TableCatalog catalog = CreateCatalog();
+        IQueryPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_bert_pair('a', 'b', 'file://{bertVocab}')['input_ids']");
+        long[] ids = await CollectFirstArrayAsync(plan);
+
+        // [CLS=2] a=5 [SEP=3] b=6 [SEP=3]
+        Assert.Equal(new long[] { 2, 5, 3, 6, 3 }, ids);
+    }
+
+    [Fact]
+    public async Task EncodeBertPair_TokenTypeIds_FlipAtTheFirstSep()
+    {
+        // The "right place for the flip" property: every token at or before
+        // the first [SEP] should have type=0; every token after it should
+        // have type=1. Encodes "aa bb" + "cc" so the query side has multiple
+        // tokens — verifies the flip isn't off-by-one.
+        string bertVocab = Path.Combine(_tmpDir, "bert-pair-flip-vocab.txt");
+        WriteBertVocab(bertVocab);
+
+        TableCatalog catalog = CreateCatalog();
+        IQueryPlan idsPlan = catalog.Plan(
+            $"SELECT tokenizer.encode_bert_pair('aa bb', 'cc', 'file://{bertVocab}')['input_ids']");
+        long[] ids = await CollectFirstArrayAsync(idsPlan);
+
+        IQueryPlan typePlan = catalog.Plan(
+            $"SELECT tokenizer.encode_bert_pair('aa bb', 'cc', 'file://{bertVocab}')['token_type_ids']");
+        long[] types = await CollectFirstArrayAsync(typePlan);
+
+        Assert.Equal(ids.Length, types.Length);
+
+        // First [SEP] (id=3) appears once on the query→passage boundary.
+        int firstSepIndex = Array.IndexOf(ids, 3L);
+        Assert.True(firstSepIndex > 0, "Expected a [SEP] separator between query and passage.");
+
+        for (int i = 0; i <= firstSepIndex; i++) Assert.Equal(0L, types[i]);
+        for (int i = firstSepIndex + 1; i < types.Length; i++) Assert.Equal(1L, types[i]);
+    }
+
+    [Fact]
+    public void EncodeBertPair_NullArgument_ReturnsNullStruct()
+    {
+        // Mirrors encode_bert / encode_roberta: any NULL argument short-circuits
+        // to a null struct so downstream propagation works the same way.
+        string bertVocab = Path.Combine(_tmpDir, "bert-pair-null-vocab.txt");
+        WriteBertVocab(bertVocab);
+
+        TableCatalog catalog = CreateCatalog();
+        IQueryPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_bert_pair(CAST(NULL AS String), 'cd', 'file://{bertVocab}') IS NULL");
+        DataValue? value = null;
+        foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None)
+                     .ToBlockingEnumerable(CancellationToken.None))
+        {
+            value = batch[0][0];
+        }
+        Assert.NotNull(value);
+        Assert.True(value.Value.AsBoolean());
+    }
+
     [Fact]
     public async Task Encode_UnsupportedModelType_ThrowsClearError()
     {

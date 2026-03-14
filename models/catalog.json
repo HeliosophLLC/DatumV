@@ -186,8 +186,9 @@
       "licenseIds": ["mit"],
       "attributions": ["BAAI — Beijing Academy of Artificial Intelligence", "Joshua Lochner / Xenova (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "Xenova/bge-reranker-base", "revision": "280bcc27a84e0b898c251e06fddb25171bd9b101", "include": ["onnx/*", "*.json", "*.txt"] }],
-      "approxSizeMb": 280
+      "sources": [{ "type": "huggingface", "repo": "Xenova/bge-reranker-base", "revision": "280bcc27a84e0b898c251e06fddb25171bd9b101", "include": ["onnx/model.onnx", "vocab.txt"] }],
+      "approxSizeMb": 280,
+      "installSql": "sql/bge-reranker-base.sql"
     },
 
     {
@@ -512,6 +513,57 @@
       "installSql": "sql/realesrgan-x4v3.sql"
     },
     {
+      "id": "swinir-realsr-x4",
+      "displayName": "SwinIR Real-World SR (4×)",
+      "description": "Swin Transformer for Image Restoration — real-world super-resolution variant. Upscales by 4× while cleaning up real-world degradations (compression artifacts, sensor noise, mild blur). SwinIR-L config, 240-dim embeddings. Pinned 64×64 input → 256×256 output; tile larger inputs.",
+      "task": "image-super-resolution",
+      "tags": ["restoration", "super-resolution", "swinir", "transformer"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, Radu Timofte — SwinIR (ETH Zurich + others)"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/swinir-onnx", "revision": "main", "include": ["swinir_realsr_x4.onnx"] }],
+      "approxSizeMb": 110,
+      "placeholder": true
+    },
+    {
+      "id": "swinir-denoising-color-25",
+      "displayName": "SwinIR Color Denoising (σ=25)",
+      "description": "SwinIR color denoising variant trained for Gaussian noise σ=25. SwinIR-M config, 180-dim embeddings. Pinned 128×128 input. Use for the standard denoising-benchmark σ=25 reference; for blind real-world noise pick scunet-color-real instead.",
+      "task": "image-denoising",
+      "tags": ["restoration", "denoising", "swinir", "transformer"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, Radu Timofte — SwinIR (ETH Zurich + others)"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/swinir-onnx", "revision": "main", "include": ["swinir_denoising_color_25.onnx"] }],
+      "approxSizeMb": 45,
+      "placeholder": true
+    },
+    {
+      "id": "scunet-color-real",
+      "displayName": "SCUNet (Blind Real-World Color Denoising)",
+      "description": "Swin-Conv-UNet for blind real-world color image denoising. Handles real-world noise patterns (sensor + JPEG + downsampling artifacts) without knowing noise level in advance. PSNR-optimized — no GAN sharpening, so the output stays faithful to the input. Dynamic H/W (must be divisible by 8).",
+      "task": "image-denoising",
+      "tags": ["restoration", "denoising", "scunet", "blind", "real-world"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Kai Zhang, Yawei Li, Jingyun Liang, Jiezhang Cao, Yulun Zhang, Hao Tang, Deng-Ping Fan, Radu Timofte, Luc Van Gool — SCUNet"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "main", "include": ["scunet_color_real_psnr.onnx"] }],
+      "approxSizeMb": 70,
+      "placeholder": true
+    },
+    {
+      "id": "nafnet-deblur",
+      "displayName": "NAFNet (Image Deblurring)",
+      "description": "Nonlinear Activation-Free Network for single-image deblurring. Removes motion blur and defocus blur from photos. State-of-the-art deblur quality with a compact (~70 MB) CNN backbone — no transformer attention, just residual blocks. Pair with realesrgan-x4v3 for a 'fix + upscale' restoration pipeline.",
+      "task": "image-deblurring",
+      "tags": ["restoration", "deblurring", "nafnet"],
+      "licenseIds": ["mit"],
+      "attributions": ["MEGVII Research — NAFNet (Chen, Chu, Zhang, Sun)", "OpenCV (ONNX export)"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "opencv/deblurring_nafnet", "revision": "main", "include": ["deblurring_nafnet_2025may.onnx"] }],
+      "approxSizeMb": 70
+    },
+    {
       "id": "mobilenetv2",
       "displayName": "MobileNetV2 (ImageNet Classification)",
       "description": "Tiny 1000-class ImageNet image classifier (~14 MB). CPU-friendly baseline for whole-image labelling, embedding extraction, or as a backbone for fine-tuning. Bundles the ImageNet-1K class label file.",
@@ -673,6 +725,29 @@
       "requiresHfLogin": true
     },
 
+    {
+      "id": "silero-vad",
+      "displayName": "Silero VAD (Voice Activity Detection)",
+      "description": "Tiny (~2.2 MB) voice-activity classifier. Detects speech vs silence/noise per 30ms frame at 16 kHz. Standard preprocessor in front of Whisper / STT pipelines — skips non-speech frames so the recognizer only sees audio that actually contains voice.",
+      "task": "voice-activity-detection",
+      "tags": ["audio", "vad", "voice-activity-detection", "edge"],
+      "licenseIds": ["mit"],
+      "attributions": ["Silero Team — silero.ai (Silero VAD)"],
+      "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/silero-vad", "revision": "e71cae966052b992a7eca6b17738916ce0eca4ec", "include": ["onnx/model.onnx"] }],
+      "approxSizeMb": 2
+    },
+    {
+      "id": "silero-vad-fp16",
+      "displayName": "Silero VAD fp16 (Voice Activity Detection)",
+      "description": "Half-precision variant of Silero VAD — ~1.15 MB on disk (vs 2.24 MB for fp32). Same voice-activity classification per 30ms frame at 16 kHz; pick this when deployment footprint matters (container images, serverless cold-start, edge bundles). On CPU runtimes that upcast fp16 → fp32 internally, expect identical latency to the fp32 variant; on GPU / NPU with native fp16, expect a modest speedup.",
+      "tags": ["audio", "vad", "voice-activity-detection", "edge", "fp16"],
+      "licenseIds": ["mit"],
+      "attributions": ["Silero Team — silero.ai (Silero VAD)"],
+      "hardware": { "minRamMb": 64, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/silero-vad", "revision": "e71cae966052b992a7eca6b17738916ce0eca4ec", "include": ["onnx/model_fp16.onnx"] }],
+      "approxSizeMb": 1
+    },
     {
       "id": "whisper-base",
       "displayName": "Whisper Base (Speech-to-Text)",

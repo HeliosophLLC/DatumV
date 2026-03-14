@@ -1,7 +1,10 @@
+using DatumIngest.Catalog;
 using DatumIngest.Functions;
+using DatumIngest.Pooling;
 using DatumIngest.Web.Api;
 using DatumIngest.Web.Dtos.Functions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DatumIngest.Web.Tests;
 
@@ -13,10 +16,19 @@ namespace DatumIngest.Web.Tests;
 /// </summary>
 public sealed class FunctionCatalogControllerTests
 {
+    private static FunctionCatalogController CreateController()
+    {
+        ServiceCollection services = new();
+        services.AddDatumIngest();
+        ServiceProvider sp = services.BuildServiceProvider();
+        Pool pool = sp.GetRequiredService<Pool>();
+        TableCatalog catalog = new(pool);
+        return new FunctionCatalogController(catalog);
+    }
+
     private static ScalarFunctionListResponse List()
     {
-        FunctionCatalogController controller = new(FunctionRegistry.CreateDefault());
-        ActionResult<ScalarFunctionListResponse> result = controller.ListScalar();
+        ActionResult<ScalarFunctionListResponse> result = CreateController().ListScalar();
         Assert.NotNull(result.Value);
         return result.Value!;
     }
@@ -234,5 +246,100 @@ public sealed class FunctionCatalogControllerTests
         // test is "BodyScope round-trips", not "infer exists".
         if (infer is null) return;
         Assert.NotEqual("None", infer.BodyScope);
+    }
+
+    // ───────────────────── /api/functions/udfs ─────────────────────
+
+    private static TableCatalog CreateCatalogWithUdfs(params string[] createStatements)
+    {
+        ServiceCollection services = new();
+        services.AddDatumIngest();
+        ServiceProvider sp = services.BuildServiceProvider();
+        Pool pool = sp.GetRequiredService<Pool>();
+        TableCatalog catalog = new(pool);
+        foreach (string sql in createStatements)
+        {
+            catalog.PlanAsync(sql).GetAwaiter().GetResult();
+        }
+        return catalog;
+    }
+
+    [Fact]
+    public void ListUdfs_EmptyCatalog_ReturnsEmptyList()
+    {
+        FunctionCatalogController controller = CreateController();
+        ActionResult<UdfListResponse> result = controller.ListUdfs();
+        Assert.NotNull(result.Value);
+        Assert.Empty(result.Value!.Udfs);
+    }
+
+    [Fact]
+    public void ListUdfs_MacroUdf_SurfacesBodyKindAndParameters()
+    {
+        TableCatalog catalog = CreateCatalogWithUdfs(
+            "CREATE FUNCTION shout(name STRING) AS upper(name)");
+        FunctionCatalogController controller = new(catalog);
+
+        UdfListResponse response = controller.ListUdfs().Value!;
+        UdfDto shout = Assert.Single(response.Udfs);
+        Assert.Equal("shout", shout.Name);
+        Assert.Equal("macro", shout.BodyKind);
+        Assert.False(shout.IsPure);
+        Assert.Single(shout.Parameters);
+        Assert.Equal("name", shout.Parameters[0].Name);
+    }
+
+    [Fact]
+    public void ListUdfs_ProceduralUdf_WithCheckClause_ProjectsTypedDiscriminator()
+    {
+        // CHECK on a procedural UDF parameter should round-trip through the
+        // walker into a BetweenCheckDto carried on the wire payload.
+        TableCatalog catalog = CreateCatalogWithUdfs(
+            "CREATE FUNCTION clamp01(x FLOAT32 = CAST(0.5 AS FLOAT32) " +
+            "CHECK (x BETWEEN 0 AND 1) STEP 0.05 COMMENT 'Sigmoid threshold.') " +
+            "RETURNS FLOAT32 BEGIN RETURN x END");
+        FunctionCatalogController controller = new(catalog);
+
+        UdfListResponse response = controller.ListUdfs().Value!;
+        UdfDto clamp = Assert.Single(response.Udfs);
+        Assert.Equal("procedural", clamp.BodyKind);
+        Assert.Equal("FLOAT32", clamp.ReturnType, ignoreCase: true);
+
+        ScalarFunctionParameterDto x = Assert.Single(clamp.Parameters);
+        Assert.True(x.IsOptional, "= default should mark the parameter optional.");
+        Assert.NotNull(x.DefaultExpression);
+
+        BetweenCheckDto between = Assert.IsType<BetweenCheckDto>(x.Check);
+        Assert.Equal(0m, between.Min);
+        Assert.Equal(1m, between.Max);
+        Assert.Equal(0.05m, x.Step);
+        Assert.Equal("Sigmoid threshold.", x.Description);
+    }
+
+    [Fact]
+    public void ListUdfs_DeclaredType_RoundTripsAsSingletonAcceptedKinds()
+    {
+        // A declared `INT32` parameter type should resolve into the
+        // accepted-kinds list as a singleton so the UI can render a typed
+        // input widget instead of a permissive any-kind text field.
+        TableCatalog catalog = CreateCatalogWithUdfs(
+            "CREATE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END");
+        FunctionCatalogController controller = new(catalog);
+
+        UdfDto sq = Assert.Single(controller.ListUdfs().Value!.Udfs);
+        ScalarFunctionParameterDto x = sq.Parameters[0];
+        Assert.False(x.AcceptsAnyKind);
+        Assert.Equal(new[] { "Int32" }, x.AcceptedKinds);
+    }
+
+    // ───────────────────── /api/functions/models ─────────────────────
+
+    [Fact]
+    public void ListModels_EmptyCatalog_ReturnsEmptyList()
+    {
+        FunctionCatalogController controller = CreateController();
+        ActionResult<ModelListResponse> result = controller.ListModels();
+        Assert.NotNull(result.Value);
+        Assert.Empty(result.Value!.Models);
     }
 }

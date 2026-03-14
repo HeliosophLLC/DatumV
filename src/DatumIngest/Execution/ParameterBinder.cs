@@ -461,7 +461,8 @@ public static class ParameterBinder
             boundOrderBy,
             function.Distinct,
             function.Span,
-            boundWithinGroup);
+            boundWithinGroup,
+            function.SchemaName);
     }
 
     private static IReadOnlyList<OrderByItem> BindOrderByItems(

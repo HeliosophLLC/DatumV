@@ -313,6 +313,94 @@ public sealed class TokenizerEncodeBertFunction : IFunction, IScalarFunction
 }
 
 /// <summary>
+/// <c>tokenizer.encode_bert_pair(query, passage, vocab_path) → Struct{input_ids: Int64[],
+/// attention_mask: Int64[], token_type_ids: Int64[]}</c>. Encodes a pair of texts
+/// into the standard BERT cross-encoder packing
+/// (<c>[CLS] query [SEP] passage [SEP]</c>) with the per-segment
+/// <c>token_type_ids</c> mask (<c>0</c> for the first segment incl. its
+/// surrounding [CLS]/[SEP]; <c>1</c> for the second segment incl. its
+/// trailing [SEP]) that BERT-family cross-encoders are trained with.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Why a separate function from <c>encode_bert</c>.</strong>
+/// Cross-encoders (rerankers, NLI, paraphrase scoring) score the
+/// relationship between two texts, and the model is trained with explicit
+/// segment ids on the second sequence. <c>encode_bert</c> wraps a single
+/// sequence with all-zero token_type_ids — fine for single-text BERT
+/// encoders but degrades reranker quality because the model loses its
+/// query-vs-passage signal.
+/// </para>
+/// <para>
+/// <strong>No native pair API.</strong> Microsoft.ML.Tokenizers' BertTokenizer
+/// has no pair-encode method; this function does the assembly manually —
+/// tokenize each side without special tokens, then prepend
+/// <see cref="BertTokenizer.ClassificationTokenId"/>, separate / terminate
+/// with <see cref="BertTokenizer.SeparatorTokenId"/>, and build the
+/// token_type_ids vector to match. Mirrors HuggingFace transformers'
+/// <c>tokenizer(query, passage)</c> output byte-for-byte for the
+/// common-case uncased English BERT vocab.
+/// </para>
+/// </remarks>
+public sealed class TokenizerEncodeBertPairFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "encode_bert_pair";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Encoding;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Encodes a (query, passage) pair with a BERT/WordPiece tokenizer "
+        + "(vocab.txt path) and returns the canonical cross-encoder bundle: "
+        + "input_ids ([CLS] q [SEP] p [SEP]), attention_mask (all 1s), and "
+        + "token_type_ids (0 for q+surrounding specials, 1 for p+trailing SEP). "
+        + "Feeds multi-input infer() in a CREATE MODEL body for rerankers, NLI, "
+        + "and paraphrase models.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("query",      DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("passage",    DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("vocab_path", DataKindMatcher.Exact(DataKind.String)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<TokenizerEncodeBertPairFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args[0].IsNull || args[1].IsNull || args[2].IsNull)
+        {
+            return new ValueTask<ValueRef>(ValueRef.NullStruct(0));
+        }
+
+        string query      = args[0].AsString();
+        string passage    = args[1].AsString();
+        string vocabPath  = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
+            args[2].AsString(), "tokenizer.encode_bert_pair", frame);
+
+        BertTokenizer tokenizer = TokenizerCache.GetBertFromVocab(vocabPath);
+        return new ValueTask<ValueRef>(
+            TokenizerOps.EncodeBertPairToValueRef(tokenizer, query, passage, frame.Types));
+    }
+}
+
+/// <summary>
 /// <c>tokenizer.encode_roberta(text, tokenizer_json_path) → Struct{input_ids: Int64[],
 /// attention_mask: Int64[]}</c>. Tokenizes the input text with a RoBERTa-family
 /// BPE tokenizer (loaded from a HuggingFace <c>tokenizer.json</c>) and packages
@@ -529,6 +617,97 @@ internal static class TokenizerOps
             attentionMask[i] = 1L;
             // tokenTypeIds left at default 0L — single-sequence default.
         }
+
+        ValueRef[] fields =
+        [
+            ValueRef.FromPrimitiveArray(inputIds,      DataKind.Int64),
+            ValueRef.FromPrimitiveArray(attentionMask, DataKind.Int64),
+            ValueRef.FromPrimitiveArray(tokenTypeIds,  DataKind.Int64),
+        ];
+
+        ushort typeId = 0;
+        if (types is not null)
+        {
+            int int64ArrayTypeId = types.InternArrayType(DataKind.Int64);
+            StructFieldDescriptor[] descriptors =
+            [
+                new("input_ids",      int64ArrayTypeId),
+                new("attention_mask", int64ArrayTypeId),
+                new("token_type_ids", int64ArrayTypeId),
+            ];
+            typeId = (ushort)types.InternStructType(descriptors);
+        }
+
+        return ValueRef.FromStruct(fields, typeId);
+    }
+
+    /// <summary>
+    /// Pair-encodes <paramref name="query"/> and <paramref name="passage"/>
+    /// into the standard BERT cross-encoder shape
+    /// (<c>[CLS] query [SEP] passage [SEP]</c>) with matching attention_mask
+    /// and per-segment token_type_ids. The struct's TypeId is interned into
+    /// <paramref name="types"/> when supplied so downstream
+    /// <c>infer({encoded}, {...})</c> can resolve field names back to
+    /// session input names.
+    /// </summary>
+    /// <remarks>
+    /// Microsoft.ML.Tokenizers' BertTokenizer has no pair-encode method;
+    /// this method does the assembly manually using
+    /// <see cref="BertTokenizer.ClassificationTokenId"/> and
+    /// <see cref="BertTokenizer.SeparatorTokenId"/>. Each side is tokenized
+    /// with <c>addSpecialTokens: false</c> to avoid double-wrapping, then
+    /// glued together with the right specials in the right positions.
+    /// </remarks>
+    internal static ValueRef EncodeBertPairToValueRef(
+        BertTokenizer tokenizer, string query, string passage, TypeRegistry? types)
+    {
+        IReadOnlyList<int> queryIds = tokenizer.EncodeToIds(
+            query, addSpecialTokens: false, considerPreTokenization: true);
+        IReadOnlyList<int> passageIds = tokenizer.EncodeToIds(
+            passage, addSpecialTokens: false, considerPreTokenization: true);
+
+        int clsId = tokenizer.ClassificationTokenId;
+        int sepId = tokenizer.SeparatorTokenId;
+
+        // Layout: [CLS] q1..qN [SEP] p1..pM [SEP]
+        //         seg=0 seg=0   seg=0 seg=1  seg=1
+        // attention_mask all 1s (no padding at this layer).
+        int qLen = queryIds.Count;
+        int pLen = passageIds.Count;
+        int total = 1 + qLen + 1 + pLen + 1;
+
+        long[] inputIds      = new long[total];
+        long[] attentionMask = new long[total];
+        long[] tokenTypeIds  = new long[total];
+
+        int pos = 0;
+        inputIds[pos]      = clsId;
+        attentionMask[pos] = 1L;
+        tokenTypeIds[pos]  = 0L;
+        pos++;
+
+        for (int i = 0; i < qLen; i++, pos++)
+        {
+            inputIds[pos]      = queryIds[i];
+            attentionMask[pos] = 1L;
+            tokenTypeIds[pos]  = 0L;
+        }
+
+        inputIds[pos]      = sepId;
+        attentionMask[pos] = 1L;
+        tokenTypeIds[pos]  = 0L;
+        pos++;
+
+        for (int i = 0; i < pLen; i++, pos++)
+        {
+            inputIds[pos]      = passageIds[i];
+            attentionMask[pos] = 1L;
+            tokenTypeIds[pos]  = 1L;
+        }
+
+        inputIds[pos]      = sepId;
+        attentionMask[pos] = 1L;
+        tokenTypeIds[pos]  = 1L;
 
         ValueRef[] fields =
         [

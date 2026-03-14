@@ -265,6 +265,7 @@ public static class ModelBodyLowerer
         "read_string_list",
         // tokenizer schema — relative paths resolve against the model's USING dir
         "tokenizer.encode_bert",
+        "tokenizer.encode_bert_pair",
         "tokenizer.encode_roberta",
     };
 
