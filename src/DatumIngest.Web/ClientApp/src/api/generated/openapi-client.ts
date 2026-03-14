@@ -51,6 +51,74 @@ export class FunctionCatalogClient {
         }
         return Promise.resolve<ScalarFunctionListResponse>(null as any);
     }
+
+    listUdfs(signal?: AbortSignal): Promise<UdfListResponse> {
+        let url_ = this.baseUrl + "/api/functions/udfs";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processListUdfs(_response);
+        });
+    }
+
+    protected processListUdfs(response: Response): Promise<UdfListResponse> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as UdfListResponse;
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<UdfListResponse>(null as any);
+    }
+
+    listModels(signal?: AbortSignal): Promise<ModelListResponse> {
+        let url_ = this.baseUrl + "/api/functions/models";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processListModels(_response);
+        });
+    }
+
+    protected processListModels(response: Response): Promise<ModelListResponse> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as ModelListResponse;
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<ModelListResponse>(null as any);
+    }
 }
 
 export class HealthClient {
@@ -910,6 +978,37 @@ export interface ScalarFunctionReturnTypeDto {
     description?: string;
     staticHint?: string | undefined;
     producesArray?: boolean;
+}
+
+export interface UdfListResponse {
+    udfs?: UdfDto[];
+}
+
+export interface UdfDto {
+    schema?: string;
+    name?: string;
+    bodyKind?: string;
+    isPure?: boolean;
+    parameters?: ScalarFunctionParameterDto[];
+    returnType?: string | undefined;
+    returnIsNotNull?: boolean;
+    sourceText?: string | undefined;
+}
+
+export interface ModelListResponse {
+    models?: ModelDto[];
+}
+
+export interface ModelDto {
+    schema?: string;
+    name?: string;
+    parameters?: ScalarFunctionParameterDto[];
+    returnType?: string;
+    returnIsNotNull?: boolean;
+    usingPath?: string;
+    resolvedUsingPath?: string;
+    implementsTask?: string | undefined;
+    sourceText?: string | undefined;
 }
 
 export interface HealthDto {

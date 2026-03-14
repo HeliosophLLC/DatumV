@@ -1,10 +1,10 @@
 import type {
-  ScalarFunctionDto,
   ScalarFunctionParameterDto,
   ScalarFunctionSignatureDto,
   ScalarFunctionVariadicDto,
 } from '@/api/generated/openapi-client';
 import type { FunctionFormState } from '@/state/functionForm';
+import type { ResolvedExecutable } from './resolveExecutableEntry';
 
 // Synthesizes the DECLARE+SELECT script a function tab will run. The
 // server's `/api/query/stream` endpoint already accepts the resulting
@@ -295,10 +295,10 @@ export function declaredKindFor(
 const VARIABLE_PREFIX = 'arg_';
 
 export function synthesizeFunctionScript(
-  fn: ScalarFunctionDto,
-  variant: ScalarFunctionSignatureDto,
+  resolved: ResolvedExecutable,
   form: FunctionFormState,
 ): ScriptSynthesisResult {
+  const { variant } = resolved;
   const params = variant.parameters ?? [];
   const lines: string[] = [];
   const fields: FormFieldStatus[] = [];
@@ -382,8 +382,8 @@ export function synthesizeFunctionScript(
     .filter((n) => n.length > 0)
     .map((n) => `${VARIABLE_PREFIX}${n}`);
   const callArgs = [...fixedCallArgs, ...variadicCallArgs].join(', ');
-  const fnSchema = fn.schema ?? 'system';
-  const fnName = fn.name ?? '';
+  const fnSchema = resolved.schema || 'system';
+  const fnName = resolved.name;
   lines.push(`SELECT ${fnSchema}.${fnName}(${callArgs});`);
 
   return {

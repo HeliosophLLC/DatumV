@@ -347,6 +347,46 @@ function SingleValueView({
   );
 }
 
+/**
+ * Single-cell image: image fitted to the pane by default, click anywhere
+ * (or the "View full resolution" button) to open the modal at native
+ * pixel size. The modal's content area scrolls when the image overflows,
+ * so a 2048×2048 image renders 1:1 with horizontal + vertical scroll
+ * rather than being downscaled to fit a viewport.
+ */
+function SingleValueImage({ cell }: { cell: JsonCell }) {
+  const [open, setOpen] = useState(false);
+  const src = dataUriOf(cell);
+  const bytes = bytesFromBase64(cell.dataB64);
+  const title = `${cell.mime ?? 'image'} · ${formatBytes(bytes)}`;
+  return (
+    <div className="relative flex h-full w-full items-center justify-center">
+      <img
+        src={src}
+        alt=""
+        onClick={() => setOpen(true)}
+        title={title}
+        className="hover:ring-primary max-h-full max-w-full cursor-zoom-in rounded-xs object-contain hover:ring-1"
+      />
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cn(
+          'bg-background/80 text-foreground border-border absolute bottom-2 right-2 rounded-md border px-2 py-1 text-xs',
+          'hover:bg-background cursor-pointer outline-none transition-colors focus:ring-2 focus:ring-ring',
+        )}
+      >
+        View full resolution
+      </button>
+      <MediaPreview open={open} onClose={() => setOpen(false)} title={title}>
+        {/* No max-w/max-h: the modal's overflow-auto content area
+            scrolls so the user can pan around at native pixel size. */}
+        <img src={src} alt="" />
+      </MediaPreview>
+    </div>
+  );
+}
+
 function SingleValueBody({ cell }: { cell: JsonCell }) {
   if (cell.kind === 'null') {
     return (
@@ -363,13 +403,7 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
   ) {
     const mime = cell.mime ?? '';
     if (mime.startsWith('image/') || cell.kind === 'image') {
-      return (
-        <img
-          src={dataUriOf(cell)}
-          alt=""
-          className="max-h-full max-w-full object-contain"
-        />
-      );
+      return <SingleValueImage cell={cell} />;
     }
     if (mime.startsWith('audio/') || cell.kind === 'audio') {
       return (
@@ -431,6 +465,36 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
 // and actual size agree and `virtualRow.size` is correct without a
 // measureElement round-trip.
 const ROW_HEIGHT = 28;
+// Row height when the grid contains at least one image / video / media-
+// array cell. Gives image thumbnails meaningful screen real estate
+// (≈ h-16 plus padding) so the user can read a content-detection result
+// at a glance instead of squinting at 20px squares.
+const ROW_HEIGHT_MEDIA = 80;
+
+/**
+ * True when the cell renders as an image or video thumbnail — what
+ * benefits from the tall-row mode. Audio cells stay short because
+ * they're a glyph + size label, not a thumbnail. `media_array` is
+ * almost always image-array in practice and renders thumbnails too.
+ */
+function isImageOrVideoCell(cell: JsonCell): boolean {
+  if (cell.kind === 'image' || cell.kind === 'video') return true;
+  if (cell.kind === 'media') {
+    const mime = cell.mime ?? '';
+    return mime.startsWith('image/') || mime.startsWith('video/');
+  }
+  if (cell.kind === 'media_array') return true;
+  return false;
+}
+
+function rowsContainImageOrVideo(rows: readonly JsonCell[][]): boolean {
+  for (const row of rows) {
+    for (const cell of row) {
+      if (isImageOrVideoCell(cell)) return true;
+    }
+  }
+  return false;
+}
 // Bounds for content-based column sizing. Narrow integer columns can
 // shrink to 60 px (room for ~6 digits); pathologically wide columns
 // (long strings, JSON blobs) cap at 400 px so they don't push every
@@ -547,10 +611,24 @@ function CellTable({ cell }: { cell: CellResult }) {
   // and horizontal scroll moves header + rows together (their grid
   // templates match, so columns stay aligned).
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Detect image/video content in the grid to decide whether to use
+  // the tall row mode. Sample-bounded for the same reason `colWidths`
+  // is — a streaming query with 1000s of rows shouldn't pay an O(rows)
+  // scan on every appended row. SAMPLE_ROWS is plenty to spot the
+  // first media cell, after which the dep stabilises.
+  const sampleSize = Math.min(cell.rows.length, SAMPLE_ROWS);
+  const largeMedia = useMemo(
+    () => rowsContainImageOrVideo(cell.rows.slice(0, sampleSize)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cell.schema, sampleSize],
+  );
+  const rowHeight = largeMedia ? ROW_HEIGHT_MEDIA : ROW_HEIGHT;
+
   const rowVirtualizer = useVirtualizer({
     count: cell.rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: () => rowHeight,
     overscan: 12,
   });
 
@@ -560,7 +638,8 @@ function CellTable({ cell }: { cell: CellResult }) {
   // hold a stable width set for the rest of the run. Without the cap, a
   // 2000-row stream would re-measure on every appended row (O(cols *
   // SAMPLE_ROWS) per render = millions of canvas measureText calls).
-  const sampleSize = Math.min(cell.rows.length, SAMPLE_ROWS);
+  // `sampleSize` was already computed above for the media-detection
+  // memo; reused here so both checks stabilise on the same boundary.
   const colWidths = useMemo(() => {
     if (cell.schema === null) return [] as number[];
     return cell.schema.map((col, idx) =>
@@ -651,9 +730,14 @@ function CellTable({ cell }: { cell: CellResult }) {
                 <div
                   key={colIdx}
                   title={cellTooltip(c)}
-                  className="border-border min-w-0 truncate border-r px-2 py-1 align-top font-mono last:border-r-0"
+                  className={cn(
+                    'border-border min-w-0 border-r px-2 py-1 font-mono last:border-r-0',
+                    largeMedia
+                      ? 'flex items-center overflow-hidden'
+                      : 'truncate align-top',
+                  )}
                 >
-                  <CellValue cell={c} />
+                  <CellValue cell={c} largeMedia={largeMedia} />
                 </div>
               ))}
             </div>
@@ -664,7 +748,13 @@ function CellTable({ cell }: { cell: CellResult }) {
   );
 }
 
-function CellValue({ cell }: { cell: JsonCell }) {
+function CellValue({
+  cell,
+  largeMedia = false,
+}: {
+  cell: JsonCell;
+  largeMedia?: boolean;
+}) {
   if (cell.kind === 'null') {
     return <span className="text-muted-foreground italic">null</span>;
   }
@@ -675,14 +765,14 @@ function CellValue({ cell }: { cell: JsonCell }) {
   // them out.
   if (cell.kind === 'media' || cell.kind === 'image' || cell.kind === 'audio' || cell.kind === 'video') {
     const mime = cell.mime ?? '';
-    if (mime.startsWith('image/') || cell.kind === 'image') return <ImageCell cell={cell} />;
+    if (mime.startsWith('image/') || cell.kind === 'image') return <ImageCell cell={cell} largeMedia={largeMedia} />;
     if (mime.startsWith('audio/') || cell.kind === 'audio') return <AudioCell cell={cell} />;
-    if (mime.startsWith('video/') || cell.kind === 'video') return <VideoCell cell={cell} />;
+    if (mime.startsWith('video/') || cell.kind === 'video') return <VideoCell cell={cell} largeMedia={largeMedia} />;
     // Unknown mime → still surface that it's a blob the user could
     // download rather than rendering empty.
     return <BinaryCell cell={cell} />;
   }
-  if (cell.kind === 'media_array' && cell.items) return <MediaArrayCell cell={cell} />;
+  if (cell.kind === 'media_array' && cell.items) return <MediaArrayCell cell={cell} largeMedia={largeMedia} />;
   return <span>{cell.text ?? ''}</span>;
 }
 
@@ -719,7 +809,7 @@ function dataUriOf(cell: JsonCell): string {
   return `data:${cell.mime ?? 'application/octet-stream'};base64,${cell.dataB64 ?? ''}`;
 }
 
-function ImageCell({ cell }: { cell: JsonCell }) {
+function ImageCell({ cell, largeMedia = false }: { cell: JsonCell; largeMedia?: boolean }) {
   const [open, setOpen] = useState(false);
   const src = dataUriOf(cell);
   const bytes = bytesFromBase64(cell.dataB64);
@@ -731,7 +821,10 @@ function ImageCell({ cell }: { cell: JsonCell }) {
         loading="lazy"
         onClick={() => setOpen(true)}
         title={`image · ${formatBytes(bytes)}`}
-        className="hover:ring-primary inline-block h-5 max-w-full cursor-zoom-in rounded-xs object-contain hover:ring-1"
+        className={cn(
+          'hover:ring-primary inline-block max-w-full cursor-zoom-in rounded-xs object-contain hover:ring-1',
+          largeMedia ? 'h-16' : 'h-5',
+        )}
       />
       <MediaPreview
         open={open}
@@ -770,10 +863,40 @@ function AudioCell({ cell }: { cell: JsonCell }) {
   );
 }
 
-function VideoCell({ cell }: { cell: JsonCell }) {
+function VideoCell({ cell, largeMedia = false }: { cell: JsonCell; largeMedia?: boolean }) {
   const [open, setOpen] = useState(false);
   const src = dataUriOf(cell);
   const bytes = bytesFromBase64(cell.dataB64);
+  // Larger row → render a clickable inline preview frame instead of the
+  // glyph-only button. The video doesn't autoplay (no `autoPlay`) — the
+  // user opens the modal for playback. `preload="metadata"` gets enough
+  // of the file for the browser to render a poster frame.
+  if (largeMedia) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          title={`video · ${cell.mime ?? 'unknown'} · ${formatBytes(bytes)}`}
+          className="hover:ring-primary cursor-zoom-in rounded-xs hover:ring-1"
+        >
+          <video
+            src={src}
+            preload="metadata"
+            muted
+            className="h-16 max-w-full object-contain"
+          />
+        </button>
+        <MediaPreview
+          open={open}
+          onClose={() => setOpen(false)}
+          title={`video · ${cell.mime ?? 'unknown'} · ${formatBytes(bytes)}`}
+        >
+          <video src={src} controls className="max-h-[80vh] max-w-[80vw]" />
+        </MediaPreview>
+      </>
+    );
+  }
   return (
     <>
       <button
@@ -796,7 +919,7 @@ function VideoCell({ cell }: { cell: JsonCell }) {
   );
 }
 
-function MediaArrayCell({ cell }: { cell: JsonCell }) {
+function MediaArrayCell({ cell, largeMedia = false }: { cell: JsonCell; largeMedia?: boolean }) {
   const [open, setOpen] = useState(false);
   const items = cell.items ?? [];
   // Render the first up-to-3 thumbnails inline; click any to open the
@@ -817,7 +940,10 @@ function MediaArrayCell({ cell }: { cell: JsonCell }) {
             src={`data:${it.mime};base64,${it.dataB64}`}
             alt=""
             loading="lazy"
-            className="inline-block h-5 w-5 rounded-xs object-cover"
+            className={cn(
+              'inline-block rounded-xs object-cover',
+              largeMedia ? 'h-16 w-16' : 'h-5 w-5',
+            )}
           />
         ))}
         <span className="text-muted-foreground">{items.length}</span>

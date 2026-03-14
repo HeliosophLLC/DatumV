@@ -1,29 +1,47 @@
+using DatumIngest.Catalog;
+using DatumIngest.Catalog.Registries;
+using DatumIngest.Execution;
 using DatumIngest.Functions;
-using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 using DatumIngest.Web.Dtos.Functions;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DatumIngest.Web.Api;
 
 /// <summary>
-/// Read-only catalog endpoints for the function registry. Lets the
-/// Execute-Function tab enumerate scalar functions with full signature
-/// metadata — argument names, accepted kinds, optionality, variadics, and
-/// the return-type rule — so the client can render a form per overload.
+/// Read-only catalog endpoints for the function / UDF / model surface.
+/// Lets the Execute-Function tab enumerate built-in scalars, user-defined
+/// functions, and SQL-defined models with full signature metadata —
+/// argument names, accepted kinds, optionality, variadics, return-type
+/// rules, parameter <see cref="ParameterCheckDto">constraints</see>,
+/// defaults, and units — so the client can render a form per overload
+/// without re-implementing the SQL grammar.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Sourced from <see cref="FunctionRegistry.ScalarDescriptors"/>. Functions
-/// that only make sense inside a procedural context (e.g. <c>infer()</c>
-/// inside a <c>CREATE MODEL</c> body) still appear in the listing with
-/// their <c>BodyScope</c> set, so the client can decide whether to
-/// disable them in the picker.
+/// Three endpoints, one shape per registry:
+/// <list type="bullet">
+///   <item><description><c>GET scalar</c> — every registered scalar function,
+///   sourced from <see cref="FunctionRegistry.ScalarDescriptors"/>. Built-ins,
+///   procedural-UDF adapters, and SQL-defined model adapters all appear here
+///   (they're all <c>IScalarFunction</c>s under the hood). Functions that only
+///   make sense inside a procedural context (e.g. <c>infer()</c> inside a
+///   <c>CREATE MODEL</c> body) still appear with their <c>BodyScope</c> set
+///   so the client can decide whether to disable them in the picker.</description></item>
+///   <item><description><c>GET udfs</c> — only SQL UDFs (macro + procedural),
+///   sourced from <see cref="TableCatalog.Udfs"/>. Carries body-shape, purity
+///   flag, return-type annotation, and verbatim source text — fields specific
+///   to user-authored routines.</description></item>
+///   <item><description><c>GET models</c> — only SQL-defined models, sourced
+///   from <see cref="TableCatalog.DeclaredModels"/>. Carries the <c>USING</c>
+///   binding path and any <c>IMPLEMENTS TaskName</c> contract.</description></item>
+/// </list>
 /// </para>
 /// </remarks>
 [ApiController]
 [Route("api/functions")]
-public sealed class FunctionCatalogController(FunctionRegistry registry) : ControllerBase
+public sealed class FunctionCatalogController(TableCatalog catalog) : ControllerBase
 {
     /// <summary>
     /// Lists every registered scalar function with its full signature
@@ -33,13 +51,129 @@ public sealed class FunctionCatalogController(FunctionRegistry registry) : Contr
     [HttpGet("scalar")]
     public ActionResult<ScalarFunctionListResponse> ListScalar()
     {
-        IReadOnlyList<FunctionDescriptor> descriptors = registry.ScalarDescriptors;
+        IReadOnlyList<FunctionDescriptor> descriptors = catalog.Functions.ScalarDescriptors;
         List<ScalarFunctionDto> functions = new(descriptors.Count);
         foreach (FunctionDescriptor d in descriptors)
         {
             functions.Add(ToDto(d));
         }
         return new ScalarFunctionListResponse(functions);
+    }
+
+    /// <summary>
+    /// Lists every SQL UDF registered against the catalog. Mirrors
+    /// <see cref="ListScalar"/>'s shape but adds body-kind, purity, and
+    /// source-text fields specific to user-authored routines, and projects
+    /// parameter defaults verbatim through <see cref="QueryExplainer.FormatExpression"/>.
+    /// </summary>
+    [HttpGet("udfs")]
+    public ActionResult<UdfListResponse> ListUdfs()
+    {
+        IReadOnlyCollection<UdfDescriptor> entries = catalog.Udfs.Entries;
+        List<UdfDto> udfs = new(entries.Count);
+        foreach (UdfDescriptor d in entries)
+        {
+            udfs.Add(ToDto(d));
+        }
+        return new UdfListResponse(udfs);
+    }
+
+    /// <summary>
+    /// Lists every SQL-defined model registered against the catalog via
+    /// <c>CREATE MODEL</c>. Surfaces the <c>USING</c> path (raw + resolved),
+    /// any <c>IMPLEMENTS</c> task-contract declaration, and full parameter
+    /// metadata.
+    /// </summary>
+    [HttpGet("models")]
+    public ActionResult<ModelListResponse> ListModels()
+    {
+        IReadOnlyCollection<ModelDescriptor> entries = catalog.DeclaredModels.Entries;
+        List<ModelDto> models = new(entries.Count);
+        foreach (ModelDescriptor d in entries)
+        {
+            models.Add(ToDto(d));
+        }
+        return new ModelListResponse(models);
+    }
+
+    private static UdfDto ToDto(UdfDescriptor d)
+    {
+        ScalarFunctionParameterDto[] parameters = new ScalarFunctionParameterDto[d.Parameters.Count];
+        for (int i = 0; i < d.Parameters.Count; i++)
+        {
+            parameters[i] = ToParameterDto(d.Parameters[i]);
+        }
+        return new UdfDto(
+            Schema: d.SchemaName,
+            Name: d.Name,
+            BodyKind: d.IsProcedural ? "procedural" : "macro",
+            IsPure: d.IsPure,
+            Parameters: parameters,
+            ReturnType: d.ReturnTypeName,
+            ReturnIsNotNull: d.ReturnIsNotNull,
+            SourceText: d.SourceText);
+    }
+
+    private static ModelDto ToDto(ModelDescriptor d)
+    {
+        ScalarFunctionParameterDto[] parameters = new ScalarFunctionParameterDto[d.Parameters.Count];
+        for (int i = 0; i < d.Parameters.Count; i++)
+        {
+            parameters[i] = ToParameterDto(d.Parameters[i]);
+        }
+        return new ModelDto(
+            Schema: d.SchemaName,
+            Name: d.Name,
+            Parameters: parameters,
+            ReturnType: d.ReturnTypeName,
+            ReturnIsNotNull: d.ReturnIsNotNull,
+            UsingPath: d.UsingPath,
+            ResolvedUsingPath: d.ResolvedUsingPath,
+            ImplementsTask: d.ImplementsTaskName,
+            SourceText: d.SourceText);
+    }
+
+    /// <summary>
+    /// Projects a parsed <see cref="UdfParameter"/> into the same
+    /// <see cref="ScalarFunctionParameterDto"/> the built-in scalar projection uses,
+    /// so client-side rendering code can switch on a single parameter shape
+    /// regardless of whether the function is a built-in, UDF, or model.
+    /// The <c>CHECK</c> AST is canonicalised through
+    /// <see cref="ParameterCheckWalker.Canonicalise"/> so the wire payload
+    /// carries the same typed discriminator (<c>"between"</c>, <c>"in"</c>, …)
+    /// as built-in scalars.
+    /// </summary>
+    private static ScalarFunctionParameterDto ToParameterDto(UdfParameter p)
+    {
+        // Declared-type → DataKind: a parsed annotation pins the slot to one kind.
+        // If the annotation doesn't resolve (custom type, parser quirk), fall
+        // back to "accepts any" so the client renders a permissive widget
+        // rather than failing closed.
+        bool typeResolved = TypeAnnotationResolver.TryParse(p.TypeName, out DataKind kind, out bool isArray);
+        IReadOnlyList<string> acceptedKinds = typeResolved
+            ? [kind.ToString()]
+            : Array.Empty<string>();
+        bool acceptsAny = !typeResolved;
+        string arrayMatch = isArray ? ArrayMatch.Array.ToString() : ArrayMatch.Either.ToString();
+
+        ParameterCheck? check = p.Check is null
+            ? null
+            : ParameterCheckWalker.Canonicalise(p.Check, p.Name);
+
+        return new ScalarFunctionParameterDto(
+            Name: p.Name,
+            KindLabel: p.TypeName,
+            AcceptedKinds: acceptedKinds,
+            AcceptsAnyKind: acceptsAny,
+            IsOptional: p.Default is not null,
+            ArrayMatch: arrayMatch,
+            DefaultExpression: p.Default is null
+                ? null
+                : QueryExplainer.FormatExpression(p.Default),
+            Check: ToCheckDto(check),
+            Step: p.Step,
+            Unit: p.Unit,
+            Description: p.Description);
     }
 
     private static ScalarFunctionDto ToDto(FunctionDescriptor d)

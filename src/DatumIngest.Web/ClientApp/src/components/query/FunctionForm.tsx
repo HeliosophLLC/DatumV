@@ -19,7 +19,8 @@ import type {
 import {
   functionCatalogState,
   loadFunctionCatalog,
-  toggleCategoryExpanded,
+  toggleSectionExpanded,
+  type CatalogStatus,
 } from '@/state/functionCatalog';
 import {
   addVariadicSlot,
@@ -45,8 +46,14 @@ import {
   synthesizeFunctionScript,
 } from '@/lib/synthesizeFunctionScript';
 import type {
+  ModelDto,
   ScalarFunctionVariadicDto,
+  UdfDto,
 } from '@/api/generated/openapi-client';
+import {
+  resolveExecutable,
+  type ResolvedExecutable,
+} from '@/lib/resolveExecutableEntry';
 import {
   describeCheck,
   isInCheck,
@@ -89,65 +96,31 @@ export function FunctionForm({ tabId }: { tabId: string }) {
   const formSnap = formsSnap.byTabId[tabId];
   const search = formSnap?.search ?? '';
   const selection = formSnap?.selection ?? null;
-
-  // Group + filter the scalar functions for the picker. Hide body-scoped
-  // entries (e.g. `infer` only valid inside CREATE MODEL bodies) — they
-  // belong in the SQL editor, not a standalone form. Search only kicks
-  // in at ≥ 2 characters so a single keystroke doesn't snap-collapse
-  // every category.
-  const groupedFunctions = useMemo<CategoryGroup[]>(() => {
-    const term = search.trim().toLowerCase();
-    const searchActive = term.length >= 2;
-    const matchPredicate = (f: ScalarFunctionDto) =>
-      !searchActive
-      || (f.name ?? '').toLowerCase().includes(term)
-      || (f.aliases ?? []).some((a) => a.toLowerCase().includes(term));
-
-    const buckets = new Map<string, ScalarFunctionDto[]>();
-    for (const fn of catalogSnap.entries as readonly ScalarFunctionDto[]) {
-      if (fn.bodyScope !== 'None') continue;
-      if (!matchPredicate(fn)) continue;
-      const category = fn.category ?? 'Other';
-      const list = buckets.get(category);
-      if (list) list.push(fn);
-      else buckets.set(category, [fn]);
-    }
-    // Sort each bucket alphabetically by function name, then return
-    // category groups in alphabetical order. The Map keeps insertion
-    // order; we sort the entries explicitly so the rendered order is
-    // stable across renders.
-    const groups: CategoryGroup[] = [];
-    for (const [category, fns] of buckets.entries()) {
-      groups.push({
-        category,
-        functions: fns
-          .slice()
-          .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
-      });
-    }
-    groups.sort((a, b) => a.category.localeCompare(b.category));
-    return groups;
-  }, [catalogSnap.entries, search]);
-
   const searchActive = search.trim().length >= 2;
 
-  // useSnapshot returns deep-readonly views which TypeScript can't
-  // implicitly assign to the mutable generated DTOs. We `ref(entries)`
-  // in the state module so the runtime objects are NOT proxied; the
-  // cast is the type-only complement of that runtime escape hatch.
-  const selectedFunction = useMemo(() => {
-    if (!selection) return null;
-    const match = catalogSnap.entries.find(
-      (f) => f.schema === selection.schema && f.name === selection.name,
-    );
-    return (match ?? null) as ScalarFunctionDto | null;
-  }, [catalogSnap.entries, selection]);
+  // Three parallel grouped views — scalars by FunctionCategory, models by
+  // ImplementsTask (with a `(no task)` bucket), UDFs flat. Search filters
+  // each at ≥ 2 chars; sections with no matches end up empty and the
+  // picker hides them under search.
+  const scalarGroups = useMemo(
+    () => buildScalarGroups(catalogSnap.scalars as readonly ScalarFunctionDto[], search),
+    [catalogSnap.scalars, search],
+  );
+  const modelGroups = useMemo(
+    () => buildModelGroups(catalogSnap.models as readonly ModelDto[], search),
+    [catalogSnap.models, search],
+  );
+  const udfList = useMemo(
+    () => buildUdfList(catalogSnap.udfs as readonly UdfDto[], search),
+    [catalogSnap.udfs, search],
+  );
 
-  const selectedVariant = useMemo<ScalarFunctionSignatureDto | null>(() => {
-    if (!selectedFunction || !selection) return null;
-    return (selectedFunction.signatures?.[selection.variantIndex]
-      ?? null) as ScalarFunctionSignatureDto | null;
-  }, [selectedFunction, selection]);
+  // Resolve the current selection into a normalized entry shape. Lets
+  // the form body stay polymorphic across the three sources.
+  const resolved = useMemo<ResolvedExecutable | null>(() => {
+    if (!selection) return null;
+    return resolveExecutable(selection);
+  }, [selection, catalogSnap.scalars, catalogSnap.udfs, catalogSnap.models]);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-row overflow-hidden">
@@ -155,21 +128,21 @@ export function FunctionForm({ tabId }: { tabId: string }) {
         tabId={tabId}
         search={search}
         searchActive={searchActive}
-        groups={groupedFunctions}
-        expandedCategories={catalogSnap.expandedCategories}
+        scalarGroups={scalarGroups}
+        modelGroups={modelGroups}
+        udfList={udfList}
+        expandedSections={catalogSnap.expandedSections}
         selection={selection}
-        status={catalogSnap.status}
-        error={catalogSnap.error}
+        catalogSnap={catalogSnap}
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {selectedFunction === null || formSnap === undefined ? (
+        {resolved === null || formSnap === undefined ? (
           <EmptySelectionHint />
         ) : (
           <FormBody
             tabId={tabId}
-            fn={selectedFunction as ScalarFunctionDto}
+            resolved={resolved}
             variantIndex={selection!.variantIndex}
-            variant={selectedVariant ?? null}
             textValues={formSnap.textValues}
             fileNames={formSnap.fileNames}
             fieldErrors={formSnap.fieldErrors}
@@ -190,48 +163,180 @@ export function FunctionForm({ tabId }: { tabId: string }) {
   }
 }
 
-// ───────────────────────── Function picker ─────────────────────────
+// ───────────────────────── Grouping helpers ─────────────────────────
 
-interface CategoryGroup {
+interface ScalarGroup {
   category: string;
   functions: ScalarFunctionDto[];
 }
+
+interface ModelGroup {
+  /** Task contract name, or the "no task" sentinel for models without IMPLEMENTS. */
+  task: string;
+  /** True for the synthetic "no task" bucket — rendered after named tasks. */
+  isNoTask: boolean;
+  models: ModelDto[];
+}
+
+const NO_TASK_KEY = '(no task)';
+
+function buildScalarGroups(
+  entries: readonly ScalarFunctionDto[],
+  search: string,
+): ScalarGroup[] {
+  const term = search.trim().toLowerCase();
+  const searchActive = term.length >= 2;
+  const matchPredicate = (f: ScalarFunctionDto) =>
+    !searchActive
+    || (f.name ?? '').toLowerCase().includes(term)
+    || (f.aliases ?? []).some((a) => a.toLowerCase().includes(term));
+
+  const buckets = new Map<string, ScalarFunctionDto[]>();
+  for (const fn of entries) {
+    if (fn.bodyScope !== 'None') continue;
+    if (!matchPredicate(fn)) continue;
+    const category = fn.category ?? 'Other';
+    const list = buckets.get(category);
+    if (list) list.push(fn);
+    else buckets.set(category, [fn]);
+  }
+  const groups: ScalarGroup[] = [];
+  for (const [category, fns] of buckets.entries()) {
+    groups.push({
+      category,
+      functions: fns
+        .slice()
+        .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    });
+  }
+  groups.sort((a, b) => a.category.localeCompare(b.category));
+  return groups;
+}
+
+function buildModelGroups(
+  entries: readonly ModelDto[],
+  search: string,
+): ModelGroup[] {
+  const term = search.trim().toLowerCase();
+  const searchActive = term.length >= 2;
+  const matchPredicate = (m: ModelDto) =>
+    !searchActive
+    || (m.name ?? '').toLowerCase().includes(term)
+    || (m.implementsTask ?? '').toLowerCase().includes(term);
+
+  const buckets = new Map<string, ModelDto[]>();
+  for (const m of entries) {
+    if (!matchPredicate(m)) continue;
+    const task = m.implementsTask ?? NO_TASK_KEY;
+    const list = buckets.get(task);
+    if (list) list.push(m);
+    else buckets.set(task, [m]);
+  }
+  // Named tasks alphabetical first, then the "(no task)" bucket at
+  // the end so it's clearly the tail rather than mixed in.
+  const named: ModelGroup[] = [];
+  let noTask: ModelGroup | null = null;
+  for (const [task, models] of buckets.entries()) {
+    const sortedModels = models
+      .slice()
+      .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+    if (task === NO_TASK_KEY) {
+      noTask = { task, isNoTask: true, models: sortedModels };
+    } else {
+      named.push({ task, isNoTask: false, models: sortedModels });
+    }
+  }
+  named.sort((a, b) => a.task.localeCompare(b.task));
+  return noTask ? [...named, noTask] : named;
+}
+
+function buildUdfList(
+  entries: readonly UdfDto[],
+  search: string,
+): UdfDto[] {
+  const term = search.trim().toLowerCase();
+  const searchActive = term.length >= 2;
+  const filtered = entries.filter(
+    (u) =>
+      !searchActive
+      || (u.name ?? '').toLowerCase().includes(term)
+      || (u.schema ?? '').toLowerCase().includes(term),
+  );
+  return filtered
+    .slice()
+    .sort((a, b) =>
+      (a.schema ?? '').localeCompare(b.schema ?? '')
+      || (a.name ?? '').localeCompare(b.name ?? ''),
+    );
+}
+
+// ───────────────────────── Function picker ─────────────────────────
+
+type SelectionView = NonNullable<
+  ReturnType<typeof useSnapshot<typeof functionFormState>>['byTabId'][string]['selection']
+>;
 
 function FunctionPicker({
   tabId,
   search,
   searchActive,
-  groups,
-  expandedCategories,
+  scalarGroups,
+  modelGroups,
+  udfList,
+  expandedSections,
   selection,
-  status,
-  error,
+  catalogSnap,
 }: {
   tabId: string;
   search: string;
-  /** True when the search input has ≥ 2 chars and the function list is filtered. */
+  /** True when the search input has ≥ 2 chars and lists are filtered. */
   searchActive: boolean;
-  groups: CategoryGroup[];
-  expandedCategories: Readonly<Record<string, true>>;
-  selection: ReturnType<typeof useSnapshot<typeof functionFormState>>['byTabId'][string]['selection'] | null;
-  status: 'idle' | 'loading' | 'ready' | 'error';
-  error: string | null;
+  scalarGroups: ScalarGroup[];
+  modelGroups: ModelGroup[];
+  udfList: UdfDto[];
+  expandedSections: Readonly<Record<string, true>>;
+  selection: SelectionView | null;
+  catalogSnap: ReturnType<typeof useSnapshot<typeof functionCatalogState>>;
 }) {
   const { t } = useTranslation('query');
 
-  function onPick(fn: ScalarFunctionDto) {
-    // Default to the first formable variant when picking a fresh
-    // function — the user can flip to another one in the overload row
-    // afterward. Falls back to 0 if none are formable (the form body
-    // will render the "use a SQL tab" hint).
+  // Top-level section "expanded": user-toggled override OR search auto-
+  // expand. Search also hides sections that produced zero results.
+  const isSectionExpanded = (key: string) =>
+    searchActive || !!expandedSections[key];
+
+  function pickScalar(fn: ScalarFunctionDto): void {
     const signatures = fn.signatures ?? [];
     const idx = signatures.findIndex(isFormableVariant);
     setFunctionFormSelection(tabId, {
+      source: 'scalar',
       schema: fn.schema ?? 'system',
       name: fn.name ?? '',
       variantIndex: idx >= 0 ? idx : 0,
     });
   }
+
+  function pickUdf(u: UdfDto): void {
+    setFunctionFormSelection(tabId, {
+      source: 'udf',
+      schema: u.schema ?? '',
+      name: u.name ?? '',
+      variantIndex: 0,
+    });
+  }
+
+  function pickModel(m: ModelDto): void {
+    setFunctionFormSelection(tabId, {
+      source: 'model',
+      schema: m.schema ?? 'models',
+      name: m.name ?? '',
+      variantIndex: 0,
+    });
+  }
+
+  const showModels = !searchActive || modelGroups.length > 0;
+  const showUdfs = !searchActive || udfList.length > 0;
+  const showScalars = !searchActive || scalarGroups.length > 0;
 
   return (
     <div className="border-border bg-background flex w-72 shrink-0 flex-col overflow-hidden border-r">
@@ -248,66 +353,180 @@ function FunctionPicker({
         />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-1">
-        {status === 'loading' && (
-          <div className="text-muted-foreground p-2 text-xs">
-            {t('fnPickerLoading')}
-          </div>
+        {showModels && (
+          <TopSection
+            id="models"
+            label={t('fnPickerModelsHeader')}
+            count={modelGroups.reduce((s, g) => s + g.models.length, 0)}
+            status={catalogSnap.modelStatus}
+            error={catalogSnap.modelError}
+            expanded={isSectionExpanded('models')}
+            clickable={!searchActive}
+          >
+            <div className="flex flex-col">
+              {modelGroups.map((group) => (
+                <TaskSubsection
+                  key={group.task}
+                  group={group}
+                  expanded={
+                    searchActive || !!expandedSections[`models:${group.task}`]
+                  }
+                  clickable={!searchActive}
+                  selection={selection}
+                  onPick={pickModel}
+                />
+              ))}
+            </div>
+          </TopSection>
         )}
-        {status === 'error' && (
-          <div className="text-destructive p-2 text-xs">
-            {t('fnPickerError', { message: error ?? '' })}{' '}
-            <button
-              type="button"
-              className="underline"
-              onClick={() => void loadFunctionCatalog()}
-            >
-              {t('fnPickerRetry')}
-            </button>
-          </div>
+        {showUdfs && (
+          <TopSection
+            id="udfs"
+            label={t('fnPickerUdfsHeader')}
+            count={udfList.length}
+            status={catalogSnap.udfStatus}
+            error={catalogSnap.udfError}
+            expanded={isSectionExpanded('udfs')}
+            clickable={!searchActive}
+          >
+            <ul className="flex flex-col pl-1">
+              {udfList.map((u) => (
+                <UdfPickerRow
+                  key={`${u.schema}.${u.name}`}
+                  udf={u}
+                  selection={selection}
+                  onPick={pickUdf}
+                />
+              ))}
+            </ul>
+          </TopSection>
         )}
-        {status === 'ready' && groups.length === 0 && (
-          <div className="text-muted-foreground p-2 text-xs">
-            {t('fnPickerEmpty')}
-          </div>
+        {showScalars && (
+          <TopSection
+            id="functions"
+            label={t('fnPickerFunctionsHeader')}
+            count={scalarGroups.reduce((s, g) => s + g.functions.length, 0)}
+            status={catalogSnap.scalarStatus}
+            error={catalogSnap.scalarError}
+            expanded={isSectionExpanded('functions')}
+            clickable={!searchActive}
+          >
+            <div className="flex flex-col">
+              {scalarGroups.map((group) => (
+                <CategorySubsection
+                  key={group.category}
+                  group={group}
+                  expanded={
+                    searchActive
+                    || !!expandedSections[`functions:${group.category}`]
+                  }
+                  clickable={!searchActive}
+                  selection={selection}
+                  onPick={pickScalar}
+                />
+              ))}
+            </div>
+          </TopSection>
         )}
-        <div className="flex flex-col">
-          {groups.map((group) => (
-            <CategorySection
-              key={group.category}
-              group={group}
-              expanded={searchActive || !!expandedCategories[group.category]}
-              // Search overrides the user's expand state — the toggle
-              // would do nothing useful while a search is active, so
-              // the click is suppressed and the chevron hides.
-              clickable={!searchActive}
-              selection={selection}
-              onPick={onPick}
-            />
-          ))}
-        </div>
       </div>
     </div>
   );
 }
 
-function CategorySection({
+/**
+ * Top-level section ("Models" / "UDFs" / "Functions") with its own
+ * collapse state. Status + error states render inline within the
+ * section body so a single failing catalog doesn't blank out the
+ * other two.
+ */
+function TopSection({
+  id,
+  label,
+  count,
+  status,
+  error,
+  expanded,
+  clickable,
+  children,
+}: {
+  id: string;
+  label: string;
+  count: number;
+  status: CatalogStatus;
+  error: string | null;
+  expanded: boolean;
+  clickable: boolean;
+  children: React.ReactNode;
+}) {
+  const { t } = useTranslation('query');
+  return (
+    <section className="mb-1 flex flex-col">
+      <button
+        type="button"
+        onClick={clickable ? () => toggleSectionExpanded(id) : undefined}
+        disabled={!clickable}
+        className={cn(
+          'text-foreground flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide transition-colors',
+          'outline-none',
+          clickable && 'hover:bg-muted cursor-pointer',
+        )}
+      >
+        {expanded ? (
+          <ChevronDown className="size-3.5" />
+        ) : (
+          <ChevronRight className="size-3.5" />
+        )}
+        <span className="flex-1 truncate">{label}</span>
+        <span className="text-muted-foreground/80 font-mono text-[10px]">
+          {count}
+        </span>
+      </button>
+      {expanded && (
+        <div className="flex flex-col">
+          {status === 'loading' && (
+            <div className="text-muted-foreground px-2 py-1 text-xs">
+              {t('fnPickerLoading')}
+            </div>
+          )}
+          {status === 'error' && (
+            <div className="text-destructive px-2 py-1 text-xs">
+              {t('fnPickerError', { message: error ?? '' })}
+            </div>
+          )}
+          {status === 'ready' && count === 0 && (
+            <div className="text-muted-foreground px-2 py-1 text-xs">
+              {t('fnPickerEmpty')}
+            </div>
+          )}
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CategorySubsection({
   group,
   expanded,
   clickable,
   selection,
   onPick,
 }: {
-  group: CategoryGroup;
+  group: ScalarGroup;
   expanded: boolean;
   clickable: boolean;
-  selection: ReturnType<typeof useSnapshot<typeof functionFormState>>['byTabId'][string]['selection'] | null;
+  selection: SelectionView | null;
   onPick: (fn: ScalarFunctionDto) => void;
 }) {
   return (
     <section className="flex flex-col">
       <button
         type="button"
-        onClick={clickable ? () => toggleCategoryExpanded(group.category) : undefined}
+        onClick={
+          clickable
+            ? () => toggleSectionExpanded(`functions:${group.category}`)
+            : undefined
+        }
         disabled={!clickable}
         className={cn(
           'text-muted-foreground hover:text-foreground flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-medium uppercase tracking-wide transition-colors',
@@ -334,6 +553,7 @@ function CategorySection({
           {group.functions.map((fn) => {
             const isSelected =
               selection !== null
+              && selection.source === 'scalar'
               && selection.schema === fn.schema
               && selection.name === fn.name;
             return (
@@ -370,13 +590,129 @@ function CategorySection({
   );
 }
 
+function TaskSubsection({
+  group,
+  expanded,
+  clickable,
+  selection,
+  onPick,
+}: {
+  group: ModelGroup;
+  expanded: boolean;
+  clickable: boolean;
+  selection: SelectionView | null;
+  onPick: (m: ModelDto) => void;
+}) {
+  return (
+    <section className="flex flex-col">
+      <button
+        type="button"
+        onClick={
+          clickable
+            ? () => toggleSectionExpanded(`models:${group.task}`)
+            : undefined
+        }
+        disabled={!clickable}
+        className={cn(
+          'flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-medium transition-colors',
+          'outline-none',
+          group.isNoTask
+            ? 'text-muted-foreground/70 italic'
+            : 'text-muted-foreground hover:text-foreground tracking-wide',
+          clickable && 'hover:bg-muted cursor-pointer',
+        )}
+      >
+        {clickable ? (
+          expanded ? (
+            <ChevronDown className="size-3.5" />
+          ) : (
+            <ChevronRight className="size-3.5" />
+          )
+        ) : (
+          <ChevronDown className="text-muted-foreground/60 size-3.5" />
+        )}
+        <span className="flex-1 truncate font-mono">{group.task}</span>
+        <span className="text-muted-foreground/80 font-mono text-[10px]">
+          {group.models.length}
+        </span>
+      </button>
+      {expanded && (
+        <ul className="flex flex-col pl-2">
+          {group.models.map((m) => {
+            const isSelected =
+              selection !== null
+              && selection.source === 'model'
+              && selection.schema === m.schema
+              && selection.name === m.name;
+            return (
+              <li key={`${m.schema}.${m.name}`}>
+                <button
+                  type="button"
+                  onClick={() => onPick(m)}
+                  className={cn(
+                    'group flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                    'cursor-pointer outline-none',
+                    isSelected
+                      ? 'bg-primary/15 text-foreground'
+                      : 'text-foreground hover:bg-muted',
+                  )}
+                >
+                  <span className="font-mono text-[0.8125rem]">{m.name}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function UdfPickerRow({
+  udf,
+  selection,
+  onPick,
+}: {
+  udf: UdfDto;
+  selection: SelectionView | null;
+  onPick: (u: UdfDto) => void;
+}) {
+  const isSelected =
+    selection !== null
+    && selection.source === 'udf'
+    && selection.schema === udf.schema
+    && selection.name === udf.name;
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onPick(udf)}
+        className={cn(
+          'group flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+          'cursor-pointer outline-none',
+          isSelected
+            ? 'bg-primary/15 text-foreground'
+            : 'text-foreground hover:bg-muted',
+        )}
+      >
+        <span className="font-mono text-[0.8125rem]">
+          {udf.schema}.{udf.name}
+        </span>
+        <span className="text-muted-foreground text-xs">
+          {udf.bodyKind}
+          {udf.isPure ? ' · pure' : ''}
+        </span>
+      </button>
+    </li>
+  );
+}
+
 // ───────────────────────── Form body ─────────────────────────
 
 function FormBody({
   tabId,
-  fn,
+  resolved,
   variantIndex,
-  variant,
   textValues,
   fileNames,
   fieldErrors,
@@ -384,9 +720,8 @@ function FormBody({
   variadicCounts,
 }: {
   tabId: string;
-  fn: ScalarFunctionDto;
+  resolved: ResolvedExecutable;
   variantIndex: number;
-  variant: ScalarFunctionSignatureDto | null;
   textValues: Record<string, string>;
   fileNames: Record<string, string>;
   fieldErrors: Record<string, string>;
@@ -394,7 +729,14 @@ function FormBody({
   variadicCounts: Record<string, number>;
 }) {
   const { t } = useTranslation('query');
-  const variants = fn.signatures ?? [];
+  // Only scalar functions carry multiple signatures (overloads). UDFs
+  // and models always have exactly one — the variant picker stays
+  // hidden for them.
+  const variant: ScalarFunctionSignatureDto | null = resolved.variant;
+  const variants =
+    resolved.source === 'scalar'
+      ? resolved.scalar?.signatures ?? []
+      : [];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -405,12 +747,24 @@ function FormBody({
           <div className="flex items-center gap-2">
             <FunctionSquare className="text-muted-foreground size-4" />
             <span className="truncate font-mono text-sm font-medium">
-              {fn.schema}.{fn.name}
+              {resolved.schema}.{resolved.name}
             </span>
           </div>
-          {fn.description && (
+          {resolved.description && (
             <p className="text-muted-foreground mt-1 text-xs">
-              {fn.description}
+              {resolved.description}
+            </p>
+          )}
+          {resolved.source === 'model' && resolved.model?.implementsTask && (
+            <p className="text-muted-foreground mt-1 text-xs">
+              implements <span className="font-mono">{resolved.model.implementsTask}</span>
+            </p>
+          )}
+          {resolved.source === 'udf' && resolved.udf && (
+            <p className="text-muted-foreground mt-1 text-xs">
+              {resolved.udf.bodyKind} UDF
+              {resolved.udf.isPure ? ' · pure' : ''}
+              {resolved.udf.returnType ? ` → ${resolved.udf.returnType}` : ''}
             </p>
           )}
         </div>
@@ -429,7 +783,7 @@ function FormBody({
                 <OverloadRow
                   key={idx}
                   tabId={tabId}
-                  fn={fn}
+                  fn={resolved.scalar!}
                   variant={v}
                   index={idx}
                   selected={idx === variantIndex}
@@ -488,8 +842,7 @@ function FormBody({
             {t('fnPreviewHeader')}
           </h3>
           <ScriptPreview
-            fn={fn}
-            variant={variant}
+            resolved={resolved}
             textValues={textValues}
             fileNames={fileNames}
             kindOverrides={kindOverrides}
@@ -521,6 +874,10 @@ function OverloadRow({
   function onPick() {
     if (!formable) return;
     setFunctionFormSelection(tabId, {
+      // OverloadRow is scalar-only — variadics + multi-signature is
+      // a scalar-function-only shape; UDFs/models have exactly one
+      // signature and never reach this row.
+      source: 'scalar',
       schema: fn.schema ?? 'system',
       name: fn.name ?? '',
       variantIndex: index,
@@ -1212,15 +1569,13 @@ function BinaryField({
 // ───────────────────────── Script preview ─────────────────────────
 
 function ScriptPreview({
-  fn,
-  variant,
+  resolved,
   textValues,
   fileNames,
   kindOverrides,
   variadicCounts,
 }: {
-  fn: ScalarFunctionDto;
-  variant: ScalarFunctionSignatureDto | null;
+  resolved: ResolvedExecutable;
   textValues: Record<string, string>;
   fileNames: Record<string, string>;
   kindOverrides: Record<string, string>;
@@ -1228,13 +1583,13 @@ function ScriptPreview({
 }) {
   const { t } = useTranslation('query');
 
-  if (variant === null || !isFormableVariant(variant)) {
+  if (!isFormableVariant(resolved.variant)) {
     return (
       <p className="text-muted-foreground text-sm">{t('fnPreviewEmpty')}</p>
     );
   }
 
-  const result = synthesizeFunctionScript(fn, variant, {
+  const result = synthesizeFunctionScript(resolved, {
     search: '',
     selection: null,
     textValues,

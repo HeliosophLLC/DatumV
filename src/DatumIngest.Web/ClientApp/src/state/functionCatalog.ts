@@ -1,72 +1,148 @@
 import { proxy, ref } from 'valtio';
 import { api } from '@/api';
-import type { ScalarFunctionDto } from '@/api/generated/openapi-client';
+import type {
+  ModelDto,
+  ScalarFunctionDto,
+  UdfDto,
+} from '@/api/generated/openapi-client';
 
-// Read-only cache for `GET /api/functions/scalar`. Fetched once per app
-// session — the catalog is bounded by the registered scalar set, which
-// changes only across server upgrades. The Execute-Function form consumes
-// this directly via `useSnapshot`.
+// Read-only cache for the catalog endpoints surfaced by
+// `FunctionCatalogController`:
 //
-// `ref(entries)` wraps the deserialised array in a Valtio ref so the
-// nested DTO structure (signatures → parameters → accepted kinds) isn't
-// proxied. Cheaper, and the generated DTOs are declared with optional
-// fields the Valtio proxy would otherwise warn about.
+//   - `GET /api/functions/scalar` — built-in scalar functions (the big one).
+//   - `GET /api/functions/udfs`   — SQL UDFs declared with `CREATE FUNCTION`.
+//   - `GET /api/functions/models` — SQL-defined models declared with
+//     `CREATE MODEL`. Each may carry an `ImplementsTask` task-contract
+//     name from `TaskTypeRegistry` — used as the grouping key in the
+//     picker so users browse by capability rather than by model name.
+//
+// All three are fetched once per session — the engine doesn't mutate
+// any of these registries at runtime today, so a single cached snapshot
+// is enough. `ref(entries)` wraps each deserialised array in a Valtio
+// ref so the nested DTO structure isn't proxied.
+//
+// `expandedSections` is a single flat map covering every collapsible
+// node in the picker. Keys are stable string ids:
+//   - top-level sections:   `models`, `udfs`, `functions`
+//   - function categories:  `functions:Numeric`, `functions:String`, …
+//   - model task buckets:   `models:TextEmbedder`, `models:(no task)`, …
+// Search (≥ 2 chars) force-expands any group with a match regardless
+// of what's in this map.
+
+export type CatalogStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 interface FunctionCatalogState {
-  status: 'idle' | 'loading' | 'ready' | 'error';
-  entries: ScalarFunctionDto[];
-  error: string | null;
-  /**
-   * Picker UI state: which category sections are currently expanded. Keyed
-   * by category name so a `true` value means "expanded". Lives on the
-   * catalog proxy (rather than per-tab) so the user's pick-a-category
-   * navigation survives switching between function tabs in the same
-   * session. Cleared on reload — expansion isn't worth persisting.
-   *
-   * The search behaviour overrides this: when the search term has ≥ 2
-   * characters, every rendered category force-expands so matches are
-   * visible without an extra click.
-   */
-  expandedCategories: Record<string, true>;
+  scalarStatus: CatalogStatus;
+  scalars: ScalarFunctionDto[];
+  scalarError: string | null;
+
+  udfStatus: CatalogStatus;
+  udfs: UdfDto[];
+  udfError: string | null;
+
+  modelStatus: CatalogStatus;
+  models: ModelDto[];
+  modelError: string | null;
+
+  /** Flat expansion map across every collapsible node in the picker. */
+  expandedSections: Record<string, true>;
 }
 
+/**
+ * Default-expansion preset. Models is a curated catalog that's going to
+ * grow large; defaulting it closed keeps the picker calm. UDFs are
+ * sparse and likely user-authored, worth expanding by default. Functions
+ * is the legacy big-list; its categories stay collapsed-by-default
+ * inside the section.
+ */
+const DEFAULT_EXPANDED: Record<string, true> = {
+  udfs: true,
+  functions: true,
+};
+
 export const functionCatalogState = proxy<FunctionCatalogState>({
-  status: 'idle',
-  entries: [],
-  error: null,
-  expandedCategories: {},
+  scalarStatus: 'idle',
+  scalars: [],
+  scalarError: null,
+  udfStatus: 'idle',
+  udfs: [],
+  udfError: null,
+  modelStatus: 'idle',
+  models: [],
+  modelError: null,
+  expandedSections: { ...DEFAULT_EXPANDED },
 });
 
-export function toggleCategoryExpanded(category: string): void {
-  if (functionCatalogState.expandedCategories[category]) {
-    const next = { ...functionCatalogState.expandedCategories };
-    delete next[category];
-    functionCatalogState.expandedCategories = next;
+export function toggleSectionExpanded(key: string): void {
+  if (functionCatalogState.expandedSections[key]) {
+    const next = { ...functionCatalogState.expandedSections };
+    delete next[key];
+    functionCatalogState.expandedSections = next;
   } else {
-    functionCatalogState.expandedCategories = {
-      ...functionCatalogState.expandedCategories,
-      [category]: true,
+    functionCatalogState.expandedSections = {
+      ...functionCatalogState.expandedSections,
+      [key]: true,
     };
   }
 }
 
 /**
- * Fetches the scalar function catalog on first call. Subsequent calls
- * are no-ops while loading or after a successful load; on error,
- * subsequent calls retry.
+ * Convenience for callers that previously toggled categories under the
+ * old `expandedCategories` map. Lives here so the picker doesn't have
+ * to know about the `functions:` prefix scheme directly.
  */
-export async function loadFunctionCatalog(): Promise<void> {
-  if (functionCatalogState.status === 'loading') return;
-  if (functionCatalogState.status === 'ready') return;
-  functionCatalogState.status = 'loading';
-  functionCatalogState.error = null;
+export function toggleCategoryExpanded(category: string): void {
+  toggleSectionExpanded(`functions:${category}`);
+}
+
+export async function loadScalarFunctions(): Promise<void> {
+  if (functionCatalogState.scalarStatus === 'loading') return;
+  if (functionCatalogState.scalarStatus === 'ready') return;
+  functionCatalogState.scalarStatus = 'loading';
+  functionCatalogState.scalarError = null;
   try {
     const response = await api.functionCatalog.listScalar();
-    const entries = response.functions ?? [];
-    functionCatalogState.entries = ref(entries);
-    functionCatalogState.status = 'ready';
+    functionCatalogState.scalars = ref(response.functions ?? []);
+    functionCatalogState.scalarStatus = 'ready';
   } catch (err) {
-    functionCatalogState.error = err instanceof Error ? err.message : String(err);
-    functionCatalogState.status = 'error';
+    functionCatalogState.scalarError = err instanceof Error ? err.message : String(err);
+    functionCatalogState.scalarStatus = 'error';
   }
+}
+
+export async function loadUdfs(): Promise<void> {
+  if (functionCatalogState.udfStatus === 'loading') return;
+  if (functionCatalogState.udfStatus === 'ready') return;
+  functionCatalogState.udfStatus = 'loading';
+  functionCatalogState.udfError = null;
+  try {
+    const response = await api.functionCatalog.listUdfs();
+    functionCatalogState.udfs = ref(response.udfs ?? []);
+    functionCatalogState.udfStatus = 'ready';
+  } catch (err) {
+    functionCatalogState.udfError = err instanceof Error ? err.message : String(err);
+    functionCatalogState.udfStatus = 'error';
+  }
+}
+
+export async function loadModels(): Promise<void> {
+  if (functionCatalogState.modelStatus === 'loading') return;
+  if (functionCatalogState.modelStatus === 'ready') return;
+  functionCatalogState.modelStatus = 'loading';
+  functionCatalogState.modelError = null;
+  try {
+    const response = await api.functionCatalog.listModels();
+    functionCatalogState.models = ref(response.models ?? []);
+    functionCatalogState.modelStatus = 'ready';
+  } catch (err) {
+    functionCatalogState.modelError = err instanceof Error ? err.message : String(err);
+    functionCatalogState.modelStatus = 'error';
+  }
+}
+
+/** Fires all three loaders in parallel. Convenient for the picker's mount effect. */
+export function loadFunctionCatalog(): Promise<void> {
+  return Promise.all([loadScalarFunctions(), loadUdfs(), loadModels()]).then(
+    () => undefined,
+  );
 }

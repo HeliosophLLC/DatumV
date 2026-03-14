@@ -1,7 +1,5 @@
 import type {
-  ScalarFunctionDto,
   ScalarFunctionParameterDto,
-  ScalarFunctionSignatureDto,
 } from '@/api/generated/openapi-client';
 import { getFunctionFormFile } from '@/state/functionForm';
 import type { FunctionFormState } from '@/state/functionForm';
@@ -17,6 +15,7 @@ import {
   synthesizeFunctionScript,
 } from './synthesizeFunctionScript';
 import { validateCheck } from './parameterCheck';
+import type { ResolvedExecutable } from './resolveExecutableEntry';
 
 // Assembles the wire payload a function tab will send to /api/query/stream.
 // Splits the form into:
@@ -52,11 +51,11 @@ export type BuildFunctionRequestResult =
 
 export function buildFunctionRequest(
   tabId: string,
-  fn: ScalarFunctionDto,
-  variant: ScalarFunctionSignatureDto,
+  resolved: ResolvedExecutable,
   form: FunctionFormState,
 ): BuildFunctionRequestResult {
-  const synth = synthesizeFunctionScript(fn, variant, form);
+  const { variant } = resolved;
+  const synth = synthesizeFunctionScript(resolved, form);
   const parameters: Record<string, ParameterBinding> = {};
   const files: Record<string, File> = {};
   const fieldErrors: Record<string, string> = {};

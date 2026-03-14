@@ -1,7 +1,7 @@
 import { proxy } from 'valtio';
 import { runTab } from './execution';
-import { functionCatalogState } from './functionCatalog';
 import { buildFunctionRequest } from '@/lib/buildFunctionRequest';
+import { resolveExecutable } from '@/lib/resolveExecutableEntry';
 
 // Per-tab state for an Execute-Function tab: which function the user
 // picked, which overload variant, and the values they've entered for
@@ -14,12 +14,23 @@ import { buildFunctionRequest } from '@/lib/buildFunctionRequest';
 // That's by v1 design (the user re-uploads each time per the agreed
 // scope) — re-upload-on-reload is acceptable in a localhost dev tool.
 
+/**
+ * Which registry the picked entry came from. Drives lookups in
+ * `runFunctionTab` + dispatch in `buildFunctionRequest`. UDFs and
+ * models always have a single signature, so their `variantIndex` is
+ * pinned to 0; the field stays on the type so the rest of the form
+ * (overload picker, kind chips, etc.) can stay polymorphic.
+ */
+export type FunctionFormSource = 'scalar' | 'udf' | 'model';
+
 export interface FunctionFormSelection {
+  /** Which catalog the picked entry lives in. */
+  source: FunctionFormSource;
   /** SQL schema of the picked function. */
   schema: string;
   /** Canonical name of the picked function. */
   name: string;
-  /** Index into the function's `signatures` array. */
+  /** Index into the function's `signatures` array. Always 0 for UDFs and models. */
   variantIndex: number;
 }
 
@@ -377,15 +388,13 @@ export function disposeFunctionForm(tabId: string): void {
 export async function runFunctionTab(tabId: string): Promise<void> {
   const state = functionFormState.byTabId[tabId];
   if (!state || !state.selection) return;
-  const fn = functionCatalogState.entries.find(
-    (f) =>
-      f.schema === state.selection!.schema && f.name === state.selection!.name,
-  );
-  if (!fn) return;
-  const variant = fn.signatures?.[state.selection.variantIndex];
-  if (!variant) return;
+  // resolveExecutable does the per-source lookup + normalises UDF/model
+  // shapes into a synthetic single-signature view; from here on the
+  // form code can stay polymorphic across all three picker sources.
+  const resolved = resolveExecutable(state.selection);
+  if (!resolved) return;
 
-  const built = buildFunctionRequest(tabId, fn, variant, state);
+  const built = buildFunctionRequest(tabId, resolved, state);
   if (!built.ok) {
     state.fieldErrors = built.fieldErrors;
     return;
