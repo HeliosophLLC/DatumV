@@ -117,4 +117,34 @@ public sealed record ColumnInfo
     /// <c>CREATE TABLE</c> / <c>ALTER TABLE</c> time.
     /// </summary>
     public Expression? ComputedExpression { get; init; }
+
+    /// <summary>
+    /// Declared character-max-length for a <see cref="DataKind.String"/>
+    /// column. Captured from the <c>VARCHAR(N)</c> / <c>String(N)</c> SQL
+    /// syntax; <see langword="null"/> for bare strings (<c>TEXT</c> /
+    /// <c>VARCHAR</c> with no length) and for non-string kinds. INSERT-time
+    /// length validation is a follow-up — this field is currently captured
+    /// and surfaced through the schema but not yet enforced.
+    /// </summary>
+    public int? MaxLength { get; init; }
+
+    /// <summary>
+    /// Declared per-row dimensions for an <see cref="IsArray"/> column.
+    /// Captured from <c>Array&lt;Float32&gt;(N)</c>, <c>Float32[N]</c>,
+    /// and the multi-dim <c>Array&lt;Float32&gt;(N, M, …)</c> SQL syntax;
+    /// <see langword="null"/> for variable-length arrays and non-array
+    /// columns. All entries are positive. Used by INSERT-time validation
+    /// and by ANN-style indexes that need a static dimensionality.
+    /// </summary>
+    public int[]? FixedShape { get; init; }
+
+    /// <summary>
+    /// Distinguishes <c>CHAR(N)</c> (blank-padded fixed-length) from
+    /// <c>VARCHAR(N)</c> (variable up to N). Only meaningful when
+    /// <see cref="Kind"/> is <see cref="DataKind.String"/> and
+    /// <see cref="MaxLength"/> is set. When <see langword="true"/>,
+    /// INSERT-time enforcement right-pads short values with spaces
+    /// before storage; overlong values are still rejected.
+    /// </summary>
+    public bool IsBlankPadded { get; init; }
 }

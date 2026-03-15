@@ -264,6 +264,129 @@ public sealed class DatumFormatV4FieldTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(original.RowCount, round.RowCount);
     }
 
+    [Fact]
+    public void ColumnFooter_MaxLength_RoundTripsThroughSerializer()
+    {
+        // Direct ColumnFooterV2 serialize/deserialize with a String column
+        // carrying MaxLength=64 — the new field gated by HasMaxLength.
+        ColumnDescriptorV2 descriptor = new(
+            Name: "label",
+            Kind: DataKind.String,
+            Encoder: EncoderKind.VariableSlot,
+            IsNullable: true,
+            MaxLength: 64);
+
+        ColumnFooterV2 footer = new(
+            Descriptor: descriptor,
+            Pages: [],
+            ChapterZoneMaps: [],
+            VolumeZoneMaps: null);
+
+        using MemoryStream ms = new();
+        using (BinaryWriter bw = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            footer.Serialize(bw, hasVolumeZoneMaps: false);
+        }
+
+        ms.Position = 0;
+        using BinaryReader br = new(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        ColumnFooterV2 round = ColumnFooterV2.Deserialize(br, hasVolumeZoneMaps: false);
+
+        Assert.Equal("label", round.Descriptor.Name);
+        Assert.Equal(DataKind.String, round.Descriptor.Kind);
+        Assert.Equal(64, round.Descriptor.MaxLength);
+        Assert.Null(round.Descriptor.FixedShape);
+    }
+
+    [Fact]
+    public void ColumnFooter_FixedShape_RoundTripsThroughSerializer()
+    {
+        // Float32 array with fixed shape [384] (vector-embedding case).
+        // FixedShape already had on-disk persistence; this pins that PR2
+        // wiring through doesn't regress it.
+        ColumnDescriptorV2 descriptor = new(
+            Name: "embedding",
+            Kind: DataKind.Float32,
+            Encoder: EncoderKind.VariableSlot,
+            IsNullable: false,
+            IsArray: true,
+            FixedShape: [384]);
+
+        ColumnFooterV2 footer = new(
+            Descriptor: descriptor,
+            Pages: [],
+            ChapterZoneMaps: [],
+            VolumeZoneMaps: null);
+
+        using MemoryStream ms = new();
+        using (BinaryWriter bw = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            footer.Serialize(bw, hasVolumeZoneMaps: false);
+        }
+
+        ms.Position = 0;
+        using BinaryReader br = new(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        ColumnFooterV2 round = ColumnFooterV2.Deserialize(br, hasVolumeZoneMaps: false);
+
+        Assert.True(round.Descriptor.IsArray);
+        Assert.NotNull(round.Descriptor.FixedShape);
+        Assert.Equal(new[] { 384 }, round.Descriptor.FixedShape);
+        Assert.Null(round.Descriptor.MaxLength);
+    }
+
+    [Fact]
+    public void ColumnFooter_MultiDimFixedShape_RoundTrips()
+    {
+        ColumnDescriptorV2 descriptor = new(
+            Name: "weights",
+            Kind: DataKind.Float32,
+            Encoder: EncoderKind.VariableSlot,
+            IsNullable: false,
+            IsArray: true,
+            FixedShape: [2, 128, 128]);
+
+        ColumnFooterV2 footer = new(descriptor, [], [], null);
+
+        using MemoryStream ms = new();
+        using (BinaryWriter bw = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            footer.Serialize(bw, hasVolumeZoneMaps: false);
+        }
+
+        ms.Position = 0;
+        using BinaryReader br = new(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        ColumnFooterV2 round = ColumnFooterV2.Deserialize(br, hasVolumeZoneMaps: false);
+
+        Assert.Equal(new[] { 2, 128, 128 }, round.Descriptor.FixedShape);
+    }
+
+    [Fact]
+    public void ColumnFooter_NoExtraMetadata_LeavesBothFieldsNull()
+    {
+        // Sanity check: bare descriptor (no MaxLength, no FixedShape) still
+        // round-trips cleanly. Both flag bits must stay clear on the wire.
+        ColumnDescriptorV2 descriptor = new(
+            Name: "n",
+            Kind: DataKind.Int32,
+            Encoder: EncoderKind.FixedWidth,
+            IsNullable: false);
+
+        ColumnFooterV2 footer = new(descriptor, [], [], null);
+
+        using MemoryStream ms = new();
+        using (BinaryWriter bw = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            footer.Serialize(bw, hasVolumeZoneMaps: false);
+        }
+
+        ms.Position = 0;
+        using BinaryReader br = new(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        ColumnFooterV2 round = ColumnFooterV2.Deserialize(br, hasVolumeZoneMaps: false);
+
+        Assert.Null(round.Descriptor.MaxLength);
+        Assert.Null(round.Descriptor.FixedShape);
+    }
+
     // ──────────────────── Helpers ────────────────────
 
     private string WriteSimpleFile(string fileName)

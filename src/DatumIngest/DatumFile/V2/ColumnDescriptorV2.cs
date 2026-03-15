@@ -23,9 +23,11 @@ namespace DatumIngest.DatumFile.V2;
 /// <see cref="DataKind"/> itself and leave this <c>false</c>.
 /// </param>
 /// <param name="FixedShape">
-/// Per-row dimensions for Vector (<c>[D]</c>), Matrix (<c>[rows, cols]</c>),
-/// or Tensor (<c>[d0, d1, ..., dN-1]</c>). <see langword="null"/> for all
-/// other kinds. Frozen at first-row-flush time.
+/// Per-row dimensions for fixed-shape arrays (<c>Float32[384]</c> →
+/// <c>[384]</c>, <c>Array&lt;Float32&gt;(3, 3)</c> → <c>[3, 3]</c>). All
+/// entries positive. <see langword="null"/> for variable-length arrays and
+/// non-array kinds. Frozen at first-row-flush time. Persisted via
+/// <c>ColumnFlagsV2.HasFixedShape</c>.
 /// </param>
 /// <param name="IsTombstoned">
 /// When <see langword="true"/>, the column has been soft-dropped via
@@ -34,6 +36,21 @@ namespace DatumIngest.DatumFile.V2;
 /// reclamation, but readers skip it at schema enumeration. Backed by
 /// <c>ColumnFlagsV2.Tombstoned</c> in the on-disk footer.
 /// </param>
+/// <param name="MaxLength">
+/// Declared character maximum length for a <see cref="DataKind.String"/>
+/// column (<c>VARCHAR(N)</c> / <c>CHAR(N)</c> / <c>String(N)</c>).
+/// <see langword="null"/> for bare strings (<c>TEXT</c> / <c>VARCHAR</c>
+/// without a length) and for all non-string kinds. Persisted via
+/// <c>ColumnFlagsV2.HasMaxLength</c>. INSERT-time enforcement happens
+/// in <c>LiteralCoercion</c>.
+/// </param>
+/// <param name="IsBlankPadded">
+/// True when the column was declared as <c>CHAR(N)</c> (blank-padded
+/// fixed-length); false for <c>VARCHAR(N)</c> and bare strings.
+/// Only meaningful when <paramref name="Kind"/> is
+/// <see cref="DataKind.String"/> and <paramref name="MaxLength"/> is
+/// set. Persisted via <c>ColumnFlagsV2.IsBlankPadded</c>.
+/// </param>
 public sealed record ColumnDescriptorV2(
     string Name,
     DataKind Kind,
@@ -41,7 +58,9 @@ public sealed record ColumnDescriptorV2(
     bool IsNullable,
     bool IsArray = false,
     int[]? FixedShape = null,
-    bool IsTombstoned = false)
+    bool IsTombstoned = false,
+    int? MaxLength = null,
+    bool IsBlankPadded = false)
 {
     /// <summary>
     /// Picks the appropriate <see cref="EncoderKind"/> for a given

@@ -70,6 +70,8 @@ public sealed record ColumnFooterV2(
         if (Descriptor.FixedShape is not null) flags |= ColumnFlagsV2.HasFixedShape;
         if (Descriptor.IsTombstoned) flags |= ColumnFlagsV2.Tombstoned;
         if (StructTypeId is not null) flags |= ColumnFlagsV2.HasStructTypeId;
+        if (Descriptor.MaxLength is not null) flags |= ColumnFlagsV2.HasMaxLength;
+        if (Descriptor.IsBlankPadded) flags |= ColumnFlagsV2.IsBlankPadded;
         writer.Write((byte)flags);
 
         if (Descriptor.FixedShape is not null)
@@ -79,6 +81,15 @@ public sealed record ColumnFooterV2(
             {
                 writer.Write(dim);
             }
+        }
+
+        if (Descriptor.MaxLength is { } maxLen)
+        {
+            // Schema-level type parameter — grouped with FixedShape rather
+            // than at the end of the block because both belong to the
+            // "declared type shape" tier and stay together when readers
+            // skim past pages they don't need.
+            writer.Write(maxLen);
         }
 
         writer.Write(Pages.Count);
@@ -135,6 +146,12 @@ public sealed record ColumnFooterV2(
             }
         }
 
+        int? maxLength = null;
+        if ((flags & ColumnFlagsV2.HasMaxLength) != 0)
+        {
+            maxLength = reader.ReadInt32();
+        }
+
         ColumnDescriptorV2 descriptor = new(
             name,
             kind,
@@ -142,7 +159,9 @@ public sealed record ColumnFooterV2(
             (flags & ColumnFlagsV2.Nullable) != 0,
             (flags & ColumnFlagsV2.IsArray) != 0,
             fixedShape,
-            (flags & ColumnFlagsV2.Tombstoned) != 0);
+            (flags & ColumnFlagsV2.Tombstoned) != 0,
+            maxLength,
+            (flags & ColumnFlagsV2.IsBlankPadded) != 0);
 
         int pageCount = reader.ReadInt32();
         PageDescriptorV2[] pages = new PageDescriptorV2[pageCount];
@@ -212,4 +231,22 @@ internal enum ColumnFlagsV2 : byte
     /// v4 files and in non-Struct columns.
     /// </summary>
     HasStructTypeId = 0x10,
+
+    /// <summary>
+    /// Column descriptor carries a declared
+    /// <see cref="ColumnDescriptorV2.MaxLength"/> (<c>VARCHAR(N)</c> /
+    /// <c>CHAR(N)</c> / <c>String(N)</c>). Gates the int32 max-length field
+    /// that immediately follows the optional fixed-shape block. Clear for
+    /// bare strings, non-string kinds, and all v4 files.
+    /// </summary>
+    HasMaxLength = 0x20,
+
+    /// <summary>
+    /// Column was declared as <c>CHAR(N)</c> rather than <c>VARCHAR(N)</c>:
+    /// short values are right-padded with spaces at INSERT time. Only
+    /// meaningful when <see cref="HasMaxLength"/> is also set. Standalone
+    /// flag — no extra field; the padding behavior is fully derived from
+    /// the bit + the existing <see cref="ColumnDescriptorV2.MaxLength"/>.
+    /// </summary>
+    IsBlankPadded = 0x40,
 }

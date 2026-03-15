@@ -2548,11 +2548,21 @@ public static class SqlParser
 
     /// <summary>
     /// Parses a column type name. Accepts a plain scalar identifier
-    /// (<c>Int32</c>, <c>String</c>, <c>Time</c>), the angle-bracket array
-    /// wrapper (<c>Array&lt;T&gt;</c>, recursive in syntax — rejected past
-    /// one level at resolution time), and the postfix sugar (<c>T[]</c>)
-    /// which canonicalises to <c>Array&lt;T&gt;</c> at parse time so
-    /// downstream consumers see one form. Returns the canonical string.
+    /// (<c>Int32</c>, <c>String</c>, <c>Time</c>, the PG aliases
+    /// <c>VARCHAR</c> / <c>TEXT</c>), the angle-bracket array wrapper
+    /// (<c>Array&lt;T&gt;</c>, recursive in syntax — rejected past one
+    /// level at resolution time), and the postfix sugars:
+    /// <list type="bullet">
+    /// <item><c>T[]</c> — variable-length array, canonicalises to
+    /// <c>Array&lt;T&gt;</c>.</item>
+    /// <item><c>T[N]</c> — fixed-length array, canonicalises to
+    /// <c>Array&lt;T&gt;(N)</c>.</item>
+    /// <item><c>T(N)</c> / <c>T(N, M, …)</c> — width for strings,
+    /// dimensionality for arrays. Composes with the wrapper form
+    /// (<c>Array&lt;Float32&gt;(384)</c>) and with bare scalars
+    /// (<c>VARCHAR(10)</c>).</item>
+    /// </list>
+    /// Returns the canonical string for downstream resolution.
     /// </summary>
     private static readonly TokenListParser<SqlToken, string> TypeNameParser =
         from baseOrWrapper in
@@ -2571,12 +2581,68 @@ public static class SqlParser
                     .Or(Token.EqualTo(SqlToken.Identifier))
                     .Or(Token.EqualTo(SqlToken.Time))
                     .Select(GetTokenText))
-        from postfixArray in (
+        from suffix in TypeNameSuffixParser.AsNullable().OptionalOrDefault()
+        select ApplyTypeNameSuffix(baseOrWrapper, suffix);
+
+    /// <summary>
+    /// One of the postfix shapes a type name may carry. Exactly one of
+    /// <see cref="BracketDim"/> being captured (with <see cref="IsBracket"/>
+    /// true) or <see cref="ParenDims"/> being non-null applies; the suffix
+    /// parser produces this and <see cref="ApplyTypeNameSuffix"/> renders it
+    /// onto the canonical string.
+    /// </summary>
+    private sealed record TypeNameSuffix(bool IsBracket, int? BracketDim, int[]? ParenDims);
+
+    private static readonly TokenListParser<SqlToken, TypeNameSuffix> TypeNameSuffixParser =
+        // Bracket form: `[]` (variable) or `[N]` (fixed).
+        (
             from lb in Token.EqualTo(SqlToken.LeftBracket)
+            from dim in Token.EqualTo(SqlToken.NumberLiteral)
+                .Select(t => (int?)ParseDimensionLiteral(t.ToStringValue()))
+                .OptionalOrDefault()
             from rb in Token.EqualTo(SqlToken.RightBracket)
-            select true
-        ).OptionalOrDefault()
-        select postfixArray ? $"Array<{baseOrWrapper}>" : baseOrWrapper;
+            select new TypeNameSuffix(IsBracket: true, BracketDim: dim, ParenDims: null)
+        )
+        .Or(
+            // Paren form: `(N)` or `(N, M, …)`.
+            from open in Token.EqualTo(SqlToken.LeftParen)
+            from first in Token.EqualTo(SqlToken.NumberLiteral)
+                .Select(t => ParseDimensionLiteral(t.ToStringValue()))
+            from rest in (
+                from comma in Token.EqualTo(SqlToken.Comma)
+                from n in Token.EqualTo(SqlToken.NumberLiteral)
+                    .Select(t => ParseDimensionLiteral(t.ToStringValue()))
+                select n
+            ).Many()
+            from close in Token.EqualTo(SqlToken.RightParen)
+            select new TypeNameSuffix(
+                IsBracket: false,
+                BracketDim: null,
+                ParenDims: rest.Length == 0 ? [first] : [first, .. rest])
+        );
+
+    private static int ParseDimensionLiteral(string text)
+    {
+        double parsed = double.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+        return checked((int)parsed);
+    }
+
+    private static string ApplyTypeNameSuffix(string baseOrWrapper, TypeNameSuffix? suffix)
+    {
+        if (suffix is null) return baseOrWrapper;
+
+        if (suffix.IsBracket)
+        {
+            // `T[]` → variable-length array; `T[N]` → fixed-length array.
+            return suffix.BracketDim is int n
+                ? $"Array<{baseOrWrapper}>({n})"
+                : $"Array<{baseOrWrapper}>";
+        }
+
+        // Paren form composes with whatever shape baseOrWrapper already has.
+        // E.g. `Array<Float32>(384)` keeps the wrapper and appends.
+        return $"{baseOrWrapper}({string.Join(",", suffix.ParenDims!)})";
+    }
 
     /// <summary>
     /// Wraps <see cref="TypeNameParser"/> with a column-context error check.

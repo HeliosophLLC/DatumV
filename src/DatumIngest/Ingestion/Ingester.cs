@@ -278,7 +278,10 @@ public class Ingester(
                 Kind: col.Kind,
                 Encoder: ColumnDescriptorV2.EncoderFor(col.Kind, col.IsArray),
                 IsNullable: col.Nullable,
-                IsArray: col.IsArray);
+                IsArray: col.IsArray,
+                FixedShape: col.FixedShape,
+                MaxLength: col.MaxLength,
+                IsBlankPadded: col.IsBlankPadded);
         }
         return descriptors;
     }

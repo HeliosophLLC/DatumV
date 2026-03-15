@@ -49,7 +49,10 @@ internal static class ColumnDefinitionResolver
         for (int i = 0; i < definitions.Count; i++)
         {
             ColumnDefinition d = definitions[i];
-            if (!TypeAnnotationResolver.TryParse(d.TypeName, out DataKind kind, out bool isArray))
+            if (!TypeAnnotationResolver.TryParse(
+                    d.TypeName, types: null,
+                    out DataKind kind, out bool isArray, out _,
+                    out int? maxLength, out int[]? fixedShape, out bool isBlankPadded))
             {
                 throw new InvalidOperationException(
                     $"Unknown column type '{d.TypeName}' on column '{d.Name}'. " +
@@ -121,6 +124,9 @@ internal static class ColumnDefinitionResolver
                 Identity = identity,
                 IsPrimaryKey = isPrimaryKey,
                 ComputedExpression = d.ComputedExpression,
+                MaxLength = maxLength,
+                FixedShape = fixedShape,
+                IsBlankPadded = isBlankPadded,
             };
         }
 

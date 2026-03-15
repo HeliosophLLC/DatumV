@@ -1958,6 +1958,9 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 Identity = i == identityFooterIndex ? identitySpec : null,
                 IsPrimaryKey = isPrimaryKey,
                 ComputedExpression = computedExpression,
+                MaxLength = d.MaxLength,
+                FixedShape = d.FixedShape,
+                IsBlankPadded = d.IsBlankPadded,
             });
             indices.Add(i);
         }

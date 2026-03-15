@@ -100,6 +100,91 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.True(rows[0][1].IsNull);
     }
 
+    // ──────────────────── VARCHAR / CHAR width enforcement ────────────────────
+
+    [Fact]
+    public async Task InsertValues_VarcharWithinLimit_Stored()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (s VARCHAR(5))");
+
+        catalog.Plan("INSERT INTO t VALUES ('abc')");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Equal("abc", rows[0][0].AsString());
+    }
+
+    [Fact]
+    public async Task InsertValues_VarcharAtLimit_Stored()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (s VARCHAR(5))");
+
+        catalog.Plan("INSERT INTO t VALUES ('hello')");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Equal("hello", rows[0][0].AsString());
+    }
+
+    [Fact]
+    public void InsertValues_VarcharOverflow_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (s VARCHAR(3))");
+
+        DatumIngest.Execution.ColumnValueConstraintException ex = Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+            catalog.Plan("INSERT INTO t VALUES ('abcd')"));
+        Assert.Contains("'s'", ex.Message);
+        Assert.Contains("3", ex.Message);
+        Assert.Contains("4", ex.Message);
+    }
+
+    [Fact]
+    public async Task InsertValues_CharShortValue_PaddedWithSpaces()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (s CHAR(5))");
+
+        catalog.Plan("INSERT INTO t VALUES ('hi')");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Equal("hi   ", rows[0][0].AsString()); // 2 chars + 3 spaces
+    }
+
+    [Fact]
+    public async Task InsertValues_CharAtLimit_StoredVerbatim()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (s CHAR(5))");
+
+        catalog.Plan("INSERT INTO t VALUES ('exact')");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Equal("exact", rows[0][0].AsString());
+    }
+
+    [Fact]
+    public void InsertValues_CharOverflow_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (s CHAR(3))");
+
+        Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+            catalog.Plan("INSERT INTO t VALUES ('toolong')"));
+    }
+
+    [Fact]
+    public async Task InsertValues_VarcharNull_BypassesLengthCheck()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (s VARCHAR(3))");
+
+        catalog.Plan("INSERT INTO t VALUES (NULL)");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.True(rows[0][0].IsNull);
+    }
+
     // ──────────────────── DEFAULT-fill (PR10b's payoff) ────────────────────
 
     [Fact]

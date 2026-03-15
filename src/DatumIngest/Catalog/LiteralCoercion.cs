@@ -1,3 +1,4 @@
+using DatumIngest.Execution;
 using DatumIngest.Model;
 
 namespace DatumIngest.Catalog;
@@ -36,7 +37,7 @@ internal static class LiteralCoercion
                 "writable from a literal. Use INSERT … SELECT (PR10c').");
         }
 
-        return target.Kind switch
+        DataValue coerced = target.Kind switch
         {
             DataKind.Boolean => CoerceBoolean(literal, columnName),
             DataKind.Int8 => DataValue.FromInt8(ToSignedInRange<sbyte>(literal, sbyte.MinValue, sbyte.MaxValue, columnName, "Int8")),
@@ -62,6 +63,42 @@ internal static class LiteralCoercion
                 $"INSERT VALUES for column '{columnName}': literal coercion to " +
                 $"{target.Kind} is not yet supported."),
         };
+        return EnforceStringWidth(coerced, target, arena, columnName);
+    }
+
+    /// <summary>
+    /// Applies declared <c>VARCHAR(N)</c> / <c>CHAR(N)</c> width semantics
+    /// to a freshly-coerced String value: overlong rejected with a
+    /// <see cref="ColumnValueConstraintException"/>; CHAR short values
+    /// right-padded with spaces to the declared length. No-op for every
+    /// other kind, for nulls, and for String columns without a declared
+    /// <see cref="ColumnInfo.MaxLength"/>.
+    /// </summary>
+    private static DataValue EnforceStringWidth(DataValue value, ColumnInfo target, Arena arena, string columnName)
+    {
+        if (target.Kind != DataKind.String || target.MaxLength is not int maxLen)
+        {
+            return value;
+        }
+        if (value.IsNull)
+        {
+            return value;
+        }
+
+        int charCount = value.StringCharCount(arena);
+        if (charCount > maxLen)
+        {
+            string declaredType = target.IsBlankPadded ? "CHAR" : "VARCHAR";
+            throw new ColumnValueConstraintException(
+                $"Column '{columnName}': value of length {charCount} exceeds declared " +
+                $"{declaredType}({maxLen}).");
+        }
+        if (target.IsBlankPadded && charCount < maxLen)
+        {
+            string padded = value.AsString(arena).PadRight(maxLen);
+            return DataValue.FromString(padded, arena);
+        }
+        return value;
     }
 
     private static DataValue CoerceDate(object literal, string columnName) =>

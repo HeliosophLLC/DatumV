@@ -244,7 +244,10 @@ public sealed class FlatFileCatalog : ITableCatalog
                 Kind: c.Kind,
                 Encoder: ColumnDescriptorV2.EncoderFor(c.Kind, c.IsArray),
                 IsNullable: c.Nullable,
-                IsArray: c.IsArray);
+                IsArray: c.IsArray,
+                FixedShape: c.FixedShape,
+                MaxLength: c.MaxLength,
+                IsBlankPadded: c.IsBlankPadded);
 
             if (c.DefaultExpression is not null)
             {
