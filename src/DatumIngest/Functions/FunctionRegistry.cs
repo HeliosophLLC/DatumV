@@ -609,6 +609,7 @@ public sealed class FunctionRegistry
         // Image
         registry.RegisterScalar<Scalar.Image.YoloxPreprocessFunction>();
         registry.RegisterScalar<Scalar.Image.YoloxPostprocessFunction>();
+        registry.RegisterScalar<Scalar.Image.RtdetrPostprocessFunction>();
         registry.RegisterScalar<Scalar.Image.ImageToTensorChwBgrFunction>();
         registry.RegisterScalar<Scalar.Image.DepthMapToImageFunction>();
         registry.RegisterScalar<Scalar.Image.ImageCropFunction>();

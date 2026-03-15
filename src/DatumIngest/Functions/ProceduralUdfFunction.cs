@@ -298,6 +298,9 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                 types: frame.Types);
         }
 
+        ExpressionEvaluator? paramEvaluator = null;
+        EvaluationFrame paramFrame = default;
+
         for (int i = 0; i < paramCount; i++)
         {
             UdfParameter param = _descriptor.Parameters[i];
@@ -312,21 +315,24 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                 // against the body's frame (no parameters yet, but
                 // defaults shouldn't reference parameters anyway — they're
                 // call-site fallbacks).
-                ExpressionEvaluator defaultEvaluator = new(
+                paramEvaluator ??= new ExpressionEvaluator(
                     _functions,
                     meter: null,
                     store: variableStore,
                     sidecarRegistry: frame.SidecarRegistry,
                     accountant: frame.Accountant);
-                EvaluationFrame defaultFrame = new(
-                    Row.Empty,
-                    variableStore,
-                    variableStore,
-                    frame.Accountant,
-                    outerRow: null,
-                    sidecarRegistry: frame.SidecarRegistry,
-                    types: frame.Types);
-                value = await defaultEvaluator.EvaluateAsValueRefAsync(param.Default, defaultFrame, cancellationToken).ConfigureAwait(false);
+                if (paramFrame.Source is null)
+                {
+                    paramFrame = new EvaluationFrame(
+                        Row.Empty,
+                        variableStore,
+                        variableStore,
+                        frame.Accountant,
+                        outerRow: null,
+                        sidecarRegistry: frame.SidecarRegistry,
+                        types: frame.Types);
+                }
+                value = await paramEvaluator.EvaluateAsValueRefAsync(param.Default, paramFrame, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -341,6 +347,42 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             {
                 throw new InvalidOperationException(
                     $"UDF 'udf.{_descriptor.Name}' parameter '@{param.Name}' must not be null.");
+            }
+
+            // Coerce the bound value to the parameter's declared type — see
+            // the matching block in ProceduralModelFunction for the rationale
+            // (SQL literals pick the narrowest exact type, so `0.5` is
+            // Float32 but `0.9` is Float64; an unchecked bind drops the
+            // mismatch into the body's downstream signature checks).
+            if (!value.IsNull && param.TypeName is not null
+                && TypeAnnotationResolver.TryParse(param.TypeName, out DataKind declaredKind, out bool declaredIsArray)
+                && NeedsCoercion(value, declaredKind, declaredIsArray))
+            {
+                paramEvaluator ??= new ExpressionEvaluator(
+                    _functions,
+                    meter: null,
+                    store: variableStore,
+                    sidecarRegistry: frame.SidecarRegistry,
+                    accountant: frame.Accountant);
+                if (paramFrame.Source is null)
+                {
+                    paramFrame = new EvaluationFrame(
+                        Row.Empty,
+                        variableStore,
+                        variableStore,
+                        frame.Accountant,
+                        outerRow: null,
+                        sidecarRegistry: frame.SidecarRegistry,
+                        types: frame.Types);
+                }
+                DataValue asData = value.ToDataValue(variableStore, value.TypeId, frame.Types);
+                CastExpression cast = new(
+                    new LiteralValueExpression(asData),
+                    param.TypeName,
+                    Span: null);
+                value = await paramEvaluator
+                    .EvaluateAsValueRefAsync(cast, paramFrame, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             // Declare before the check so any CustomCheck expression can
@@ -510,6 +552,21 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             min++;
         }
         return min;
+    }
+
+    /// <summary>
+    /// True when the bound <paramref name="value"/>'s runtime shape differs
+    /// from the parameter's declared <paramref name="declaredKind"/> /
+    /// <paramref name="declaredIsArray"/> enough to require a CAST round-trip.
+    /// </summary>
+    private static bool NeedsCoercion(ValueRef value, DataKind declaredKind, bool declaredIsArray)
+    {
+        if (value.IsArray != declaredIsArray) return true;
+        if (declaredIsArray)
+        {
+            return value.ArrayElementKind != declaredKind;
+        }
+        return value.Kind != declaredKind;
     }
 
     /// <summary>

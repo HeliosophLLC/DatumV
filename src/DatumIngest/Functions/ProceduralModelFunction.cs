@@ -307,6 +307,9 @@ public sealed class ProceduralModelFunction : IScalarFunction
                 types: frame.Types);
         }
 
+        ExpressionEvaluator? paramEvaluator = null;
+        EvaluationFrame paramFrame = default;
+
         for (int i = 0; i < paramCount; i++)
         {
             UdfParameter param = _descriptor.Parameters[i];
@@ -317,21 +320,24 @@ public sealed class ProceduralModelFunction : IScalarFunction
             }
             else if (param.Default is not null)
             {
-                ExpressionEvaluator defaultEvaluator = new(
+                paramEvaluator ??= new ExpressionEvaluator(
                     _functions,
                     meter: null,
                     store: variableStore,
                     sidecarRegistry: frame.SidecarRegistry,
                     accountant: frame.Accountant);
-                EvaluationFrame defaultFrame = new(
-                    Row.Empty,
-                    variableStore,
-                    variableStore,
-                    frame.Accountant,
-                    outerRow: null,
-                    sidecarRegistry: frame.SidecarRegistry,
-                    types: frame.Types);
-                value = await defaultEvaluator.EvaluateAsValueRefAsync(param.Default, defaultFrame, cancellationToken).ConfigureAwait(false);
+                if (paramFrame.Source is null)
+                {
+                    paramFrame = new EvaluationFrame(
+                        Row.Empty,
+                        variableStore,
+                        variableStore,
+                        frame.Accountant,
+                        outerRow: null,
+                        sidecarRegistry: frame.SidecarRegistry,
+                        types: frame.Types);
+                }
+                value = await paramEvaluator.EvaluateAsValueRefAsync(param.Default, paramFrame, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -343,6 +349,47 @@ public sealed class ProceduralModelFunction : IScalarFunction
             {
                 throw new InvalidOperationException(
                     $"Model '{_descriptor.QualifiedName}' parameter '@{param.Name}' must not be null.");
+            }
+
+            // Coerce the bound value to the parameter's declared type.
+            // SQL literals pick the narrowest type that exactly represents
+            // them — `0.5` parses as Float32 (exact in binary) but `0.9`
+            // parses as Float64 (inexact) — so a model that declares
+            // `conf_thresh Float32` and is called as `model(img, 0.9)`
+            // would otherwise see a Float64 in scope and surface as a
+            // signature mismatch the next time a downstream function with
+            // an exact Float32 parameter touches it. The cast funnels
+            // every supplied argument through the same coercion path the
+            // body's DECLARE statements use.
+            if (!value.IsNull && param.TypeName is not null
+                && TypeAnnotationResolver.TryParse(param.TypeName, out DataKind declaredKind, out bool declaredIsArray)
+                && NeedsCoercion(value, declaredKind, declaredIsArray))
+            {
+                paramEvaluator ??= new ExpressionEvaluator(
+                    _functions,
+                    meter: null,
+                    store: variableStore,
+                    sidecarRegistry: frame.SidecarRegistry,
+                    accountant: frame.Accountant);
+                if (paramFrame.Source is null)
+                {
+                    paramFrame = new EvaluationFrame(
+                        Row.Empty,
+                        variableStore,
+                        variableStore,
+                        frame.Accountant,
+                        outerRow: null,
+                        sidecarRegistry: frame.SidecarRegistry,
+                        types: frame.Types);
+                }
+                DataValue asData = value.ToDataValue(variableStore, value.TypeId, frame.Types);
+                CastExpression cast = new(
+                    new LiteralValueExpression(asData),
+                    param.TypeName,
+                    Span: null);
+                value = await paramEvaluator
+                    .EvaluateAsValueRefAsync(cast, paramFrame, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             // Declare into scope BEFORE running the check so any CustomCheck
@@ -495,6 +542,23 @@ public sealed class ProceduralModelFunction : IScalarFunction
             min++;
         }
         return min;
+    }
+
+    /// <summary>
+    /// True when the bound <paramref name="value"/>'s runtime shape differs
+    /// from the parameter's declared <paramref name="declaredKind"/> /
+    /// <paramref name="declaredIsArray"/> enough to require a CAST round-
+    /// trip. Cheap kind/array check up front so the common already-matches
+    /// case doesn't pay the cast overhead.
+    /// </summary>
+    private static bool NeedsCoercion(ValueRef value, DataKind declaredKind, bool declaredIsArray)
+    {
+        if (value.IsArray != declaredIsArray) return true;
+        if (declaredIsArray)
+        {
+            return value.ArrayElementKind != declaredKind;
+        }
+        return value.Kind != declaredKind;
     }
 
     private sealed record ReturnSignal(ValueRef Value);

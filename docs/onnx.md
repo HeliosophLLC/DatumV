@@ -384,6 +384,37 @@ END
 simplification to convert a probability mask into a smooth polygon
 contour — ready to overlay on the source image.
 
+### Multi-output models (RT-DETR, RoBERTa QA, BlazeFace)
+
+`infer()` returns the **first** declared output of the session — the
+convention most ONNX exports follow (e.g. HuggingFace optimum lists
+`last_hidden_state` ahead of `pooler_output`, U²-Net lists its final
+fused saliency map ahead of the six deep-supervision aux outputs). For
+models where you need more than just the first output — RT-DETR's
+`logits` + `pred_boxes`, RoBERTa extractive-QA's `start_logits` +
+`end_logits`, BlazeFace's `boxes` + `scores` — use **`infer_outputs()`**,
+which returns every declared output as a `Struct` keyed by ONNX output
+name:
+
+```sql
+CREATE MODEL detect(img Image) RETURNS Array<LabeledDetection>
+USING 'file:///e:/models/rtdetr/model.onnx'
+AS BEGIN
+    DECLARE tensor Float32[] = image_to_tensor_chw(img, [640, 640]);
+    DECLARE outputs Struct = infer_outputs(tensor);
+    DECLARE logits Float32[] = outputs['logits'];
+    DECLARE boxes  Float32[] = outputs['pred_boxes'];
+    RETURN rtdetr_postprocess(logits, boxes, img)
+END
+```
+
+Positional access (`outputs[0]`) also works when the ONNX output names
+are unstable across exports (PyTorch's numeric defaults like `"1992"`).
+The struct's element kinds are heterogeneous — Int64 token outputs
+alongside Float32 logits is fine. Single-output sessions stay on plain
+`infer()`; reaching for `infer_outputs()` is the explicit "I need every
+output" signal.
+
 ## Step 5 — Call your model
 
 Once registered, the model is callable from any query under

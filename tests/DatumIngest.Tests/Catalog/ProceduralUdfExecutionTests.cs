@@ -547,6 +547,34 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
     }
 
     [Fact]
+    public async Task CallerLiteral_NarrowerThanDeclaredType_CoercesToDeclaredKind()
+    {
+        // `0.9` parses as Float64 (Float32 can't represent it exactly) but
+        // the parameter is declared Float32 — without coercion at bind
+        // time the body's downstream functions see a Float64 and signature-
+        // mismatch fail. The fix funnels the bound value through CAST.
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["v"],
+            new object?[] { 1 });
+
+        // Body calls a Float32-only scalar (assert_finite is signed to
+        // Family(FloatingPoint); narrow the test by composing with an
+        // explicit-Float32-only operation). Cleanest: use math that returns
+        // the same kind as its argument, then assert the returned kind.
+        catalog.Plan(
+            "CREATE FUNCTION echo_threshold(t FLOAT32) RETURNS FLOAT32 " +
+            "BEGIN RETURN t * CAST(1 AS FLOAT32) END");
+        IQueryPlan plan = catalog.Plan("SELECT echo_threshold(0.9) FROM data");
+
+        List<DataValue> values = await CollectFirstColumnAsync(plan);
+        Assert.Single(values);
+        // The bind-time cast Float64 → Float32 produces the Float32
+        // approximation of 0.9 (which is 0.9f, ~0.9000000357627869).
+        Assert.Equal(DataKind.Float32, values[0].Kind);
+        Assert.Equal(0.9f, values[0].AsFloat32(), 5);
+    }
+
+    [Fact]
     public async Task CustomCheck_NullValue_PassesWithoutEvaluation()
     {
         // Same NULL-passes-any-check rule as typed checks. The CustomCheck
