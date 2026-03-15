@@ -1,8 +1,18 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { Menu } from '@base-ui/react/menu';
-import { Boxes, FunctionSquare, Play, Plus, SquareCode, Square, X } from 'lucide-react';
+import {
+  Boxes,
+  ChevronLeft,
+  ChevronRight,
+  FunctionSquare,
+  Play,
+  Plus,
+  SquareCode,
+  Square,
+  X,
+} from 'lucide-react';
 import {
   panesState,
   openTab,
@@ -40,6 +50,84 @@ export function TabStrip({ leafId }: { leafId: string }) {
   useSnapshot(panesState); // re-render on any tab change
   useSnapshot(executionsState); // re-render when any tab's run status changes
   const leaf = findLeaf(panesState.root, leafId);
+
+  // Hooks must run before any early return so render order stays stable
+  // when the leaf disappears mid-flight (cross-window move can null it
+  // out for one render).
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+
+  // Track overflow + scroll-edge state so the chevrons can render
+  // disabled at the rails. ResizeObserver catches container shrinks
+  // (window resize, drag-handle on the surrounding ResizablePanel);
+  // the tab-count dep re-arms the observer reading after tabs are
+  // added/removed (changes scrollWidth without firing scroll events).
+  const tabCount = leaf?.tabs.length ?? 0;
+  const activeTabId = leaf?.activeTabId ?? null;
+
+  // Scroll a newly-active tab into view if it's offscreen. The `+`
+  // button always lands a new tab at the end with activeTabId set, so
+  // this effect catches that case; it also catches programmatic
+  // selectTab() calls (e.g. cross-window drop activates the imported
+  // tab). `inline: 'nearest'` is the key — it scrolls horizontally
+  // only when the chip is partly/fully outside the viewport, no-op
+  // when already visible. `block: 'nearest'` prevents accidental
+  // vertical scrolling of the page.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !activeTabId) return;
+    const chip = el.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(activeTabId)}"]`);
+    if (!chip) return; // pinned chips (Models) live outside the scroll container
+    chip.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+  }, [activeTabId, tabCount]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      // +1 absorbs sub-pixel rounding; without it we'd flicker overflow
+      // on/off at zoom levels where scrollWidth == clientWidth + 0.4.
+      const overflow = el.scrollWidth > el.clientWidth + 1;
+      setOverflowing(overflow);
+      setCanLeft(el.scrollLeft > 0);
+      setCanRight(overflow && el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+    };
+    update();
+    el.addEventListener('scroll', update);
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', update);
+      ro.disconnect();
+    };
+  }, [tabCount]);
+
+  function onWheel(e: React.WheelEvent<HTMLDivElement>) {
+    const el = scrollRef.current;
+    if (!el) return;
+    // No horizontal overflow → let the wheel bubble so a vertical
+    // scroll over the strip still scrolls the page when there's nothing
+    // to scroll horizontally.
+    if (el.scrollWidth <= el.clientWidth) return;
+    // deltaX (trackpad horizontal / Shift+wheel) and deltaY (mouse
+    // wheel) both feed into horizontal scroll. The user shouldn't have
+    // to hold Shift just to navigate tabs.
+    const delta = e.deltaX || e.deltaY;
+    if (delta === 0) return;
+    e.preventDefault();
+    el.scrollLeft += delta;
+  }
+
+  function scrollByPage(direction: 1 | -1) {
+    const el = scrollRef.current;
+    if (!el) return;
+    // ~70% page step keeps a strip of overlap so the user keeps context
+    // on which tabs they were just looking at.
+    el.scrollBy({ left: direction * el.clientWidth * 0.7, behavior: 'smooth' });
+  }
+
   if (!leaf) return null;
 
   // No bottom border on the strip — the active tab paints `bg-editor`
@@ -49,50 +137,130 @@ export function TabStrip({ leafId }: { leafId: string }) {
   // hairline border here would always cut across the active tab —
   // `overflow-x-auto` on the inner row clips the pseudo-element we'd
   // otherwise use to overlay it.
+  // Pinned tabs (Models) get their own slot outside the scrollable row
+  // so they stay visible even when the user has filled the strip. We
+  // iterate `leaf.tabs` and pick by `pinned` rather than splitting the
+  // array — keeps the `index` passed to each chip aligned with the
+  // backing `leaf.tabs[]` indices that moveTab/closeTab/onDrop expect.
+  const renderChip = (tab: typeof leaf.tabs[number], index: number) => {
+    const exec = executionsState.byTabId[tab.id];
+    const isStreaming = exec?.status === 'streaming';
+    return (
+      <TabChip
+        key={tab.id}
+        leafId={leafId}
+        id={tab.id}
+        index={index}
+        title={tab.title}
+        kind={tab.kind}
+        sql={tab.sql}
+        editorSize={tab.editorSize}
+        dirty={tab.dirty}
+        pinned={tab.pinned === true}
+        active={tab.id === leaf.activeTabId}
+        isStreaming={isStreaming}
+        renameLabel={t('renameTab')}
+        renamePromptLabel={t('renamePrompt')}
+        closeLabel={t('closeTab')}
+        runLabel={t('run')}
+        cancelLabel={t('cancel')}
+      />
+    );
+  };
+
   return (
     <div className="bg-background flex h-9 shrink-0 items-stretch">
-      <div className="flex flex-1 items-stretch overflow-x-auto">
-        {leaf.tabs.map((tab, index) => {
-          const exec = executionsState.byTabId[tab.id];
-          const isStreaming = exec?.status === 'streaming';
-          return (
-            <TabChip
-              key={tab.id}
-              leafId={leafId}
-              id={tab.id}
-              index={index}
-              title={tab.title}
-              kind={tab.kind}
-              sql={tab.sql}
-              editorSize={tab.editorSize}
-              dirty={tab.dirty}
-              pinned={tab.pinned === true}
-              active={tab.id === leaf.activeTabId}
-              isStreaming={isStreaming}
-              renameLabel={t('renameTab')}
-              renamePromptLabel={t('renamePrompt')}
-              closeLabel={t('closeTab')}
-              runLabel={t('run')}
-              cancelLabel={t('cancel')}
-            />
-          );
-        })}
-        {/* End-of-strip drop sentinel + new-tab menu. The sentinel
-            absorbs drops past the last tab so the user can move a tab to
-            the very end. The + button opens a dropdown — single-click on
-            "SQL Query" matches the prior single-click-to-add-tab UX,
-            "Execute Function" creates a function tab. */}
-        <EndSentinel leafId={leafId} tabCount={leaf.tabs.length} />
-        <NewTabMenu leafId={leafId} />
-
-        {/* Trailing filler that paints the strip's separator line in
-            the empty area to the right of the + button. flex-1 with
-            default shrink so it collapses to 0 when tabs overflow
-            horizontally — the scrollable row then fills the width on
-            its own and the filler is never seen. */}
+      {/* Left rail: pinned tabs (Models) live here, outside the
+          scrollable region so they're always visible regardless of how
+          many other tabs the user has open. Rendered as icon-only chips
+          (title shows on hover). */}
+      {leaf.tabs.map((tab, index) => (tab.pinned ? renderChip(tab, index) : null))}
+      {overflowing && (
+        <ChevronButton
+          direction="prev"
+          enabled={canLeft}
+          onClick={() => scrollByPage(-1)}
+          label={t('scrollPrev')}
+        />
+      )}
+      {/* `overflow-x-auto` alone would also expose a vertical scrollbar:
+          CSS promotes the other axis to `auto` whenever one is set, and
+          the horizontal scrollbar's height pushes the chips a few pixels
+          over. We scroll horizontally on wheel/trackpad but hide both
+          scrollbars (VS Code-style) — `overflow-y-hidden` kills the
+          y-promotion; the arbitrary `scrollbar-width: none` + the
+          WebKit pseudo-element handle the visible bar across Chromium
+          (Electron) and any preview-in-browser cases. */}
+      <div
+        ref={scrollRef}
+        onWheel={onWheel}
+        className="flex flex-1 items-stretch overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {leaf.tabs.map((tab, index) => (tab.pinned ? null : renderChip(tab, index)))}
+        {/* Trailing filler paints the strip's separator line across the
+            empty area to the right of the last tab. flex-1 with default
+            shrink so it collapses to 0 when tabs overflow horizontally
+            — the scrollable row then fills the width on its own and the
+            filler is never seen. Drops past the last tab fall through
+            to the leaf body's center-zone handler, which appends to
+            the leaf — same end result as the old EndSentinel. */}
         <div className="border-border flex-1 border-b" />
       </div>
+      {overflowing && (
+        <ChevronButton
+          direction="next"
+          enabled={canRight}
+          onClick={() => scrollByPage(1)}
+          label={t('scrollNext')}
+        />
+      )}
+      {/* Right rail: + button always visible. Lives outside the
+          scrollable region so even an overflowed strip keeps "new tab"
+          one click away — matches VS Code's behavior. */}
+      <NewTabMenu leafId={leafId} />
     </div>
+  );
+}
+
+function ChevronButton({
+  direction,
+  enabled,
+  onClick,
+  label,
+}: {
+  direction: 'prev' | 'next';
+  enabled: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  const Icon = direction === 'prev' ? ChevronLeft : ChevronRight;
+  // Always rendered (alongside the opposite-side chevron) whenever the
+  // strip overflows — disabled-state is purely visual. Anti-flicker:
+  // toggling the buttons in and out of the DOM as the user scrolls past
+  // the rails would change the scrollable area's clientWidth, which
+  // could re-trigger the overflow threshold and cause oscillation.
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!enabled}
+      aria-label={label}
+      title={label}
+      className={cn(
+        'border-border flex shrink-0 items-center justify-center border-b px-1.5 transition-colors',
+        // Vertical separators that anchor the chevron between its
+        // neighbours: left chevron just needs a right border (between
+        // it and the scrollable region); right chevron needs both, to
+        // separate it from the scrollable region on the left and the
+        // + button on the right.
+        direction === 'prev' ? 'border-r' : 'border-l border-r',
+        enabled
+          ? 'cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground'
+          : 'cursor-default text-muted-foreground/30',
+      )}
+    >
+      <Icon className="size-4" />
+    </button>
   );
 }
 
@@ -293,6 +461,7 @@ function TabChip({
     <div
       role="tab"
       aria-selected={active}
+      data-tab-id={id}
       draggable={!pinned}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -352,10 +521,14 @@ function TabChip({
           )}
         </button>
       )}
-      <span className="max-w-[160px] truncate">
-        {displayTitle}
-        {dirty ? ' •' : ''}
-      </span>
+      {!pinned && (
+        // Pinned chips (Models) are icon-only — title shows via the
+        // chip's `title` attribute on hover.
+        <span className="max-w-[160px] truncate">
+          {displayTitle}
+          {dirty ? ' •' : ''}
+        </span>
+      )}
       {!pinned && (
         <button
           type="button"
@@ -404,10 +577,17 @@ function NewTabMenu({ leafId }: { leafId: string }) {
         <Plus className="size-4" />
       </Menu.Trigger>
       <Menu.Portal>
-        <Menu.Positioner side="bottom" align="start" sideOffset={4}>
+        {/* The Positioner is the element Floating UI applies
+            `position: fixed` to. Without an explicit z-index here, the
+            Positioner creates its own stacking context at the body's
+            default level — beaten by the ResizableHandle's `z-20` even
+            though the Popup's own `z-50` is numerically higher. Putting
+            z-50 on the Positioner roots the whole popup at z-50 at body
+            level, so the dropdown lands above the editor/chat divider. */}
+        <Menu.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
           <Menu.Popup
             className={cn(
-              'bg-popover text-popover-foreground border-border z-50 min-w-48',
+              'bg-popover text-popover-foreground border-border min-w-48',
               'rounded-md border p-1 shadow-md outline-none',
             )}
           >
@@ -438,51 +618,3 @@ function NewTabMenu({ leafId }: { leafId: string }) {
   );
 }
 
-function EndSentinel({ leafId, tabCount }: { leafId: string; tabCount: number }) {
-  const [hover, setHover] = useState(false);
-
-  function hasTabPayload(e: React.DragEvent): boolean {
-    return e.dataTransfer.types.includes(TAB_DRAG_MIME);
-  }
-
-  function onDragOver(e: React.DragEvent) {
-    if (!hasTabPayload(e)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = 'move';
-    setHover(true);
-  }
-
-  function onDragLeave() {
-    setHover(false);
-  }
-
-  function onDrop(e: React.DragEvent) {
-    if (!hasTabPayload(e)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const payload = parseTabDragData(e.dataTransfer);
-    setHover(false);
-    if (!payload) return;
-    if (isCrossWindowDrop(payload)) {
-      if (payload.isRunning) return; // see chip onDrop for rationale.
-      importTabIntoLeaf(leafId, payload.tab, tabCount);
-      notifySourceToRemove(payload);
-    } else {
-      moveTab(payload.tabId, leafId, tabCount);
-    }
-  }
-
-  return (
-    <div
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-      className="border-border relative w-2 shrink-0 border-b"
-    >
-      {hover && (
-        <div className="bg-primary pointer-events-none absolute inset-y-0 left-0 w-0.5" />
-      )}
-    </div>
-  );
-}

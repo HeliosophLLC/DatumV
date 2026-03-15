@@ -28,6 +28,8 @@
   "fnVariadicRemove": "Remove",
   "fnVariadicMin": "min: {{count}}",
   "closeTab": "Close",
+  "scrollPrev": "Scroll left",
+  "scrollNext": "Scroll right",
   "renameTab": "Rename",
   "renamePrompt": "Tab name:",
   "run": "Run",
