@@ -371,7 +371,8 @@
       "attributions": ["Baidu Inc. — RT-DETR (Lv, Xu, Zhao et al., PaddlePaddle team)", "PekingU (HuggingFace mirror)", "onnx-community (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "37122d8b9b89eb8384fba4d688d05051eaf7bb78", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] }],
-      "approxSizeMb": 80
+      "approxSizeMb": 80,
+      "installSql": "sql/rtdetr-r18.sql"
     },
     {
       "id": "rtdetr-r18-fp16",
@@ -383,7 +384,8 @@
       "attributions": ["Baidu Inc. — RT-DETR (Lv, Xu, Zhao et al., PaddlePaddle team)", "PekingU (HuggingFace mirror)", "onnx-community (ONNX export + fp16 quantization)"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "gpu" },
       "sources": [{ "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "37122d8b9b89eb8384fba4d688d05051eaf7bb78", "include": ["onnx/model_fp16.onnx", "config.json", "preprocessor_config.json"] }],
-      "approxSizeMb": 41
+      "approxSizeMb": 41,
+      "installSql": "sql/rtdetr-r18-fp16.sql"
     },
     {
       "id": "rtdetr-r18-int8",
@@ -395,7 +397,8 @@
       "attributions": ["Baidu Inc. — RT-DETR (Lv, Xu, Zhao et al., PaddlePaddle team)", "PekingU (HuggingFace mirror)", "onnx-community (ONNX export + INT8 quantization)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "onnx-community/rtdetr_r18vd_coco_o365", "revision": "37122d8b9b89eb8384fba4d688d05051eaf7bb78", "include": ["onnx/model_quantized.onnx", "config.json", "preprocessor_config.json"] }],
-      "approxSizeMb": 22
+      "approxSizeMb": 22,
+      "installSql": "sql/rtdetr-r18-int8.sql"
     },
 
     {
@@ -521,7 +524,7 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, Radu Timofte — SwinIR (ETH Zurich + others)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
-      "sources": [{ "type": "huggingface", "repo": "Heliosoph/swinir-onnx", "revision": "main", "include": ["swinir_realsr_x4.onnx"] }],
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/swinir-onnx", "revision": "d2500929641e9bb1e03f7ab83793ba59c307fb06", "include": ["swinir_realsr_x4.onnx"] }],
       "approxSizeMb": 110,
       "placeholder": true
     },
@@ -534,21 +537,112 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, Radu Timofte — SwinIR (ETH Zurich + others)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "Heliosoph/swinir-onnx", "revision": "main", "include": ["swinir_denoising_color_25.onnx"] }],
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/swinir-onnx", "revision": "d2500929641e9bb1e03f7ab83793ba59c307fb06", "include": ["swinir_denoising_color_25.onnx"] }],
       "approxSizeMb": 45,
       "placeholder": true
     },
     {
-      "id": "scunet-color-real",
-      "displayName": "SCUNet (Blind Real-World Color Denoising)",
-      "description": "Swin-Conv-UNet for blind real-world color image denoising. Handles real-world noise patterns (sensor + JPEG + downsampling artifacts) without knowing noise level in advance. PSNR-optimized — no GAN sharpening, so the output stays faithful to the input. Dynamic H/W (must be divisible by 8).",
+      "id": "scunet-color-real-psnr",
+      "displayName": "SCUNet (Blind Real-World Color, PSNR)",
+      "description": "Blind real-world color denoising — handles unknown noise patterns (sensor + JPEG + downsampling artifacts) without needing the noise level. PSNR-optimized: stays faithful to the input, no GAN sharpening. Recommended default for general-purpose photo denoising. Dynamic H/W (must be divisible by 8).",
       "task": "image-denoising",
       "tags": ["restoration", "denoising", "scunet", "blind", "real-world"],
       "licenseIds": ["apache-2.0"],
       "attributions": ["Kai Zhang, Yawei Li, Jingyun Liang, Jiezhang Cao, Yulun Zhang, Hao Tang, Deng-Ping Fan, Radu Timofte, Luc Van Gool — SCUNet"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "main", "include": ["scunet_color_real_psnr.onnx"] }],
-      "approxSizeMb": 70,
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_color_real_psnr.onnx", "scunet_color_real_psnr.onnx.data"] }],
+      "approxSizeMb": 73,
+      "placeholder": true
+    },
+    {
+      "id": "scunet-color-real-gan",
+      "displayName": "SCUNet (Blind Real-World Color, GAN)",
+      "description": "Same blind real-world denoiser as the PSNR variant, trained with adversarial loss. Output is sharper and more 'photographic' — invents plausible texture (hair, fabric) the noisy input couldn't pin down. Pick for consumer photo cleanup; avoid when fidelity matters.",
+      "task": "image-denoising",
+      "tags": ["restoration", "denoising", "scunet", "blind", "real-world", "gan"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Kai Zhang, Yawei Li, Jingyun Liang, Jiezhang Cao, Yulun Zhang, Hao Tang, Deng-Ping Fan, Radu Timofte, Luc Van Gool — SCUNet"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_color_real_gan.onnx", "scunet_color_real_gan.onnx.data"] }],
+      "approxSizeMb": 73,
+      "placeholder": true
+    },
+    {
+      "id": "scunet-color-15",
+      "displayName": "SCUNet Color (σ=15)",
+      "description": "Color Gaussian-noise specialist trained at σ=15 (light noise — ISO-grain territory). Beats the blind variant when input noise actually matches σ≈15; over-smooths cleaner inputs. Use for matched-condition denoising or benchmark reproduction.",
+      "task": "image-denoising",
+      "tags": ["restoration", "denoising", "scunet", "gaussian"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_color_15.onnx", "scunet_color_15.onnx.data"] }],
+      "approxSizeMb": 73,
+      "placeholder": true
+    },
+    {
+      "id": "scunet-color-25",
+      "displayName": "SCUNet Color (σ=25)",
+      "description": "Color Gaussian-noise specialist trained at σ=25 (moderate noise — typical night phone photo). The standard denoising-benchmark reference level. Use for σ≈25 matched conditions or apples-to-apples comparison with other published denoisers at σ=25.",
+      "task": "image-denoising",
+      "tags": ["restoration", "denoising", "scunet", "gaussian"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_color_25.onnx", "scunet_color_25.onnx.data"] }],
+      "approxSizeMb": 73,
+      "placeholder": true
+    },
+    {
+      "id": "scunet-color-50",
+      "displayName": "SCUNet Color (σ=50)",
+      "description": "Color Gaussian-noise specialist trained at σ=50 (heavy noise — extreme low-light, old digital cameras). Aggressive enough to flatten heavy noise; over-smooths on cleaner inputs. Use for σ≈50 matched conditions or visualizing wrong-specialist artifacts in a comparison demo.",
+      "task": "image-denoising",
+      "tags": ["restoration", "denoising", "scunet", "gaussian"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_color_50.onnx", "scunet_color_50.onnx.data"] }],
+      "approxSizeMb": 73,
+      "placeholder": true
+    },
+    {
+      "id": "scunet-gray-15",
+      "displayName": "SCUNet Grayscale (σ=15)",
+      "description": "Grayscale (single-channel) Gaussian denoising at σ=15. ~3× faster than running the color variant on replicated channels. Use for medical/document/scientific grayscale denoising at matched σ≈15 conditions.",
+      "task": "image-denoising",
+      "tags": ["restoration", "denoising", "scunet", "gaussian", "grayscale"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_gray_15.onnx", "scunet_gray_15.onnx.data"] }],
+      "approxSizeMb": 73,
+      "placeholder": true
+    },
+    {
+      "id": "scunet-gray-25",
+      "displayName": "SCUNet Grayscale (σ=25)",
+      "description": "Grayscale Gaussian denoising at σ=25. Single-channel input, single-channel output. The standard benchmark reference for grayscale denoising. Pair with chest X-ray / document / B&W photo workflows.",
+      "task": "image-denoising",
+      "tags": ["restoration", "denoising", "scunet", "gaussian", "grayscale"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_gray_25.onnx", "scunet_gray_25.onnx.data"] }],
+      "approxSizeMb": 73,
+      "placeholder": true
+    },
+    {
+      "id": "scunet-gray-50",
+      "displayName": "SCUNet Grayscale (σ=50)",
+      "description": "Grayscale Gaussian denoising at σ=50 (heavy noise). Single-channel input/output. Use for heavily-noisy grayscale workflows (low-light astrophotography, degraded scans) at matched σ≈50 conditions.",
+      "task": "image-denoising",
+      "tags": ["restoration", "denoising", "scunet", "gaussian", "grayscale"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_gray_50.onnx", "scunet_gray_50.onnx.data"] }],
+      "approxSizeMb": 73,
       "placeholder": true
     },
     {
@@ -560,7 +654,7 @@
       "licenseIds": ["mit"],
       "attributions": ["MEGVII Research — NAFNet (Chen, Chu, Zhang, Sun)", "OpenCV (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "opencv/deblurring_nafnet", "revision": "main", "include": ["deblurring_nafnet_2025may.onnx"] }],
+      "sources": [{ "type": "huggingface", "repo": "opencv/deblurring_nafnet", "revision": "f1f255116cdb628a311d2b5749871189a4639d84", "include": ["deblurring_nafnet_2025may.onnx"] }],
       "approxSizeMb": 70
     },
     {

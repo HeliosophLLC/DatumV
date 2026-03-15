@@ -502,6 +502,62 @@
       "licenseFiles": [
         { "name": "LICENSE", "source": "https://raw.githubusercontent.com/onnx/models/main/LICENSE" }
       ]
+    },
+    {
+      "repoSuffix": "swinir-onnx",
+      "sourceFolder": "${DATUM_MODELS}/swinir-staging",
+      "expectedSizeMb": 155,
+      "exportedBy": "scripts/export-swinir.ps1",
+      "expectedContents": ["swinir_realsr_x4.onnx", "swinir_denoising_color_25.onnx"],
+      "uploadStaging": "Run scripts/export-swinir.ps1. The script clones JingyunLiang/SwinIR, downloads the two pinned .pth checkpoints from the v0.0 GitHub release, builds the SwinIR PyTorch model with the matching configs, and writes the two .onnx files into $env:DATUM_MODELS/swinir-staging/. Drop README.md + LICENSE in the staging folder before upload.",
+      "provenance": {
+        "baseModel": "JingyunLiang/SwinIR — Apache-2.0 (Liang et al., ICCV 2021)",
+        "exportToolchain": "torch.onnx.export from upstream PyTorch checkpoints (v0.0 GitHub release). Variants: 003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_GAN.pth (real-world SR) + 005_colorDN_DFWB_s128w8_SwinIR-M_noise25.pth (color denoising σ=25).",
+        "precision": "fp32",
+        "notes": "Two-variant bundle. swinir_realsr_x4.onnx: SwinIR-L, 240-dim, 9 RSTB blocks; 64x64 input -> 256x256 output (4× SR); RGB float32 [0,1] in/out. swinir_denoising_color_25.onnx: SwinIR-M, 180-dim, 6 RSTB blocks; 128x128 input -> 128x128 output; RGB float32 [0,1] in/out. Spatial dims fixed (window-shift in attention is brittle under dynamic axes for ORT); batch is dynamic. Consumers tile larger images at runtime."
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://github.com/JingyunLiang/SwinIR/blob/main/LICENSE",
+        "confidence": "high",
+        "requiresAcceptance": false,
+        "notes": "Apache-2.0 from the authoritative upstream (JingyunLiang/SwinIR). We re-export from upstream weights rather than mirror the personal wuminghao/swinir HF account — personal accounts can vanish or change without notice."
+      },
+      "licenseFiles": [
+        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/JingyunLiang/SwinIR/main/LICENSE" }
+      ]
+    },
+    {
+      "repoSuffix": "scunet-onnx",
+      "sourceFolder": "${DATUM_MODELS}/kair-staging",
+      "expectedSizeMb": 615,
+      "exportedBy": "scripts/export-kair.ps1 -Model scunet-color|scunet-gray (looped per checkpoint)",
+      "expectedContents": [
+        "scunet_color_real_psnr.onnx", "scunet_color_real_psnr.onnx.data",
+        "scunet_color_real_gan.onnx",  "scunet_color_real_gan.onnx.data",
+        "scunet_color_15.onnx",        "scunet_color_15.onnx.data",
+        "scunet_color_25.onnx",        "scunet_color_25.onnx.data",
+        "scunet_color_50.onnx",        "scunet_color_50.onnx.data",
+        "scunet_gray_15.onnx",         "scunet_gray_15.onnx.data",
+        "scunet_gray_25.onnx",         "scunet_gray_25.onnx.data",
+        "scunet_gray_50.onnx",         "scunet_gray_50.onnx.data"
+      ],
+      "uploadStaging": "Run scripts/export-kair.ps1 in a loop over all 8 .pth checkpoints in the local cszn/SCUNet repo's model_zoo/ folder (5 color variants with -Model scunet-color, 3 gray variants with -Model scunet-gray). The script writes each ONNX as an .onnx + .onnx.data sibling pair (torch externalizes weights at this opset/size). All 16 files land in $env:DATUM_MODELS/kair-staging/. Drop README.md + LICENSE in the staging folder before upload — both files for every variant MUST travel together (the .onnx references the .data by relative filename).",
+      "provenance": {
+        "baseModel": "cszn/SCUNet — Apache-2.0 (Zhang et al., 'Practical Blind Image Denoising via Swin-Conv-UNet and Data Synthesis', 2022)",
+        "exportToolchain": "torch.onnx.export from the 8 upstream PyTorch checkpoints. Color variants: SCUNet(in_nc=3, config=[4]*7, dim=64). Gray variants: SCUNet(in_nc=1, config=[4]*7, dim=64).",
+        "precision": "fp32",
+        "notes": "Eight-variant bundle. Color (in_nc=3, 5 variants): scunet_color_{15,25,50} are Gaussian-noise specialists; scunet_color_real_{psnr,gan} are blind real-world denoisers. Gray (in_nc=1, 3 variants): scunet_gray_{15,25,50} are Gaussian specialists for grayscale workflows. Input: NCHW float32 in [0,1]; H and W must be divisible by 8 (internal downsampling). Output: same shape, denoised. Dynamic axes enabled for batch + H + W. Each variant is ~73 MB (3.8 MB .onnx + 70 MB .onnx.data external weights); the .onnx and .onnx.data files MUST be uploaded together."
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://github.com/cszn/SCUNet/blob/main/LICENSE",
+        "confidence": "high",
+        "requiresAcceptance": false
+      },
+      "licenseFiles": [
+        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/cszn/SCUNet/main/LICENSE" }
+      ]
     }
   ],
   "rejected": [
