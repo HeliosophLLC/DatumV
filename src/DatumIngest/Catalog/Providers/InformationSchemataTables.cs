@@ -27,6 +27,9 @@
                     ["ordinal_position"] = "Int32",
                     ["data_type"] = "String",
                     ["is_nullable"] = "String",
+                    ["data_kind"] = "String",
+                    ["character_maximum_length"] = "Int32",
+                    ["is_blank_padded"] = "Boolean",
                 },
                 ["schemata"] = new(StringComparer.OrdinalIgnoreCase)
                 {

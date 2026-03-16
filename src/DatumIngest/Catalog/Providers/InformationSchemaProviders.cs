@@ -110,7 +110,17 @@ internal sealed class InformationSchemaTablesProvider : NonSeekableTableProvider
 /// </summary>
 /// <remarks>
 /// Schema: <c>table_catalog</c>, <c>table_schema</c>, <c>table_name</c>,
-/// <c>column_name</c>, <c>ordinal_position</c>, <c>data_type</c>, <c>is_nullable</c>.
+/// <c>column_name</c>, <c>ordinal_position</c>, <c>data_type</c>,
+/// <c>is_nullable</c>, <c>data_kind</c>, <c>character_maximum_length</c>,
+/// <c>is_blank_padded</c>.
+/// <para>
+/// <c>data_type</c> uses PG-standard names (<c>'character varying'</c>,
+/// <c>'integer'</c>, <c>'ARRAY'</c>, <c>'USER-DEFINED'</c>, …) for
+/// portability. <c>data_kind</c> sits alongside with the DatumIngest-native
+/// <see cref="DataKind"/> name (<c>'String'</c>, <c>'Int32'</c>, …) —
+/// useful when <c>data_type</c> is <c>'USER-DEFINED'</c> or <c>'ARRAY'</c>
+/// and the consumer wants the exact engine kind.
+/// </para>
 /// </remarks>
 internal sealed class InformationSchemaColumnsProvider : NonSeekableTableProviderBase
 {
@@ -119,17 +129,23 @@ internal sealed class InformationSchemaColumnsProvider : NonSeekableTableProvide
 
     private static readonly Schema _schema = new(
     [
-        new ColumnInfo("table_catalog",    DataKind.String, nullable: false),
-        new ColumnInfo("table_schema",     DataKind.String, nullable: false),
-        new ColumnInfo("table_name",       DataKind.String, nullable: false),
-        new ColumnInfo("column_name",      DataKind.String, nullable: false),
-        new ColumnInfo("ordinal_position", DataKind.Int32,  nullable: false),
-        new ColumnInfo("data_type",        DataKind.String, nullable: false),
-        new ColumnInfo("is_nullable",      DataKind.String, nullable: false),
+        new ColumnInfo("table_catalog",            DataKind.String,  nullable: false),
+        new ColumnInfo("table_schema",             DataKind.String,  nullable: false),
+        new ColumnInfo("table_name",               DataKind.String,  nullable: false),
+        new ColumnInfo("column_name",              DataKind.String,  nullable: false),
+        new ColumnInfo("ordinal_position",         DataKind.Int32,   nullable: false),
+        new ColumnInfo("data_type",                DataKind.String,  nullable: false),
+        new ColumnInfo("is_nullable",              DataKind.String,  nullable: false),
+        new ColumnInfo("data_kind",                DataKind.String,  nullable: false),
+        new ColumnInfo("character_maximum_length", DataKind.Int32,   nullable: true),
+        new ColumnInfo("is_blank_padded",          DataKind.Boolean, nullable: false),
     ]);
 
     private static readonly string[] ColumnNames =
-        ["table_catalog", "table_schema", "table_name", "column_name", "ordinal_position", "data_type", "is_nullable"];
+    [
+        "table_catalog", "table_schema", "table_name", "column_name", "ordinal_position",
+        "data_type", "is_nullable", "data_kind", "character_maximum_length", "is_blank_padded",
+    ];
 
     private readonly TableCatalog _catalog;
 
@@ -186,14 +202,19 @@ internal sealed class InformationSchemaColumnsProvider : NonSeekableTableProvide
                 ColumnInfo column = tableSchema.Columns[ordinal];
 
                 batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
-                DataValue[] values = Pool.RentDataValues(7);
+                DataValue[] values = Pool.RentDataValues(10);
                 values[0] = DataValue.FromString("datum", batch.Arena);
                 values[1] = DataValue.FromString(schemaName, batch.Arena);
                 values[2] = DataValue.FromString(provider.QualifiedName.Name, batch.Arena);
                 values[3] = DataValue.FromString(column.Name, batch.Arena);
                 values[4] = DataValue.FromInt32(ordinal + 1);
-                values[5] = DataValue.FromString(column.Kind.ToString(), batch.Arena);
+                values[5] = DataValue.FromString(PgDataType(column), batch.Arena);
                 values[6] = DataValue.FromString(column.Nullable ? "YES" : "NO", batch.Arena);
+                values[7] = DataValue.FromString(column.Kind.ToString(), batch.Arena);
+                values[8] = column.MaxLength is int n
+                    ? DataValue.FromInt32(n)
+                    : DataValue.Null(DataKind.Int32);
+                values[9] = DataValue.FromBoolean(column.IsBlankPadded);
                 batch.Add(values);
 
                 if (batch.IsFull)
@@ -210,6 +231,41 @@ internal sealed class InformationSchemaColumnsProvider : NonSeekableTableProvide
         }
 
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Maps a <see cref="ColumnInfo"/> to the SQL-standard / PostgreSQL
+    /// <c>data_type</c> string surfaced through
+    /// <c>information_schema.columns</c>. Arrays surface as <c>'ARRAY'</c>;
+    /// engine kinds without a PG analog (<c>UInt32</c>, <c>Float16</c>,
+    /// <c>Image</c>, <c>Audio</c>, <c>Video</c>, <c>Struct</c>, <c>Point2D</c>,
+    /// <c>Point3D</c>, …) surface as <c>'USER-DEFINED'</c> — the
+    /// <c>data_kind</c> column next to it carries the precise engine kind.
+    /// </summary>
+    private static string PgDataType(ColumnInfo column)
+    {
+        if (column.IsArray) return "ARRAY";
+
+        return column.Kind switch
+        {
+            DataKind.Boolean => "boolean",
+            DataKind.Int16 => "smallint",
+            DataKind.Int32 => "integer",
+            DataKind.Int64 => "bigint",
+            DataKind.Float32 => "real",
+            DataKind.Float64 => "double precision",
+            DataKind.Decimal => "numeric",
+            DataKind.String when column.MaxLength is not null && column.IsBlankPadded => "character",
+            DataKind.String when column.MaxLength is not null => "character varying",
+            DataKind.String => "text",
+            DataKind.Date => "date",
+            DataKind.Time => "time without time zone",
+            DataKind.DateTime => "timestamp with time zone",
+            DataKind.Duration => "interval",
+            DataKind.Uuid => "uuid",
+            DataKind.Json => "jsonb",
+            _ => "USER-DEFINED",
+        };
     }
 }
 

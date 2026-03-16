@@ -20,7 +20,8 @@ public sealed class InformationSchemaProvidersTests : ServiceTestBase
 
     private sealed record ColumnsRow(
         string TableCatalog, string TableSchema, string TableName,
-        string ColumnName, int OrdinalPosition, string DataType, string IsNullable);
+        string ColumnName, int OrdinalPosition, string DataType, string IsNullable,
+        string DataKind, int? CharacterMaximumLength, bool IsBlankPadded);
 
     private sealed record SchemataRow(string CatalogName, string SchemaName);
 
@@ -65,7 +66,10 @@ public sealed class InformationSchemaProvidersTests : ServiceTestBase
                     row[3].AsString(arena),
                     row[4].AsInt32(),
                     row[5].AsString(arena),
-                    row[6].AsString(arena)));
+                    row[6].AsString(arena),
+                    row[7].AsString(arena),
+                    row[8].IsNull ? null : row[8].AsInt32(),
+                    row[9].AsBoolean()));
             }
         }
         return rows;
@@ -179,20 +183,140 @@ public sealed class InformationSchemaProvidersTests : ServiceTestBase
     }
 
     [Fact]
-    public void Columns_Schema_HasSevenColumnsInOrder()
+    public void Columns_Schema_HasTenColumnsInOrder()
     {
         TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog[InformationSchemaColumnsProvider.TableName];
         Schema schema = provider.GetSchema();
 
-        Assert.Equal(7, schema.Columns.Count);
-        Assert.Equal("table_catalog",    schema.Columns[0].Name);
-        Assert.Equal("table_schema",     schema.Columns[1].Name);
-        Assert.Equal("table_name",       schema.Columns[2].Name);
-        Assert.Equal("column_name",      schema.Columns[3].Name);
-        Assert.Equal("ordinal_position", schema.Columns[4].Name);
-        Assert.Equal("data_type",        schema.Columns[5].Name);
-        Assert.Equal("is_nullable",      schema.Columns[6].Name);
+        Assert.Equal(10, schema.Columns.Count);
+        Assert.Equal("table_catalog",             schema.Columns[0].Name);
+        Assert.Equal("table_schema",              schema.Columns[1].Name);
+        Assert.Equal("table_name",                schema.Columns[2].Name);
+        Assert.Equal("column_name",               schema.Columns[3].Name);
+        Assert.Equal("ordinal_position",          schema.Columns[4].Name);
+        Assert.Equal("data_type",                 schema.Columns[5].Name);
+        Assert.Equal("is_nullable",               schema.Columns[6].Name);
+        Assert.Equal("data_kind",                 schema.Columns[7].Name);
+        Assert.Equal("character_maximum_length",  schema.Columns[8].Name);
+        Assert.Equal("is_blank_padded",           schema.Columns[9].Name);
+    }
+
+    [Fact]
+    public async Task Columns_Varchar_SurfacesPgDataTypeAndMaxLength()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (name VARCHAR(64))");
+
+        InformationSchemaColumnsProvider provider =
+            (InformationSchemaColumnsProvider)catalog[InformationSchemaColumnsProvider.TableName];
+        List<ColumnsRow> rows = await ScanColumnsAsync(provider);
+        ColumnsRow nameCol = rows.Single(r => r.TableName == "t" && r.ColumnName == "name");
+
+        Assert.Equal("character varying", nameCol.DataType);
+        Assert.Equal("String", nameCol.DataKind);
+        Assert.Equal(64, nameCol.CharacterMaximumLength);
+        Assert.False(nameCol.IsBlankPadded);
+    }
+
+    [Fact]
+    public async Task Columns_Char_SurfacesPgDataTypeAndPaddingFlag()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (code CHAR(5))");
+
+        InformationSchemaColumnsProvider provider =
+            (InformationSchemaColumnsProvider)catalog[InformationSchemaColumnsProvider.TableName];
+        List<ColumnsRow> rows = await ScanColumnsAsync(provider);
+        ColumnsRow codeCol = rows.Single(r => r.TableName == "t" && r.ColumnName == "code");
+
+        Assert.Equal("character", codeCol.DataType);
+        Assert.Equal("String", codeCol.DataKind);
+        Assert.Equal(5, codeCol.CharacterMaximumLength);
+        Assert.True(codeCol.IsBlankPadded);
+    }
+
+    [Fact]
+    public async Task Columns_BareTextOrString_SurfacesText()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (a TEXT, b String)");
+
+        InformationSchemaColumnsProvider provider =
+            (InformationSchemaColumnsProvider)catalog[InformationSchemaColumnsProvider.TableName];
+        List<ColumnsRow> rows = await ScanColumnsAsync(provider);
+        List<ColumnsRow> tRows = rows.Where(r => r.TableName == "t").OrderBy(r => r.OrdinalPosition).ToList();
+
+        Assert.Equal("text",   tRows[0].DataType);
+        Assert.Equal("String", tRows[0].DataKind);
+        Assert.Null(tRows[0].CharacterMaximumLength);
+        Assert.False(tRows[0].IsBlankPadded);
+
+        Assert.Equal("text",   tRows[1].DataType);
+        Assert.Equal("String", tRows[1].DataKind);
+    }
+
+    [Theory]
+    [InlineData("Int16", "smallint")]
+    [InlineData("Int32", "integer")]
+    [InlineData("Int64", "bigint")]
+    [InlineData("Float32", "real")]
+    [InlineData("Float64", "double precision")]
+    [InlineData("Boolean", "boolean")]
+    [InlineData("Date", "date")]
+    [InlineData("Time", "time without time zone")]
+    [InlineData("DateTime", "timestamp with time zone")]
+    [InlineData("Uuid", "uuid")]
+    [InlineData("Decimal", "numeric")]
+    [InlineData("Json", "jsonb")]
+    public async Task Columns_NumericAndTemporal_MapToPgDataType(string nativeKind, string expectedPg)
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan($"CREATE TEMP TABLE t (c {nativeKind})");
+
+        InformationSchemaColumnsProvider provider =
+            (InformationSchemaColumnsProvider)catalog[InformationSchemaColumnsProvider.TableName];
+        List<ColumnsRow> rows = await ScanColumnsAsync(provider);
+        ColumnsRow c = rows.Single(r => r.TableName == "t" && r.ColumnName == "c");
+
+        Assert.Equal(expectedPg, c.DataType);
+        Assert.Equal(nativeKind, c.DataKind);
+    }
+
+    [Fact]
+    public async Task Columns_KindWithoutPgEquivalent_SurfacesUserDefined()
+    {
+        // UInt32, Float16, Image etc. have no clean PG analog — PG's
+        // convention is to use 'USER-DEFINED' and let the consumer fall
+        // back to the engine's native kind name (data_kind).
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (c UInt32)");
+
+        InformationSchemaColumnsProvider provider =
+            (InformationSchemaColumnsProvider)catalog[InformationSchemaColumnsProvider.TableName];
+        List<ColumnsRow> rows = await ScanColumnsAsync(provider);
+        ColumnsRow c = rows.Single(r => r.TableName == "t" && r.ColumnName == "c");
+
+        Assert.Equal("USER-DEFINED", c.DataType);
+        Assert.Equal("UInt32", c.DataKind);
+    }
+
+    [Fact]
+    public async Task Columns_TypedArray_SurfacesArrayDataType()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (xs Float32[384])");
+
+        InformationSchemaColumnsProvider provider =
+            (InformationSchemaColumnsProvider)catalog[InformationSchemaColumnsProvider.TableName];
+        List<ColumnsRow> rows = await ScanColumnsAsync(provider);
+        ColumnsRow c = rows.Single(r => r.TableName == "t" && r.ColumnName == "xs");
+
+        Assert.Equal("ARRAY", c.DataType);
+        Assert.Equal("Float32", c.DataKind);
+        // No max-length / padding for arrays.
+        Assert.Null(c.CharacterMaximumLength);
+        Assert.False(c.IsBlankPadded);
     }
 
     [Fact]

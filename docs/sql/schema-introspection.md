@@ -143,8 +143,11 @@ ORDER BY table_schema, table_name
 | `table_name` | String | Parent table name |
 | `column_name` | String | Column name |
 | `ordinal_position` | Int32 | 1-based column position |
-| `data_type` | String | DatumIngest `DataKind` name (e.g. `'Float32'`, `'String'`) |
+| `data_type` | String | SQL-standard / PostgreSQL type name (`'character varying'`, `'integer'`, `'real'`, `'jsonb'`, `'ARRAY'` for typed arrays, `'USER-DEFINED'` for engine kinds without a PG analog) |
 | `is_nullable` | String | `'YES'` or `'NO'` |
+| `data_kind` | String | DatumIngest-native `DataKind` name (`'String'`, `'Int32'`, `'Float32'`, `'Json'`, …) — the exact engine kind regardless of how `data_type` summarises it |
+| `character_maximum_length` | Int32 (nullable) | Declared `N` for `VARCHAR(N)` / `CHAR(N)`; `NULL` for bare strings and non-string kinds |
+| `is_blank_padded` | Boolean | `true` when the column was declared `CHAR(N)` (short values right-padded with spaces); `false` for `VARCHAR(N)`, `TEXT`, and every non-string kind |
 
 ```sql
 -- Show columns for a specific table
