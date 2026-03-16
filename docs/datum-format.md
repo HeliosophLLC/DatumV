@@ -190,11 +190,18 @@ For each column (in schema order, count = prologue.columnCount):
   string  : name                    (length-prefixed UTF-8)
   byte    : DataKind                (enum value)
   byte    : EncoderKind              (0=FixedWidth, 1=BitPackedBoolean, 2=VariableSlot)
-  byte    : ColumnFlagsV2            (Nullable | IsArray | HasFixedShape | Tombstoned)
+  byte    : ColumnFlagsV2            (Nullable | IsArray | HasFixedShape | Tombstoned
+                                      | HasStructTypeId | HasMaxLength | IsBlankPadded)
 
   If HasFixedShape:
     uint16  : shapeRank
-    int32[] : dimensions[rank]      (e.g. [256, 512] for a 256×512 matrix)
+    int32[] : dimensions[rank]      (e.g. [256, 512] for a 256×512 matrix,
+                                     or [384] for a fixed-length Float32[384])
+
+  If HasMaxLength:
+    int32   : characterMaxLength    (declared N from VARCHAR(N) / CHAR(N) /
+                                     String(N). Bare TEXT / VARCHAR clear the flag.
+                                     IsBlankPadded distinguishes CHAR from VARCHAR.)
 
   int32: pageCount
   For each page:

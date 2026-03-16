@@ -37,6 +37,10 @@ Persistent `CREATE TABLE` requires a catalog backed by `.datum-catalog.json` (i.
 
 Column types use the kind names from the type system: `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `Float32`, `Float64`, `Boolean`, `String`, `Uuid`, `Date`, `DateTime`, `Time`, `Duration`. See [Type System](type-system.md) for the full set.
 
+Strings accept SQL-standard width syntax: `VARCHAR(N)` and `CHAR(N)` declare a maximum character length (INSERT rejects overlong values; `CHAR(N)` also right-pads short values with spaces). Bare `TEXT` / `VARCHAR` / `String` is unbounded.
+
+Typed arrays accept fixed-length syntax in two equivalent forms: `Float32[N]` (single-dim sugar) and `Array<Float32>(N, M, …)` (generic, multi-dim). Multi-dim shapes are stored flat row-major. INSERT-time enforcement rejects values whose flat element count doesn't match the declared product. Variable-length arrays still use `Float32[]` / `Array<Float32>`.
+
 #### Column modifiers
 
 | Modifier | Behavior |

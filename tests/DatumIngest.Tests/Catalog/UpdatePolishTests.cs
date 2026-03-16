@@ -34,6 +34,42 @@ public sealed class UpdatePolishTests : ServiceTestBase, IAsyncLifetime
     private TableCatalog NewFileCatalog() => CreateCatalog(CatalogPath);
     private TableCatalog NewMemoryCatalog() => CreateCatalog();
 
+    // ──────────────────── FixedShape enforcement on UPDATE fast-path ────────────────────
+
+    [Fact]
+    public void Update_ColumnCopyIntoFixedShape_WrongLength_Throws()
+    {
+        // The UpdateExecutor fast-path returns the source DataValue without
+        // routing through LiteralCoercion when kinds match and the value is
+        // inline/sidecar. For array columns that would silently accept a
+        // shape-mismatched source — the call to EnforceFixedShape inside
+        // the fast-path closes that gap. Uses the file-backed catalog
+        // because InMemoryTableProvider's array round-trip is byte-array
+        // only today.
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (fixed Int32[3], var Int32[])");
+        catalog.Plan("INSERT INTO t VALUES ([1, 2, 3], [9, 9])");
+
+        DatumIngest.Execution.ColumnValueConstraintException ex =
+            Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+                catalog.Plan("UPDATE t SET fixed = var"));
+        Assert.Contains("'fixed'", ex.Message);
+        Assert.Contains("3", ex.Message);
+        Assert.Contains("2", ex.Message);
+    }
+
+    [Fact]
+    public void Update_ColumnCopyIntoFixedShape_MatchingLength_Succeeds()
+    {
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (fixed Int32[3], var Int32[])");
+        catalog.Plan("INSERT INTO t VALUES ([1, 2, 3], [9, 9, 9])");
+
+        catalog.Plan("UPDATE t SET fixed = var");
+
+        Assert.Equal(1, catalog["t"].GetRowCount());
+    }
+
     // ──────────────────── No-op detection ────────────────────
 
     [Fact]

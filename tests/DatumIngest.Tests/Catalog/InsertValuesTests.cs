@@ -607,6 +607,96 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(DataKind.Int32, scores.Kind);
     }
 
+    // ──────────────────── FixedShape array enforcement ────────────────────
+
+    [Fact]
+    public async Task InsertValues_FixedShapeArrayMatchingLength_Succeeds()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, scores Int32[3])");
+
+        catalog.Plan("INSERT INTO t (id, scores) VALUES (1, [10, 20, 30])");
+
+        Assert.Equal(1, catalog["t"].GetRowCount());
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.True(rows[0][1].IsArray);
+    }
+
+    [Fact]
+    public void InsertValues_FixedShapeArrayTooShort_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, scores Int32[3])");
+
+        DatumIngest.Execution.ColumnValueConstraintException ex =
+            Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+                catalog.Plan("INSERT INTO t (id, scores) VALUES (1, [10, 20])"));
+        Assert.Contains("'scores'", ex.Message);
+        Assert.Contains("3", ex.Message);
+        Assert.Contains("2", ex.Message);
+    }
+
+    [Fact]
+    public void InsertValues_FixedShapeArrayTooLong_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, scores Int32[3])");
+
+        Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+            catalog.Plan("INSERT INTO t (id, scores) VALUES (1, [10, 20, 30, 40])"));
+    }
+
+    [Fact]
+    public async Task InsertValues_MultiDimFixedShape_MatchingFlatLength_Succeeds()
+    {
+        // 3x3 = 9 elements stored flat.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, m Array<Int32>(3, 3))");
+
+        catalog.Plan("INSERT INTO t (id, m) VALUES (1, [1, 2, 3, 4, 5, 6, 7, 8, 9])");
+
+        Assert.Equal(1, catalog["t"].GetRowCount());
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.True(rows[0][1].IsArray);
+    }
+
+    [Fact]
+    public void InsertValues_MultiDimFixedShape_WrongFlatLength_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, m Array<Int32>(3, 3))");
+
+        DatumIngest.Execution.ColumnValueConstraintException ex =
+            Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+                catalog.Plan("INSERT INTO t (id, m) VALUES (1, [1, 2, 3, 4, 5])"));
+        Assert.Contains("9", ex.Message); // expected element count = 3*3
+    }
+
+    [Fact]
+    public async Task InsertValues_VariableLengthArray_NoShapeCheck()
+    {
+        // Float32[] (no fixed shape) accepts any length.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, xs Int32[])");
+
+        catalog.Plan("INSERT INTO t (id, xs) VALUES (1, [10, 20])");
+        catalog.Plan("INSERT INTO t (id, xs) VALUES (2, [10, 20, 30, 40, 50])");
+
+        Assert.Equal(2, catalog["t"].GetRowCount());
+    }
+
+    [Fact]
+    public async Task InsertValues_NullIntoFixedShapeColumn_BypassesCheck()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, scores Int32[3])");
+
+        catalog.Plan("INSERT INTO t (id, scores) VALUES (1, NULL)");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.True(rows[0][1].IsNull);
+    }
+
     [Fact]
     public void InsertValues_ArrayKindMismatch_Throws()
     {

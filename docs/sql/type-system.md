@@ -75,9 +75,44 @@ SELECT * FROM data WHERE value AS Float64 v AND v > 0.5
 Arrays are not a separate `DataKind`. Any primitive kind can carry an
 orthogonal `IsArray` flag, turning a single value into an ordered sequence of
 values of that kind. `Float32` with `IsArray` is what you'd call a vector;
-`UInt8` with `IsArray` is a raw byte buffer. There is no fixed shape —
-multi-dimensional shapes live above this level (e.g. paired with a separate
-shape descriptor).
+`UInt8` with `IsArray` is a raw byte buffer.
+
+Array columns can optionally declare a **fixed shape** at `CREATE TABLE` time —
+useful for embeddings, kernels, and anything where every row must carry the
+same dimensionality. Three equivalent surface forms:
+
+```sql
+CREATE TABLE t (
+    embedding  Float32[384],              -- 1D fixed length
+    weights    Array<Float32>(3, 3),      -- 2D shape (stored flat, 9 elements)
+    feature    Array<Int8>(256),          -- generic-wrapper form
+    bag        Float32[]                  -- no fixed shape (variable length)
+);
+```
+
+`Float32[N]` and `Array<Float32>(N)` produce the same column; the bracket form
+only carries a single dimension, the paren form generalises to N-D. Multi-dim
+shapes are stored flat row-major — `Array<Float32>(3, 3)` is a 9-element
+`Float32[]` with shape metadata on the side. INSERT-time enforcement rejects
+any value whose element count doesn't match the declared product of dimensions.
+
+#### String width — `VARCHAR(N)` / `CHAR(N)` / `TEXT`
+
+`String` is a single kind but accepts SQL-standard aliases that pin its
+declared maximum length:
+
+| SQL syntax | Stored as | Semantics |
+|------------|-----------|-----------|
+| `String`, `TEXT`, `VARCHAR` (bare) | `String` with no max length | Unbounded UTF-8. |
+| `String(N)`, `VARCHAR(N)` | `String` with `MaxLength = N` | INSERT rejects values longer than `N` characters. |
+| `CHAR(N)` | `String` with `MaxLength = N` and blank-padding | Like `VARCHAR(N)` plus right-pad short values with spaces. |
+| `CHAR` (bare) | `String` with `MaxLength = 1` and blank-padding | PG convention — bare `CHAR` is `CHAR(1)`. |
+
+Lengths are measured in **characters**, not bytes — `VARCHAR(5)` accepts `'héllo'`
+(5 chars, 6 UTF-8 bytes). `information_schema.columns` surfaces both the
+PG-standard `data_type` (`'character varying'`, `'character'`, `'text'`) and the
+DatumIngest-native `data_kind` (`'String'`), plus `character_maximum_length` and
+`is_blank_padded` for full round-trip.
 
 #### Points
 

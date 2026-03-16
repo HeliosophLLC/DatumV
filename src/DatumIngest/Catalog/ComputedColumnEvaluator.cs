@@ -60,7 +60,9 @@ internal static class ComputedColumnEvaluator
             // skip GetArrayElements entirely here.
             if (source.Kind == target.Kind)
             {
-                return source.ToDataValue(targetArena);
+                DataValue materialised = source.ToDataValue(targetArena);
+                LiteralCoercion.EnforceFixedShape(materialised, target, columnName);
+                return materialised;
             }
 
             // Different element kind: per-element coerce via LiteralCoercion,
@@ -69,7 +71,9 @@ internal static class ComputedColumnEvaluator
             // arrays come from struct/array literal evaluation, which builds
             // ValueRef[] payloads, so the call is safe here.
             ReadOnlySpan<ValueRef> elements = source.GetArrayElements();
-            return CoerceArrayElements(elements, target, targetArena, columnName);
+            DataValue coerced = CoerceArrayElements(elements, target, targetArena, columnName);
+            LiteralCoercion.EnforceFixedShape(coerced, target, columnName);
+            return coerced;
         }
 
         // Scalar target. Reject array-source / struct-source up front.

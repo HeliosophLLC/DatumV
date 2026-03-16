@@ -67,6 +67,48 @@ internal static class LiteralCoercion
     }
 
     /// <summary>
+    /// Validates that a typed-array <paramref name="source"/> matches the
+    /// target column's declared <see cref="ColumnInfo.FixedShape"/>. For
+    /// shape <c>[D]</c> the source must have exactly <c>D</c> elements;
+    /// for multi-dim shapes the check is against the product of dimensions
+    /// (arrays are stored flat regardless of declared shape). No-op for
+    /// nulls and for variable-length array columns (<c>FixedShape</c>
+    /// is <see langword="null"/>). Internal so the array branches of both
+    /// <c>InsertExecutor.ConvertSourceValue</c> (INSERT … SELECT) and
+    /// <c>ComputedColumnEvaluator.ConvertValueRefToTarget</c> (INSERT
+    /// VALUES) can share one enforcement point.
+    /// </summary>
+    internal static void EnforceFixedShape(DataValue source, ColumnInfo target, string columnName)
+    {
+        if (target.FixedShape is not int[] shape) return;
+        if (source.IsNull) return;
+
+        int expected = 1;
+        foreach (int dim in shape) expected = checked(expected * dim);
+
+        // Inline arrays cache their count in _charCount's low byte; arena-backed
+        // arrays derive it from byte length / element size. Sidecar-backed arrays
+        // don't arrive on the INSERT path (same-arena gates above reject them).
+        int actual = source.IsInline ? source.InlineArrayElementCount : source.ElementCount;
+        if (actual < 0)
+        {
+            throw new ColumnValueConstraintException(
+                $"Column '{columnName}': could not determine the length of the supplied " +
+                "array to validate against the declared fixed shape.");
+        }
+
+        if (actual != expected)
+        {
+            string shapeText = shape.Length == 1
+                ? shape[0].ToString()
+                : $"[{string.Join(",", shape)}] (= {expected} elements flat)";
+            throw new ColumnValueConstraintException(
+                $"Column '{columnName}': supplied array has {actual} element" +
+                $"{(actual == 1 ? "" : "s")} but declared shape requires {shapeText}.");
+        }
+    }
+
+    /// <summary>
     /// Applies declared <c>VARCHAR(N)</c> / <c>CHAR(N)</c> width semantics
     /// to a freshly-coerced String value: overlong rejected with a
     /// <see cref="ColumnValueConstraintException"/>; CHAR short values

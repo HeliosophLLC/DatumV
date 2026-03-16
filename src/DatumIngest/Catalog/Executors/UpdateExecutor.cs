@@ -693,6 +693,10 @@ internal static class UpdateExecutor
         // batch loop; passing one through would dangle into UpdateRows.
         if (source.Kind == target.Kind && (source.IsInSidecar || source.IsInline))
         {
+            // Same-kind array passes through without LiteralCoercion, so the
+            // shape check has to fire here too. No-op for variable-length
+            // and for non-array values.
+            LiteralCoercion.EnforceFixedShape(source, target, target.Name);
             return source;
         }
 
