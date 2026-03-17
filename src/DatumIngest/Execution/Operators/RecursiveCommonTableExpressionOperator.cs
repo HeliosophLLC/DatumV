@@ -28,9 +28,9 @@ namespace DatumIngest.Execution.Operators;
 /// must not OOM the host.
 /// </para>
 /// </remarks>
-internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, IDisposable
+internal sealed class RecursiveCommonTableExpressionOperator : QueryOperator, IDisposable
 {
-    private readonly IQueryOperator _anchorOperator;
+    private readonly QueryOperator _anchorOperator;
     private readonly string _name;
     private readonly IReadOnlyList<string>? _explicitColumnNames;
 
@@ -39,7 +39,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     /// iteration with a working-table operator (in-memory or spiller-backed) that replays
     /// the previous iteration's rows.
     /// </summary>
-    private readonly Func<IQueryOperator, IQueryOperator> _recursiveMemberFactory;
+    private readonly Func<QueryOperator, QueryOperator> _recursiveMemberFactory;
 
     private List<RowBatch>? _allBatches;
     private Pool? _pool;
@@ -61,8 +61,8 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     /// <param name="name">The CTE name.</param>
     /// <param name="explicitColumnNames">Optional explicit column names from the CTE definition.</param>
     public RecursiveCommonTableExpressionOperator(
-        IQueryOperator anchorOperator,
-        Func<IQueryOperator, IQueryOperator> recursiveMemberFactory,
+        QueryOperator anchorOperator,
+        Func<QueryOperator, QueryOperator> recursiveMemberFactory,
         string name,
         IReadOnlyList<string>? explicitColumnNames = null)
     {
@@ -76,7 +76,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     public string Name => _name;
 
     /// <summary>The anchor operator tree.</summary>
-    public IQueryOperator AnchorOperator => _anchorOperator;
+    public QueryOperator AnchorOperator => _anchorOperator;
 
     /// <summary>True once the spiller has taken over (in-memory accumulation has been evicted to disk).</summary>
     [MemberNotNullWhen(true, nameof(_spiller))]
@@ -87,7 +87,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     private bool HasMaterialized => _allBatches is not null || _spiller is not null;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         return new OperatorPlanDescription("Recursive CTE")
         {
@@ -101,7 +101,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         if (!HasMaterialized)
         {
@@ -205,12 +205,12 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
                 return;
             }
 
-            IQueryOperator workingTableOperator = BuildWorkingTableOperator(
+            QueryOperator workingTableOperator = BuildWorkingTableOperator(
                 _materializedSchema!,
                 iterationStartRow,
                 iterationStartBatchIndex,
                 currentRowCount);
-            IQueryOperator recursiveMember = _recursiveMemberFactory(workingTableOperator);
+            QueryOperator recursiveMember = _recursiveMemberFactory(workingTableOperator);
 
             // Snapshot iteration boundaries BEFORE consuming the recursive member's output —
             // those are the markers; the *next* iteration uses these.
@@ -329,7 +329,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     /// in-memory backend (when not spilling) or the spiller-backed backend (when spilling),
     /// representing the row range produced by the immediately preceding iteration.
     /// </summary>
-    private IQueryOperator BuildWorkingTableOperator(
+    private QueryOperator BuildWorkingTableOperator(
         ColumnLookup schema,
         long startRow,
         int startBatchIndex,
@@ -398,16 +398,16 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     private sealed class InMemoryWorkingTableOperator(
         Pool pool,
         ColumnLookup schema,
-        IReadOnlyList<RowBatch> batches) : IQueryOperator
+        IReadOnlyList<RowBatch> batches) : QueryOperator
     {
-        public OperatorPlanDescription DescribeForExplain()
+        protected override OperatorPlanDescription DescribeForExplainImpl()
         {
             long rows = 0;
             foreach (RowBatch b in batches) rows += b.Count;
             return new OperatorPlanDescription("Working Table") { EstimatedRows = rows };
         }
 
-        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+        protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
         {
             // Same null-before-yield + outer try-finally pattern as CTE replay. The cached
             // batches stay owned by the outer recursive CTE; we yield COPIES that share the
@@ -455,12 +455,12 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
         SpillReaderWriter spiller,
         ColumnLookup schema,
         long startRow,
-        long rowCount) : IQueryOperator
+        long rowCount) : QueryOperator
     {
-        public OperatorPlanDescription DescribeForExplain()
+        protected override OperatorPlanDescription DescribeForExplainImpl()
             => new("Working Table (spilled)") { EstimatedRows = rowCount };
 
-        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+        protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
         {
             await foreach (RowBatch batch in spiller
                 .ReplayRangeAsync(context, schema, startRow, rowCount)

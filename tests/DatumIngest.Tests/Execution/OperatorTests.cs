@@ -14,7 +14,7 @@ public class OperatorTests : ServiceTestBase
     private static readonly string[] XyColumns = ["x", "y"];
     private static readonly string[] GroupValColumns = ["group", "val"];
 
-    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(QueryOperator op, ExecutionContext? context = null)
     {
         context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);

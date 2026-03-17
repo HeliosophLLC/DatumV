@@ -21,7 +21,7 @@ public class AdvancedAggregateTests : ServiceTestBase
     private static readonly string[] XSepColumns = ["x", "sep"];
     private static readonly string[] CatXSepColumns = ["cat", "x", "sep"];
 
-    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(QueryOperator op, ExecutionContext? context = null)
     {
         context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);

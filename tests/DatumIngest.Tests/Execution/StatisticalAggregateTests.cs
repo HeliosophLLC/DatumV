@@ -20,7 +20,7 @@ public class StatisticalAggregateTests : ServiceTestBase
     private static readonly string[] CatXColumns = ["cat", "x"];
     private static readonly string[] XpColumns = ["x", "p"];
 
-    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(QueryOperator op, ExecutionContext? context = null)
     {
         context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);

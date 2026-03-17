@@ -8,7 +8,7 @@ namespace DatumIngest.Execution.Operators;
 /// Filters rows from a child operator by evaluating a WHERE expression.
 /// Only rows where the expression evaluates to true are emitted.
 /// </summary>
-public sealed class FilterOperator : IQueryOperator
+public sealed class FilterOperator : QueryOperator
 {
 
     /// <summary>
@@ -16,24 +16,24 @@ public sealed class FilterOperator : IQueryOperator
     /// </summary>
     /// <param name="source">The child operator producing rows.</param>
     /// <param name="predicate">The WHERE predicate expression.</param>
-    public FilterOperator(IQueryOperator source, Expression predicate)
+    public FilterOperator(QueryOperator source, Expression predicate)
     {
         Source = source;
         Predicate = predicate;
     }
 
     /// <summary>The child operator producing rows.</summary>
-    public IQueryOperator Source { get; }
+    public QueryOperator Source { get; }
 
     /// <summary>The filter predicate expression.</summary>
     public Expression Predicate { get; }
 
     /// <inheritdoc/>
-    public IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter) =>
+    public override QueryOperator RewriteExpressions(Func<Expression, Expression> rewriter) =>
         new FilterOperator(Source.RewriteExpressions(rewriter), rewriter(Predicate));
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         List<string> warnings = [];
 
@@ -54,7 +54,7 @@ public sealed class FilterOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context);
         Pool pool = context.Pool;

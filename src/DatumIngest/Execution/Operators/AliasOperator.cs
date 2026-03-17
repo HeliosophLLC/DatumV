@@ -8,9 +8,9 @@ namespace DatumIngest.Execution.Operators;
 /// enabling qualified column references (e.g. <c>t.column_name</c>).
 /// Retains the original unqualified names as well for unqualified access.
 /// </summary>
-public sealed class AliasOperator : IQueryOperator
+public sealed class AliasOperator : QueryOperator
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly string _alias;
 
     /// <summary>
@@ -18,20 +18,20 @@ public sealed class AliasOperator : IQueryOperator
     /// </summary>
     /// <param name="source">The child operator producing rows.</param>
     /// <param name="alias">The table alias to prefix column names with.</param>
-    public AliasOperator(IQueryOperator source, string alias)
+    public AliasOperator(QueryOperator source, string alias)
     {
         _source = source;
         _alias = alias;
     }
 
     /// <summary>The child operator.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The table alias.</summary>
     public string Alias => _alias;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         return new OperatorPlanDescription("Alias")
         {
@@ -44,7 +44,7 @@ public sealed class AliasOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
         AliasSchema? schema = null;

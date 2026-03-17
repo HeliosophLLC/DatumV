@@ -10,9 +10,9 @@ namespace DatumIngest.Execution.Operators;
 /// <c>percentage / 100</c>, regardless of its class. Because the rate is the same
 /// for all classes, proportions are maintained in expectation.
 /// </summary>
-public sealed class StratifiedSampleOperator : IQueryOperator
+public sealed class StratifiedSampleOperator : QueryOperator
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly double _percentage;
     private readonly string[] _stratifyColumnNames;
     private readonly int? _seed;
@@ -27,7 +27,7 @@ public sealed class StratifiedSampleOperator : IQueryOperator
     /// and column-existence validation at execution time.
     /// </param>
     /// <param name="seed">Optional seed for deterministic sampling, or <c>null</c> for non-deterministic.</param>
-    public StratifiedSampleOperator(IQueryOperator source, double percentage, string[] stratifyColumnNames, int? seed)
+    public StratifiedSampleOperator(QueryOperator source, double percentage, string[] stratifyColumnNames, int? seed)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(percentage, 0.0);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(percentage, 100.0);
@@ -45,10 +45,10 @@ public sealed class StratifiedSampleOperator : IQueryOperator
     }
 
     /// <summary>The inner operator being sampled.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new()
         {
@@ -70,7 +70,7 @@ public sealed class StratifiedSampleOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         // 0% → emit nothing; 100% → pass through unfiltered
         if (_percentage <= 0.0)

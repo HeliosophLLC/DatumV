@@ -52,7 +52,7 @@ internal sealed class BuildSideMaterializer
     /// values into a pool-rented array stored in this materializer's target
     /// store, and returning each input batch to the pool as it is consumed.
     /// </summary>
-    public async ValueTask MaterializeAsync(IQueryOperator source, ExecutionContext context)
+    public async ValueTask MaterializeAsync(QueryOperator source, ExecutionContext context)
     {
         _accountant = context.Accountant;
         await foreach (RowBatch batch in source.ExecuteAsync(context).ConfigureAwait(false))

@@ -20,7 +20,7 @@ public class GroupByOperatorTests : ServiceTestBase
     private static readonly string[] GroupValColumns = ["group", "val"];
     private static readonly string[] CategoryPriceColumns = ["category", "price"];
 
-    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(QueryOperator op, ExecutionContext? context = null)
     {
         context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);

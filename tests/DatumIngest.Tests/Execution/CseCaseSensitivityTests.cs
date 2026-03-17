@@ -22,7 +22,7 @@ using DatumIngest.Parsing.Ast;
 /// </summary>
 public sealed class CseCaseSensitivityTests : ServiceTestBase
 {
-    private static IQueryOperator PlanQuery(string sql, TableCatalog catalog)
+    private static QueryOperator PlanQuery(string sql, TableCatalog catalog)
     {
         QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
@@ -45,7 +45,7 @@ public sealed class CseCaseSensitivityTests : ServiceTestBase
     public void WhitespaceVariations_AreDeduped()
     {
         TableCatalog catalog = Catalog();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT concat(a, b), concat( a,b ), concat(a , b) FROM t",
             catalog);
 
@@ -73,7 +73,7 @@ public sealed class CseCaseSensitivityTests : ServiceTestBase
     public void FunctionNameCaseDifference_IsDeduped()
     {
         TableCatalog catalog = Catalog();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT UPPER(a), upper(a) FROM t",
             catalog);
 
@@ -98,7 +98,7 @@ public sealed class CseCaseSensitivityTests : ServiceTestBase
     public void ColumnNameCaseDifference_IsDeduped()
     {
         TableCatalog catalog = Catalog();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT concat(A, b), concat(a, b) FROM t",
             catalog);
 
@@ -122,7 +122,7 @@ public sealed class CseCaseSensitivityTests : ServiceTestBase
     public void StringLiteralCaseDifference_IsNotDeduped()
     {
         TableCatalog catalog = Catalog();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT concat(a, 'FOO'), concat(a, 'foo') FROM t",
             catalog);
 

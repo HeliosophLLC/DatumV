@@ -20,7 +20,7 @@ namespace DatumIngest.Execution.Operators;
 /// allows join operators to pre-filter chunks by providing build-side key
 /// values: chunks where no build-side key could possibly exist are skipped.
 /// </summary>
-public sealed class ScanOperator : IQueryOperator
+public sealed class ScanOperator : QueryOperator
 {
     private readonly IReadOnlySet<string>? _requiredColumns;
     private Expression? _filterHint;
@@ -161,7 +161,7 @@ public sealed class ScanOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         SourceIndex? sourceIndex = TableProvider.GetSourceIndex();
 
@@ -217,7 +217,7 @@ public sealed class ScanOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
         SourceIndex? sourceIndex = TableProvider.GetSourceIndex();

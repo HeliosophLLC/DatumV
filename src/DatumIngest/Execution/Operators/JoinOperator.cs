@@ -21,10 +21,10 @@ namespace DatumIngest.Execution.Operators;
 /// residual filter for non-equi parts. Falls back to nested-loop only when
 /// no equalities can be extracted.
 /// </summary>
-public sealed class JoinOperator : IQueryOperator
+public sealed class JoinOperator : QueryOperator
 {
-    private readonly IQueryOperator _left;
-    private readonly IQueryOperator _right;
+    private readonly QueryOperator _left;
+    private readonly QueryOperator _right;
     private readonly JoinType _joinType;
     private readonly Expression? _onCondition;
     private readonly bool _nullSensitiveAntiSemi;
@@ -56,8 +56,8 @@ public sealed class JoinOperator : IQueryOperator
     /// its context downstream.
     /// </param>
     public JoinOperator(
-        IQueryOperator left,
-        IQueryOperator right,
+        QueryOperator left,
+        QueryOperator right,
         JoinType joinType,
         Expression? onCondition,
         bool nullSensitiveAntiSemi = false,
@@ -74,10 +74,10 @@ public sealed class JoinOperator : IQueryOperator
     }
 
     /// <summary>The left (probe) side operator.</summary>
-    public IQueryOperator Left => _left;
+    public QueryOperator Left => _left;
 
     /// <summary>The right (build) side operator.</summary>
-    public IQueryOperator Right => _right;
+    public QueryOperator Right => _right;
 
     /// <summary>The type of join.</summary>
     public JoinType Type => _joinType;
@@ -109,7 +109,7 @@ public sealed class JoinOperator : IQueryOperator
     public bool PreferIndexNestedLoop => _preferIndexNestedLoop;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         string joinTypeName = _joinType switch
         {
@@ -164,7 +164,7 @@ public sealed class JoinOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         if (_joinType == JoinType.Cross)
         {
@@ -212,7 +212,7 @@ public sealed class JoinOperator : IQueryOperator
             if (context.MemoryBudgetBytes is long memoryBudget)
             {
                 ExpressionEvaluator evaluator = new(context);
-                IQueryOperator buildSide = _flipped ? _left : _right;
+                QueryOperator buildSide = _flipped ? _left : _right;
                 long? estimatedBuildRows = GetEstimatedRowCount(buildSide);
                 ExecutionTracer.Write($"JOIN GraceHash starting  build={GetOperatorLabel(buildSide)}  estimatedBuild={estimatedBuildRows}");
                 GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi, _flipped, label: GetOperatorLabel(buildSide), estimatedBuildRows: estimatedBuildRows);
@@ -245,9 +245,9 @@ public sealed class JoinOperator : IQueryOperator
     /// its table name, used as a human-readable label in execution trace output.
     /// Returns the operator's type name when no scan is found (e.g. a derived join result).
     /// </summary>
-    private static string GetOperatorLabel(IQueryOperator op)
+    private static string GetOperatorLabel(QueryOperator op)
     {
-        IQueryOperator current = op;
+        QueryOperator current = op;
         while (true)
         {
             if (current is ScanOperator scan)
@@ -368,8 +368,8 @@ public sealed class JoinOperator : IQueryOperator
 
         // Physical side assignment. Normally right=build, left=probe.
         // When flipped, left=build (smaller side materialized), right=probe (larger, streamed).
-        IQueryOperator buildSource = _flipped ? _left : _right;
-        IQueryOperator probeSource = _flipped ? _right : _left;
+        QueryOperator buildSource = _flipped ? _left : _right;
+        QueryOperator probeSource = _flipped ? _right : _left;
         bool buildKeyIsRight = !_flipped;
 
         // Build phase: materialize the build side into a hash table.
@@ -594,7 +594,7 @@ public sealed class JoinOperator : IQueryOperator
     private async IAsyncEnumerable<RowBatch> ExecuteParallelProbeAsync(
         ExecutionContext context,
         JoinKeyExtractionResult extraction,
-        IQueryOperator probeSource,
+        QueryOperator probeSource,
         IJoinHashTable hashTable,
         IReadOnlyList<Row> buildRows,
         bool isSemiJoin,
@@ -839,9 +839,9 @@ public sealed class JoinOperator : IQueryOperator
     /// underlying <see cref="ScanOperator"/> and returns its estimated row count.
     /// Returns <see langword="null"/> when the tree does not bottom out at a scan.
     /// </summary>
-    private static long? GetEstimatedRowCount(IQueryOperator operatorNode)
+    private static long? GetEstimatedRowCount(QueryOperator operatorNode)
     {
-        IQueryOperator current = operatorNode;
+        QueryOperator current = operatorNode;
         while (true)
         {
             switch (current)
@@ -867,8 +867,8 @@ public sealed class JoinOperator : IQueryOperator
         bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
 
         // Physical side assignment mirrors the hash join path.
-        IQueryOperator buildSource = _flipped ? _left : _right;
-        IQueryOperator probeSource = _flipped ? _right : _left;
+        QueryOperator buildSource = _flipped ? _left : _right;
+        QueryOperator probeSource = _flipped ? _right : _left;
 
         bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
         bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
@@ -1081,7 +1081,7 @@ public sealed class JoinOperator : IQueryOperator
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
         IJoinHashTable hashTable)
     {
-        IQueryOperator probeOperator = _flipped ? _right : _left;
+        QueryOperator probeOperator = _flipped ? _right : _left;
         List<ScanOperator> probeScans = new();
         CollectScanOperators(probeOperator, probeScans);
 
@@ -1143,9 +1143,9 @@ public sealed class JoinOperator : IQueryOperator
     /// <c>null</c> if no alias wrapper exists. Traverses through
     /// <see cref="FilterOperator"/> which may be inserted by predicate pushdown.
     /// </summary>
-    private static string? FindBuildAlias(IQueryOperator operatorNode)
+    private static string? FindBuildAlias(QueryOperator operatorNode)
     {
-        IQueryOperator current = operatorNode;
+        QueryOperator current = operatorNode;
         while (true)
         {
             switch (current)
@@ -1168,9 +1168,9 @@ public sealed class JoinOperator : IQueryOperator
     /// <see cref="JoinOperator"/> (both sides). Stops at operators that
     /// break column identity (e.g. aggregation, DISTINCT).
     /// </summary>
-    internal static void CollectScanOperators(IQueryOperator operatorNode, List<ScanOperator> results)
+    internal static void CollectScanOperators(QueryOperator operatorNode, List<ScanOperator> results)
     {
-        IQueryOperator current = operatorNode;
+        QueryOperator current = operatorNode;
         while (true)
         {
             switch (current)

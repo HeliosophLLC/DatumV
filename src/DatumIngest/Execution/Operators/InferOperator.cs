@@ -1,4 +1,5 @@
 using DatumIngest.Catalog.Registries;
+using DatumIngest.Diagnostics;
 using DatumIngest.Functions;
 using DatumIngest.Inference;
 using DatumIngest.Model;
@@ -37,9 +38,9 @@ namespace DatumIngest.Execution.Operators;
 /// (mirror <see cref="DatumIngest.Functions.InferFunction"/>'s switch).
 /// </para>
 /// </remarks>
-public sealed class InferOperator : IQueryOperator
+public sealed class InferOperator : QueryOperator
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly ModelDescriptor _descriptor;
     private readonly string _sessionName;
     private readonly string _inputColumnName;
@@ -62,7 +63,7 @@ public sealed class InferOperator : IQueryOperator
     /// </param>
     /// <param name="outputColumnName">Column to append on the output batch carrying the model's per-row result.</param>
     public InferOperator(
-        IQueryOperator source,
+        QueryOperator source,
         ModelDescriptor descriptor,
         string sessionName,
         string inputColumnName,
@@ -78,7 +79,7 @@ public sealed class InferOperator : IQueryOperator
     }
 
     /// <summary>The upstream source operator.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The model descriptor whose session this operator dispatches to.</summary>
     public ModelDescriptor Descriptor => _descriptor;
@@ -100,7 +101,7 @@ public sealed class InferOperator : IQueryOperator
     public string OutputColumnName => _outputColumnName;
 
     /// <inheritdoc/>
-    public IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter) =>
+    public override QueryOperator RewriteExpressions(Func<Expression, Expression> rewriter) =>
         new InferOperator(
             _source.RewriteExpressions(rewriter),
             _descriptor,
@@ -110,7 +111,7 @@ public sealed class InferOperator : IQueryOperator
             _shapeColumnName);
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new()
         {
@@ -131,7 +132,7 @@ public sealed class InferOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         System.Threading.CancellationToken ct = context.CancellationToken;
         if (!_descriptor.BoundSessions.TryGetValue(_sessionName, out IInferenceSession? session))
@@ -286,18 +287,27 @@ public sealed class InferOperator : IQueryOperator
         }
 
         bool sameLength = rowCount <= 1 || AllSameLength(inputs);
+        ExecutionTracer.Write(
+            $"[infer-op] {_descriptor.Name}: dispatch rowCount={rowCount} batchable={batchable} sameLength={sameLength} perRowLen={inputs[0].Length}");
         if (batchable && sameLength && rowCount > 1)
         {
+            ExecutionTracer.Write(
+                $"[infer-op] {_descriptor.Name}: batched-path pre-Run B={rowCount} bytes={(long)rowCount * inputs[0].Length * 4}");
             await BatchedDispatchAsync(session, inputSpec, outputSpec, inputs, results, ct).ConfigureAwait(false);
+            ExecutionTracer.Write($"[infer-op] {_descriptor.Name}: batched-path post-Run B={rowCount}");
+
         }
         else
         {
+            ExecutionTracer.Write($"[infer-op] {_descriptor.Name}: per-row-path rowCount={rowCount}");
             for (int rowIdx = 0; rowIdx < rowCount; rowIdx++)
             {
                 ct.ThrowIfCancellationRequested();
                 int[]? explicitShape = perRowShapes?[rowIdx];
                 results[rowIdx] = await SingleRowDispatchAsync(
                     session, inputSpec, outputSpec, inputs[rowIdx], explicitShape, ct).ConfigureAwait(false);
+                if ((rowIdx & 0x1f) == 0)
+                    ExecutionTracer.Write($"[infer-op] {_descriptor.Name}: per-row {rowIdx + 1}/{rowCount} done");
             }
         }
         return results;
@@ -353,7 +363,9 @@ public sealed class InferOperator : IQueryOperator
         try
         {
             inputBag.Add<float>(inputSpec.Name, DataKind.Float32, shape, packed);
+            ExecutionTracer.Write($"[infer-op] BatchedDispatch: pre-RunAsync shape=[{string.Join(",", shape)}] floats={packed.Length}");
             outputBag = await session.RunAsync(inputBag, ct).ConfigureAwait(false);
+            ExecutionTracer.Write($"[infer-op] BatchedDispatch: post-RunAsync");
 
             if (!outputBag.TryGet(outputSpec.Name, out IInferenceTensor outputTensor))
             {
@@ -420,7 +432,9 @@ public sealed class InferOperator : IQueryOperator
                     + $"doesn't match the Float32[] input's element count {input.Length}.");
             }
             inputBag.Add<float>(inputSpec.Name, DataKind.Float32, shape, input);
+            ExecutionTracer.Write($"[infer-op] SingleRow: pre-RunAsync shape=[{string.Join(",", shape)}] floats={input.Length}");
             outputBag = await session.RunAsync(inputBag, ct).ConfigureAwait(false);
+            ExecutionTracer.Write($"[infer-op] SingleRow: post-RunAsync");
 
             if (!outputBag.TryGet(outputSpec.Name, out IInferenceTensor outputTensor))
             {

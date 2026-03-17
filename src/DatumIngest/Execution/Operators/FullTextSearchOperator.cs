@@ -35,7 +35,7 @@ namespace DatumIngest.Execution.Operators;
 /// provider's seek session. Same pattern as <see cref="ScanOperator"/>'s
 /// exact-seek path.</para>
 /// </remarks>
-public sealed class FullTextSearchOperator : IQueryOperator
+public sealed class FullTextSearchOperator : QueryOperator
 {
     private readonly ITableProvider _provider;
     private readonly string _columnName;
@@ -83,7 +83,7 @@ public sealed class FullTextSearchOperator : IQueryOperator
     public int MatchingRows { get; private set; }
 
     /// <inheritdoc />
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         return new OperatorPlanDescription("FullTextSearch")
         {
@@ -97,11 +97,11 @@ public sealed class FullTextSearchOperator : IQueryOperator
     }
 
     /// <inheritdoc />
-    public IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
+    public override QueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
         => this; // No expressions to rewrite — the query text is a literal.
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
         CancellationToken cancellationToken = context.CancellationToken;

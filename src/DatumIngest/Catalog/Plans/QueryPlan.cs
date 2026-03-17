@@ -16,10 +16,10 @@ internal sealed class QueryPlan : IQueryPlan
 {
     private readonly TableCatalog _catalog;
     private readonly FunctionRegistry _functions;
-    private readonly IQueryOperator _operator;
+    private readonly QueryOperator _operator;
     private readonly Arena _hoistStore;
 
-    public QueryPlan(IQueryOperator op, TableCatalog catalog, FunctionRegistry functions)
+    public QueryPlan(QueryOperator op, TableCatalog catalog, FunctionRegistry functions)
     {
         _catalog = catalog;
         _functions = functions;

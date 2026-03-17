@@ -21,13 +21,13 @@ public static class QueryExplainer
     /// </summary>
     /// <param name="root">The root of the operator tree.</param>
     /// <returns>An explain plan node tree describing the plan.</returns>
-    public static ExplainPlanNode Explain(IQueryOperator root)
+    public static ExplainPlanNode Explain(QueryOperator root)
     {
         IReadOnlyDictionary<string, FeatureManifest>? stats = CollectColumnStatistics(root);
         return BuildNode(root, stats);
     }
 
-    private static ExplainPlanNode BuildNode(IQueryOperator op, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    private static ExplainPlanNode BuildNode(QueryOperator op, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
         return op switch
         {
@@ -117,7 +117,7 @@ public static class QueryExplainer
     /// Builds a generic explain node from an operator's <see cref="OperatorPlanDescription"/>.
     /// Used as the fallback for operators without dedicated BuildXxxNode methods.
     /// </summary>
-    private static ExplainPlanNode BuildGenericNode(IQueryOperator op, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    private static ExplainPlanNode BuildGenericNode(QueryOperator op, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
         OperatorPlanDescription description = op.DescribeForExplain();
 
@@ -129,7 +129,7 @@ public static class QueryExplainer
         }
 
         List<ExplainPlanNode> children = [];
-        foreach ((IQueryOperator child, string? label) in description.Children)
+        foreach ((QueryOperator child, string? label) in description.Children)
         {
             ExplainPlanNode childNode = BuildNode(child, stats);
             childNode.ChildLabel = label;
@@ -661,7 +661,7 @@ public static class QueryExplainer
     /// entries from all scan operators. Column names are registered both bare and
     /// alias-qualified so that predicates like <c>t.age = 30</c> resolve correctly.
     /// </summary>
-    private static IReadOnlyDictionary<string, FeatureManifest>? CollectColumnStatistics(IQueryOperator root)
+    private static IReadOnlyDictionary<string, FeatureManifest>? CollectColumnStatistics(QueryOperator root)
     {
         Dictionary<string, FeatureManifest>? result = null;
         CollectColumnStatisticsCore(root, alias: null, ref result);
@@ -669,7 +669,7 @@ public static class QueryExplainer
     }
 
     private static void CollectColumnStatisticsCore(
-        IQueryOperator op, string? alias, ref Dictionary<string, FeatureManifest>? result)
+        QueryOperator op, string? alias, ref Dictionary<string, FeatureManifest>? result)
     {
         switch (op)
         {

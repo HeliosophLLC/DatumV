@@ -8,7 +8,7 @@ namespace DatumIngest.Execution.Operators;
 /// Executes a table-valued function and streams the resulting rows.
 /// Arguments are evaluated once at execution start, then passed to the function.
 /// </summary>
-public sealed class FunctionSourceOperator : IQueryOperator
+public sealed class FunctionSourceOperator : QueryOperator
 {
     private readonly ITableValuedFunction _function;
     private readonly IReadOnlyList<Expression> _arguments;
@@ -31,7 +31,7 @@ public sealed class FunctionSourceOperator : IQueryOperator
     public IReadOnlyList<Expression> Arguments => _arguments;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new()
         {
@@ -51,7 +51,7 @@ public sealed class FunctionSourceOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context);
         EvaluationFrame frame = new(Row.Empty, context.Store, context.Store, context.Accountant, context.OuterRow, context.SidecarRegistry, context.Types, context.TypeIdTranslations);

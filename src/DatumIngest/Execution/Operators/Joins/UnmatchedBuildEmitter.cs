@@ -48,7 +48,7 @@ internal sealed class UnmatchedBuildEmitter
     public async IAsyncEnumerable<RowBatch> EmitAsync(
         BitArray buildMatched,
         IReadOnlyList<Row> buildRows,
-        IQueryOperator probeSource,
+        QueryOperator probeSource,
         Arena buildStore,
         ExecutionContext context)
     {
@@ -85,7 +85,7 @@ internal sealed class UnmatchedBuildEmitter
     /// produces no rows at all.
     /// </summary>
     private static async Task<Row?> GetFirstRowForNullPadAsync(
-        IQueryOperator source, ExecutionContext context)
+        QueryOperator source, ExecutionContext context)
     {
         await foreach (RowBatch batch in source.ExecuteAsync(context).ConfigureAwait(false))
         {

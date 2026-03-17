@@ -20,10 +20,10 @@ namespace DatumIngest.Execution.Operators;
 /// type requires all rows to appear.
 /// </para>
 /// </summary>
-public sealed class MergeJoinOperator : IQueryOperator
+public sealed class MergeJoinOperator : QueryOperator
 {
-    private readonly IQueryOperator _left;
-    private readonly IQueryOperator _right;
+    private readonly QueryOperator _left;
+    private readonly QueryOperator _right;
     private readonly JoinType _joinType;
     private readonly JoinKeyExtractionResult _extraction;
     private readonly string _leftSortColumn;
@@ -42,8 +42,8 @@ public sealed class MergeJoinOperator : IQueryOperator
     /// <param name="leftSortColumn">The name of the sorted column on the left side (for plan descriptions).</param>
     /// <param name="rightSortColumn">The name of the sorted column on the right side (for plan descriptions).</param>
     public MergeJoinOperator(
-        IQueryOperator left,
-        IQueryOperator right,
+        QueryOperator left,
+        QueryOperator right,
         JoinType joinType,
         JoinKeyExtractionResult extraction,
         string leftSortColumn,
@@ -58,10 +58,10 @@ public sealed class MergeJoinOperator : IQueryOperator
     }
 
     /// <summary>The left input operator.</summary>
-    public IQueryOperator Left => _left;
+    public QueryOperator Left => _left;
 
     /// <summary>The right input operator.</summary>
-    public IQueryOperator Right => _right;
+    public QueryOperator Right => _right;
 
     /// <summary>The type of join.</summary>
     public JoinType Type => _joinType;
@@ -76,7 +76,7 @@ public sealed class MergeJoinOperator : IQueryOperator
     public string RightSortColumn => _rightSortColumn;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         string joinTypeName = _joinType switch
         {
@@ -103,7 +103,7 @@ public sealed class MergeJoinOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
         ExpressionEvaluator evaluator = new(context);

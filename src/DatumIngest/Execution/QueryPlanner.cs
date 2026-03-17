@@ -14,7 +14,7 @@ namespace DatumIngest.Execution;
 
 /// <summary>
 /// Transforms a parsed <see cref="SelectStatement"/> AST into an executable
-/// operator tree (<see cref="IQueryOperator"/>). Applies predicate pushdown
+/// operator tree (<see cref="QueryOperator"/>). Applies predicate pushdown
 /// to filter rows early and projection pushdown to skip unreferenced columns
 /// at the source.
 /// </summary>
@@ -42,7 +42,7 @@ public sealed class QueryPlanner
     /// </summary>
     /// <param name="query">The parsed query expression.</param>
     /// <returns>The root operator of the execution plan.</returns>
-    public IQueryOperator Plan(QueryExpression query)
+    public QueryOperator Plan(QueryExpression query)
     {
         // Body-scope gate. The planner is only entered for top-level queries —
         // procedural UDF / model bodies are interpreted by their respective
@@ -53,7 +53,7 @@ public sealed class QueryPlanner
         // (and before any rows are scanned).
         BodyScopeGate.EnforceForQuery(query, _functionRegistry);
 
-        IQueryOperator op = query switch
+        QueryOperator op = query switch
         {
             SelectQueryExpression select => Plan(select.Statement),
             CompoundQueryExpression compound => PlanCompound(compound),
@@ -71,7 +71,7 @@ public sealed class QueryPlanner
     /// effect fires when the surrounding plan executes — matching PostgreSQL's
     /// modifying-CTE semantics. <c>EXPLAIN</c> does not commit it.
     /// </summary>
-    private IQueryOperator PlanInsertQueryExpression(InsertQueryExpression insertQuery)
+    private QueryOperator PlanInsertQueryExpression(InsertQueryExpression insertQuery)
     {
         if (insertQuery.Insert.Returning is null)
         {
@@ -88,7 +88,7 @@ public sealed class QueryPlanner
     /// Same modifying-CTE semantics as INSERT: side effect fires once per
     /// surrounding execution; RETURNING is required.
     /// </summary>
-    private IQueryOperator PlanUpdateQueryExpression(UpdateQueryExpression updateQuery)
+    private QueryOperator PlanUpdateQueryExpression(UpdateQueryExpression updateQuery)
     {
         if (updateQuery.Update.Returning is null)
         {
@@ -105,7 +105,7 @@ public sealed class QueryPlanner
     /// Same modifying-CTE semantics as INSERT: side effect fires once per
     /// surrounding execution; RETURNING is required.
     /// </summary>
-    private IQueryOperator PlanDeleteQueryExpression(DeleteQueryExpression deleteQuery)
+    private QueryOperator PlanDeleteQueryExpression(DeleteQueryExpression deleteQuery)
     {
         if (deleteQuery.Delete.Returning is null)
         {
@@ -122,7 +122,7 @@ public sealed class QueryPlanner
     /// </summary>
     /// <param name="statement">The parsed SELECT statement.</param>
     /// <returns>The root operator of the execution plan.</returns>
-    public IQueryOperator Plan(SelectStatement statement)
+    public QueryOperator Plan(SelectStatement statement)
     {
         return Finalize(PlanCore(statement));
     }
@@ -135,11 +135,11 @@ public sealed class QueryPlanner
     /// <param name="query">The parsed query expression.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The root operator of the execution plan.</returns>
-    public async Task<IQueryOperator> PlanAsync(
+    public async Task<QueryOperator> PlanAsync(
         QueryExpression query,
         CancellationToken cancellationToken)
     {
-        IQueryOperator op = query switch
+        QueryOperator op = query switch
         {
             SelectQueryExpression select => PlanCore(select.Statement),
             CompoundQueryExpression compound => await PlanCompoundAsync(compound, cancellationToken).ConfigureAwait(false),
@@ -158,12 +158,12 @@ public sealed class QueryPlanner
     /// <param name="context">Execution context for running uncorrelated scalar subqueries at plan time.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The root operator of the execution plan.</returns>
-    public async Task<IQueryOperator> PlanWithSubqueriesAsync(
+    public async Task<QueryOperator> PlanWithSubqueriesAsync(
         QueryExpression query,
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
-        IQueryOperator op = query switch
+        QueryOperator op = query switch
         {
             SelectQueryExpression select =>
                 await PlanCoreWithSubqueriesAsync(select.Statement, context, cancellationToken).ConfigureAwait(false),
@@ -190,14 +190,14 @@ public sealed class QueryPlanner
     /// instance optimisation that lives in <see cref="DatumIngest.Catalog.Plans.QueryPlan"/>
     /// because the hoist arena's lifetime is tied to that instance, not to the planner.
     /// </remarks>
-    private IQueryOperator Finalize(IQueryOperator op)
+    private QueryOperator Finalize(QueryOperator op)
     {
-        IQueryOperator afterModelHoist = ModelInvocationHoister.Hoist(op, _catalog.Models);
+        QueryOperator afterModelHoist = ModelInvocationHoister.Hoist(op, _catalog.Models);
         // Post-pass: replace MIOs that target SQL-defined straight-line bodies
         // with a lowered chain of ProjectOperator + InferOperator nodes. Non-
         // lowerable bodies stay on the MIO + ProceduralModelAdapter path from
         // step 2. Built-in models always stay on MIO.
-        IQueryOperator afterBodyLower = ModelBodyLowerer.LowerSqlDefinedBodies(
+        QueryOperator afterBodyLower = ModelBodyLowerer.LowerSqlDefinedBodies(
             afterModelHoist, _catalog.DeclaredModels);
         return CommonSubexpressionEliminator.Eliminate(afterBodyLower, _functionRegistry);
     }
@@ -207,11 +207,11 @@ public sealed class QueryPlanner
     /// planning both branches and combining them with a <see cref="SetOperationOperator"/>.
     /// ORDER BY, LIMIT, and OFFSET on the compound are applied on top.
     /// </summary>
-    private IQueryOperator PlanCompound(CompoundQueryExpression compound)
+    private QueryOperator PlanCompound(CompoundQueryExpression compound)
     {
-        IQueryOperator left = Plan(compound.Left);
-        IQueryOperator right = Plan(compound.Right);
-        IQueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
+        QueryOperator left = Plan(compound.Left);
+        QueryOperator right = Plan(compound.Right);
+        QueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
 
         result = ApplyCompoundTrailingClauses(result, compound);
         return result;
@@ -222,7 +222,7 @@ public sealed class QueryPlanner
     /// table references inside the expression can resolve earlier CTEs.
     /// Used when planning non-recursive CTE bodies that may reference sibling CTEs.
     /// </summary>
-    private IQueryOperator PlanWithSiblingCommonTableExpressions(
+    private QueryOperator PlanWithSiblingCommonTableExpressions(
         QueryExpression query,
         IReadOnlyDictionary<string, CommonTableExpressionOperator> siblingOperators)
     {
@@ -239,13 +239,13 @@ public sealed class QueryPlanner
     /// <summary>
     /// Plans a compound set operation with sibling CTE operators threaded to both branches.
     /// </summary>
-    private IQueryOperator PlanCompoundWithSiblingCommonTableExpressions(
+    private QueryOperator PlanCompoundWithSiblingCommonTableExpressions(
         CompoundQueryExpression compound,
         IReadOnlyDictionary<string, CommonTableExpressionOperator> siblingOperators)
     {
-        IQueryOperator left = PlanWithSiblingCommonTableExpressions(compound.Left, siblingOperators);
-        IQueryOperator right = PlanWithSiblingCommonTableExpressions(compound.Right, siblingOperators);
-        IQueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
+        QueryOperator left = PlanWithSiblingCommonTableExpressions(compound.Left, siblingOperators);
+        QueryOperator right = PlanWithSiblingCommonTableExpressions(compound.Right, siblingOperators);
+        QueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
 
         result = ApplyCompoundTrailingClauses(result, compound);
         return result;
@@ -254,12 +254,12 @@ public sealed class QueryPlanner
     /// <summary>
     /// Async variant of <see cref="PlanCompound"/> with late materialization.
     /// </summary>
-    private async Task<IQueryOperator> PlanCompoundAsync(
+    private async Task<QueryOperator> PlanCompoundAsync(
         CompoundQueryExpression compound, CancellationToken cancellationToken)
     {
-        IQueryOperator left = await PlanAsync(compound.Left, cancellationToken).ConfigureAwait(false);
-        IQueryOperator right = await PlanAsync(compound.Right, cancellationToken).ConfigureAwait(false);
-        IQueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
+        QueryOperator left = await PlanAsync(compound.Left, cancellationToken).ConfigureAwait(false);
+        QueryOperator right = await PlanAsync(compound.Right, cancellationToken).ConfigureAwait(false);
+        QueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
 
         result = ApplyCompoundTrailingClauses(result, compound);
         return result;
@@ -268,12 +268,12 @@ public sealed class QueryPlanner
     /// <summary>
     /// Async variant of <see cref="PlanCompound"/> with subquery rewriting.
     /// </summary>
-    private async Task<IQueryOperator> PlanCompoundWithSubqueriesAsync(
+    private async Task<QueryOperator> PlanCompoundWithSubqueriesAsync(
         CompoundQueryExpression compound, ExecutionContext context, CancellationToken cancellationToken)
     {
-        IQueryOperator left = await PlanWithSubqueriesAsync(compound.Left, context, cancellationToken).ConfigureAwait(false);
-        IQueryOperator right = await PlanWithSubqueriesAsync(compound.Right, context, cancellationToken).ConfigureAwait(false);
-        IQueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
+        QueryOperator left = await PlanWithSubqueriesAsync(compound.Left, context, cancellationToken).ConfigureAwait(false);
+        QueryOperator right = await PlanWithSubqueriesAsync(compound.Right, context, cancellationToken).ConfigureAwait(false);
+        QueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
 
         result = ApplyCompoundTrailingClauses(result, compound);
         return result;
@@ -283,8 +283,8 @@ public sealed class QueryPlanner
     /// Applies ORDER BY, LIMIT/OFFSET from a compound query expression to the
     /// combined operator. Mirrors the trailing-clause logic in <see cref="PlanCore"/>.
     /// </summary>
-    private static IQueryOperator ApplyCompoundTrailingClauses(
-        IQueryOperator source, CompoundQueryExpression compound)
+    private static QueryOperator ApplyCompoundTrailingClauses(
+        QueryOperator source, CompoundQueryExpression compound)
     {
         if (compound.OrderBy is not null)
         {
@@ -363,9 +363,9 @@ public sealed class QueryPlanner
     /// (e.g. ON conditions of decorrelated/semi-join descriptors injected by
     /// <see cref="PlanWithSubqueriesAsync"/>).
     /// </param>
-    private IQueryOperator PlanCore(
+    private QueryOperator PlanCore(
         SelectStatement statement,
-        Func<IQueryOperator, IQueryOperator>? sourceTransform = null,
+        Func<QueryOperator, QueryOperator>? sourceTransform = null,
         IReadOnlyDictionary<string, CommonTableExpressionOperator>? externalCommonTableExpressionOperators = null,
         IReadOnlyList<Expression>? extraReferenceExpressions = null)
     {
@@ -409,7 +409,7 @@ public sealed class QueryPlanner
 
         // 1. Build the source operator (FROM clause) with projection pushdown.
         bool hasJoins = statement.Joins is not null && statement.Joins.Count > 0;
-        IQueryOperator source = statement.From is not null
+        QueryOperator source = statement.From is not null
             ? PlanSource(statement.From.Source, allReferencedColumns, hasJoins, commonTableExpressionOperators)
             : new SingleEmptyRowOperator();
 
@@ -466,11 +466,11 @@ public sealed class QueryPlanner
         if (statement.Joins is not null)
         {
             // Pre-plan all join sources so we can inspect estimated row counts.
-            List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)> plannedJoins = new(statement.Joins.Count);
+            List<(JoinClause Join, QueryOperator Operator, HashSet<string> Aliases)> plannedJoins = new(statement.Joins.Count);
 
             foreach (JoinClause join in statement.Joins)
             {
-                IQueryOperator rightSide = PlanSource(join.Source, allReferencedColumns, hasJoins, commonTableExpressionOperators);
+                QueryOperator rightSide = PlanSource(join.Source, allReferencedColumns, hasJoins, commonTableExpressionOperators);
                 HashSet<string> rightAliases = new(StringComparer.OrdinalIgnoreCase);
                 CollectSourceAliases(join.Source, rightAliases);
                 plannedJoins.Add((join, rightSide, rightAliases));
@@ -495,17 +495,17 @@ public sealed class QueryPlanner
             // join is a non-lateral INNER join and all sources have estimated
             // row counts. This is a heuristic — the roadmap CBO will replace it.
             if (TryReorderJoins(source, leftAliases, plannedJoins, orderBySortTableAlias,
-                out IQueryOperator? reorderedSource, out HashSet<string>? reorderedFromAliases,
-                out List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)>? reorderedJoins))
+                out QueryOperator? reorderedSource, out HashSet<string>? reorderedFromAliases,
+                out List<(JoinClause Join, QueryOperator Operator, HashSet<string> Aliases)>? reorderedJoins))
             {
                 source = reorderedSource;
                 leftAliases = reorderedFromAliases;
                 plannedJoins = reorderedJoins;
             }
 
-            foreach ((JoinClause join, IQueryOperator rightSide, HashSet<string> rightAliases) in plannedJoins)
+            foreach ((JoinClause join, QueryOperator rightSide, HashSet<string> rightAliases) in plannedJoins)
             {
-                IQueryOperator currentRight = rightSide;
+                QueryOperator currentRight = rightSide;
 
                 if (join.IsLateral)
                 {
@@ -1164,7 +1164,7 @@ public sealed class QueryPlanner
     /// column references and injected as <see cref="Operators.ScalarSubqueryOperator"/>
     /// wrappers around the source operator.
     /// </summary>
-    private async Task<IQueryOperator> PlanCoreWithSubqueriesAsync(
+    private async Task<QueryOperator> PlanCoreWithSubqueriesAsync(
         SelectStatement statement,
         ExecutionContext context,
         CancellationToken cancellationToken)
@@ -1322,7 +1322,7 @@ public sealed class QueryPlanner
         // (Scan+Joins) and the rest of the pipeline (Filter/Project/etc.).
         // This ensures synthetic columns and semi-join filtering are applied
         // before any operator that references them.
-        Func<IQueryOperator, IQueryOperator>? sourceTransform = null;
+        Func<QueryOperator, QueryOperator>? sourceTransform = null;
         if (allCorrelated.Count > 0 || allDecorrelated.Count > 0 || semiJoinResult.SemiJoins.Count > 0)
         {
             sourceTransform = source =>
@@ -1339,7 +1339,7 @@ public sealed class QueryPlanner
 
                 foreach (SubqueryRewriter.CorrelatedSubquery correlated in allCorrelated)
                 {
-                    IQueryOperator innerPlan = Plan(correlated.InnerQuery);
+                    QueryOperator innerPlan = Plan(correlated.InnerQuery);
                     source = new Operators.ScalarSubqueryOperator(source, innerPlan, correlated.SyntheticColumnName);
                 }
 
@@ -1507,8 +1507,8 @@ public sealed class QueryPlanner
     /// two FTS-indexed columns ANDed) are deferred — they require either
     /// an intersection step or planner cost-comparison.
     /// </remarks>
-    private static IQueryOperator MaybeRewriteForFullTextSearch(
-        IQueryOperator source,
+    private static QueryOperator MaybeRewriteForFullTextSearch(
+        QueryOperator source,
         List<Expression> pendingPredicates)
     {
         ScanOperator? scan;
@@ -1624,12 +1624,12 @@ public sealed class QueryPlanner
         return false;
     }
 
-    private static IQueryOperator PushPredicatesBelow(
-        IQueryOperator operatorNode,
+    private static QueryOperator PushPredicatesBelow(
+        QueryOperator operatorNode,
         HashSet<string> availableAliases,
         List<Expression> predicates)
     {
-        IQueryOperator result = operatorNode;
+        QueryOperator result = operatorNode;
 
         for (int index = predicates.Count - 1; index >= 0; index--)
         {
@@ -1656,9 +1656,9 @@ public sealed class QueryPlanner
     /// Walks down the operator tree to find the <see cref="ScanOperator"/>
     /// and adds the predicate as an advisory filter hint.
     /// </summary>
-    private static void AddFilterHintToScan(IQueryOperator operatorNode, Expression predicate)
+    private static void AddFilterHintToScan(QueryOperator operatorNode, Expression predicate)
     {
-        IQueryOperator current = operatorNode;
+        QueryOperator current = operatorNode;
         while (true)
         {
             switch (current)
@@ -1799,7 +1799,7 @@ public sealed class QueryPlanner
     /// </remarks>
     private static void EliminateUnusedJoins(
         SelectStatement statement,
-        List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)> plannedJoins)
+        List<(JoinClause Join, QueryOperator Operator, HashSet<string> Aliases)> plannedJoins)
     {
         // Collect table aliases referenced in query output clauses (not JOIN ON).
         HashSet<string> outputReferenced = new(StringComparer.OrdinalIgnoreCase);
@@ -1977,13 +1977,13 @@ public sealed class QueryPlanner
     /// </remarks>
     /// <returns><c>true</c> if a reordering was produced and the out parameters are populated.</returns>
     private static bool TryReorderJoins(
-        IQueryOperator fromOperator,
+        QueryOperator fromOperator,
         HashSet<string> fromAliases,
-        List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)> plannedJoins,
+        List<(JoinClause Join, QueryOperator Operator, HashSet<string> Aliases)> plannedJoins,
         string? preferredProbeTableAlias,
-        [NotNullWhen(true)] out IQueryOperator? reorderedSource,
+        [NotNullWhen(true)] out QueryOperator? reorderedSource,
         [NotNullWhen(true)] out HashSet<string>? reorderedFromAliases,
-        [NotNullWhen(true)] out List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)>? reorderedJoins)
+        [NotNullWhen(true)] out List<(JoinClause Join, QueryOperator Operator, HashSet<string> Aliases)>? reorderedJoins)
     {
         reorderedSource = null;
         reorderedFromAliases = null;
@@ -2087,7 +2087,7 @@ public sealed class QueryPlanner
 
         // Build the pool of remaining sources to schedule.
         // Each entry: (Operator, Aliases, RowCount, JoinClause or null for the original FROM).
-        List<(IQueryOperator Operator, HashSet<string> Aliases, long RowCount, JoinClause? Join)> remaining = new(totalSources - 1);
+        List<(QueryOperator Operator, HashSet<string> Aliases, long RowCount, JoinClause? Join)> remaining = new(totalSources - 1);
 
         // The original FROM becomes a joinable source — it keeps the ON condition
         // from the join that previously connected the new probe to the tree.
@@ -2115,7 +2115,7 @@ public sealed class QueryPlanner
         }
 
         // Set up the new FROM from the chosen source.
-        IQueryOperator newFrom;
+        QueryOperator newFrom;
         HashSet<string> joinedAliases;
 
         int chosenJoinIndex = chosenIndex - 1;
@@ -2124,7 +2124,7 @@ public sealed class QueryPlanner
 
         // Greedy scheduling: at each step pick the smallest remaining source whose
         // ON condition is satisfiable (all referenced aliases are in the joined set).
-        List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)> result = new(remaining.Count);
+        List<(JoinClause Join, QueryOperator Operator, HashSet<string> Aliases)> result = new(remaining.Count);
 
         while (remaining.Count > 0)
         {
@@ -2175,7 +2175,7 @@ public sealed class QueryPlanner
             }
 
             // Consume the chosen source and assign its applicable ON conditions.
-            (IQueryOperator chosenOperator, HashSet<string> chosenAliases, _, _) = remaining[bestIndex];
+            (QueryOperator chosenOperator, HashSet<string> chosenAliases, _, _) = remaining[bestIndex];
             remaining.RemoveAt(bestIndex);
 
             // Collect all ON conditions that are now satisfiable with the joined set + chosen source.
@@ -2233,9 +2233,9 @@ public sealed class QueryPlanner
     /// to find the underlying <see cref="ScanOperator"/> and returns its table name,
     /// used in execution trace output.
     /// </summary>
-    private static string GetOperatorName(IQueryOperator op)
+    private static string GetOperatorName(QueryOperator op)
     {
-        IQueryOperator current = op;
+        QueryOperator current = op;
         while (true)
         {
             if (current is ScanOperator scan)
@@ -2255,9 +2255,9 @@ public sealed class QueryPlanner
     /// </summary>
     /// <returns>The estimated row count, or <c>null</c> if no <see cref="ScanOperator"/> is found
     /// or it lacks an estimate.</returns>
-    private static long? GetEstimatedRowCount(IQueryOperator operatorNode)
+    private static long? GetEstimatedRowCount(QueryOperator operatorNode)
     {
-        IQueryOperator current = operatorNode;
+        QueryOperator current = operatorNode;
         while (true)
         {
             switch (current)
@@ -2288,9 +2288,9 @@ public sealed class QueryPlanner
     /// or <c>null</c> if the ordering is unknown or destroyed by a blocking operator.
     /// </returns>
     private static IReadOnlyList<(string ColumnName, bool Descending)>? GetOutputOrdering(
-        IQueryOperator operatorNode)
+        QueryOperator operatorNode)
     {
-        IQueryOperator current = operatorNode;
+        QueryOperator current = operatorNode;
         while (true)
         {
             switch (current)
@@ -2387,7 +2387,7 @@ public sealed class QueryPlanner
     /// separate <see cref="OrderByOperator"/> unnecessary.
     /// </summary>
     private static bool OutputOrderingSatisfiesOrderBy(
-        IQueryOperator source,
+        QueryOperator source,
         OrderByClause orderBy)
     {
         IReadOnlyList<(string ColumnName, bool Descending)>? ordering = GetOutputOrdering(source);
@@ -2434,7 +2434,7 @@ public sealed class QueryPlanner
     /// aggregation can replace hash aggregation.
     /// </returns>
     private static bool CanUseStreamingAggregate(
-        IQueryOperator source,
+        QueryOperator source,
         IReadOnlyList<Expression> groupByExpressions)
     {
         if (groupByExpressions.Count == 0)
@@ -2555,7 +2555,7 @@ public sealed class QueryPlanner
     /// Mutates <paramref name="source"/> in place when the substitution succeeds.
     /// </summary>
     /// <returns><c>true</c> if the index scan was substituted and the ORDER BY can be elided.</returns>
-    private static bool TryReplaceWithIndexScan(ref IQueryOperator source, OrderByClause orderBy)
+    private static bool TryReplaceWithIndexScan(ref QueryOperator source, OrderByClause orderBy)
     {
         // Only single-column, simple column reference ORDER BY is eligible.
         if (orderBy.Items.Count != 1)
@@ -2640,8 +2640,8 @@ public sealed class QueryPlanner
     private static bool ShouldUseMergeJoin(
         SelectStatement statement,
         Expression? onCondition,
-        IQueryOperator leftOperator,
-        IQueryOperator rightOperator)
+        QueryOperator leftOperator,
+        QueryOperator rightOperator)
     {
         if (onCondition is null)
         {
@@ -2727,7 +2727,7 @@ public sealed class QueryPlanner
     /// </remarks>
     private static bool ShouldPreferIndexNestedLoop(
         SelectStatement statement,
-        IQueryOperator buildSide,
+        QueryOperator buildSide,
         JoinClause join)
     {
         // NLJ only pays off when LIMIT restricts the result to a small top-N.
@@ -2789,8 +2789,8 @@ public sealed class QueryPlanner
     /// </para>
     /// </summary>
     private static bool TryCreateMergeJoin(
-        IQueryOperator left,
-        IQueryOperator right,
+        QueryOperator left,
+        QueryOperator right,
         JoinType joinType,
         Expression? onCondition,
         [NotNullWhen(true)] out MergeJoinOperator? mergeJoin)
@@ -2872,8 +2872,8 @@ public sealed class QueryPlanner
             descending: false,
             rightColumnName);
 
-        IQueryOperator leftReplaced = ReplaceScanOperator(left, leftScan, leftIndexScan);
-        IQueryOperator rightReplaced = ReplaceScanOperator(right, rightScan, rightIndexScan);
+        QueryOperator leftReplaced = ReplaceScanOperator(left, leftScan, leftIndexScan);
+        QueryOperator rightReplaced = ReplaceScanOperator(right, rightScan, rightIndexScan);
 
         mergeJoin = new MergeJoinOperator(
             leftReplaced, rightReplaced, joinType, extraction,
@@ -2891,9 +2891,9 @@ public sealed class QueryPlanner
     /// probe chain down to the leaf scan.
     /// Returns <c>null</c> if no scan is reachable via this path.
     /// </summary>
-    private static ScanOperator? FindScanOperator(IQueryOperator operatorNode)
+    private static ScanOperator? FindScanOperator(QueryOperator operatorNode)
     {
-        IQueryOperator current = operatorNode;
+        QueryOperator current = operatorNode;
 
         while (true)
         {
@@ -2936,8 +2936,8 @@ public sealed class QueryPlanner
     /// project, distinct, join). For <see cref="JoinOperator"/> nodes the left (probe) chain
     /// is searched recursively; the right (build) side is never modified.
     /// </summary>
-    private static IQueryOperator ReplaceScanOperator(
-        IQueryOperator root, ScanOperator target, IndexScanOperator replacement)
+    private static QueryOperator ReplaceScanOperator(
+        QueryOperator root, ScanOperator target, IndexScanOperator replacement)
     {
         if (ReferenceEquals(root, target))
         {
@@ -2986,9 +2986,9 @@ public sealed class QueryPlanner
     /// </summary>
     private static string? GetOrderBySortTableAlias(
         OrderByClause? orderBy,
-        IQueryOperator fromOperator,
+        QueryOperator fromOperator,
         HashSet<string> fromAliases,
-        List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)> plannedJoins)
+        List<(JoinClause Join, QueryOperator Operator, HashSet<string> Aliases)> plannedJoins)
     {
         if (orderBy is null || orderBy.Items.Count != 1)
         {
@@ -3001,7 +3001,7 @@ public sealed class QueryPlanner
         }
 
         // Locate the operator for the ORDER BY table alias.
-        IQueryOperator? tableOperator = null;
+        QueryOperator? tableOperator = null;
 
         if (fromAliases.Contains(tableName))
         {
@@ -3009,7 +3009,7 @@ public sealed class QueryPlanner
         }
         else
         {
-            foreach ((_, IQueryOperator op, HashSet<string> aliases) in plannedJoins)
+            foreach ((_, QueryOperator op, HashSet<string> aliases) in plannedJoins)
             {
                 if (aliases.Contains(tableName))
                 {
@@ -3042,9 +3042,9 @@ public sealed class QueryPlanner
     /// into join subtrees. This variant is used when inspecting a single planned table
     /// operator (which is always a chain, never a join).
     /// </summary>
-    private static ScanOperator? FindScanOperatorInChain(IQueryOperator operatorNode)
+    private static ScanOperator? FindScanOperatorInChain(QueryOperator operatorNode)
     {
-        IQueryOperator current = operatorNode;
+        QueryOperator current = operatorNode;
 
         while (true)
         {
@@ -3419,9 +3419,9 @@ public sealed class QueryPlanner
     /// column read because the value already lives on the row.
     /// </para>
     /// </remarks>
-    private (IQueryOperator Source, Expression Predicate, IReadOnlyList<LetBinding>? LetBindings)
+    private (QueryOperator Source, Expression Predicate, IReadOnlyList<LetBinding>? LetBindings)
         LiftLetBindingsForWhere(
-            IQueryOperator source,
+            QueryOperator source,
             Expression predicate,
             IReadOnlyList<LetBinding>? letBindings)
     {
@@ -3574,8 +3574,8 @@ public sealed class QueryPlanner
     /// validation in <see cref="ModelInvocationHoister"/>'s equivalent helper
     /// so the same plan-time error messages surface here.
     /// </summary>
-    private static IQueryOperator BuildSingleMioForLiftedLet(
-        IQueryOperator source,
+    private static QueryOperator BuildSingleMioForLiftedLet(
+        QueryOperator source,
         FunctionCallExpression call,
         string outputColumn,
         ModelCatalog catalog)
@@ -4798,7 +4798,7 @@ public sealed class QueryPlanner
             && value == "*";
     }
 
-    private IQueryOperator PlanSource(
+    private QueryOperator PlanSource(
         TableSource source,
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
         bool hasJoins,
@@ -4814,7 +4814,7 @@ public sealed class QueryPlanner
         };
     }
 
-    private IQueryOperator PlanTableReference(
+    private QueryOperator PlanTableReference(
         TableReference tableRef,
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
         bool hasJoins,
@@ -4825,7 +4825,7 @@ public sealed class QueryPlanner
         if (commonTableExpressionOperators is not null &&
             commonTableExpressionOperators.TryGetValue(tableRef.Name, out CommonTableExpressionOperator? commonTableExpressionOperator))
         {
-            IQueryOperator cteSource = commonTableExpressionOperator;
+            QueryOperator cteSource = commonTableExpressionOperator;
             if (tableRef.Alias is not null || hasJoins)
             {
                 cteSource = new AliasOperator(cteSource, tableRef.Alias ?? tableRef.Name);
@@ -4863,7 +4863,7 @@ public sealed class QueryPlanner
             scanOperator.ColumnStatistics = columnStatistics;
         }
 
-        IQueryOperator outOperator = scanOperator;
+        QueryOperator outOperator = scanOperator;
 
         // Apply TABLESAMPLE row/chunk sampling if the table reference includes a sampling clause.
         if (tableRef.Tablesample is TablesampleClause tablesampleClause)
@@ -4901,13 +4901,13 @@ public sealed class QueryPlanner
         return outOperator;
     }
 
-    private IQueryOperator PlanSubquery(SubquerySource subquery)
+    private QueryOperator PlanSubquery(SubquerySource subquery)
     {
-        IQueryOperator innerPlan = Plan(subquery.Query);
+        QueryOperator innerPlan = Plan(subquery.Query);
         return new SubqueryOperator(innerPlan, subquery.Alias);
     }
 
-    private IQueryOperator PlanFunctionSource(FunctionSource functionSource, bool hasJoins)
+    private QueryOperator PlanFunctionSource(FunctionSource functionSource, bool hasJoins)
     {
         ITableValuedFunction? function = _functionRegistry.TryGetTableValued(functionSource.CallName);
 
@@ -4917,7 +4917,7 @@ public sealed class QueryPlanner
                 $"Unknown table-valued function: '{functionSource.CallName}'.");
         }
 
-        IQueryOperator sourceOperator = new FunctionSourceOperator(function, functionSource.Arguments);
+        QueryOperator sourceOperator = new FunctionSourceOperator(function, functionSource.Arguments);
 
         if (functionSource.Alias is not null || hasJoins)
         {
@@ -5047,7 +5047,7 @@ public sealed class QueryPlanner
                         $"Recursive CTE '{commonTableExpression.Name}' body must be a single SELECT statement (the anchor member)."),
                 };
 
-                IQueryOperator anchorPlan = PlanCore(
+                QueryOperator anchorPlan = PlanCore(
                     anchorStatement,
                     externalCommonTableExpressionOperators: operators);
 
@@ -5096,7 +5096,7 @@ public sealed class QueryPlanner
                 continue;
             }
 
-            IQueryOperator innerPlan = operators.Count > 0
+            QueryOperator innerPlan = operators.Count > 0
                 ? PlanWithSiblingCommonTableExpressions(commonTableExpression.Body, operators)
                 : Plan(commonTableExpression.Body);
 

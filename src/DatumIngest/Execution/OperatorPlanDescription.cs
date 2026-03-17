@@ -1,8 +1,8 @@
 namespace DatumIngest.Execution;
 
 /// <summary>
-/// Self-description of an operator for EXPLAIN output. Each <see cref="IQueryOperator"/>
-/// implementation returns this from <see cref="IQueryOperator.DescribeForExplain"/> to
+/// Self-description of an operator for EXPLAIN output. Each <see cref="QueryOperator"/>
+/// implementation returns this from <see cref="QueryOperator.DescribeForExplain"/> to
 /// provide its name, properties, children, warnings, and annotations. The
 /// <see cref="QueryExplainer"/> uses these descriptions to build the
 /// <see cref="ExplainPlanNode"/> tree, adding cross-cutting concerns like
@@ -32,7 +32,7 @@ public sealed class OperatorPlanDescription
     /// Child operators and their optional edge labels (e.g. "probe", "build").
     /// The <see cref="QueryExplainer"/> recurses into these to build the full plan tree.
     /// </summary>
-    public IReadOnlyList<(IQueryOperator Child, string? Label)> Children { get; init; } = [];
+    public IReadOnlyList<(QueryOperator Child, string? Label)> Children { get; init; } = [];
 
     /// <summary>Estimated number of rows this operator will produce, or <c>null</c> if unknown.</summary>
     public long? EstimatedRows { get; init; }

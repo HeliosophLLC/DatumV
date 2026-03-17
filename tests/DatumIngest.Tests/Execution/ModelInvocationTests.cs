@@ -86,7 +86,7 @@ public sealed class ModelInvocationTests : ServiceTestBase
 
         QueryExpression query = SqlParser.Parse("SELECT models.echo(name) FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = planner.Plan(query);
+        QueryOperator plan = planner.Plan(query);
 
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
         ModelInvocationOperator invocation = Assert.IsType<ModelInvocationOperator>(project.Source);
@@ -138,7 +138,7 @@ public sealed class ModelInvocationTests : ServiceTestBase
 
         QueryExpression query = SqlParser.Parse("SELECT models.echo(name, 0.5) FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = planner.Plan(query);
+        QueryOperator plan = planner.Plan(query);
 
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
         ModelInvocationOperator invocation = Assert.IsType<ModelInvocationOperator>(project.Source);
@@ -509,7 +509,7 @@ public sealed class ModelInvocationTests : ServiceTestBase
         QueryExpression query = SqlParser.Parse(
             "SELECT models.echo('test'), models.echo('test') FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = planner.Plan(query);
+        QueryOperator plan = planner.Plan(query);
 
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
         ModelInvocationOperator invocation = Assert.IsType<ModelInvocationOperator>(project.Source);
@@ -575,7 +575,7 @@ public sealed class ModelInvocationTests : ServiceTestBase
         QueryExpression query = SqlParser.Parse(
             "SELECT models.echo('a'), models.echo('b') FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = planner.Plan(query);
+        QueryOperator plan = planner.Plan(query);
 
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
 
@@ -611,7 +611,7 @@ public sealed class ModelInvocationTests : ServiceTestBase
         QueryExpression query = SqlParser.Parse(
             "SELECT LET v = models.echo(name), v FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = planner.Plan(query);
+        QueryOperator plan = planner.Plan(query);
 
         // Plan shape: Project ← Enricher(__let_v_*) ← MIO(echo) ← Scan.
         // LET binding has been lifted out of the projection.
@@ -643,11 +643,11 @@ public sealed class ModelInvocationTests : ServiceTestBase
         QueryExpression query = SqlParser.Parse(
             "SELECT name FROM t WHERE upper(models.echo(name)) = 'ALICE'");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = planner.Plan(query);
+        QueryOperator plan = planner.Plan(query);
 
         // Find the FilterOperator in the chain.
         FilterOperator? filter = null;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is FilterOperator f) { filter = f; break; }
@@ -687,11 +687,11 @@ public sealed class ModelInvocationTests : ServiceTestBase
         QueryExpression query = SqlParser.Parse(
             "SELECT name FROM t ORDER BY upper(models.echo(name))");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = planner.Plan(query);
+        QueryOperator plan = planner.Plan(query);
 
         // Walk the plan looking for the OrderByOperator.
         OrderByOperator? orderBy = null;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is OrderByOperator ob) { orderBy = ob; break; }
@@ -853,12 +853,12 @@ public sealed class ModelInvocationTests : ServiceTestBase
         QueryExpression query = SqlParser.Parse(
             "SELECT models.echo(name) FROM t WHERE upper(models.echo(name)) = 'ALICE'");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = planner.Plan(query);
+        QueryOperator plan = planner.Plan(query);
 
         // Walk the plan, count MIOs.
         int mioCount = 0;
         ModelInvocationOperator? deepestMio = null;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is ModelInvocationOperator m)
@@ -897,10 +897,10 @@ public sealed class ModelInvocationTests : ServiceTestBase
         QueryExpression query = SqlParser.Parse(
             "SELECT models.echo(name) FROM t ORDER BY models.echo(name)");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = planner.Plan(query);
+        QueryOperator plan = planner.Plan(query);
 
         int mioCount = 0;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is ModelInvocationOperator) mioCount++;
@@ -1082,7 +1082,7 @@ public sealed class ModelInvocationTests : ServiceTestBase
         DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(catalog: catalog);
         QueryExpression query = SqlParser.Parse("SELECT models.array_struct_echo(name) FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
+        QueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         // Stream the result so the per-batch arena stays alive while we read
         // AsStructArray. Capture only the registry-resolved fields we need to

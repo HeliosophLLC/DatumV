@@ -14,10 +14,10 @@ namespace DatumIngest.Execution.Operators;
 /// This is an O(N × M) nested-loop strategy; no hash acceleration is possible
 /// because the right side is recomputed per outer row.
 /// </summary>
-public sealed class LateralJoinOperator : IQueryOperator
+public sealed class LateralJoinOperator : QueryOperator
 {
-    private readonly IQueryOperator _left;
-    private readonly IQueryOperator _right;
+    private readonly QueryOperator _left;
+    private readonly QueryOperator _right;
     private readonly JoinType _joinType;
     private readonly Expression? _onCondition;
 
@@ -31,8 +31,8 @@ public sealed class LateralJoinOperator : IQueryOperator
     /// </param>
     /// <param name="onCondition">Optional ON condition applied after combining rows.</param>
     public LateralJoinOperator(
-        IQueryOperator left,
-        IQueryOperator right,
+        QueryOperator left,
+        QueryOperator right,
         JoinType joinType,
         Expression? onCondition)
     {
@@ -43,10 +43,10 @@ public sealed class LateralJoinOperator : IQueryOperator
     }
 
     /// <summary>The outer (driving) operator.</summary>
-    public IQueryOperator Left => _left;
+    public QueryOperator Left => _left;
 
     /// <summary>The inner (lateral) operator.</summary>
-    public IQueryOperator Right => _right;
+    public QueryOperator Right => _right;
 
     /// <summary>The join type (Cross or Left).</summary>
     public JoinType JoinType => _joinType;
@@ -55,7 +55,7 @@ public sealed class LateralJoinOperator : IQueryOperator
     public Expression? OnCondition => _onCondition;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         string joinTypeName = _joinType switch
         {
@@ -83,7 +83,7 @@ public sealed class LateralJoinOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
         ExpressionEvaluator evaluator = new(context);

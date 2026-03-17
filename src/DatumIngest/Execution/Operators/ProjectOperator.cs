@@ -10,9 +10,9 @@ namespace DatumIngest.Execution.Operators;
 /// Expression results are wrapped in <see cref="LazyDataValue"/> thunks
 /// so computation chains through nested SELECTs without eagerly materializing.
 /// </summary>
-public sealed class ProjectOperator : IQueryOperator
+public sealed class ProjectOperator : QueryOperator
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly IReadOnlyList<SelectColumn> _columns;
     private readonly IReadOnlyList<LetBinding>? _letBindings;
     private readonly IReadOnlyList<AssertClause>? _assertions;
@@ -27,7 +27,7 @@ public sealed class ProjectOperator : IQueryOperator
     /// <param name="assertions">Optional ASSERT clauses to evaluate after LET bindings.</param>
     /// <param name="sourceSchema">Optional source schema for star expansion.</param>
     public ProjectOperator(
-        IQueryOperator source,
+        QueryOperator source,
         IReadOnlyList<SelectColumn> columns,
         IReadOnlyList<LetBinding>? letBindings = null,
         IReadOnlyList<AssertClause>? assertions = null,
@@ -41,7 +41,7 @@ public sealed class ProjectOperator : IQueryOperator
     }
 
     /// <summary>The child operator producing rows.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The projected SELECT columns.</summary>
     public IReadOnlyList<SelectColumn> Columns => _columns;
@@ -53,7 +53,7 @@ public sealed class ProjectOperator : IQueryOperator
     public IReadOnlyList<AssertClause>? Assertions => _assertions;
 
     /// <inheritdoc/>
-    public IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
+    public override QueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
     {
         IReadOnlyList<SelectColumn> columns = _columns
             .Select(c => c with { Expression = rewriter(c.Expression) })
@@ -80,7 +80,7 @@ public sealed class ProjectOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         List<string> columnDescriptions = [];
         foreach (SelectColumn column in _columns)
@@ -114,7 +114,7 @@ public sealed class ProjectOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         // Build a name→expression map for LET bindings so the evaluator can recover struct
         // field metadata from binding expressions (e.g., hidden __destructure_N bindings

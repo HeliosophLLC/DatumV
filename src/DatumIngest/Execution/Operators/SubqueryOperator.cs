@@ -7,9 +7,9 @@ namespace DatumIngest.Execution.Operators;
 /// Wraps an inner <see cref="SelectStatement"/>'s operator tree, applying
 /// the subquery alias to produce a derived table result.
 /// </summary>
-public sealed class SubqueryOperator : IQueryOperator
+public sealed class SubqueryOperator : QueryOperator
 {
-    private readonly IQueryOperator _innerOperator;
+    private readonly QueryOperator _innerOperator;
     private readonly string _alias;
 
     /// <summary>
@@ -17,20 +17,20 @@ public sealed class SubqueryOperator : IQueryOperator
     /// </summary>
     /// <param name="innerOperator">The operator tree for the inner SELECT.</param>
     /// <param name="alias">The alias for this derived table.</param>
-    public SubqueryOperator(IQueryOperator innerOperator, string alias)
+    public SubqueryOperator(QueryOperator innerOperator, string alias)
     {
         _innerOperator = innerOperator;
         _alias = alias;
     }
 
     /// <summary>The inner operator tree.</summary>
-    public IQueryOperator InnerOperator => _innerOperator;
+    public QueryOperator InnerOperator => _innerOperator;
 
     /// <summary>The derived table alias.</summary>
     public string Alias => _alias;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         return new OperatorPlanDescription("Subquery")
         {
@@ -43,7 +43,7 @@ public sealed class SubqueryOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         // The inner operator already produces correctly-named rows.
         // Pass them through without copying.

@@ -17,7 +17,7 @@ public sealed class DistinctOperatorTests : ServiceTestBase
     private static readonly string[] XColumns = ["x"];
 
     private async Task<List<Row>> CollectAsync(
-        IQueryOperator op, ExecutionContext? context = null)
+        QueryOperator op, ExecutionContext? context = null)
     {
         context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);

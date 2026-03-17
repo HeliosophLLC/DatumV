@@ -15,7 +15,7 @@ namespace DatumIngest.Tests;
 /// operator delegates scanning to <see cref="InMemoryTableProvider.ScanAsync"/>, so
 /// batches are pool-rented and carry an arena — matching production scan semantics.
 /// </remarks>
-public sealed class MockOperator : IQueryOperator
+public sealed class MockOperator : QueryOperator
 {
     private readonly InMemoryTableProvider _provider;
 
@@ -24,8 +24,8 @@ public sealed class MockOperator : IQueryOperator
         _provider = provider;
     }
 
-    public OperatorPlanDescription DescribeForExplain() => new("Mock");
+    protected override OperatorPlanDescription DescribeForExplainImpl() => new("Mock");
 
-    public IAsyncEnumerable<RowBatch> ExecuteAsync(DatumIngest.Execution.ExecutionContext context)
+    protected override IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(DatumIngest.Execution.ExecutionContext context)
         => _provider.ScanAsync(requiredColumns: null, filterHint: null, context.Store, context.CancellationToken);
 }

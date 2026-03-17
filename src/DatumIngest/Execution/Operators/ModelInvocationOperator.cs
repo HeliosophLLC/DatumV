@@ -35,9 +35,9 @@ namespace DatumIngest.Execution.Operators;
 /// Same pattern as <c>ProjectOperator</c>.
 /// </para>
 /// </remarks>
-public sealed class ModelInvocationOperator : IQueryOperator
+public sealed class ModelInvocationOperator : QueryOperator
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly string _modelName;
     private readonly IReadOnlyList<Expression> _inputExpressions;
     private readonly IReadOnlyList<Expression> _optionalExpressions;
@@ -68,7 +68,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
     /// expressions can reference the result.
     /// </param>
     public ModelInvocationOperator(
-        IQueryOperator source,
+        QueryOperator source,
         string modelName,
         IReadOnlyList<Expression> inputExpressions,
         IReadOnlyList<Expression> optionalExpressions,
@@ -82,7 +82,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
     }
 
     /// <summary>The upstream source operator.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The unqualified model name resolved against <see cref="ExecutionContext.Models"/>.</summary>
     public string ModelName => _modelName;
@@ -97,7 +97,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
     public string OutputColumnName => _outputColumnName;
 
     /// <inheritdoc/>
-    public IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
+    public override QueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
     {
         Expression[] rewrittenInputs = new Expression[_inputExpressions.Count];
         for (int i = 0; i < _inputExpressions.Count; i++)
@@ -120,7 +120,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new()
         {
@@ -141,7 +141,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
 

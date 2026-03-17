@@ -74,7 +74,7 @@ public sealed class SkipOperatorTests : ServiceTestBase
         Assert.Empty(result);
     }
 
-    private async Task<List<Row>> CollectAsync(IQueryOperator op)
+    private async Task<List<Row>> CollectAsync(QueryOperator op)
     {
         ExecutionContext context = CreateExecutionContext();
         return await op.CollectRowsAsync(context);

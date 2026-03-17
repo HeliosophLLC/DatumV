@@ -97,8 +97,8 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// <param name="context">Execution context.</param>
     /// <returns>Combined rows from the join.</returns>
     internal async IAsyncEnumerable<RowBatch> ExecuteAsync(
-        IQueryOperator probeOperator,
-        IQueryOperator buildOperator,
+        QueryOperator probeOperator,
+        QueryOperator buildOperator,
         ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;

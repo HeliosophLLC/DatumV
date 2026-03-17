@@ -52,8 +52,8 @@ public static class ModelInvocationHoister
     /// expression (e.g. the LET-from-WHERE lifter) without rewriting an
     /// entire operator tree. Pure-scalar expressions return unchanged.
     /// </summary>
-    public static (IQueryOperator NewSource, Expression Rewritten) HoistModelCallsFromExpression(
-        IQueryOperator source,
+    public static (QueryOperator NewSource, Expression Rewritten) HoistModelCallsFromExpression(
+        QueryOperator source,
         Expression expression,
         ModelCatalog catalog)
     {
@@ -65,7 +65,7 @@ public static class ModelInvocationHoister
             return (source, expression);
         }
 
-        IQueryOperator augmented = BuildMioStack(source, collector, catalog);
+        QueryOperator augmented = BuildMioStack(source, collector, catalog);
         Expression rewritten = RewriteExpression(expression, collector.HoistedColumns);
         return (augmented, rewritten);
     }
@@ -77,7 +77,7 @@ public static class ModelInvocationHoister
     /// Returns the root of the rewritten tree (which may differ from
     /// <paramref name="op"/> when hoisting inserted new operators above it).
     /// </summary>
-    public static IQueryOperator Hoist(IQueryOperator op, ModelCatalog? catalog)
+    public static QueryOperator Hoist(QueryOperator op, ModelCatalog? catalog)
     {
         // Catalog is required for plan-time validation (input arity, output kind).
         // When no catalog is configured, plans containing models.* calls would
@@ -116,15 +116,15 @@ public static class ModelInvocationHoister
     /// <see cref="ColumnReference"/>. Fingerprints appearing in only one
     /// operator are left untouched for stage-2 to handle.
     /// </summary>
-    private static IQueryOperator HoistCrossClauseFirst(IQueryOperator op, ModelCatalog catalog)
+    private static QueryOperator HoistCrossClauseFirst(QueryOperator op, ModelCatalog catalog)
     {
         if (IsCrossClauseChainable(op))
         {
             // Collect the linear chain top-to-bottom. The first element is
             // the topmost operator (closest to the root); the last element's
             // Source is the chain boundary we recurse into separately.
-            List<IQueryOperator> chain = new();
-            IQueryOperator cursor = op;
+            List<QueryOperator> chain = new();
+            QueryOperator cursor = op;
             while (IsCrossClauseChainable(cursor))
             {
                 chain.Add(cursor);
@@ -132,7 +132,7 @@ public static class ModelInvocationHoister
             }
 
             // `cursor` is the chain boundary — recurse into it independently.
-            IQueryOperator newSource = HoistCrossClauseFirst(cursor, catalog);
+            QueryOperator newSource = HoistCrossClauseFirst(cursor, catalog);
 
             return ProcessChainCrossClause(chain, newSource, catalog);
         }
@@ -140,10 +140,10 @@ public static class ModelInvocationHoister
         return RewriteChildren(op, child => HoistCrossClauseFirst(child, catalog));
     }
 
-    private static bool IsCrossClauseChainable(IQueryOperator op) =>
+    private static bool IsCrossClauseChainable(QueryOperator op) =>
         op is ProjectOperator or FilterOperator or OrderByOperator;
 
-    private static IQueryOperator GetChainSource(IQueryOperator op) => op switch
+    private static QueryOperator GetChainSource(QueryOperator op) => op switch
     {
         ProjectOperator p => p.Source,
         FilterOperator f => f.Source,
@@ -159,8 +159,8 @@ public static class ModelInvocationHoister
     /// upstream of the deepest referencing operator. Otherwise, return the
     /// chain rebuilt with the new source unchanged.
     /// </summary>
-    private static IQueryOperator ProcessChainCrossClause(
-        List<IQueryOperator> chain, IQueryOperator source, ModelCatalog catalog)
+    private static QueryOperator ProcessChainCrossClause(
+        List<QueryOperator> chain, QueryOperator source, ModelCatalog catalog)
     {
         if (chain.Count == 0) return source;
         if (chain.Count == 1) return RebuildChainOperator(chain[0], source, EmptyRewriteMap);
@@ -205,7 +205,7 @@ public static class ModelInvocationHoister
         {
             // No cross-clause work needed. Rebuild the chain unchanged with the
             // recursed source.
-            IQueryOperator augmented = source;
+            QueryOperator augmented = source;
             for (int i = chain.Count - 1; i >= 0; i--)
             {
                 augmented = RebuildChainOperator(chain[i], augmented, EmptyRewriteMap);
@@ -266,7 +266,7 @@ public static class ModelInvocationHoister
         // clause hoists) ends up closer to the source than the outer call's
         // MIO. Without this, the outer's argument-rewrite would reference a
         // column not yet on the row.
-        IQueryOperator aug = source;
+        QueryOperator aug = source;
         for (int i = chain.Count - 1; i >= 0; i--)
         {
             if (hoistsByIndex.TryGetValue(i, out List<string>? fps))
@@ -301,9 +301,9 @@ public static class ModelInvocationHoister
     /// source and every model-call AST node in its expressions rewritten via
     /// <paramref name="rewriteMap"/>. Used by the cross-clause pass.
     /// </summary>
-    private static IQueryOperator RebuildChainOperator(
-        IQueryOperator op,
-        IQueryOperator newSource,
+    private static QueryOperator RebuildChainOperator(
+        QueryOperator op,
+        QueryOperator newSource,
         IReadOnlyDictionary<FunctionCallExpression, string> rewriteMap)
     {
         return op switch
@@ -337,7 +337,7 @@ public static class ModelInvocationHoister
     /// operators expose different expression collections — this method is the
     /// per-operator-type dispatch.
     /// </summary>
-    private static void VisitChainOperator(IQueryOperator op, ModelHoistCollector collector)
+    private static void VisitChainOperator(QueryOperator op, ModelHoistCollector collector)
     {
         switch (op)
         {
@@ -364,8 +364,8 @@ public static class ModelInvocationHoister
     /// <paramref name="rewriteMap"/> so any nested cross-clause references
     /// resolve to their hidden columns rather than re-invoking the model.
     /// </summary>
-    private static IQueryOperator BuildSingleMio(
-        IQueryOperator source,
+    private static QueryOperator BuildSingleMio(
+        QueryOperator source,
         FunctionCallExpression canonical,
         string column,
         IReadOnlyDictionary<FunctionCallExpression, string> rewriteMap,
@@ -434,7 +434,7 @@ public static class ModelInvocationHoister
         return new ModelInvocationOperator(source, modelName, requiredArgs, optionalArgs, column);
     }
 
-    private static IQueryOperator HoistRecursive(IQueryOperator op, ModelCatalog catalog)
+    private static QueryOperator HoistRecursive(QueryOperator op, ModelCatalog catalog)
     {
         // Per-operator hoisters share the same collector + MIO-stacker primitives;
         // they differ only in which expression sites they walk and how they
@@ -443,35 +443,35 @@ public static class ModelInvocationHoister
         // dedup is handled by stage-1 (HoistCrossClauseFirst) before this runs.
         if (op is ProjectOperator project)
         {
-            IQueryOperator hoistedSource = HoistRecursive(project.Source, catalog);
+            QueryOperator hoistedSource = HoistRecursive(project.Source, catalog);
             return HoistProject(project, hoistedSource, catalog);
         }
         else if (op is FilterOperator filter)
         {
-            IQueryOperator hoistedSource = HoistRecursive(filter.Source, catalog);
+            QueryOperator hoistedSource = HoistRecursive(filter.Source, catalog);
             return HoistFilter(filter, hoistedSource, catalog);
         }
         else if (op is OrderByOperator orderBy)
         {
-            IQueryOperator hoistedSource = HoistRecursive(orderBy.Source, catalog);
+            QueryOperator hoistedSource = HoistRecursive(orderBy.Source, catalog);
             return HoistOrderBy(orderBy, hoistedSource, catalog);
         }
         else if (op is GroupByOperator group)
         {
-            IQueryOperator hoistedSource = HoistRecursive(group.Source, catalog);
+            QueryOperator hoistedSource = HoistRecursive(group.Source, catalog);
             return HoistGroupBy(group, hoistedSource, catalog);
         }
         else if (op is WindowOperator window)
         {
-            IQueryOperator hoistedSource = HoistRecursive(window.Source, catalog);
+            QueryOperator hoistedSource = HoistRecursive(window.Source, catalog);
             return HoistWindow(window, hoistedSource, catalog);
         }
 
         return RewriteChildren(op, child => HoistRecursive(child, catalog));
     }
 
-    private static IQueryOperator HoistProject(
-        ProjectOperator project, IQueryOperator hoistedSource, ModelCatalog catalog)
+    private static QueryOperator HoistProject(
+        ProjectOperator project, QueryOperator hoistedSource, ModelCatalog catalog)
     {
         ModelHoistCollector collector = new(catalog);
 
@@ -512,7 +512,7 @@ public static class ModelInvocationHoister
             return HoistProjectWithLetStaircase(project, hoistedSource, catalog, collector);
         }
 
-        IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
+        QueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
 
         // Rewrite projection columns and LET binding bodies. Hoisted model-call
         // nodes become ColumnReferences to their synthesised columns; the
@@ -548,9 +548,9 @@ public static class ModelInvocationHoister
     /// <see cref="SelectColumn"/> prepended so the projected schema still
     /// includes them.
     /// </summary>
-    private static IQueryOperator HoistProjectWithLetStaircase(
+    private static QueryOperator HoistProjectWithLetStaircase(
         ProjectOperator project,
-        IQueryOperator hoistedSource,
+        QueryOperator hoistedSource,
         ModelCatalog catalog,
         ModelHoistCollector modelCollector)
     {
@@ -613,7 +613,7 @@ public static class ModelInvocationHoister
         // Within a level, group scalar-LET targets into a single Enricher
         // (their enrichments are independent by topo guarantee) and emit one
         // MIO per model target.
-        IQueryOperator augmented = hoistedSource;
+        QueryOperator augmented = hoistedSource;
         foreach (List<string> level in levels)
         {
             List<RowEnrichment> levelEnrichments = new();
@@ -707,8 +707,8 @@ public static class ModelInvocationHoister
     /// substitutes LET-name <see cref="ColumnReference"/>s for their
     /// synthesised hidden columns. Used by the LET-staircase pass.
     /// </summary>
-    private static IQueryOperator BuildSingleMioWithLetRefs(
-        IQueryOperator source,
+    private static QueryOperator BuildSingleMioWithLetRefs(
+        QueryOperator source,
         FunctionCallExpression canonical,
         string outputColumn,
         IReadOnlyDictionary<FunctionCallExpression, string> modelRewrites,
@@ -880,8 +880,8 @@ public static class ModelInvocationHoister
     /// <c>LENGTH(models.x(name)) &gt; 5 AND models.x(name) IS NOT NULL</c>
     /// hoists once, not twice.
     /// </summary>
-    private static IQueryOperator HoistFilter(
-        FilterOperator filter, IQueryOperator hoistedSource, ModelCatalog catalog)
+    private static QueryOperator HoistFilter(
+        FilterOperator filter, QueryOperator hoistedSource, ModelCatalog catalog)
     {
         ModelHoistCollector collector = new(catalog);
         collector.Visit(filter.Predicate);
@@ -893,7 +893,7 @@ public static class ModelInvocationHoister
                 : new FilterOperator(hoistedSource, filter.Predicate);
         }
 
-        IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
+        QueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
         Expression rewrittenPredicate = RewriteExpression(filter.Predicate, collector.HoistedColumns);
         return new FilterOperator(augmented, rewrittenPredicate);
     }
@@ -905,8 +905,8 @@ public static class ModelInvocationHoister
     /// the GroupBy's source and the GroupBy itself, so partitioning,
     /// accumulation, and intra-aggregate sorting all see pre-computed columns.
     /// </summary>
-    private static IQueryOperator HoistGroupBy(
-        GroupByOperator group, IQueryOperator hoistedSource, ModelCatalog catalog)
+    private static QueryOperator HoistGroupBy(
+        GroupByOperator group, QueryOperator hoistedSource, ModelCatalog catalog)
     {
         ModelHoistCollector collector = new(catalog);
         foreach (Expression key in group.GroupByExpressions)
@@ -929,7 +929,7 @@ public static class ModelInvocationHoister
                 : new GroupByOperator(hoistedSource, group.GroupByExpressions, group.AggregateColumns, group.StreamingSorted);
         }
 
-        IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
+        QueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
         Expression[] rewrittenKeys = group.GroupByExpressions
             .Select(e => RewriteExpression(e, collector.HoistedColumns))
             .ToArray();
@@ -953,8 +953,8 @@ public static class ModelInvocationHoister
     /// keys, and ORDER BY items. The MIO stack lands between the Window's
     /// source and the Window itself.
     /// </summary>
-    private static IQueryOperator HoistWindow(
-        WindowOperator window, IQueryOperator hoistedSource, ModelCatalog catalog)
+    private static QueryOperator HoistWindow(
+        WindowOperator window, QueryOperator hoistedSource, ModelCatalog catalog)
     {
         ModelHoistCollector collector = new(catalog);
         foreach (WindowColumn wc in window.WindowColumns)
@@ -977,7 +977,7 @@ public static class ModelInvocationHoister
                 : new WindowOperator(hoistedSource, window.WindowColumns);
         }
 
-        IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
+        QueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
         WindowColumn[] rewrittenColumns = window.WindowColumns
             .Select(wc => wc with
             {
@@ -1006,8 +1006,8 @@ public static class ModelInvocationHoister
     /// that a downstream LIMIT will discard — sort fundamentally needs to
     /// inspect every candidate to find the top-N.
     /// </summary>
-    private static IQueryOperator HoistOrderBy(
-        OrderByOperator orderBy, IQueryOperator hoistedSource, ModelCatalog catalog)
+    private static QueryOperator HoistOrderBy(
+        OrderByOperator orderBy, QueryOperator hoistedSource, ModelCatalog catalog)
     {
         ModelHoistCollector collector = new(catalog);
         foreach (OrderByItem item in orderBy.OrderByItems)
@@ -1022,7 +1022,7 @@ public static class ModelInvocationHoister
                 : new OrderByOperator(hoistedSource, orderBy.OrderByItems, orderBy.TopNRows);
         }
 
-        IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
+        QueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
         OrderByItem[] rewrittenItems = new OrderByItem[orderBy.OrderByItems.Count];
         for (int i = 0; i < orderBy.OrderByItems.Count; i++)
         {
@@ -1130,10 +1130,10 @@ public static class ModelInvocationHoister
     /// inner's output column, available on the row by the time the parent
     /// operator runs.
     /// </summary>
-    private static IQueryOperator BuildMioStack(
-        IQueryOperator source, ModelHoistCollector collector, ModelCatalog catalog)
+    private static QueryOperator BuildMioStack(
+        QueryOperator source, ModelHoistCollector collector, ModelCatalog catalog)
     {
-        IQueryOperator augmented = source;
+        QueryOperator augmented = source;
         foreach (FunctionCallExpression fn in collector.HoistedOrder)
         {
             string modelName = StripNamespace(fn.FunctionName);
@@ -1278,12 +1278,12 @@ public static class ModelInvocationHoister
     /// <summary>
     /// Generic operator rewrite: replace each child operator via
     /// <paramref name="childRewriter"/> and reconstruct the parent. Falls back
-    /// to <see cref="IQueryOperator.RewriteExpressions"/> when the operator
+    /// to <see cref="QueryOperator.RewriteExpressions"/> when the operator
     /// doesn't expose a child set we recognise — that path is identity-on-
     /// expressions and just hands the rewriter a no-op.
     /// </summary>
-    internal static IQueryOperator RewriteChildren(
-        IQueryOperator op, Func<IQueryOperator, IQueryOperator> childRewriter)
+    internal static QueryOperator RewriteChildren(
+        QueryOperator op, Func<QueryOperator, QueryOperator> childRewriter)
     {
         // For Phase A we recognise the small set of operators that wrap a single
         // source. The full set lives in different operator subclasses; we extend
@@ -1305,17 +1305,17 @@ public static class ModelInvocationHoister
         };
     }
 
-    private static IQueryOperator RewriteOrderBy(OrderByOperator orderBy, Func<IQueryOperator, IQueryOperator> childRewriter)
+    private static QueryOperator RewriteOrderBy(OrderByOperator orderBy, Func<QueryOperator, QueryOperator> childRewriter)
     {
-        IQueryOperator newSource = childRewriter(orderBy.Source);
+        QueryOperator newSource = childRewriter(orderBy.Source);
         return ReferenceEquals(newSource, orderBy.Source)
             ? orderBy
             : new OrderByOperator(newSource, orderBy.OrderByItems, orderBy.TopNRows);
     }
 
-    private static IQueryOperator RewriteLimit(LimitOperator limit, Func<IQueryOperator, IQueryOperator> childRewriter)
+    private static QueryOperator RewriteLimit(LimitOperator limit, Func<QueryOperator, QueryOperator> childRewriter)
     {
-        IQueryOperator newSource = childRewriter(limit.Source);
+        QueryOperator newSource = childRewriter(limit.Source);
         return ReferenceEquals(newSource, limit.Source)
             ? limit
             : new LimitOperator(newSource, limit.LimitExpression, limit.OffsetExpression);

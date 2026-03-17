@@ -22,24 +22,24 @@ namespace DatumIngest.Execution.Operators;
 /// in-memory and spilled-and-not-yet-emitted.
 /// </para>
 /// </summary>
-internal sealed class DistinctOperator : IQueryOperator, IDisposable
+internal sealed class DistinctOperator : QueryOperator, IDisposable
 {
     /// <summary>Number of spill partitions used when the memory budget is exceeded.</summary>
     private const int SpillPartitionCount = 64;
 
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
 
     /// <summary>
     /// Creates a new distinct operator over the given source.
     /// </summary>
     /// <param name="source">The upstream operator whose output rows are deduplicated.</param>
-    public DistinctOperator(IQueryOperator source)
+    public DistinctOperator(QueryOperator source)
     {
         _source = source;
     }
 
     /// <summary>The upstream operator.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>
     /// Set to <see langword="true"/> the first time the in-memory set crosses the
@@ -68,7 +68,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
     internal long SpilledRowCount { get; private set; }
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         return new OperatorPlanDescription("Distinct")
         {
@@ -78,7 +78,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         // DISTINCT must scan enough input rows to find N unique values — it cannot
         // predict how many input rows are needed. Strip RowLimit to prevent child

@@ -6,7 +6,7 @@ using DatumIngest.Pooling;
 namespace DatumIngest.Execution.Operators;
 
 /// <summary>
-/// Wraps an inner <see cref="IQueryOperator"/> and filters its output stream
+/// Wraps an inner <see cref="QueryOperator"/> and filters its output stream
 /// to return an approximate percentage of rows. Supports two sampling strategies:
 /// <list type="bullet">
 ///   <item><see cref="TablesampleMethod.Bernoulli"/> — row-level: each row is
@@ -18,9 +18,9 @@ namespace DatumIngest.Execution.Operators;
 /// When a seed is provided via <c>REPEATABLE(seed)</c>, sampling is deterministic
 /// across identical data sets.
 /// </summary>
-public sealed class SampleScanOperator : IQueryOperator
+public sealed class SampleScanOperator : QueryOperator
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly TablesampleMethod _method;
     private readonly double _percentage;
     private readonly int? _seed;
@@ -32,7 +32,7 @@ public sealed class SampleScanOperator : IQueryOperator
     /// <param name="method">The sampling strategy.</param>
     /// <param name="percentage">The target sampling percentage (0–100).</param>
     /// <param name="seed">Optional seed for deterministic sampling, or <c>null</c> for non-deterministic.</param>
-    public SampleScanOperator(IQueryOperator source, TablesampleMethod method, double percentage, int? seed)
+    public SampleScanOperator(QueryOperator source, TablesampleMethod method, double percentage, int? seed)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(percentage, 0.0);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(percentage, 100.0);
@@ -44,7 +44,7 @@ public sealed class SampleScanOperator : IQueryOperator
     }
 
     /// <summary>The inner operator being sampled.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The sampling strategy.</summary>
     public TablesampleMethod Method => _method;
@@ -56,7 +56,7 @@ public sealed class SampleScanOperator : IQueryOperator
     public int? Seed => _seed;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new()
         {
@@ -77,8 +77,7 @@ public sealed class SampleScanOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(
-        ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         // 0% → emit nothing; 100% → pass through unfiltered
         if (_percentage <= 0.0)

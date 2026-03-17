@@ -38,7 +38,7 @@ internal static class SubqueryRewriter
     /// </param>
     internal sealed record DecorrelatedScalarJoin(
         string SyntheticColumnName,
-        IQueryOperator InnerPlan,
+        QueryOperator InnerPlan,
         Expression OnCondition);
 
     /// <summary>
@@ -413,7 +413,7 @@ internal static class SubqueryRewriter
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
-        IQueryOperator innerPlan = planner.Plan(innerQuery);
+        QueryOperator innerPlan = planner.Plan(innerQuery);
 
         Row? firstRow = null;
         bool hasMultipleRows = false;
@@ -740,7 +740,7 @@ internal static class SubqueryRewriter
             Where: nonCorrelatedWhere,
             GroupBy: new GroupByClause(groupByExpressions));
 
-        IQueryOperator innerPlan = planner.Plan(derivedQuery);
+        QueryOperator innerPlan = planner.Plan(derivedQuery);
 
         // The synthetic column name matches the aggregate output alias so
         // the ColumnReference resolves via unqualified fallback on the joined row.

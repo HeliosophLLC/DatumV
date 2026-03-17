@@ -23,7 +23,7 @@ internal static class SemiJoinRewriter
     /// </param>
     internal sealed record SemiJoinDescriptor(
         JoinType JoinType,
-        IQueryOperator InnerPlan,
+        QueryOperator InnerPlan,
         Expression OnCondition,
         bool NullSensitiveAntiSemi);
 
@@ -157,7 +157,7 @@ internal static class SemiJoinRewriter
                 GroupBy: innerQuery.GroupBy,
                 Having: innerQuery.Having);
 
-            IQueryOperator innerPlan = planner.Plan(innerPlanStatement);
+            QueryOperator innerPlan = planner.Plan(innerPlanStatement);
 
             // Build ON condition: key equality + correlation predicates, normalized for JoinKeyExtractor.
             Expression keyEquality = new BinaryExpression(
@@ -238,7 +238,7 @@ internal static class SemiJoinRewriter
                 GroupBy: innerQuery.GroupBy,
                 Having: innerQuery.Having);
 
-            IQueryOperator innerPlan = planner.Plan(innerPlanStatement);
+            QueryOperator innerPlan = planner.Plan(innerPlanStatement);
 
             // ON condition = correlation predicates, normalized for JoinKeyExtractor.
             Expression onCondition = NormalizeJoinKeyOrder(separated.Correlated, outerAliases);
@@ -306,7 +306,7 @@ internal static class SemiJoinRewriter
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
-        IQueryOperator innerPlan = planner.Plan(innerQuery);
+        QueryOperator innerPlan = planner.Plan(innerQuery);
         List<Expression> values = new();
 
         await foreach (RowBatch inputBatch in innerPlan.ExecuteAsync(context).ConfigureAwait(false))
@@ -332,7 +332,7 @@ internal static class SemiJoinRewriter
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
-        IQueryOperator innerPlan = planner.Plan(innerQuery);
+        QueryOperator innerPlan = planner.Plan(innerQuery);
 
         await foreach (RowBatch inputBatch in innerPlan.ExecuteAsync(context).ConfigureAwait(false))
         {

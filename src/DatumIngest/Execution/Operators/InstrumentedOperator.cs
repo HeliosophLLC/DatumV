@@ -4,12 +4,12 @@ using DatumIngest.Model;
 namespace DatumIngest.Execution.Operators;
 
 /// <summary>
-/// A decorator that wraps any <see cref="IQueryOperator"/> and collects
+/// A decorator that wraps any <see cref="QueryOperator"/> and collects
 /// runtime metrics: row counts and elapsed time. Used by EXPLAIN ANALYZE.
 /// </summary>
-public sealed class InstrumentedOperator : IQueryOperator
+public sealed class InstrumentedOperator : QueryOperator
 {
-    private readonly IQueryOperator _inner;
+    private readonly QueryOperator _inner;
     private readonly Stopwatch _stopwatch = new();
     private long _rowsProduced;
 
@@ -17,13 +17,13 @@ public sealed class InstrumentedOperator : IQueryOperator
     /// Creates an instrumented wrapper around the given operator.
     /// </summary>
     /// <param name="inner">The operator to instrument.</param>
-    public InstrumentedOperator(IQueryOperator inner)
+    public InstrumentedOperator(QueryOperator inner)
     {
         _inner = inner;
     }
 
     /// <summary>The wrapped operator.</summary>
-    public IQueryOperator Inner => _inner;
+    public QueryOperator Inner => _inner;
 
     /// <summary>Number of rows this operator has produced.</summary>
     public long RowsProduced => _rowsProduced;
@@ -60,13 +60,13 @@ public sealed class InstrumentedOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         return _inner.DescribeForExplain();
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         _stopwatch.Start();
 
@@ -87,16 +87,16 @@ public sealed class InstrumentedOperator : IQueryOperator
     /// </summary>
     /// <param name="root">The root operator to instrument.</param>
     /// <returns>An instrumented operator wrapping the entire tree.</returns>
-    public static InstrumentedOperator InstrumentTree(IQueryOperator root)
+    public static InstrumentedOperator InstrumentTree(QueryOperator root)
     {
-        IQueryOperator instrumented = InstrumentRecursive(root);
+        QueryOperator instrumented = InstrumentRecursive(root);
         return (InstrumentedOperator)instrumented;
     }
 
-    private static IQueryOperator InstrumentRecursive(IQueryOperator op)
+    private static QueryOperator InstrumentRecursive(QueryOperator op)
     {
         // Instrument children first, then wrap the operator itself.
-        IQueryOperator wrapped = op switch
+        QueryOperator wrapped = op switch
         {
             Operators.FilterOperator filter => new Operators.FilterOperator(
                 InstrumentRecursive(filter.Source), filter.Predicate),
@@ -183,7 +183,7 @@ public sealed class InstrumentedOperator : IQueryOperator
         }
     }
 
-    private static IEnumerable<IQueryOperator> GetDirectChildren(IQueryOperator op)
+    private static IEnumerable<QueryOperator> GetDirectChildren(QueryOperator op)
     {
         return op.DescribeForExplain().Children.Select(child => child.Child);
     }

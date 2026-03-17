@@ -20,7 +20,7 @@ public sealed class QualifyTests : ServiceTestBase
     private static readonly string[] CategoryItemScoreColumns = ["category", "item", "score"];
     private static readonly string[] ValColumns = ["val"];
 
-    private async Task<List<Row>> CollectAsync(IQueryOperator operatorNode, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(QueryOperator operatorNode, ExecutionContext? context = null)
     {
         context ??= CreateExecutionContext();
         return await operatorNode.CollectRowsAsync(context);

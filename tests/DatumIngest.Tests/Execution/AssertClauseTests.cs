@@ -384,7 +384,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             "SELECT DEFINE { let x = reordered } order_id, product_id, reordered FROM orders ASSERT x = FALSE MESSAGE 'test' ON FAIL WARN");
         QueryPlanner planner = new(catalog, DefaultFunctions);
         ExecutionContext context = CreateExecutionContext(catalog: catalog, diagnostics: diagnostics);
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
+        QueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         List<Row> result = await plan.CollectRowsAsync(context);
 

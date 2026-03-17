@@ -115,8 +115,8 @@ internal sealed class GraceHashJoinExecutor
     /// <param name="context">The execution context.</param>
     /// <returns>An async enumerable of joined rows.</returns>
     internal async IAsyncEnumerable<RowBatch> ExecuteAsync(
-        IQueryOperator leftOperator,
-        IQueryOperator rightOperator,
+        QueryOperator leftOperator,
+        QueryOperator rightOperator,
         ExecutionContext context)
     {
         Pool pool = context.Pool;
@@ -125,8 +125,8 @@ internal sealed class GraceHashJoinExecutor
         bool useSingleKey = keyPairs.Count == 1;
 
         // Physical side assignment. When flipped, left=build, right=probe.
-        IQueryOperator buildOperator = _flipped ? leftOperator : rightOperator;
-        IQueryOperator probeOperator = _flipped ? rightOperator : leftOperator;
+        QueryOperator buildOperator = _flipped ? leftOperator : rightOperator;
+        QueryOperator probeOperator = _flipped ? rightOperator : leftOperator;
         bool buildKeyIsRight = !_flipped;
 
         int partitionCount = ComputeInitialPartitionCount();

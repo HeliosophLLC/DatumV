@@ -211,7 +211,7 @@ public sealed class FlippedJoinTests : ServiceTestBase
         Assert.Equal(95f, rows[0]["r.score"].AsFloat32());
     }
 
-    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(QueryOperator op, ExecutionContext? context = null)
     {
         context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);

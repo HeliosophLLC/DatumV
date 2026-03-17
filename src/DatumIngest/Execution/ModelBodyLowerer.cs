@@ -58,20 +58,20 @@ public static class ModelBodyLowerer
     /// Registry of SQL-defined models. <see langword="null"/> short-
     /// circuits to identity (no lowering attempted).
     /// </param>
-    public static IQueryOperator LowerSqlDefinedBodies(
-        IQueryOperator op,
+    public static QueryOperator LowerSqlDefinedBodies(
+        QueryOperator op,
         ModelRegistry? declaredModels)
     {
         if (declaredModels is null) return op;
         return LowerRecursive(op, declaredModels);
     }
 
-    private static IQueryOperator LowerRecursive(IQueryOperator op, ModelRegistry declaredModels)
+    private static QueryOperator LowerRecursive(QueryOperator op, ModelRegistry declaredModels)
     {
         // Pre-order: descend into children first, then try to lower this
         // node. That way nested MIOs (a model whose argument is itself a
         // model call) lower bottom-up correctly.
-        IQueryOperator rewritten = ModelInvocationHoister.RewriteChildren(
+        QueryOperator rewritten = ModelInvocationHoister.RewriteChildren(
             op, child => LowerRecursive(child, declaredModels));
 
         if (rewritten is not ModelInvocationOperator mio) return rewritten;
@@ -94,7 +94,7 @@ public static class ModelBodyLowerer
                 : (IReadOnlyList<Expression>)mio.InputExpressions.Concat(mio.OptionalExpressions).ToList();
         if (allArgs.Count != descriptor.Parameters.Count) return rewritten;
 
-        IQueryOperator? lowered = TryLower(descriptor, mio.Source, allArgs, mio.OutputColumnName);
+        QueryOperator? lowered = TryLower(descriptor, mio.Source, allArgs, mio.OutputColumnName);
         return lowered ?? rewritten;
     }
 
@@ -331,9 +331,9 @@ public static class ModelBodyLowerer
     /// hoister's outer rewriter expects to <c>ColumnReference</c> to in
     /// the caller's expression.
     /// </param>
-    public static IQueryOperator? TryLower(
+    public static QueryOperator? TryLower(
         ModelDescriptor descriptor,
-        IQueryOperator source,
+        QueryOperator source,
         IReadOnlyList<Expression> argExpressions,
         string outputColumnName)
     {
@@ -352,7 +352,7 @@ public static class ModelBodyLowerer
         // Body-variable name → the synthesised column name carrying its value.
         Dictionary<string, string> declaredVars = new(StringComparer.OrdinalIgnoreCase);
 
-        IQueryOperator current = source;
+        QueryOperator current = source;
         int stmtIdx = 0;
 
         foreach (Statement stmt in descriptor.StatementBody)
@@ -397,8 +397,8 @@ public static class ModelBodyLowerer
     /// <c>SELECT *</c> so the chain doesn't lose them to the
     /// hidden-name filter.
     /// </summary>
-    private static IQueryOperator AppendStatement(
-        IQueryOperator source,
+    private static QueryOperator AppendStatement(
+        QueryOperator source,
         ModelDescriptor descriptor,
         Expression expr,
         string outputColumn,
@@ -411,7 +411,7 @@ public static class ModelBodyLowerer
             if (fc.Arguments.Count == 1)
             {
                 string inputCol = $"{outputColumn}__in";
-                IQueryOperator projected = AddDerivedColumn(source, inputCol, fc.Arguments[0], priorSynthColumns);
+                QueryOperator projected = AddDerivedColumn(source, inputCol, fc.Arguments[0], priorSynthColumns);
                 return new InferOperator(
                     projected,
                     descriptor,
@@ -431,9 +431,9 @@ public static class ModelBodyLowerer
                 // upstream batch. The shape Project also passes the input
                 // column through (it's part of priorSynthColumns at that
                 // point) so InferOperator sees both on its source row.
-                IQueryOperator afterInput = AddDerivedColumn(source, inputCol, fc.Arguments[0], priorSynthColumns);
+                QueryOperator afterInput = AddDerivedColumn(source, inputCol, fc.Arguments[0], priorSynthColumns);
                 IReadOnlyList<string> priorPlusInput = AppendOne(priorSynthColumns, inputCol);
-                IQueryOperator afterShape = AddDerivedColumn(afterInput, shapeCol, fc.Arguments[1], priorPlusInput);
+                QueryOperator afterShape = AddDerivedColumn(afterInput, shapeCol, fc.Arguments[1], priorPlusInput);
                 return new InferOperator(
                     afterShape,
                     descriptor,
@@ -482,8 +482,8 @@ public static class ModelBodyLowerer
     /// <see cref="SelectColumn"/> alongside <c>SelectAllColumns</c>.
     /// </para>
     /// </remarks>
-    private static IQueryOperator AddDerivedColumn(
-        IQueryOperator source,
+    private static QueryOperator AddDerivedColumn(
+        QueryOperator source,
         string colName,
         Expression expr,
         IReadOnlyList<string> priorSynthColumns)

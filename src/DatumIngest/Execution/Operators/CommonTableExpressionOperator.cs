@@ -12,14 +12,14 @@ namespace DatumIngest.Execution.Operators;
 /// <item>
 /// <term>Inlined</term>
 /// <description>
-/// Each call to <see cref="ExecuteAsync"/> re-executes the inner operator tree,
+/// Each call to <see cref="QueryOperator.ExecuteAsync(ExecutionContext)"/> re-executes the inner operator tree,
 /// behaving like a subquery at each reference site.
 /// </description>
 /// </item>
 /// <item>
 /// <term>Materialized</term>
 /// <description>
-/// The first call to <see cref="ExecuteAsync"/> fully consumes the inner operator
+/// The first call to <see cref="QueryOperator.ExecuteAsync(ExecutionContext)"/> fully consumes the inner operator
 /// and buffers the result set into pool-owned <see cref="RowBatch"/> objects.
 /// Subsequent calls replay by copying cached values into fresh output batches.
 /// When a memory budget is configured and the buffer exceeds it, rows are spilled
@@ -28,9 +28,9 @@ namespace DatumIngest.Execution.Operators;
 /// </item>
 /// </list>
 /// </summary>
-internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposable
+internal sealed class CommonTableExpressionOperator : QueryOperator, IDisposable
 {
-    private readonly IQueryOperator _innerOperator;
+    private readonly QueryOperator _innerOperator;
     private readonly string _name;
     private readonly bool _isMaterialized;
     private readonly IReadOnlyList<string>? _explicitColumnNames;
@@ -56,7 +56,7 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     /// columns positionally (e.g. <c>WITH cte(a, b) AS (...)</c>).
     /// </param>
     public CommonTableExpressionOperator(
-        IQueryOperator innerOperator,
+        QueryOperator innerOperator,
         string name,
         bool isMaterialized,
         IReadOnlyList<string>? explicitColumnNames = null)
@@ -83,10 +83,10 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     private bool HasMaterialized => _materializedBatches is not null || _spiller is not null;
 
     /// <summary>The inner operator tree.</summary>
-    public IQueryOperator InnerOperator => _innerOperator;
+    public QueryOperator InnerOperator => _innerOperator;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new()
         {
@@ -102,7 +102,7 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
 

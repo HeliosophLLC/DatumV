@@ -410,7 +410,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             ") SELECT n FROM nums")).Statement;
 
         QueryPlanner planner = new(catalog, DefaultFunctions);
-        IQueryOperator plan = planner.Plan(statement);
+        QueryOperator plan = planner.Plan(statement);
 
         RecursionDepthExceededException exception = await Assert.ThrowsAsync<RecursionDepthExceededException>(async () =>
         {
@@ -452,7 +452,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             ") SELECT n FROM nums")).Statement;
 
         QueryPlanner planner = new(catalog, DefaultFunctions);
-        IQueryOperator plan = planner.Plan(statement);
+        QueryOperator plan = planner.Plan(statement);
 
         List<Row> results = await plan.CollectRowsAsync(context);
 
@@ -506,7 +506,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             ") SELECT n FROM nums")).Statement;
 
         QueryPlanner planner = new(catalog, DefaultFunctions);
-        IQueryOperator plan = planner.Plan(statement);
+        QueryOperator plan = planner.Plan(statement);
 
         List<Row> results = await plan.CollectRowsAsync(context);
 
@@ -550,7 +550,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             ") SELECT n FROM nums")).Statement;
 
         QueryPlanner planner = new(catalog, DefaultFunctions);
-        IQueryOperator plan = planner.Plan(statement);
+        QueryOperator plan = planner.Plan(statement);
 
         int batchesReceived = 0;
         await foreach (RowBatch batch in plan.ExecuteAsync(context))
@@ -733,7 +733,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
         SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
             "WITH cte AS (SELECT x FROM t) SELECT * FROM cte")).Statement;
 
-        IQueryOperator plan = planner.Plan(statement);
+        QueryOperator plan = planner.Plan(statement);
 
         // Plan should contain a CTE operator wrapping the inner scan.
         // The plan for SELECT * FROM cte produces an AliasOperator(CTE(...))
@@ -994,7 +994,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
         return new Row(new ColumnLookup(names), values);
     }
 
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext context)
+    private static async Task<List<Row>> CollectAsync(QueryOperator op, ExecutionContext context)
     {
         return await op.CollectRowsAsync(context);
     }
@@ -1031,7 +1031,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     /// <summary>
     /// A mock operator that tracks how many times <see cref="ExecuteAsync"/> is called.
     /// </summary>
-    private sealed class CountingOperator : IQueryOperator
+    private sealed class CountingOperator : QueryOperator
     {
         private readonly Pool _pool;
         private readonly ColumnLookup _lookup;
@@ -1046,9 +1046,9 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             _rows = rows;
         }
 
-        public OperatorPlanDescription DescribeForExplain() => new("Counting Mock");
+        protected override OperatorPlanDescription DescribeForExplainImpl() => new("Counting Mock");
 
-        public IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+        protected override IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
         {
             _onExecute();
             return YieldRowsAsBatches(_pool, _lookup, _rows);
@@ -1058,7 +1058,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     /// <summary>
     /// Pool-aware mock operator that yields the supplied rows in pool-rented batches.
     /// </summary>
-    private sealed class MockOperator : IQueryOperator
+    private sealed class MockOperator : QueryOperator
     {
         private readonly Pool _pool;
         private readonly ColumnLookup _lookup;
@@ -1071,9 +1071,9 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             _rows = rows;
         }
 
-        public OperatorPlanDescription DescribeForExplain() => new("Mock");
+        protected override OperatorPlanDescription DescribeForExplainImpl() => new("Mock");
 
-        public IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+        protected override IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
             => YieldRowsAsBatches(_pool, _lookup, _rows);
     }
 }

@@ -115,7 +115,7 @@ public sealed class RequiredColumnsContractTests : ServiceTestBase, IAsyncLifeti
         QueryExpression query = SqlParser.Parse(
             "SELECT LET capital = upper(name), LET tagged = concat('hi ', capital), tagged FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = planner.Plan(query);
+        QueryOperator plan = planner.Plan(query);
 
         ExecutionContext context = CreateExecutionContext(catalog: catalog);
         List<Row> rows = await plan.CollectRowsAsync(context);
@@ -143,7 +143,7 @@ public sealed class RequiredColumnsContractTests : ServiceTestBase, IAsyncLifeti
                   "LET shouted = concat(tagged, '!') " +
                   ", shouted FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = planner.Plan(query);
+        QueryOperator plan = planner.Plan(query);
 
         ExecutionContext context = CreateExecutionContext(catalog: catalog);
         List<Row> rows = await plan.CollectRowsAsync(context);

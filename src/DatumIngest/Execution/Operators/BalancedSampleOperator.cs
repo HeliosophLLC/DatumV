@@ -10,7 +10,7 @@ namespace DatumIngest.Execution.Operators;
 /// defined by one or more column names. Single-pass streaming with bounded
 /// memory (one reservoir per distinct class).
 /// </summary>
-public sealed class BalancedSampleOperator : IQueryOperator
+public sealed class BalancedSampleOperator : QueryOperator
 {
     /// <summary>
     /// Default maximum number of distinct classes when not configured via
@@ -18,7 +18,7 @@ public sealed class BalancedSampleOperator : IQueryOperator
     /// </summary>
     internal const int DefaultMaxClasses = 10_000;
 
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly int _countPerClass;
     private readonly string[] _stratifyColumnNames;
     private readonly int? _seed;
@@ -30,7 +30,7 @@ public sealed class BalancedSampleOperator : IQueryOperator
     /// <param name="countPerClass">The target number of rows per distinct class.</param>
     /// <param name="stratifyColumnNames">Column names defining the stratification key.</param>
     /// <param name="seed">Optional seed for deterministic sampling, or <c>null</c> for non-deterministic.</param>
-    public BalancedSampleOperator(IQueryOperator source, int countPerClass, string[] stratifyColumnNames, int? seed)
+    public BalancedSampleOperator(QueryOperator source, int countPerClass, string[] stratifyColumnNames, int? seed)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(countPerClass, 1);
         ArgumentNullException.ThrowIfNull(stratifyColumnNames);
@@ -47,10 +47,10 @@ public sealed class BalancedSampleOperator : IQueryOperator
     }
 
     /// <summary>The inner operator being sampled.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new()
         {
@@ -73,7 +73,7 @@ public sealed class BalancedSampleOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         int maxClasses = context.MaxStratifyClasses ?? DefaultMaxClasses;
         Random random = _seed.HasValue ? new Random(_seed.Value) : Random.Shared;

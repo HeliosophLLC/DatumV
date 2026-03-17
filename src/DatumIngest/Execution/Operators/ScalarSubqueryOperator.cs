@@ -9,10 +9,10 @@ namespace DatumIngest.Execution.Operators;
 /// outer row via <see cref="ExecutionContext.OuterRow"/>, enabling correlated
 /// column references (e.g. <c>WHERE t2.id = t1.id</c>) to resolve.
 /// </summary>
-internal sealed class ScalarSubqueryOperator : IQueryOperator
+internal sealed class ScalarSubqueryOperator : QueryOperator
 {
-    private readonly IQueryOperator _source;
-    private readonly IQueryOperator _innerPlan;
+    private readonly QueryOperator _source;
+    private readonly QueryOperator _innerPlan;
     private readonly string _syntheticColumnName;
 
     /// <summary>
@@ -22,8 +22,8 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
     /// <param name="innerPlan">The pre-planned inner subquery operator tree.</param>
     /// <param name="syntheticColumnName">The column name to inject the scalar result as.</param>
     public ScalarSubqueryOperator(
-        IQueryOperator source,
-        IQueryOperator innerPlan,
+        QueryOperator source,
+        QueryOperator innerPlan,
         string syntheticColumnName)
     {
         _source = source;
@@ -32,16 +32,16 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
     }
 
     /// <summary>The outer operator producing rows.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The correlated inner subquery operator tree.</summary>
-    public IQueryOperator InnerPlan => _innerPlan;
+    public QueryOperator InnerPlan => _innerPlan;
 
     /// <summary>The synthetic column name for the scalar result.</summary>
     public string SyntheticColumnName => _syntheticColumnName;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         return new OperatorPlanDescription("Scalar Subquery")
         {
@@ -55,7 +55,7 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
         ColumnLookup? outputLookup = null;

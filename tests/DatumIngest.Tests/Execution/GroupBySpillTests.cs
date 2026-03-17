@@ -109,7 +109,7 @@ public sealed class GroupBySpillTests : ServiceTestBase
         return rows;
     }
 
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext context)
+    private static async Task<List<Row>> CollectAsync(QueryOperator op, ExecutionContext context)
     {
         return await op.CollectRowsAsync(context);
     }

@@ -409,7 +409,7 @@ public sealed class FoldScanTests : ServiceTestBase
         QueryExpression query = SqlParser.Parse(
             "SELECT SCAN s = s + value INIT 0 OVER (ORDER BY id) AS running_sum FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
+        QueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         ExecutionException ex = await Assert.ThrowsAnyAsync<ExecutionException>(
             () => plan.CollectRowsAsync(context));
@@ -436,7 +436,7 @@ public sealed class FoldScanTests : ServiceTestBase
         QueryExpression query = SqlParser.Parse(
             "SELECT SCAN s = s + value INIT 0 OVER (ORDER BY id) AS running_sum FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
+        QueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         List<Row> results = await plan.CollectRowsAsync(context);
 

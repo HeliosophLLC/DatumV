@@ -390,7 +390,7 @@ public sealed class MergeJoinTests : ServiceTestBase
     /// Creates a merge join with the standard l.id = r.id key pair.
     /// </summary>
     private static MergeJoinOperator CreateMergeJoin(
-        IQueryOperator left, IQueryOperator right, JoinType joinType)
+        QueryOperator left, QueryOperator right, JoinType joinType)
     {
         JoinKeyExtractionResult extraction = new(
             [(new ColumnReference("l", "id"), new ColumnReference("r", "id"))],
@@ -399,7 +399,7 @@ public sealed class MergeJoinTests : ServiceTestBase
         return new MergeJoinOperator(left, right, joinType, extraction, "id", "id");
     }
 
-    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(QueryOperator op, ExecutionContext? context = null)
     {
         context ??= CreateExecutionContext();
 

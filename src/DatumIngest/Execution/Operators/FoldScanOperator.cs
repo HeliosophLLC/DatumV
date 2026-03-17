@@ -13,9 +13,9 @@ namespace DatumIngest.Execution.Operators;
 /// This is a blocking operator: all input rows are materialized before
 /// any output is emitted, because the fold is sequential within each partition.
 /// </summary>
-public sealed class FoldScanOperator : IQueryOperator
+public sealed class FoldScanOperator : QueryOperator
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly IReadOnlyList<FoldScanColumn> _scanColumns;
 
     /// <summary>
@@ -25,7 +25,7 @@ public sealed class FoldScanOperator : IQueryOperator
     /// <param name="source">The upstream operator providing input rows.</param>
     /// <param name="scanColumns">The fold/scan columns to compute.</param>
     public FoldScanOperator(
-        IQueryOperator source,
+        QueryOperator source,
         IReadOnlyList<FoldScanColumn> scanColumns)
     {
         _source = source;
@@ -33,13 +33,13 @@ public sealed class FoldScanOperator : IQueryOperator
     }
 
     /// <summary>The upstream source operator.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The fold/scan columns being computed.</summary>
     public IReadOnlyList<FoldScanColumn> ScanColumns => _scanColumns;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         List<string> descriptions = [];
         foreach (FoldScanColumn column in _scanColumns)
@@ -75,7 +75,7 @@ public sealed class FoldScanOperator : IQueryOperator
     /// sort is on the roadmap (Tier 3 / Tier 4).
     /// </para>
     /// </remarks>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
         // Structural per-row residency: DataValue cells (~20 bytes each) +

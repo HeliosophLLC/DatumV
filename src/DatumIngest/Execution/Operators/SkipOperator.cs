@@ -12,9 +12,9 @@ namespace DatumIngest.Execution.Operators;
 /// or sources with undefined row ordering) will produce incorrect results on resume.
 /// Ensuring deterministic ordering is the user's responsibility.
 /// </remarks>
-public sealed class SkipOperator : IQueryOperator
+public sealed class SkipOperator : QueryOperator
 {
-    private readonly IQueryOperator _child;
+    private readonly QueryOperator _child;
     private readonly long _count;
 
     /// <summary>
@@ -22,14 +22,14 @@ public sealed class SkipOperator : IQueryOperator
     /// </summary>
     /// <param name="child">The child operator whose output to skip over.</param>
     /// <param name="count">The number of rows to skip.</param>
-    public SkipOperator(IQueryOperator child, long count)
+    public SkipOperator(QueryOperator child, long count)
     {
         _child = child;
         _count = count;
     }
 
     /// <inheritdoc />
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         return new OperatorPlanDescription("Skip")
         {
@@ -42,7 +42,7 @@ public sealed class SkipOperator : IQueryOperator
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         long skipped = 0;
         RowBatch? outputBatch = null;

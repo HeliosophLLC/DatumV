@@ -13,15 +13,15 @@ namespace DatumIngest.Execution.Operators;
 /// (<c>LIMIT @rowCount</c>, <c>OFFSET random(0, 1000)</c>,
 /// <c>LIMIT udf.computeLimit()</c>, etc.). The expressions are
 /// evaluated <strong>once</strong> at the start of
-/// <see cref="ExecuteAsync"/> against the operator's
+/// <see cref="QueryOperator.ExecuteAsync(ExecutionContext)"/> against the operator's
 /// <see cref="ExecutionContext"/> — no per-row evaluation cost.
 /// Constant literals (the common case) are folded by the planner
 /// when it builds the operator, so the expression here is typically
 /// a <c>LiteralExpression</c> wrapping the int.
 /// </remarks>
-public sealed class LimitOperator : IQueryOperator
+public sealed class LimitOperator : QueryOperator
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly Expression _limitExpression;
     private readonly Expression? _offsetExpression;
 
@@ -32,7 +32,7 @@ public sealed class LimitOperator : IQueryOperator
     /// <see cref="LiteralExpression"/>s for the canonical Expression-based
     /// shape.
     /// </summary>
-    public LimitOperator(IQueryOperator source, int limit, int offset = 0)
+    public LimitOperator(QueryOperator source, int limit, int offset = 0)
         : this(
             source,
             new LiteralExpression(limit),
@@ -47,7 +47,7 @@ public sealed class LimitOperator : IQueryOperator
     /// <param name="limitExpression">Expression yielding the maximum row count.</param>
     /// <param name="offsetExpression">Optional expression yielding the row count to skip; <see langword="null"/> means no offset.</param>
     public LimitOperator(
-        IQueryOperator source,
+        QueryOperator source,
         Expression limitExpression,
         Expression? offsetExpression = null)
     {
@@ -57,7 +57,7 @@ public sealed class LimitOperator : IQueryOperator
     }
 
     /// <summary>The child operator producing rows.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The unevaluated limit expression. <see cref="LiteralExpression"/> for plan-time folded constants.</summary>
     public Expression LimitExpression => _limitExpression;
@@ -66,14 +66,14 @@ public sealed class LimitOperator : IQueryOperator
     public Expression? OffsetExpression => _offsetExpression;
 
     /// <inheritdoc/>
-    public IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter) =>
+    public override QueryOperator RewriteExpressions(Func<Expression, Expression> rewriter) =>
         new LimitOperator(
             _source.RewriteExpressions(rewriter),
             rewriter(_limitExpression),
             _offsetExpression is null ? null : rewriter(_offsetExpression));
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new()
         {
@@ -123,7 +123,7 @@ public sealed class LimitOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         // Evaluate LIMIT / OFFSET expressions once at the start. Plain
         // literal expressions short-circuit without touching the evaluator;

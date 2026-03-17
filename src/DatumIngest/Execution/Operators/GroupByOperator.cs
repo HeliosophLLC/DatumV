@@ -29,9 +29,9 @@ namespace DatumIngest.Execution.Operators;
 /// entire input.
 /// </para>
 /// </summary>
-public sealed class GroupByOperator : IQueryOperator, IDisposable
+public sealed class GroupByOperator : QueryOperator, IDisposable
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly IReadOnlyList<Expression> _groupByExpressions;
     private readonly IReadOnlyList<AggregateColumn> _aggregateColumns;
     private readonly bool _streamingSorted;
@@ -53,7 +53,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// short-circuit. Defaults to <c>false</c> (hash aggregation).
     /// </param>
     public GroupByOperator(
-        IQueryOperator source,
+        QueryOperator source,
         IReadOnlyList<Expression> groupByExpressions,
         IReadOnlyList<AggregateColumn> aggregateColumns,
         bool streamingSorted = false)
@@ -65,7 +65,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     }
 
     /// <summary>The child operator producing rows.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The GROUP BY key expressions.</summary>
     public IReadOnlyList<Expression> GroupByExpressions => _groupByExpressions;
@@ -80,7 +80,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     public bool StreamingSorted => _streamingSorted;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new();
 
@@ -109,7 +109,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     }
 
     /// <inheritdoc/>
-    public IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         // GroupBy is a blocking operator — it must consume ALL input before
         // emitting any output. A downstream RowLimit cannot short-circuit the
@@ -228,7 +228,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// </summary>
     private long? GetEstimatedSourceRowCount()
     {
-        IQueryOperator current = _source;
+        QueryOperator current = _source;
         while (true)
         {
             switch (current)

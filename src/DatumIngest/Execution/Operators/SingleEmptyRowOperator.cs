@@ -6,10 +6,10 @@ namespace DatumIngest.Execution.Operators;
 /// Produces a single row with no columns. Used as the source for SELECT statements
 /// without a FROM clause (e.g., recursive CTE anchors like <c>SELECT 1 AS n</c>).
 /// </summary>
-internal sealed class SingleEmptyRowOperator : IQueryOperator
+internal sealed class SingleEmptyRowOperator : QueryOperator
 {
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         return new OperatorPlanDescription("Single Empty Row")
         {
@@ -18,7 +18,7 @@ internal sealed class SingleEmptyRowOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         RowBatch outputBatch = context.RentRowBatch(ColumnLookup.Empty, 1);
 

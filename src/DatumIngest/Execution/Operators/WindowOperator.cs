@@ -25,9 +25,9 @@ namespace DatumIngest.Execution.Operators;
 /// partitioning/sorting pass to avoid redundant work.
 /// </para>
 /// </remarks>
-public sealed class WindowOperator : IQueryOperator
+public sealed class WindowOperator : QueryOperator
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly IReadOnlyList<WindowColumn> _windowColumns;
 
     /// <summary>
@@ -37,7 +37,7 @@ public sealed class WindowOperator : IQueryOperator
     /// <param name="source">The upstream operator providing input rows.</param>
     /// <param name="windowColumns">The window function columns to compute.</param>
     public WindowOperator(
-        IQueryOperator source,
+        QueryOperator source,
         IReadOnlyList<WindowColumn> windowColumns)
     {
         _source = source;
@@ -45,13 +45,13 @@ public sealed class WindowOperator : IQueryOperator
     }
 
     /// <summary>The upstream source operator.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The window function columns being computed.</summary>
     public IReadOnlyList<WindowColumn> WindowColumns => _windowColumns;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         List<string> functionDescriptions = [];
         foreach (WindowColumn column in _windowColumns)
@@ -70,7 +70,7 @@ public sealed class WindowOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
         ExpressionEvaluator evaluator = new(context);

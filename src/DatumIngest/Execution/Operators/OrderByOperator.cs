@@ -28,9 +28,9 @@ namespace DatumIngest.Execution.Operators;
 /// as the row's stabilised payload, so they share the row's lifetime.
 /// </para>
 /// </summary>
-public sealed class OrderByOperator : IQueryOperator, IDisposable
+public sealed class OrderByOperator : QueryOperator, IDisposable
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly IReadOnlyList<OrderByItem> _orderByItems;
     private readonly int? _topNRows;
 
@@ -44,7 +44,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     /// Typically <c>LIMIT + OFFSET</c> from the query planner.
     /// </param>
     public OrderByOperator(
-        IQueryOperator source,
+        QueryOperator source,
         IReadOnlyList<OrderByItem> orderByItems,
         int? topNRows = null)
     {
@@ -54,7 +54,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     }
 
     /// <summary>The child operator producing rows.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The sort criteria.</summary>
     public IReadOnlyList<OrderByItem> OrderByItems => _orderByItems;
@@ -78,7 +78,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     internal int SortedRunCount { get; private set; }
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         List<string> items = [];
         foreach (OrderByItem item in _orderByItems)
@@ -119,7 +119,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
         ExpressionEvaluator evaluator = new(context);

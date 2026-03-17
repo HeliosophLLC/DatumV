@@ -16,7 +16,7 @@ using DatumIngest.Parsing.Ast;
 /// </summary>
 public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
 {
-    private static IQueryOperator PlanQuery(string sql, TableCatalog catalog)
+    private static QueryOperator PlanQuery(string sql, TableCatalog catalog)
     {
         QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
@@ -35,7 +35,7 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // concat(a, b) appears twice — should hoist into a single RowEnricher,
         // both projection columns become ColumnReference("__cse_0").
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery("SELECT concat(a, b), concat(a, b) FROM t", catalog);
+        QueryOperator plan = PlanQuery("SELECT concat(a, b), concat(a, b) FROM t", catalog);
 
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
         RowEnricherOperator enricher = Assert.IsType<RowEnricherOperator>(project.Source);
@@ -62,7 +62,7 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
     {
         // concat(a, b) appears exactly once — no CSE benefit, no rewrite.
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery("SELECT concat(a, b) FROM t", catalog);
+        QueryOperator plan = PlanQuery("SELECT concat(a, b) FROM t", catalog);
 
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
 
@@ -80,7 +80,7 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // Trivial leaves (column references) don't pay for hoisting.
         // SELECT a, a FROM t — no enricher, two ColRefs preserved.
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery("SELECT a, a FROM t", catalog);
+        QueryOperator plan = PlanQuery("SELECT a, a FROM t", catalog);
 
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
         Assert.IsNotType<RowEnricherOperator>(project.Source);
@@ -98,7 +98,7 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // instead of allocating __cse_0. The LET binding's body is preserved
         // as-is (it IS the canonical site).
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT LET v = concat(a, b), v, concat(a, b) FROM t",
             catalog);
 
@@ -129,7 +129,7 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
     {
         // Same as LET-unification case but no LET — should fall back to __cse_0.
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT concat(a, b), concat(a, b) AS dup FROM t",
             catalog);
 
@@ -193,15 +193,15 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // (the deepest reference), so both WHERE and SELECT see the hidden
         // column.
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT concat(a, b) FROM t WHERE concat(a, b) = 'alphabeta'",
             catalog);
 
         // Walk the plan, count RowEnricherOperators and their position.
         int enricherCount = 0;
         bool enricherIsUpstreamOfFilter = false;
-        IQueryOperator? cursor = plan;
-        IQueryOperator? prev = null;
+        QueryOperator? cursor = plan;
+        QueryOperator? prev = null;
         while (cursor is not null)
         {
             if (cursor is RowEnricherOperator)
@@ -230,12 +230,12 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // concat(a, b) appears in SELECT and ORDER BY. One RowEnricher,
         // placed upstream of the deepest reference (OrderBy).
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT concat(a, b) FROM t ORDER BY concat(a, b)",
             catalog);
 
         int enricherCount = 0;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is RowEnricherOperator) enricherCount++;
@@ -278,14 +278,14 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // Project pass would normally handle the SELECT-only duplicate, but
         // cross-clause runs first and unifies it with the WHERE site.)
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT concat(a, b) AS first, concat(a, b) AS second " +
             "FROM t WHERE concat(a, b) = 'alphabeta'",
             catalog);
 
         // Exactly one RowEnricher in the chain.
         int enricherCount = 0;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is RowEnricherOperator) enricherCount++;
@@ -309,7 +309,7 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // The inner concat(a,b) is gone from the projections — it lives only
         // inside the enrichment expression.
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT upper(concat(a, b)), upper(concat(a, b)) FROM t",
             catalog);
 
@@ -340,7 +340,7 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // upper(__inner) enrichment references the inner concat enrichment's
         // column, so concat is computed once per row, upper once per row.
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT upper(concat(a, b)) AS x, upper(concat(a, b)) AS y, concat(a, b) AS z FROM t",
             catalog);
 
@@ -350,7 +350,7 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // one for concat (closer to source), one for upper(concat) (above it).
         // The upper enricher's expression must reference the concat column.
         List<RowEnricherOperator> enrichers = new();
-        IQueryOperator? cursor = project.Source;
+        QueryOperator? cursor = project.Source;
         while (cursor is RowEnricherOperator e)
         {
             enrichers.Add(e);
@@ -394,14 +394,14 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // boolean comparison) references the same expression twice and the
         // predicate stays as one FilterOperator.
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT a, b FROM t WHERE concat(a, b) = 'alphabeta' OR concat(a, b) = 'gammadelta'",
             catalog);
 
         // Walk to the FilterOperator. There may be a Project above it, possibly
         // additional Filters. Find the FIRST Filter encountered top-down.
         FilterOperator? filter = null;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is FilterOperator f) { filter = f; break; }
@@ -433,13 +433,13 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
     {
         // Single occurrence — no hoist.
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT a, b FROM t WHERE concat(a, b) = 'alphabeta'",
             catalog);
 
         // No RowEnricher anywhere.
         bool foundEnricher = false;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is RowEnricherOperator) { foundEnricher = true; break; }
@@ -470,14 +470,14 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // concat(a, b) appears twice in ORDER BY: once as a key, once inside
         // a deriving function. Within-OrderBy hoists upstream.
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT a FROM t ORDER BY concat(a, b) DESC, upper(concat(a, b)) ASC",
             catalog);
 
         // Walk down to find OrderByOperator and verify a RowEnricher is its
         // direct source.
         OrderByOperator? orderBy = null;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is OrderByOperator ob) { orderBy = ob; break; }
@@ -529,14 +529,14 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // the GroupByOperator, so partitioning and accumulation share one
         // evaluation per row.
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT upper(a), COUNT(upper(a)) FROM t GROUP BY upper(a)",
             catalog);
 
         // Walk the plan to find the GroupByOperator. The chain is typically
         // Project → GroupBy → ... possibly with intermediate operators.
         GroupByOperator? group = null;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is GroupByOperator g) { group = g; break; }
@@ -579,12 +579,12 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         // Same expression in two different aggregate args (no group key match).
         // Within-GroupBy CSE collapses to one enrichment.
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT SUM(upper(a)), MIN(upper(a)) FROM t",
             catalog);
 
         GroupByOperator? group = null;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is GroupByOperator g) { group = g; break; }
@@ -614,12 +614,12 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
     public void WithinGroupBy_SingleOccurrence_NotHoisted()
     {
         TableCatalog catalog = Catalog2Cols();
-        IQueryOperator plan = PlanQuery(
+        QueryOperator plan = PlanQuery(
             "SELECT upper(a), COUNT(*) FROM t GROUP BY upper(a)",
             catalog);
 
         GroupByOperator? group = null;
-        IQueryOperator? cursor = plan;
+        QueryOperator? cursor = plan;
         while (cursor is not null)
         {
             if (cursor is GroupByOperator g) { group = g; break; }

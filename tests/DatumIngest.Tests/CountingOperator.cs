@@ -14,7 +14,7 @@ namespace DatumIngest.Tests;
 /// <see cref="InMemoryTableProvider"/>; when the consumer stops pulling, no further
 /// rows are materialized — preserving the original CountingOperator semantics.
 /// </remarks>
-public sealed class CountingOperator : IQueryOperator
+public sealed class CountingOperator : QueryOperator
 {
     private readonly InMemoryTableProvider _provider;
     private readonly Action _onRowYielded;
@@ -25,9 +25,9 @@ public sealed class CountingOperator : IQueryOperator
         _onRowYielded = onRowYielded;
     }
 
-    public OperatorPlanDescription DescribeForExplain() => new("Counting Mock");
+    protected override OperatorPlanDescription DescribeForExplainImpl() => new("Counting Mock");
 
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(DatumIngest.Execution.ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(DatumIngest.Execution.ExecutionContext context)
     {
         await foreach (RowBatch batch in _provider.ScanAsync(
             requiredColumns: null, filterHint: null, context.Store, context.CancellationToken))

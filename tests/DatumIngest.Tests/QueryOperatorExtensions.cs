@@ -21,7 +21,7 @@ internal static class QueryOperatorExtensions
     /// <c>context.Store</c> as the resolution store.
     /// </summary>
     internal static async Task<List<Row>> CollectRowsAsync(
-        this IQueryOperator plan, ExecutionContext context)
+        this QueryOperator plan, ExecutionContext context)
     {
         List<Row> rows = [];
 

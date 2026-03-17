@@ -33,13 +33,13 @@ namespace DatumIngest.Execution.Operators;
 /// / <see cref="PoolBacking.DataValueArrayRentCount"/> balanced for clean leak detection.
 /// </para>
 /// </summary>
-internal sealed class SetOperationOperator : IQueryOperator, IDisposable
+internal sealed class SetOperationOperator : QueryOperator, IDisposable
 {
     /// <summary>Number of hash partitions used when spilling to disk.</summary>
     private const int SpillPartitionCount = 64;
 
-    private readonly IQueryOperator _left;
-    private readonly IQueryOperator _right;
+    private readonly QueryOperator _left;
+    private readonly QueryOperator _right;
     private readonly SetOperationType _operationType;
     private readonly bool _all;
 
@@ -51,8 +51,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     /// <param name="operationType">The type of set operation (Union, Intersect, or Except).</param>
     /// <param name="all">Whether to use ALL (multiset) semantics, preserving duplicates.</param>
     public SetOperationOperator(
-        IQueryOperator left,
-        IQueryOperator right,
+        QueryOperator left,
+        QueryOperator right,
         SetOperationType operationType,
         bool all)
     {
@@ -63,10 +63,10 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     }
 
     /// <summary>The left input operator.</summary>
-    public IQueryOperator Left => _left;
+    public QueryOperator Left => _left;
 
     /// <summary>The right input operator.</summary>
-    public IQueryOperator Right => _right;
+    public QueryOperator Right => _right;
 
     /// <summary>The type of set operation.</summary>
     public SetOperationType OperationType => _operationType;
@@ -91,7 +91,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     internal bool SpillingTriggered { get; private set; }
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         string operationName = _operationType switch
         {
@@ -108,7 +108,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     }
 
     /// <inheritdoc />
-    public IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         return (_operationType, _all) switch
         {
@@ -2241,8 +2241,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     /// Concatenates two operator streams sequentially.
     /// </summary>
     private static async IAsyncEnumerable<RowBatch> ConcatenateAsync(
-        IQueryOperator first,
-        IQueryOperator second,
+        QueryOperator first,
+        QueryOperator second,
         ExecutionContext context)
     {
         await foreach (RowBatch batch in first.ExecuteAsync(context).ConfigureAwait(false))

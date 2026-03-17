@@ -382,7 +382,7 @@ public sealed class OrderBySpillTests : ServiceTestBase
         return CreateExecutionContext(memoryBudgetBytes: memoryBudgetBytes);
     }
 
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext context)
+    private static async Task<List<Row>> CollectAsync(QueryOperator op, ExecutionContext context)
     {
         return await op.CollectRowsAsync(context);
     }

@@ -244,7 +244,7 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
     /// from the <see cref="LocalBufferPool"/> via <see cref="LocalBufferPool.RentOwned"/>,
     /// mimicking how <see cref="ScanOperator"/> produces rows.
     /// </summary>
-    private sealed class PooledMockOperator : IQueryOperator
+    private sealed class PooledMockOperator : QueryOperator
     {
         private readonly Pool _pool;
         private readonly int _rowCount;
@@ -257,9 +257,9 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
             _columnCount = columnCount;
         }
 
-        public OperatorPlanDescription DescribeForExplain() => new("PooledMock");
+        protected override OperatorPlanDescription DescribeForExplainImpl() => new("PooledMock");
 
-        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+        protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
         {
             string[] names = Enumerable.Range(0, _columnCount)
                 .Select(i => $"c{i}")

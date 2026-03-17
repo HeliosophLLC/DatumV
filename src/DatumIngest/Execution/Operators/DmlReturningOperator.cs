@@ -7,12 +7,12 @@ namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Adapts an INSERT / UPDATE / DELETE … RETURNING into an
-/// <see cref="IQueryOperator"/> so a data-modifying CTE body —
+/// <see cref="QueryOperator"/> so a data-modifying CTE body —
 /// <c>WITH cte AS (INSERT/UPDATE/DELETE … RETURNING …)</c> — can act as a
 /// row source in the surrounding plan tree.
 /// </summary>
 /// <remarks>
-/// The DML side effect fires on first <see cref="ExecuteAsync"/>, exactly
+/// The DML side effect fires on first <see cref="QueryOperator.ExecuteAsync(ExecutionContext)"/>, exactly
 /// once per surrounding query execution — matching PostgreSQL's
 /// modifying-CTE semantics. <c>EXPLAIN WITH cte AS (UPDATE …) SELECT …</c>
 /// does not commit the mutation at plan time. Multi-reference CTEs are
@@ -20,7 +20,7 @@ namespace DatumIngest.Execution.Operators;
 /// mutation still runs only once even when the CTE is referenced
 /// multiple times.
 /// </remarks>
-internal sealed class DmlReturningOperator : IQueryOperator
+internal sealed class DmlReturningOperator : QueryOperator
 {
     private readonly TableCatalog _catalog;
     private readonly Func<TableCatalog, Task<IQueryPlan>> _executeAsync;
@@ -61,7 +61,7 @@ internal sealed class DmlReturningOperator : IQueryOperator
             explainDetails: $"DELETE FROM {delete.TableName} … RETURNING …");
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         IQueryPlan innerPlan = await _executeAsync(_catalog).ConfigureAwait(false);
         await foreach (RowBatch batch in innerPlan.ExecuteAsync(context.CancellationToken)
@@ -72,7 +72,7 @@ internal sealed class DmlReturningOperator : IQueryOperator
     }
 
     /// <inheritdoc />
-    public OperatorPlanDescription DescribeForExplain() => new(_operatorName)
+    protected override OperatorPlanDescription DescribeForExplainImpl() => new(_operatorName)
     {
         Properties = new Dictionary<string, string>
         {

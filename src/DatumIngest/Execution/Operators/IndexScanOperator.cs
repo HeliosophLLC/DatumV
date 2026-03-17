@@ -20,7 +20,7 @@ namespace DatumIngest.Execution.Operators;
 /// a sorted index exists for the ORDER BY column and the provider supports seeking.
 /// </para>
 /// </remarks>
-public sealed class IndexScanOperator : IQueryOperator
+public sealed class IndexScanOperator : QueryOperator
 {
     /// <summary>
     /// Maximum number of index entries accumulated before flushing, even when all
@@ -74,7 +74,7 @@ public sealed class IndexScanOperator : IQueryOperator
     public string ColumnName => _columnName;
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new()
         {
@@ -97,7 +97,7 @@ public sealed class IndexScanOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
 

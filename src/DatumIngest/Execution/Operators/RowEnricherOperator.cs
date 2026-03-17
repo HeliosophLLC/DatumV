@@ -29,9 +29,9 @@ namespace DatumIngest.Execution.Operators;
 /// source batch returning to the pool.
 /// </para>
 /// </remarks>
-public sealed class RowEnricherOperator : IQueryOperator
+public sealed class RowEnricherOperator : QueryOperator
 {
-    private readonly IQueryOperator _source;
+    private readonly QueryOperator _source;
     private readonly IReadOnlyList<RowEnrichment> _enrichments;
 
     /// <summary>
@@ -46,7 +46,7 @@ public sealed class RowEnricherOperator : IQueryOperator
     /// kind of dependent computation.
     /// </param>
     public RowEnricherOperator(
-        IQueryOperator source,
+        QueryOperator source,
         IReadOnlyList<RowEnrichment> enrichments)
     {
         if (enrichments.Count == 0)
@@ -60,13 +60,13 @@ public sealed class RowEnricherOperator : IQueryOperator
     }
 
     /// <summary>The upstream source operator.</summary>
-    public IQueryOperator Source => _source;
+    public QueryOperator Source => _source;
 
     /// <summary>The expressions and their target hidden column names.</summary>
     public IReadOnlyList<RowEnrichment> Enrichments => _enrichments;
 
     /// <inheritdoc/>
-    public IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
+    public override QueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
     {
         RowEnrichment[] rewritten = new RowEnrichment[_enrichments.Count];
         for (int i = 0; i < _enrichments.Count; i++)
@@ -82,7 +82,7 @@ public sealed class RowEnricherOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public OperatorPlanDescription DescribeForExplain()
+    protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new()
         {
@@ -99,7 +99,7 @@ public sealed class RowEnricherOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
         ExpressionEvaluator evaluator = new(context);

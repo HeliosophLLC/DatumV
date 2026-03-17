@@ -650,7 +650,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     {
         QueryExpression inlined = UdfInliner.Inline(query, Udfs, SearchPath, Procedures);
         QueryPlanner planner = new(this, Functions);
-        IQueryOperator op = planner.Plan(inlined);
+        QueryOperator op = planner.Plan(inlined);
         return new QueryPlan(op, this, Functions);
     }
 

@@ -67,37 +67,37 @@ public static class CommonSubexpressionEliminator
     ///   </description></item>
     /// </list>
     /// </remarks>
-    public static IQueryOperator Eliminate(IQueryOperator op, FunctionRegistry functions)
+    public static QueryOperator Eliminate(QueryOperator op, FunctionRegistry functions)
     {
         op = EliminateCrossClauseFirst(op, functions);
         return EliminateRecursive(op, functions);
     }
 
-    private static IQueryOperator EliminateRecursive(IQueryOperator op, FunctionRegistry functions)
+    private static QueryOperator EliminateRecursive(QueryOperator op, FunctionRegistry functions)
     {
         if (op is ProjectOperator project)
         {
-            IQueryOperator newSource = EliminateRecursive(project.Source, functions);
+            QueryOperator newSource = EliminateRecursive(project.Source, functions);
             return EliminateInProject(project, newSource, functions);
         }
         if (op is FilterOperator filter)
         {
-            IQueryOperator newSource = EliminateRecursive(filter.Source, functions);
+            QueryOperator newSource = EliminateRecursive(filter.Source, functions);
             return EliminateInFilter(filter, newSource, functions);
         }
         if (op is OrderByOperator orderBy)
         {
-            IQueryOperator newSource = EliminateRecursive(orderBy.Source, functions);
+            QueryOperator newSource = EliminateRecursive(orderBy.Source, functions);
             return EliminateInOrderBy(orderBy, newSource, functions);
         }
         if (op is GroupByOperator group)
         {
-            IQueryOperator newSource = EliminateRecursive(group.Source, functions);
+            QueryOperator newSource = EliminateRecursive(group.Source, functions);
             return EliminateInGroupBy(group, newSource, functions);
         }
         if (op is WindowOperator window)
         {
-            IQueryOperator newSource = EliminateRecursive(window.Source, functions);
+            QueryOperator newSource = EliminateRecursive(window.Source, functions);
             return EliminateInWindow(window, newSource, functions);
         }
         return RewriteChildren(op, child => EliminateRecursive(child, functions));
@@ -111,8 +111,8 @@ public static class CommonSubexpressionEliminator
     /// used as a group key AND as an aggregate argument
     /// (<c>SELECT SUM(upper(name)), upper(name) FROM t GROUP BY upper(name)</c>).
     /// </summary>
-    private static IQueryOperator EliminateInGroupBy(
-        GroupByOperator group, IQueryOperator source, FunctionRegistry functions)
+    private static QueryOperator EliminateInGroupBy(
+        GroupByOperator group, QueryOperator source, FunctionRegistry functions)
     {
         HashSet<string> letNames = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, FingerprintEntry> entries = new(StringComparer.Ordinal);
@@ -136,7 +136,7 @@ public static class CommonSubexpressionEliminator
             }
         }
 
-        IQueryOperator RebuildUnchanged() =>
+        QueryOperator RebuildUnchanged() =>
             ReferenceEquals(source, group.Source)
                 ? group
                 : new GroupByOperator(source, group.GroupByExpressions, group.AggregateColumns, group.StreamingSorted);
@@ -156,7 +156,7 @@ public static class CommonSubexpressionEliminator
 
         if (fpToColumn.Count == 0) return RebuildUnchanged();
 
-        IQueryOperator augmented = BuildEnricherStack(
+        QueryOperator augmented = BuildEnricherStack(
             source, fpToColumn.Keys.ToList(), fpToColumn, fpToCanonical);
 
         Expression[] rewrittenKeys = group.GroupByExpressions
@@ -186,8 +186,8 @@ public static class CommonSubexpressionEliminator
     /// used as both a partition key and a sort key
     /// (<c>RANK() OVER (PARTITION BY upper(name) ORDER BY upper(name))</c>).
     /// </summary>
-    private static IQueryOperator EliminateInWindow(
-        WindowOperator window, IQueryOperator source, FunctionRegistry functions)
+    private static QueryOperator EliminateInWindow(
+        WindowOperator window, QueryOperator source, FunctionRegistry functions)
     {
         HashSet<string> letNames = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, FingerprintEntry> entries = new(StringComparer.Ordinal);
@@ -214,7 +214,7 @@ public static class CommonSubexpressionEliminator
             }
         }
 
-        IQueryOperator RebuildUnchanged() =>
+        QueryOperator RebuildUnchanged() =>
             ReferenceEquals(source, window.Source)
                 ? window
                 : new WindowOperator(source, window.WindowColumns);
@@ -234,7 +234,7 @@ public static class CommonSubexpressionEliminator
 
         if (fpToColumn.Count == 0) return RebuildUnchanged();
 
-        IQueryOperator augmented = BuildEnricherStack(
+        QueryOperator augmented = BuildEnricherStack(
             source, fpToColumn.Keys.ToList(), fpToColumn, fpToCanonical);
 
         WindowColumn[] rewrittenColumns = window.WindowColumns
@@ -266,8 +266,8 @@ public static class CommonSubexpressionEliminator
     /// Inserts a <see cref="RowEnricherOperator"/> upstream of the filter and
     /// rewrites the predicate.
     /// </summary>
-    private static IQueryOperator EliminateInFilter(
-        FilterOperator filter, IQueryOperator source, FunctionRegistry functions)
+    private static QueryOperator EliminateInFilter(
+        FilterOperator filter, QueryOperator source, FunctionRegistry functions)
     {
         // Filter has no LET bindings; the empty letNames set short-circuits the
         // LET-name reference check inside IsCseEligible.
@@ -304,7 +304,7 @@ public static class CommonSubexpressionEliminator
                 : new FilterOperator(source, filter.Predicate);
         }
 
-        IQueryOperator augmented = BuildEnricherStack(
+        QueryOperator augmented = BuildEnricherStack(
             source, fpToColumn.Keys.ToList(), fpToColumn, fpToCanonical);
         Expression rewrittenPredicate = RewriteWithHoists(filter.Predicate, fpToColumn);
         return new FilterOperator(augmented, rewrittenPredicate);
@@ -317,8 +317,8 @@ public static class CommonSubexpressionEliminator
     /// primary key and inside a deriving function on a tiebreaker, e.g.
     /// <c>ORDER BY concat(a,b) DESC, length(concat(a,b)) ASC</c>.
     /// </summary>
-    private static IQueryOperator EliminateInOrderBy(
-        OrderByOperator orderBy, IQueryOperator source, FunctionRegistry functions)
+    private static QueryOperator EliminateInOrderBy(
+        OrderByOperator orderBy, QueryOperator source, FunctionRegistry functions)
     {
         HashSet<string> letNames = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, FingerprintEntry> entries = new(StringComparer.Ordinal);
@@ -352,7 +352,7 @@ public static class CommonSubexpressionEliminator
                 : new OrderByOperator(source, orderBy.OrderByItems, orderBy.TopNRows);
         }
 
-        IQueryOperator augmented = BuildEnricherStack(
+        QueryOperator augmented = BuildEnricherStack(
             source, fpToColumn.Keys.ToList(), fpToColumn, fpToCanonical);
         OrderByItem[] rewrittenItems = orderBy.OrderByItems
             .Select(i => i with { Expression = RewriteWithHoists(i.Expression, fpToColumn) })
@@ -368,34 +368,34 @@ public static class CommonSubexpressionEliminator
     /// occurrence (across every clause) to a <see cref="ColumnReference"/>
     /// targeting the hidden column.
     /// </summary>
-    private static IQueryOperator EliminateCrossClauseFirst(
-        IQueryOperator op, FunctionRegistry functions)
+    private static QueryOperator EliminateCrossClauseFirst(
+        QueryOperator op, FunctionRegistry functions)
     {
         if (IsCrossClauseChainable(op))
         {
-            List<IQueryOperator> chain = new();
-            IQueryOperator cursor = op;
+            List<QueryOperator> chain = new();
+            QueryOperator cursor = op;
             while (IsCrossClauseChainable(cursor))
             {
                 chain.Add(cursor);
                 cursor = GetChainSource(cursor);
             }
 
-            IQueryOperator newSource = EliminateCrossClauseFirst(cursor, functions);
+            QueryOperator newSource = EliminateCrossClauseFirst(cursor, functions);
             return ProcessChainCrossClause(chain, newSource, functions);
         }
 
         return RewriteChildren(op, child => EliminateCrossClauseFirst(child, functions));
     }
 
-    private static bool IsCrossClauseChainable(IQueryOperator op) =>
+    private static bool IsCrossClauseChainable(QueryOperator op) =>
         op is ProjectOperator
             or FilterOperator
             or OrderByOperator
             or RowEnricherOperator
             or ModelInvocationOperator;
 
-    private static IQueryOperator GetChainSource(IQueryOperator op) => op switch
+    private static QueryOperator GetChainSource(QueryOperator op) => op switch
     {
         ProjectOperator p => p.Source,
         FilterOperator f => f.Source,
@@ -411,8 +411,8 @@ public static class CommonSubexpressionEliminator
             $"GetChainSource called on non-chainable operator {op.GetType().Name}."),
     };
 
-    private static IQueryOperator ProcessChainCrossClause(
-        List<IQueryOperator> chain, IQueryOperator source, FunctionRegistry functions)
+    private static QueryOperator ProcessChainCrossClause(
+        List<QueryOperator> chain, QueryOperator source, FunctionRegistry functions)
     {
         if (chain.Count == 0) return source;
         if (chain.Count == 1)
@@ -424,7 +424,7 @@ public static class CommonSubexpressionEliminator
         // LET names from any Project in the chain, so candidates that reference
         // them are excluded (placement upstream would precede the LET evaluation).
         HashSet<string> letNames = new(StringComparer.OrdinalIgnoreCase);
-        foreach (IQueryOperator c in chain)
+        foreach (QueryOperator c in chain)
         {
             if (c is ProjectOperator p && p.LetBindings is not null)
             {
@@ -458,7 +458,7 @@ public static class CommonSubexpressionEliminator
         if (fpToColumn.Count == 0)
         {
             // No cross-clause work needed. Rebuild chain unchanged with new source.
-            IQueryOperator unchanged = source;
+            QueryOperator unchanged = source;
             for (int i = chain.Count - 1; i >= 0; i--)
             {
                 unchanged = RebuildChainOperator(chain[i], unchanged, EmptyFingerprintMap);
@@ -484,7 +484,7 @@ public static class CommonSubexpressionEliminator
         // dependencies (subsumption), the inner one(s) land in a deeper
         // RowEnricher so their hidden column is on the row before the outer
         // one's enrichment evaluates.
-        IQueryOperator aug = source;
+        QueryOperator aug = source;
         for (int i = chain.Count - 1; i >= 0; i--)
         {
             if (hoistsByIndex.TryGetValue(i, out List<string>? fps))
@@ -503,8 +503,8 @@ public static class CommonSubexpressionEliminator
     /// reference them. Hoists at the same dependency level share one operator;
     /// each successive level becomes its own operator stacked on top.
     /// </summary>
-    private static IQueryOperator BuildEnricherStack(
-        IQueryOperator source,
+    private static QueryOperator BuildEnricherStack(
+        QueryOperator source,
         IReadOnlyList<string> fingerprints,
         IReadOnlyDictionary<string, string> fpToColumn,
         IReadOnlyDictionary<string, Expression> fpToCanonical)
@@ -517,7 +517,7 @@ public static class CommonSubexpressionEliminator
 
         List<List<string>> levels = HoistDependencyOrdering.OrderByDependency(placementCanonicals);
 
-        IQueryOperator aug = source;
+        QueryOperator aug = source;
         foreach (List<string> level in levels)
         {
             List<RowEnrichment> enrichments = new(level.Count);
@@ -546,7 +546,7 @@ public static class CommonSubexpressionEliminator
     /// reference which fingerprint.
     /// </summary>
     private static void VisitChainOperatorSites(
-        IQueryOperator op,
+        QueryOperator op,
         int operatorIndex,
         Dictionary<string, CrossClauseEntry> entries,
         HashSet<string> letNames,
@@ -636,9 +636,9 @@ public static class CommonSubexpressionEliminator
     /// subtree replaced by a <see cref="ColumnReference"/>. Mirror of
     /// <see cref="RewriteWithHoists"/> applied per expression site.
     /// </summary>
-    private static IQueryOperator RebuildChainOperator(
-        IQueryOperator op,
-        IQueryOperator newSource,
+    private static QueryOperator RebuildChainOperator(
+        QueryOperator op,
+        QueryOperator newSource,
         IReadOnlyDictionary<string, string> hoists)
     {
         return op switch
@@ -694,8 +694,8 @@ public static class CommonSubexpressionEliminator
         public CrossClauseEntry(Expression canonical) { Canonical = canonical; }
     }
 
-    private static IQueryOperator EliminateInProject(
-        ProjectOperator project, IQueryOperator source, FunctionRegistry functions)
+    private static QueryOperator EliminateInProject(
+        ProjectOperator project, QueryOperator source, FunctionRegistry functions)
     {
         HashSet<string> letNames = project.LetBindings is null
             ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -830,7 +830,7 @@ public static class CommonSubexpressionEliminator
         // contains another hoisted expression as a subtree (e.g. f(g(x)) and
         // g(x) both qualify), the inner one ends up in a deeper enricher so
         // the outer's enrichment can reference its column.
-        IQueryOperator augmented = cseFingerprintToColumn.Count == 0
+        QueryOperator augmented = cseFingerprintToColumn.Count == 0
             ? source
             : BuildEnricherStack(
                 source,
@@ -1106,8 +1106,8 @@ public static class CommonSubexpressionEliminator
         };
     }
 
-    private static IQueryOperator RewriteChildren(
-        IQueryOperator op, Func<IQueryOperator, IQueryOperator> childRewriter)
+    private static QueryOperator RewriteChildren(
+        QueryOperator op, Func<QueryOperator, QueryOperator> childRewriter)
     {
         return op switch
         {
@@ -1127,10 +1127,10 @@ public static class CommonSubexpressionEliminator
         };
     }
 
-    private static IQueryOperator RewriteLimit(
-        LimitOperator limit, Func<IQueryOperator, IQueryOperator> childRewriter)
+    private static QueryOperator RewriteLimit(
+        LimitOperator limit, Func<QueryOperator, QueryOperator> childRewriter)
     {
-        IQueryOperator newSource = childRewriter(limit.Source);
+        QueryOperator newSource = childRewriter(limit.Source);
         return ReferenceEquals(newSource, limit.Source)
             ? limit
             : new LimitOperator(newSource, limit.LimitExpression, limit.OffsetExpression);

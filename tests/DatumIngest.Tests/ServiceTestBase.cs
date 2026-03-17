@@ -319,7 +319,7 @@ public abstract class ServiceTestBase : IDisposable
 
         DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(catalog: catalog, diagnostics: diagnostics, store: store);
 
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
+        QueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         return await plan.CollectRowsAsync(context);
     }
