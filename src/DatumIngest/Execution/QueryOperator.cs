@@ -41,11 +41,44 @@ public abstract class QueryOperator
         // dotnet-trace, OpenTelemetry, etc.) the Activity is started here
         // and disposed when the iterator is fully iterated or torn down
         // early (the `using` declaration's scope is the entire iterator).
-        using Activity? activity = DatumActivity.Operators.StartActivity(GetType().Name);
+        string operatorName = GetType().Name;
+        using Activity? operatorSpan = DatumActivity.Operators.StartActivity(operatorName);
 
-        await foreach (RowBatch rowBatch in ExecuteAsyncImpl(context).ConfigureAwait(false))
+        // Wrap each *batch* of work in its own span so the timeline shows
+        // per-yield latency (how long this operator took to produce one
+        // batch) rather than just the iterator's full lifetime. Without
+        // these, every operator stays "open" for the entire query and the
+        // recent-spans log shows nothing until the consumer disposes —
+        // useless for hang investigations because that's exactly when
+        // disposal doesn't happen. With them, you see one completed
+        // "OperatorName.batch" entry per yielded batch in real time.
+        string batchName = operatorName + ".batch";
+        Activity? batchSpan = DatumActivity.Operators.StartActivity(batchName);
+        try
         {
-            yield return rowBatch;
+            await foreach (RowBatch rowBatch in ExecuteAsyncImpl(context).ConfigureAwait(false))
+            {
+                // The work that produced THIS batch is now finished. Close
+                // the span before yielding so the consumer's pull time isn't
+                // attributed to this operator's batch.
+                batchSpan?.Dispose();
+                batchSpan = null;
+
+                yield return rowBatch;
+
+                // Open a span for the NEXT batch's work. Created lazily here
+                // so the consumer's "between pulls" idle time isn't attributed
+                // to us either — the span starts exactly when ExecuteAsyncImpl
+                // resumes computing.
+                batchSpan = DatumActivity.Operators.StartActivity(batchName);
+            }
+        }
+        finally
+        {
+            // The final span never produced a batch (the impl completed
+            // without yielding). Close it as trailing work. Also fires on
+            // early disposal / exceptions so we never leak an open span.
+            batchSpan?.Dispose();
         }
     }
 
