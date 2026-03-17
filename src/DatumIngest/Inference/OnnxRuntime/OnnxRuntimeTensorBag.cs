@@ -99,6 +99,34 @@ internal sealed class OnnxRuntimeTensorBag : TensorBag
         _order.Add(name);
     }
 
+    /// <summary>
+    /// Copies an <see cref="OrtValue"/>'s payload into a managed byte[]
+    /// and stores it as a managed-only tensor in this bag. The source
+    /// <paramref name="value"/> is NOT adopted — the caller still owns
+    /// (and must dispose) it. Used by <c>OnnxRuntimeSession.RunAsync</c>
+    /// to materialise outputs before disposing the ORT-owned collection
+    /// wrapper, eliminating the double-ownership lifetime trap.
+    /// </summary>
+    internal void AdoptMaterialized(string name, OrtValue value)
+    {
+        OrtTensorTypeAndShapeInfo info = value.GetTensorTypeAndShape();
+        DataKind elementKind = OnnxElementTypes.ToDataKind(info.ElementDataType);
+
+        long[] shapeLongs = info.Shape;
+        int[] shape = new int[shapeLongs.Length];
+        for (int i = 0; i < shapeLongs.Length; i++)
+        {
+            shape[i] = checked((int)shapeLongs[i]);
+        }
+
+        ReadOnlySpan<byte> sourceBytes = value.GetTensorMutableRawData();
+        byte[] managedBytes = sourceBytes.ToArray();
+
+        OnnxRuntimeTensor tensor = new(name, elementKind, shape, managedBytes);
+        _tensors.Add(name, tensor);
+        _order.Add(name);
+    }
+
     /// <inheritdoc />
     public override void Dispose()
     {

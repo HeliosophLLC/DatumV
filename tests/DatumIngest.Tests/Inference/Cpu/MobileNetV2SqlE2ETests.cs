@@ -96,10 +96,9 @@ public sealed class MobileNetV2SqlE2ETests : ServiceTestBase
         Assert.Equal("ScoredLabel", descriptor.ReturnTypeName);
         // 5 DECLAREs (tensor, logits, probs, top, labels) + 1 RETURN.
         Assert.Equal(6, descriptor.StatementBody.Count);
-        // Body uses read_string_list — bails to MIO+adapter so the model
-        // body frame carries currentModel for catalog-relative resolution.
-        Assert.False(ModelBodyLowerer.BodyIsStraightLine(descriptor.StatementBody),
-            "MobileNetV2 body should bail to MIO+adapter because it uses catalog-relative read_string_list.");
+        // Body lowering was removed; every SQL-defined model now dispatches
+        // through MIO + ProceduralModelAdapter, which carries frame.CurrentModel
+        // through for catalog-relative scalars like read_string_list.
     }
 
     [Fact]

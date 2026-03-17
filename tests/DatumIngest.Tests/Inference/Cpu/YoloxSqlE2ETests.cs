@@ -106,12 +106,9 @@ public sealed class YoloxSqlE2ETests : ServiceTestBase
         Assert.Equal("Array<LabeledDetection>", descriptor.ReturnTypeName);
         // 3 DECLAREs (tensor, raw, labels) + 1 RETURN.
         Assert.Equal(4, descriptor.StatementBody.Count);
-        // The body references read_string_list which depends on
-        // frame.CurrentModel — bails to MIO+adapter, not the lowerer.
-        // (Lowered operators don't propagate currentModel today; long-
-        // term fix would plumb the descriptor through.)
-        Assert.False(ModelBodyLowerer.BodyIsStraightLine(descriptor.StatementBody),
-            "YOLOX body should bail to MIO+adapter because it uses catalog-relative read_string_list.");
+        // Body lowering was removed; every SQL-defined model now dispatches
+        // through MIO + ProceduralModelAdapter, which carries frame.CurrentModel
+        // through for catalog-relative scalars like read_string_list.
     }
 
     [Fact]

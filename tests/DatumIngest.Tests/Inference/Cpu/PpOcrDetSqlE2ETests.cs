@@ -164,8 +164,8 @@ public sealed class PpOcrDetSqlE2ETests : ServiceTestBase
             catalog.DeclaredModels.TryGet(new QualifiedName("models", "paddleocr_v4_det"), out ModelDescriptor? descriptor));
         Assert.NotNull(descriptor);
         Assert.Equal(6, descriptor!.StatementBody.Count); // 5 DECLAREs + 1 RETURN
-        Assert.True(ModelBodyLowerer.BodyIsStraightLine(descriptor.StatementBody),
-            "PP-OCR-det body should be straight-line; step 3's lowerer must take it.");
+        // Body lowering was removed; every SQL-defined model now dispatches
+        // through MIO + ProceduralModelAdapter regardless of body shape.
     }
 
     private EvaluationFrame MakeFrame()

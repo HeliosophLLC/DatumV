@@ -87,20 +87,38 @@ internal sealed class OnnxRuntimeSession : IInferenceSession
         string[] outputNames = new string[Outputs.Count];
         for (int i = 0; i < Outputs.Count; i++) outputNames[i] = Outputs[i].Name;
 
+        // RunOptions wraps a native handle that must be disposed; leaving
+        // it to finalization (the original bug) leaked one native handle
+        // per invocation and after ~hundreds-of-thousands of calls ORT's
+        // allocator faulted inside Run with a raw 0xC0000005.
+        //
+        // Bridge the .NET CancellationToken onto RunOptions.Terminate so
+        // a co-operative cancel actually reaches the executing kernel.
+        // The registration runs synchronously on cancel; the lambda flips
+        // Terminate true and ORT's per-kernel cancellation polling tears
+        // the in-flight Run down. The registration is disposed inside the
+        // same scope as runOptions, so ORT never sees Terminate flip
+        // after the Run has already returned.
+        using RunOptions runOptions = new();
+        using CancellationTokenRegistration ctReg = cancellationToken.Register(
+            static state => ((RunOptions)state!).Terminate = true,
+            runOptions);
+
         // Hop to the thread pool so the EP's blocking Run doesn't tie up
         // the caller's async context.
-        IDisposableReadOnlyCollection<OrtValue> ortOutputs = await Task.Run(
-            () => _session.Run(new RunOptions(), inputDict, outputNames),
+        using IDisposableReadOnlyCollection<OrtValue> ortOutputs = await Task.Run(
+            () => _session.Run(runOptions, inputDict, outputNames),
             cancellationToken).ConfigureAwait(false);
-
-        // Move the output OrtValues into a new bag. The collection wrapper
-        // owned by ORT gets disposed once we've handed the values off; the
-        // bag now owns each OrtValue.
+            
+        // Materialise every output tensor into managed memory before the
+        // ortOutputs `using` disposes the underlying OrtValues. The bag
+        // we return only holds managed copies — no shared lifetime with
+        // ORT-owned native handles.
         OnnxRuntimeTensorBag outputBag = new();
         int idx = 0;
         foreach (OrtValue value in ortOutputs)
         {
-            outputBag.Adopt(outputNames[idx++], value);
+            outputBag.AdoptMaterialized(outputNames[idx++], value);
         }
 
         return outputBag;

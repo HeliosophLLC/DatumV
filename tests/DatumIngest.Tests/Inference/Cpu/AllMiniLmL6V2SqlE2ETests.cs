@@ -104,12 +104,10 @@ public sealed class AllMiniLmL6V2SqlE2ETests : ServiceTestBase
                 new QualifiedName("models", "all_minilm_l6_v2"),
                 out ModelDescriptor? descriptor));
         Assert.NotNull(descriptor);
-        // Body has a Struct DECLARE — straight-line lowerer must reject it
-        // so dispatch routes through the procedural-adapter path that knows
-        // how to unpack a struct-arg infer().
-        Assert.False(
-            DatumIngest.Execution.ModelBodyLowerer.BodyIsStraightLine(descriptor!.StatementBody),
-            "all-MiniLM-L6 body has a struct DECLARE; lowerer must bail to MIO+adapter.");
+        // Body lowering was removed; every SQL-defined model now dispatches
+        // through MIO + ProceduralModelAdapter, which knows how to unpack a
+        // struct-arg infer() (the construct that historically forced the
+        // lowerer to bail anyway).
     }
 
     /// <summary>

@@ -1,3 +1,5 @@
+using DatumIngest.Diagnostics;
+
 namespace DatumIngest.Models;
 
 /// <summary>
@@ -151,6 +153,7 @@ public sealed class ModelResidencyManager : IDisposable
                     cached.ActiveRefs++;
                     cached.LastUsed = DateTimeOffset.UtcNow;
                     modelTask = cached.ModelTask;
+                    ExecutionTracer.Write($"[residency] acquire-hit '{entry.Name}' refs={cached.ActiveRefs}");
                 }
                 else if (TryFitNew(estimatedBytes))
                 {
@@ -216,6 +219,8 @@ public sealed class ModelResidencyManager : IDisposable
                     Console.Error.WriteLine(
                         $"[residency] Loaded '{entry.Name}' (~{FormatBytes(estimatedBytes)}); " +
                         $"used {FormatBytes(_vramUsedBytes)}/{FormatBudget()}.");
+                    ExecutionTracer.Write(
+                        $"[residency] loaded '{entry.Name}' bytes={estimatedBytes} used={_vramUsedBytes}");
                 }
                 loaderTcs.SetResult(loadedModel);
                 return new ModelLease(this, entry.Name, loadedModel);
@@ -274,6 +279,7 @@ public sealed class ModelResidencyManager : IDisposable
             {
                 if (r.ActiveRefs > 0) r.ActiveRefs--;
                 r.LastUsed = DateTimeOffset.UtcNow;
+                ExecutionTracer.Write($"[residency] release '{modelName}' refs={r.ActiveRefs}");
             }
         }
     }
@@ -312,6 +318,8 @@ public sealed class ModelResidencyManager : IDisposable
             Console.Error.WriteLine(
                 $"[residency] Evicted '{kv.Key}' ({FormatBytes(kv.Value.Bytes)}); " +
                 $"used {FormatBytes(_vramUsedBytes)}/{FormatBudget()}.");
+            ExecutionTracer.Write(
+                $"[residency] evicted '{kv.Key}' bytes={kv.Value.Bytes} used={_vramUsedBytes}");
 
             if (needed <= 0) return true;
         }

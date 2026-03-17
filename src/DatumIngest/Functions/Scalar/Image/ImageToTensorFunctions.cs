@@ -1,3 +1,4 @@
+using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -264,6 +265,15 @@ internal static class ImageToTensorShared
         int plane = height * width;
         float[] output = new float[3 * plane];
 
+        // The unsafe block below reads through `p` (a raw byte* derived from
+        // resized.GetPixels()). The JIT's reachability analysis can decide
+        // `resized` and `source` aren't "used" inside the unsafe block — only
+        // `p` is — and stop rooting them. Under per-row dispatch pressure
+        // (many rows in close succession + concurrent GC), SKBitmap's
+        // finalizer can fire mid-loop and free the native pixel buffer that
+        // `p` is reading. Garbage / NaN values then flow into the model and
+        // crash native ORT.Run downstream. GC.KeepAlive after the loop
+        // forces the JIT to keep both alive until that point.
         nint pixelPtr = resized.GetPixels();
         unsafe
         {
@@ -313,6 +323,31 @@ internal static class ImageToTensorShared
                     }
                 }
             }
+        }
+
+        // Force both bitmaps to stay rooted through the end of the unsafe
+        // pointer read. See the comment above the unsafe block for why this
+        // matters — TL;DR the JIT can release locals it considers dead
+        // and SKBitmap's finalizer can fire mid-loop on freed pixels.
+        GC.KeepAlive(resized);
+        GC.KeepAlive(source);
+
+        if (ExecutionTracer.IsEnabled)
+        {
+            int nanCount = 0, infCount = 0;
+            float min = float.PositiveInfinity, max = float.NegativeInfinity;
+            for (int k = 0; k < output.Length; k++)
+            {
+                float v = output[k];
+                if (float.IsNaN(v)) nanCount++;
+                else if (float.IsInfinity(v)) infCount++;
+                else { if (v < min) min = v; if (v > max) max = v; }
+            }
+            ExecutionTracer.Write(
+                $"[img2tensor:{fnName}] {source.Width}x{source.Height}->{width}x{height} bgr={bgr} layout={layout} " +
+                $"len={output.Length} sample=[{output[0]:F3},{output[1]:F3},{output[2]:F3}] " +
+                $"min={(min == float.PositiveInfinity ? double.NaN : min):F3} max={(max == float.NegativeInfinity ? double.NaN : max):F3} " +
+                $"nan={nanCount} inf={infCount}");
         }
 
         return new ValueTask<ValueRef>(ValueRef.FromPrimitiveArray(output, DataKind.Float32));

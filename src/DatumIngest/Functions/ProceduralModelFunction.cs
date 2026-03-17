@@ -1,4 +1,5 @@
 using DatumIngest.Catalog.Registries;
+using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -143,9 +144,17 @@ public sealed class ProceduralModelFunction : IScalarFunction
         }
 
         stack.Push(_descriptor.Name);
+        ExecutionTracer.Write($"[model] {_descriptor.Name}: enter, depth={stack.Count}, args={arguments.Length}");
         try
         {
-            return await ExecuteBodyAsync(arguments, frame, cancellationToken).ConfigureAwait(false);
+            ValueRef result = await ExecuteBodyAsync(arguments, frame, cancellationToken).ConfigureAwait(false);
+            ExecutionTracer.Write($"[model] {_descriptor.Name}: exit kind={result.Kind} isArray={result.IsArray}");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            ExecutionTracer.Write($"[model] {_descriptor.Name}: THREW {ex.GetType().Name}: {ex.Message}");
+            throw;
         }
         finally
         {

@@ -1,3 +1,4 @@
+using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Inference;
 using DatumIngest.Manifest;
@@ -147,6 +148,217 @@ public sealed class InferFunction : IFunction, IScalarFunction
             (session, bag, _, modelName) => ReadFirstOutput(session, bag, modelName),
             cancellationToken);
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Packs the column of per-row Float32 input tensors into one
+    /// <c>[B, feature_dims...]</c> tensor and runs <c>Session.Run</c> once,
+    /// then splits the flat output back into per-row results. Falls back
+    /// to the default per-row loop in any of these cases:
+    /// <list type="bullet">
+    /// <item><paramref name="rowCount"/> ≤ 1 — no batching win.</item>
+    /// <item>Multi-input dispatch (struct argument form) — packing across
+    /// rows for struct-shaped inputs is not implemented here; routes back
+    /// to per-row.</item>
+    /// <item>Explicit shape argument (the 2-arg <c>infer(value, shape)</c>
+    /// form) — per-row shape variability is the precise case batching
+    /// can't absorb.</item>
+    /// <item>Session input rank &lt; 2 or with non-dynamic leading dim, or
+    /// any non-leading dynamic dim — not a batchable shape.</item>
+    /// <item>Row inputs have differing element counts — variable-shape
+    /// detectors that resize per-image to different dims.</item>
+    /// </list>
+    /// In every fallback the per-row loop produces results indistinguishable
+    /// from the batched path; this method is purely a performance override.
+    /// </remarks>
+    public ValueTask<ValueRef[]> ExecuteBatchAsync(
+        ReadOnlyMemory<ValueRef>[] argumentColumns,
+        int rowCount,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        // The columnar packing optimisation only applies to the 1-arg
+        // single-input form against a batchable session. Every other
+        // shape (multi-input struct, explicit per-row shape, non-batchable
+        // session) falls back to the default per-row loop.
+        if (rowCount <= 1
+            || argumentColumns.Length != 1
+            || frame.CurrentModel is not { } model
+            || !model.BoundSessions.TryGetValue("default", out IInferenceSession? session)
+            || session.Inputs.Count != 1
+            || !IsBatchableShape(session.Inputs[0]))
+        {
+            return ScalarFunctionBatchHelpers.DefaultLoop(this, argumentColumns, rowCount, frame, cancellationToken);
+        }
+
+        return ExecuteBatchedSingleInputAsync(
+            session, argumentColumns[0], rowCount, model.QualifiedName.ToString(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Cross-row packing path. Pre-validates every row's input as a
+    /// Float32 array of the same length, packs them into a single
+    /// <c>[B, ...]</c> Float32 tensor, runs the session once, splits the
+    /// output back into per-row results.
+    /// </summary>
+    private static async ValueTask<ValueRef[]> ExecuteBatchedSingleInputAsync(
+        IInferenceSession session,
+        ReadOnlyMemory<ValueRef> valueColumn,
+        int rowCount,
+        string modelName,
+        CancellationToken cancellationToken)
+    {
+        // Materialise every row's input as a managed float[]. We need
+        // them anyway for the packed copy, and the homogeneous-length
+        // check decides whether batching is even legal for this batch.
+        float[][] inputs = new float[rowCount][];
+        int perRowLen = -1;
+        ReadOnlySpan<ValueRef> col = valueColumn.Span;
+        for (int row = 0; row < rowCount; row++)
+        {
+            ValueRef cell = col[row];
+            if (cell.IsNull)
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer() input must not be null (row {row}).");
+            }
+            if (!cell.IsArray || cell.ArrayElementKind != DataKind.Float32)
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer() batched dispatch expected Float32[] inputs; "
+                    + $"row {row} has {cell.Kind}{(cell.IsArray ? "[]" : "")}.");
+            }
+            if (cell.Materialized is not float[] rowInput)
+            {
+                ReadOnlySpan<ValueRef> elements = cell.GetArrayElements();
+                float[] copied = new float[elements.Length];
+                for (int i = 0; i < elements.Length; i++)
+                {
+                    if (!elements[i].TryToFloat(out float f))
+                    {
+                        throw new InvalidOperationException(
+                            $"Model '{modelName}': infer() row {row} array element [{i}] is not Float32-coercible.");
+                    }
+                    copied[i] = f;
+                }
+                rowInput = copied;
+            }
+            if (perRowLen < 0) perRowLen = rowInput.Length;
+            else if (rowInput.Length != perRowLen)
+            {
+                // Variable element counts can't be cross-row packed — bail
+                // to per-row dispatch via the static helper. The work done
+                // up to this row is wasted; the alternative is a two-pass
+                // shape check which costs the same in the homogeneous case.
+                return await PerRowFallbackAsync().ConfigureAwait(false);
+            }
+            inputs[row] = rowInput;
+        }
+
+        // Build the packed [B, feature_dims...] tensor. IsBatchableShape
+        // guarantees shape[0] is dynamic and shape[1..] are concrete.
+        TensorSpec inputSpec = session.Inputs[0];
+        int[] shape = new int[inputSpec.Shape.Count];
+        shape[0] = rowCount;
+        for (int i = 1; i < inputSpec.Shape.Count; i++)
+        {
+            shape[i] = inputSpec.Shape[i]!.Value;
+        }
+
+        // Sanity-check the per-row element count against the packed shape.
+        long expectedPerRow = 1;
+        for (int i = 1; i < shape.Length; i++) expectedPerRow *= shape[i];
+        if (expectedPerRow != perRowLen)
+        {
+            // Per-row input doesn't match the session's declared per-row
+            // shape product — fall back so the per-row path's ResolveShape
+            // produces the precise error message.
+            return await PerRowFallbackAsync().ConfigureAwait(false);
+        }
+
+        float[] packed = new float[(long)rowCount * perRowLen];
+        for (int row = 0; row < rowCount; row++)
+        {
+            Buffer.BlockCopy(
+                inputs[row], 0,
+                packed, row * perRowLen * sizeof(float),
+                perRowLen * sizeof(float));
+        }
+
+        TensorSpec outputSpec = session.Outputs[0];
+        TensorBag inputBag = session.CreateInputBag();
+        TensorBag? outputBag = null;
+        try
+        {
+            inputBag.Add<float>(inputSpec.Name, DataKind.Float32, shape, packed);
+            outputBag = await session.RunAsync(inputBag, cancellationToken).ConfigureAwait(false);
+
+            if (!outputBag.TryGet(outputSpec.Name, out IInferenceTensor outputTensor))
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer() batched dispatch session returned no tensor "
+                    + $"named '{outputSpec.Name}' (declared first output).");
+            }
+
+            ReadOnlySpan<float> outputSpan = outputTensor.AsSpan<float>();
+            if (outputSpan.Length % rowCount != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer() batched output element count "
+                    + $"{outputSpan.Length} is not divisible by row count {rowCount}; "
+                    + "expected B rows × M output elements after batched dispatch.");
+            }
+            int outputPerRow = outputSpan.Length / rowCount;
+            ValueRef[] results = new ValueRef[rowCount];
+            for (int row = 0; row < rowCount; row++)
+            {
+                float[] rowOutput = outputSpan.Slice(row * outputPerRow, outputPerRow).ToArray();
+                results[row] = outputPerRow == 1
+                    ? ValueRef.FromFloat32(rowOutput[0])
+                    : ValueRef.FromPrimitiveArray(rowOutput, DataKind.Float32);
+            }
+            return results;
+        }
+        finally
+        {
+            inputBag.Dispose();
+            outputBag?.Dispose();
+        }
+
+        // Local helper. The captures (session, valueColumn, rowCount,
+        // cancellationToken) come from the enclosing method's parameters
+        // — no per-row state from the partially-built `inputs` array
+        // escapes; the fallback re-evaluates from the original column.
+        ValueTask<ValueRef[]> PerRowFallbackAsync()
+        {
+            return ScalarFunctionBatchHelpers.DefaultLoop(
+                Instance, [valueColumn], rowCount, default!, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Returns whether the session's input shape admits cross-row batching:
+    /// rank ≥ 2 with a dynamic leading dim and concrete non-leading dims —
+    /// the canonical <c>[batch, feature_dims...]</c> shape used by ONNX
+    /// classifiers / embedders / recognizers. Mirrors the legacy
+    /// <c>InferOperator.IsBatchableShape</c> gate.
+    /// </summary>
+    private static bool IsBatchableShape(TensorSpec spec)
+    {
+        if (spec.Shape.Count < 2) return false;
+        if (spec.Shape[0] is not null) return false;
+        for (int i = 1; i < spec.Shape.Count; i++)
+        {
+            if (spec.Shape[i] is null) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Shared singleton for the fallback closure; <see cref="InferFunction"/>
+    /// is stateless so one instance suffices for every dispatch site.
+    /// </summary>
+    private static readonly InferFunction Instance = new();
+
     /// <summary>
     /// Reader delegate for the multi-step <see cref="DispatchAndReadAsync"/>
     /// helper — decides how to package the post-Run output bag into a
@@ -253,11 +465,18 @@ public sealed class InferFunction : IFunction, IScalarFunction
         {
             AddInputTensor(inputBag, inputSpec, arg, model.QualifiedName.ToString(), explicitShape);
 
+            ExecutionTracer.Write($"[infer] {model.QualifiedName}.{functionName}: pre-Run single-input '{inputSpec.Name}' kind={inputSpec.ElementKind}");
             outputBag = await session
                 .RunAsync(inputBag, cancellationToken)
                 .ConfigureAwait(false);
+            ExecutionTracer.Write($"[infer] {model.QualifiedName}.{functionName}: post-Run outputs={session.Outputs.Count}");
 
             return reader(session, outputBag, frame.Types, model.QualifiedName.ToString());
+        }
+        catch (Exception ex)
+        {
+            ExecutionTracer.Write($"[infer] {model.QualifiedName}.{functionName}: THREW {ex.GetType().Name}: {ex.Message}");
+            throw;
         }
         finally
         {
@@ -373,11 +592,18 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 AddInputTensor(inputBag, inputSpec, inputFields[fieldIdx], modelName, explicitShape);
             }
 
+            ExecutionTracer.Write($"[infer] {modelName}.{functionName}: pre-Run multi-input inputs={session.Inputs.Count}");
             outputBag = await session
                 .RunAsync(inputBag, cancellationToken)
                 .ConfigureAwait(false);
+            ExecutionTracer.Write($"[infer] {modelName}.{functionName}: post-Run outputs={session.Outputs.Count}");
 
             return reader(session, outputBag, frame.Types, modelName);
+        }
+        catch (Exception ex)
+        {
+            ExecutionTracer.Write($"[infer] {modelName}.{functionName}: THREW {ex.GetType().Name}: {ex.Message}");
+            throw;
         }
         finally
         {

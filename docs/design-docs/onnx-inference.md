@@ -117,28 +117,32 @@ Once a `ModelDescriptor` is in `DeclaredModels`, queries need to be able to *cal
 
 ---
 
-## Layer 4: the hoister — three-way dispatch
+## Layer 4: the hoister — two-way dispatch
 
-**Location**: `src/DatumIngest/Execution/ModelInvocationHoister.cs`, `src/DatumIngest/Execution/ModelBodyLowerer.cs`, `src/DatumIngest/Models/ProceduralModelAdapter.cs`
+**Location**: `src/DatumIngest/Execution/ModelInvocationHoister.cs`, `src/DatumIngest/Models/ProceduralModelAdapter.cs`
 
-The planner lifts every `models.X(...)` call out of expressions into a dedicated `ModelInvocationOperator` (MIO) node — batched dispatch, residency leases, output-struct shape stamping. The post-pass `ModelBodyLowerer` then either keeps MIO in place or rewrites it into a column pipeline of `ProjectOperator` + `InferOperator` nodes. Three resulting paths:
+The planner lifts every `models.X(...)` call out of expressions into a dedicated `ModelInvocationOperator` (MIO) node — batched dispatch, residency leases, output-struct shape stamping. Both built-in `IModel` classes and SQL-defined `CREATE MODEL` bodies route through MIO; the only difference is which `IModel` MIO ultimately dispatches to:
 
-| Source shape | Hoister output | Lowerer post-pass | Result |
-|---|---|---|---|
-| Built-in `IModel` | MIO | leave (no descriptor in `DeclaredModels`) | MIO dispatches via `IModel.InferBatchAsync` with full batching + residency + tracer + RowLimit + streaming sink + `PreferredBatchSize` sub-batching. |
-| SQL-defined, **straight-line** body | MIO targeting `ProceduralModelAdapter` | rewrite to `Project(__decl_n = expr) → InferOperator → Project(__return = expr)` chain | Real batched `Session.Run` packing when shapes line up. This is the primary path for SQL-defined detectors. |
-| SQL-defined, **branchy** body (`IF`/`WHILE`/`SET`-after-`DECLARE`/struct DECLARE/multi-input `infer`) | MIO targeting `ProceduralModelAdapter` | leave | Adapter runs the procedural body per row inside `InferBatchAsync`, gets operator-boundary parity (tracer, residency lease, etc.) without unifying with the column pipeline. |
+| Source shape | MIO dispatches via | Notes |
+|---|---|---|
+| Built-in `IModel` | the class itself (e.g. `MidasSmallModel.InferBatchAsync`) | Direct path. Full batching + residency + tracer + RowLimit + streaming sink + `PreferredBatchSize` sub-batching. |
+| SQL-defined `CREATE MODEL` body | `ProceduralModelAdapter.InferBatchAsync`, which wraps `ProceduralModelFunction` per row | Same MIO features. The body executes inside one procedural call per row, with DECLARE bindings living in a per-call `VariableScope` — image / tensor / struct values bound once and reused across body statements without re-stabilization through arena boundaries. |
 
-`ModelBodyLowerer.BodyIsStraightLine` is the gating predicate. It rejects:
+The third residual path (scalar `ProceduralModelFunction` with no MIO at all) survives for **non-hoisted call sites**: `models.X(...)` inside a UDF body, inside an unhoisted clause, etc. Same per-row scalar adapter, no operator-boundary features. The hoister prefers MIO for top-level `SELECT` call sites.
 
-- DECLARE with no initializer (typed-null DECLAREs).
-- Non-DECLARE / non-RETURN statements (IF/WHILE/SET/CALL/BLOCK/BREAK/CONTINUE/mid-body RETURN).
-- DECLAREs whose declared type annotation starts with `Struct` (cheap textual check). Struct-typed locals can be referenced by name in downstream expressions where the lowerer would need to thread struct metadata through column refs — easier to bail than to extend `InferOperator` to unpack struct columns.
-- Any `infer()` call with a struct-literal argument anywhere in its argument list. These signal multi-input dispatch, which the per-row scalar `InferFunction` path handles natively via `ExecuteMultiInputAsync` — the lowerer routes through MIO + adapter instead of trying to teach `InferOperator` multi-input.
+### Cross-row batched dispatch for batchable shapes
 
-The fourth residual path (Option A — scalar `ProceduralModelFunction` with no MIO at all) survives for **non-hoisted call sites**: `models.X(...)` inside a UDF body, inside an unhoisted clause, etc. Same per-row scalar adapter as before, no operator-boundary features. The hoister prefers MIO (and then the lowerer prefers Option D) for top-level `SELECT` call sites.
+For ONNX sessions whose input is rank-≥2 with a dynamic leading dim (`[batch, feature_dims...]`) — BERT-family embedders, MobileNet-style classifiers — `InferFunction.ExecuteBatchAsync` (a columnar `IScalarFunction.ExecuteBatchAsync` override) packs N rows into one `[B, ...]` tensor and calls `Session.Run` once per RowBatch. Falls back to per-row dispatch for non-batchable shapes (rank 1, all-concrete, multi-dynamic), multi-input struct args, explicit per-row shape args, or rows of unequal sizes.
 
-Active follow-up list with effort estimates lives in [batched-SQL-defined-models memo](../../memory/project_batched_sql_defined_models.md). Read that before extending any of these paths.
+### Why we *removed* the column-pipeline lowering path
+
+An earlier "Step 3" added a post-pass `ModelBodyLowerer` that rewrote a SQL model's straight-line body into a chain of `ProjectOperator(__decl_n = expr) → InferOperator → ProjectOperator(__return = expr)` nodes. Real batched `Session.Run` packing fell out naturally as the structural shape. The path was removed in 2026-05-19 because:
+
+- **Repeated arena stabilization of source columns.** Each operator boundary called `DataValueRetention.Stabilize` on every passed-through column, including the `Image` parameter. For sidecar-backed Images that meant repeated bytes copies (or worse, sidecar re-decode) per row. With ~5 operators between Scan and the consumer, a 1024-row LIMIT 100 MiDaS query measured ~870s end-to-end vs ~38s for the same query when the body ran inside a single MIO via `ProceduralModelFunction`.
+- **No `RowLimit` propagation.** `ModelInvocationOperator` honours `context.RowLimit` and trims incoming batches; `InferOperator` did not, so LIMIT 100 still processed a full 1024-row source page.
+- **Two dispatch paths for one logical operation.** Bugs landed on `InferFunction` but not `InferOperator` (e.g. the 0xC0000005 lifecycle crash) because the two paths drifted.
+
+Cross-row batching for genuinely batchable shapes was preserved by moving the packing logic to `InferFunction.ExecuteBatchAsync` (one function, one place, used by both the MIO path and any future ExpressionEvaluator-batched dispatch). The `ModelBodyLowerer.LowerSqlDefinedBodies` entry point survives as the hook for future per-model plan rewrites but is currently a no-op walk.
 
 ---
 

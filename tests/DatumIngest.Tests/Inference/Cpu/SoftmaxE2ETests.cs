@@ -116,10 +116,9 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
     /// Step 2 probe: a SQL-defined model whose body is NOT straight-line
     /// falls back through <c>ModelInvocationOperator</c> + the
     /// <c>ProceduralModelAdapter</c>. The tracer fires for this path —
-    /// proving the step-2 adapter wiring still works for bodies that
-    /// step 3's lowerer can't take. Straight-line bodies lower into
-    /// <see cref="InferOperator"/> directly and never hit MIO; that path
-    /// is covered by the lowered-plan probe below.
+    /// proving the step-2 adapter wiring still works. Every SQL-defined
+    /// model body now flows through this MIO path; the historical
+    /// straight-line-body lowering was removed (see the next test).
     /// </summary>
     [Fact]
     public async Task Softmax_NonStraightLineBody_RoutesThroughMioWithTracer()
@@ -163,15 +162,18 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
     }
 
     /// <summary>
-    /// Step 3 probe: a straight-line SQL-defined model body lowers into
-    /// a plan with <see cref="InferOperator"/> nodes and no
-    /// <see cref="ModelInvocationOperator"/>. Walking the plan's
-    /// <c>ExplainTree</c> proves the body lowered — without step 3's
-    /// post-pass the same query would surface a "Model Invocation"
-    /// operator instead.
+    /// Every SQL-defined model body — straight-line or not — now runs
+    /// through <see cref="ModelInvocationOperator"/> + <c>ProceduralModelAdapter</c>.
+    /// The InferOperator lowering path was deleted because it paid for
+    /// repeated arena retention + sidecar re-decode at every operator
+    /// boundary, measuring ~20× slower per row than the unified MIO path.
+    /// Cross-row batching for batchable shapes now lives on
+    /// <c>InferFunction.ExecuteBatchAsync</c> instead of being structural.
+    /// This test pins the plan shape (Model Invocation node, no Infer) so
+    /// a regression that re-introduces lowering is caught early.
     /// </summary>
     [Fact]
-    public async Task Softmax_StraightLineBody_LowersToInferOperator()
+    public async Task Softmax_StraightLineBody_RoutesThroughModelInvocationOperator()
     {
         string fixturePath = FixturePath();
         Assert.True(File.Exists(fixturePath), $"Fixture missing at {fixturePath}.");
@@ -197,11 +199,11 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
             if (node.OperatorName == "Model Invocation") sawMio = true;
         });
 
-        Assert.True(sawInfer, "Plan tree must contain an Infer operator after lowering a straight-line body.");
-        Assert.False(sawMio, "Plan tree must NOT contain a Model Invocation operator for a straight-line SQL-defined body.");
+        Assert.False(sawInfer, "Plan tree must NOT contain an Infer operator — SQL-defined-body lowering was removed.");
+        Assert.True(sawMio, "Plan tree must contain a Model Invocation operator for SQL-defined model bodies.");
 
-        // Execute too — the lowered plan must produce the same output as
-        // the un-lowered path. Compare against the canonical softmax.
+        // Output correctness — the MIO path must produce the same softmax
+        // result the lowered path used to. Compare against the canonical.
         List<float[]> rows = new();
         await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
         {
@@ -226,13 +228,11 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
     }
 
     /// <summary>
-    /// Regression test for the 2-arg <c>infer(value, shape)</c> path.
-    /// The softmax fixture's input shape is a single dynamic dim
-    /// (<c>[None]</c>), so a body that passes an explicit shape exercises
-    /// the lowerer's 2-arg detection + the InferOperator's per-row
-    /// shape column without needing a multi-dynamic-dim ONNX. The
-    /// explicit shape <c>[3]</c> matches the 3-element softmax input,
-    /// so output is identical to the 1-arg form.
+    /// Regression test for the 2-arg <c>infer(value, shape)</c> path. The
+    /// softmax fixture's input shape is a single dynamic dim, and the
+    /// explicit shape <c>[3]</c> matches the 3-element softmax input, so
+    /// output is identical to the 1-arg form. Pinned plan shape: Model
+    /// Invocation node (no Infer node — lowering was removed).
     /// </summary>
     [Fact]
     public async Task Softmax_TwoArgInfer_WithExplicitShape_ProducesSameOutput()
@@ -253,18 +253,12 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
             "SELECT models.softmax_shaped([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
 
         ExplainPlanNode tree = plan.ExplainTree;
-        bool sawInfer = false;
-        bool sawShapeProperty = false;
+        bool sawMio = false;
         WalkPlan(tree, n =>
         {
-            if (n.OperatorName == "Infer")
-            {
-                sawInfer = true;
-                if (n.Properties?.ContainsKey("shape") == true) sawShapeProperty = true;
-            }
+            if (n.OperatorName == "Model Invocation") sawMio = true;
         });
-        Assert.True(sawInfer, "Plan tree must contain an Infer operator.");
-        Assert.True(sawShapeProperty, "Infer operator must record the shape column when 2-arg infer() is used.");
+        Assert.True(sawMio, "Plan tree must contain a Model Invocation operator for SQL-defined model bodies.");
 
         List<float[]> rows = new();
         await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
@@ -285,32 +279,18 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
     }
 
     /// <summary>
-    /// Regression test for the synthesized-column-passthrough bug
-    /// (2026-05-16). A SQL-defined model body that references an earlier
-    /// DECLARE's value <em>across an intervening DECLARE</em> requires
-    /// each Project step to pass the prior synthesized hidden column
-    /// through. Without explicit passthrough, <c>SELECT *</c> expansion
-    /// in <see cref="ProjectOperator"/> filters <c>__</c>-prefixed names
-    /// out, so the column survives one step (the next Project's expression
-    /// reads from the upstream row directly) but vanishes from the second-
-    /// next Project's upstream — its expression can't find it.
+    /// Multi-DECLARE body smoke test. Historically this exercised the
+    /// lowered-path synthesized-column-passthrough invariant (each
+    /// intermediate ProjectOperator passing every prior <c>__mb_*</c>
+    /// column through so later DECLAREs could reference earlier ones).
+    /// That invariant is moot now — lowering was removed and bodies
+    /// run row-at-a-time inside a single <see cref="ProceduralModelFunction"/>
+    /// where DECLARE bindings live in a per-call <c>VariableScope</c>
+    /// rather than as columns. The test stays as a smoke check that
+    /// multi-DECLARE bodies still produce correct output via MIO.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <strong>The shape that triggers it.</strong> The PP-OCR-det body
-    /// has this pattern: <c>DECLARE resized = ...; DECLARE rh = image_height(resized);
-    /// DECLARE rw = image_width(resized); DECLARE tensor = image_to_tensor_chw(resized, ...)</c>.
-    /// <c>tensor</c> references <c>resized</c> after <c>rh</c> and
-    /// <c>rw</c> were declared — <c>__mb_resized</c> is two and three
-    /// Projects back by then. Without explicit passthrough each
-    /// intervening Project drops it.
-    /// </para>
-    /// <para>
-    /// <strong>This regression test mirrors that shape.</strong>
-    /// </para>
-    /// </remarks>
     [Fact]
-    public async Task Softmax_MultiDeclareBody_PreservesSynthesizedColumnsAcrossSteps()
+    public async Task Softmax_MultiDeclareBody_ProducesCorrectOutput()
     {
         string fixturePath = FixturePath();
         Assert.True(File.Exists(fixturePath), $"Fixture missing at {fixturePath}.");
@@ -319,11 +299,6 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         catalog.Add(new InMemoryTableProvider(
             CreatePool(), "data", ["d"], [new object?[] { 1 }]));
 
-        // `original` is referenced by `result` AFTER `dummy1` and `dummy2`
-        // were declared. Without explicit passthrough, the Project for
-        // `dummy2` drops `__mb_..._original` from its output, so the
-        // Project for `result` can't evaluate `ColumnReference(__mb_..._original)`
-        // against its upstream row.
         catalog.Plan(
             $"CREATE MODEL softmax_chained(x Float32[]) RETURNS Float32[] " +
             $"USING 'file://{fixturePath}' " +
@@ -338,18 +313,13 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         IQueryPlan plan = catalog.Plan(
             "SELECT models.softmax_chained([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
 
-        // Confirm we're actually testing the lowered path — without this
-        // assertion the test would silently pass even if the model fell
-        // back to MIO + ProceduralModelAdapter (which doesn't exercise the
-        // synth-column passthrough).
         ExplainPlanNode tree = plan.ExplainTree;
-        bool sawInfer = false;
-        WalkPlan(tree, n => { if (n.OperatorName == "Infer") sawInfer = true; });
-        Assert.True(sawInfer, "Test must run via the lowered path; saw no Infer operator in the plan tree.");
+        bool sawMio = false;
+        WalkPlan(tree, n => { if (n.OperatorName == "Model Invocation") sawMio = true; });
+        Assert.True(sawMio, "Plan tree must contain a Model Invocation operator (lowering removed; only MIO path remains).");
 
-        // Execute end-to-end — the lowered Project chain must keep every
-        // synthesized column alive long enough for every later reference
-        // to resolve.
+        // Execute end-to-end — every DECLARE binding must resolve across
+        // the body's row-at-a-time interpretation.
         List<float[]> rows = new();
         await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
         {

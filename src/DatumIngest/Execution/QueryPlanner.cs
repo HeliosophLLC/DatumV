@@ -193,10 +193,14 @@ public sealed class QueryPlanner
     private QueryOperator Finalize(QueryOperator op)
     {
         QueryOperator afterModelHoist = ModelInvocationHoister.Hoist(op, _catalog.Models);
-        // Post-pass: replace MIOs that target SQL-defined straight-line bodies
-        // with a lowered chain of ProjectOperator + InferOperator nodes. Non-
-        // lowerable bodies stay on the MIO + ProceduralModelAdapter path from
-        // step 2. Built-in models always stay on MIO.
+        // Post-pass entry point. Historically this lowered SQL-defined
+        // straight-line bodies into a chain of ProjectOperator + InferOperator
+        // nodes for cross-row batching; that path was removed because the
+        // multi-operator pipeline paid for arena retention + sidecar
+        // re-decode at every boundary (measured ~20× slower per row than
+        // the unified MIO + ProceduralModelAdapter path). The pass is kept
+        // as a call site so per-model rewrites that DO benefit from plan-
+        // shape changes have a hook; currently it's a no-op walk.
         QueryOperator afterBodyLower = ModelBodyLowerer.LowerSqlDefinedBodies(
             afterModelHoist, _catalog.DeclaredModels);
         return CommonSubexpressionEliminator.Eliminate(afterBodyLower, _functionRegistry);

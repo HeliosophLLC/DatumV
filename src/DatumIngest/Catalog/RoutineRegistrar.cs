@@ -1455,6 +1455,16 @@ internal sealed class RoutineRegistrar
         if (models is null) return;
 
         ProceduralModelAdapter iModelAdapter = new(descriptor, _functions);
+        // Estimate VRAM as on-disk file size × 1.2 — same heuristic the
+        // C# builtin path uses (ModelResidencyManager.DefaultFileSizeMultiplier).
+        // Weights dominate the resident footprint; the 20% slack covers ORT's
+        // session metadata + per-input/output tensor buffers. Without this,
+        // EstimatedVramBytes was 0, making every SQL-defined model invisible
+        // to the residency manager's admission control — multiple models would
+        // happily co-load past dedicated VRAM and spill into shared memory,
+        // which the NVIDIA driver mishandles into native crashes inside
+        // InferenceSession.Run.
+        long estimatedVram = EstimateFileSizeBytes(descriptor.ResolvedUsingPath);
         ModelCatalogEntry entry = new(
             Name: descriptor.Name,
             Backend: "sql",
@@ -1464,7 +1474,7 @@ internal sealed class RoutineRegistrar
             IsDeterministic: iModelAdapter.IsDeterministic,
             Loader: _ => iModelAdapter,
             OptionalArgKinds: iModelAdapter.OptionalKinds.Count > 0 ? iModelAdapter.OptionalKinds : null,
-            EstimatedVramBytes: 0,
+            EstimatedVramBytes: estimatedVram,
             DisplayName: descriptor.QualifiedName.ToString());
 
         if (replace)
@@ -1675,6 +1685,32 @@ internal sealed class RoutineRegistrar
                     $"Nested DROP PROCEDURE '{dropProc.Name}' is not allowed inside a procedure body.");
             default:
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Reads the on-disk size of the model bundle and applies the same
+    /// 1.2× multiplier the C# builtin path uses to size resident VRAM.
+    /// Returns 0 (forces the admission manager to treat the load as
+    /// unknown-size) when the file is missing or unreadable rather than
+    /// throwing — registration is past the point where we know the file
+    /// existed at <c>CREATE MODEL</c> time, so a stat failure here is a
+    /// rare race we'd rather log around than abort.
+    /// </summary>
+    private static long EstimateFileSizeBytes(string? resolvedPath)
+    {
+        if (string.IsNullOrEmpty(resolvedPath)) return 0;
+        try
+        {
+            FileInfo info = new(resolvedPath);
+            if (!info.Exists) return 0;
+            // 1.2× — matches the builtin ModelCatalogEntry estimates and the
+            // residency manager's own default multiplier.
+            return (long)(info.Length * 1.2);
+        }
+        catch
+        {
+            return 0;
         }
     }
 

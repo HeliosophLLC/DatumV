@@ -67,6 +67,51 @@ public interface IScalarFunction
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Columnar batch entry-point: evaluates the function for
+    /// <paramref name="rowCount"/> rows in one call. The default
+    /// implementation loops calling <see cref="ExecuteAsync"/> row by row,
+    /// so every existing function works without override. Functions whose
+    /// dispatch benefits from cross-row work — model inference (pack rows
+    /// into <c>[B, ...]</c> and run one <c>Session.Run</c>), SIMD scalar
+    /// arithmetic (Vector&lt;T&gt; over a column), bulk image ops with
+    /// reusable scratch — override to do the work efficiently then return
+    /// per-row results in source order.
+    /// </summary>
+    /// <param name="argumentColumns">
+    /// One <see cref="ReadOnlyMemory{ValueRef}"/> per declared parameter,
+    /// in declaration order. Each column has length <paramref name="rowCount"/>;
+    /// <c>argumentColumns[paramIdx].Span[rowIdx]</c> is the value of the
+    /// <c>paramIdx</c>th parameter on the <c>rowIdx</c>th row.
+    /// </param>
+    /// <param name="rowCount">Number of rows in each column.</param>
+    /// <param name="frame">
+    /// Evaluation frame shared across all rows in the batch. Frame state
+    /// that varies per row (<see cref="EvaluationFrame.Row"/>) is NOT
+    /// rebound by the default loop — overrides that need per-row frame
+    /// context must rebind themselves via <see cref="EvaluationFrame.WithRow"/>.
+    /// Frame state that's invariant across the batch (current model,
+    /// sidecar registry, type registry) is correct as-is.
+    /// </param>
+    /// <param name="cancellationToken">Cooperative cancellation.</param>
+    /// <returns>
+    /// Per-row results in the same order as the input columns; length
+    /// equals <paramref name="rowCount"/>.
+    /// </returns>
+    /// <remarks>
+    /// The columnar shape is deliberate: per-parameter columns let
+    /// overrides walk one column at a time (e.g. pack a Float32[] column
+    /// into a single packed tensor) without per-row argument-tuple
+    /// unpacking. The default loop pays that unpacking cost since it has
+    /// to call the row-major <see cref="ExecuteAsync"/> anyway.
+    /// </remarks>
+    ValueTask<ValueRef[]> ExecuteBatchAsync(
+        ReadOnlyMemory<ValueRef>[] argumentColumns,
+        int rowCount,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+        => ScalarFunctionBatchHelpers.DefaultLoop(this, argumentColumns, rowCount, frame, cancellationToken);
+
+    /// <summary>
     /// Cost weight of a single invocation in Query Units (QU). Used for
     /// billing, governance budgets, and pre-execution cost estimation.
     /// </summary>
