@@ -614,6 +614,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.DepthMapToImageFunction>();
         registry.RegisterScalar<Scalar.Image.ImageCropFunction>();
         registry.RegisterScalar<Scalar.Image.ImageCutoutFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageMultiplyFunction>();
         registry.RegisterScalar<Scalar.Image.ImageDrawBoundingBoxesFunction>();
         registry.RegisterScalar<Scalar.Image.ApplyColormapFunction>();
         registry.RegisterScalar<Scalar.Image.ImageWidthFunction>();
