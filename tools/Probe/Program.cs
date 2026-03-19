@@ -58,26 +58,25 @@ using Microsoft.Extensions.Logging.Abstractions;
 //                             Each --also statement gets its own --repeat-count
 //                             iteration too.
 //
-// Tracing:
-//   Set the DATUM_TRACE_FILE env var to a path before invocation to enable
-//   ExecutionTracer output (includes model dispatch + image-to-tensor +
-//   residency events when those sites are instrumented).
-//
 // Live execution diagnostics:
 //   --activity-log <N>        Enable a RecentActivityLog with capacity N (default
 //                             100 when the flag is passed without a value).
 //                             Press Ctrl+C during a hung query to dump:
-//                               1. CurrentStack — the live operator stack at
-//                                  the moment of cancellation (leaf first).
-//                               2. RecentActivityLog — the last N completed
-//                                  operator spans with durations.
+//                               1. Live operators — the live operator stack at
+//                                  the moment of cancellation, sorted oldest
+//                                  first (leaf = where execution is parked).
+//                               2. Recent activity — the last N completed
+//                                  spans (operator pulls + scalar function
+//                                  dispatches) with parent linkage.
 //                             Useful for "where is the engine right now?"
+//   --activity-source <name>  Repeatable. Filter --activity-log output to
+//                             only show spans from sources named <name>.
+//                             Accepts the short forms "op" (operator pulls)
+//                             and "fn" (scalar function calls), or the full
+//                             source name "DatumIngest.Operators" /
+//                             "DatumIngest.Scalars". Omit to see all.
 
 Console.OutputEncoding = Encoding.UTF8;
-if (Environment.GetEnvironmentVariable("DATUM_TRACE_FILE") is { Length: > 0 } tracePath)
-{
-    ExecutionTracer.Initialize(tracePath);
-}
 
 Options opts;
 try
@@ -241,6 +240,10 @@ Console.CancelKeyPress += (_, e) =>
     else
     {
         ActivityFrame[] live = activityLog.LiveSnapshot();
+        if (opts.ActivitySources.Count > 0)
+        {
+            live = live.Where(f => opts.ActivitySources.Contains(f.SourceName)).ToArray();
+        }
         if (live.Length == 0)
         {
             Console.Error.WriteLine("  (no operators open — engine is idle)");
@@ -249,17 +252,21 @@ Console.CancelKeyPress += (_, e) =>
         {
             foreach (ActivityFrame f in live)
             {
-                Console.Error.WriteLine($"  {f.Name,-32} elapsed {f.Elapsed.TotalSeconds,8:F3}s");
+                string parent = f.ParentName is null ? "" : $"  ⇐ {f.ParentName}";
+                Console.Error.WriteLine($"  [{ShortSource(f.SourceName)}] {f.Name,-36}{parent}  elapsed {f.Elapsed.TotalSeconds,8:F3}s");
             }
         }
 
-        RecentActivityEntry[] events = activityLog.Snapshot();
+        RecentActivityEntry[] events = opts.ActivitySources.Count > 0
+            ? activityLog.Snapshot(opts.ActivitySources.ToArray())
+            : activityLog.Snapshot();
         Console.Error.WriteLine();
         Console.Error.WriteLine($"── Recent activity (last {events.Length} completed spans) ──");
         foreach (RecentActivityEntry ev in events)
         {
+            string parent = ev.ParentName is null ? "" : $"  ⇐ {ev.ParentName}";
             Console.Error.WriteLine(
-                $"  {ev.StartedAt:HH:mm:ss.fff} {ev.Name,-32} {ev.Duration.TotalMilliseconds,8:F2} ms");
+                $"  {ev.StartedAt:HH:mm:ss.fff} [{ShortSource(ev.SourceName)}] {ev.Name,-36}{parent}  {ev.Duration.TotalMilliseconds,8:F2} ms");
         }
     }
 };
@@ -502,6 +509,13 @@ static string RenderStrings(string[] arr, int preview)
 
 static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
+static string ShortSource(string fullName) => fullName switch
+{
+    "DatumIngest.Operators" => "op",
+    "DatumIngest.Scalars" => "fn",
+    _ => fullName,
+};
+
 sealed record Options(
     string? Sql,
     string? SqlFile,
@@ -515,7 +529,8 @@ sealed record Options(
     bool PrintAll,
     int Repeat,
     List<string> AlsoSql,
-    int? ActivityLogCapacity)
+    int? ActivityLogCapacity,
+    HashSet<string> ActivitySources)
 {
     // Convenience aliases for datasets the author always has available
     // on this machine. Keep the canonical mappings here so flags like
@@ -539,6 +554,7 @@ sealed record Options(
         int repeat = 1;
         List<string> alsoSql = new();
         int? activityLogCapacity = null;
+        HashSet<string> activitySources = new(StringComparer.Ordinal);
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -610,6 +626,15 @@ sealed record Options(
                         activityLogCapacity = 100;
                     }
                     break;
+                case "--activity-source":
+                    if (++i >= args.Length) throw new ArgumentException("--activity-source requires a name.");
+                    activitySources.Add(args[i] switch
+                    {
+                        "op" => "DatumIngest.Operators",
+                        "fn" => "DatumIngest.Scalars",
+                        string s => s,
+                    });
+                    break;
                 default:
                     if (sql is not null) throw new ArgumentException($"Unexpected argument: {arg}");
                     sql = arg;
@@ -622,7 +647,7 @@ sealed record Options(
         if (sql is not null && sqlFile is not null)
             throw new ArgumentException("Specify either positional SQL or --sql-file, not both.");
 
-        return new Options(sql, sqlFile, catalogRoot, modelsDir, noBuiltins, noRehydrate, applySql, tables, limit, printAll, repeat, alsoSql, activityLogCapacity);
+        return new Options(sql, sqlFile, catalogRoot, modelsDir, noBuiltins, noRehydrate, applySql, tables, limit, printAll, repeat, alsoSql, activityLogCapacity, activitySources);
     }
 
     private static (string, string) ParseTableSpec(string spec)

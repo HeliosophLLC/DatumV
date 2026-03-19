@@ -255,8 +255,8 @@ internal static class UnifiedIndexWriter
         Schema schema)
     {
         long sectionStartPos = writer.BaseStream.Position;
-        if (ExecutionTracer.IsEnabled)
-            ExecutionTracer.Write($"ChunkDir.Write  section starts at stream pos {sectionStartPos}");
+        if (DatumActivity.Operators.HasListeners())
+            DatumActivity.Operators.Trace($"ChunkDir.Write  section starts at stream pos {sectionStartPos}");
 
         writer.Write(chunks.Count);
 
@@ -282,8 +282,8 @@ internal static class UnifiedIndexWriter
         }
 
         long chunkFixedFieldsPos = writer.BaseStream.Position;
-        if (ExecutionTracer.IsEnabled)
-            ExecutionTracer.Write(
+        if (DatumActivity.Operators.HasListeners())
+            DatumActivity.Operators.Trace(
                 $"ChunkDir.Write  chunkFixedFields at stream pos {chunkFixedFieldsPos} (rel {chunkFixedFieldsPos - sectionStartPos}), " +
                 $"chunks={chunks.Count}, zoneMapColumns={zoneMapColumns.Count}");
 
@@ -295,8 +295,8 @@ internal static class UnifiedIndexWriter
         }
 
         long zoneMapsStartPos = writer.BaseStream.Position;
-        if (ExecutionTracer.IsEnabled)
-            ExecutionTracer.Write(
+        if (DatumActivity.Operators.HasListeners())
+            DatumActivity.Operators.Trace(
                 $"ChunkDir.Write  zoneMaps at stream pos {zoneMapsStartPos} (rel {zoneMapsStartPos - sectionStartPos}), " +
                 $"per-chunk width emitted={(zoneMapsStartPos - chunkFixedFieldsPos) / Math.Max(1, chunks.Count)}");
 
@@ -329,12 +329,12 @@ internal static class UnifiedIndexWriter
                 writer.Write(statistics?.EstimatedCardinality ?? 0L);
             }
 
-            if (ExecutionTracer.IsEnabled)
+            if (DatumActivity.Operators.HasListeners())
             {
                 long colBytes = writer.BaseStream.Position - colStartPos;
                 int expectedStride = 2 * (1 + keyWidth) + 24;
                 long actualStride = chunks.Count > 0 ? colBytes / chunks.Count : 0;
-                ExecutionTracer.Write(
+                DatumActivity.Operators.Trace(
                     $"ChunkDir.Write  col='{columnName}' kind={kind} keyWidth={keyWidth}  " +
                     $"bytes={colBytes}  actualStride={actualStride}  expectedStride={expectedStride}  " +
                     $"{(actualStride == expectedStride ? "OK" : "STRIDE MISMATCH")}");
@@ -342,8 +342,8 @@ internal static class UnifiedIndexWriter
         }
 
         long stringTablePos = writer.BaseStream.Position;
-        if (ExecutionTracer.IsEnabled)
-            ExecutionTracer.Write(
+        if (DatumActivity.Operators.HasListeners())
+            DatumActivity.Operators.Trace(
                 $"ChunkDir.Write  stringTable at stream pos {stringTablePos} (rel {stringTablePos - sectionStartPos}), " +
                 $"entries={stringTableEntries.Count}");
 
@@ -356,10 +356,10 @@ internal static class UnifiedIndexWriter
             writer.Write(entry);
         }
 
-        if (ExecutionTracer.IsEnabled)
+        if (DatumActivity.Operators.HasListeners())
         {
             long endPos = writer.BaseStream.Position;
-            ExecutionTracer.Write(
+            DatumActivity.Operators.Trace(
                 $"ChunkDir.Write  section ends at stream pos {endPos} (total section bytes {endPos - sectionStartPos})");
         }
     }

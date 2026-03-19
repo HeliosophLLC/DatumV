@@ -91,10 +91,10 @@ internal sealed class SpillCoordinator : IDisposable
             partitionCount: _partitionCount);
         _partitionBuffers = new RowBatch?[_partitionCount];
 
-        if (ExecutionTracer.IsEnabled)
+        if (DatumActivity.Operators.HasListeners())
         {
-            ExecutionTracer.Write(
-                $"GROUP BY spill start  budget={ExecutionTracer.FormatBytes(memoryBudget)}  estimated={ExecutionTracer.FormatBytes(estimatedMemory)}  groups={currentGroupCount}");
+            DatumActivity.Operators.Trace(
+                $"GROUP BY spill start  budget={DatumActivity.FormatBytes(memoryBudget)}  estimated={DatumActivity.FormatBytes(estimatedMemory)}  groups={currentGroupCount}");
         }
     }
 

@@ -465,17 +465,17 @@ public sealed class InferFunction : IFunction, IScalarFunction
         {
             AddInputTensor(inputBag, inputSpec, arg, model.QualifiedName.ToString(), explicitShape);
 
-            ExecutionTracer.Write($"[infer] {model.QualifiedName}.{functionName}: pre-Run single-input '{inputSpec.Name}' kind={inputSpec.ElementKind}");
+            DatumActivity.Scalars.Trace($"[infer] {model.QualifiedName}.{functionName}: pre-Run single-input '{inputSpec.Name}' kind={inputSpec.ElementKind}");
             outputBag = await session
                 .RunAsync(inputBag, cancellationToken)
                 .ConfigureAwait(false);
-            ExecutionTracer.Write($"[infer] {model.QualifiedName}.{functionName}: post-Run outputs={session.Outputs.Count}");
+            DatumActivity.Scalars.Trace($"[infer] {model.QualifiedName}.{functionName}: post-Run outputs={session.Outputs.Count}");
 
             return reader(session, outputBag, frame.Types, model.QualifiedName.ToString());
         }
         catch (Exception ex)
         {
-            ExecutionTracer.Write($"[infer] {model.QualifiedName}.{functionName}: THREW {ex.GetType().Name}: {ex.Message}");
+            DatumActivity.Scalars.Trace($"[infer] {model.QualifiedName}.{functionName}: THREW {ex.GetType().Name}: {ex.Message}");
             throw;
         }
         finally
@@ -592,17 +592,17 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 AddInputTensor(inputBag, inputSpec, inputFields[fieldIdx], modelName, explicitShape);
             }
 
-            ExecutionTracer.Write($"[infer] {modelName}.{functionName}: pre-Run multi-input inputs={session.Inputs.Count}");
+            DatumActivity.Scalars.Trace($"[infer] {modelName}.{functionName}: pre-Run multi-input inputs={session.Inputs.Count}");
             outputBag = await session
                 .RunAsync(inputBag, cancellationToken)
                 .ConfigureAwait(false);
-            ExecutionTracer.Write($"[infer] {modelName}.{functionName}: post-Run outputs={session.Outputs.Count}");
+            DatumActivity.Scalars.Trace($"[infer] {modelName}.{functionName}: post-Run outputs={session.Outputs.Count}");
 
             return reader(session, outputBag, frame.Types, modelName);
         }
         catch (Exception ex)
         {
-            ExecutionTracer.Write($"[infer] {modelName}.{functionName}: THREW {ex.GetType().Name}: {ex.Message}");
+            DatumActivity.Scalars.Trace($"[infer] {modelName}.{functionName}: THREW {ex.GetType().Name}: {ex.Message}");
             throw;
         }
         finally

@@ -125,8 +125,8 @@ internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
         Dictionary<string, int> columnIndexByName;
         string[]? stringTable;
 
-        if (ExecutionTracer.IsEnabled)
-            ExecutionTracer.Write(
+        if (DatumActivity.Operators.HasListeners())
+            DatumActivity.Operators.Trace(
                 $"ChunkDir.Read   section at absolute offset {sectionOffset}, length {sectionLength}");
 
         using (MemoryMappedViewStream stream = memoryMappedFile.CreateViewStream(
@@ -156,8 +156,8 @@ internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
             // Chunk fixed fields start immediately after the column headers.
             chunkFixedFieldsOffset = sectionOffset + stream.Position;
 
-            if (ExecutionTracer.IsEnabled)
-                ExecutionTracer.Write(
+            if (DatumActivity.Operators.HasListeners())
+                DatumActivity.Operators.Trace(
                     $"ChunkDir.Read   chunkFixedFields at stream pos {stream.Position} (abs {chunkFixedFieldsOffset}), " +
                     $"chunks={chunkCount}, zoneMapColumns={zoneMapColumnCount}, perChunkWidth={ChunkFixedFieldWidth}");
 
@@ -165,8 +165,8 @@ internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
             long zoneMapStart = chunkFixedFieldsOffset + (long)chunkCount * ChunkFixedFieldWidth;
             long currentZoneMapOffset = zoneMapStart;
 
-            if (ExecutionTracer.IsEnabled)
-                ExecutionTracer.Write(
+            if (DatumActivity.Operators.HasListeners())
+                DatumActivity.Operators.Trace(
                     $"ChunkDir.Read   zoneMaps at stream pos {zoneMapStart - sectionOffset} (abs {zoneMapStart})");
 
             for (int columnIndex = 0; columnIndex < zoneMapColumnCount; columnIndex++)
@@ -174,8 +174,8 @@ internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
                 ZoneMapColumnDescriptor column = columns[columnIndex];
                 columns[columnIndex] = column with { ZoneMapBaseOffset = currentZoneMapOffset };
 
-                if (ExecutionTracer.IsEnabled)
-                    ExecutionTracer.Write(
+                if (DatumActivity.Operators.HasListeners())
+                    DatumActivity.Operators.Trace(
                         $"ChunkDir.Read   col='{column.Name}' kind={column.Kind} keyWidth={column.KeyWidth}  " +
                         $"stride={column.EntryStride}  baseAbs={currentZoneMapOffset}  totalBytes={(long)chunkCount * column.EntryStride}");
 
@@ -185,8 +185,8 @@ internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
             // Read string table (after all zone maps).
             long stringTableStreamPosition = currentZoneMapOffset - sectionOffset;
 
-            if (ExecutionTracer.IsEnabled)
-                ExecutionTracer.Write(
+            if (DatumActivity.Operators.HasListeners())
+                DatumActivity.Operators.Trace(
                     $"ChunkDir.Read   stringTable at stream pos {stringTableStreamPosition} (abs {currentZoneMapOffset}), " +
                     $"sectionLength={sectionLength}, remaining={sectionLength - stringTableStreamPosition}");
 
@@ -203,8 +203,8 @@ internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
             int stringTableEntryCount = reader.ReadInt32();
             stringTable = null;
 
-            if (ExecutionTracer.IsEnabled)
-                ExecutionTracer.Write($"ChunkDir.Read   stringTable count={stringTableEntryCount}");
+            if (DatumActivity.Operators.HasListeners())
+                DatumActivity.Operators.Trace($"ChunkDir.Read   stringTable count={stringTableEntryCount}");
 
             if (stringTableEntryCount > 0)
             {

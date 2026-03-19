@@ -208,9 +208,9 @@ public sealed class MergeJoinOperator : QueryOperator
         bool hasLeft = await AdvanceLeftCursorAsync().ConfigureAwait(false);
         bool hasRight = await AdvanceRightCursorAsync().ConfigureAwait(false);
 
-        if (ExecutionTracer.IsEnabled)
+        if (DatumActivity.Operators.HasListeners())
         {
-            ExecutionTracer.Write(
+            DatumActivity.Operators.Trace(
                 $"MergeJoin  start  type={_joinType}  leftKey={_leftSortColumn}  rightKey={_rightSortColumn}");
         }
 
@@ -411,9 +411,9 @@ public sealed class MergeJoinOperator : QueryOperator
 
             if (writer.Flush() is RowBatch trailing) yield return trailing;
 
-            if (ExecutionTracer.IsEnabled)
+            if (DatumActivity.Operators.HasListeners())
             {
-                ExecutionTracer.Write(
+                DatumActivity.Operators.Trace(
                     $"MergeJoin  done  type={_joinType}");
             }
         }

@@ -222,8 +222,8 @@ public sealed class ScanOperator : QueryOperator
         CancellationToken cancellationToken = context.CancellationToken;
         SourceIndex? sourceIndex = TableProvider.GetSourceIndex();
 
-        ExecutionTracer.Write($"SCAN start  table={TableProvider.QualifiedName}  hasIndex={sourceIndex is not null}  filterHint={_filterHint is not null}  tableRowCount={TableRowCount}");
-        ExecutionTracer.Write($"SCAN path  table={TableProvider.QualifiedName}  indexPruning={HasIndexPruning}");
+        DatumActivity.Operators.Trace($"SCAN start  table={TableProvider.QualifiedName}  hasIndex={sourceIndex is not null}  filterHint={_filterHint is not null}  tableRowCount={TableRowCount}");
+        DatumActivity.Operators.Trace($"SCAN path  table={TableProvider.QualifiedName}  indexPruning={HasIndexPruning}");
 
         // Datum-format providers may carry a per-file struct type table that
         // needs to be deserialized into this query's TypeRegistry and
@@ -285,7 +285,7 @@ public sealed class ScanOperator : QueryOperator
                 {
                     if (chunkIndex == 0)
                     {
-                        ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=zonemap  table={TableProvider.QualifiedName}  statsKeys=[{string.Join(",", statistics.Keys)}]");
+                        DatumActivity.Operators.Trace($"SCAN PRUNE chunk=0  reason=zonemap  table={TableProvider.QualifiedName}  statsKeys=[{string.Join(",", statistics.Keys)}]");
                     }
                     pruned = true;
                 }
@@ -311,7 +311,7 @@ public sealed class ScanOperator : QueryOperator
 
                         if (!anyMayMatch)
                         {
-                            if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=bloom  table={TableProvider.QualifiedName}");
+                            if (chunkIndex == 0) DatumActivity.Operators.Trace($"SCAN PRUNE chunk=0  reason=bloom  table={TableProvider.QualifiedName}");
                             pruned = true;
                             break;
                         }
@@ -341,7 +341,7 @@ public sealed class ScanOperator : QueryOperator
 
                         if (!anyPresent)
                         {
-                            if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=sorted_join_key  table={TableProvider.QualifiedName}");
+                            if (chunkIndex == 0) DatumActivity.Operators.Trace($"SCAN PRUNE chunk=0  reason=sorted_join_key  table={TableProvider.QualifiedName}");
                             pruned = true;
                             break;
                         }
@@ -355,7 +355,7 @@ public sealed class ScanOperator : QueryOperator
             {
                 if (ShouldPruneWithColumnIndexes(_filterHint, provider, chunkIndex, context.Store))
                 {
-                    if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=column_index  table={TableProvider.QualifiedName}");
+                    if (chunkIndex == 0) DatumActivity.Operators.Trace($"SCAN PRUNE chunk=0  reason=column_index  table={TableProvider.QualifiedName}");
                     pruned = true;
                 }
             }
@@ -366,7 +366,7 @@ public sealed class ScanOperator : QueryOperator
             {
                 if (ShouldPruneWithBitmapIndexes(_filterHint, sourceIndex.BitmapIndexes, chunkIndex, context.Store))
                 {
-                    if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=bitmap  table={TableProvider.QualifiedName}");
+                    if (chunkIndex == 0) DatumActivity.Operators.Trace($"SCAN PRUNE chunk=0  reason=bitmap  table={TableProvider.QualifiedName}");
                     pruned = true;
                 }
             }
@@ -382,7 +382,7 @@ public sealed class ScanOperator : QueryOperator
             }
         }
 
-        ExecutionTracer.Write($"SCAN index pruning  table={TableProvider.QualifiedName}  totalChunks={chunks.Count}  pruned={PrunedIndexChunks}  active={activeRanges.Count}");
+        DatumActivity.Operators.Trace($"SCAN index pruning  table={TableProvider.QualifiedName}  totalChunks={chunks.Count}  pruned={PrunedIndexChunks}  active={activeRanges.Count}");
 
         // Invariant: outputBatch != null ⟺ producer still owns it. Yielding transfers
         // ownership, so we null the local *before* yield. The outer finally cleans up
@@ -398,7 +398,7 @@ public sealed class ScanOperator : QueryOperator
             if (_filterHint is not null
                 && CollectExactSeekPositions(_filterHint, provider, chunks, activeChunkIndexes, context.Store, out int? compositeHits) is List<long> exactPositions)
             {
-                ExecutionTracer.Write($"SCAN exact seek  table={TableProvider.QualifiedName}  positions={exactPositions.Count}");
+                DatumActivity.Operators.Trace($"SCAN exact seek  table={TableProvider.QualifiedName}  positions={exactPositions.Count}");
                 ExactSeekRowsFetched = exactPositions.Count;
                 CompositeIndexSeekHits = compositeHits;
 

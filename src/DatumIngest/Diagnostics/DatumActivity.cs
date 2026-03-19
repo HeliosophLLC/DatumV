@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 
 namespace DatumIngest.Diagnostics;
 
@@ -39,6 +40,18 @@ public static class DatumActivity
     public static readonly ActivitySource Scalars = new("DatumIngest.Scalars");
 
     /// <summary>
+    /// Formats a byte count as a human-readable string (B / KB / MB / GB).
+    /// Convenience helper for trace messages that report memory budgets.
+    /// </summary>
+    public static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024 * 1024):F1} GB",
+        >= 1024L * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
+        >= 1024L => $"{bytes / 1024.0:F1} KB",
+        _ => $"{bytes} B",
+    };
+
+    /// <summary>
     /// Walks <see cref="Activity.Current"/> up through <see cref="Activity.Parent"/>
     /// and returns the live operator stack, leaf first. Useful from
     /// debugger watch windows, exception handlers, or admin endpoints
@@ -52,16 +65,147 @@ public static class DatumActivity
         DateTimeOffset now = DateTimeOffset.UtcNow;
         for (Activity? a = Activity.Current; a is not null; a = a.Parent)
         {
-            frames.Add(new ActivityFrame(a.DisplayName, a.StartTimeUtc, now - a.StartTimeUtc));
+            frames.Add(new ActivityFrame(a.DisplayName, a.Source.Name, a.Parent?.DisplayName, a.StartTimeUtc, now - a.StartTimeUtc));
         }
         return frames;
     }
 }
 
 /// <summary>
-/// A single frame from <see cref="DatumActivity.CurrentStack"/>. Captures
-/// the operator name, when it started, and how long it has been running
-/// at the moment the snapshot was taken (i.e., open-span duration, not
-/// final duration).
+/// A single frame from <see cref="DatumActivity.CurrentStack"/> or
+/// <see cref="RecentActivityLog.LiveSnapshot"/>. Captures the operator
+/// name, the <see cref="ActivitySource"/> it came from
+/// (<c>"DatumIngest.Operators"</c> vs <c>"DatumIngest.Scalars"</c>), the
+/// display name of the parent activity (so callers can reconstruct the
+/// pull chain across threads), and the moment the activity started plus
+/// elapsed time at snapshot.
 /// </summary>
-public readonly record struct ActivityFrame(string Name, DateTimeOffset StartedAt, TimeSpan Elapsed);
+public readonly record struct ActivityFrame(
+    string Name,
+    string SourceName,
+    string? ParentName,
+    DateTimeOffset StartedAt,
+    TimeSpan Elapsed);
+
+/// <summary>
+/// Extensions on <see cref="ActivitySource"/> for emitting one-shot trace
+/// messages as zero-duration spans. Replaces ad-hoc tracer write calls:
+/// the formatted message becomes the span's display name so it appears
+/// in <see cref="RecentActivityLog.Snapshot()"/> alongside the surrounding
+/// operator and scalar spans, and standard trace consumers
+/// (<c>dotnet-trace</c>, OpenTelemetry exporters) pick it up via the
+/// usual <see cref="ActivityListener"/> mechanism.
+/// </summary>
+/// <remarks>
+/// The interpolated-string handler short-circuits when no listener is
+/// attached, so the formatting cost is paid only when something is
+/// actually subscribed. Sites that need to capture state for the message
+/// (e.g. compute <see cref="GC.GetTotalMemory"/> first) should still guard
+/// with <see cref="ActivitySource.HasListeners"/> explicitly because
+/// argument evaluation precedes the handler.
+/// </remarks>
+public static class ActivitySourceTraceExtensions
+{
+    /// <summary>
+    /// Emits a one-shot trace message as a zero-duration span. No-op when
+    /// the source has no listeners.
+    /// </summary>
+    public static void Trace(
+        this ActivitySource source,
+        [InterpolatedStringHandlerArgument(nameof(source))] ref TraceMessageInterpolatedHandler message)
+    {
+        if (!message.IsEnabled) return;
+        Activity? span = source.StartActivity(message.ToStringAndClear());
+        span?.Dispose();
+    }
+
+    /// <summary>
+    /// Non-interpolated overload: emits the supplied static message as a
+    /// zero-duration span. The interpolated handler isn't used for plain
+    /// string literals because the C# compiler binds to the most specific
+    /// overload, so this overload exists explicitly to keep
+    /// <c>source.Trace("static text")</c> call sites compilable.
+    /// </summary>
+    public static void Trace(this ActivitySource source, string message)
+    {
+        if (!source.HasListeners()) return;
+        Activity? span = source.StartActivity(message);
+        span?.Dispose();
+    }
+}
+
+/// <summary>
+/// Interpolated-string handler used by
+/// <see cref="ActivitySourceTraceExtensions.Trace(ActivitySource, ref TraceMessageInterpolatedHandler)"/>
+/// to defer message formatting until after the listener check has confirmed
+/// at least one consumer is attached. When the source has no listeners,
+/// <see cref="IsEnabled"/> is <see langword="false"/> and every
+/// <c>Append*</c> call is a no-op — zero allocation, zero formatting.
+/// </summary>
+[InterpolatedStringHandler]
+public ref struct TraceMessageInterpolatedHandler
+{
+    private DefaultInterpolatedStringHandler _inner;
+
+    /// <summary>
+    /// <see langword="true"/> when the source had at least one listener at
+    /// construction time. Append calls short-circuit when this is false.
+    /// </summary>
+    public bool IsEnabled { get; }
+
+    /// <summary>Compiler-emitted constructor: caller passes literal-length,
+    /// formatted-count, and the trace source whose listener state gates
+    /// formatting work.</summary>
+    public TraceMessageInterpolatedHandler(int literalLength, int formattedCount, ActivitySource source)
+    {
+        IsEnabled = source.HasListeners();
+        if (IsEnabled)
+        {
+            _inner = new DefaultInterpolatedStringHandler(literalLength, formattedCount);
+        }
+    }
+
+    /// <summary>Appends a literal string segment from the interpolated template.</summary>
+    public void AppendLiteral(string value)
+    {
+        if (IsEnabled) _inner.AppendLiteral(value);
+    }
+
+    /// <summary>Appends a formatted interpolation hole.</summary>
+    public void AppendFormatted<T>(T value)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value);
+    }
+
+    /// <summary>Appends a formatted interpolation hole with the given format string.</summary>
+    public void AppendFormatted<T>(T value, string? format)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value, format);
+    }
+
+    /// <summary>Appends a formatted interpolation hole with the given alignment.</summary>
+    public void AppendFormatted<T>(T value, int alignment)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value, alignment);
+    }
+
+    /// <summary>Appends a formatted interpolation hole with alignment and format string.</summary>
+    public void AppendFormatted<T>(T value, int alignment, string? format)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value, alignment, format);
+    }
+
+    /// <summary>Appends a character-span interpolation hole.</summary>
+    public void AppendFormatted(ReadOnlySpan<char> value)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value);
+    }
+
+    /// <summary>Appends a nullable-string interpolation hole.</summary>
+    public void AppendFormatted(string? value)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value);
+    }
+
+    internal string ToStringAndClear() => _inner.ToStringAndClear();
+}

@@ -137,14 +137,14 @@ internal sealed class IndexNestedLoopJoinExecutor
         long probeRowsProcessed = 0;
         long totalMatches = 0;
 
-        ExecutionTracer.Write($"INLJ start  trialBudget={trialBudget}  buildTable={_buildTableProvider.QualifiedName}  buildAlias={_buildAlias}  joinType={_joinType}");
+        DatumActivity.Operators.Trace($"INLJ start  trialBudget={trialBudget}  buildTable={_buildTableProvider.QualifiedName}  buildAlias={_buildAlias}  joinType={_joinType}");
 
         // Open a seek session once for the lifetime of this executor — it owns the
         // reader, decode buffers, and projection metadata for every build-side fetch.
         // Bound to context.Store so emitted batches share the per-query arena.
         ISeekSession seekSession = _buildTableProvider.OpenSeekSession(requiredColumns: null, context.Store);
 
-        ExecutionTracer.Write("INLJ probing probe side");
+        DatumActivity.Operators.Trace("INLJ probing probe side");
         await foreach (RowBatch probeBatch in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
         {
             for (int probeBatchIndex = 0; probeBatchIndex < probeBatch.Count; probeBatchIndex++)
@@ -156,7 +156,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                     // Too many probe rows — NLJ is not benefiting from
                     // LIMIT short-circuit. Discard buffered output and signal
                     // the caller to fall back to hash join.
-                    ExecutionTracer.Write($"INLJ circuit breaker tripped  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
+                    DatumActivity.Operators.Trace($"INLJ circuit breaker tripped  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
                     context.ReturnRowBatch(probeBatch);
                     if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
                     foreach (RowBatch buffered in trialBuffer) { context.ReturnRowBatch(buffered); }
@@ -281,7 +281,7 @@ internal sealed class IndexNestedLoopJoinExecutor
             context.ReturnRowBatch(probeBatch);
         }
 
-        ExecutionTracer.Write($"INLJ trial complete  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
+        DatumActivity.Operators.Trace($"INLJ trial complete  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
 
         // Trial completed — NLJ processed all probe rows within budget.
         // Yield the buffered output batches.

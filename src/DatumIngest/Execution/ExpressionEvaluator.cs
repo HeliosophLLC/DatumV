@@ -1,7 +1,9 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Diagnostics;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -891,6 +893,13 @@ public sealed class ExpressionEvaluator
                 ValidateParameterChecksOrThrow(function, bindings, arguments.AsSpan(0, argumentCount));
             }
 
+            // Per-call span on DatumActivity.Scalars. Nests under the owning
+            // operator's batch span via Activity.Current so a recent-activity
+            // dump shows which function inside an operator batch did the work.
+            // The Scalars source is intentionally separate from Operators —
+            // listeners can subscribe to operator-only if per-row allocation
+            // cost is unwelcome.
+            using Activity? scalarSpan = DatumActivity.Scalars.StartActivity(function.CallName);
             ValueRef result = await scalarFunction.ExecuteAsync(arguments.AsMemory(0, argumentCount), frame, cancellationToken).ConfigureAwait(false);
             _meter?.Add(scalarFunction.QueryUnitCost);
             return result;

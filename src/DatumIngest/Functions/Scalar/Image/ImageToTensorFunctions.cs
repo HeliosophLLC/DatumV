@@ -332,7 +332,7 @@ internal static class ImageToTensorShared
         GC.KeepAlive(resized);
         GC.KeepAlive(source);
 
-        if (ExecutionTracer.IsEnabled)
+        if (DatumActivity.Scalars.HasListeners())
         {
             int nanCount = 0, infCount = 0;
             float min = float.PositiveInfinity, max = float.NegativeInfinity;
@@ -343,7 +343,7 @@ internal static class ImageToTensorShared
                 else if (float.IsInfinity(v)) infCount++;
                 else { if (v < min) min = v; if (v > max) max = v; }
             }
-            ExecutionTracer.Write(
+            DatumActivity.Scalars.Trace(
                 $"[img2tensor:{fnName}] {source.Width}x{source.Height}->{width}x{height} bgr={bgr} layout={layout} " +
                 $"len={output.Length} sample=[{output[0]:F3},{output[1]:F3},{output[2]:F3}] " +
                 $"min={(min == float.PositiveInfinity ? double.NaN : min):F3} max={(max == float.NegativeInfinity ? double.NaN : max):F3} " +

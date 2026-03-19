@@ -132,15 +132,13 @@ internal sealed class GraceHashJoinExecutor
         int partitionCount = ComputeInitialPartitionCount();
         SpillPartition[] partitions = CreatePartitions(partitionCount, pool, context);
 
-        ExecutionTracer.Initialize();
         long ph1aStart = Stopwatch.GetTimestamp();
         long buildRowCount = 0;
         long phase1bProbeCount = 0;
 
-        if (ExecutionTracer.IsEnabled)
+        if (DatumActivity.Operators.HasListeners())
         {
-            ExecutionTracer.WriteSeparator();
-            ExecutionTracer.Write($"JOIN Phase1a start  build={_label}  join={_joinType}  budget={ExecutionTracer.FormatBytes(_memoryBudgetBytes)}  partitions={partitionCount}");
+            DatumActivity.Operators.Trace($"JOIN Phase1a start  build={_label}  join={_joinType}  budget={DatumActivity.FormatBytes(_memoryBudgetBytes)}  partitions={partitionCount}");
         }
 
         // Structural per-row residency in the in-memory build partitions.
@@ -156,12 +154,12 @@ internal sealed class GraceHashJoinExecutor
             long inMemoryRowCount = 0;
             DataValue[] keyScratch = useSingleKey ? [] : new DataValue[keyPairs.Count];
 
-            ExecutionTracer.Write($"JOIN Phase1a iterating buildOperator type={buildOperator.GetType().Name}");
+            DatumActivity.Operators.Trace($"JOIN Phase1a iterating buildOperator type={buildOperator.GetType().Name}");
             await foreach (RowBatch buildBatch in buildOperator.ExecuteAsync(context).ConfigureAwait(false))
             {
                 if (buildRowCount == 0)
                 {
-                    ExecutionTracer.Write($"JOIN Phase1a first build batch  count={buildBatch.Count}");
+                    DatumActivity.Operators.Trace($"JOIN Phase1a first build batch  count={buildBatch.Count}");
                 }
 
                 for (int buildBatchIndex = 0; buildBatchIndex < buildBatch.Count; buildBatchIndex++)
@@ -217,12 +215,12 @@ internal sealed class GraceHashJoinExecutor
                 context.ReturnRowBatch(buildBatch);
             }
 
-            if (ExecutionTracer.IsEnabled)
+            if (DatumActivity.Operators.HasListeners())
             {
                 int spilledPartitions = 0;
                 foreach (SpillPartition p in partitions) if (p.IsBuildSpilled) spilledPartitions++;
                 long processMemory = GC.GetTotalMemory(forceFullCollection: false);
-                ExecutionTracer.Write($"JOIN Phase1a done   build_rows={buildRowCount:N0}  in_memory={inMemoryRowCount:N0}  in_mem_bytes={ExecutionTracer.FormatBytes(residentBytesNotified)}  spilled={spilledPartitions}/{partitionCount}  process_mem={ExecutionTracer.FormatBytes(processMemory)}  elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
+                DatumActivity.Operators.Trace($"JOIN Phase1a done   build_rows={buildRowCount:N0}  in_memory={inMemoryRowCount:N0}  in_mem_bytes={DatumActivity.FormatBytes(residentBytesNotified)}  spilled={spilledPartitions}/{partitionCount}  process_mem={DatumActivity.FormatBytes(processMemory)}  elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
             }
 
             // NOT IN null semantics: if any build-side key is NULL, the entire result is empty.
@@ -357,18 +355,18 @@ internal sealed class GraceHashJoinExecutor
 
             Row? nullProbeTemplate = firstProbeRow is not null ? CreateNullRow(firstProbeRow.Value) : null;
 
-            if (ExecutionTracer.IsEnabled)
+            if (DatumActivity.Operators.HasListeners())
             {
                 long probeProcessMemory = GC.GetTotalMemory(forceFullCollection: false);
-                ExecutionTracer.Write($"JOIN Phase1b done   probe_rows={phase1bProbeCount:N0}  process_mem={ExecutionTracer.FormatBytes(probeProcessMemory)}  elapsed={Stopwatch.GetElapsedTime(ph1bStart).TotalMilliseconds:F0}ms");
+                DatumActivity.Operators.Trace($"JOIN Phase1b done   probe_rows={phase1bProbeCount:N0}  process_mem={DatumActivity.FormatBytes(probeProcessMemory)}  elapsed={Stopwatch.GetElapsedTime(ph1bStart).TotalMilliseconds:F0}ms");
             }
 
             long ph2Start = Stopwatch.GetTimestamp();
-            if (ExecutionTracer.IsEnabled)
+            if (DatumActivity.Operators.HasListeners())
             {
                 int spilledPartitions = 0;
                 foreach (SpillPartition p in partitions) if (p.IsBuildSpilled) spilledPartitions++;
-                ExecutionTracer.Write($"JOIN Phase2 start   spilled_partitions={spilledPartitions}");
+                DatumActivity.Operators.Trace($"JOIN Phase2 start   spilled_partitions={spilledPartitions}");
             }
 
             // ── Phase 2: Join each partition ──
@@ -398,10 +396,9 @@ internal sealed class GraceHashJoinExecutor
                 context.Accountant.NotifyReleased(residentBytesNotified);
             }
 
-            if (ExecutionTracer.IsEnabled)
+            if (DatumActivity.Operators.HasListeners())
             {
-                ExecutionTracer.Write($"JOIN complete       build={_label}  total_build={buildRowCount:N0}  total_probe={phase1bProbeCount:N0}  total_elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
-                ExecutionTracer.WriteSeparator();
+                DatumActivity.Operators.Trace($"JOIN complete       build={_label}  total_build={buildRowCount:N0}  total_probe={phase1bProbeCount:N0}  total_elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
             }
 
             foreach (SpillPartition partition in partitions)

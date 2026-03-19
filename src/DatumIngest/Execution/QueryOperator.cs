@@ -51,9 +51,16 @@ public abstract class QueryOperator
         // recent-spans log shows nothing until the consumer disposes —
         // useless for hang investigations because that's exactly when
         // disposal doesn't happen. With them, you see one completed
-        // "OperatorName.batch" entry per yielded batch in real time.
-        string batchName = operatorName + ".batch";
-        Activity? batchSpan = DatumActivity.Operators.StartActivity(batchName);
+        // "OperatorName.batch[i]" entry per yielded batch in real time.
+        //
+        // The [i] suffix on the display name is the per-operator batch
+        // ordinal. When you read a recent-activity dump back you can tell
+        // ScanOperator.batch[3] from ScanOperator.batch[7] without having
+        // to count entries — useful for back-and-forth pull patterns
+        // (e.g. a FilterOperator pulling several batches from Scan before
+        // it accumulates enough surviving rows to yield upward).
+        int batchIndex = 0;
+        Activity? batchSpan = StartBatchSpan(operatorName, batchIndex);
         try
         {
             await foreach (RowBatch rowBatch in ExecuteAsyncImpl(context).ConfigureAwait(false))
@@ -70,7 +77,8 @@ public abstract class QueryOperator
                 // so the consumer's "between pulls" idle time isn't attributed
                 // to us either — the span starts exactly when ExecuteAsyncImpl
                 // resumes computing.
-                batchSpan = DatumActivity.Operators.StartActivity(batchName);
+                batchIndex++;
+                batchSpan = StartBatchSpan(operatorName, batchIndex);
             }
         }
         finally
@@ -80,6 +88,17 @@ public abstract class QueryOperator
             // early disposal / exceptions so we never leak an open span.
             batchSpan?.Dispose();
         }
+    }
+
+    private static Activity? StartBatchSpan(string operatorName, int index)
+    {
+        Activity? span = DatumActivity.Operators.StartActivity(operatorName + ".batch");
+        if (span is not null)
+        {
+            span.DisplayName = $"{operatorName}.batch[{index}]";
+            span.SetTag("batch.index", index);
+        }
+        return span;
     }
 
     /// <summary>

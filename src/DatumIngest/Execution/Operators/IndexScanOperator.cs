@@ -124,9 +124,9 @@ public sealed class IndexScanOperator : QueryOperator
         long indexScanRowsYielded = 0;
         RowBatch? outputBatch = null;
 
-        if (ExecutionTracer.IsEnabled)
+        if (DatumActivity.Operators.HasListeners())
         {
-            ExecutionTracer.Write(
+            DatumActivity.Operators.Trace(
                 $"IndexScan  start  table={TableProvider.QualifiedName}  totalEntries={_columnIndex.EntryCount:N0}");
         }
 
@@ -140,13 +140,13 @@ public sealed class IndexScanOperator : QueryOperator
                 await foreach (Row row in FlushIndexEntriesAsync(
                     seekSession, indexEntries, context, cancellationToken).ConfigureAwait(false))
                 {
-                    if (ExecutionTracer.IsEnabled)
+                    if (DatumActivity.Operators.HasListeners())
                     {
                         indexScanRowsYielded++;
 
                         if (indexScanRowsYielded % 1_000_000 == 0)
                         {
-                            ExecutionTracer.Write(
+                            DatumActivity.Operators.Trace(
                                 $"IndexScan  {TableProvider.QualifiedName}  yielded {indexScanRowsYielded:N0} rows");
                         }
                     }
@@ -174,13 +174,13 @@ public sealed class IndexScanOperator : QueryOperator
         {
             await foreach (Row row in FlushIndexEntriesAsync(seekSession, indexEntries, context, cancellationToken).ConfigureAwait(false))
             {
-                if (ExecutionTracer.IsEnabled)
+                if (DatumActivity.Operators.HasListeners())
                 {
                     indexScanRowsYielded++;
 
                     if (indexScanRowsYielded % 1_000_000 == 0)
                     {
-                        ExecutionTracer.Write(
+                        DatumActivity.Operators.Trace(
                             $"IndexScan  {TableProvider.QualifiedName}  yielded {indexScanRowsYielded:N0} rows");
                     }
                 }
@@ -204,9 +204,9 @@ public sealed class IndexScanOperator : QueryOperator
             yield return toYield;
         }
 
-        if (ExecutionTracer.IsEnabled)
+        if (DatumActivity.Operators.HasListeners())
         {
-            ExecutionTracer.Write(
+            DatumActivity.Operators.Trace(
                 $"IndexScan  done  table={TableProvider.QualifiedName}  totalYielded={indexScanRowsYielded:N0}");
         }
     }

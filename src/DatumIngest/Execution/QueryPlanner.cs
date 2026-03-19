@@ -852,7 +852,7 @@ public sealed class QueryPlanner
 
                 source = new ProjectOperator(source, groupByProjection, null);
                 source = new DistinctOperator(source);
-                ExecutionTracer.Write("GROUP BY without aggregates rewritten to streaming DISTINCT");
+                DatumActivity.Operators.Trace("GROUP BY without aggregates rewritten to streaming DISTINCT");
             }
             else
             {
@@ -871,7 +871,7 @@ public sealed class QueryPlanner
 
                 if (streamingSorted)
                 {
-                    ExecutionTracer.Write("GROUP BY uses streaming aggregation (sorted input)");
+                    DatumActivity.Operators.Trace("GROUP BY uses streaming aggregation (sorted input)");
                 }
 
                 // Apply HAVING as a filter on the grouped output.
@@ -1130,7 +1130,7 @@ public sealed class QueryPlanner
 
             if (OutputOrderingSatisfiesOrderBy(source, effectiveOrderBy))
             {
-                ExecutionTracer.Write("ORDER BY elided — output already sorted by streaming GROUP BY");
+                DatumActivity.Operators.Trace("ORDER BY elided — output already sorted by streaming GROUP BY");
             }
             else if (!TryReplaceWithIndexScan(ref source, effectiveOrderBy))
             {
@@ -1956,7 +1956,7 @@ public sealed class QueryPlanner
                 if (!referencedByOtherJoin)
                 {
                     string joinLabel = string.Join(", ", aliases);
-                    ExecutionTracer.Write($"JOIN ELIMINATION  removed {joinLabel} (unreferenced LEFT JOIN)");
+                    DatumActivity.Operators.Trace($"JOIN ELIMINATION  removed {joinLabel} (unreferenced LEFT JOIN)");
                     plannedJoins.RemoveAt(index);
                     changed = true;
                 }
@@ -1998,8 +1998,7 @@ public sealed class QueryPlanner
         {
             if (join.IsLateral || join.Type != JoinType.Inner || join.OnCondition is null)
             {
-                ExecutionTracer.Initialize();
-                ExecutionTracer.Write("JOIN REORDER  skipped: non-INNER or lateral join present");
+                DatumActivity.Operators.Trace($"JOIN REORDER  skipped: non-INNER or lateral join present");
                 return false;
             }
         }
@@ -2012,8 +2011,7 @@ public sealed class QueryPlanner
         rowCounts[0] = GetEstimatedRowCount(fromOperator);
         if (rowCounts[0] is null)
         {
-            ExecutionTracer.Initialize();
-            ExecutionTracer.Write($"JOIN REORDER  skipped: no row count for FROM={GetOperatorName(fromOperator)}");
+            DatumActivity.Operators.Trace($"JOIN REORDER  skipped: no row count for FROM={GetOperatorName(fromOperator)}");
             return false;
         }
 
@@ -2022,20 +2020,18 @@ public sealed class QueryPlanner
             rowCounts[index + 1] = GetEstimatedRowCount(plannedJoins[index].Operator);
             if (rowCounts[index + 1] is null)
             {
-                ExecutionTracer.Initialize();
-                ExecutionTracer.Write($"JOIN REORDER  skipped: no row count for JOIN[{index}]={GetOperatorName(plannedJoins[index].Operator)}");
+                DatumActivity.Operators.Trace($"JOIN REORDER  skipped: no row count for JOIN[{index}]={GetOperatorName(plannedJoins[index].Operator)}");
                 return false;
             }
         }
 
-        if (ExecutionTracer.IsEnabled)
+        if (DatumActivity.Operators.HasListeners())
         {
-            ExecutionTracer.WriteSeparator();
-            ExecutionTracer.Write($"JOIN REORDER  evaluating {totalSources} sources");
-            ExecutionTracer.Write($"  [0] FROM  {GetOperatorName(fromOperator)}  rows={rowCounts[0]:N0}");
+            DatumActivity.Operators.Trace($"JOIN REORDER  evaluating {totalSources} sources");
+            DatumActivity.Operators.Trace($"  [0] FROM  {GetOperatorName(fromOperator)}  rows={rowCounts[0]:N0}");
             for (int index = 0; index < plannedJoins.Count; index++)
             {
-                ExecutionTracer.Write($"  [{index + 1}] JOIN  {GetOperatorName(plannedJoins[index].Operator)}  rows={rowCounts[index + 1]:N0}");
+                DatumActivity.Operators.Trace($"  [{index + 1}] JOIN  {GetOperatorName(plannedJoins[index].Operator)}  rows={rowCounts[index + 1]:N0}");
             }
         }
 
@@ -2065,7 +2061,7 @@ public sealed class QueryPlanner
             {
                 // The preferred table is already the outermost FROM — no reordering
                 // is needed and we must not displace it with the largest-table heuristic.
-                ExecutionTracer.Write($"JOIN REORDER  skipped: ORDER BY table '{preferredProbeTableAlias}' is already outermost FROM");
+                DatumActivity.Operators.Trace($"JOIN REORDER  skipped: ORDER BY table '{preferredProbeTableAlias}' is already outermost FROM");
                 return false;
             }
 
@@ -2074,7 +2070,7 @@ public sealed class QueryPlanner
                 if (plannedJoins[index].Aliases.Contains(preferredProbeTableAlias))
                 {
                     chosenIndex = index + 1;
-                    ExecutionTracer.Write($"JOIN REORDER  promoting ORDER BY table '{preferredProbeTableAlias}' as outermost probe for sort elimination");
+                    DatumActivity.Operators.Trace($"JOIN REORDER  promoting ORDER BY table '{preferredProbeTableAlias}' as outermost probe for sort elimination");
                     break;
                 }
             }
@@ -2083,11 +2079,11 @@ public sealed class QueryPlanner
         // If the chosen source is already the FROM, no reordering is needed.
         if (chosenIndex == 0)
         {
-            ExecutionTracer.Write($"JOIN REORDER  skipped: FROM is already largest ({GetOperatorName(fromOperator)} rows={largestCount:N0})");
+            DatumActivity.Operators.Trace($"JOIN REORDER  skipped: FROM is already largest ({GetOperatorName(fromOperator)} rows={largestCount:N0})");
             return false;
         }
 
-        ExecutionTracer.Write($"JOIN REORDER  new probe (FROM) = {GetOperatorName(plannedJoins[chosenIndex - 1].Operator)}  rows={rowCounts[chosenIndex]:N0}");
+        DatumActivity.Operators.Trace($"JOIN REORDER  new probe (FROM) = {GetOperatorName(plannedJoins[chosenIndex - 1].Operator)}  rows={rowCounts[chosenIndex]:N0}");
 
         // Build the pool of remaining sources to schedule.
         // Each entry: (Operator, Aliases, RowCount, JoinClause or null for the original FROM).
@@ -2220,12 +2216,12 @@ public sealed class QueryPlanner
             StringComparer.OrdinalIgnoreCase);
         reorderedJoins = result;
 
-        if (ExecutionTracer.IsEnabled)
+        if (DatumActivity.Operators.HasListeners())
         {
-            ExecutionTracer.Write("JOIN REORDER  final build order (smallest first):");
+            DatumActivity.Operators.Trace($"JOIN REORDER  final build order (smallest first):");
             for (int index = 0; index < result.Count; index++)
             {
-                ExecutionTracer.Write($"  build[{index}]  {GetOperatorName(result[index].Operator)}");
+                DatumActivity.Operators.Trace($"  build[{index}]  {GetOperatorName(result[index].Operator)}");
             }
         }
 

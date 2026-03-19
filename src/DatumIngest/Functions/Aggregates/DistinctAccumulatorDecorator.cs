@@ -278,14 +278,14 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
             partitionCount: SpillPartitionCount);
         _partitionBuffers = new RowBatch?[SpillPartitionCount];
 
-        if (ExecutionTracer.IsEnabled)
+        if (DatumActivity.Operators.HasListeners())
         {
             long count = _singleArgumentSet?.Count ?? _multiArgumentSet!.Count;
             long estimatedBytes = count * EstimatedBytesPerHashSetEntry;
-            ExecutionTracer.Write(
+            DatumActivity.Operators.Trace(
                 $"DISTINCT accumulator spill start  " +
-                $"budget={ExecutionTracer.FormatBytes(_memoryBudgetBytes!.Value)}  " +
-                $"estimated={ExecutionTracer.FormatBytes(estimatedBytes)}  " +
+                $"budget={DatumActivity.FormatBytes(_memoryBudgetBytes!.Value)}  " +
+                $"estimated={DatumActivity.FormatBytes(estimatedBytes)}  " +
                 $"entries={count}");
         }
 
@@ -468,10 +468,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
             await _inner.MergeAsync(partitionAccumulator, drainFrame).ConfigureAwait(false);
         }
 
-        if (ExecutionTracer.IsEnabled)
-        {
-            ExecutionTracer.Write("DISTINCT accumulator spill drain complete");
-        }
+        DatumActivity.Operators.Trace($"DISTINCT accumulator spill drain complete");
 
         CleanupSpillState();
     }

@@ -1,12 +1,13 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 
 namespace DatumIngest.Diagnostics;
 
 /// <summary>
 /// Bounded ring buffer of recently-completed <see cref="Activity"/> spans
 /// from the engine's <see cref="DatumActivity"/> sources. Construct one
-/// to start listening; <see cref="Snapshot"/> returns the last
+/// to start listening; <see cref="Snapshot()"/> returns the last
 /// <see cref="Capacity"/> events newest-first. Dispose to stop listening.
 /// </summary>
 /// <remarks>
@@ -86,7 +87,7 @@ public sealed class RecentActivityLog : IDisposable
     {
         if (_disposed) return;
         _live.TryRemove(a, out _);
-        RecentActivityEntry ev = new(a.DisplayName, a.StartTimeUtc, a.Duration);
+        RecentActivityEntry ev = new(a.DisplayName, a.Source.Name, a.Parent?.DisplayName, a.StartTimeUtc, a.Duration);
         lock (_lock)
         {
             _ring.Enqueue(ev);
@@ -101,6 +102,23 @@ public sealed class RecentActivityLog : IDisposable
     public RecentActivityEntry[] Snapshot()
     {
         lock (_lock) return _ring.ToArray();
+    }
+
+    /// <summary>
+    /// Same as <see cref="Snapshot()"/> but filters to entries whose
+    /// <see cref="RecentActivityEntry.SourceName"/> matches one of the
+    /// supplied source names. Useful when scalar spans are wired and the
+    /// operator-pull pattern would otherwise be drowned in per-row
+    /// function spans.
+    /// </summary>
+    public RecentActivityEntry[] Snapshot(params string[] sourceNames)
+    {
+        if (sourceNames is null || sourceNames.Length == 0) return Snapshot();
+        HashSet<string> filter = new(sourceNames, StringComparer.Ordinal);
+        lock (_lock)
+        {
+            return _ring.Where(e => filter.Contains(e.SourceName)).ToArray();
+        }
     }
 
     /// <summary>
@@ -122,10 +140,42 @@ public sealed class RecentActivityLog : IDisposable
         for (int i = 0; i < keys.Length; i++)
         {
             Activity a = keys[i];
-            frames[i] = new ActivityFrame(a.DisplayName, a.StartTimeUtc, now - a.StartTimeUtc);
+            frames[i] = new ActivityFrame(a.DisplayName, a.Source.Name, a.Parent?.DisplayName, a.StartTimeUtc, now - a.StartTimeUtc);
         }
         Array.Sort(frames, static (x, y) => x.StartedAt.CompareTo(y.StartedAt));
         return frames;
+    }
+
+    /// <summary>
+    /// Renders the completed-span ring as a multi-line text trace, oldest
+    /// first. Each line reports the relative timestamp from the first
+    /// recorded span, the source-prefixed display name, the parent's
+    /// display name (when known), and the duration in milliseconds. Used
+    /// by hosts (web app, probe) that need a human-readable trace blob
+    /// to attach to a query response.
+    /// </summary>
+    public string FormatTrace()
+    {
+        RecentActivityEntry[] entries = Snapshot();
+        if (entries.Length == 0) return string.Empty;
+
+        StringBuilder sb = new();
+        DateTimeOffset start = entries[0].StartedAt;
+        foreach (RecentActivityEntry e in entries)
+        {
+            double offsetMs = (e.StartedAt - start).TotalMilliseconds;
+            string sourceTag = e.SourceName switch
+            {
+                "DatumIngest.Operators" => "op",
+                "DatumIngest.Scalars" => "fn",
+                _ => e.SourceName,
+            };
+            sb.Append('[').Append(offsetMs.ToString("F2")).Append("ms ").Append(sourceTag).Append("] ");
+            sb.Append(e.Name);
+            if (e.ParentName is not null) sb.Append(" ⇐ ").Append(e.ParentName);
+            sb.Append("  ").Append(e.Duration.TotalMilliseconds.ToString("F2")).AppendLine(" ms");
+        }
+        return sb.ToString();
     }
 
     /// <inheritdoc />
@@ -139,6 +189,14 @@ public sealed class RecentActivityLog : IDisposable
 
 /// <summary>
 /// One completed-span entry from <see cref="RecentActivityLog"/>. Captures
-/// the operator name, when it started, and how long it ultimately ran.
+/// the operator name, the <see cref="ActivitySource"/> it came from
+/// (<c>"DatumIngest.Operators"</c> vs <c>"DatumIngest.Scalars"</c>), the
+/// display name of its parent activity at start (so callers can render the
+/// pull chain), when it started, and how long it ultimately ran.
 /// </summary>
-public readonly record struct RecentActivityEntry(string Name, DateTimeOffset StartedAt, TimeSpan Duration);
+public readonly record struct RecentActivityEntry(
+    string Name,
+    string SourceName,
+    string? ParentName,
+    DateTimeOffset StartedAt,
+    TimeSpan Duration);
