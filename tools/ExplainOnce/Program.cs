@@ -68,7 +68,7 @@ catch (Exception ex)
 
 QueryPlanner planner = new(catalog, functions);
 
-IQueryOperator plan;
+QueryOperator plan;
 try
 {
     plan = planner.Plan(query);
