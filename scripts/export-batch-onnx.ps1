@@ -175,27 +175,6 @@ $KnownModels = @(
         Description  = 'CLIP ViT-B/32 - image/text contrastive embeddings.'
     },
     @{
-        Name        = 'paligemma2-3b-mix-224'
-        HF          = 'google/paligemma2-3b-mix-224'
-        OutputFolder = 'paligemma2-3b-mix-224-onnx'
-        ExpectedSize = '~6.0 GB'
-        # SigLIP vision encoder + Gemma 2B decoder + linear projector.
-        # 224x224 input is faster; 448 variant gives better fine-detail.
-        # Mix-tuned variants are pre-finetuned on multiple tasks
-        # (captioning, VQA, OCR) so they handle generic prompts well.
-        Description  = 'Google PaliGemma 2 3B (mix, 224x224) - verbose factual captioner.'
-    },
-    @{
-        Name        = 'paligemma2-3b-mix-448'
-        HF          = 'google/paligemma2-3b-mix-448'
-        OutputFolder = 'paligemma2-3b-mix-448-onnx'
-        ExpectedSize = '~6.0 GB'
-        # Higher-resolution sibling. Slower (~4x more vision tokens) but
-        # noticeably better at fine details, OCR, small-object recognition.
-        # This is the better default for D&D scene art with rich detail.
-        Description  = 'Google PaliGemma 2 3B (mix, 448x448) - higher-detail captioner.'
-    },
-    @{
         Name        = 'phi-3.5-vision-instruct'
         HF          = 'microsoft/Phi-3.5-vision-instruct'
         OutputFolder = 'phi-3.5-vision-instruct-onnx-converted'

@@ -5,7 +5,6 @@ using DatumIngest.Catalog.Providers;
 using DatumIngest.Model;
 using DatumIngest.Models.Llama;
 using DatumIngest.Models.Onnx;
-using DatumIngest.Models.Onnx.PaliGemma;
 using DatumIngest.Models.Onnx.Whisper;
 using DatumIngest.Models.Python;
 
@@ -140,13 +139,6 @@ public static class BuiltinModels
         RegisterWhisperBase(modelCatalog);
         RegisterWhisperSmall(modelCatalog);
         RegisterWhisperMedium(modelCatalog);
-
-        // PaliGemma 2 captioner zoo. Two resolutions: the 224 variant
-        // for cheap iteration, the 448 variant as the better default.
-        // Both report status=missing until their optimum-cli output
-        // folders land.
-        RegisterPaliGemma2Mix224(modelCatalog);
-        RegisterPaliGemma2Mix448(modelCatalog);
 
         // VLM zoo — Apache/MIT-licensed alternatives to OmniParser's
         // AGPL detector. Free-form prompt as the second positional arg:
@@ -2361,108 +2353,6 @@ public static class BuiltinModels
     public static void RegisterWhisperMedium(ModelCatalog catalog, string modelName = "whisper_medium")
         => RegisterWhisperVariant(catalog, modelName, WhisperMediumFolder,
             displayName: "Whisper Medium", parameters: "769M", maxTokens: 224);
-
-    // ───────────────────────── PaliGemma 2 captioner ─────────────────────────
-    //
-    // Google's vision-language model: SigLIP encoder + Gemma 2B decoder
-    // with a learned linear projector. The "mix" variants are pre-finetuned
-    // on captioning + VQA + OCR so they handle generic prompts well. We
-    // register at 448x448 by default (better fine-detail than 224); the
-    // 224 variant is a separate registration for cheaper iteration.
-
-    /// <summary>Default folder for PaliGemma 2 mix-224 (faster, less detail).</summary>
-    public const string PaliGemma2Mix224Folder = "paligemma2-3b-mix-224-onnx";
-
-    /// <summary>Default folder for PaliGemma 2 mix-448 (slower, fine-detail aware).</summary>
-    public const string PaliGemma2Mix448Folder = "paligemma2-3b-mix-448-onnx";
-
-    /// <summary>
-    /// Files needed for any PaliGemma 2 install (relative to its variant
-    /// folder). Multi-file model — vision encoder + token embedder +
-    /// autoregressive decoder + tokenizer.
-    /// </summary>
-    private static IReadOnlyList<string> PaliGemma2Files(string folder) =>
-    [
-        $"{folder}/vision_encoder.onnx",
-        $"{folder}/embed_tokens.onnx",
-        $"{folder}/decoder_model.onnx",
-        // optimum may also produce decoder_model_merged.onnx /
-        // decoder_with_past_model.onnx; we only need decoder_model.onnx
-        // for the no-cache path. Skip them in the file list to keep
-        // status checks clean.
-        $"{folder}/vocab.json",
-        $"{folder}/merges.txt",
-        $"{folder}/tokenizer.json",
-        $"{folder}/config.json",
-    ];
-
-    /// <summary>
-    /// Common backbone for the PaliGemma 2 size variants. Each public
-    /// <c>RegisterPaliGemma2*</c> wraps this with size-specific
-    /// folder + display metadata.
-    /// </summary>
-    private static void RegisterPaliGemma2Variant(
-        ModelCatalog catalog,
-        string modelName,
-        string folder,
-        string displayName,
-        string defaultPrompt,
-        int maxTokens)
-    {
-        string visionEncoderRelativePath = $"{folder}/vision_encoder.onnx";
-
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: visionEncoderRelativePath,
-            InputKinds: [DataKind.Image],
-            OutputKind: DataKind.String,
-            // Greedy decoding from a fixed prefix → reproducible.
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string visionEncoderPath = Path.Combine(ctx.ModelDirectory, visionEncoderRelativePath);
-                return new PaliGemmaModel(modelName, visionEncoderPath, defaultPrompt, maxTokens);
-            },
-            DisplayName: displayName,
-            Parameters: "3B",
-            License: "Gemma Terms",
-            LicenseHolder: "Google",
-            SourceUrl: "https://huggingface.co/google/paligemma2-3b-mix-448",
-            Category: "captioner",
-            Modalities: ["image", "text"],
-            Files: PaliGemma2Files(folder)));
-    }
-
-    /// <summary>
-    /// Registers PaliGemma 2 mix-224 — faster captioner (256 image tokens
-    /// vs 1024 for the 448 variant). Use for cheaper iteration; the 448
-    /// variant is the better default for fine-detail scene art.
-    /// </summary>
-    public static void RegisterPaliGemma2Mix224(
-        ModelCatalog catalog,
-        string modelName = "paligemma2_224",
-        string defaultPrompt = "caption en",
-        int maxTokens = 100)
-        => RegisterPaliGemma2Variant(catalog, modelName, PaliGemma2Mix224Folder,
-            displayName: "PaliGemma 2 mix-224 (Captioner)",
-            defaultPrompt: defaultPrompt,
-            maxTokens: maxTokens);
-
-    /// <summary>
-    /// Registers PaliGemma 2 mix-448 — high-detail captioner. 1024 image
-    /// tokens give noticeably better fine-detail recognition than the 224
-    /// variant; ~3-4× slower per call. Default for D&amp;D scene art.
-    /// </summary>
-    public static void RegisterPaliGemma2Mix448(
-        ModelCatalog catalog,
-        string modelName = "paligemma2_448",
-        string defaultPrompt = "caption en",
-        int maxTokens = 100)
-        => RegisterPaliGemma2Variant(catalog, modelName, PaliGemma2Mix448Folder,
-            displayName: "PaliGemma 2 mix-448 (Captioner)",
-            defaultPrompt: defaultPrompt,
-            maxTokens: maxTokens);
 
     /// <summary>Default folder for the Xenova / onnx-community Moondream2 export.</summary>
     public const string Moondream2Folder = "moondream2-onnx";

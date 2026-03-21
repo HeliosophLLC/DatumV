@@ -23,8 +23,8 @@ namespace DatumIngest.Models.Onnx;
 /// Decoder-only generative inference at batch=1 is dominated by the
 /// per-token KV-cache movement between GPU and CPU. The naive
 /// "<c>ReadCacheFloats → DenseTensor → CreateAutoCastInput</c>" pattern
-/// (used by <see cref="TrOcrModel"/>, <see cref="Moondream2Model"/>,
-/// and <c>PaliGemmaModel</c>) round-trips the entire growing KV cache
+/// (used by <see cref="TrOcrModel"/> and <see cref="Moondream2Model"/>)
+/// round-trips the entire growing KV cache
 /// through managed memory every step — at ~3-4s per token on a modern
 /// GPU vs the ~20-50ms the same hardware can deliver with proper
 /// IO binding. ORT GenAI handles IO binding, KV-cache management, and

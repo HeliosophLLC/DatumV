@@ -268,6 +268,42 @@
       "approxSizeMb": 1100,
       "placeholder": true
     },
+    {
+      "id": "phi-3.5-vision-instruct-cpu",
+      "displayName": "Phi-3.5 Vision Instruct (CPU INT4)",
+      "description": "Microsoft's 4.2B-param vision-language model — image + text in, text out. INT4-quantized for CPU. Strong at OCR, chart reading, structured-data extraction from screenshots. Driven via onnxruntime-genai (same pipeline as the Phi-3.5 text LLM entry).",
+      "task": "vision-language",
+      "tags": ["vlm", "instruct", "phi", "ocr", "cpu", "int4"],
+      "licenseIds": ["mit"],
+      "attributions": ["Microsoft Research — Phi-3.5 Vision"],
+      "hardware": { "minRamMb": 6144, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "microsoft/Phi-3.5-vision-instruct-onnx", "revision": "672d73375fa86f3d7787e40ac593e33a4f04a055", "include": ["cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/*"] }],
+      "approxSizeMb": 2400
+    },
+    {
+      "id": "phi-3.5-vision-instruct-cuda",
+      "displayName": "Phi-3.5 Vision Instruct (CUDA INT4)",
+      "description": "GPU build of Phi-3.5 Vision Instruct. Same model as the CPU variant but packaged for NVIDIA CUDA execution via onnxruntime-genai. Modest VRAM footprint thanks to INT4 quantization; expect ~3× the throughput of the CPU build on a consumer GPU.",
+      "task": "vision-language",
+      "tags": ["vlm", "instruct", "phi", "ocr", "gpu", "int4", "cuda"],
+      "licenseIds": ["mit"],
+      "attributions": ["Microsoft Research — Phi-3.5 Vision"],
+      "hardware": { "minRamMb": 4096, "minVramMb": 6144, "preferred": "gpu" },
+      "sources": [{ "type": "huggingface", "repo": "microsoft/Phi-3.5-vision-instruct-onnx", "revision": "672d73375fa86f3d7787e40ac593e33a4f04a055", "include": ["gpu/gpu-int4-rtn-block-32/*"] }],
+      "approxSizeMb": 2400
+    },
+    {
+      "id": "moondream2",
+      "displayName": "Moondream2 (Compact VLM)",
+      "description": "1.86B-param vision-language model from Vikhyat Korrapati. Surprisingly capable for its size — does captioning, VQA, and basic grounding. Apache-2.0 throughout. Drive via raw onnxruntime sessions (the onnxruntime-genai model_builder doesn't currently accept Moondream2's architecture).",
+      "task": "vision-language",
+      "tags": ["vlm", "captioning", "vqa", "compact"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Vikhyat Korrapati — Moondream"],
+      "hardware": { "minRamMb": 4096, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "vikhyatk/moondream2", "revision": "6b714b26eea5cbd9f31e4edb2541c170afa935ba", "include": ["*.onnx", "*.onnx.data", "*.json", "*.txt"] }],
+      "approxSizeMb": 2000
+    },
 
     {
       "id": "yolox-s",
@@ -501,6 +537,30 @@
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/paddleocr-v4-det-onnx", "revision": "e8454256830dd5e4eb08f9e6f6d8b84d7d1c9dab", "include": ["ch_PP-OCRv4_det.onnx"] }],
       "approxSizeMb": 5,
       "installSql": "sql/paddleocr-v4-det.sql"
+    },
+    {
+      "id": "trocr-base-printed",
+      "displayName": "TrOCR Base Printed (Text Recognition)",
+      "description": "Microsoft's Transformer-based OCR — ViT image encoder + GPT-style text decoder, trained on printed-text crops (SROIE dataset). Recognizes the text in a cropped image of a single line/word. Pair with a text-region detector (PaddleOCR or Florence-2 detection) for end-to-end document OCR. Encoder + decoder + tokenizer travel together.",
+      "task": "text-recognition",
+      "tags": ["ocr", "text-recognition", "trocr", "documents", "transformer"],
+      "licenseIds": ["mit"],
+      "attributions": ["Microsoft Research — TrOCR (Li, Lv, Yu, Cui, Lu, Wei, 2021)", "Joshua Lochner / Xenova (ONNX export)"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Xenova/trocr-base-printed", "revision": "cf024f7df347684b6ee92859452962b67c6873fb", "include": ["onnx/encoder_model.onnx", "onnx/decoder_model_merged.onnx", "config.json", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "special_tokens_map.json"] }],
+      "approxSizeMb": 1400
+    },
+    {
+      "id": "trocr-base-printed-fp16",
+      "displayName": "TrOCR Base Printed fp16 (Text Recognition)",
+      "description": "Half-precision TrOCR Base Printed — ~half the disk of the fp32 variant. Same encoder-decoder architecture, same printed-text training. Pick this when deployment footprint matters (containerized inference, edge bundles); on GPU / NPU with native fp16, expect a modest speedup. On CPU runtimes that upcast fp16 → fp32, expect identical latency to fp32 but half the model-load memory.",
+      "task": "text-recognition",
+      "tags": ["ocr", "text-recognition", "trocr", "documents", "transformer", "fp16"],
+      "licenseIds": ["mit"],
+      "attributions": ["Microsoft Research — TrOCR (Li, Lv, Yu, Cui, Lu, Wei, 2021)", "Joshua Lochner / Xenova (ONNX export + fp16 quantization)"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Xenova/trocr-base-printed", "revision": "cf024f7df347684b6ee92859452962b67c6873fb", "include": ["onnx/encoder_model_fp16.onnx", "onnx/decoder_model_merged_fp16.onnx", "config.json", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "special_tokens_map.json"] }],
+      "approxSizeMb": 700
     },
     {
       "id": "realesrgan-x4v3",
