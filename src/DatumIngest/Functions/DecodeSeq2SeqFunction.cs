@@ -199,17 +199,6 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         }
         bool useKvCache = args[6].AsBoolean();
 
-        if (useKvCache)
-        {
-            // Reserve the parameter for the follow-up that lands the
-            // KV-cache path. Throwing rather than silently falling back
-            // to no-cache so a caller who deliberately requested cache
-            // notices the missing implementation.
-            throw new NotSupportedException(
-                "decode_seq2seq(): use_kv_cache=true is reserved for the upcoming "
-                + "KV-cache variant. Pass false for v1 (no-cache greedy decode).");
-        }
-
         // Resolve decoder session input metadata. The decoder must declare
         // at least `input_ids` and `encoder_hidden_states`; `encoder_attention_mask`
         // is optional and only consumed when present.
@@ -291,27 +280,63 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
             string.Equals(o.Name, "logits", StringComparison.Ordinal))
             ?? decoder.Outputs[0];
 
+        int[] encoderShape = [1, encoderSeqLen, hiddenDim];
+        int[]? encoderMaskShape = encoderMask is null ? null : new[] { 1, encoderSeqLen };
+
         DatumActivity.Scalars.Trace(
             $"[decode_seq2seq] {model.QualifiedName}#{sessionAlias}: "
             + $"prefix.Length={prefix.Length} max_tokens={maxTokens} eos={eosTokenId} "
-            + $"encoder=[{encoderSeqLen},{hiddenDim}] mask={(encoderMask is null ? "null" : encoderMask.Length.ToString())}");
+            + $"encoder=[{encoderSeqLen},{hiddenDim}] mask={(encoderMask is null ? "null" : encoderMask.Length.ToString())} "
+            + $"use_kv_cache={useKvCache}");
 
-        // ───────── No-cache generation loop ─────────
-        //
-        // Each step rebuilds the full input_ids = prefix || generated and
-        // re-runs the decoder. Output logits are [1, seq, vocab]; argmax
-        // over the last position is the next token. Loop until EOS or
-        // max_tokens. Returned array contains only the generated tokens
-        // (prefix is excluded — the caller already supplied it).
+        long[] result = useKvCache
+            ? await GenerateWithKvCacheAsync(
+                decoder, inputIdsSpec, encoderHiddenSpec, encoderMaskSpec, logitsSpec,
+                prefix, eosTokenId, maxTokens,
+                encoderFeatures, encoderShape, encoderMask, encoderMaskShape,
+                sessionAlias, cancellationToken).ConfigureAwait(false)
+            : await GenerateNoCacheAsync(
+                decoder, inputIdsSpec, encoderHiddenSpec, encoderMaskSpec, logitsSpec,
+                prefix, eosTokenId, maxTokens,
+                encoderFeatures, encoderShape, encoderMask, encoderMaskShape,
+                cancellationToken).ConfigureAwait(false);
+
+        DatumActivity.Scalars.Trace(
+            $"[decode_seq2seq] {model.QualifiedName}#{sessionAlias}: "
+            + $"generated.Count={result.Length}");
+
+        return ValueRef.FromPrimitiveArray(result, DataKind.Int64);
+    }
+
+    /// <summary>
+    /// No-cache greedy loop. Each step rebuilds the full
+    /// <c>input_ids = prefix || generated</c> and re-runs the decoder over
+    /// the entire sequence — cheapest decoding path that doesn't require
+    /// the decoder ONNX to export <c>past_key_values.*</c> inputs. Used by
+    /// ViT-GPT2, Florence-2 (no-cache exports), and any other decoder
+    /// without a cache branch.
+    /// </summary>
+    private static async ValueTask<long[]> GenerateNoCacheAsync(
+        IInferenceSession decoder,
+        TensorSpec inputIdsSpec,
+        TensorSpec encoderHiddenSpec,
+        TensorSpec? encoderMaskSpec,
+        TensorSpec logitsSpec,
+        long[] prefix,
+        long eosTokenId,
+        int maxTokens,
+        float[] encoderFeatures,
+        int[] encoderShape,
+        long[]? encoderMask,
+        int[]? encoderMaskShape,
+        CancellationToken cancellationToken)
+    {
         List<long> generated = new(capacity: Math.Min(maxTokens, 32));
-        int[] encoderShape = [1, encoderSeqLen, hiddenDim];
-        int[]? encoderMaskShape = encoderMask is null ? null : new[] { 1, encoderSeqLen };
 
         for (int step = 0; step < maxTokens; step++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Build the current input_ids tensor: prefix || generated.
             int seqLen = prefix.Length + generated.Count;
             long[] currentIds = new long[seqLen];
             for (int i = 0; i < prefix.Length; i++) currentIds[i] = prefix[i];
@@ -330,20 +355,340 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
                 encoderMaskShape,
                 cancellationToken).ConfigureAwait(false);
 
-            if (nextToken == eosTokenId)
-            {
-                break;
-            }
+            if (nextToken == eosTokenId) break;
             generated.Add(nextToken);
         }
 
-        DatumActivity.Scalars.Trace(
-            $"[decode_seq2seq] {model.QualifiedName}#{sessionAlias}: "
-            + $"generated.Count={generated.Count} (stopped on "
-            + $"{(generated.Count == maxTokens ? "max_tokens" : "eos")})");
+        return generated.ToArray();
+    }
 
-        long[] result = generated.ToArray();
-        return ValueRef.FromPrimitiveArray(result, DataKind.Int64);
+    /// <summary>
+    /// KV-cache greedy loop. Used by TrOCR-style decoders whose ONNX export
+    /// declares per-layer <c>past_key_values.{layer}.decoder.{key|value}</c>
+    /// (self-attention) and optionally
+    /// <c>past_key_values.{layer}.encoder.{key|value}</c> (cross-attention)
+    /// inputs, plus matching <c>present.*</c> outputs. Step 0 is a prefill
+    /// pass that consumes the full prefix with all-empty past caches and
+    /// <c>use_cache_branch = false</c>; subsequent steps feed just the
+    /// last generated token with the previous step's present-* outputs
+    /// as past-* inputs and <c>use_cache_branch = true</c>.
+    /// </summary>
+    private static async ValueTask<long[]> GenerateWithKvCacheAsync(
+        IInferenceSession decoder,
+        TensorSpec inputIdsSpec,
+        TensorSpec encoderHiddenSpec,
+        TensorSpec? encoderMaskSpec,
+        TensorSpec logitsSpec,
+        long[] prefix,
+        long eosTokenId,
+        int maxTokens,
+        float[] encoderFeatures,
+        int[] encoderShape,
+        long[]? encoderMask,
+        int[]? encoderMaskShape,
+        string sessionAlias,
+        CancellationToken cancellationToken)
+    {
+        // Discover the cache layout from the decoder session's input set.
+        // Naming convention: past_key_values.{layer}.{decoder|encoder}.{key|value}
+        // (mirrored on the output side as `present.{...}`). Layer count is
+        // the count of `past_key_values.{N}.decoder.key` entries.
+        List<TensorSpec> decoderKeyInputs = new();
+        List<TensorSpec> decoderValueInputs = new();
+        List<TensorSpec> encoderKeyInputs = new();
+        List<TensorSpec> encoderValueInputs = new();
+        TensorSpec? useCacheBranchSpec = null;
+
+        foreach (TensorSpec spec in decoder.Inputs)
+        {
+            if (spec.Name == "use_cache_branch")
+            {
+                useCacheBranchSpec = spec;
+            }
+            else if (spec.Name.StartsWith("past_key_values.", StringComparison.Ordinal))
+            {
+                if (spec.Name.EndsWith(".decoder.key", StringComparison.Ordinal)) decoderKeyInputs.Add(spec);
+                else if (spec.Name.EndsWith(".decoder.value", StringComparison.Ordinal)) decoderValueInputs.Add(spec);
+                else if (spec.Name.EndsWith(".encoder.key", StringComparison.Ordinal)) encoderKeyInputs.Add(spec);
+                else if (spec.Name.EndsWith(".encoder.value", StringComparison.Ordinal)) encoderValueInputs.Add(spec);
+            }
+        }
+
+        if (decoderKeyInputs.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"decode_seq2seq(): use_kv_cache=true but decoder session '{sessionAlias}' "
+                + "declares no `past_key_values.{layer}.decoder.key` inputs. The decoder ONNX "
+                + "must be an `optimum-cli` export with cache support (the `*-with-past` or "
+                + "merged variant). Switch to use_kv_cache=false or re-export the model.");
+        }
+
+        int numLayers = decoderKeyInputs.Count;
+        if (decoderValueInputs.Count != numLayers)
+        {
+            throw new InvalidOperationException(
+                $"decode_seq2seq(): decoder session '{sessionAlias}' has {numLayers} decoder.key "
+                + $"inputs but {decoderValueInputs.Count} decoder.value inputs. The export is "
+                + "malformed — every layer needs a matching key/value pair.");
+        }
+        bool hasCrossCache = encoderKeyInputs.Count == numLayers;
+        if (encoderKeyInputs.Count != 0 && encoderKeyInputs.Count != numLayers)
+        {
+            throw new InvalidOperationException(
+                $"decode_seq2seq(): decoder session '{sessionAlias}' has partial cross-attention "
+                + $"cache: {encoderKeyInputs.Count} encoder.key inputs vs {numLayers} layers. "
+                + "Cross-attention cache must be either fully present or fully absent.");
+        }
+
+        // Derive num_heads + head_dim from one past tensor's shape spec.
+        // Convention: [batch, num_heads, past_seq, head_dim] with dims 1 and 3
+        // concrete (heads and head_dim are model-architecture constants).
+        TensorSpec sampleSpec = decoderKeyInputs[0];
+        if (sampleSpec.Shape.Count != 4
+            || sampleSpec.Shape[1] is not int numHeads
+            || sampleSpec.Shape[3] is not int headDim)
+        {
+            throw new InvalidOperationException(
+                $"decode_seq2seq(): decoder session '{sessionAlias}' "
+                + $"`past_key_values.0.decoder.key` shape must be 4-d [batch, heads, past_seq, head_dim] "
+                + $"with concrete heads and head_dim; got "
+                + $"[{string.Join(", ", sampleSpec.Shape.Select(d => d?.ToString() ?? "?"))}].");
+        }
+        int perPositionFloats = numHeads * headDim;
+
+        DatumActivity.Scalars.Trace(
+            $"[decode_seq2seq] kv-cache layout: layers={numLayers} heads={numHeads} "
+            + $"head_dim={headDim} hasCrossCache={hasCrossCache} hasUseCacheBranch={useCacheBranchSpec is not null}");
+
+        // Cache state, one float[] per (layer, side, kv) slot. Indexed by layer
+        // for the inner loop; the array stays at Empty until the first present
+        // output is read in.
+        float[][] decoderKeyCache = new float[numLayers][];
+        float[][] decoderValueCache = new float[numLayers][];
+        float[][]? encoderKeyCache = hasCrossCache ? new float[numLayers][] : null;
+        float[][]? encoderValueCache = hasCrossCache ? new float[numLayers][] : null;
+        for (int l = 0; l < numLayers; l++)
+        {
+            decoderKeyCache[l] = Array.Empty<float>();
+            decoderValueCache[l] = Array.Empty<float>();
+            if (hasCrossCache)
+            {
+                encoderKeyCache![l] = Array.Empty<float>();
+                encoderValueCache![l] = Array.Empty<float>();
+            }
+        }
+
+        List<long> generated = new(capacity: Math.Min(maxTokens, 32));
+        bool useCacheBranch = false;
+
+        for (int step = 0; step < maxTokens; step++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Prefill (step 0): full prefix, empty cache, use_cache_branch=false.
+            // Incremental (step 1+): just the last generated token, cache from
+            // previous step, use_cache_branch=true. The cached-decoder ONNX
+            // returns logits whose seq-dim matches the input_ids seq-dim, so
+            // we always argmax over the LAST position regardless of mode.
+            long[] currentIds;
+            if (!useCacheBranch)
+            {
+                currentIds = prefix;
+            }
+            else
+            {
+                currentIds = new long[] { generated[^1] };
+            }
+
+            int pastDecSeq = useCacheBranch ? decoderKeyCache[0].Length / perPositionFloats : 0;
+            int pastEncSeq = useCacheBranch && hasCrossCache
+                ? encoderKeyCache![0].Length / perPositionFloats : 0;
+            int[] decoderCacheShape = [1, numHeads, pastDecSeq, headDim];
+            int[] encoderCacheShape = hasCrossCache ? [1, numHeads, pastEncSeq, headDim] : null!;
+
+            long nextToken = await DispatchOneStepWithCacheAsync(
+                decoder,
+                inputIdsSpec, encoderHiddenSpec, encoderMaskSpec, logitsSpec,
+                useCacheBranchSpec,
+                decoderKeyInputs, decoderValueInputs,
+                encoderKeyInputs, encoderValueInputs,
+                currentIds, encoderFeatures, encoderShape, encoderMask, encoderMaskShape,
+                useCacheBranch,
+                decoderKeyCache, decoderValueCache, encoderKeyCache, encoderValueCache,
+                decoderCacheShape, encoderCacheShape, hasCrossCache,
+                numLayers,
+                cancellationToken).ConfigureAwait(false);
+
+            if (nextToken == eosTokenId) break;
+            generated.Add(nextToken);
+            useCacheBranch = true;
+        }
+
+        return generated.ToArray();
+    }
+
+    /// <summary>
+    /// Runs a single cached decoder forward pass: wires every past_kv input
+    /// from the supplied caches, sets <c>use_cache_branch</c>, runs the
+    /// session, reads the argmax of the last logits position AND rotates
+    /// every <c>present.*</c> output into the corresponding cache slot for
+    /// the next iteration. Caller resets <c>useCacheBranch</c> to true
+    /// after the first invocation.
+    /// </summary>
+    private static async ValueTask<long> DispatchOneStepWithCacheAsync(
+        IInferenceSession decoder,
+        TensorSpec inputIdsSpec,
+        TensorSpec encoderHiddenSpec,
+        TensorSpec? encoderMaskSpec,
+        TensorSpec logitsSpec,
+        TensorSpec? useCacheBranchSpec,
+        List<TensorSpec> decoderKeyInputs,
+        List<TensorSpec> decoderValueInputs,
+        List<TensorSpec> encoderKeyInputs,
+        List<TensorSpec> encoderValueInputs,
+        long[] currentIds,
+        float[] encoderFeatures,
+        int[] encoderShape,
+        long[]? encoderMask,
+        int[]? encoderMaskShape,
+        bool useCacheBranch,
+        float[][] decoderKeyCache,
+        float[][] decoderValueCache,
+        float[][]? encoderKeyCache,
+        float[][]? encoderValueCache,
+        int[] decoderCacheShape,
+        int[] encoderCacheShape,
+        bool hasCrossCache,
+        int numLayers,
+        CancellationToken cancellationToken)
+    {
+        TensorBag inputBag = decoder.CreateInputBag();
+        TensorBag? outputBag = null;
+        try
+        {
+            // Required inputs: input_ids + encoder_hidden_states. Both shapes
+            // are exact every step; the cached export's leading-dim is always
+            // batch=1 and the seq-dim reflects either prefill (full prefix)
+            // or incremental (single new token).
+            inputBag.Add<long>(
+                inputIdsSpec.Name, DataKind.Int64,
+                new int[] { 1, currentIds.Length }, currentIds);
+            inputBag.Add<float>(
+                encoderHiddenSpec.Name, DataKind.Float32,
+                encoderShape, encoderFeatures);
+            if (encoderMaskSpec is not null)
+            {
+                inputBag.Add<long>(
+                    encoderMaskSpec.Name, DataKind.Int64,
+                    encoderMaskShape!, encoderMask!);
+            }
+
+            // use_cache_branch is a shape-[1] bool tensor in TrOCR's export.
+            // Always wired when the input exists — false on prefill, true after.
+            if (useCacheBranchSpec is not null)
+            {
+                inputBag.Add<bool>(
+                    useCacheBranchSpec.Name, DataKind.Boolean,
+                    new int[] { 1 }, new[] { useCacheBranch });
+            }
+
+            // Wire every per-layer past_kv input. Self-attention pair always;
+            // cross-attention pair when the export declared it. On prefill
+            // the caches are zero-length (decoderCacheShape[2] = 0); on
+            // incremental steps they hold the previous step's `present.*`
+            // contents.
+            for (int l = 0; l < numLayers; l++)
+            {
+                inputBag.Add<float>(
+                    decoderKeyInputs[l].Name, DataKind.Float32,
+                    decoderCacheShape, decoderKeyCache[l]);
+                inputBag.Add<float>(
+                    decoderValueInputs[l].Name, DataKind.Float32,
+                    decoderCacheShape, decoderValueCache[l]);
+                if (hasCrossCache)
+                {
+                    inputBag.Add<float>(
+                        encoderKeyInputs[l].Name, DataKind.Float32,
+                        encoderCacheShape, encoderKeyCache![l]);
+                    inputBag.Add<float>(
+                        encoderValueInputs[l].Name, DataKind.Float32,
+                        encoderCacheShape, encoderValueCache![l]);
+                }
+            }
+
+            outputBag = await decoder.RunAsync(inputBag, cancellationToken).ConfigureAwait(false);
+
+            if (!outputBag.TryGet(logitsSpec.Name, out IInferenceTensor logitsTensor))
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): decoder did not produce expected output '{logitsSpec.Name}'.");
+            }
+
+            ReadOnlySpan<float> logits = logitsTensor.AsSpan<float>();
+            IReadOnlyList<int> shape = logitsTensor.Shape;
+            if (shape.Count != 3)
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): cached-decoder logits expected rank-3 [batch, seq, vocab]; "
+                    + $"got [{string.Join(", ", shape)}].");
+            }
+            int vocab = shape[2];
+            int lastPosStart = (shape[1] - 1) * vocab;
+            ReadOnlySpan<float> lastPos = logits.Slice(lastPosStart, vocab);
+
+            int argmax = 0;
+            float best = lastPos[0];
+            for (int i = 1; i < lastPos.Length; i++)
+            {
+                if (lastPos[i] > best) { best = lastPos[i]; argmax = i; }
+            }
+
+            // Rotate `present.*` outputs into the corresponding cache slot
+            // for the next iteration. Names match per-layer past inputs but
+            // with the prefix flipped from `past_key_values.` to `present.`.
+            // The output bag is disposed at the end of this scope, so we
+            // copy out to managed arrays here.
+            for (int l = 0; l < numLayers; l++)
+            {
+                decoderKeyCache[l]   = ReadPresentFloats(outputBag, decoderKeyInputs[l].Name);
+                decoderValueCache[l] = ReadPresentFloats(outputBag, decoderValueInputs[l].Name);
+                if (hasCrossCache)
+                {
+                    encoderKeyCache![l]   = ReadPresentFloats(outputBag, encoderKeyInputs[l].Name);
+                    encoderValueCache![l] = ReadPresentFloats(outputBag, encoderValueInputs[l].Name);
+                }
+            }
+
+            return argmax;
+        }
+        finally
+        {
+            inputBag.Dispose();
+            outputBag?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Reads the `present.*` output corresponding to a past_kv input name
+    /// (`past_key_values.{layer}.{side}.{kv}` → `present.{layer}.{side}.{kv}`)
+    /// and returns a freshly-allocated float[]. Throws if the expected
+    /// output is missing — every cached-decoder export pairs each past
+    /// input with its present output.
+    /// </summary>
+    private static float[] ReadPresentFloats(TensorBag outputBag, string pastInputName)
+    {
+        const string PastPrefix = "past_key_values.";
+        const string PresentPrefix = "present.";
+        string presentName = pastInputName.StartsWith(PastPrefix, StringComparison.Ordinal)
+            ? PresentPrefix + pastInputName[PastPrefix.Length..]
+            : pastInputName; // already in the present.* form (some exports use it directly)
+
+        if (!outputBag.TryGet(presentName, out IInferenceTensor tensor))
+        {
+            throw new InvalidOperationException(
+                $"decode_seq2seq(): cached decoder did not produce expected present output '{presentName}'.");
+        }
+        return tensor.AsSpan<float>().ToArray();
     }
 
     /// <summary>

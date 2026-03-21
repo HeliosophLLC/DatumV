@@ -84,8 +84,8 @@ public static class BuiltinModels
         RegisterMobileSamPrompted(modelCatalog);
         RegisterMobileSam(modelCatalog);
         // ViT-GPT2 migrated to a SQL-defined model (models/sql/vit-gpt2-image-captioning.sql).
-        RegisterTrOcrPrinted(modelCatalog);
-        RegisterTrOcrPrintedFp16(modelCatalog);
+        // TrOCR (fp32 + fp16) migrated to SQL-defined models
+        // (models/sql/trocr-base-printed.sql + trocr-base-printed-fp16.sql).
 
         // Captioner zoo — Florence-2 in three caption styles plus a
         // quantized comparison entry. Same model, different task tokens.
@@ -738,132 +738,14 @@ public static class BuiltinModels
     // for caption assembly. The catalog entry's installSql declaration
     // re-registers the SQL form when the model directory is rehydrated.
 
-    /// <summary>
-    /// Default folder for the TrOCR printed-text OCR model. Holds both
-    /// fp32 and fp16 ONNX exports (encoder + merged decoder for each
-    /// precision) plus a single shared tokenizer + config set, all
-    /// produced by <c>optimum-cli export onnx</c>.
-    /// </summary>
-    public const string TrOcrPrintedFolder = "trocr-base-printed";
-
-    /// <summary>
-    /// Default fp32 anchor: <c>{folder}/encoder_model.onnx</c>. The
-    /// <see cref="TrOcrModel"/> loader derives the model directory from
-    /// this path and pairs it with <c>decoder_model_merged.onnx</c>.
-    /// </summary>
-    public const string TrOcrPrintedEncoderRelativePath =
-        TrOcrPrintedFolder + "/encoder_model.onnx";
-
-    /// <summary>
-    /// fp16 anchor: <c>{folder}/encoder_model_fp16.onnx</c>. Pairs with
-    /// <c>decoder_model_merged_fp16.onnx</c>.
-    /// </summary>
-    public const string TrOcrPrintedFp16EncoderRelativePath =
-        TrOcrPrintedFolder + "/encoder_model_fp16.onnx";
-
-    /// <summary>
-    /// Registers Microsoft's <c>trocr-base-printed</c> model — ViT-base
-    /// 384×384 encoder + 12-layer RoBERTa decoder, ~1.3 GB on disk as
-    /// fp32 ONNX. MIT licensed; targets single-line printed text
-    /// (receipts, signage, document lines).
-    /// </summary>
-    /// <param name="catalog">Catalog to register against.</param>
-    /// <param name="modelName">SQL-visible name (defaults to <c>"trocr_printed"</c>).</param>
-    /// <param name="encoderRelativePath">Path to the encoder ONNX, relative to <c>ModelDirectory</c>.</param>
-    /// <param name="maxTokens">Maximum tokens generated per image. Defaults to 20 (matches generation_config).</param>
-    public static void RegisterTrOcrPrinted(
-        ModelCatalog catalog,
-        string modelName = "trocr_printed",
-        string encoderRelativePath = TrOcrPrintedEncoderRelativePath,
-        int maxTokens = 20)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: encoderRelativePath,
-            InputKinds: [DataKind.Image],
-            OutputKind: DataKind.String,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
-                return new TrOcrModel(modelName, encoderPath, maxTokens: maxTokens);
-            },
-            DisplayName: "TrOCR Printed (fp32)",
-            ImplementsTaskName: "TextRecognizer",
-            Parameters: "334M",
-            License: "MIT",
-            LicenseHolder: "Microsoft",
-            SourceUrl: "https://huggingface.co/microsoft/trocr-base-printed",
-            Category: "ocr",
-            Modalities: ["image", "text"],
-            Files:
-            [
-                TrOcrPrintedFolder + "/encoder_model.onnx",
-                TrOcrPrintedFolder + "/decoder_model_merged.onnx",
-                TrOcrPrintedFolder + "/tokenizer.json",
-                TrOcrPrintedFolder + "/vocab.json",
-                TrOcrPrintedFolder + "/merges.txt",
-                TrOcrPrintedFolder + "/config.json",
-                TrOcrPrintedFolder + "/generation_config.json",
-                TrOcrPrintedFolder + "/preprocessor_config.json",
-                TrOcrPrintedFolder + "/tokenizer_config.json",
-                TrOcrPrintedFolder + "/special_tokens_map.json",
-            ]));
-    }
-
-    /// <summary>
-    /// Registers the fp16 TrOCR variant under the catalog name
-    /// <paramref name="modelName"/> (defaults to
-    /// <c>"trocr_printed_fp16"</c>). ~640 MB on disk — about half the
-    /// fp32 size, with negligible accuracy loss for printed-text OCR.
-    /// Shares the tokenizer + config files with the fp32 entry; both
-    /// can live in the same folder.
-    /// </summary>
-    public static void RegisterTrOcrPrintedFp16(
-        ModelCatalog catalog,
-        string modelName = "trocr_printed_fp16",
-        string encoderRelativePath = TrOcrPrintedFp16EncoderRelativePath,
-        int maxTokens = 20)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: encoderRelativePath,
-            InputKinds: [DataKind.Image],
-            OutputKind: DataKind.String,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
-                return new TrOcrModel(
-                    modelName,
-                    encoderPath,
-                    decoderFileName: "decoder_model_merged_fp16.onnx",
-                    maxTokens: maxTokens);
-            },
-            DisplayName: "TrOCR Printed (fp16)",
-            ImplementsTaskName: "TextRecognizer",
-            Parameters: "334M",
-            License: "MIT",
-            LicenseHolder: "Microsoft",
-            SourceUrl: "https://huggingface.co/microsoft/trocr-base-printed",
-            Category: "ocr",
-            Modalities: ["image", "text"],
-            Files:
-            [
-                TrOcrPrintedFolder + "/encoder_model_fp16.onnx",
-                TrOcrPrintedFolder + "/decoder_model_merged_fp16.onnx",
-                TrOcrPrintedFolder + "/tokenizer.json",
-                TrOcrPrintedFolder + "/vocab.json",
-                TrOcrPrintedFolder + "/merges.txt",
-                TrOcrPrintedFolder + "/config.json",
-                TrOcrPrintedFolder + "/generation_config.json",
-                TrOcrPrintedFolder + "/preprocessor_config.json",
-                TrOcrPrintedFolder + "/tokenizer_config.json",
-                TrOcrPrintedFolder + "/special_tokens_map.json",
-            ]));
-    }
+    // TrOCR (fp32 + fp16) was previously registered here as a built-in
+    // C# IModel (TrOcrModel.cs). Both variants now ship as SQL-defined
+    // models in models/sql/trocr-base-printed.sql and
+    // models/sql/trocr-base-printed-fp16.sql, backed by image_to_tensor_chw,
+    // a two-session USING (encoder + merged-decoder-with-cache), and
+    // decode_seq2seq with use_kv_cache=true for the auto-regressive loop.
+    // The catalog entries' installSql declarations re-register the SQL
+    // forms when the model directories are rehydrated.
 
     /// <summary>Default folder for SD-Turbo's diffusers ONNX layout.</summary>
     public const string SdTurboFolder = "sd-turbo-onnx";
