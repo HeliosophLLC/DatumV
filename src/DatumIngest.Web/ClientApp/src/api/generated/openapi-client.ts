@@ -86,6 +86,40 @@ export class FunctionCatalogClient {
         return Promise.resolve<UdfListResponse>(null as any);
     }
 
+    listProcedures(signal?: AbortSignal): Promise<ProcedureListResponse> {
+        let url_ = this.baseUrl + "/api/functions/procedures";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processListProcedures(_response);
+        });
+    }
+
+    protected processListProcedures(response: Response): Promise<ProcedureListResponse> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as ProcedureListResponse;
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<ProcedureListResponse>(null as any);
+    }
+
     listModels(signal?: AbortSignal): Promise<ModelListResponse> {
         let url_ = this.baseUrl + "/api/functions/models";
         url_ = url_.replace(/[?&]$/, "");
@@ -809,6 +843,51 @@ export class QueryStreamClient {
     }
 }
 
+export class SchemaCatalogClient {
+    private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
+    private baseUrl: string;
+    protected jsonParseReviver: ((key: string, value: any) => any) | undefined = undefined;
+
+    constructor(baseUrl?: string, http?: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> }) {
+        this.http = http ? http : window as any;
+        this.baseUrl = baseUrl ?? "";
+    }
+
+    getCatalog(signal?: AbortSignal): Promise<SchemaCatalogDto> {
+        let url_ = this.baseUrl + "/api/schema/catalog";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processGetCatalog(_response);
+        });
+    }
+
+    protected processGetCatalog(response: Response): Promise<SchemaCatalogDto> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as SchemaCatalogDto;
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<SchemaCatalogDto>(null as any);
+    }
+}
+
 export class SettingsClient {
     private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
     private baseUrl: string;
@@ -992,6 +1071,17 @@ export interface UdfDto {
     parameters?: ScalarFunctionParameterDto[];
     returnType?: string | undefined;
     returnIsNotNull?: boolean;
+    sourceText?: string | undefined;
+}
+
+export interface ProcedureListResponse {
+    procedures?: ProcedureDto[];
+}
+
+export interface ProcedureDto {
+    schema?: string;
+    name?: string;
+    parameters?: ScalarFunctionParameterDto[];
     sourceText?: string | undefined;
 }
 
@@ -1200,12 +1290,44 @@ export interface ProblemDetails {
     [key: string]: any;
 }
 
+export interface SchemaCatalogDto {
+    tables?: TableEntryDto[];
+}
+
+export interface TableEntryDto {
+    schema?: string;
+    name?: string;
+    kind?: string;
+    columns?: ColumnEntryDto[];
+    indexes?: IndexEntryDto[];
+}
+
+export interface ColumnEntryDto {
+    ordinal?: number;
+    name?: string;
+    dataType?: string;
+    isArray?: boolean;
+    isNullable?: boolean;
+    isPrimaryKey?: boolean;
+}
+
+export interface IndexEntryDto {
+    name?: string;
+    columns?: string[];
+    isUnique?: boolean;
+    kind?: string;
+}
+
 export interface SettingsDto {
     theme?: ThemePreference;
     chromeStyle?: ChromeStyle;
     locale?: string;
     modelsDirectory?: string;
     animations?: boolean;
+    dockLeftItems?: string[];
+    dockRightItems?: string[];
+    openLeftPanel?: string | undefined;
+    openRightPanel?: string | undefined;
 }
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -1218,6 +1340,12 @@ export interface SettingsPatchDto {
     locale?: string | undefined;
     modelsDirectory?: string | undefined;
     animations?: boolean | undefined;
+    dockLeftItems?: string[] | undefined;
+    dockRightItems?: string[] | undefined;
+    openLeftPanel?: string | undefined;
+    openRightPanel?: string | undefined;
+    clearOpenLeftPanel?: boolean;
+    clearOpenRightPanel?: boolean;
 }
 
 export interface FileResponse {

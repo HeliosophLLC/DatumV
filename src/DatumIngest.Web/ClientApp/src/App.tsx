@@ -2,42 +2,54 @@ import { useEffect } from 'react';
 import { useSnapshot } from 'valtio';
 import { refreshHealth } from './state/health';
 import { refreshSettings } from './state/settings';
-import { conversationState } from './state/conversation';
-import { navState } from './state/nav';
+import { hydrateDockFromSettings, navState } from './state/nav';
+import { subscribeCatalogExplorerToHub } from './state/catalogExplorer';
+import { subscribeRoutinesToHub } from './state/functionCatalog';
 import { isTornOutWindow } from './state/tabs';
 import { WindowChrome } from '@/components/window/WindowChrome';
-import { HomePage } from '@/components/home/HomePage';
-import { ConversationView } from '@/components/chat/ConversationView';
+import { AppDock } from '@/components/nav/AppDock';
 import { QueryEditorView } from '@/components/query/QueryEditorView';
 import { SettingsView } from '@/components/settings/SettingsView';
+import { SidePanelHost } from '@/components/panels/SidePanelHost';
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from '@/components/ui/resizable';
 
-// Default split between the workspace (left) and the chat dock (right).
-// Chat is always present in the main window — the dock no longer toggles
-// it. Users resize via the drag handle when they want more workspace
-// room. The workspace renders the tab editor (with the pinned Models tab
-// as the first tab) when view = 'query', or SettingsView when the user
-// has Settings open from the dock.
-const DEFAULT_WORKSPACE_SIZE = '65%';
-const DEFAULT_CHAT_SIZE = '35%';
-const PANEL_MIN_SIZE = '20%';
+// Layout:
+//
+//   ┌─────────────────────────────────────────────────────────────┐
+//   │ TitleBar                                                    │
+//   ├──┬──────────────────────────────────────────────────────┬──┤
+//   │L │ [left panel?] | workspace | [right panel?]           │R │
+//   │  │  ResizablePanelGroup w/ at most 3 panels             │  │
+//   └──┴──────────────────────────────────────────────────────┴──┘
+//
+// Settings replaces the workspace via the pinned Settings icon at the
+// bottom of the left dock — it isn't a side panel.
+//
+// The ResizablePanelGroup is keyed on the open-panel signature so
+// react-resizable-panels recomputes sizes cleanly when a panel opens
+// or closes. autoSaveId persists each combination's split independently
+// (closing then reopening Chat restores its prior width).
+const SIDE_PANEL_DEFAULT_SIZE = '25%';
+const WORKSPACE_MIN_SIZE = '30%';
+const SIDE_PANEL_MIN_SIZE = '15%';
 
 export default function App() {
-  const { messages, status } = useSnapshot(conversationState);
-  const { view } = useSnapshot(navState);
+  const { openLeft, openRight, workspaceView } = useSnapshot(navState);
 
   useEffect(() => {
     refreshHealth();
-    refreshSettings();
+    void refreshSettings().then(() => hydrateDockFromSettings());
+    subscribeCatalogExplorerToHub();
+    subscribeRoutinesToHub();
   }, []);
 
-  // Torn-out tab windows skip the main shell entirely: no AppDock, no
-  // chat panel, no view switcher — just the query editor for the tab
-  // that was torn out. The split / DnD / Monaco machinery inside
+  // Torn-out tab windows skip the main shell entirely: no docks, no
+  // panels, no view switcher — just the query editor for the tab that
+  // was torn out. The split / DnD / Monaco machinery inside
   // QueryEditorView is identical to the main window's, so dragging
   // tabs back into the main works seamlessly.
   if (isTornOutWindow) {
@@ -50,30 +62,56 @@ export default function App() {
     );
   }
 
-  const showConversation = messages.length > 0 || status !== 'idle';
+  // Group key encodes which sides have panels open so the resize
+  // library remounts cleanly when a panel opens or closes (rather
+  // than trying to reconcile a 3-panel layout into a 2-panel one,
+  // which produces visible flicker as it re-clamps sizes).
+  const groupKey = `dock:${openLeft ?? '_'}|${openRight ?? '_'}`;
 
   return (
     <WindowChrome>
-      <ResizablePanelGroup orientation="horizontal" className="flex-1">
+      <AppDock side="left" />
+      <ResizablePanelGroup
+        key={groupKey}
+        orientation="horizontal"
+        className="flex-1"
+      >
+        {openLeft && (
+          <>
+            <ResizablePanel
+              id="left-panel"
+              defaultSize={SIDE_PANEL_DEFAULT_SIZE}
+              minSize={SIDE_PANEL_MIN_SIZE}
+              className="flex flex-col overflow-hidden"
+            >
+              <SidePanelHost side="left" panelId={openLeft} />
+            </ResizablePanel>
+            <ResizableHandle />
+          </>
+        )}
         <ResizablePanel
           id="workspace"
-          defaultSize={DEFAULT_WORKSPACE_SIZE}
-          minSize={PANEL_MIN_SIZE}
+          minSize={WORKSPACE_MIN_SIZE}
           className="flex flex-col overflow-hidden"
         >
-          {view === 'query' && <QueryEditorView />}
-          {view === 'settings' && <SettingsView />}
+          {workspaceView === 'query' && <QueryEditorView />}
+          {workspaceView === 'settings' && <SettingsView />}
         </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel
-          id="chat"
-          defaultSize={DEFAULT_CHAT_SIZE}
-          minSize={PANEL_MIN_SIZE}
-          className="flex flex-col overflow-hidden"
-        >
-          {showConversation ? <ConversationView /> : <HomePage />}
-        </ResizablePanel>
+        {openRight && (
+          <>
+            <ResizableHandle />
+            <ResizablePanel
+              id="right-panel"
+              defaultSize={SIDE_PANEL_DEFAULT_SIZE}
+              minSize={SIDE_PANEL_MIN_SIZE}
+              className="flex flex-col overflow-hidden"
+            >
+              <SidePanelHost side="right" panelId={openRight} />
+            </ResizablePanel>
+          </>
+        )}
       </ResizablePanelGroup>
+      <AppDock side="right" />
     </WindowChrome>
   );
 }

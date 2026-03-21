@@ -1,0 +1,16 @@
+{
+  "closePanel": "Close panel",
+  "chat": {
+    "title": "Chat"
+  },
+  "catalog": {
+    "title": "Catalog explorer"
+  },
+  "procedures": {
+    "title": "Procedures & UDFs"
+  },
+  "projects": {
+    "title": "Project explorer",
+    "comingSoon": "Project explorer is coming soon."
+  }
+}

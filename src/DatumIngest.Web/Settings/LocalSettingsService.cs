@@ -18,12 +18,26 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
     // ModelsDirectory empty string = "use the resolution cascade"
     // (env var → default location). The Settings UI surfaces the resolved
     // effective path via the Health endpoint.
+    // Default dock layout: every panel icon lives on the left dock at app
+    // first-launch (right dock hidden until the user drags an icon over).
+    // Settings is pinned to the bottom of the left dock by the renderer and
+    // is not part of this list. Order = display order.
+    private static readonly IReadOnlyList<string> DefaultDockLeftItems =
+        ["chat", "catalog", "procedures", "projects"];
+
+    private static readonly IReadOnlyList<string> DefaultDockRightItems =
+        Array.Empty<string>();
+
     private static readonly SettingsDto Defaults = new(
         Theme: ThemePreference.System,
         ChromeStyle: ChromeStyle.Auto,
         Locale: "system",
         ModelsDirectory: "",
-        Animations: true);
+        Animations: true,
+        DockLeftItems: DefaultDockLeftItems,
+        DockRightItems: DefaultDockRightItems,
+        OpenLeftPanel: null,
+        OpenRightPanel: null);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -43,7 +57,25 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
 
         await using var stream = File.OpenRead(SettingsPath);
         var dto = await JsonSerializer.DeserializeAsync<SettingsDto>(stream, JsonOptions, ct);
-        return dto ?? Defaults;
+        if (dto is null) return Defaults;
+        // Heal old documents that pre-date the dock fields. A positional
+        // record deserialized from JSON missing those keys would hand us
+        // `null!` for the collection slots, which then trips downstream
+        // code. Treat missing-or-null as "use the default layout."
+        return FillCollectionDefaults(dto);
+    }
+
+    private static SettingsDto FillCollectionDefaults(SettingsDto dto)
+    {
+        if (dto.DockLeftItems is not null && dto.DockRightItems is not null)
+        {
+            return dto;
+        }
+        return dto with
+        {
+            DockLeftItems = dto.DockLeftItems ?? DefaultDockLeftItems,
+            DockRightItems = dto.DockRightItems ?? DefaultDockRightItems,
+        };
     }
 
     public async Task<SettingsDto> PatchAsync(SettingsPatchDto patch, CancellationToken ct = default)
@@ -54,7 +86,17 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
             ChromeStyle: patch.ChromeStyle ?? current.ChromeStyle,
             Locale: patch.Locale ?? current.Locale,
             ModelsDirectory: patch.ModelsDirectory ?? current.ModelsDirectory,
-            Animations: patch.Animations ?? current.Animations);
+            Animations: patch.Animations ?? current.Animations,
+            DockLeftItems: patch.DockLeftItems ?? current.DockLeftItems,
+            DockRightItems: patch.DockRightItems ?? current.DockRightItems,
+            // Clear flags win over the value field — passing both is a
+            // client bug but the clearer of the two semantically wins.
+            OpenLeftPanel: patch.ClearOpenLeftPanel
+                ? null
+                : patch.OpenLeftPanel ?? current.OpenLeftPanel,
+            OpenRightPanel: patch.ClearOpenRightPanel
+                ? null
+                : patch.OpenRightPanel ?? current.OpenRightPanel);
 
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
 

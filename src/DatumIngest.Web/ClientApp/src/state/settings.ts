@@ -25,6 +25,14 @@ interface SettingsState {
   // slide, future page transitions). Honours a user who prefers reduced
   // motion or just dislikes the movement.
   animations: boolean;
+  // Persisted dock layout. Initial values match the server defaults so
+  // the pre-fetch render shows the canonical layout; the dock state
+  // module (state/nav.ts) re-seeds these fields' downstream copies via
+  // hydrateDockFromSettings() once the real document arrives.
+  dockLeftItems: string[];
+  dockRightItems: string[];
+  openLeftPanel: string | null;
+  openRightPanel: string | null;
 }
 
 export const settingsState = proxy<SettingsState>({
@@ -33,12 +41,32 @@ export const settingsState = proxy<SettingsState>({
   locale: 'system',
   modelsDirectory: '',
   animations: true,
+  dockLeftItems: ['chat', 'catalog', 'procedures', 'projects'],
+  dockRightItems: [],
+  openLeftPanel: null,
+  openRightPanel: null,
 });
+
+function applyDto(dto: SettingsDto): void {
+  // NSwag generates every field as optional even though the server's
+  // GET path fills defaults — fall back to the proxy's current values
+  // so a partial document (which we shouldn't ever see in practice)
+  // doesn't blow null into typed slots.
+  settingsState.theme = dto.theme ?? settingsState.theme;
+  settingsState.chromeStyle = dto.chromeStyle ?? settingsState.chromeStyle;
+  settingsState.locale = dto.locale ?? settingsState.locale;
+  settingsState.modelsDirectory = dto.modelsDirectory ?? settingsState.modelsDirectory;
+  settingsState.animations = dto.animations ?? settingsState.animations;
+  settingsState.dockLeftItems = dto.dockLeftItems ?? [];
+  settingsState.dockRightItems = dto.dockRightItems ?? [];
+  settingsState.openLeftPanel = dto.openLeftPanel ?? null;
+  settingsState.openRightPanel = dto.openRightPanel ?? null;
+}
 
 export async function refreshSettings(): Promise<void> {
   try {
     const dto = await api.settings.get();
-    Object.assign(settingsState, dto);
+    applyDto(dto);
   } catch (err) {
     console.error('[settings] refresh failed', err);
   }
@@ -47,7 +75,7 @@ export async function refreshSettings(): Promise<void> {
 export async function updateSettings(patch: SettingsPatchDto): Promise<void> {
   try {
     const dto = await api.settings.patch(patch);
-    Object.assign(settingsState, dto);
+    applyDto(dto);
   } catch (err) {
     console.error('[settings] update failed', err);
   }

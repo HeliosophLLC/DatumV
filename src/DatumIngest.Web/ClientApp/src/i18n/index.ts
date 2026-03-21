@@ -1,11 +1,14 @@
 import i18next from 'i18next';
 import ICU from 'i18next-icu';
 import { initReactI18next } from 'react-i18next';
+import enCatalog from './locales/en/catalog.json';
 import enChat from './locales/en/chat.json';
 import enCommon from './locales/en/common.json';
 import enDialogs from './locales/en/dialogs.json';
 import enHome from './locales/en/home.json';
 import enModels from './locales/en/models.json';
+import enPanels from './locales/en/panels.json';
+import enProcedures from './locales/en/procedures.json';
 import enQuery from './locales/en/query.json';
 import enSettings from './locales/en/settings.json';
 
@@ -25,6 +28,9 @@ const resources = {
     query: enQuery,
     settings: enSettings,
     dialogs: enDialogs,
+    panels: enPanels,
+    catalog: enCatalog,
+    procedures: enProcedures,
   },
 } as const;
 
@@ -36,7 +42,18 @@ i18next
     lng: FallbackLocale,
     fallbackLng: FallbackLocale,
     defaultNS: 'common',
-    ns: ['common', 'home', 'chat', 'models', 'query', 'settings', 'dialogs'],
+    ns: [
+      'common',
+      'home',
+      'chat',
+      'models',
+      'query',
+      'settings',
+      'dialogs',
+      'panels',
+      'catalog',
+      'procedures',
+    ],
     // React already escapes interpolated values.
     interpolation: { escapeValue: false },
     returnNull: false,

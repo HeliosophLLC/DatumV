@@ -79,6 +79,33 @@ public sealed class FunctionCatalogController(TableCatalog catalog) : Controller
     }
 
     /// <summary>
+    /// Lists every SQL procedure registered against the catalog via
+    /// <c>CREATE PROCEDURE</c>. Same parameter projection as
+    /// <see cref="ListUdfs"/>; procedures lack a return type because they
+    /// run for effect under <c>CALL</c>.
+    /// </summary>
+    [HttpGet("procedures")]
+    public ActionResult<ProcedureListResponse> ListProcedures()
+    {
+        IReadOnlyCollection<ProcedureDescriptor> entries = catalog.Procedures.Entries;
+        List<ProcedureDto> procedures = new(entries.Count);
+        foreach (ProcedureDescriptor d in entries)
+        {
+            ScalarFunctionParameterDto[] parameters = new ScalarFunctionParameterDto[d.Parameters.Count];
+            for (int i = 0; i < d.Parameters.Count; i++)
+            {
+                parameters[i] = ToParameterDto(d.Parameters[i]);
+            }
+            procedures.Add(new ProcedureDto(
+                Schema: d.SchemaName,
+                Name: d.Name,
+                Parameters: parameters,
+                SourceText: d.SourceText));
+        }
+        return new ProcedureListResponse(procedures);
+    }
+
+    /// <summary>
     /// Lists every SQL-defined model registered against the catalog via
     /// <c>CREATE MODEL</c>. Surfaces the <c>USING</c> path (raw + resolved),
     /// any <c>IMPLEMENTS</c> task-contract declaration, and full parameter

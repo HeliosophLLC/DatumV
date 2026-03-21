@@ -50,3 +50,22 @@ public sealed record UdfDto(
     string? ReturnType,
     bool ReturnIsNotNull,
     string? SourceText);
+
+/// <summary>
+/// Response payload for <c>GET /api/functions/procedures</c>: every SQL
+/// procedure registered against the catalog via <c>CREATE PROCEDURE</c>.
+/// Procedures aren't expression-callable (only <c>CALL</c> invokes them)
+/// so they live in a separate response from UDFs even though the metadata
+/// shape is similar.
+/// </summary>
+public sealed record ProcedureListResponse(
+    IReadOnlyList<ProcedureDto> Procedures);
+
+/// <summary>
+/// One stored procedure in the catalog.
+/// </summary>
+public sealed record ProcedureDto(
+    string Schema,
+    string Name,
+    IReadOnlyList<ScalarFunctionParameterDto> Parameters,
+    string? SourceText);

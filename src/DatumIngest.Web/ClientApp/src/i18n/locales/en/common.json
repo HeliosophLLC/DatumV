@@ -6,6 +6,17 @@
     "query": "Query editor",
     "settings": "Settings"
   },
+  "dock": {
+    "left": "Left dock",
+    "right": "Right dock",
+    "dropHere": "Drop here",
+    "tooltip": {
+      "chat": "Chat",
+      "catalog": "Catalog explorer",
+      "procedures": "Procedures & UDFs",
+      "projects": "Project explorer"
+    }
+  },
   "window": {
     "minimize": "Minimize",
     "maximize": "Maximize",

@@ -1,0 +1,11 @@
+{
+  "loading": "Loading catalog…",
+  "errorTitle": "Couldn't load catalog",
+  "noTables": "No tables in this catalog yet.",
+  "columns": "Columns",
+  "indexes": "Indexes",
+  "noIndexes": "No indexes",
+  "primaryKey": "Primary key",
+  "notNull": "not null",
+  "unique": "unique"
+}

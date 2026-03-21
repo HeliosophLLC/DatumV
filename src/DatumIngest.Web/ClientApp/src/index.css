@@ -56,6 +56,8 @@
   --color-table-row: var(--table-row);
   --color-table-pane: var(--table-pane);
   --color-editor: var(--editor-bg);
+  --color-dock-header: var(--dock-header);
+  --color-dock-header-foreground: var(--dock-header-foreground);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
@@ -134,6 +136,15 @@
      blue-tinted surface, while Monaco's vs theme is pure white. */
   --editor-bg: #ffffff;
 
+  /* Dock-panel header bar — the strip above each side panel that
+     carries the title and close button. Defaults to the same blue
+     family as --primary so the panel reads as branded chrome rather
+     than another data surface, but lives on its own token so the
+     header can be retuned without dragging button / focus / link
+     colours along with it. */
+  --dock-header: oklch(52.267% 0.12335 242.245);
+  --dock-header-foreground: oklch(0.99 0.01 203.97);
+
   --font-sans: 'Source Code Pro', 'Geist', 'Geist Fallback', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   --font-serif: 'Source Serif 4', 'Geist', 'Geist Fallback', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
   --font-mono: 'Source Code Pro', 'Geist Mono', 'Geist Mono Fallback', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
@@ -153,7 +164,7 @@
 
 .dark {
   --background: oklch(25.591% 0.00405 264.551);
-  --foreground: oklch(0.90 0.01 238.47);
+  --foreground: oklch(97.566% 0.00181 249.234);
   --card: oklch(0.22 0.02 271.67);
   --card-foreground: oklch(0.90 0.01 238.47);
   --popover: oklch(0.22 0.02 271.67);
@@ -163,7 +174,7 @@
   --secondary: oklch(0.28 0.03 270.91);
   --secondary-foreground: oklch(0.90 0.01 238.47);
   --muted: oklch(38.661% 0.00889 268.448);
-  --muted-foreground: oklch(0.60 0.03 269.46);
+  --muted-foreground: oklch(84.235% 0.0233 269.422);
   --accent: oklch(0.28 0.03 270.91);
   --accent-foreground: oklch(0.90 0.01 238.47);
   --destructive: oklch(0.64 0.25 19.69);
@@ -197,6 +208,12 @@
   /* Matches Monaco's `vs-dark` editor surface. See the light-mode
      comment on `--editor-bg` above for the rationale. */
   --editor-bg: #1e1e1e;
+
+  /* Dark-mode dock-panel header. Slightly desaturated vs light mode
+     so the blue doesn't blast against the surrounding near-black
+     dock chrome. Foreground stays near-white for AA contrast. */
+  --dock-header: oklch(0.55 0.13 239.15);
+  --dock-header-foreground: oklch(0.97 0.01 238.47);
 
   --shadow-2xs: 0px 1px 2px 0px oklch(0 0 0 / 0.01);
   --shadow-xs: 0px 1px 2px 0px oklch(0 0 0 / 0.01);

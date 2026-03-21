@@ -2,9 +2,15 @@ import { proxy, ref } from 'valtio';
 import { api } from '@/api';
 import type {
   ModelDto,
+  ProcedureDto,
   ScalarFunctionDto,
   UdfDto,
 } from '@/api/generated/openapi-client';
+import {
+  CatalogChangeKind,
+  onCatalogChanged,
+  acquireCatalogHub,
+} from '@/api/catalogHub';
 
 // Read-only cache for the catalog endpoints surfaced by
 // `FunctionCatalogController`:
@@ -44,6 +50,10 @@ interface FunctionCatalogState {
   models: ModelDto[];
   modelError: string | null;
 
+  procedureStatus: CatalogStatus;
+  procedures: ProcedureDto[];
+  procedureError: string | null;
+
   /** Flat expansion map across every collapsible node in the picker. */
   expandedSections: Record<string, true>;
 }
@@ -70,6 +80,9 @@ export const functionCatalogState = proxy<FunctionCatalogState>({
   modelStatus: 'idle',
   models: [],
   modelError: null,
+  procedureStatus: 'idle',
+  procedures: [],
+  procedureError: null,
   expandedSections: { ...DEFAULT_EXPANDED },
 });
 
@@ -140,9 +153,82 @@ export async function loadModels(): Promise<void> {
   }
 }
 
+export async function loadProcedures(force = false): Promise<void> {
+  if (functionCatalogState.procedureStatus === 'loading') return;
+  if (!force && functionCatalogState.procedureStatus === 'ready') return;
+  functionCatalogState.procedureStatus = 'loading';
+  functionCatalogState.procedureError = null;
+  try {
+    const response = await api.functionCatalog.listProcedures();
+    functionCatalogState.procedures = ref(response.procedures ?? []);
+    functionCatalogState.procedureStatus = 'ready';
+  } catch (err) {
+    functionCatalogState.procedureError = err instanceof Error ? err.message : String(err);
+    functionCatalogState.procedureStatus = 'error';
+  }
+}
+
 /** Fires all three loaders in parallel. Convenient for the picker's mount effect. */
 export function loadFunctionCatalog(): Promise<void> {
   return Promise.all([loadScalarFunctions(), loadUdfs(), loadModels()]).then(
     () => undefined,
   );
+}
+
+// ──────────────────────── Live updates ────────────────────────
+
+// Procedures + UDFs panel debounce. Procedural-UDF creation can come in
+// bursts (a setup script running CREATE FUNCTION/PROCEDURE several
+// times); 250ms collapses the burst before refetching.
+const REFETCH_DEBOUNCE_MS = 250;
+let procRefetchTimer: number | null = null;
+let udfRefetchTimer: number | null = null;
+
+function scheduleProcedureRefetch(): void {
+  if (procRefetchTimer !== null) window.clearTimeout(procRefetchTimer);
+  procRefetchTimer = window.setTimeout(() => {
+    procRefetchTimer = null;
+    void loadProcedures(true);
+  }, REFETCH_DEBOUNCE_MS);
+}
+
+function scheduleUdfRefetch(): void {
+  if (udfRefetchTimer !== null) window.clearTimeout(udfRefetchTimer);
+  udfRefetchTimer = window.setTimeout(() => {
+    udfRefetchTimer = null;
+    // `loadUdfs` is no-op after first ready load; force a refetch.
+    functionCatalogState.udfStatus = 'idle';
+    void loadUdfs();
+  }, REFETCH_DEBOUNCE_MS);
+}
+
+const PROCEDURE_KINDS: ReadonlySet<CatalogChangeKind> = new Set([
+  CatalogChangeKind.ProcedureCreated,
+  CatalogChangeKind.ProcedureAltered,
+  CatalogChangeKind.ProcedureDropped,
+]);
+
+const UDF_KINDS: ReadonlySet<CatalogChangeKind> = new Set([
+  CatalogChangeKind.FunctionCreated,
+  CatalogChangeKind.FunctionAltered,
+  CatalogChangeKind.FunctionDropped,
+]);
+
+let routinesSubscribed = false;
+// Subscribe the Procedures/UDFs panel to live catalog updates. Idempotent;
+// call once at app startup.
+export function subscribeRoutinesToHub(): void {
+  if (routinesSubscribed) return;
+  routinesSubscribed = true;
+  void acquireCatalogHub().catch((err) => {
+    console.error('[functionCatalog] hub acquire failed', err);
+  });
+  onCatalogChanged((event) => {
+    if (PROCEDURE_KINDS.has(event.kind)) {
+      scheduleProcedureRefetch();
+    }
+    if (UDF_KINDS.has(event.kind)) {
+      scheduleUdfRefetch();
+    }
+  });
 }

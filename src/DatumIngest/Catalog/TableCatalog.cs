@@ -659,9 +659,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// or <see langword="null"/> when the table has no indexes (or doesn't exist).
     /// Used by the <c>information_schema.table_constraints</c> /
     /// <c>information_schema.key_column_usage</c> views to surface UNIQUE
-    /// constraints alongside PRIMARY KEY constraints.
+    /// constraints alongside PRIMARY KEY constraints, and by
+    /// <c>SchemaCatalogController</c> to enumerate per-table indexes for
+    /// the catalog-explorer UI.
     /// </summary>
-    internal IReadOnlyList<IndexDescriptor>? GetTableIndexes(string tableName)
+    public IReadOnlyList<IndexDescriptor>? GetTableIndexes(string tableName)
     {
         QualifiedName qn = QualifiedName.Parse(tableName);
         return TryResolveBackend(qn.Schema, out ITableCatalog? backend)
