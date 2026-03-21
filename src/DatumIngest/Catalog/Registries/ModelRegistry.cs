@@ -76,6 +76,15 @@ namespace DatumIngest.Catalog.Registries;
 /// Optional <c>IMPLEMENTS TaskName</c> task contract declaration. Surfaces
 /// on <c>system.models.task</c> for frontend dispatch routing.
 /// </param>
+/// <param name="UsingFiles">
+/// Optional multi-session bundle declaration mirroring
+/// <see cref="DatumIngest.Parsing.Ast.CreateModelStatement.UsingFiles"/>.
+/// When non-null, every entry's session is loaded into
+/// <see cref="BoundSessions"/> keyed by its alias; the body's
+/// <c>infer('alias', value)</c> calls dispatch by name. When null (legacy
+/// single-session bundles) <see cref="BoundSessions"/> has one entry
+/// keyed <c>"default"</c> loaded from <see cref="UsingPath"/>.
+/// </param>
 public sealed record ModelDescriptor(
     string SchemaName,
     string Name,
@@ -87,11 +96,24 @@ public sealed record ModelDescriptor(
     IReadOnlyDictionary<string, IInferenceSession> BoundSessions,
     bool ReturnIsNotNull = false,
     string? SourceText = null,
-    string? ImplementsTaskName = null)
+    string? ImplementsTaskName = null,
+    IReadOnlyList<ResolvedUsingFile>? UsingFiles = null)
 {
     /// <summary>Canonical <c>(schema, name)</c> identity.</summary>
     public QualifiedName QualifiedName => new(SchemaName, Name);
 }
+
+/// <summary>
+/// Runtime-resolved counterpart to <see cref="DatumIngest.Parsing.Ast.UsingFileSpec"/>.
+/// The registrar resolves each declared path against the host's models
+/// directory at <c>CREATE MODEL</c> time and threads the resolved absolute
+/// path here so downstream consumers (sidecar-relative file resolution,
+/// session caches, status probes) don't re-walk the resolution rules.
+/// </summary>
+/// <param name="Path">Original path as written in the SQL.</param>
+/// <param name="Alias">Session alias used by <c>infer('alias', ...)</c>.</param>
+/// <param name="ResolvedPath">Absolute filesystem path after resolution.</param>
+public sealed record ResolvedUsingFile(string Path, string Alias, string ResolvedPath);
 
 /// <summary>
 /// Process-scoped registry of SQL-defined models. Parallel to

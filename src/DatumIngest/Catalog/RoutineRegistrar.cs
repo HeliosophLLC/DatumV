@@ -739,25 +739,51 @@ internal sealed class RoutineRegistrar
             return;
         }
 
-        string resolvedPath = ResolveUsingPath(create.UsingPath, create.Name);
-        if (!File.Exists(resolvedPath))
+        // Build the (alias → resolved-path) map from either the new
+        // multi-file USING form or the legacy single-file form. The legacy
+        // form's session is always keyed "default" so downstream code that
+        // looks up BoundSessions["default"] keeps working without change.
+        Dictionary<string, string> sessionPaths = new(StringComparer.Ordinal);
+        List<ResolvedUsingFile>? resolvedFiles = null;
+        string primaryResolvedPath;
+        if (create.UsingFiles is { Count: > 0 } usingFiles)
         {
-            throw new FileNotFoundException(
-                $"CREATE MODEL {create.Name}: ONNX file not found at '{resolvedPath}' " +
-                $"(USING '{create.UsingPath}'). " +
-                "Verify the path is correct relative to the host's model directory, " +
-                "or prefix with 'file://' for an absolute path.",
-                resolvedPath);
+            resolvedFiles = new List<ResolvedUsingFile>(usingFiles.Count);
+            foreach (UsingFileSpec spec in usingFiles)
+            {
+                string resolved = ResolveUsingPath(spec.Path, create.Name);
+                if (!File.Exists(resolved))
+                {
+                    throw new FileNotFoundException(
+                        $"CREATE MODEL {create.Name}: ONNX file not found at '{resolved}' " +
+                        $"(USING '{spec.Path}' AS {spec.Alias}). " +
+                        "Verify the path is correct relative to the host's model directory, " +
+                        "or prefix with 'file://' for an absolute path.",
+                        resolved);
+                }
+                sessionPaths[spec.Alias] = resolved;
+                resolvedFiles.Add(new ResolvedUsingFile(spec.Path, spec.Alias, resolved));
+            }
+            primaryResolvedPath = resolvedFiles[0].ResolvedPath;
+        }
+        else
+        {
+            primaryResolvedPath = ResolveUsingPath(create.UsingPath, create.Name);
+            if (!File.Exists(primaryResolvedPath))
+            {
+                throw new FileNotFoundException(
+                    $"CREATE MODEL {create.Name}: ONNX file not found at '{primaryResolvedPath}' " +
+                    $"(USING '{create.UsingPath}'). " +
+                    "Verify the path is correct relative to the host's model directory, " +
+                    "or prefix with 'file://' for an absolute path.",
+                    primaryResolvedPath);
+            }
+            sessionPaths["default"] = primaryResolvedPath;
         }
 
-        // Single-session bundle for v1. Multi-session (Florence-2 etc.) lands
-        // when USING points at a directory + bundle.json.
         Inference.BundleManifest bundle = new(
             BundleId: $"{qn} (USING '{create.UsingPath}')",
-            Sessions: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["default"] = resolvedPath,
-            },
+            Sessions: sessionPaths,
             PreferredBackends: Array.Empty<Inference.InferenceBackendId>());
 
         IReadOnlyDictionary<string, Inference.IInferenceSession> sessions =
@@ -772,12 +798,13 @@ internal sealed class RoutineRegistrar
             Parameters: create.Parameters,
             ReturnTypeName: create.ReturnTypeName,
             UsingPath: create.UsingPath,
-            ResolvedUsingPath: resolvedPath,
+            ResolvedUsingPath: primaryResolvedPath,
             StatementBody: create.StatementBody,
             BoundSessions: sessions,
             ReturnIsNotNull: create.ReturnIsNotNull,
             SourceText: sourceText ?? $"CREATE MODEL {qn}",
-            ImplementsTaskName: create.ImplementsTaskName);
+            ImplementsTaskName: create.ImplementsTaskName,
+            UsingFiles: resolvedFiles);
 
         ModelDescriptor? displaced = _catalog.DeclaredModels.Register(
             descriptor, replace: create.OrReplace);

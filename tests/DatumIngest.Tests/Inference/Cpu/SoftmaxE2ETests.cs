@@ -1,5 +1,6 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Execution;
 using DatumIngest.Inference;
 using DatumIngest.Inference.OnnxRuntime;
@@ -336,6 +337,153 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         {
             Assert.InRange(rows[0][i] - expected[i], -1e-5f, 1e-5f);
         }
+    }
+
+    /// <summary>
+    /// Multi-session CREATE MODEL — declares two ONNX sessions under
+    /// distinct aliases and dispatches each via <c>infer('alias', ...)</c>.
+    /// Uses the softmax fixture as both sessions (identical math); the body
+    /// chains them so the output is softmax(softmax(x)), distinguishing the
+    /// "ran both sessions in order" path from "ran one twice via the same
+    /// implicit default" or "ran only one."
+    /// </summary>
+    [Fact]
+    public async Task Softmax_MultiSession_TwoAliasedSessionsDispatchByName()
+    {
+        string fixturePath = FixturePath();
+        Assert.True(File.Exists(fixturePath), $"Fixture missing at {fixturePath}.");
+
+        TableCatalog catalog = CreateCatalogWithRealDispatcher();
+        catalog.Add(new InMemoryTableProvider(
+            CreatePool(), "data", ["d"], [new object?[] { 1 }]));
+
+        catalog.Plan(
+            $"CREATE MODEL softmax_dual(x Float32[]) RETURNS Float32[] " +
+            $"USING 'file://{fixturePath}' AS first, " +
+            $"      'file://{fixturePath}' AS second " +
+            $"AS BEGIN " +
+            $"  DECLARE pass1 Float32[] = infer('first', x); " +
+            $"  RETURN infer('second', pass1) " +
+            $"END");
+
+        // The descriptor must carry both aliases in UsingFiles, and the
+        // runtime BoundSessions dict must hold a session per alias (no
+        // hidden "default" key for a multi-session model).
+        Assert.True(
+            catalog.DeclaredModels.TryGet(
+                new QualifiedName("models", "softmax_dual"),
+                out ModelDescriptor? descriptor));
+        Assert.NotNull(descriptor);
+        Assert.NotNull(descriptor!.UsingFiles);
+        Assert.Equal(2, descriptor.UsingFiles!.Count);
+        Assert.Equal("first", descriptor.UsingFiles[0].Alias);
+        Assert.Equal("second", descriptor.UsingFiles[1].Alias);
+        Assert.True(descriptor.BoundSessions.ContainsKey("first"));
+        Assert.True(descriptor.BoundSessions.ContainsKey("second"));
+        Assert.False(descriptor.BoundSessions.ContainsKey("default"),
+            "Multi-session models must not carry an implicit 'default' alias.");
+
+        // End-to-end execution: chained softmax via named dispatch.
+        IQueryPlan plan = catalog.Plan(
+            "SELECT models.softmax_dual([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
+
+        List<float[]> rows = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                DataValue cell = batch[i][0];
+                rows.Add(cell.AsArraySpan<float>(batch.Arena).ToArray());
+            }
+        }
+        Assert.Single(rows);
+        float[] expected = SoftmaxReference(SoftmaxReference([1.0f, 2.0f, 3.0f]));
+        for (int i = 0; i < expected.Length; i++)
+        {
+            Assert.InRange(rows[0][i] - expected[i], -1e-5f, 1e-5f);
+        }
+    }
+
+    /// <summary>
+    /// Calling <c>infer('unknown_alias', ...)</c> against a multi-session
+    /// model must raise a clear runtime error that names the bad alias and
+    /// lists the available ones. The plan-time signature check accepts
+    /// any String first arg; alias validity is a runtime concern.
+    /// </summary>
+    [Fact]
+    public async Task Softmax_MultiSession_UnknownAlias_ThrowsClearError()
+    {
+        string fixturePath = FixturePath();
+        Assert.True(File.Exists(fixturePath), $"Fixture missing at {fixturePath}.");
+
+        TableCatalog catalog = CreateCatalogWithRealDispatcher();
+        catalog.Add(new InMemoryTableProvider(
+            CreatePool(), "data", ["d"], [new object?[] { 1 }]));
+
+        catalog.Plan(
+            $"CREATE MODEL softmax_typo(x Float32[]) RETURNS Float32[] " +
+            $"USING 'file://{fixturePath}' AS encoder " +
+            $"AS BEGIN RETURN infer('decodr', x) END"); // typo: 'decodr' not 'encoder'
+
+        IQueryPlan plan = catalog.Plan(
+            "SELECT models.softmax_typo([CAST(1.0 AS Float32), CAST(2.0 AS Float32)]) FROM data");
+
+        Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+        });
+
+        // The error message should name the bad alias AND list available ones.
+        string flat = ex.ToString();
+        Assert.Contains("decodr", flat);
+        Assert.Contains("encoder", flat);
+    }
+
+    /// <summary>
+    /// Mixing aliased and bare entries within one USING clause is a parse
+    /// error — once any entry uses AS, all entries must. Prevents the
+    /// ambiguity of `USING 'a.onnx', 'b.onnx' AS x` (does 'a.onnx' get
+    /// the implicit 'default' alias? Or is this a syntax error?).
+    /// </summary>
+    [Fact]
+    public void Softmax_MultiSession_MixedAliasAndBare_IsParseError()
+    {
+        string fixturePath = FixturePath();
+        Assert.True(File.Exists(fixturePath), $"Fixture missing at {fixturePath}.");
+
+        TableCatalog catalog = CreateCatalogWithRealDispatcher();
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+        {
+            catalog.Plan(
+                $"CREATE MODEL softmax_mixed(x Float32[]) RETURNS Float32[] " +
+                $"USING 'file://{fixturePath}' AS a, 'file://{fixturePath}' " +
+                $"AS BEGIN RETURN infer('a', x) END");
+        });
+
+        Assert.Contains("alias", ex.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Duplicate aliases within one USING clause must reject at parse time.
+    /// </summary>
+    [Fact]
+    public void Softmax_MultiSession_DuplicateAlias_IsParseError()
+    {
+        string fixturePath = FixturePath();
+        Assert.True(File.Exists(fixturePath), $"Fixture missing at {fixturePath}.");
+
+        TableCatalog catalog = CreateCatalogWithRealDispatcher();
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+        {
+            catalog.Plan(
+                $"CREATE MODEL softmax_dup(x Float32[]) RETURNS Float32[] " +
+                $"USING 'file://{fixturePath}' AS s, 'file://{fixturePath}' AS s " +
+                $"AS BEGIN RETURN infer('s', x) END");
+        });
+
+        Assert.Contains("declared more than once", ex.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class RecordingTracer : IModelInvocationTracer

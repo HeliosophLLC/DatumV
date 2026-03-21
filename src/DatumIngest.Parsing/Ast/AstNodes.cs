@@ -1774,9 +1774,21 @@ public sealed record CreateFunctionStatement(
 /// <param name="Parameters">Declared call-site parameters.</param>
 /// <param name="ReturnTypeName">Required return-type annotation.</param>
 /// <param name="UsingPath">
-/// Path to the ONNX file or bundle directory. Relative paths resolve
-/// against the host's models directory; <c>file://</c>-prefixed paths
-/// are treated as absolute (useful for testing).
+/// Path to the primary ONNX file or bundle directory. Relative paths
+/// resolve against the host's models directory; <c>file://</c>-prefixed
+/// paths are treated as absolute (useful for testing). When the model
+/// declares multiple sessions via <see cref="UsingFiles"/> this is the
+/// first declared file's path — kept for back-compat with serializers
+/// and front-end DTOs that show a single primary file.
+/// </param>
+/// <param name="UsingFiles">
+/// Optional multi-session bundle declaration. When non-null, each entry
+/// becomes an independently-loaded inference session keyed by its
+/// <see cref="UsingFileSpec.Alias"/> in the descriptor's
+/// <c>BoundSessions</c> dictionary; the model body dispatches to a
+/// specific session via <c>infer('alias', value)</c>. <see langword="null"/>
+/// (the common case) means a single-session bundle keyed <c>"default"</c>,
+/// loaded from <see cref="UsingPath"/>.
 /// </param>
 /// <param name="StatementBody">Procedural body. Always non-null on a valid model.</param>
 /// <param name="IfNotExists">When <see langword="true"/>, no-op on conflict.</param>
@@ -1796,7 +1808,29 @@ public sealed record CreateModelStatement(
     SourceSpan? Span = null,
     bool ReturnIsNotNull = false,
     string? SchemaName = null,
-    string? ImplementsTaskName = null) : Statement;
+    string? ImplementsTaskName = null,
+    IReadOnlyList<UsingFileSpec>? UsingFiles = null) : Statement;
+
+/// <summary>
+/// One entry in a multi-session <c>USING</c> clause: a file path plus the
+/// alias the model body uses to dispatch to it via <c>infer('alias', ...)</c>.
+/// Single-session models leave <see cref="CreateModelStatement.UsingFiles"/>
+/// null and use the implicit <c>"default"</c> alias.
+/// </summary>
+/// <param name="Path">
+/// Raw path as written in the SQL. Resolution rules match
+/// <see cref="CreateModelStatement.UsingPath"/> — relative paths route
+/// through the host's models directory, <c>file://</c> is treated as
+/// absolute.
+/// </param>
+/// <param name="Alias">
+/// Session name the model body uses with <c>infer('alias', value)</c>.
+/// Must be unique within the declaration; the registrar rejects duplicate
+/// aliases at <c>CREATE MODEL</c> time.
+/// </param>
+public sealed record UsingFileSpec(
+    string Path,
+    string Alias);
 
 /// <summary>
 /// <c>DROP MODEL [IF EXISTS] name</c> — removes a previously registered

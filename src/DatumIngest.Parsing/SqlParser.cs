@@ -3810,11 +3810,16 @@ public static class SqlParser
             select (string?)GetTokenText(taskName)
         ).OptionalOrDefault()
         // USING is a contextual identifier (matches existing
-        // CREATE INDEX USING pattern), followed by a single-quoted
-        // string literal naming the path.
+        // CREATE INDEX USING pattern). Two accepted shapes:
+        //   - Single-session legacy:  USING 'path'
+        //   - Multi-session aliased:  USING 'a' AS x, 'b' AS y[, ...]
+        // The parser captures the full list in `usingEntries`; legacy
+        // single-string form is a one-entry list with the implicit
+        // "default" alias, kept null on the Alias field so the registrar
+        // can route through the same back-compat path as today.
         from usingKw in Token.EqualTo(SqlToken.Identifier)
             .Where(t => GetTokenText(t).Equals("USING", StringComparison.OrdinalIgnoreCase), "USING")
-        from usingPathToken in Token.EqualTo(SqlToken.StringLiteral)
+        from usingEntries in ParseUsingEntries()
         // Body: optionally preceded by AS, always a BEGIN…END block.
         from body in
             (from asKw in Token.EqualTo(SqlToken.As)
@@ -3826,7 +3831,7 @@ public static class SqlParser
             qualifiedName.TableName,
             parameters,
             returnTypeName,
-            UnquoteString(usingPathToken),
+            usingEntries,
             body,
             ifNotExists,
             orReplace,
@@ -3835,18 +3840,70 @@ public static class SqlParser
             implementsTask);
 
     /// <summary>
+    /// Parses the USING clause's entry list. Accepts either a single bare
+    /// string literal (legacy single-session form) or a comma-separated
+    /// list of <c>'path' AS alias</c> entries (multi-session form). The
+    /// returned list always has at least one entry; legacy single-string
+    /// form yields one entry whose <c>Alias</c> is <see langword="null"/>,
+    /// distinguishing it from an explicitly aliased single-file entry.
+    /// The registrar treats the null-alias case as the implicit
+    /// <c>"default"</c> session and is responsible for downstream
+    /// resolution rules.
+    /// </summary>
+    private static TokenListParser<SqlToken, IReadOnlyList<(string Path, string? Alias)>> ParseUsingEntries()
+    {
+        // One entry: 'path' AS alias  OR  'path' (alias inferred null).
+        //
+        // The `.Try()` on the AS+identifier pair is load-bearing: the
+        // legacy body opener `USING 'path' AS BEGIN ... END` shares the
+        // `AS` keyword with the alias clause. Without backtracking, the
+        // parser commits to "alias coming" after consuming `AS`, then
+        // fails on `BEGIN` (not an Identifier) without rolling back —
+        // breaking every single-file CREATE MODEL in the codebase. The
+        // `.Try()` resets the cursor when the alias-identifier check
+        // fails, letting the outer body parser see the original `AS`.
+        TokenListParser<SqlToken, (string Path, string? Alias)> entry =
+            from pathToken in Token.EqualTo(SqlToken.StringLiteral)
+            from alias in
+                (from asKw in Token.EqualTo(SqlToken.As)
+                 from aliasToken in Token.EqualTo(SqlToken.Identifier)
+                 select (string?)GetTokenText(aliasToken))
+                .Try()
+                .OptionalOrDefault()
+            select (UnquoteString(pathToken), alias);
+
+        return
+            from first in entry
+            from rest in (
+                from comma in Token.EqualTo(SqlToken.Comma)
+                from next in entry
+                select next
+            ).Many()
+            select (IReadOnlyList<(string, string?)>)(new[] { first }.Concat(rest).ToList());
+    }
+
+    /// <summary>
     /// Constructs a <see cref="CreateModelStatement"/>, applying the same
     /// procedural-body validation as procedural UDFs (must end with
     /// <c>RETURN</c>, no top-level result-emitting statements). Throws
     /// <see cref="FormatException"/> on validation failure so the bad
     /// statement surfaces as a clean parse error rather than a runtime
     /// crash.
+    /// <para>
+    /// <c>usingEntries</c> is the output of <see cref="ParseUsingEntries"/>
+    /// — always non-empty. A single entry with a null alias is the legacy
+    /// <c>USING 'path'</c> form: surfaces as <c>UsingPath = path</c> +
+    /// <c>UsingFiles = null</c>. Anything else (multiple entries, or one
+    /// entry with an explicit alias) surfaces as
+    /// <c>UsingPath = entries[0].Path</c> +
+    /// <c>UsingFiles = explicit list with aliases</c> for the registrar.
+    /// </para>
     /// </summary>
     private static CreateModelStatement BuildCreateModelStatement(
         string name,
         IReadOnlyList<UdfParameter> parameters,
         string returnTypeName,
-        string usingPath,
+        IReadOnlyList<(string Path, string? Alias)> usingEntries,
         IReadOnlyList<Statement> body,
         bool ifNotExists,
         bool orReplace,
@@ -3854,10 +3911,50 @@ public static class SqlParser
         string? schemaName,
         string? implementsTaskName)
     {
-        if (string.IsNullOrWhiteSpace(usingPath))
+        if (usingEntries.Count == 0)
         {
             throw new FormatException(
-                $"CREATE MODEL {name}: USING clause must specify a non-empty path.");
+                $"CREATE MODEL {name}: USING clause must specify at least one file.");
+        }
+        foreach ((string path, _) in usingEntries)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new FormatException(
+                    $"CREATE MODEL {name}: USING clause file path must be non-empty.");
+            }
+        }
+
+        // Distinguish legacy from multi-session at AST construction time.
+        // Legacy: exactly one entry, null alias → no UsingFiles attached;
+        // the existing single-session code paths (registrar, system.models
+        // serializer, etc.) flow unchanged.
+        bool isLegacy = usingEntries.Count == 1 && usingEntries[0].Alias is null;
+        IReadOnlyList<UsingFileSpec>? usingFiles = null;
+        if (!isLegacy)
+        {
+            // Duplicate-alias detection. The implicit "default" alias is
+            // only used for legacy single-session bundles; any aliased
+            // declaration requires every entry to carry an explicit alias.
+            HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+            List<UsingFileSpec> files = new(usingEntries.Count);
+            foreach ((string path, string? alias) in usingEntries)
+            {
+                if (alias is null)
+                {
+                    throw new FormatException(
+                        $"CREATE MODEL {name}: every USING entry must have an explicit alias " +
+                        $"(`'path' AS alias`) when more than one file is declared, or when any " +
+                        $"entry uses AS.");
+                }
+                if (!seen.Add(alias))
+                {
+                    throw new FormatException(
+                        $"CREATE MODEL {name}: USING alias '{alias}' is declared more than once.");
+                }
+                files.Add(new UsingFileSpec(path, alias));
+            }
+            usingFiles = files;
         }
 
         ValidateProceduralBody(name, body);
@@ -3866,14 +3963,15 @@ public static class SqlParser
             Name: name,
             Parameters: parameters,
             ReturnTypeName: returnTypeName,
-            UsingPath: usingPath,
+            UsingPath: usingEntries[0].Path,
             StatementBody: body,
             IfNotExists: ifNotExists,
             OrReplace: orReplace,
             Span: null,
             ReturnIsNotNull: returnIsNotNull,
             SchemaName: schemaName,
-            ImplementsTaskName: implementsTaskName);
+            ImplementsTaskName: implementsTaskName,
+            UsingFiles: usingFiles);
     }
 
     /// <summary>

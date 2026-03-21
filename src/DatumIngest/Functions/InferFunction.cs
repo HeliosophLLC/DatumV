@@ -86,6 +86,59 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
     [
+        // ───────── Named-session forms (multi-session bundles) ─────────
+        // Every "named" variant takes the session alias as the FIRST String
+        // argument and dispatches to BoundSessions[alias]. The alias must
+        // have been declared in the CREATE MODEL's USING ... AS clause.
+        // Listed BEFORE the implicit-"default" forms so a String first arg
+        // routes to the named path even though the implicit forms' "Any"
+        // first param would also match.
+
+        // 3-arg named multi-input + shapes form. Same shape as the
+        // 2-arg (Struct, Struct) below but prefixed with the alias.
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("session", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("inputs",  DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("shapes",  DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Scalar),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.SameAs(1)),
+        // 3-arg named single-input + explicit shape form.
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("session", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("value",   DataKindMatcher.Any),
+                new ParameterSpec("shape",   DataKindMatcher.Family(DataKindFamily.IntegerFamily), IsArray: ArrayMatch.Array),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.SameAs(1)),
+        // 2-arg named multi-input form. Listed BEFORE (String, Any) so
+        // the matcher prefers the more specific (String, Struct) shape
+        // when both apply — same rule as the un-named pair below.
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("session", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("inputs",  DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Scalar),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.SameAs(1)),
+        // 2-arg named single-input form. The bread-and-butter case for
+        // multi-session bundles: `infer('encoder', img_tensor)`.
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("session", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("value",   DataKindMatcher.Any),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.SameAs(1)),
+
+        // ───────── Implicit-"default" forms (legacy single-session) ─────────
+
         // 2-arg multi-input form: struct of tensors + struct of explicit
         // shapes, fields matched by name. Required for BERT-family
         // transformers where every input has multiple dynamic dims
@@ -405,13 +458,51 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 + "scalar-function form for the underlying computation.");
         }
 
-        if (!model.BoundSessions.TryGetValue("default", out IInferenceSession? session))
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args.Length is < 1 or > 3)
         {
             throw new InvalidOperationException(
-                $"Model '{model.QualifiedName.ToString()}' has no 'default' session bound. "
-                + "Multi-session bundles need a session-name argument; v1 only "
-                + "supports single-session bundles (CREATE MODEL with a single "
-                + "USING file).");
+                $"{functionName}() expects 1-3 arguments (value | session, value [, shape]); got {args.Length}.");
+        }
+
+        // Named-session form: first argument is a String alias when the
+        // caller writes `infer('encoder', value, ...)`. Slice it off and
+        // resolve the session by alias; the rest of the dispatch operates
+        // on the remaining "logical" arguments against that session,
+        // identical to the implicit-default path.
+        IInferenceSession session;
+        string sessionName;
+        ReadOnlySpan<ValueRef> logicalArgs;
+        if (args.Length >= 2 && args[0].Kind == DataKind.String && !args[0].IsArray)
+        {
+            string alias = args[0].AsString();
+            if (!model.BoundSessions.TryGetValue(alias, out IInferenceSession? namedSession))
+            {
+                throw new InvalidOperationException(
+                    $"Model '{model.QualifiedName.ToString()}': {functionName}() referenced session "
+                    + $"alias '{alias}' which is not bound. Declared sessions: ["
+                    + $"{string.Join(", ", model.BoundSessions.Keys)}]. "
+                    + "Aliases come from the CREATE MODEL's USING clause "
+                    + "(`USING 'path' AS alias`).");
+            }
+            session = namedSession;
+            sessionName = alias;
+            logicalArgs = arguments.Slice(1).Span;
+        }
+        else
+        {
+            if (!model.BoundSessions.TryGetValue("default", out IInferenceSession? defaultSession))
+            {
+                throw new InvalidOperationException(
+                    $"Model '{model.QualifiedName.ToString()}' has no 'default' session bound. "
+                    + "Multi-session bundles must dispatch by name — use "
+                    + $"`{functionName}('alias', value, ...)`. "
+                    + "Available sessions: ["
+                    + $"{string.Join(", ", model.BoundSessions.Keys)}].");
+            }
+            session = defaultSession;
+            sessionName = "default";
+            logicalArgs = args;
         }
 
         if (session.Outputs.Count == 0)
@@ -421,14 +512,14 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 + "no outputs. The session implementation is misconfigured.");
         }
 
-        ReadOnlySpan<ValueRef> args = arguments.Span;
-        if (args.Length is < 1 or > 2)
+        if (logicalArgs.Length is < 1 or > 2)
         {
             throw new InvalidOperationException(
-                $"{functionName}() expects 1 or 2 arguments (value [, shape]); got {args.Length}.");
+                $"{functionName}() expects (value [, shape]) after the optional session-alias; "
+                + $"got {logicalArgs.Length} logical arguments.");
         }
 
-        ValueRef arg = args[0];
+        ValueRef arg = logicalArgs[0];
 
         // Multi-input dispatch: a struct argument unpacks by field name
         // into the session's input bag. Routes here for any (Struct) or
@@ -436,10 +527,10 @@ public sealed class InferFunction : IFunction, IScalarFunction
         // against a single-input session is allowed but unusual.
         if (arg.Kind == DataKind.Struct && !arg.IsArray)
         {
-            ValueRef? shapeStructArg = args.Length == 2 ? args[1] : null;
+            ValueRef? shapeStructArg = logicalArgs.Length == 2 ? logicalArgs[1] : null;
             return await ExecuteMultiInputAsync(
                 session, arg, shapeStructArg, frame, model.QualifiedName.ToString(),
-                functionName, reader, cancellationToken)
+                sessionName, functionName, reader, cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -453,9 +544,9 @@ public sealed class InferFunction : IFunction, IScalarFunction
         }
 
         int[]? explicitShape = null;
-        if (args.Length == 2)
+        if (logicalArgs.Length == 2)
         {
-            explicitShape = ReadShapeArray(args[1], model.QualifiedName.ToString());
+            explicitShape = ReadShapeArray(logicalArgs[1], model.QualifiedName.ToString());
         }
         TensorSpec inputSpec = session.Inputs[0];
 
@@ -465,17 +556,17 @@ public sealed class InferFunction : IFunction, IScalarFunction
         {
             AddInputTensor(inputBag, inputSpec, arg, model.QualifiedName.ToString(), explicitShape);
 
-            DatumActivity.Scalars.Trace($"[infer] {model.QualifiedName}.{functionName}: pre-Run single-input '{inputSpec.Name}' kind={inputSpec.ElementKind}");
+            DatumActivity.Scalars.Trace($"[infer] {model.QualifiedName}#{sessionName}.{functionName}: pre-Run single-input '{inputSpec.Name}' kind={inputSpec.ElementKind}");
             outputBag = await session
                 .RunAsync(inputBag, cancellationToken)
                 .ConfigureAwait(false);
-            DatumActivity.Scalars.Trace($"[infer] {model.QualifiedName}.{functionName}: post-Run outputs={session.Outputs.Count}");
+            DatumActivity.Scalars.Trace($"[infer] {model.QualifiedName}#{sessionName}.{functionName}: post-Run outputs={session.Outputs.Count}");
 
             return reader(session, outputBag, frame.Types, model.QualifiedName.ToString());
         }
         catch (Exception ex)
         {
-            DatumActivity.Scalars.Trace($"[infer] {model.QualifiedName}.{functionName}: THREW {ex.GetType().Name}: {ex.Message}");
+            DatumActivity.Scalars.Trace($"[infer] {model.QualifiedName}#{sessionName}.{functionName}: THREW {ex.GetType().Name}: {ex.Message}");
             throw;
         }
         finally
@@ -499,6 +590,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
         ValueRef? shapesStruct,
         EvaluationFrame frame,
         string modelName,
+        string sessionName,
         string functionName,
         OutputReader reader,
         CancellationToken cancellationToken)
@@ -592,17 +684,17 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 AddInputTensor(inputBag, inputSpec, inputFields[fieldIdx], modelName, explicitShape);
             }
 
-            DatumActivity.Scalars.Trace($"[infer] {modelName}.{functionName}: pre-Run multi-input inputs={session.Inputs.Count}");
+            DatumActivity.Scalars.Trace($"[infer] {modelName}#{sessionName}.{functionName}: pre-Run multi-input inputs={session.Inputs.Count}");
             outputBag = await session
                 .RunAsync(inputBag, cancellationToken)
                 .ConfigureAwait(false);
-            DatumActivity.Scalars.Trace($"[infer] {modelName}.{functionName}: post-Run outputs={session.Outputs.Count}");
+            DatumActivity.Scalars.Trace($"[infer] {modelName}#{sessionName}.{functionName}: post-Run outputs={session.Outputs.Count}");
 
             return reader(session, outputBag, frame.Types, modelName);
         }
         catch (Exception ex)
         {
-            DatumActivity.Scalars.Trace($"[infer] {modelName}.{functionName}: THREW {ex.GetType().Name}: {ex.Message}");
+            DatumActivity.Scalars.Trace($"[infer] {modelName}#{sessionName}.{functionName}: THREW {ex.GetType().Name}: {ex.Message}");
             throw;
         }
         finally

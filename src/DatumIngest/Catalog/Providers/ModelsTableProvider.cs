@@ -269,7 +269,20 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         cells[4]  = DataValue.FromString("sql", arena);       // backend — discriminator inside the row; the `kind` column is the schema-stable signal
         cells[5]  = DataValue.Null(DataKind.String);          // parameters
         cells[6]  = DataValue.FromString(descriptor.UsingPath, arena);
-        cells[7]  = DataValue.NullArrayOf(DataKind.String);   // file_names — single-session bundles; multi-file lands when multi-session arrives
+        // file_names: NULL for legacy single-session bundles; a string[]
+        // of every aliased file's source path for multi-session bundles.
+        // Each entry is the SQL-declared path (not the resolved absolute
+        // form) so the column matches what the user wrote in CREATE MODEL.
+        if (descriptor.UsingFiles is { Count: > 0 } usingFiles)
+        {
+            string[] paths = new string[usingFiles.Count];
+            for (int i = 0; i < usingFiles.Count; i++) paths[i] = usingFiles[i].Path;
+            cells[7] = DataValue.FromStringArray(paths, arena);
+        }
+        else
+        {
+            cells[7] = DataValue.NullArrayOf(DataKind.String);
+        }
         cells[8]  = fileSize.HasValue ? DataValue.FromInt64(fileSize.Value) : DataValue.Null(DataKind.Int64);
         cells[9]  = DataValue.Null(DataKind.String);          // license
         cells[10] = DataValue.Null(DataKind.String);          // license_holder
