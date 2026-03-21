@@ -541,6 +541,10 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Strings.UpperFunction>();
         registry.RegisterScalar<Scalar.Strings.LowerFunction>();
         registry.RegisterScalar<Scalar.Strings.LenFunction>();
+        registry.RegisterScalar<Scalar.Strings.TrimFunction>();
+        registry.RegisterScalarAlias<Scalar.Strings.TrimFunction>("btrim");
+        registry.RegisterScalar<Scalar.Strings.LtrimFunction>();
+        registry.RegisterScalar<Scalar.Strings.RtrimFunction>();
 
         // Fulltext family
         registry.RegisterScalar<Scalar.Fulltext.PlainToTsqueryFunction>();
