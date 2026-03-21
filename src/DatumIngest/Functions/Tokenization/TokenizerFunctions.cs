@@ -241,11 +241,94 @@ public sealed class TokenizerDecodeBpeFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.String));
         }
 
-        string resolvedVocab  = TokenizerPath.ResolveAbsolute(args[1].AsString(), "tokenizer.decode_bpe");
-        string resolvedMerges = TokenizerPath.ResolveAbsolute(args[2].AsString(), "tokenizer.decode_bpe");
+        // Catalog-relative resolution so SQL model bodies can name vocab /
+        // merges as files-next-to-the-onnx (e.g. 'vit-gpt2-image-captioning/vocab.json')
+        // without having to know the absolute models-directory path. Falls
+        // back to absolute when the path is already absolute.
+        string resolvedVocab  = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
+            args[1].AsString(), "tokenizer.decode_bpe", frame);
+        string resolvedMerges = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
+            args[2].AsString(), "tokenizer.decode_bpe", frame);
 
         BpeTokenizer tokenizer = TokenizerCache.GetFromVocabMerges(resolvedVocab, resolvedMerges);
         return new ValueTask<ValueRef>(TokenizerOps.DecodeToValueRef(tokenizer, args[0]));
+    }
+}
+
+/// <summary>
+/// <c>tokenizer.byte_level_decode(text) → STRING</c>. Reverses GPT-2 /
+/// RoBERTa / BART byte-level BPE encoding mojibake so a token-decoded
+/// string becomes plain UTF-8. Used as a post-processing step right
+/// after <c>tokenizer.decode_bpe</c> for byte-level-BPE families.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Why it's a separate step.</strong> The byte-level BPE encoder
+/// remaps non-printable bytes (including ASCII space and newline) to
+/// high-Unicode codepoints so they survive BPE merging without
+/// ambiguity. <c>BpeTokenizer.Decode</c> turns token ids back
+/// into characters but does NOT invert that remap — a literal <c>Ġ</c>
+/// (U+0120, the encoded space) leaks into the output. Every GPT-2 /
+/// RoBERTa / BART export needs this inversion to produce real text.
+/// </para>
+/// <para>
+/// <strong>Why not fold it into <c>decode_bpe</c>.</strong> Non-byte-level
+/// BPE tokenizers (rare, but possible) would have this inversion
+/// silently corrupt their output. Keeping it as an explicit post-step
+/// is also more discoverable in SQL — the chain
+/// <c>byte_level_decode(decode_bpe(...))</c> reads as "decode token ids
+/// then unescape byte-level encoding," which is what the operation
+/// actually does.
+/// </para>
+/// </remarks>
+public sealed class TokenizerByteLevelDecodeFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "byte_level_decode";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Encoding;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Reverses GPT-2 / RoBERTa / BART byte-level BPE encoding mojibake "
+        + "(Ġ → space, Ċ → newline, etc.) on a token-decoded string and "
+        + "trims surrounding whitespace. Pair with tokenizer.decode_bpe to "
+        + "get plain UTF-8 text out of any byte-level BPE model's decoder "
+        + "output. The leading space (artifact of the byte-level encoding "
+        + "always treating the first content token as space-prefixed) is "
+        + "removed by the trim — the canonical caption/OCR post-processing.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("text", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.String)),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<TokenizerByteLevelDecodeFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args[0].IsNull)
+        {
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.String));
+        }
+        string raw = args[0].AsString();
+        string decoded = DatumIngest.Models.Onnx.ByteLevelBpeDecoder.Decode(raw).Trim();
+        return new ValueTask<ValueRef>(ValueRef.FromString(decoded));
     }
 }
 

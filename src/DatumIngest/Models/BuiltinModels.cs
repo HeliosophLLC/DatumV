@@ -83,7 +83,7 @@ public static class BuiltinModels
         // u2netp,midas-small,dpt-large}.sql).
         RegisterMobileSamPrompted(modelCatalog);
         RegisterMobileSam(modelCatalog);
-        RegisterViTGpt2Caption(modelCatalog);
+        // ViT-GPT2 migrated to a SQL-defined model (models/sql/vit-gpt2-image-captioning.sql).
         RegisterTrOcrPrinted(modelCatalog);
         RegisterTrOcrPrintedFp16(modelCatalog);
 
@@ -730,81 +730,13 @@ public static class BuiltinModels
             Files: [modelFilename]));
     }
 
-    /// <summary>
-    /// Default folder name for the ViT-GPT2 image captioner. The folder
-    /// contains <c>encoder_model.onnx</c>, <c>decoder_model.onnx</c>,
-    /// <c>vocab.json</c>, <c>merges.txt</c>, and tokenizer/preprocessor
-    /// configs — all produced by <c>optimum-cli export onnx</c>.
-    /// </summary>
-    public const string ViTGpt2CaptionDefaultFolder = "vit-gpt2-image-captioning";
-
-    /// <summary>
-    /// File-existence anchor used by the catalog to verify the captioner is
-    /// installed: <c>{folder}/encoder_model.onnx</c>. Multi-file model
-    /// convention — the catalog's <c>RelativePath</c> still points at a
-    /// single file, the model loader derives the rest from that file's
-    /// directory.
-    /// </summary>
-    public const string ViTGpt2CaptionEncoderRelativePath =
-        ViTGpt2CaptionDefaultFolder + "/encoder_model.onnx";
-
-    /// <summary>
-    /// Registers the nlpconnect/vit-gpt2-image-captioning model under the
-    /// catalog name <paramref name="modelName"/> (defaults to
-    /// <c>"vit_gpt2_caption"</c>). ViT-base encoder + GPT-2 decoder, ~1 GB
-    /// on disk as ONNX. Apache-2.0 — fully unencumbered for commercial use.
-    /// </summary>
-    /// <param name="catalog">Catalog to register against.</param>
-    /// <param name="modelName">SQL-visible name (the <c>X</c> in <c>models.X(image)</c>).</param>
-    /// <param name="encoderRelativePath">
-    /// Path to <c>encoder_model.onnx</c>, relative to the catalog's
-    /// model directory. The loader resolves the rest of the file pack
-    /// (decoder + tokenizer) from the encoder's parent directory.
-    /// </param>
-    /// <param name="maxTokens">Maximum tokens generated per caption. Defaults to 16 (vit-gpt2 produces short captions).</param>
-    public static void RegisterViTGpt2Caption(
-        ModelCatalog catalog,
-        string modelName = "vit_gpt2_caption",
-        string encoderRelativePath = ViTGpt2CaptionEncoderRelativePath,
-        int maxTokens = 16)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: encoderRelativePath,
-            InputKinds: [DataKind.Image],
-            OutputKind: DataKind.String,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
-                return new ViTGpt2CaptionModel(modelName, encoderPath, maxTokens);
-            },
-            DisplayName: "ViT-GPT2 Image Captioner",
-            ImplementsTaskName: "ImageCaptioner",
-            Parameters: "239M",
-            License: "Apache-2.0",
-            LicenseHolder: "nlpconnect",
-            SourceUrl: "https://huggingface.co/nlpconnect/vit-gpt2-image-captioning",
-            Category: "captioner",
-            Modalities: ["image", "text"],
-            // Multi-file model — every file required to run, relative to the
-            // model directory. The catalog's RelativePath = encoderRelativePath
-            // is the anchor for status checks; this list is for documentation /
-            // recovery. Order: ONNX weights first, then tokenizer/configs.
-            Files:
-            [
-                ViTGpt2CaptionDefaultFolder + "/encoder_model.onnx",
-                ViTGpt2CaptionDefaultFolder + "/decoder_model.onnx",
-                ViTGpt2CaptionDefaultFolder + "/tokenizer.json",
-                ViTGpt2CaptionDefaultFolder + "/vocab.json",
-                ViTGpt2CaptionDefaultFolder + "/merges.txt",
-                ViTGpt2CaptionDefaultFolder + "/config.json",
-                ViTGpt2CaptionDefaultFolder + "/generation_config.json",
-                ViTGpt2CaptionDefaultFolder + "/tokenizer_config.json",
-                ViTGpt2CaptionDefaultFolder + "/special_tokens_map.json",
-            ]));
-    }
+    // ViT-GPT2 was previously registered here as a built-in C# IModel
+    // (ViTGpt2CaptionModel.cs). It now ships as a SQL-defined model in
+    // models/sql/vit-gpt2-image-captioning.sql backed by image_to_tensor_chw,
+    // a two-session USING (encoder + decoder), decode_seq2seq for greedy
+    // generation, and tokenizer.decode_bpe + tokenizer.byte_level_decode
+    // for caption assembly. The catalog entry's installSql declaration
+    // re-registers the SQL form when the model directory is rehydrated.
 
     /// <summary>
     /// Default folder for the TrOCR printed-text OCR model. Holds both

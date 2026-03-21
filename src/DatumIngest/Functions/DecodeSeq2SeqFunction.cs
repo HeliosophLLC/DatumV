@@ -84,7 +84,12 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
             [
                 new ParameterSpec("decoder_session", DataKindMatcher.Exact(DataKind.String),  IsArray: ArrayMatch.Scalar),
                 new ParameterSpec("encoder_features", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
-                new ParameterSpec("encoder_attention_mask", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Array),
+                // Nullable: a decoder without an encoder_attention_mask input
+                // takes NULL here. NULL arrives at plan time as Unknown, which
+                // doesn't match an exact-kind+array spec; widen to Any and
+                // type-check inside ExecuteAsync. The function's contract
+                // (non-NULL must be Int64[]) is enforced at runtime instead.
+                new ParameterSpec("encoder_attention_mask", DataKindMatcher.Any),
                 new ParameterSpec("prefix_token_ids", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Array),
                 new ParameterSpec("eos_token_id", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Scalar),
                 new ParameterSpec("max_tokens", DataKindMatcher.Exact(DataKind.Int32), IsArray: ArrayMatch.Scalar),
@@ -152,9 +157,24 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         float[] encoderFeatures = ExtractFloat32Array(args[1]);
 
         // encoder_attention_mask is structurally nullable — caller passes
-        // NULL when the decoder session has no such input. Mismatch
-        // resolution happens below against the decoder's declared inputs.
-        long[]? encoderMask = args[2].IsNull ? null : ExtractInt64Array(args[2]);
+        // NULL when the decoder session has no such input. The signature
+        // accepts Any (the matcher can't represent "Int64[] or NULL");
+        // when non-null we enforce the Int64[] contract here.
+        long[]? encoderMask;
+        if (args[2].IsNull)
+        {
+            encoderMask = null;
+        }
+        else
+        {
+            if (!args[2].IsArray || args[2].ArrayElementKind != DataKind.Int64)
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): encoder_attention_mask must be Int64[] or NULL; "
+                    + $"got {args[2].Kind}{(args[2].IsArray ? "[]" : "")}.");
+            }
+            encoderMask = ExtractInt64Array(args[2]);
+        }
 
         if (args[3].IsNull)
         {

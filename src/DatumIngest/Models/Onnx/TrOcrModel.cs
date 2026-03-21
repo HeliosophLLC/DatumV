@@ -16,8 +16,9 @@ namespace DatumIngest.Models.Onnx;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <strong>Two ONNX sessions.</strong> Like <see cref="ViTGpt2CaptionModel"/>,
-/// TrOCR is encoder + decoder. The encoder is ViT-base 384×384 producing
+/// <strong>Two ONNX sessions.</strong> Encoder + decoder, the same shape
+/// the migrated-to-SQL <c>vit_gpt2_caption</c> model uses but with a larger
+/// vision encoder. The encoder is ViT-base 384×384 producing
 /// <c>[batch, 577, 768]</c> hidden states; the decoder is a RoBERTa-style
 /// 12-layer transformer with cross-attention to those hidden states.
 /// </para>

@@ -676,6 +676,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Tokenization.TokenizerEncodeRobertaFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerDecodeFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerDecodeBpeFunction>("tokenizer");
+        registry.RegisterScalar<Tokenization.TokenizerByteLevelDecodeFunction>("tokenizer");
 
         // Temporal — current time, date/time arithmetic, extraction.
         registry.RegisterScalar<Scalar.Temporal.NowFunction>();
