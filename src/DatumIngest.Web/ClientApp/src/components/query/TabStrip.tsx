@@ -25,7 +25,7 @@ import {
   type TabKind,
 } from '@/state/tabs';
 import { cancelTab, executionsState, runTab } from '@/state/execution';
-import { runFunctionTab } from '@/state/functionForm';
+import { runFunctionTab, serializeFunctionForm } from '@/state/functionForm';
 import { resolveRunSql } from '@/state/activeEditor';
 import {
   TAB_DRAG_MIME,
@@ -385,6 +385,11 @@ function TabChip({
     // out above — a 'models' value can't reach here. Narrow defensively
     // so the wire payload's type stays 'sql' | 'function'.
     const dragKind: 'sql' | 'function' = kind === 'function' ? 'function' : 'sql';
+    // Snapshot the form-state slice so a cross-window drop can rebuild
+    // the function tab on the destination — null for SQL tabs and for
+    // function tabs the user hasn't interacted with.
+    const functionForm =
+      dragKind === 'function' ? serializeFunctionForm(id) : null;
     const payload: TabDragPayload = {
       fromLeafId: leafId,
       tabId: id,
@@ -393,7 +398,14 @@ function TabChip({
       // destination still sees the stale flag, which is the safer
       // direction (refuse rather than orphan an in-flight stream).
       isRunning: isStreaming,
-      tab: { id, title, kind: dragKind, sql, editorSize },
+      tab: {
+        id,
+        title,
+        kind: dragKind,
+        sql,
+        editorSize,
+        functionForm: functionForm ?? undefined,
+      },
     };
     dragPayloadRef.current = payload;
     writeTabDragData(e.dataTransfer, payload);

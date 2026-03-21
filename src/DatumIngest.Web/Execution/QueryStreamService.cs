@@ -73,9 +73,19 @@ public sealed class QueryStreamService
     {
         Stopwatch sw = Stopwatch.StartNew();
 
-        StringWriter? traceCapture = trace
-            ? ExecutionTracer.BeginCapture()
-            : null;
+        // When the caller asked for a trace, attach a RecentActivityLog for
+        // the duration of the request. Every Operators/Scalars span fired
+        // during execution lands in its ring; FormatTrace() renders it for
+        // the wire. Per-request scope avoids the per-row Activity allocation
+        // cost for the (much larger) population of untraced requests, which
+        // get the default zero-listener path.
+        //
+        // The 4096-entry ring covers a few hundred batches of operator pulls
+        // plus the corresponding scalar spans without overflowing — large
+        // enough for typical interactive queries to record fully. If we hit
+        // the cap on a long-running query the oldest entries roll off,
+        // which is the standard ring-buffer trade.
+        RecentActivityLog? traceLog = trace ? new RecentActivityLog(capacity: 4096) : null;
 
         // Parse outside the response body — parse errors map to an
         // inline error+complete event pair so the wire format stays
@@ -89,7 +99,7 @@ public sealed class QueryStreamService
         }
         catch (Exception ex)
         {
-            if (traceCapture is not null) ExecutionTracer.EndCapture(traceCapture);
+            traceLog?.Dispose();
             await WriteEventAsync(output, jsonOptions, new ErrorEvent("error", null, ex.Message, ex.ToString()), ct).ConfigureAwait(false);
             await WriteEventAsync(output, jsonOptions, new CompleteEvent("complete", sw.Elapsed.TotalMilliseconds), ct).ConfigureAwait(false);
             return;
@@ -97,7 +107,7 @@ public sealed class QueryStreamService
 
         if (statements.Count == 0)
         {
-            if (traceCapture is not null) ExecutionTracer.EndCapture(traceCapture);
+            traceLog?.Dispose();
             await WriteEventAsync(output, jsonOptions, new ErrorEvent("error", null, "empty SQL input", null), ct).ConfigureAwait(false);
             await WriteEventAsync(output, jsonOptions, new CompleteEvent("complete", sw.Elapsed.TotalMilliseconds), ct).ConfigureAwait(false);
             return;
@@ -130,7 +140,7 @@ public sealed class QueryStreamService
             }
             catch (ArgumentException ex)
             {
-                if (traceCapture is not null) ExecutionTracer.EndCapture(traceCapture);
+                traceLog?.Dispose();
                 await WriteEventAsync(output, jsonOptions, new ErrorEvent("error", null, ex.Message, ex.ToString()), ct).ConfigureAwait(false);
                 await WriteEventAsync(output, jsonOptions, new CompleteEvent("complete", sw.Elapsed.TotalMilliseconds), ct).ConfigureAwait(false);
                 return;
@@ -148,10 +158,11 @@ public sealed class QueryStreamService
             await ExecuteBatchAsync(statements, maxRows, output, jsonOptions, registry, ct)
                 .ConfigureAwait(false);
 
-            if (traceCapture is not null)
+            if (traceLog is not null)
             {
-                string traceText = ExecutionTracer.EndCapture(traceCapture);
-                traceCapture = null;
+                string traceText = traceLog.FormatTrace();
+                traceLog.Dispose();
+                traceLog = null;
                 if (!string.IsNullOrEmpty(traceText))
                 {
                     // Trace is batch-wide today; emit attached to a synthetic
@@ -180,10 +191,7 @@ public sealed class QueryStreamService
         }
         finally
         {
-            if (traceCapture is not null)
-            {
-                ExecutionTracer.EndCapture(traceCapture);
-            }
+            traceLog?.Dispose();
 
             if (errorEmitted)
             {

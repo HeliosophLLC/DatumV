@@ -67,6 +67,13 @@ declare global {
           kind?: 'sql' | 'function';
           sql: string;
           editorSize?: number;
+          /**
+           * Function-tab form-state slice — opaque JSON to the IPC layer
+           * (main process just round-trips it through the URL hash). The
+           * receiving renderer's `readSeedFromHash` validates the shape
+           * via `hydrateFunctionForm` on the destination side.
+           */
+          functionForm?: unknown;
         };
         x: number;
         y: number;

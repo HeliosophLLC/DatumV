@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('electronHost', {
       kind?: 'sql' | 'function';
       sql: string;
       editorSize?: number;
+      functionForm?: unknown;
     };
     x: number;
     y: number;

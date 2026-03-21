@@ -375,6 +375,85 @@ export function disposeFunctionForm(tabId: string): void {
   filesByTabId.delete(tabId);
 }
 
+// ───────────────────────── Persistence ─────────────────────────
+//
+// `PersistedFunctionForm` is the subset of `FunctionFormState` that
+// survives a reload / tear-out / cross-window drop. Transient fields
+// (`search`, `fieldErrors`) are omitted — the search input clears on
+// boot anyway and validation messages should re-derive from the next
+// Run. File handles can't round-trip through serialisation, so only
+// the filenames mirror is kept; the user re-attaches the actual file
+// on first run after rehydrate (matches the agreed v1 file story).
+
+export interface PersistedFunctionForm {
+  selection: FunctionFormSelection | null;
+  textValues: Record<string, string>;
+  fileNames: Record<string, string>;
+  kindOverrides: Record<string, string>;
+  variadicCounts: Record<string, number>;
+}
+
+/**
+ * Returns the form-state slice for `tabId` in a JSON-serialisable
+ * shape, or null when no form has been touched for this tab (the
+ * caller can omit the field entirely in that case so the persisted
+ * payload stays compact).
+ */
+export function serializeFunctionForm(tabId: string): PersistedFunctionForm | null {
+  const state = functionFormState.byTabId[tabId];
+  if (!state) return null;
+  // Skip the snapshot when nothing interesting has been entered —
+  // keeps localStorage payloads small and avoids re-hydrating a stub
+  // proxy slot for SQL tabs / never-touched function tabs.
+  const hasContent =
+    state.selection !== null
+    || Object.keys(state.textValues).length > 0
+    || Object.keys(state.fileNames).length > 0
+    || Object.keys(state.kindOverrides).length > 0
+    || Object.keys(state.variadicCounts).length > 0;
+  if (!hasContent) return null;
+  // `state.selection` is a Valtio-proxied object reference — passing
+  // it through structured clone (Electron IPC) throws "An object could
+  // not be cloned." Spread it into a plain object first. The other
+  // fields are already plain because their values are primitive strings
+  // / numbers, so the shallow spread above flattens them safely.
+  return {
+    selection: state.selection ? { ...state.selection } : null,
+    textValues: { ...state.textValues },
+    fileNames: { ...state.fileNames },
+    kindOverrides: { ...state.kindOverrides },
+    variadicCounts: { ...state.variadicCounts },
+  };
+}
+
+/**
+ * Writes a serialised form slice into the live `functionFormState`
+ * keyed by `tabId`. Called on initial state hydration + on tear-out
+ * receive. Idempotent — overwrites whatever stub state may have been
+ * created by an earlier `ensureFunctionForm` call.
+ */
+export function hydrateFunctionForm(
+  tabId: string,
+  persisted: PersistedFunctionForm,
+): void {
+  functionFormState.byTabId[tabId] = {
+    search: '',
+    selection: persisted.selection,
+    textValues: { ...persisted.textValues },
+    // `fileNames` is intentionally NOT restored. Files themselves don't
+    // survive serialisation (no `File` blob in IPC / localStorage), so
+    // showing a stale filename chip — complete with a clear-X — would
+    // imply a file is attached when there isn't one. Leaving the mirror
+    // empty makes the binary slot read as untouched on the destination;
+    // the user re-attaches and the "Required" check confirms it.
+    fileNames: {},
+    fieldErrors: {},
+    kindOverrides: { ...persisted.kindOverrides },
+    variadicCounts: { ...persisted.variadicCounts },
+  };
+  filesByTabId.delete(tabId);
+}
+
 /**
  * Builds a wire request from the current form and dispatches it to the
  * NDJSON runner. No-op when no function is picked. Validation failures

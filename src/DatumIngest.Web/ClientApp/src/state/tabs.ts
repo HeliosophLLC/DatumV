@@ -1,4 +1,9 @@
 import { proxy, subscribe } from 'valtio';
+import {
+  hydrateFunctionForm,
+  serializeFunctionForm,
+  type PersistedFunctionForm,
+} from './functionForm';
 
 // Query-editor pane tree. PR 1 shipped a flat `tabs[]` model; PR 7 lifts
 // that into a recursive binary tree of panes so the user can split the
@@ -206,6 +211,14 @@ interface PersistedTab {
   sql: string;
   editorSize?: number;
   pinned?: boolean;
+  /**
+   * Function-tab form state. Absent for SQL tabs and for function tabs
+   * the user hasn't interacted with yet. File handles don't survive the
+   * round-trip — the `fileNames` mirror is included as a display hint,
+   * but actual `File` objects need to be re-selected on first run after
+   * rehydrate.
+   */
+  functionForm?: PersistedFunctionForm;
 }
 
 type PersistedNode =
@@ -253,15 +266,16 @@ function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
         typeof t.title === 'string' &&
         typeof t.sql === 'string'
       ) {
+        const kind: TabKind =
+          t.kind === 'function'
+            ? 'function'
+            : t.kind === 'models'
+              ? 'models'
+              : 'sql';
         tabs.push({
           id: t.id,
           title: t.title,
-          kind:
-            t.kind === 'function'
-              ? 'function'
-              : t.kind === 'models'
-                ? 'models'
-                : 'sql',
+          kind,
           sql: t.sql,
           dirty: false,
           editorSize:
@@ -272,6 +286,13 @@ function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
               : undefined,
           pinned: t.pinned === true ? true : undefined,
         });
+        // Restore the function-form proxy slot before the React tree
+        // mounts the form. `ensureFunctionForm` would otherwise create
+        // a blank slot on first render and overwrite the persisted
+        // selection / values.
+        if (kind === 'function' && t.functionForm) {
+          hydrateFunctionForm(t.id, t.functionForm);
+        }
       }
     }
     if (tabs.length === 0) return null;
@@ -311,7 +332,12 @@ function readSeedFromHash(): Tab | null {
     const normalized = match[1].replace(/-/g, '+').replace(/_/g, '/');
     const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
     const json = atob(padded);
-    const parsed = JSON.parse(json) as Partial<Tab>;
+    // The seed may carry a `functionForm` slice when a function tab is
+    // being torn out — extract it before the partial-Tab type-narrowing
+    // (PersistedFunctionForm isn't on Tab itself).
+    const parsed = JSON.parse(json) as Partial<Tab> & {
+      functionForm?: PersistedFunctionForm;
+    };
     if (
       typeof parsed.id !== 'string' ||
       typeof parsed.title !== 'string' ||
@@ -319,10 +345,18 @@ function readSeedFromHash(): Tab | null {
     ) {
       return null;
     }
+    const kind: TabKind =
+      parsed.kind === 'function' ? 'function' : 'sql';
+    // Restore the function-form proxy BEFORE the returned Tab is
+    // committed to panesState — `ensureFunctionForm` would otherwise
+    // clobber the persisted slice on the first render.
+    if (kind === 'function' && parsed.functionForm) {
+      hydrateFunctionForm(parsed.id, parsed.functionForm);
+    }
     return {
       id: parsed.id,
       title: parsed.title,
-      kind: parsed.kind === 'function' ? 'function' : 'sql',
+      kind,
       sql: parsed.sql,
       dirty: false,
       editorSize:
@@ -470,14 +504,24 @@ function serializeNode(node: PaneNode): PersistedNode {
     return {
       kind: 'leaf',
       id: node.id,
-      tabs: node.tabs.map((t) => ({
-        id: t.id,
-        title: t.title,
-        kind: t.kind,
-        sql: t.sql,
-        editorSize: t.editorSize,
-        pinned: t.pinned,
-      })),
+      tabs: node.tabs.map((t) => {
+        const persisted: PersistedTab = {
+          id: t.id,
+          title: t.title,
+          kind: t.kind,
+          sql: t.sql,
+          editorSize: t.editorSize,
+          pinned: t.pinned,
+        };
+        // Function-tab content lives in a sibling proxy keyed by tabId.
+        // Pull the slice here so the existing panesState localStorage
+        // save carries it without a second persistence channel.
+        if (t.kind === 'function') {
+          const form = serializeFunctionForm(t.id);
+          if (form !== null) persisted.functionForm = form;
+        }
+        return persisted;
+      }),
       activeTabId: node.activeTabId,
     };
   }
@@ -810,6 +854,7 @@ export function importTabIntoLeaf(
     kind?: TabKind;
     sql: string;
     editorSize?: number;
+    functionForm?: PersistedFunctionForm;
   },
   insertIndex?: number,
 ): void {
@@ -819,14 +864,18 @@ export function importTabIntoLeaf(
   // surface; importing one would create a duplicate.
   if (tab.kind === 'models') return;
   const id = findTab(panesState.root, tab.id) ? newTabId() : tab.id;
+  const kind: TabKind = tab.kind === 'function' ? 'function' : 'sql';
   const newTab: Tab = {
     id,
     title: tab.title,
-    kind: tab.kind === 'function' ? 'function' : 'sql',
+    kind,
     sql: tab.sql,
     dirty: false,
     editorSize: tab.editorSize,
   };
+  if (kind === 'function' && tab.functionForm) {
+    hydrateFunctionForm(id, tab.functionForm);
+  }
   const minIndex = firstNonPinnedIndex(leaf);
   const index =
     insertIndex !== undefined
@@ -850,6 +899,7 @@ export function importTabAsSplit(
     kind?: TabKind;
     sql: string;
     editorSize?: number;
+    functionForm?: PersistedFunctionForm;
   },
   side: SplitSide,
 ): void {
@@ -857,14 +907,18 @@ export function importTabAsSplit(
   if (!target) return;
   if (tab.kind === 'models') return;
   const id = findTab(panesState.root, tab.id) ? newTabId() : tab.id;
+  const kind: TabKind = tab.kind === 'function' ? 'function' : 'sql';
   const newTab: Tab = {
     id,
     title: tab.title,
-    kind: tab.kind === 'function' ? 'function' : 'sql',
+    kind,
     sql: tab.sql,
     dirty: false,
     editorSize: tab.editorSize,
   };
+  if (kind === 'function' && tab.functionForm) {
+    hydrateFunctionForm(id, tab.functionForm);
+  }
   const newLeaf: LeafPane = {
     kind: 'leaf',
     id: newLeafId(),

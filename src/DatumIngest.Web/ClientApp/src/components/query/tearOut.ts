@@ -68,6 +68,10 @@ export async function tearOutTabIfNoDrop(
       kind: payload.tab.kind,
       sql: payload.tab.sql,
       editorSize: payload.tab.editorSize,
+      // dragstart captured the form-state slice into the drag payload;
+      // ride it through to the new window's URL hash so the form
+      // rehydrates with the same selection/values/overrides.
+      functionForm: payload.tab.functionForm,
     },
     x: x - 80,
     y: y - 12,

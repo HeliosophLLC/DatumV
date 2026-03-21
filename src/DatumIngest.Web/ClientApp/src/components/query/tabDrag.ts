@@ -1,3 +1,5 @@
+import type { PersistedFunctionForm } from '@/state/functionForm';
+
 // Wire format for tab drag-and-drop. A small custom MIME identifies our
 // drags so drop targets can distinguish a tab being moved from a text
 // selection or a file drop, and a JSON blob in the data carries the
@@ -38,6 +40,13 @@ export interface TabDragPayload {
     kind?: 'sql' | 'function';
     sql: string;
     editorSize?: number;
+    /**
+     * Function-tab form state slice — present only when `kind === 'function'`
+     * and the user has interacted with the form. Files don't survive the
+     * round-trip (the `fileNames` mirror inside survives as a display hint
+     * only); see PersistedFunctionForm.
+     */
+    functionForm?: PersistedFunctionForm;
   };
 }
 
@@ -85,6 +94,11 @@ export function parseTabDragData(dt: DataTransfer): TabDragPayload | null {
           typeof parsed.tab.editorSize === 'number'
             ? parsed.tab.editorSize
             : undefined,
+        // The form slice is opaquely JSON-typed here — the destination's
+        // `hydrateFunctionForm` writes whatever fields are present and
+        // tolerates missing ones (textValues/etc. default to {} via the
+        // spread).
+        functionForm: parsed.tab.functionForm,
       },
     };
   } catch {

@@ -228,6 +228,12 @@ interface TabSeed {
   kind?: 'sql' | 'function';
   sql: string;
   editorSize?: number;
+  /**
+   * Function-tab form state. Opaque to main — round-tripped through the
+   * URL hash and validated by the destination renderer. Set only for
+   * function tabs whose form the user has interacted with.
+   */
+  functionForm?: unknown;
 }
 
 /**
