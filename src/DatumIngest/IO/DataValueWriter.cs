@@ -141,6 +141,7 @@ internal static class DataValueWriter
             case DataKind.Audio:
             case DataKind.Video:
             case DataKind.Json:
+            case DataKind.PointCloud:
                 ReadOnlySpan<byte> blobBytes = value.AsByteSpan(store);
                 writer.Write(blobBytes.Length);
                 writer.Write(blobBytes);

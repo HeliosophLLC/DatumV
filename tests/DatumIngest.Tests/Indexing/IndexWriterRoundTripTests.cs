@@ -29,6 +29,7 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Video,
         DataKind.Json,
         DataKind.Image,
+        DataKind.PointCloud,
     ];
 
     /// <summary>
@@ -161,6 +162,7 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Audio    => DataValue.FromAudioInSidecar(offset: 0, length: 12),
         DataKind.Video    => DataValue.FromVideoInSidecar(offset: 0, length: 12),
         DataKind.Json     => DataValue.FromJsonInSidecar(offset: 0, length: 4),
+        DataKind.PointCloud => DataValue.FromPointCloudInSidecar(offset: 0, length: 40),
         DataKind.Struct   => DataValue.NullUntypedStruct(),
         DataKind.Type     => DataValue.FromType(DataKind.Int32),
         DataKind.Point2D  => DataValue.FromPoint2D(4, 5),

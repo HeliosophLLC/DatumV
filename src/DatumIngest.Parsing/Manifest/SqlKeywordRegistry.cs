@@ -108,6 +108,7 @@ public static class SqlKeywordRegistry
         "Date", "Time", "DateTime", "Duration",
         "String", "Uuid",
         "Image", "Audio", "Video", "Json", "Struct",
+        "PointCloud",
         // Array is a type-position wrapper keyword (Array<T>). The lexer
         // tokenises it as a plain identifier — the parser's recursive
         // TypeNameParser does the wrapper recognition — but the editor's

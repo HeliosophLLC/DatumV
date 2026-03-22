@@ -84,6 +84,7 @@ internal static class DataValueReader
             DataKind.Audio => ReadAudio(reader, store),
             DataKind.Video => ReadVideo(reader, store),
             DataKind.Json => ReadJson(reader, store),
+            DataKind.PointCloud => ReadPointCloud(reader, store),
             DataKind.Uuid => DataValue.FromUuid(new Guid(reader.ReadBytes(16))),
             DataKind.Point2D => DataValue.FromPoint2D(reader.ReadSingle(), reader.ReadSingle()),
             DataKind.Point3D => DataValue.FromPoint3D(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
@@ -122,6 +123,7 @@ internal static class DataValueReader
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
             DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks(reader.ReadInt64())),
             DataKind.Image => ReadImage(reader),
+            DataKind.PointCloud => ReadPointCloud(reader),
             DataKind.Uuid => DataValue.FromUuid(new Guid(reader.ReadBytes(16))),
             DataKind.Point2D => DataValue.FromPoint2D(reader.ReadSingle(), reader.ReadSingle()),
             DataKind.Point3D => DataValue.FromPoint3D(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
@@ -200,5 +202,23 @@ internal static class DataValueReader
         int length = reader.ReadInt32();
         byte[] bytes = reader.ReadBytes(length);
         return DataValue.FromJson(bytes, store);
+    }
+
+    private static DataValue ReadPointCloud(BinaryReader reader)
+    {
+        // The no-store body reader is used by zone-map readers, which never carry
+        // point-cloud min/max values (clouds aren't comparable). Throw if a caller
+        // hits this — they should be using the store-aware overload.
+        _ = reader.ReadInt32();
+        throw new InvalidOperationException(
+            "Cannot deserialize PointCloud body without a target IValueStore. "
+            + "PointClouds are not expected in zone-map / no-store wire-format payloads.");
+    }
+
+    private static DataValue ReadPointCloud(BinaryReader reader, IValueStore store)
+    {
+        int length = reader.ReadInt32();
+        byte[] bytes = reader.ReadBytes(length);
+        return DataValue.FromPointCloud(bytes, store);
     }
 }

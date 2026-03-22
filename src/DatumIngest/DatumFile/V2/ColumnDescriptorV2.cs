@@ -102,6 +102,7 @@ public sealed record ColumnDescriptorV2(
                 or DataKind.Audio
                 or DataKind.Video
                 or DataKind.Json
+                or DataKind.PointCloud
                 or DataKind.Struct
                 => EncoderKind.VariableSlot,
 

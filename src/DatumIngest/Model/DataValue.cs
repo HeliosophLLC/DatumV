@@ -755,6 +755,18 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Image, flags: DataValueFlags.InArena, p0: p0, p1: p1);
     }
 
+    /// <summary>
+    /// Creates a value from a fully formed PointCloud blob (40-byte header
+    /// followed by interleaved per-point payload) using an explicit
+    /// <see cref="IValueStore"/>. Callers are responsible for building the blob;
+    /// see <c>DatumIngest.Model.Spatial.PointCloudHeader</c> for the layout.
+    /// </summary>
+    public static DataValue FromPointCloud(byte[] blob, IValueStore store)
+    {
+        var (p0, p1) = store.StoreBytes(blob);
+        return new(DataKind.PointCloud, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+    }
+
     /// <summary>Creates a value from encoded audio bytes.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromAudio(byte[], IValueStore)"/> instead.</remarks>
     public static DataValue FromAudio(byte[] value) =>
@@ -841,6 +853,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     public static DataValue FromVideoInSidecar(long offset, long length, byte storeId = 0) =>
         BuildSidecar(DataKind.Video, offset, length, storeId);
+
+    /// <summary>
+    /// Creates a <see cref="DataKind.PointCloud"/> value whose blob lives in a
+    /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar"/>.
+    /// </summary>
+    public static DataValue FromPointCloudInSidecar(long offset, long length, byte storeId = 0) =>
+        BuildSidecar(DataKind.PointCloud, offset, length, storeId);
 
     /// <summary>
     /// Creates an <c>Array&lt;Image&gt;</c> value. Each element's encoded bytes are
@@ -2485,14 +2504,16 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// True when this value carries an encoded-blob payload — <see cref="DataKind.Image"/>,
-    /// <see cref="DataKind.Audio"/>, <see cref="DataKind.Video"/>, or <see cref="DataKind.Json"/>.
-    /// All four share the same byte-content storage shape (inline / arena / sidecar at
-    /// <c>(_p0, _p1)</c>) and the same accessors (<see cref="AsByteSpan"/>, etc.); only the
-    /// kind discriminator distinguishes them. JSON's bytes are canonical CBOR (RFC 7049 §3.9);
-    /// the other three are codec-specific.
+    /// <see cref="DataKind.Audio"/>, <see cref="DataKind.Video"/>, <see cref="DataKind.Json"/>,
+    /// or <see cref="DataKind.PointCloud"/>. All share the same byte-content storage shape
+    /// (inline / arena / sidecar at <c>(_p0, _p1)</c>) and the same accessors
+    /// (<see cref="AsByteSpan"/>, etc.); only the kind discriminator distinguishes them.
+    /// JSON's bytes are canonical CBOR (RFC 7049 §3.9); PointCloud's bytes are a 40-byte
+    /// header plus interleaved per-point payload (see
+    /// <c>DatumIngest.Model.Spatial.PointCloudHeader</c>); the other three are codec-specific.
     /// </summary>
     public bool IsBlobKind =>
-        _kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json;
+        _kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud;
 
     /// <summary>
     /// Returns the byte payload for a byte-array (UInt8 + IsArray) or
@@ -2511,7 +2532,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         if (!IsBlobKind && !IsByteArrayKind)
         {
             throw new InvalidOperationException(
-                $"AsByteSpan is only valid for byte-content kinds (Image/Audio/Video or UInt8 + IsArray); got {_kind}.");
+                $"AsByteSpan is only valid for byte-content kinds (Image/Audio/Video/Json/PointCloud or UInt8 + IsArray); got {_kind}.");
         }
 
         if (IsInSidecar)
@@ -2788,6 +2809,24 @@ public readonly struct DataValue : IEquatable<DataValue>
         return store.RetrieveBytes(_p0, _p1);
     }
 
+    /// <summary>
+    /// Returns the raw PointCloud blob (40-byte header followed by interleaved
+    /// per-point payload). For arena-backed values, reads from <paramref name="store"/>;
+    /// for sidecar-backed values, looks up the value's <c>storeId</c> in
+    /// <paramref name="registry"/>. Callers parse the header via
+    /// <c>DatumIngest.Model.Spatial.PointCloudHeader.Read</c>.
+    /// </summary>
+    public byte[] AsPointCloud(IValueStore store, SidecarRegistry? registry = null)
+    {
+        ThrowIfNullOrWrongKind(DataKind.PointCloud);
+
+        if (IsInSidecar)
+        {
+            return ReadSidecarBytes(registry).ToArray();
+        }
+        return store.RetrieveBytes(_p0, _p1);
+    }
+
     /// <summary>Returns the calendar date payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public DateOnly AsDate()
@@ -3018,7 +3057,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2,
             // For reference types without a store, use offset-equality: same (_p0,_p1) in the
             // same store means identical content. Different offsets → unknown, return false.
-            DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json
+            DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud
                 => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Struct
                 => _meta == other._meta && _p0 == other._p0 && _p1 == other._p1,
@@ -3099,7 +3138,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Uuid
                 => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
             // Offset-based hashing: consistent with offset-equality in Equals.
-            DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json
+            DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud
                 => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Struct
                 => HashCode.Combine(_kind, _p0, _p1, _meta),

@@ -153,4 +153,12 @@ public enum DataKind : byte
     /// <c>p.z</c> (sugar for <c>point_x</c> / <c>point_y</c> / <c>point_z</c>).
     /// </summary>
     Point3D = 73,
+
+    /// <summary>
+    /// A dense collection of 3D points with optional per-point attributes (color, normal, intensity).
+    /// Storage is a single byte blob: a 40-byte header (see <c>PointCloudHeader</c>) followed by
+    /// a fixed-stride interleaved per-point payload. Shares <see cref="DataKind.Image"/>'s arena /
+    /// sidecar storage shape; accessed via <c>AsPointCloud</c> / <c>AsByteSpan</c>.
+    /// </summary>
+    PointCloud = 74,
 }
