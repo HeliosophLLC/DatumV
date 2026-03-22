@@ -72,8 +72,11 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Equal("models", descriptor.SchemaName);
         Assert.Equal("INT32", descriptor.ReturnTypeName);
         Assert.Equal(_absoluteUsingPath, descriptor.UsingPath);
-        Assert.Single(descriptor.BoundSessions);
-        Assert.Equal(1, dispatcher.LoadCallCount);
+        // BoundSessions now exposes alias keys; the actual ONNX load is
+        // lazy (deferred to the body's first infer() call), so the
+        // dispatcher hasn't been touched yet at registration time.
+        Assert.Single(descriptor.BoundSessions.Keys);
+        Assert.Equal(0, dispatcher.LoadCallCount);
     }
 
     [Fact]
@@ -166,11 +169,17 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     }
 
     [Fact]
-    public void CreateModel_OrReplace_ReplacesAndDisposesOldSessions()
+    public async Task CreateModel_OrReplace_ReplacesAndDisposesOldSessions()
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
 
         catalog.Plan(Ddl("RETURN x"));
+        // Sessions are lazy now — force the first load by resolving the
+        // alias through the descriptor's BoundSessions accessor. This is
+        // what the body's first infer() call does at runtime.
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "classify"), out ModelDescriptor? firstDescriptor));
+        _ = await firstDescriptor!.BoundSessions.ResolveAsync("default", default);
         StubSession firstSession = dispatcher.LastSession!;
         Assert.False(firstSession.Disposed);
 
@@ -178,19 +187,27 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE OR REPLACE MODEL classify(x INT32) RETURNS INT32 " +
             $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x + 1 END");
 
-        // Old session must be disposed; new session is live.
+        // Old session must be disposed (it was loaded). New session is
+        // lazy — verify by resolving and confirming it's distinct + live.
         Assert.True(firstSession.Disposed);
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "classify"), out ModelDescriptor? secondDescriptor));
+        _ = await secondDescriptor!.BoundSessions.ResolveAsync("default", default);
         Assert.NotSame(firstSession, dispatcher.LastSession);
         Assert.False(dispatcher.LastSession!.Disposed);
         Assert.Equal(2, dispatcher.LoadCallCount);
     }
 
     [Fact]
-    public void CreateModel_IfNotExists_NoOpWhenAlreadyRegistered()
+    public async Task CreateModel_IfNotExists_NoOpWhenAlreadyRegistered()
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
 
         catalog.Plan(Ddl("RETURN x"));
+        // Force the lazy session to load so we have a StubSession to assert on.
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "classify"), out ModelDescriptor? descriptor));
+        _ = await descriptor!.BoundSessions.ResolveAsync("default", default);
         StubSession firstSession = dispatcher.LastSession!;
 
         catalog.Plan(
@@ -198,7 +215,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x + 1 END");
 
         // No second load happened — the existing descriptor wins and
-        // no new session was bound.
+        // no new session was bound (the original load counted as 1).
         Assert.Equal(1, dispatcher.LoadCallCount);
         Assert.False(firstSession.Disposed);
     }
@@ -206,11 +223,17 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     // ───────────────────── DROP MODEL ─────────────────────
 
     [Fact]
-    public void DropModel_RemovesFromRegistryAndDisposesSessions()
+    public async Task DropModel_RemovesFromRegistryAndDisposesSessions()
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
 
         catalog.Plan(Ddl("RETURN x"));
+        // Force the lazy session to load — DROP only disposes sessions
+        // that were actually allocated; this test verifies the disposal
+        // path for a model that has been used.
+        Assert.True(catalog.DeclaredModels.TryGet(
+            new QualifiedName("models", "classify"), out ModelDescriptor? descriptor));
+        _ = await descriptor!.BoundSessions.ResolveAsync("default", default);
         StubSession session = dispatcher.LastSession!;
 
         catalog.Plan("DROP MODEL classify");

@@ -223,7 +223,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// In every fallback the per-row loop produces results indistinguishable
     /// from the batched path; this method is purely a performance override.
     /// </remarks>
-    public ValueTask<ValueRef[]> ExecuteBatchAsync(
+    public async ValueTask<ValueRef[]> ExecuteBatchAsync(
         ReadOnlyMemory<ValueRef>[] argumentColumns,
         int rowCount,
         EvaluationFrame frame,
@@ -232,19 +232,31 @@ public sealed class InferFunction : IFunction, IScalarFunction
         // The columnar packing optimisation only applies to the 1-arg
         // single-input form against a batchable session. Every other
         // shape (multi-input struct, explicit per-row shape, non-batchable
-        // session) falls back to the default per-row loop.
+        // session) falls back to the default per-row loop. We have to
+        // load the default session here to inspect its input shape; this
+        // is the one place outside DispatchAndReadAsync where lazy session
+        // loading happens before the SQL body actually calls infer().
         if (rowCount <= 1
             || argumentColumns.Length != 1
             || frame.CurrentModel is not { } model
-            || !model.BoundSessions.TryGetValue("default", out IInferenceSession? session)
-            || session.Inputs.Count != 1
-            || !IsBatchableShape(session.Inputs[0]))
+            || !model.BoundSessions.ContainsKey("default"))
         {
-            return ScalarFunctionBatchHelpers.DefaultLoop(this, argumentColumns, rowCount, frame, cancellationToken);
+            return await ScalarFunctionBatchHelpers.DefaultLoop(
+                this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
         }
 
-        return ExecuteBatchedSingleInputAsync(
-            session, argumentColumns[0], rowCount, model.QualifiedName.ToString(), cancellationToken);
+        IInferenceSession session = await model.BoundSessions
+            .ResolveAsync("default", cancellationToken)
+            .ConfigureAwait(false);
+        if (session.Inputs.Count != 1 || !IsBatchableShape(session.Inputs[0]))
+        {
+            return await ScalarFunctionBatchHelpers.DefaultLoop(
+                this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await ExecuteBatchedSingleInputAsync(
+            session, argumentColumns[0], rowCount, model.QualifiedName.ToString(), cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -458,25 +470,30 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 + "scalar-function form for the underlying computation.");
         }
 
-        ReadOnlySpan<ValueRef> args = arguments.Span;
-        if (args.Length is < 1 or > 3)
+        int argLength = arguments.Length;
+        if (argLength is < 1 or > 3)
         {
             throw new InvalidOperationException(
-                $"{functionName}() expects 1-3 arguments (value | session, value [, shape]); got {args.Length}.");
+                $"{functionName}() expects 1-3 arguments (value | session, value [, shape]); got {argLength}.");
         }
 
         // Named-session form: first argument is a String alias when the
         // caller writes `infer('encoder', value, ...)`. Slice it off and
         // resolve the session by alias; the rest of the dispatch operates
         // on the remaining "logical" arguments against that session,
-        // identical to the implicit-default path.
+        // identical to the implicit-default path. Sessions load on first
+        // touch — ResolveAsync caches subsequent calls.
         IInferenceSession session;
         string sessionName;
-        ReadOnlySpan<ValueRef> logicalArgs;
-        if (args.Length >= 2 && args[0].Kind == DataKind.String && !args[0].IsArray)
+        bool namedForm;
         {
-            string alias = args[0].AsString();
-            if (!model.BoundSessions.TryGetValue(alias, out IInferenceSession? namedSession))
+            ReadOnlySpan<ValueRef> probe = arguments.Span;
+            namedForm = argLength >= 2 && probe[0].Kind == DataKind.String && !probe[0].IsArray;
+        }
+        if (namedForm)
+        {
+            string alias = arguments.Span[0].AsString();
+            if (!model.BoundSessions.ContainsKey(alias))
             {
                 throw new InvalidOperationException(
                     $"Model '{model.QualifiedName.ToString()}': {functionName}() referenced session "
@@ -485,13 +502,12 @@ public sealed class InferFunction : IFunction, IScalarFunction
                     + "Aliases come from the CREATE MODEL's USING clause "
                     + "(`USING 'path' AS alias`).");
             }
-            session = namedSession;
+            session = await model.BoundSessions.ResolveAsync(alias, cancellationToken).ConfigureAwait(false);
             sessionName = alias;
-            logicalArgs = arguments.Slice(1).Span;
         }
         else
         {
-            if (!model.BoundSessions.TryGetValue("default", out IInferenceSession? defaultSession))
+            if (!model.BoundSessions.ContainsKey("default"))
             {
                 throw new InvalidOperationException(
                     $"Model '{model.QualifiedName.ToString()}' has no 'default' session bound. "
@@ -500,10 +516,12 @@ public sealed class InferFunction : IFunction, IScalarFunction
                     + "Available sessions: ["
                     + $"{string.Join(", ", model.BoundSessions.Keys)}].");
             }
-            session = defaultSession;
+            session = await model.BoundSessions.ResolveAsync("default", cancellationToken).ConfigureAwait(false);
             sessionName = "default";
-            logicalArgs = args;
         }
+
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ReadOnlySpan<ValueRef> logicalArgs = namedForm ? arguments.Slice(1).Span : args;
 
         if (session.Outputs.Count == 0)
         {

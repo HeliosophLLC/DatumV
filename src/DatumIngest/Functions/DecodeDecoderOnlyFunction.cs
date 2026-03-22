@@ -124,11 +124,11 @@ public sealed class DecodeDecoderOnlyFunction : IFunction, IScalarFunction
         EvaluationFrame frame,
         CancellationToken cancellationToken)
     {
-        ReadOnlySpan<ValueRef> args = arguments.Span;
-        if (args.Length != 5)
+        int argLen = arguments.Length;
+        if (argLen != 5)
         {
             throw new InvalidOperationException(
-                $"decode_decoder_only() expects 5 arguments; got {args.Length}.");
+                $"decode_decoder_only() expects 5 arguments; got {argLen}.");
         }
         if (frame.CurrentModel is not { } model)
         {
@@ -136,23 +136,34 @@ public sealed class DecodeDecoderOnlyFunction : IFunction, IScalarFunction
                 "decode_decoder_only() is only callable from inside a CREATE MODEL body.");
         }
 
-        // Resolve session aliases. Both must be in the current model's
-        // BoundSessions map.
-        string decoderAlias = args[0].AsString();
-        if (!model.BoundSessions.TryGetValue(decoderAlias, out IInferenceSession? decoder))
+        // Two-phase: extract alias strings before awaiting (Spans can't
+        // cross an await), then load both sessions, then re-acquire span.
+        string decoderAlias;
+        string embedAlias;
+        {
+            ReadOnlySpan<ValueRef> probe = arguments.Span;
+            decoderAlias = probe[0].AsString();
+            embedAlias = probe[1].AsString();
+        }
+
+        if (!model.BoundSessions.ContainsKey(decoderAlias))
         {
             throw new InvalidOperationException(
                 $"decode_decoder_only(): decoder session alias '{decoderAlias}' is not bound. "
                 + $"Available: [{string.Join(", ", model.BoundSessions.Keys)}].");
         }
-        string embedAlias = args[1].AsString();
-        if (!model.BoundSessions.TryGetValue(embedAlias, out IInferenceSession? embedTokens))
+        if (!model.BoundSessions.ContainsKey(embedAlias))
         {
             throw new InvalidOperationException(
                 $"decode_decoder_only(): embed_tokens session alias '{embedAlias}' is not bound. "
                 + $"Available: [{string.Join(", ", model.BoundSessions.Keys)}].");
         }
+        IInferenceSession decoder = await model.BoundSessions
+            .ResolveAsync(decoderAlias, cancellationToken).ConfigureAwait(false);
+        IInferenceSession embedTokens = await model.BoundSessions
+            .ResolveAsync(embedAlias, cancellationToken).ConfigureAwait(false);
 
+        ReadOnlySpan<ValueRef> args = arguments.Span;
         if (args[2].IsNull)
         {
             throw new InvalidOperationException(

@@ -306,7 +306,13 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
         UsingPath: usingPath,
         ResolvedUsingPath: usingPath,
         StatementBody: Array.Empty<DatumIngest.Parsing.Ast.Statement>(),
-        BoundSessions: new Dictionary<string, IInferenceSession>(StringComparer.Ordinal),
+        // Empty alias map — the table-provider tests inspect descriptor
+        // metadata only and never trigger a session load, so the dispatcher
+        // reference is never dereferenced.
+        BoundSessions: new DatumIngest.Catalog.Registries.LazyModelSessions(
+            dispatcher: null!,
+            resolvedPaths: new Dictionary<string, string>(StringComparer.Ordinal),
+            bundleId: $"test:{name}"),
         ReturnIsNotNull: false,
         SourceText: $"CREATE MODEL {name}");
 

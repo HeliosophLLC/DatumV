@@ -781,16 +781,17 @@ internal sealed class RoutineRegistrar
             sessionPaths["default"] = primaryResolvedPath;
         }
 
-        Inference.BundleManifest bundle = new(
-            BundleId: $"{qn} (USING '{create.UsingPath}')",
-            Sessions: sessionPaths,
-            PreferredBackends: Array.Empty<Inference.InferenceBackendId>());
-
-        IReadOnlyDictionary<string, Inference.IInferenceSession> sessions =
-            await dispatcher.LoadBundleAsync(
-                bundle,
-                new Inference.InferencePreferences(),
-                CancellationToken.None).ConfigureAwait(false);
+        // Defer the ONNX session load until the body's first infer('alias', ...)
+        // call. Eager LoadBundleAsync at registration time made catalog rehydration
+        // (which replays every persisted CREATE MODEL on startup) load every
+        // installed model's sessions before the host could serve requests — an
+        // O(installed models) boot cost. With LazyModelSessions, registration
+        // pays only path-resolution + AST cost; sessions land on first invoke
+        // and stick around for subsequent calls.
+        LazyModelSessions sessions = new(
+            dispatcher,
+            sessionPaths,
+            bundleId: $"{qn} (USING '{create.UsingPath}')");
 
         ModelDescriptor descriptor = new(
             SchemaName: qn.Schema,
@@ -1437,17 +1438,7 @@ internal sealed class RoutineRegistrar
     /// the descriptor was being released.
     /// </summary>
     private static void DisposeSessions(ModelDescriptor descriptor)
-    {
-        foreach (Inference.IInferenceSession session in descriptor.BoundSessions.Values)
-        {
-            try { session.Dispose(); }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine(
-                    $"Failed to dispose session for model '{descriptor.QualifiedName}': {ex.Message}");
-            }
-        }
-    }
+        => descriptor.BoundSessions.DisposeLoaded();
 
     /// <summary>
     /// Registers (or replaces) the SQL-defined model on two surfaces:

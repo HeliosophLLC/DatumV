@@ -137,11 +137,16 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         EvaluationFrame frame,
         CancellationToken cancellationToken)
     {
-        ReadOnlySpan<ValueRef> args = arguments.Span;
-        if (args.Length is not 7 and not 8)
+        // Two-phase argument handling: first phase only touches values
+        // that don't need a span (alias strings + arg count), so we can
+        // safely await session resolution between phase 1 and phase 2
+        // (Spans can't cross an await). Phase 2 re-acquires the span and
+        // unpacks the rest.
+        int argLen = arguments.Length;
+        if (argLen is not 7 and not 8)
         {
             throw new InvalidOperationException(
-                $"decode_seq2seq() expects 7 or 8 arguments; got {args.Length}.");
+                $"decode_seq2seq() expects 7 or 8 arguments; got {argLen}.");
         }
 
         if (frame.CurrentModel is not { } model)
@@ -151,17 +156,30 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
                 + "Outside a model frame there is no bound session to dispatch to.");
         }
 
-        // Argument extraction. ValueRef accessors handle inline + arena
-        // payloads transparently; primitive arrays come back as their
-        // managed counterparts via Materialized.
-        if (args[0].IsNull || args[0].Kind != DataKind.String)
+        // Phase 1: extract alias strings and the optional embed-tokens alias.
+        string sessionAlias;
+        string? embedAlias;
         {
-            throw new InvalidOperationException(
-                "decode_seq2seq(): decoder_session must be a non-NULL String alias.");
+            ReadOnlySpan<ValueRef> probe = arguments.Span;
+            if (probe[0].IsNull || probe[0].Kind != DataKind.String)
+            {
+                throw new InvalidOperationException(
+                    "decode_seq2seq(): decoder_session must be a non-NULL String alias.");
+            }
+            sessionAlias = probe[0].AsString();
+            embedAlias = null;
+            if (argLen == 8)
+            {
+                if (probe[7].IsNull || probe[7].Kind != DataKind.String)
+                {
+                    throw new InvalidOperationException(
+                        "decode_seq2seq(): embed_tokens_session must be a non-NULL String alias.");
+                }
+                embedAlias = probe[7].AsString();
+            }
         }
-        string sessionAlias = args[0].AsString();
 
-        if (!model.BoundSessions.TryGetValue(sessionAlias, out IInferenceSession? decoder))
+        if (!model.BoundSessions.ContainsKey(sessionAlias))
         {
             throw new InvalidOperationException(
                 $"decode_seq2seq(): decoder session alias '{sessionAlias}' is not bound. "
@@ -169,7 +187,42 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
                 + "Aliases come from the CREATE MODEL's USING clause "
                 + "(`USING 'path' AS alias`).");
         }
+        IInferenceSession decoder = await model.BoundSessions
+            .ResolveAsync(sessionAlias, cancellationToken).ConfigureAwait(false);
 
+        // Resolve the optional embed-tokens session here too (also between
+        // phases, so we never await once the span is alive).
+        IInferenceSession? embedTokensSession = null;
+        TensorSpec? embedTokensInputIdsSpec = null;
+        TensorSpec? embedTokensOutputSpec = null;
+        if (embedAlias is not null)
+        {
+            if (!model.BoundSessions.ContainsKey(embedAlias))
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): embed_tokens session alias '{embedAlias}' is not bound. "
+                    + $"Available aliases: [{string.Join(", ", model.BoundSessions.Keys)}].");
+            }
+            embedTokensSession = await model.BoundSessions
+                .ResolveAsync(embedAlias, cancellationToken).ConfigureAwait(false);
+            embedTokensInputIdsSpec = FindInput(embedTokensSession, "input_ids");
+            if (embedTokensInputIdsSpec is null)
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): embed_tokens session '{embedAlias}' must declare an "
+                    + "'input_ids' input (the token-ids to look up).");
+            }
+            if (embedTokensSession.Outputs.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): embed_tokens session '{embedAlias}' declares no outputs.");
+            }
+            embedTokensOutputSpec = embedTokensSession.Outputs[0];
+        }
+
+        // Phase 2: re-acquire the span and unpack the remaining typed
+        // arguments. From here we don't await again.
+        ReadOnlySpan<ValueRef> args = arguments.Span;
         if (args[1].IsNull)
         {
             throw new InvalidOperationException(
@@ -219,41 +272,6 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
                 $"decode_seq2seq(): max_tokens must be positive; got {maxTokens}.");
         }
         bool useKvCache = args[6].AsBoolean();
-
-        // The 8-arg form supplies an embed_tokens session alias for decoders
-        // that take `inputs_embeds` rather than `input_ids` (BART, Florence-2).
-        // Resolved + validated up-front so the per-step dispatch is uniform.
-        IInferenceSession? embedTokensSession = null;
-        TensorSpec? embedTokensInputIdsSpec = null;
-        TensorSpec? embedTokensOutputSpec = null;
-        if (args.Length == 8)
-        {
-            if (args[7].IsNull || args[7].Kind != DataKind.String)
-            {
-                throw new InvalidOperationException(
-                    "decode_seq2seq(): embed_tokens_session must be a non-NULL String alias.");
-            }
-            string embedAlias = args[7].AsString();
-            if (!model.BoundSessions.TryGetValue(embedAlias, out embedTokensSession))
-            {
-                throw new InvalidOperationException(
-                    $"decode_seq2seq(): embed_tokens session alias '{embedAlias}' is not bound. "
-                    + $"Available aliases: [{string.Join(", ", model.BoundSessions.Keys)}].");
-            }
-            embedTokensInputIdsSpec = FindInput(embedTokensSession, "input_ids");
-            if (embedTokensInputIdsSpec is null)
-            {
-                throw new InvalidOperationException(
-                    $"decode_seq2seq(): embed_tokens session '{embedAlias}' must declare an "
-                    + "'input_ids' input (the token-ids to look up).");
-            }
-            if (embedTokensSession.Outputs.Count == 0)
-            {
-                throw new InvalidOperationException(
-                    $"decode_seq2seq(): embed_tokens session '{embedAlias}' declares no outputs.");
-            }
-            embedTokensOutputSpec = embedTokensSession.Outputs[0];
-        }
 
         // Resolve decoder session input metadata. The decoder must declare
         // `encoder_hidden_states` plus either `input_ids` (token-id form)

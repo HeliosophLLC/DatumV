@@ -60,9 +60,14 @@ namespace DatumIngest.Catalog.Registries;
 /// rejects expression bodies).
 /// </param>
 /// <param name="BoundSessions">
-/// Map from session name to loaded inference session, populated by the
-/// registrar after dispatcher load. Single-session bundles have one
-/// entry keyed <c>"default"</c>.
+/// Lazy session resolver covering every alias declared in the model's
+/// <c>USING ... AS</c> clause. The registrar builds this at
+/// <c>CREATE MODEL</c> time but defers the actual ONNX session load
+/// until the first <c>infer('alias', ...)</c> call inside the body —
+/// catalog rehydration on startup pays only path resolution + AST
+/// parsing cost, never per-model session load. Single-session bundles
+/// expose one alias <c>"default"</c>. Disposal walks only the aliases
+/// that finished loading.
 /// </param>
 /// <param name="ReturnIsNotNull">
 /// When <see langword="true"/>, the procedural executor applies a runtime
@@ -93,7 +98,7 @@ public sealed record ModelDescriptor(
     string UsingPath,
     string ResolvedUsingPath,
     IReadOnlyList<Statement> StatementBody,
-    IReadOnlyDictionary<string, IInferenceSession> BoundSessions,
+    LazyModelSessions BoundSessions,
     bool ReturnIsNotNull = false,
     string? SourceText = null,
     string? ImplementsTaskName = null,
