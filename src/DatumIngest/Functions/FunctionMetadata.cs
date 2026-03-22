@@ -73,7 +73,7 @@ public static class FunctionMetadata
     /// </summary>
     public static FunctionSignatureVariant? MatchVariantWithShape(
         IReadOnlyList<FunctionSignatureVariant> signatures,
-        ReadOnlySpan<(DataKind Kind, bool IsArray)> argumentShapes)
+        ReadOnlySpan<(DataKind Kind, bool IsArray, bool IsMultiDim)> argumentShapes)
     {
         for (int i = 0; i < signatures.Count; i++)
         {
@@ -90,11 +90,12 @@ public static class FunctionMetadata
     /// <see cref="TryMatch"/> except each fixed parameter and the variadic
     /// also enforce <see cref="ParameterSpec.IsArray"/> /
     /// <see cref="VariadicSpec.IsArray"/> against the argument's actual
-    /// array-ness.
+    /// array-ness (and multi-dim-ness for the <see cref="ArrayMatch.FlatArray"/>
+    /// / <see cref="ArrayMatch.MultiDimArray"/> variants).
     /// </summary>
     public static bool TryMatchWithShape(
         FunctionSignatureVariant variant,
-        ReadOnlySpan<(DataKind Kind, bool IsArray)> argumentShapes)
+        ReadOnlySpan<(DataKind Kind, bool IsArray, bool IsMultiDim)> argumentShapes)
     {
         IReadOnlyList<ParameterSpec> parameters = variant.Parameters;
         int requiredCount = 0;
@@ -113,9 +114,9 @@ public static class FunctionMetadata
         int fixedToCheck = Math.Min(argumentShapes.Length, maxFixed);
         for (int i = 0; i < fixedToCheck; i++)
         {
-            (DataKind kind, bool isArray) = argumentShapes[i];
+            (DataKind kind, bool isArray, bool isMultiDim) = argumentShapes[i];
             if (!parameters[i].Kind.Matches(kind)) return false;
-            if (!ArrayMatchSatisfied(parameters[i].IsArray, isArray)) return false;
+            if (!ArrayMatchSatisfied(parameters[i].IsArray, isArray, isMultiDim)) return false;
         }
 
         if (variadic is not null)
@@ -123,9 +124,9 @@ public static class FunctionMetadata
             DataKind? firstVariadic = null;
             for (int i = maxFixed; i < argumentShapes.Length; i++)
             {
-                (DataKind kind, bool isArray) = argumentShapes[i];
+                (DataKind kind, bool isArray, bool isMultiDim) = argumentShapes[i];
                 if (!variadic.Kind.Matches(kind)) return false;
-                if (!ArrayMatchSatisfied(variadic.IsArray, isArray)) return false;
+                if (!ArrayMatchSatisfied(variadic.IsArray, isArray, isMultiDim)) return false;
                 if (variadic.RequireSameKindAcrossArgs)
                 {
                     if (firstVariadic is null)
@@ -143,11 +144,13 @@ public static class FunctionMetadata
         return true;
     }
 
-    private static bool ArrayMatchSatisfied(ArrayMatch spec, bool actualIsArray) => spec switch
+    private static bool ArrayMatchSatisfied(ArrayMatch spec, bool actualIsArray, bool actualIsMultiDim) => spec switch
     {
         ArrayMatch.Either => true,
         ArrayMatch.Scalar => !actualIsArray,
         ArrayMatch.Array => actualIsArray,
+        ArrayMatch.FlatArray => actualIsArray && !actualIsMultiDim,
+        ArrayMatch.MultiDimArray => actualIsArray && actualIsMultiDim,
         _ => true,
     };
 

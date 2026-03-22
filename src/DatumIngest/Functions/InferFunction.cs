@@ -198,7 +198,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
         CancellationToken cancellationToken)
         => DispatchAndReadAsync(
             arguments, frame, "infer",
-            (session, bag, _, modelName) => ReadFirstOutput(session, bag, modelName),
+            (session, bag, _, modelName, arena) => ReadFirstOutput(session, bag, modelName, arena),
             cancellationToken);
 
     /// <inheritdoc />
@@ -255,7 +255,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
         }
 
         return await ExecuteBatchedSingleInputAsync(
-            session, argumentColumns[0], rowCount, model.QualifiedName.ToString(), cancellationToken)
+            session, argumentColumns[0], rowCount, model.QualifiedName.ToString(), frame.Source, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -270,6 +270,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
         ReadOnlyMemory<ValueRef> valueColumn,
         int rowCount,
         string modelName,
+        IValueStore? arena,
         CancellationToken cancellationToken)
     {
         // Materialise every row's input as a managed float[]. We need
@@ -373,13 +374,35 @@ public sealed class InferFunction : IFunction, IScalarFunction
                     + "expected B rows × M output elements after batched dispatch.");
             }
             int outputPerRow = outputSpan.Length / rowCount;
+            // The full output shape is [B, ...feature_dims]; the per-row shape is
+            // the trailing slice. ndim ≥ 2 per row → emit as a multi-dim ValueRef
+            // so bracket access works on depth-map-style outputs. The arena
+            // parameter is plumbed for API symmetry but not used directly — the
+            // multi-dim DataValue materialises at ToDataValue time against the
+            // projection's target arena.
+            _ = arena;
+            int[]? perRowShape = null;
+            if (outputTensor.Shape.Count >= 3)
+            {
+                perRowShape = new int[outputTensor.Shape.Count - 1];
+                for (int i = 0; i < perRowShape.Length; i++) perRowShape[i] = outputTensor.Shape[i + 1];
+            }
             ValueRef[] results = new ValueRef[rowCount];
             for (int row = 0; row < rowCount; row++)
             {
-                float[] rowOutput = outputSpan.Slice(row * outputPerRow, outputPerRow).ToArray();
-                results[row] = outputPerRow == 1
-                    ? ValueRef.FromFloat32(rowOutput[0])
-                    : ValueRef.FromPrimitiveArray(rowOutput, DataKind.Float32);
+                ReadOnlySpan<float> rowSlice = outputSpan.Slice(row * outputPerRow, outputPerRow);
+                if (outputPerRow == 1)
+                {
+                    results[row] = ValueRef.FromFloat32(rowSlice[0]);
+                }
+                else if (perRowShape is not null)
+                {
+                    results[row] = ValueRef.FromPrimitiveMultiDimArray(rowSlice.ToArray(), perRowShape, DataKind.Float32);
+                }
+                else
+                {
+                    results[row] = ValueRef.FromPrimitiveArray(rowSlice.ToArray(), DataKind.Float32);
+                }
             }
             return results;
         }
@@ -435,7 +458,8 @@ public sealed class InferFunction : IFunction, IScalarFunction
         IInferenceSession session,
         TensorBag outputBag,
         TypeRegistry? types,
-        string modelName);
+        string modelName,
+        IValueStore? arena);
 
     /// <summary>
     /// Shared dispatch core for <c>infer()</c> and <c>infer_outputs()</c>.
@@ -580,7 +604,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 .ConfigureAwait(false);
             DatumActivity.Scalars.Trace($"[infer] {model.QualifiedName}#{sessionName}.{functionName}: post-Run outputs={session.Outputs.Count}");
 
-            return reader(session, outputBag, frame.Types, model.QualifiedName.ToString());
+            return reader(session, outputBag, frame.Types, model.QualifiedName.ToString(), frame.Source);
         }
         catch (Exception ex)
         {
@@ -708,7 +732,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 .ConfigureAwait(false);
             DatumActivity.Scalars.Trace($"[infer] {modelName}#{sessionName}.{functionName}: post-Run outputs={session.Outputs.Count}");
 
-            return reader(session, outputBag, frame.Types, modelName);
+            return reader(session, outputBag, frame.Types, modelName, frame.Source);
         }
         catch (Exception ex)
         {
@@ -732,7 +756,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// <see cref="InferOutputsFunction"/> instead.
     /// </summary>
     internal static ValueRef ReadFirstOutput(
-        IInferenceSession session, TensorBag outputBag, string modelName)
+        IInferenceSession session, TensorBag outputBag, string modelName, IValueStore? arena)
     {
         TensorSpec outputSpec = session.Outputs[0];
         if (!outputBag.TryGet(outputSpec.Name, out IInferenceTensor outputTensor))
@@ -742,7 +766,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 + $"'{outputSpec.Name}' (declared output). The session implementation "
                 + "is misconfigured — its output bag must contain every name in Outputs.");
         }
-        return ReadOutputTensor(outputTensor, modelName);
+        return ReadOutputTensor(outputTensor, modelName, arena);
     }
 
     /// <summary>
@@ -1021,11 +1045,17 @@ public sealed class InferFunction : IFunction, IScalarFunction
 
     /// <summary>
     /// Reads the single output tensor and packages it as a
-    /// <see cref="ValueRef"/>. Shape product 1 surfaces as a scalar
-    /// (no array wrapper), everything else as a primitive array of the
-    /// tensor's element kind.
+    /// <see cref="ValueRef"/>. Shape product 1 surfaces as a scalar (no
+    /// array wrapper); rank-1 outputs surface as a flat primitive array;
+    /// rank ≥ 2 outputs surface as a multi-dim array wrapping a DataValue
+    /// in <paramref name="arena"/> with the tensor's shape attached so
+    /// downstream <c>arr[y, x]</c> bracket access resolves to a single
+    /// element. <paramref name="arena"/> may be <see langword="null"/>
+    /// when multi-dim materialisation is not required (the rank ≥ 2 path
+    /// then falls back to the flat array, used by call sites in unit
+    /// tests that don't carry a frame).
     /// </summary>
-    private static ValueRef ReadOutputTensor(IInferenceTensor tensor, string modelName)
+    private static ValueRef ReadOutputTensor(IInferenceTensor tensor, string modelName, IValueStore? arena)
     {
         long product = 1;
         foreach (int dim in tensor.Shape)
@@ -1037,25 +1067,51 @@ public sealed class InferFunction : IFunction, IScalarFunction
         {
             case DataKind.Float32:
                 ReadOnlySpan<float> f32 = tensor.AsSpan<float>();
-                return product == 1
-                    ? ValueRef.FromFloat32(f32[0])
-                    : ValueRef.FromPrimitiveArray(f32.ToArray(), DataKind.Float32);
+                if (product == 1) return ValueRef.FromFloat32(f32[0]);
+                return MaybeMultiDim(f32, tensor.Shape, DataKind.Float32, arena);
             case DataKind.Int64:
                 ReadOnlySpan<long> i64 = tensor.AsSpan<long>();
-                return product == 1
-                    ? ValueRef.FromInt64(i64[0])
-                    : ValueRef.FromPrimitiveArray(i64.ToArray(), DataKind.Int64);
+                if (product == 1) return ValueRef.FromInt64(i64[0]);
+                return MaybeMultiDim(i64, tensor.Shape, DataKind.Int64, arena);
             case DataKind.Int32:
                 ReadOnlySpan<int> i32 = tensor.AsSpan<int>();
-                return product == 1
-                    ? ValueRef.FromInt32(i32[0])
-                    : ValueRef.FromPrimitiveArray(i32.ToArray(), DataKind.Int32);
+                if (product == 1) return ValueRef.FromInt32(i32[0]);
+                return MaybeMultiDim(i32, tensor.Shape, DataKind.Int32, arena);
             default:
                 throw new NotSupportedException(
                     $"Model '{modelName}': infer() v1 supports output element kinds "
                     + $"Float32, Int32, Int64. Session declares output as "
                     + $"{tensor.ElementKind}; extend ReadOutputTensor to add a converter.");
         }
+    }
+
+    /// <summary>
+    /// Branches on tensor rank: rank-1 → flat primitive array on the managed
+    /// heap; rank ≥ 2 → a multi-dim primitive ValueRef carrying the elements
+    /// + shape in managed memory. The actual arena-backed multi-dim
+    /// <see cref="DataValue"/> materialises at <see cref="ValueRef.ToDataValue"/>
+    /// time into the target arena, so the value's lifetime survives the
+    /// source arena's recycling at batch boundaries. The <paramref name="arena"/>
+    /// parameter is kept for API symmetry with the rank-1 path but is unused
+    /// here — materialisation happens later against the target.
+    /// </summary>
+    private static ValueRef MaybeMultiDim<T>(
+        ReadOnlySpan<T> elements,
+        IReadOnlyList<int> tensorShape,
+        DataKind elementKind,
+        IValueStore? arena)
+        where T : unmanaged
+    {
+        _ = arena;  // managed-payload path; target arena resolves at ToDataValue.
+        if (tensorShape.Count < 2)
+        {
+            return ValueRef.FromPrimitiveArray(elements.ToArray(), elementKind);
+        }
+
+        int[] shape = new int[tensorShape.Count];
+        for (int i = 0; i < shape.Length; i++) shape[i] = tensorShape[i];
+
+        return ValueRef.FromPrimitiveMultiDimArray(elements.ToArray(), shape, elementKind);
     }
 
     /// <summary>
@@ -1079,7 +1135,8 @@ public sealed class InferFunction : IFunction, IScalarFunction
         IInferenceSession session,
         TensorBag outputBag,
         TypeRegistry? types,
-        string modelName)
+        string modelName,
+        IValueStore? arena)
     {
         IReadOnlyList<TensorSpec> outputs = session.Outputs;
         ValueRef[] fields = new ValueRef[outputs.Count];
@@ -1093,7 +1150,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
                     + $"'{spec.Name}' (declared output {i}). The session implementation "
                     + "is misconfigured — its output bag must contain every name in Outputs.");
             }
-            fields[i] = ReadOutputTensor(tensor, modelName);
+            fields[i] = ReadOutputTensor(tensor, modelName, arena);
         }
 
         ushort typeId = 0;

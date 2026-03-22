@@ -39,11 +39,11 @@ AS BEGIN
     prompt, 'vocab.json', 'merges.txt');
   DECLARE prompt_ids Int64[] = array_concat(
     array_concat([CAST(0 AS Int64)], instruction_ids), [CAST(2 AS Int64)]);
-  DECLARE prompt_seq Int32 = array_length(prompt_ids);
+  DECLARE prompt_seq Int32 = cardinality(prompt_ids);
   DECLARE prompt_embeds Float32[] = infer(
     'embed_tokens', prompt_ids, [CAST(1 AS Int32), prompt_seq]);
 
-  DECLARE visual_seq Int32 = array_length(visual_features) / CAST(768 AS Int32);
+  DECLARE visual_seq Int32 = cardinality(visual_features) / CAST(768 AS Int32);
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
   DECLARE combined_embeds Float32[] = array_concat(visual_features, prompt_embeds);
   DECLARE attention_mask Int64[] = array_repeat(CAST(1 AS Int64), total_seq);
@@ -90,11 +90,11 @@ AS BEGIN
     'vocab.json', 'merges.txt');
   DECLARE prompt_ids Int64[] = array_concat(
     array_concat([CAST(0 AS Int64)], instruction_ids), [CAST(2 AS Int64)]);
-  DECLARE prompt_seq Int32 = array_length(prompt_ids);
+  DECLARE prompt_seq Int32 = cardinality(prompt_ids);
   DECLARE prompt_embeds Float32[] = infer(
     'embed_tokens', prompt_ids, [CAST(1 AS Int32), prompt_seq]);
 
-  DECLARE visual_seq Int32 = array_length(visual_features) / CAST(768 AS Int32);
+  DECLARE visual_seq Int32 = cardinality(visual_features) / CAST(768 AS Int32);
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
   DECLARE combined_embeds Float32[] = array_concat(visual_features, prompt_embeds);
   DECLARE attention_mask Int64[] = array_repeat(CAST(1 AS Int64), total_seq);
@@ -141,11 +141,11 @@ AS BEGIN
     'vocab.json', 'merges.txt');
   DECLARE prompt_ids Int64[] = array_concat(
     array_concat([CAST(0 AS Int64)], instruction_ids), [CAST(2 AS Int64)]);
-  DECLARE prompt_seq Int32 = array_length(prompt_ids);
+  DECLARE prompt_seq Int32 = cardinality(prompt_ids);
   DECLARE prompt_embeds Float32[] = infer(
     'embed_tokens', prompt_ids, [CAST(1 AS Int32), prompt_seq]);
 
-  DECLARE visual_seq Int32 = array_length(visual_features) / CAST(768 AS Int32);
+  DECLARE visual_seq Int32 = cardinality(visual_features) / CAST(768 AS Int32);
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
   DECLARE combined_embeds Float32[] = array_concat(visual_features, prompt_embeds);
   DECLARE attention_mask Int64[] = array_repeat(CAST(1 AS Int64), total_seq);
@@ -198,11 +198,11 @@ AS BEGIN
     'vocab.json', 'merges.txt');
   DECLARE prompt_ids Int64[] = array_concat(
     array_concat([CAST(0 AS Int64)], instruction_ids), [CAST(2 AS Int64)]);
-  DECLARE prompt_seq Int32 = array_length(prompt_ids);
+  DECLARE prompt_seq Int32 = cardinality(prompt_ids);
   DECLARE prompt_embeds Float32[] = infer(
     'embed_tokens', prompt_ids, [CAST(1 AS Int32), prompt_seq]);
 
-  DECLARE visual_seq Int32 = array_length(visual_features) / CAST(768 AS Int32);
+  DECLARE visual_seq Int32 = cardinality(visual_features) / CAST(768 AS Int32);
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
   DECLARE combined_embeds Float32[] = array_concat(visual_features, prompt_embeds);
   DECLARE attention_mask Int64[] = array_repeat(CAST(1 AS Int64), total_seq);

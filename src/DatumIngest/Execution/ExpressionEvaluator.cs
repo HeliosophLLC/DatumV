@@ -1049,6 +1049,33 @@ public sealed class ExpressionEvaluator
     /// </summary>
     private static ValueRef ArrayDataValueToValueRef(DataValue value, EvaluationFrame frame)
     {
+        // Multi-dim arrays: materialise as a flat managed T[] (so existing
+        // `_materialized as float[]` consumers continue to work) AND attach the
+        // shape via FromPrimitiveMultiDimArray so multi-dim-aware paths
+        // (array_shape, array_get, bracket access) see ndim + shape.
+        if (value.IsMultiDim)
+        {
+            int[] shape = value.GetShape(frame.Source, frame.SidecarRegistry).ToArray();
+            return value.Kind switch
+            {
+                DataKind.Boolean => PrimitiveMultiDimToValueRef<byte>(value, shape, frame),
+                DataKind.UInt8   => PrimitiveMultiDimToValueRef<byte>(value, shape, frame),
+                DataKind.UInt16  => PrimitiveMultiDimToValueRef<ushort>(value, shape, frame),
+                DataKind.UInt32  => PrimitiveMultiDimToValueRef<uint>(value, shape, frame),
+                DataKind.UInt64  => PrimitiveMultiDimToValueRef<ulong>(value, shape, frame),
+                DataKind.Int8    => PrimitiveMultiDimToValueRef<sbyte>(value, shape, frame),
+                DataKind.Int16   => PrimitiveMultiDimToValueRef<short>(value, shape, frame),
+                DataKind.Int32   => PrimitiveMultiDimToValueRef<int>(value, shape, frame),
+                DataKind.Int64   => PrimitiveMultiDimToValueRef<long>(value, shape, frame),
+                DataKind.Float16 => PrimitiveMultiDimToValueRef<Half>(value, shape, frame),
+                DataKind.Float32 => PrimitiveMultiDimToValueRef<float>(value, shape, frame),
+                DataKind.Float64 => PrimitiveMultiDimToValueRef<double>(value, shape, frame),
+                _ => throw new InvalidOperationException(
+                    $"Cannot convert multi-dim Array<{value.Kind}> into a ValueRef. " +
+                    "Add a case to ArrayDataValueToValueRef when this element kind reaches the function boundary."),
+            };
+        }
+
         return value.Kind switch
         {
             DataKind.String => StringArrayToValueRef(value, frame),
@@ -1101,6 +1128,21 @@ public sealed class ExpressionEvaluator
     {
         ReadOnlySpan<T> span = value.AsArraySpan<T>(frame.Source, frame.SidecarRegistry);
         return ValueRef.FromPrimitiveArray(span.ToArray(), value.Kind);
+    }
+
+    /// <summary>
+    /// Multi-dim counterpart to <see cref="PrimitiveArrayToValueRef{T}"/>:
+    /// materialises the flat element span (post-shape-prefix) into a managed
+    /// <c>T[]</c> AND attaches the per-dim shape so the resulting ValueRef
+    /// both satisfies <c>_materialized as T[]</c> consumers and surfaces
+    /// <see cref="ValueRef.IsMultiDim"/>/<see cref="ValueRef.Ndim"/> +
+    /// <see cref="ValueRef.ToDataValue"/> multi-dim materialisation.
+    /// </summary>
+    private static ValueRef PrimitiveMultiDimToValueRef<T>(DataValue value, int[] shape, EvaluationFrame frame)
+        where T : unmanaged
+    {
+        ReadOnlySpan<T> span = value.AsArraySpan<T>(frame.Source, frame.SidecarRegistry);
+        return ValueRef.FromPrimitiveMultiDimArray(span.ToArray(), shape, value.Kind);
     }
 
     /// <summary>
@@ -2221,11 +2263,59 @@ public sealed class ExpressionEvaluator
             return source;
         }
 
-        DataValue index = await EvaluateAsync(indexAccess.Index, frame, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<Expression> indices = indexAccess.Indices;
 
         if (source.IsArray)
         {
-            // Typed array (Kind=elementKind + IsArray). Element kind is source.Kind.
+            // Multi-index (multi-dim) access: arr[i, j, ...]. Validate the index
+            // count matches the array's dimensionality and compute a flat row-major
+            // offset. Single-index (the common path) falls through unchanged.
+            if (indices.Count > 1)
+            {
+                if (!source.IsMultiDim)
+                {
+                    throw new InvalidOperationException(
+                        $"Array indexing with {indices.Count} indices requires a multi-dim array; " +
+                        $"got a 1-D Array<{source.Kind}>.");
+                }
+                // Materialise the shape span to an array so it can survive across
+                // the per-index await calls (Spans can't cross await boundaries).
+                int[] shape = source.GetShape(frame.Source, frame.SidecarRegistry).ToArray();
+                if (indices.Count != shape.Length)
+                {
+                    throw new InvalidOperationException(
+                        $"Array indexing expected {shape.Length} indices (ndim) but {indices.Count} were supplied.");
+                }
+                long flatOffset = 0;
+                for (int i = 0; i < indices.Count; i++)
+                {
+                    DataValue idxValue = await EvaluateAsync(indices[i], frame, cancellationToken).ConfigureAwait(false);
+                    if (!IsPositionalIndexKind(idxValue.Kind))
+                    {
+                        throw new InvalidOperationException(
+                            $"Multi-dim array index {i} must be numeric; got {idxValue.Kind}.");
+                    }
+                    int dimIndex = (int)ToFloat(idxValue);
+                    int dimSize = shape[i];
+                    if (dimIndex < 0 || dimIndex >= dimSize)
+                    {
+                        return DataValue.Null(source.Kind);
+                    }
+                    flatOffset = flatOffset * dimSize + dimIndex;
+                }
+                return ReadTypedArrayElement(source, (int)flatOffset, frame);
+            }
+
+            // Single-index path: integer position for typed arrays, string is a misuse.
+            // Reject single-index access against a multi-dim source — we don't support
+            // slicing (returning sub-arrays), only scalar element access.
+            if (source.IsMultiDim)
+            {
+                throw new InvalidOperationException(
+                    $"Array indexing on a {source.Ndim}-dimensional Array<{source.Kind}> requires " +
+                    $"{source.Ndim} indices; only 1 was supplied. Slicing (returning a sub-array) is not supported.");
+            }
+            DataValue index = await EvaluateAsync(indices[0], frame, cancellationToken).ConfigureAwait(false);
             if (index.Kind == DataKind.String)
             {
                 throw new InvalidOperationException(
@@ -2239,6 +2329,12 @@ public sealed class ExpressionEvaluator
 
         if (source.Kind == DataKind.Struct)
         {
+            if (indices.Count != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Struct field access takes exactly one index; got {indices.Count}.");
+            }
+            DataValue index = await EvaluateAsync(indices[0], frame, cancellationToken).ConfigureAwait(false);
             // Integer / float index → positional (ordinal) access by declaration
             // order. Numeric literals like @row[1] parse to the narrowest type
             // that fits (Int8 for small values), so the kind check covers every

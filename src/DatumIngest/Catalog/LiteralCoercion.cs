@@ -70,18 +70,22 @@ internal static class LiteralCoercion
     /// Validates that a typed-array <paramref name="source"/> matches the
     /// target column's declared <see cref="ColumnInfo.FixedShape"/>. For
     /// shape <c>[D]</c> the source must have exactly <c>D</c> elements;
-    /// for multi-dim shapes the check is against the product of dimensions
-    /// (arrays are stored flat regardless of declared shape). No-op for
+    /// for multi-dim shapes the check is against the product of dimensions.
+    /// When the declared shape has <c>ndim ≥ 2</c> and the source value is not
+    /// already multi-dim, the value is rebuilt as an arena-backed multi-dim
+    /// <see cref="DataValue"/> with the declared shape attached (prefix in the
+    /// payload bytes, <see cref="DataValue.IsMultiDim"/> flag set). No-op for
     /// nulls and for variable-length array columns (<c>FixedShape</c>
     /// is <see langword="null"/>). Internal so the array branches of both
     /// <c>InsertExecutor.ConvertSourceValue</c> (INSERT … SELECT) and
-    /// <c>ComputedColumnEvaluator.ConvertValueRefToTarget</c> (INSERT
-    /// VALUES) can share one enforcement point.
+    /// <c>ComputedColumnEvaluator.ConvertValueRefToTarget</c> (INSERT VALUES)
+    /// can share one enforcement point.
     /// </summary>
-    internal static void EnforceFixedShape(DataValue source, ColumnInfo target, string columnName)
+    internal static DataValue EnforceFixedShape(
+        DataValue source, ColumnInfo target, string columnName, Arena? arena = null)
     {
-        if (target.FixedShape is not int[] shape) return;
-        if (source.IsNull) return;
+        if (target.FixedShape is not int[] shape) return source;
+        if (source.IsNull) return source;
 
         int expected = 1;
         foreach (int dim in shape) expected = checked(expected * dim);
@@ -106,6 +110,23 @@ internal static class LiteralCoercion
                 $"Column '{columnName}': supplied array has {actual} element" +
                 $"{(actual == 1 ? "" : "s")} but declared shape requires {shapeText}.");
         }
+
+        // Attach the declared shape on multi-dim columns. 1-D fixed shapes leave
+        // the value flat (existing element-count derivation suffices). Sources
+        // already carrying IsMultiDim (e.g. re-INSERT from a multi-dim column)
+        // are left alone — their shape is already in the bytes.
+        if (shape.Length >= 2 && !source.IsMultiDim && arena is not null)
+        {
+            // Inline arrays expose element bytes via InlineArrayBytes (count × elementSize,
+            // prefix-skipping if any); arena/sidecar use AsArraySpan<byte>, which casts
+            // through MemoryMarshal so element-count vs. byte-count semantics align.
+            ReadOnlySpan<byte> elementBytes = source.IsInline
+                ? source.InlineArrayBytes
+                : source.AsArraySpan<byte>(arena);
+            return DataValue.FromArenaMultiDimArrayBytes(elementBytes, shape, source.Kind, arena);
+        }
+
+        return source;
     }
 
     /// <summary>

@@ -842,7 +842,7 @@ public static class ModelInvocationHoister
             IndexAccessExpression ia => ia with
             {
                 Source = RewriteExpressionWithLetRefs(ia.Source, modelRewrites, letRewrites),
-                Index = RewriteExpressionWithLetRefs(ia.Index, modelRewrites, letRewrites),
+                Indices = ia.Indices.Select(i => RewriteExpressionWithLetRefs(i, modelRewrites, letRewrites)).ToArray(),
             },
             LambdaExpression lam => lam with
             {
@@ -1114,7 +1114,10 @@ public static class ModelInvocationHoister
                 case StructLiteralExpression sl:
                     foreach (StructField f in sl.Fields) Visit(f.Value);
                     break;
-                case IndexAccessExpression ia: Visit(ia.Source); Visit(ia.Index); break;
+                case IndexAccessExpression ia:
+                    Visit(ia.Source);
+                    foreach (Expression i in ia.Indices) Visit(i);
+                    break;
                 case LambdaExpression lam: Visit(lam.Body); break;
                 default: break;
             }
@@ -1250,7 +1253,7 @@ public static class ModelInvocationHoister
             IndexAccessExpression ia => ia with
             {
                 Source = RewriteExpression(ia.Source, hoisted),
-                Index = RewriteExpression(ia.Index, hoisted),
+                Indices = ia.Indices.Select(i => RewriteExpression(i, hoisted)).ToArray(),
             },
             LambdaExpression lam => lam with { Body = RewriteExpression(lam.Body, hoisted) },
 

@@ -44,7 +44,7 @@ public static class ExpressionTypeResolver
     /// All other branches yield <c>IsArray = false</c>. Index access strips
     /// the array dimension (indexing a typed array yields the element kind).
     /// </remarks>
-    public static (DataKind Kind, bool IsArray)? ResolveTypeShape(
+    public static (DataKind Kind, bool IsArray, bool IsMultiDim)? ResolveTypeShape(
         Expression expression, Schema sourceSchema, FunctionRegistry functions)
     {
         switch (expression)
@@ -52,17 +52,25 @@ public static class ExpressionTypeResolver
             case ColumnReference column:
             {
                 ColumnInfo? info = ResolveColumnInfo(column, sourceSchema);
-                return info is null ? null : (info.Kind, info.IsArray);
+                if (info is null) return null;
+                // Multi-dim either explicit (IsMultiDim flag — set by
+                // QuerySchemaResolver on projected columns) or implicit via a
+                // static-shape FixedShape with ndim >= 2 (LiteralCoercion
+                // attaches the shape at INSERT time). 1-D fixed-shape and
+                // variable-length arrays stay flat.
+                bool isMultiDim = info.IsArray
+                    && (info.IsMultiDim || info.FixedShape is { Length: >= 2 });
+                return (info.Kind, info.IsArray, isMultiDim);
             }
             case CastExpression cast:
             {
                 if (TypeAnnotationResolver.TryParse(cast.TargetType, out DataKind k, out bool arr))
                 {
-                    return (k, arr);
+                    return (k, arr, IsMultiDim: false);
                 }
                 // Fall through to legacy resolver for unrecognised aliases.
                 DataKind? legacy = ResolveCastTargetKind(cast.TargetType);
-                return legacy is null ? null : (legacy.Value, false);
+                return legacy is null ? null : (legacy.Value, false, false);
             }
             case FunctionCallExpression function:
             {
@@ -73,7 +81,7 @@ public static class ExpressionTypeResolver
         // All other branches can't produce IsArray = true. Reuse the kind
         // resolution path and tag IsArray = false.
         DataKind? kind = ResolveTypeKindOnly(expression, sourceSchema, functions);
-        return kind is null ? null : (kind.Value, false);
+        return kind is null ? null : (kind.Value, false, false);
     }
 
     private static DataKind? ResolveTypeKindOnly(Expression expression, Schema sourceSchema, FunctionRegistry functions)
@@ -220,7 +228,8 @@ public static class ExpressionTypeResolver
         }
 
         if (sourceKind == DataKind.Struct
-            && indexAccess.Index is LiteralExpression { Value: string fieldName })
+            && indexAccess.Indices.Count == 1
+            && indexAccess.Indices[0] is LiteralExpression { Value: string fieldName })
         {
             // Struct field access by name: resolve via ColumnInfo.Fields.
             IReadOnlyList<ColumnInfo>? fields = null;
@@ -424,7 +433,7 @@ public static class ExpressionTypeResolver
     /// <see cref="IAggregateFunction.ReturnRule"/> — aggregates do not expose
     /// per-signature variants, so a single rule covers the function.
     /// </summary>
-    private static (DataKind Kind, bool IsArray)? ResolveFunctionShape(
+    private static (DataKind Kind, bool IsArray, bool IsMultiDim)? ResolveFunctionShape(
         FunctionCallExpression function, Schema sourceSchema, FunctionRegistry functions)
     {
         IScalarFunction? scalarFunction = functions.TryGetScalar(function.CallName);
@@ -444,18 +453,18 @@ public static class ExpressionTypeResolver
             }
 
             DataKind aggKind = aggregateFunction.ValidateArguments(aggArgs);
-            return (aggKind, aggregateFunction.ReturnRule?.ProducesArray ?? false);
+            return (aggKind, aggregateFunction.ReturnRule?.ProducesArray ?? false, false);
         }
 
         DataKind[] argumentKinds = new DataKind[function.Arguments.Count];
-        (DataKind, bool)[] argumentShapes = new (DataKind, bool)[function.Arguments.Count];
+        (DataKind, bool, bool)[] argumentShapes = new (DataKind, bool, bool)[function.Arguments.Count];
         for (int index = 0; index < function.Arguments.Count; index++)
         {
-            (DataKind Kind, bool IsArray)? shape = ResolveTypeShape(
+            (DataKind Kind, bool IsArray, bool IsMultiDim)? shape = ResolveTypeShape(
                 function.Arguments[index], sourceSchema, functions);
             if (shape is null) return null;
             argumentKinds[index] = shape.Value.Kind;
-            argumentShapes[index] = (shape.Value.Kind, shape.Value.IsArray);
+            argumentShapes[index] = (shape.Value.Kind, shape.Value.IsArray, shape.Value.IsMultiDim);
         }
 
         DataKind resultKind = scalarFunction.ValidateArguments(argumentKinds);
@@ -466,6 +475,7 @@ public static class ExpressionTypeResolver
         // adapters are expected to register a synthetic descriptor when their
         // return shape is array-typed (see RoutineRegistrar's procedural-UDF path).
         bool isArray = false;
+        bool isMultiDim = false;
         FunctionDescriptor? descriptor = functions.TryGetScalarDescriptor(function.FunctionName);
         if (descriptor is not null)
         {
@@ -474,10 +484,15 @@ public static class ExpressionTypeResolver
             if (matched is not null)
             {
                 isArray = matched.ReturnType.ProducesArray;
+                isMultiDim = matched.ReturnType.ProducesMultiDimArray;
             }
         }
 
-        return (resultKind, isArray);
+        // Rank-dynamic functions (e.g. infer(), whose output ndim follows the
+        // ONNX model's output shape) leave ProducesMultiDimArray = false on the
+        // signature and emit multi-dim DataValues at runtime; the evaluator
+        // consults runtime IsMultiDim directly for index-access dispatch.
+        return (resultKind, isArray, isMultiDim);
     }
 
     /// <summary>
@@ -493,13 +508,13 @@ public static class ExpressionTypeResolver
         FunctionDescriptor? descriptor = functions.TryGetScalarDescriptor(function.FunctionName);
         if (descriptor is null) return false;
 
-        (DataKind, bool)[] argumentShapes = new (DataKind, bool)[function.Arguments.Count];
+        (DataKind, bool, bool)[] argumentShapes = new (DataKind, bool, bool)[function.Arguments.Count];
         for (int i = 0; i < function.Arguments.Count; i++)
         {
-            (DataKind Kind, bool IsArray)? shape = ResolveTypeShape(
+            (DataKind Kind, bool IsArray, bool IsMultiDim)? shape = ResolveTypeShape(
                 function.Arguments[i], sourceSchema, functions);
             if (shape is null) return false;
-            argumentShapes[i] = (shape.Value.Kind, shape.Value.IsArray);
+            argumentShapes[i] = (shape.Value.Kind, shape.Value.IsArray, shape.Value.IsMultiDim);
         }
 
         FunctionSignatureVariant? matched = FunctionMetadata.MatchVariantWithShape(

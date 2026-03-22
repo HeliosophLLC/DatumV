@@ -180,7 +180,8 @@ internal static class BodyScopeGate
                 break;
             case IndexAccessExpression ix:
                 VisitExpression(ix.Source, functions);
-                VisitExpression(ix.Index, functions);
+                foreach (Expression i in ix.Indices)
+                    VisitExpression(i, functions);
                 break;
             case SubqueryExpression subq:
                 Visit(subq.Query, functions);

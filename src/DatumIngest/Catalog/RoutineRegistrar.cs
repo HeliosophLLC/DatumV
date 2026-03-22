@@ -400,7 +400,8 @@ internal sealed class RoutineRegistrar
                 break;
             case IndexAccessExpression ix:
                 CollectUdfReferencesInExpression(ix.Source, referencedNames, defaultSchema);
-                CollectUdfReferencesInExpression(ix.Index, referencedNames, defaultSchema);
+                foreach (Expression i in ix.Indices)
+                    CollectUdfReferencesInExpression(i, referencedNames, defaultSchema);
                 break;
             // Leaves: column references, literals, parameters, variables.
         }

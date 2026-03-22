@@ -2214,9 +2214,15 @@ public sealed record StructLiteralExpression(
 /// using the element kind of the base expression's <c>ColumnInfo</c>.
 /// </summary>
 /// <param name="Source">The expression whose result is subscripted.</param>
-/// <param name="Index">The index expression (integer for arrays, string for structs).</param>
+/// <param name="Indices">
+/// The index expressions. For 1-D array / struct access this is a single
+/// element (integer index for arrays, string field name for structs). For
+/// multi-dim array access (e.g. <c>m[y, x]</c>) the list has one entry per
+/// dimension; the count must equal the array's <c>ndim</c> and only scalar
+/// element access is supported (no slicing).
+/// </param>
 /// <param name="Span">Source location of the opening bracket token.</param>
 public sealed record IndexAccessExpression(
     Expression Source,
-    Expression Index,
+    IReadOnlyList<Expression> Indices,
     SourceSpan? Span = null) : Expression;

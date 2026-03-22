@@ -1333,7 +1333,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new StructField("x", new LiteralExpression(10)),
                 new StructField("y", new LiteralExpression(20)),
             ]),
-            new LiteralExpression("y"));
+            [new LiteralExpression("y")]);
 
         DataValue result = await _evaluator.EvaluateAsync(access, Row.Empty);
 
@@ -1350,7 +1350,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             [
                 new StructField("x", new LiteralExpression(1)),
             ]),
-            new LiteralExpression("z"));
+            [new LiteralExpression("z")]);
 
         DataValue result = await _evaluator.EvaluateAsync(access, Row.Empty);
 
@@ -1366,7 +1366,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             [
                 new StructField("Foo", new LiteralExpression(42)),
             ]),
-            new LiteralExpression("foo"));
+            [new LiteralExpression("foo")]);
 
         DataValue result = await _evaluator.EvaluateAsync(access, Row.Empty);
 
@@ -1399,7 +1399,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
 
         IndexAccessExpression access = new(
             new ColumnReference("info"),
-            new LiteralExpression("score"));
+            [new LiteralExpression("score")]);
 
         DataValue result = await evaluatorWithSchema.EvaluateAsync(access, row);
 

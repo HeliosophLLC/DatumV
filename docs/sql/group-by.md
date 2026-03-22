@@ -153,7 +153,7 @@ GROUP BY category
 
 -- Array functions: construct, inspect, search, join
 SELECT array(1, 2, 3) AS literal_array,
-       array_length(ARRAY_AGG(name)) AS name_count,
+       cardinality(ARRAY_AGG(name)) AS name_count,
        array_contains(ARRAY_AGG(tag), 'urgent') AS has_urgent,
        array_join(ARRAY_AGG(name ORDER BY name ASC), ', ') AS name_list
 FROM products

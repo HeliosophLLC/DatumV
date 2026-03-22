@@ -279,7 +279,7 @@ AS BEGIN
     -- WordPiece tokenize → Struct{input_ids, attention_mask, token_type_ids}
     -- with field names matching the ONNX input names.
     DECLARE encoded Struct = tokenizer.encode_bert(text, 'vocab.txt');
-    DECLARE n Int32 = array_length(encoded['input_ids']);
+    DECLARE n Int32 = cardinality(encoded['input_ids']);
 
     -- Multi-input infer: struct of tensors + parallel struct of shapes.
     -- Every input has shape [1, seq_len] — two dynamic dims, so explicit

@@ -50,11 +50,29 @@ public readonly struct ValueRef
 {
     private readonly DataValue _inline;
     private readonly object? _materialized;
+    /// <summary>
+    /// Per-dim shape for multi-dim primitive arrays. <see langword="null"/>
+    /// for flat arrays / non-array values. When non-null, <c>_materialized</c>
+    /// is still the typed <see cref="Array"/> (e.g. <c>float[]</c>), so
+    /// existing <c>_materialized as float[]</c> consumers continue to see
+    /// the flat element span — the shape is an additional, optional
+    /// attachment that <see cref="ToDataValue"/> uses to construct a
+    /// multi-dim <see cref="DataValue"/>.
+    /// </summary>
+    private readonly int[]? _shape;
 
     private ValueRef(DataValue inline, object? materialized)
     {
         _inline = inline;
         _materialized = materialized;
+        _shape = null;
+    }
+
+    private ValueRef(DataValue inline, object? materialized, int[]? shape)
+    {
+        _inline = inline;
+        _materialized = materialized;
+        _shape = shape;
     }
 
     /// <summary>The kind of the value carried by this reference.</summary>
@@ -77,6 +95,20 @@ public readonly struct ValueRef
 
     /// <summary>True when the value is a byte array (Kind=UInt8 + IsArray).</summary>
     public bool IsByteArrayKind => _inline.IsByteArrayKind;
+
+    /// <summary>
+    /// True when the value is a typed array carrying an explicit multi-dimensional
+    /// shape — either as a scan-output ValueRef whose inline DataValue's
+    /// <see cref="DataValue.IsMultiDim"/> is set, or as a function-output ValueRef
+    /// carrying a managed shape attachment alongside its flat element payload.
+    /// </summary>
+    public bool IsMultiDim => _inline.IsMultiDim || _shape is not null;
+
+    /// <summary>
+    /// Number of dimensions for a multi-dim array value (≥2); <c>0</c> when
+    /// <see cref="IsMultiDim"/> is <c>false</c>.
+    /// </summary>
+    public int Ndim => _shape?.Length ?? _inline.Ndim;
 
     /// <summary>
     /// The inline carrier. Only meaningful when <see cref="IsNull"/> is
@@ -115,6 +147,45 @@ public readonly struct ValueRef
                 nameof(value));
         }
         return new(value, null);
+    }
+
+    /// <summary>
+    /// Constructs a multi-dim typed-array <see cref="ValueRef"/> whose elements
+    /// and shape live in managed memory. The multi-dim <see cref="DataValue"/>
+    /// gets materialised into the target arena at <see cref="ToDataValue"/>
+    /// time — the canonical shape for function outputs (e.g.
+    /// <c>infer()</c>'s rank ≥ 2 ONNX tensors) so the resulting DataValue
+    /// outlives the source arena's lifetime.
+    /// </summary>
+    /// <typeparam name="T">Unmanaged element type matching <paramref name="elementKind"/>.</typeparam>
+    /// <param name="elements">Flat row-major element data; length must equal <c>product(shape)</c>.</param>
+    /// <param name="shape">Per-dim sizes (ndim ≥ 2; all positive).</param>
+    /// <param name="elementKind">Element kind; must not be byte / reference / blob.</param>
+    public static ValueRef FromPrimitiveMultiDimArray<T>(T[] elements, int[] shape, DataKind elementKind)
+        where T : unmanaged
+    {
+        if (shape.Length < 2)
+        {
+            throw new ArgumentException(
+                "Multi-dim ValueRef requires ndim >= 2. Use FromPrimitiveArray for 1-D.",
+                nameof(shape));
+        }
+        long product = 1;
+        for (int i = 0; i < shape.Length; i++) product *= shape[i];
+        if (product != elements.Length)
+        {
+            throw new ArgumentException(
+                $"Product of shape ({product}) does not equal elements.Length ({elements.Length}).",
+                nameof(shape));
+        }
+
+        // Inline + _materialized mirror the flat FromPrimitiveArray shape so
+        // every existing `_materialized as T[]` / GetArrayLength / etc. reader
+        // continues to see the elements as a 1-D array. The optional _shape
+        // attachment is consulted only by multi-dim-aware paths (ToDataValue,
+        // IsMultiDim/Ndim accessors, GetShape).
+        ValueRef typed = FromPrimitiveArray(elements, elementKind);
+        return new(typed._inline, typed._materialized, shape);
     }
 
     /// <summary>Boolean inline value.</summary>
@@ -885,8 +956,11 @@ public readonly struct ValueRef
             ValueRef[] fields when _inline.Kind == DataKind.Struct =>
                 DataValue.FromStruct(MaterialiseEach(fields, targetStore, typeId, types), targetStore, typeId),
             // Bulk primitive-array path: a typed T[] payload (Float32, Int32, …)
-            // produced by FromPrimitiveArray<T>. Dispatch by kind to the matching
-            // typed-span factory; bytes copy once into the target arena.
+            // produced by FromPrimitiveArray<T> / FromPrimitiveMultiDimArray<T>.
+            // When _shape is non-null, the array gets a shape prefix attached at
+            // materialisation; otherwise it lands as a flat 1-D arena array.
+            Array primitiveArray when _inline.IsArray && _shape is not null =>
+                BuildMultiDimPrimitiveArray(_inline.Kind, primitiveArray, _shape, targetStore),
             Array primitiveArray when _inline.IsArray =>
                 BuildPrimitiveArray(_inline.Kind, primitiveArray, targetStore),
             _ => throw new InvalidOperationException(
@@ -1233,5 +1307,35 @@ public readonly struct ValueRef
                 $"FromPrimitiveArray materialisation for element kind {elementKind} is not supported. "
                 + "Add a case here when the kind has a fixed-width primitive representation."),
         };
+    }
+
+    /// <summary>
+    /// Multi-dim counterpart to <see cref="BuildPrimitiveArray"/>: takes the
+    /// flat elements (typed managed array) and per-dim shape and writes a
+    /// multi-dim <see cref="DataValue"/> (with shape prefix) into
+    /// <paramref name="target"/>. Element-kind dispatch mirrors the flat
+    /// primitive array path one-for-one so the supported kinds stay aligned.
+    /// </summary>
+    private static DataValue BuildMultiDimPrimitiveArray(DataKind elementKind, Array elements, int[] shape, IValueStore target)
+    {
+        ReadOnlySpan<byte> bytes = elementKind switch
+        {
+            DataKind.Boolean  => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<byte>((byte[])elements)),
+            DataKind.UInt8    => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<byte>((byte[])elements)),
+            DataKind.Int8     => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<sbyte>((sbyte[])elements)),
+            DataKind.UInt16   => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<ushort>((ushort[])elements)),
+            DataKind.Int16    => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<short>((short[])elements)),
+            DataKind.Float16  => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<Half>((Half[])elements)),
+            DataKind.UInt32   => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<uint>((uint[])elements)),
+            DataKind.Int32    => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<int>((int[])elements)),
+            DataKind.Float32  => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<float>((float[])elements)),
+            DataKind.UInt64   => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<ulong>((ulong[])elements)),
+            DataKind.Int64    => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<long>((long[])elements)),
+            DataKind.Float64  => System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<double>((double[])elements)),
+            _ => throw new NotSupportedException(
+                $"Multi-dim ValueRef materialisation for element kind {elementKind} is not supported. "
+                + "Add a case here when the kind has a fixed-width primitive representation."),
+        };
+        return DataValue.FromArenaMultiDimArrayBytes(bytes, shape, elementKind, target);
     }
 }

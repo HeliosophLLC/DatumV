@@ -34,7 +34,7 @@ AS BEGIN
 
   -- All three inputs share the same shape [1, seq_len]. seq_len comes from
   -- the tokenizer; we read it once off input_ids.
-  DECLARE n Int32 = array_length(encoded['input_ids']);
+  DECLARE n Int32 = cardinality(encoded['input_ids']);
 
   -- Multi-input infer: per-field tensors + per-field shapes. Every input
   -- has two dynamic dims (batch + seq_len) so explicit shapes are required.

@@ -7,9 +7,19 @@ category: array
 
 Typed array construction, inspection, search, manipulation, and string conversion.
 
-> **Tip:** `len(arr)` also works as an alias for `array_length(arr)` since `len()` supports Array inputs.
-
 > **Tip:** Arrays can be constructed with bracket syntax: `[1, 2, 3]` is equivalent to `array(1, 2, 3)`.
+
+## Multi-dim arrays
+
+Columns declared with multiple dimensions (`Array<Float32>(2, 3)`) and function outputs whose ONNX tensor rank is ≥ 2 (e.g. `infer()` for a `[1, H, W]` depth map) carry an explicit shape — the multi-dim flag survives across SQL expressions and round-trips through `.datum`. Each function below behaves in one of three ways on multi-dim input:
+
+| Behavior | Meaning | Functions |
+|---|---|---|
+| **Shape-aware** | Reads the shape and operates per-dim. | `cardinality`, `array_length`, `array_ndims`, `array_shape`, `array_get`, `m[y, x]` bracket syntax |
+| **Shape-agnostic (flatten)** | Iterates the flat element span; the per-dim shape is irrelevant. The output is a flat 1-D array of the same total length. | `array_concat`, `array_contains`, `array_to_string` (input is `Array<String>` so multi-dim is impossible) |
+| **Reject** | Multi-dim is rejected at DDL time, no runtime check needed. | `Array<String>(m, n)`, `Array<Image>(m, n)`, `Array<Struct>(m, n)`, `Array<UInt8>(m, n)` — see [CREATE TABLE](../sql/create-table.md) |
+
+The shape-agnostic functions intentionally "drop" the multi-dim shape on output — the result is always a flat 1-D array. This is what model-pipeline SQL expects: e.g. Florence-2's `array_concat(visual_features, prompt_embeds)` stitches the flat element spans regardless of source rank. If you need shape-preserving multi-dim operations, decompose with `array_get` / `array_shape` and rebuild.
 
 ### array
 
@@ -22,14 +32,61 @@ SELECT array(1, 2, 3) AS nums
 SELECT [1, 2, 3] AS nums  -- bracket syntax equivalent
 ```
 
-### array_length
+### cardinality
 
-`array_length(arr)` → Float32 | QU: 1
+`cardinality(arr)` → Int32 | QU: 1
 
-Number of elements in the array.
+Total number of elements in the array (product of all dimensions for a multi-dim array). PostgreSQL-compatible.
 
 ```sql
-SELECT array_length(array(1, 2, 3)) -- 3
+SELECT cardinality(array(1, 2, 3))            -- 3
+SELECT cardinality(matrix_2x3)                -- 6
+```
+
+### array_length
+
+`array_length(arr, dim)` → Int32 | QU: 1
+
+Size of the requested dimension (1-based). PostgreSQL-compatible. Returns NULL for an out-of-range dimension.
+
+```sql
+SELECT array_length(array(1, 2, 3), 1)        -- 3
+SELECT array_length(matrix_2x3, 1)            -- 2
+SELECT array_length(matrix_2x3, 2)            -- 3
+SELECT array_length(matrix_2x3, 99)           -- NULL
+```
+
+### array_ndims
+
+`array_ndims(arr)` → Int32 | QU: 1
+
+Number of dimensions of an array. PostgreSQL-compatible. Flat (1-D) arrays return `1`; multi-dim arrays return their declared ndim.
+
+```sql
+SELECT array_ndims(array(1, 2, 3))            -- 1
+SELECT array_ndims(matrix_2x3)                -- 2
+```
+
+### array_shape
+
+`array_shape(arr)` → Array<Int32> | QU: 1
+
+Per-dimension sizes of an array.
+
+```sql
+SELECT array_shape(array(1, 2, 3))            -- [3]
+SELECT array_shape(matrix_2x3)                -- [2, 3]
+```
+
+### array_get
+
+`array_get(arr, i0, i1, ...)` → element kind | QU: 1
+
+Read a single element by positional indices. The number of indices must equal the array's `ndim`. Returns NULL for out-of-bounds element access; throws on dimension-count or per-dim-index range errors. (Pending the `arr[y, x]` bracket-syntax accessor.)
+
+```sql
+SELECT array_get(array(10, 20, 30), 1)        -- 20
+SELECT array_get(matrix_2x3, 0, 2)            -- element at row 0, col 2
 ```
 
 ### array_join

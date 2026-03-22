@@ -603,6 +603,10 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Arrays.ArrayLengthFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayConcatFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayRepeatFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayShapeFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayGetFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayNdimsFunction>();
+        registry.RegisterScalar<Scalar.Arrays.CardinalityFunction>();
 
         // UUID
         registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();

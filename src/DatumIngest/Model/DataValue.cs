@@ -88,7 +88,23 @@ public readonly struct DataValue : IEquatable<DataValue>
         /// </summary>
         InlineArray = 0x10,
 
-        // 0x20, 0x40, 0x80 reserved for future use.
+        /// <summary>
+        /// This typed-array value carries an explicit multi-dimensional shape as an
+        /// <c>int32 × ndim</c> prefix at the head of its payload bytes (arena / sidecar /
+        /// inline alike). <c>ndim</c> lives in the high byte of <c>_charCount</c>. Only
+        /// set for <c>ndim ≥ 2</c> — 1-D arrays remain represented as today (no flag, no
+        /// prefix, element count derived from byte length). Element accessors
+        /// (<see cref="AsArraySpan{T}"/>, <see cref="AsInlineArraySpan{T}"/>,
+        /// <see cref="InlineArrayBytes"/>, <see cref="ElementCount"/>) skip the prefix
+        /// transparently; <see cref="GetShape"/> exposes the dims.
+        ///
+        /// Incompatible with byte-array kinds (<c>UInt8 + IsArray</c>) and with reference-
+        /// element arrays (<c>String[]</c>, <c>Image[]</c>, <c>Struct[]</c>) — those use
+        /// <c>_charCount</c> for storeId / TypeId already.
+        /// </summary>
+        IsMultiDim = 0x20,
+
+        // 0x40, 0x80 reserved for future use.
     }
 
     /// <summary>Maximum representable length for a sidecar-backed value (40-bit cap, ~1 TiB).</summary>
@@ -211,9 +227,35 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Element count for inline arrays (0-16). Stored in the low byte of <c>_charCount</c>.
-    /// Only meaningful when <see cref="IsInlineArray"/> is <c>true</c>.
+    /// Only meaningful when <see cref="IsInlineArray"/> is <c>true</c>. Independent of
+    /// <see cref="IsMultiDim"/> — the count is always the number of logical elements;
+    /// the shape prefix is overhead, not counted.
     /// </summary>
     internal byte InlineArrayElementCount => (byte)(_charCount & 0xFF);
+
+    /// <summary>
+    /// Whether this value is a typed array carrying an explicit multi-dimensional shape
+    /// (<see cref="DataValueFlags.IsMultiDim"/>). Set for <c>ndim ≥ 2</c> arrays produced
+    /// by <see cref="FromArenaMultiDimArray{T}"/>, <see cref="FromInlineMultiDimArray{T}"/>,
+    /// <see cref="FromMultiDimArrayInSidecar"/>, or attached at INSERT-time by the
+    /// shape-coercion path for fixed-shape columns. 1-D arrays leave this <c>false</c>.
+    /// </summary>
+    public bool IsMultiDim => (_flags & DataValueFlags.IsMultiDim) != 0;
+
+    /// <summary>
+    /// Number of dimensions for a multi-dim array value (≥2); <c>0</c> for non-multi-dim
+    /// values. Stored in the high byte of <c>_charCount</c>. Use <see cref="GetShape"/>
+    /// to read the actual dimensions.
+    /// </summary>
+    public int Ndim => IsMultiDim ? (_charCount >> 8) : 0;
+
+    /// <summary>
+    /// Number of bytes consumed by the shape prefix at the head of this value's payload
+    /// (<c>4 × ndim</c>). Zero when <see cref="IsMultiDim"/> is <c>false</c>. Used by
+    /// element accessors to skip the prefix and by length-aware encoders to compute
+    /// element vs. total byte counts.
+    /// </summary>
+    private int ShapePrefixByteCount => IsMultiDim ? (_charCount >> 8) * sizeof(int) : 0;
 
     /// <summary>
     /// Per-query <see cref="TypeRegistry"/> id for this struct value; 0 (<see cref="TypeRegistry.NoType"/>)
@@ -1460,6 +1502,414 @@ public readonly struct DataValue : IEquatable<DataValue>
             p0: p0, p1: p1);
     }
 
+    // ───────────────────────── Multi-dim arrays ─────────────────────────
+
+    /// <summary>
+    /// Maximum representable <c>ndim</c> for a multi-dim array — <c>ndim</c> is packed
+    /// into the high byte of <c>_charCount</c>, so the cap is 255. Real tensor shapes
+    /// are typically ≤4 dims; this cap is effectively unreachable.
+    /// </summary>
+    private const int MultiDimMaxNdim = byte.MaxValue;
+
+    /// <summary>
+    /// Rejects element kinds for which multi-dim is not supported: byte arrays
+    /// (UInt8 collides with the byte-count ElementCount path) and reference /
+    /// blob kinds (already use <c>_charCount</c> for storeId / TypeId).
+    /// </summary>
+    private static void RejectReferenceElementKind(DataKind elementKind)
+    {
+        if (elementKind == DataKind.UInt8)
+        {
+            throw new ArgumentException(
+                "Multi-dim is not supported for byte arrays (UInt8 + IsArray); the byte-count " +
+                "path in ElementCount assumes a raw byte payload with no shape prefix.",
+                nameof(elementKind));
+        }
+        if (elementKind is DataKind.String or DataKind.Struct
+            or DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud)
+        {
+            throw new ArgumentException(
+                $"Multi-dim is not supported for reference-element kind {elementKind} in this version. " +
+                "Reference arrays already use _charCount for storeId / TypeId.",
+                nameof(elementKind));
+        }
+    }
+
+    /// <summary>
+    /// Shared shape-validation used by the multi-dim factories. Rejects <c>ndim &lt; 2</c>,
+    /// non-positive dims, byte-array kinds, reference-element kinds (String / Struct / blob
+    /// kinds), and product-of-dims mismatching the supplied element count.
+    /// </summary>
+    private static void ValidateMultiDimShape(
+        ReadOnlySpan<int> shape, int elementCount, DataKind elementKind)
+    {
+        if (shape.Length < 2)
+        {
+            throw new ArgumentException(
+                "Multi-dim array requires ndim >= 2. Use FromArenaArray / FromInlineArray for 1-D arrays.",
+                nameof(shape));
+        }
+        if (shape.Length > MultiDimMaxNdim)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(shape), shape.Length,
+                $"Multi-dim ndim {shape.Length} exceeds the {MultiDimMaxNdim}-dimension cap.");
+        }
+        RejectReferenceElementKind(elementKind);
+
+        long product = 1;
+        for (int i = 0; i < shape.Length; i++)
+        {
+            int dim = shape[i];
+            if (dim <= 0)
+            {
+                throw new ArgumentException(
+                    $"Shape dimension {i} must be positive; got {dim}.", nameof(shape));
+            }
+            product *= dim;
+            if (product > int.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(shape), product,
+                    "Product of shape dimensions overflows Int32.");
+            }
+        }
+        if (product != elementCount)
+        {
+            throw new ArgumentException(
+                $"Product of shape dimensions ({product}) does not equal element count ({elementCount}).",
+                nameof(shape));
+        }
+    }
+
+    /// <summary>
+    /// Creates an arena-backed multi-dimensional typed-array value. Packs the shape
+    /// (<c>int32 × ndim</c>) followed by the element bytes into a single contiguous arena
+    /// allocation; the resulting <see cref="DataValue"/> carries <see cref="DataValueFlags.IsArray"/> |
+    /// <see cref="DataValueFlags.InArena"/> | <see cref="DataValueFlags.IsMultiDim"/>, with
+    /// <c>ndim</c> in the high byte of <c>_charCount</c>. Element accessors
+    /// (<see cref="AsArraySpan{T}"/>, <see cref="ElementCount"/>) transparently skip the
+    /// prefix; <see cref="GetShape"/> exposes the dims.
+    /// </summary>
+    /// <typeparam name="T">Unmanaged element type; must match <paramref name="elementKind"/>.</typeparam>
+    /// <param name="elements">Flat element data in row-major order. Length must equal product of <paramref name="shape"/>.</param>
+    /// <param name="shape">Per-dim sizes; <c>shape.Length ≥ 2</c>, all positive.</param>
+    /// <param name="elementKind">Element kind; cannot be a reference / byte-array kind.</param>
+    /// <param name="store">Arena to receive the packed bytes.</param>
+    public static DataValue FromArenaMultiDimArray<T>(
+        ReadOnlySpan<T> elements,
+        ReadOnlySpan<int> shape,
+        DataKind elementKind,
+        IValueStore store)
+        where T : unmanaged
+        => FromArenaMultiDimArrayBytes(MemoryMarshal.AsBytes(elements), shape, elementKind, store);
+
+    /// <summary>
+    /// Byte-level entry point for arena-backed multi-dim arrays. Mirrors
+    /// <see cref="FromArenaArrayBytes"/>: the caller has already packed flat element
+    /// bytes (matching <see cref="ScalarByteSize"/> for <paramref name="elementKind"/>);
+    /// this prepends the shape prefix and stores the combined block. Used by
+    /// <c>LiteralCoercion.EnforceFixedShape</c> to promote a flat fixed-shape INSERT
+    /// payload into multi-dim without needing a typed span.
+    /// </summary>
+    public static DataValue FromArenaMultiDimArrayBytes(
+        ReadOnlySpan<byte> elementBytes,
+        ReadOnlySpan<int> shape,
+        DataKind elementKind,
+        IValueStore store)
+    {
+        // Reject reference / byte-array kinds before calling ScalarByteSize —
+        // it throws InvalidOperationException for kinds without a fixed scalar
+        // size, which would mask the cleaner ArgumentException from
+        // ValidateMultiDimShape.
+        RejectReferenceElementKind(elementKind);
+
+        int elementSize = ScalarByteSize(elementKind);
+        if (elementBytes.Length % elementSize != 0)
+        {
+            throw new ArgumentException(
+                $"Element byte length {elementBytes.Length} is not a multiple of size " +
+                $"{elementSize} for DataKind.{elementKind}.",
+                nameof(elementBytes));
+        }
+
+        int elementCount = elementBytes.Length / elementSize;
+        ValidateMultiDimShape(shape, elementCount, elementKind);
+
+        int shapeBytes = shape.Length * sizeof(int);
+        int totalBytes = shapeBytes + elementBytes.Length;
+
+        // Assemble shape + elements into one buffer so the arena store sees a single
+        // contiguous block — its address is what (_p0, _p1) records. Two sequential
+        // StoreBytes calls would risk a non-back-to-back placement under contention.
+        byte[] buffer = new byte[totalBytes];
+        MemoryMarshal.AsBytes(shape).CopyTo(buffer);
+        elementBytes.CopyTo(buffer.AsSpan(shapeBytes));
+        var (p0, p1) = store.StoreBytes(buffer);
+
+        ushort cc = (ushort)(shape.Length << 8);
+        return new(
+            elementKind,
+            flags: DataValueFlags.InArena | DataValueFlags.IsArray | DataValueFlags.IsMultiDim,
+            p0: p0, p1: p1, charCount: cc);
+    }
+
+    /// <summary>
+    /// Creates an inline multi-dimensional typed-array value. Packs the shape prefix and
+    /// element bytes into the struct's 16-byte payload region — only viable when
+    /// <c>4 × ndim + sizeof(T) × elements.Length ≤ 16</c>. Falls into the same flag
+    /// shape as <see cref="FromArenaMultiDimArray{T}"/> but with <see cref="DataValueFlags.InlineArray"/>
+    /// set and <c>_charCount</c> packing both ndim (high byte) and element count (low byte).
+    /// </summary>
+    /// <param name="elements">Flat element data; length must equal product of <paramref name="shape"/> and fit alongside the shape in 16 bytes.</param>
+    /// <param name="shape">Per-dim sizes; <c>shape.Length ≥ 2</c>.</param>
+    /// <param name="elementKind">Element kind; cannot be a reference / byte-array kind.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Total inline bytes exceed 16, or element count exceeds 255.</exception>
+    public static DataValue FromInlineMultiDimArray<T>(
+        ReadOnlySpan<T> elements,
+        ReadOnlySpan<int> shape,
+        DataKind elementKind)
+        where T : unmanaged
+    {
+        ValidateMultiDimShape(shape, elements.Length, elementKind);
+
+        int shapeBytes = shape.Length * sizeof(int);
+        int elementBytes = elements.Length * Unsafe.SizeOf<T>();
+        int totalBytes = shapeBytes + elementBytes;
+
+        if (totalBytes > InlineArrayMaxBytes)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(elements), totalBytes,
+                $"Inline multi-dim payload {totalBytes} bytes ({shapeBytes} shape + {elementBytes} elements) " +
+                $"exceeds the {InlineArrayMaxBytes}-byte cap. Use FromArenaMultiDimArray.");
+        }
+        if (elements.Length > byte.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(elements), elements.Length,
+                "Inline array element count exceeds the 255-element field cap.");
+        }
+
+        Span<byte> buffer = stackalloc byte[InlineArrayMaxBytes];
+        MemoryMarshal.AsBytes(shape).CopyTo(buffer);
+        MemoryMarshal.AsBytes(elements).CopyTo(buffer[shapeBytes..]);
+
+        int p0 = MemoryMarshal.Read<int>(buffer[..4]);
+        int p1 = MemoryMarshal.Read<int>(buffer[4..8]);
+        int p2 = MemoryMarshal.Read<int>(buffer[8..12]);
+        int p3 = MemoryMarshal.Read<int>(buffer[12..16]);
+
+        ushort cc = (ushort)((shape.Length << 8) | (byte)elements.Length);
+        return new(
+            elementKind,
+            flags: DataValueFlags.IsArray | DataValueFlags.InlineArray | DataValueFlags.IsMultiDim,
+            p0: p0, p1: p1, p2: p2, p3: p3, charCount: cc);
+    }
+
+    /// <summary>
+    /// Creates a sidecar-backed multi-dimensional typed-array value. The caller is
+    /// responsible for having written the combined <c>shape (int32 × ndim) + element bytes</c>
+    /// block to the sidecar; <paramref name="offset"/> points at the start of the shape
+    /// prefix and <paramref name="length"/> covers both prefix and elements.
+    /// </summary>
+    /// <param name="elementKind">Element kind; cannot be a reference / byte-array kind.</param>
+    /// <param name="offset">Absolute byte offset of the shape prefix inside the sidecar file.</param>
+    /// <param name="length">Total bytes (shape prefix + elements); 0 ≤ length ≤ 2^40 − 1.</param>
+    /// <param name="ndim">Number of dimensions (2..255). Caller must keep this consistent with the bytes at <paramref name="offset"/>.</param>
+    /// <param name="storeId">Per-query <see cref="SidecarRegistry"/> id for the backing blob source.</param>
+    public static DataValue FromMultiDimArrayInSidecar(
+        DataKind elementKind, long offset, long length, int ndim, byte storeId = 0)
+    {
+        if (ndim < 2 || ndim > MultiDimMaxNdim)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ndim), ndim,
+                $"Multi-dim ndim must be in [2, {MultiDimMaxNdim}].");
+        }
+        if (elementKind == DataKind.UInt8
+            || elementKind is DataKind.String or DataKind.Struct
+            or DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud)
+        {
+            throw new ArgumentException(
+                $"Multi-dim is not supported for element kind {elementKind} (byte / reference / blob kinds).",
+                nameof(elementKind));
+        }
+
+        if (offset < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(offset), offset, "Sidecar offset must be non-negative.");
+        }
+        if (length < 0 || length > SidecarLengthMax)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(length), length,
+                $"Sidecar length must be in [0, {SidecarLengthMax}] (40-bit cap).");
+        }
+
+        ushort cc = (ushort)((ndim << 8) | storeId);
+        return new(
+            elementKind,
+            flags: DataValueFlags.InSidecar | DataValueFlags.IsArray | DataValueFlags.IsMultiDim,
+            p0: (int)offset,
+            p1: (int)(offset >> 32),
+            p2: (int)length,
+            p3: (int)((length >> 32) & 0xFF),
+            charCount: cc);
+    }
+
+    /// <summary>
+    /// Returns the shape dimensions for a multi-dim array value. Reads the
+    /// <c>int32 × ndim</c> prefix from the head of the payload (inline / arena / sidecar
+    /// alike). Returns an empty span when <see cref="IsMultiDim"/> is <c>false</c>.
+    /// </summary>
+    /// <param name="store">Required for arena-backed values; ignored for inline / sidecar.</param>
+    /// <param name="registry">Required for sidecar-backed values; ignored otherwise.</param>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when an arena value is missing its store, or a sidecar value is missing its
+    /// registry — same contract as <see cref="AsArraySpan{T}"/>.
+    /// </exception>
+    public ReadOnlySpan<int> GetShape(IValueStore? store = null, SidecarRegistry? registry = null)
+    {
+        if (!IsMultiDim) return ReadOnlySpan<int>.Empty;
+        int ndim = _charCount >> 8;
+        int shapeBytes = ndim * sizeof(int);
+
+        if (IsInlineArray)
+        {
+            ref int head = ref Unsafe.AsRef(in _p0);
+            return MemoryMarshal.CreateReadOnlySpan(ref head, ndim);
+        }
+        if (IsInSidecar)
+        {
+            ReadOnlySpan<byte> all = ReadSidecarBytes(registry);
+            return MemoryMarshal.Cast<byte, int>(all[..shapeBytes]);
+        }
+        // Arena-backed.
+        if (store is null)
+        {
+            throw new InvalidOperationException(
+                "GetShape: arena-backed multi-dim array requires an IValueStore. " +
+                "Pass the frame's Source arena.");
+        }
+        ReadOnlySpan<byte> bytes = store.RetrieveUtf8Span(_p0, shapeBytes);
+        return MemoryMarshal.Cast<byte, int>(bytes);
+    }
+
+    /// <summary>
+    /// Returns the raw payload bytes of a typed-array value, including any shape
+    /// prefix (i.e. the full <c>[shape × int32][elements]</c> block for multi-dim
+    /// values, or just <c>[elements]</c> for flat 1-D arrays). Used by the
+    /// <c>VariableSlotPageEncoderV2</c> sidecar/inline persistence paths, which
+    /// must persist the whole on-wire payload so the decoder can resurrect it.
+    /// Element-only readers (<see cref="AsArraySpan{T}"/>, <see cref="InlineArrayBytes"/>)
+    /// strip the prefix and are wrong for this purpose.
+    /// </summary>
+    /// <param name="store">Required for arena-backed values; ignored for inline / sidecar.</param>
+    /// <param name="registry">Required for sidecar-backed values; ignored otherwise.</param>
+    internal ReadOnlySpan<byte> RawArrayBytes(IValueStore? store, SidecarRegistry? registry = null)
+    {
+        if (!IsArray)
+        {
+            throw new InvalidOperationException(
+                $"RawArrayBytes called on a non-array value (Kind={_kind}, IsArray=false).");
+        }
+        if (IsInlineArray)
+        {
+            int totalBytes = InlineArrayElementCount * ScalarByteSize(_kind) + ShapePrefixByteCount;
+            ref byte head = ref Unsafe.As<int, byte>(ref Unsafe.AsRef(in _p0));
+            return MemoryMarshal.CreateReadOnlySpan(ref head, totalBytes);
+        }
+        if (IsInSidecar)
+        {
+            return ReadSidecarBytes(registry);
+        }
+        if (store is null)
+        {
+            throw new InvalidOperationException(
+                "RawArrayBytes: arena-backed array requires an IValueStore.");
+        }
+        return store.RetrieveUtf8Span(_p0, _p1);
+    }
+
+    /// <summary>
+    /// Decoder-side constructor for an inline multi-dim array whose <paramref name="rawBytes"/>
+    /// already include the shape prefix followed by element bytes — the exact form the
+    /// encoder persisted. <paramref name="ndim"/> is supplied by the column's
+    /// <c>FixedShape.Length</c>; the prefix is not re-parsed here, just framed by
+    /// <c>_charCount</c>.
+    /// </summary>
+    internal static DataValue FromInlineMultiDimRawBytes(
+        ReadOnlySpan<byte> rawBytes, DataKind elementKind, int ndim)
+    {
+        if (ndim < 2 || ndim > MultiDimMaxNdim)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ndim), ndim,
+                $"Multi-dim ndim must be in [2, {MultiDimMaxNdim}].");
+        }
+        RejectReferenceElementKind(elementKind);
+
+        int prefixBytes = ndim * sizeof(int);
+        if (rawBytes.Length < prefixBytes || rawBytes.Length > InlineArrayMaxBytes)
+        {
+            throw new ArgumentException(
+                $"Inline multi-dim raw payload {rawBytes.Length} bytes is outside the valid range " +
+                $"[{prefixBytes}, {InlineArrayMaxBytes}] for ndim={ndim}, kind={elementKind}.",
+                nameof(rawBytes));
+        }
+        int elementSize = ScalarByteSize(elementKind);
+        int elementBytes = rawBytes.Length - prefixBytes;
+        if (elementBytes % elementSize != 0)
+        {
+            throw new ArgumentException(
+                $"Inline multi-dim element byte length {elementBytes} is not a multiple of " +
+                $"size {elementSize} for {elementKind}.",
+                nameof(rawBytes));
+        }
+        int elementCount = elementBytes / elementSize;
+
+        Span<byte> buffer = stackalloc byte[InlineArrayMaxBytes];
+        rawBytes.CopyTo(buffer);
+        int p0 = MemoryMarshal.Read<int>(buffer[..4]);
+        int p1 = MemoryMarshal.Read<int>(buffer[4..8]);
+        int p2 = MemoryMarshal.Read<int>(buffer[8..12]);
+        int p3 = MemoryMarshal.Read<int>(buffer[12..16]);
+
+        ushort cc = (ushort)((ndim << 8) | (byte)elementCount);
+        return new(
+            elementKind,
+            flags: DataValueFlags.IsArray | DataValueFlags.InlineArray | DataValueFlags.IsMultiDim,
+            p0: p0, p1: p1, p2: p2, p3: p3, charCount: cc);
+    }
+
+    /// <summary>
+    /// Decoder-side constructor for an arena-backed multi-dim array whose
+    /// <paramref name="rawBytes"/> already include the shape prefix followed by
+    /// element bytes. The full byte block is written into <paramref name="store"/>
+    /// as a single contiguous allocation; <paramref name="ndim"/> is supplied by
+    /// the column's <c>FixedShape.Length</c>.
+    /// </summary>
+    internal static DataValue FromArenaMultiDimRawBytes(
+        ReadOnlySpan<byte> rawBytes, DataKind elementKind, int ndim, IValueStore store)
+    {
+        if (ndim < 2 || ndim > MultiDimMaxNdim)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ndim), ndim,
+                $"Multi-dim ndim must be in [2, {MultiDimMaxNdim}].");
+        }
+        RejectReferenceElementKind(elementKind);
+
+        var (p0, p1) = store.StoreBytes(rawBytes);
+        ushort cc = (ushort)(ndim << 8);
+        return new(
+            elementKind,
+            flags: DataValueFlags.InArena | DataValueFlags.IsArray | DataValueFlags.IsMultiDim,
+            p0: p0, p1: p1, charCount: cc);
+    }
+
     /// <summary>
     /// Returns the inline-array elements as a typed read-only span. The span points
     /// directly into the struct's payload region via a managed reference, so it is
@@ -1479,12 +1929,13 @@ public readonly struct DataValue : IEquatable<DataValue>
             throw new InvalidOperationException(
                 "AsInlineArraySpan called on a non-inline value. Check IsInlineArray before invoking.");
         }
-        // Reinterpret the payload region's first int field as ref T and build a span
-        // covering the active element count. Same idiom as SidecarOffset / SidecarLength
-        // accessors above; works without `fixed` because the ref keeps the struct
+        // Reinterpret the payload region's first byte as ref byte, skip the shape
+        // prefix (zero bytes when !IsMultiDim), then build a typed span over the
+        // element region. Works without `fixed` because the ref keeps the struct
         // tracked by the GC via Unsafe.AsRef on a readonly field.
-        ref T head = ref Unsafe.As<int, T>(ref Unsafe.AsRef(in _p0));
-        return MemoryMarshal.CreateReadOnlySpan(ref head, InlineArrayElementCount);
+        ref byte head = ref Unsafe.As<int, byte>(ref Unsafe.AsRef(in _p0));
+        ref T elements = ref Unsafe.As<byte, T>(ref Unsafe.Add(ref head, ShapePrefixByteCount));
+        return MemoryMarshal.CreateReadOnlySpan(ref elements, InlineArrayElementCount);
     }
 
     /// <summary>
@@ -1506,7 +1957,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             }
             int byteCount = InlineArrayElementCount * ScalarByteSize(_kind);
             ref byte head = ref Unsafe.As<int, byte>(ref Unsafe.AsRef(in _p0));
-            return MemoryMarshal.CreateReadOnlySpan(ref head, byteCount);
+            ref byte elements = ref Unsafe.Add(ref head, ShapePrefixByteCount);
+            return MemoryMarshal.CreateReadOnlySpan(ref elements, byteCount);
         }
     }
 
@@ -1610,14 +2062,17 @@ public readonly struct DataValue : IEquatable<DataValue>
             return AsInlineArraySpan<T>();
         }
 
+        int shapePrefix = ShapePrefixByteCount;
+
         if (IsInSidecar)
         {
             ReadOnlySpan<byte> sidecarBytes = ReadSidecarBytes(registry);
-            return MemoryMarshal.Cast<byte, T>(sidecarBytes);
+            return MemoryMarshal.Cast<byte, T>(sidecarBytes[shapePrefix..]);
         }
 
         // Arena-backed via the IsArray flag model: bytes live at (_p0, _p1) in
-        // the store. Reinterpret the byte span as ReadOnlySpan<T>.
+        // the store. Reinterpret the byte span as ReadOnlySpan<T>, skipping the
+        // shape prefix when this is a multi-dim array.
         if (store is null)
         {
             throw new InvalidOperationException(
@@ -1625,7 +2080,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 "Pass the frame's Source arena.");
         }
         ReadOnlySpan<byte> arenaBytes = store.RetrieveUtf8Span(_p0, _p1);
-        return MemoryMarshal.Cast<byte, T>(arenaBytes);
+        return MemoryMarshal.Cast<byte, T>(arenaBytes[shapePrefix..]);
     }
 
     /// <summary>
@@ -2672,12 +3127,12 @@ public readonly struct DataValue : IEquatable<DataValue>
 
             if (IsInline)
             {
-                if (IsInlineArray) return InlineArrayElementCount * ScalarByteSize(_kind);
+                if (IsInlineArray) return InlineArrayElementCount * ScalarByteSize(_kind) + ShapePrefixByteCount;
                 if (_kind == DataKind.String) return InlineByteLength;
                 return 0;
             }
 
-            // Arena-backed.
+            // Arena-backed. _p1 already covers the shape prefix when IsMultiDim is set.
             if (IsArray || IsBlobKind) return _p1;
             return _kind switch
             {
@@ -2734,11 +3189,24 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         get
         {
+            // Byte arrays are not allowed to carry IsMultiDim (asserted at construction);
+            // _p1 is the raw byte count which equals the element count.
             if (IsByteArrayKind) return _p1;
-            if (IsArray && (_flags & DataValueFlags.InArena) != 0)
+            if (IsInlineArray) return InlineArrayElementCount;
+            if (!IsArray) return -1;
+            if ((_flags & DataValueFlags.InArena) != 0)
             {
                 int elementSize = ScalarByteSize(_kind);
-                return elementSize > 0 ? _p1 / elementSize : -1;
+                if (elementSize <= 0) return -1;
+                int elementBytes = _p1 - ShapePrefixByteCount;
+                return elementBytes / elementSize;
+            }
+            if (IsInSidecar)
+            {
+                int elementSize = ScalarByteSize(_kind);
+                if (elementSize <= 0) return -1;
+                long elementBytes = SidecarLength - ShapePrefixByteCount;
+                return (int)(elementBytes / elementSize);
             }
             return -1;
         }

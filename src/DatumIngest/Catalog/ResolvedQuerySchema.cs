@@ -22,12 +22,21 @@ namespace DatumIngest.Catalog;
 /// is a typed array of <see cref="Kind"/> elements rather than a single
 /// scalar.
 /// </param>
+/// <param name="IsMultiDim">
+/// True when each value is a multi-dimensional typed array (carries an
+/// explicit shape — <see cref="DataValue.IsMultiDim"/> on every row).
+/// Propagates from source columns whose <see cref="ColumnInfo.FixedShape"/>
+/// has ndim ≥ 2 and from projection expressions (e.g. <c>infer()</c>) that
+/// produce multi-dim values dynamically. Used by downstream signature
+/// dispatch so chained calls in subqueries see the correct shape.
+/// </param>
 public sealed record ResolvedColumn(
     string ColumnName,
     DataKind Kind,
     bool Nullable,
     string? SourceTableOrAlias,
-    bool IsArray = false);
+    bool IsArray = false,
+    bool IsMultiDim = false);
 
 /// <summary>
 /// The combined column schema resolved from all table sources in a query's

@@ -78,7 +78,7 @@ Answer:';
     text_part,
     'moondream2/vocab.json',
     'moondream2/merges.txt');
-  DECLARE text_seq Int32 = array_length(text_ids);
+  DECLARE text_seq Int32 = cardinality(text_ids);
 
   -- Step 4: token ids → [1, text_seq, 2048] text embeddings.
   DECLARE text_embeds Float32[] = infer(

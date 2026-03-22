@@ -696,8 +696,25 @@ internal static class UpdateExecutor
             // Same-kind array passes through without LiteralCoercion, so the
             // shape check has to fire here too. No-op for variable-length
             // and for non-array values.
-            LiteralCoercion.EnforceFixedShape(source, target, target.Name);
-            return source;
+            //
+            // Multi-dim attachment: passing arena=null deliberately SKIPS the
+            // multi-dim attachment step. Two reasons:
+            //   1. Sidecar sources already carry their shape prefix in the
+            //      on-disk bytes (PR3 encoder); re-materialising into a fresh
+            //      arena would defeat the sidecar-pointer pass-through that
+            //      makes wide-blob UPDATE cheap.
+            //   2. The only paths that arrive here are sidecar-backed values
+            //      (just copy) and inline values (self-contained, no arena
+            //      reference). Neither needs a Multi-dim arena alloc.
+            //
+            // Edge case: an inline source that happens to be a 4-element
+            // Float32 array UPDATEd into a 2×2 column would NOT gain the
+            // multi-dim flag on this path. That value flows on as flat. If
+            // this becomes a problem, route through the slow path (kind
+            // mismatch or non-inline/non-sidecar source) which DOES pass an
+            // arena — or extend the fast path with a per-batch capture arena
+            // similar to the column-copy branch above.
+            return LiteralCoercion.EnforceFixedShape(source, target, target.Name);
         }
 
         // Composite / blob results from SET expressions aren't supported —

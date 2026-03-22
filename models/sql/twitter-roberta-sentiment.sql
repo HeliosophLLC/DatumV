@@ -33,7 +33,7 @@ AS BEGIN
   -- tokenizer.json sits at the catalog root one directory up from
   -- the ONNX (which lives in `onnx/`), so the relative path is `../tokenizer.json`.
   DECLARE encoded Struct = tokenizer.encode_roberta(text, '../tokenizer.json');
-  DECLARE n Int32 = array_length(encoded['input_ids']);
+  DECLARE n Int32 = cardinality(encoded['input_ids']);
   -- Multi-input infer: RoBERTa takes input_ids + attention_mask only.
   -- Both share [1, seq_len] shape.
   DECLARE logits Float32[] = infer(

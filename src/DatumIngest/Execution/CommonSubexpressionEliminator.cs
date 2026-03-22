@@ -943,8 +943,10 @@ public static class CommonSubexpressionEliminator
                     if (!IsCseEligible(f.Value, letNames, functions)) return false;
                 return true;
             case IndexAccessExpression ia:
-                return IsCseEligible(ia.Source, letNames, functions)
-                    && IsCseEligible(ia.Index, letNames, functions);
+                if (!IsCseEligible(ia.Source, letNames, functions)) return false;
+                foreach (Expression i in ia.Indices)
+                    if (!IsCseEligible(i, letNames, functions)) return false;
+                return true;
             case AtTimeZoneExpression atz:
                 return IsCseEligible(atz.Expression, letNames, functions)
                     && IsCseEligible(atz.TimeZone, letNames, functions);
@@ -1013,7 +1015,8 @@ public static class CommonSubexpressionEliminator
                 foreach (StructField f in sl.Fields) visitor(f.Value);
                 break;
             case IndexAccessExpression ia:
-                visitor(ia.Source); visitor(ia.Index);
+                visitor(ia.Source);
+                foreach (Expression i in ia.Indices) visitor(i);
                 break;
             case AtTimeZoneExpression atz:
                 visitor(atz.Expression); visitor(atz.TimeZone);
@@ -1091,7 +1094,7 @@ public static class CommonSubexpressionEliminator
             IndexAccessExpression ia => ia with
             {
                 Source = RewriteWithHoists(ia.Source, hoists),
-                Index = RewriteWithHoists(ia.Index, hoists),
+                Indices = ia.Indices.Select(i => RewriteWithHoists(i, hoists)).ToArray(),
             },
             AtTimeZoneExpression atz => atz with
             {

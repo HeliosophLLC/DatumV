@@ -5,8 +5,14 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar.Arrays;
 
 /// <summary>
-/// Returns the number of elements in an array. Null array yields a null result.
-/// Throws if the argument is not an array. Element kind is unrestricted.
+/// PostgreSQL-compatible <c>array_length(arr, dim)</c>: returns the size of
+/// the requested dimension (1-based) of an array. For a 1-D array,
+/// <c>array_length(arr, 1)</c> equals the element count. For a multi-dim
+/// array (<c>Array&lt;T&gt;(n, m, …)</c>), <c>array_length(arr, k)</c>
+/// returns the <c>k</c>-th dimension's size as declared in the column's
+/// fixed shape or carried by the value's runtime shape prefix.
+/// Returns null for nulls and for out-of-range dimensions. Use
+/// <c>cardinality(arr)</c> for the total (flat) element count.
 /// </summary>
 public sealed class ArrayLengthFunction : IFunction, IScalarFunction
 {
@@ -18,7 +24,9 @@ public sealed class ArrayLengthFunction : IFunction, IScalarFunction
 
     /// <inheritdoc />
     public static string Description =>
-        "Returns the number of elements in an array.";
+        "Returns the size of the requested array dimension (1-based). "
+        + "PostgreSQL-compatible. Use cardinality(arr) for the total flat "
+        + "element count.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -26,7 +34,8 @@ public sealed class ArrayLengthFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("array", DataKindMatcher.Any),
+                new ParameterSpec("array", DataKindMatcher.Any, IsArray: ArrayMatch.Array),
+                new ParameterSpec("dim", DataKindMatcher.Family(DataKindFamily.NumericScalar), IsArray: ArrayMatch.Scalar),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Int32)),
@@ -44,13 +53,28 @@ public sealed class ArrayLengthFunction : IFunction, IScalarFunction
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
         ValueRef arrayArg = args[0];
-
-        if (!arrayArg.IsArray)
-            throw new FunctionArgumentException(Name, "argument must be an array.");
-
-        if (arrayArg.IsNull)
+        if (arrayArg.IsNull || args[1].IsNull)
+        {
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
+        }
 
+        int dim = args[1].ToInt32();
+        DataValue source = arrayArg.ToDataValue(frame.Source);
+
+        int ndim = source.IsMultiDim ? source.Ndim : 1;
+        if (dim < 1 || dim > ndim)
+        {
+            // PG returns NULL for an out-of-range dim rather than raising.
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
+        }
+
+        if (source.IsMultiDim)
+        {
+            ReadOnlySpan<int> shape = source.GetShape(frame.Source, frame.SidecarRegistry);
+            return new ValueTask<ValueRef>(ValueRef.FromInt32(shape[dim - 1]));
+        }
+
+        // Flat 1-D array: only dim=1 is in range (already enforced above).
         return new ValueTask<ValueRef>(ValueRef.FromInt32(arrayArg.GetArrayLength()));
     }
 }

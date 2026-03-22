@@ -121,8 +121,15 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         // Float16/Decimal/Int128/UInt128) share the same inline payload layout: a
         // contiguous run of element bytes packed into _p0–_p3. FromInlineArrayBytes
         // derives the element count from payload length and the kind's element size.
+        // Multi-dim columns (FixedShape with ndim >= 2) have their shape prefix
+        // persisted ahead of the elements; the column's FixedShape.Length gives the
+        // ndim the decoder uses to frame the multi-dim DataValue.
         if (_column.IsArray)
         {
+            if (_column.FixedShape is { Length: >= 2 } shape)
+            {
+                return DataValue.FromInlineMultiDimRawBytes(payload, _column.Kind, shape.Length);
+            }
             return DataValue.FromInlineArrayBytes(payload, _column.Kind);
         }
 
@@ -157,6 +164,11 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         // array stay zero-copy.
         if (_column.IsArray)
         {
+            if (_column.FixedShape is { Length: >= 2 } shape)
+            {
+                return DataValue.FromMultiDimArrayInSidecar(
+                    _column.Kind, offset, length, shape.Length, _sidecarStoreId);
+            }
             return DataValue.FromArrayInSidecar(_column.Kind, offset, length, _sidecarStoreId);
         }
 

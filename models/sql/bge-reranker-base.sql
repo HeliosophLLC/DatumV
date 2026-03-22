@@ -52,7 +52,7 @@ USING 'bge-reranker-base/onnx/model.onnx'
 AS BEGIN
   -- vocab.txt sits at the bundle root (sibling to the onnx/ folder).
   DECLARE encoded Struct = tokenizer.encode_bert_pair(query, passage, '../vocab.txt');
-  DECLARE n Int32 = array_length(encoded['input_ids']);
+  DECLARE n Int32 = cardinality(encoded['input_ids']);
   RETURN infer(
     encoded,
     {

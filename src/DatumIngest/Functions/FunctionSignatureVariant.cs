@@ -1,3 +1,5 @@
+using DatumIngest.Model;
+
 namespace DatumIngest.Functions;
 
 /// <summary>
@@ -18,11 +20,12 @@ public sealed record FunctionSignatureVariant(
     ReturnTypeRule ReturnType);
 
 /// <summary>
-/// Three-state filter on a parameter's array-ness, used by array-aware
-/// signature matching. <see cref="Either"/> means the slot accepts both
-/// scalar and array values (kind-only matching, matching legacy behaviour
-/// before per-signature array discrimination); <see cref="Scalar"/> rejects
-/// arrays; <see cref="Array"/> requires arrays.
+/// Filter on a parameter's array-ness, used by array-aware signature matching.
+/// <see cref="Either"/> means the slot accepts both scalar and array values
+/// (kind-only matching, matching legacy behaviour before per-signature array
+/// discrimination); <see cref="Scalar"/> rejects arrays; <see cref="Array"/>
+/// accepts any array (flat or multi-dim); <see cref="FlatArray"/> rejects
+/// multi-dim arrays; <see cref="MultiDimArray"/> requires multi-dim arrays.
 /// </summary>
 public enum ArrayMatch
 {
@@ -31,8 +34,20 @@ public enum ArrayMatch
     Either = 0,
     /// <summary>The argument must NOT be a typed array.</summary>
     Scalar = 1,
-    /// <summary>The argument must be a typed array.</summary>
+    /// <summary>The argument must be a typed array (1-D flat OR multi-dim).</summary>
     Array = 2,
+    /// <summary>
+    /// The argument must be a typed array AND not carry an explicit multi-dim
+    /// shape (<see cref="DataValue.IsMultiDim"/> false). Use on a sibling
+    /// signature that handles only the 1-D case.
+    /// </summary>
+    FlatArray = 3,
+    /// <summary>
+    /// The argument must be a typed array carrying an explicit multi-dim shape
+    /// (<see cref="DataValue.IsMultiDim"/> true). Use on the signature variant
+    /// that needs <see cref="DataValue.GetShape"/> to discriminate tensor rank.
+    /// </summary>
+    MultiDimArray = 4,
 }
 
 /// <summary>

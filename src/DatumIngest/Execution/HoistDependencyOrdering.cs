@@ -142,7 +142,8 @@ internal static class HoistDependencyOrdering
                 foreach (StructField f in sl.Fields) visitor(f.Value);
                 break;
             case IndexAccessExpression ia:
-                visitor(ia.Source); visitor(ia.Index);
+                visitor(ia.Source);
+                foreach (Expression i in ia.Indices) visitor(i);
                 break;
             case AtTimeZoneExpression atz:
                 visitor(atz.Expression); visitor(atz.TimeZone);

@@ -500,8 +500,7 @@ internal static class InsertExecutor
                     "yet supported. INSERT … SELECT of array columns from another table will " +
                     "land in a later PR.");
             }
-            LiteralCoercion.EnforceFixedShape(source, target, columnName);
-            return source;
+            return LiteralCoercion.EnforceFixedShape(source, target, columnName, targetArena);
         }
 
         // Reject array-to-scalar shape mismatches.

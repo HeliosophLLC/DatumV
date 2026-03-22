@@ -4319,7 +4319,7 @@ public sealed class QueryPlanner
                     Expression index = new LiteralExpression((float)i);
                     expanded.Add(new LetBinding(
                         pattern.Names[i],
-                        new IndexAccessExpression(hiddenRef, index),
+                        new IndexAccessExpression(hiddenRef, new[] { index }),
                         OutputAlias: null,
                         Span: binding.Span));
                 }
@@ -4332,7 +4332,7 @@ public sealed class QueryPlanner
                     Expression index = new LiteralExpression(fieldName);
                     expanded.Add(new LetBinding(
                         fieldName,
-                        new IndexAccessExpression(hiddenRef, index),
+                        new IndexAccessExpression(hiddenRef, new[] { index }),
                         OutputAlias: null,
                         Span: binding.Span));
                 }
@@ -4738,7 +4738,7 @@ public sealed class QueryPlanner
                 caseExpr.Span),
             IndexAccessExpression idx => new IndexAccessExpression(
                 RewritePrevCalls(idx.Source, prevColumnNames),
-                RewritePrevCalls(idx.Index, prevColumnNames),
+                idx.Indices.Select(i => RewritePrevCalls(i, prevColumnNames)).ToArray(),
                 idx.Span),
             _ => expression,
         };

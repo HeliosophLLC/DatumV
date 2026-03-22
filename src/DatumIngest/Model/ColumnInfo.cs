@@ -139,6 +139,25 @@ public sealed record ColumnInfo
     public int[]? FixedShape { get; init; }
 
     /// <summary>
+    /// True when values in this column are multi-dimensional typed arrays
+    /// (<see cref="DataValue.IsMultiDim"/> on every row). Set by:
+    /// <list type="bullet">
+    ///   <item>DDL with a static multi-dim <see cref="FixedShape"/>
+    ///   (<c>Array&lt;Float32&gt;(2, 3)</c>) — inferred as <see cref="FixedShape"/>
+    ///   length ≥ 2 during column-info resolution, also recorded here so
+    ///   downstream code can ask <c>IsMultiDim</c> directly.</item>
+    ///   <item>Projection columns whose source expression produces multi-dim
+    ///   values dynamically (e.g. <c>SELECT infer(x) FROM t</c>) — the
+    ///   <c>QuerySchemaResolver</c> sets this without populating
+    ///   <see cref="FixedShape"/> because the actual dims aren't known
+    ///   statically.</item>
+    /// </list>
+    /// Used by <c>ExpressionTypeResolver</c> for signature dispatch; the
+    /// flag is the canonical "is multi-dim" signal at the schema level.
+    /// </summary>
+    public bool IsMultiDim { get; init; }
+
+    /// <summary>
     /// Distinguishes <c>CHAR(N)</c> (blank-padded fixed-length) from
     /// <c>VARCHAR(N)</c> (variable up to N). Only meaningful when
     /// <see cref="Kind"/> is <see cref="DataKind.String"/> and

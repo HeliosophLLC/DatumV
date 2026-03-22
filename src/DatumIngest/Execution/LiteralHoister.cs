@@ -96,7 +96,7 @@ public static class LiteralHoister
             IndexAccessExpression ia => ia with
             {
                 Source = Hoist(ia.Source, store),
-                Index = Hoist(ia.Index, store),
+                Indices = ia.Indices.Select(i => Hoist(i, store)).ToArray(),
             },
 
             LambdaExpression lam => lam with { Body = Hoist(lam.Body, store) },

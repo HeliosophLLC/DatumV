@@ -59,7 +59,7 @@ FROM documents
 EXPLODE tags AS tag, scores AS score
 ```
 
-Element-wise: row `i` of the input produces `N` output rows, where `N = MAX(array_length(tags), array_length(scores))`. Element `j` of each array appears in the same output row. If one array is shorter than the other, the shorter array's column is NULL for the overflow positions.
+Element-wise: row `i` of the input produces `N` output rows, where `N = MAX(cardinality(tags), cardinality(scores))`. Element `j` of each array appears in the same output row. If one array is shorter than the other, the shorter array's column is NULL for the overflow positions.
 
 ### Expression arguments
 

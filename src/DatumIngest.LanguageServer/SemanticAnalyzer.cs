@@ -560,10 +560,11 @@ internal sealed class SemanticAnalyzer
                 }
                 break;
 
-            // IndexAccessExpression — validate both source and index sub-expressions.
+            // IndexAccessExpression — validate source and each index sub-expression.
             case IndexAccessExpression indexAccess:
                 AnalyzeExpression(indexAccess.Source, aliasToTable, opaqueAliases, diagnostics);
-                AnalyzeExpression(indexAccess.Index, aliasToTable, opaqueAliases, diagnostics);
+                foreach (Expression i in indexAccess.Indices)
+                    AnalyzeExpression(i, aliasToTable, opaqueAliases, diagnostics);
                 break;
 
             // LiteralExpression — nothing to validate.

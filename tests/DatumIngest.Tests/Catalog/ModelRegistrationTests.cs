@@ -965,6 +965,155 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     }
 
     [Fact]
+    public async Task Infer_RankTwoOutput_ProducesMultiDimValue()
+    {
+        // ONNX-tensor outputs with rank ≥ 2 surface as multi-dim DataValues so
+        // SQL bracket-access (m[y, x]) and array_shape() see the declared shape.
+        // The stub emits a 2×3 Float32 matrix; the model returns it directly via
+        // `RETURN infer(x)` and the test asserts the resulting value's
+        // IsMultiDim / Ndim / GetShape / element values.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        dispatcher.NextSession = StubSession.Float32Matrix2x3();
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"], [new object?[] { 10.0f }]));
+
+        catalog.Plan(
+            $"CREATE MODEL gen_matrix(x Float32) RETURNS Array<Float32> USING '{_absoluteUsingPath}' " +
+            $"AS BEGIN RETURN infer(x) END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.gen_matrix(v) AS m FROM data");
+
+        // Multi-dim values are arena-backed; read shape/elements within the foreach
+        // before the batch arena is released, then capture the materialized values.
+        int rowsSeen = 0;
+        int[]? shape = null;
+        float[]? elements = null;
+        bool isMultiDim = false;
+        int ndim = 0;
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                DataValue m = batch[i][0];
+                isMultiDim = m.IsMultiDim;
+                ndim = m.Ndim;
+                shape = m.GetShape(batch.Arena).ToArray();
+                elements = m.AsArraySpan<float>(batch.Arena).ToArray();
+                rowsSeen++;
+            }
+        }
+        Assert.Equal(1, rowsSeen);
+        Assert.True(isMultiDim);
+        Assert.Equal(2, ndim);
+        Assert.Equal([2, 3], shape!);
+        Assert.Equal([10f, 11f, 12f, 13f, 14f, 15f], elements!);
+    }
+
+    [Fact]
+    public async Task Infer_RankTwoOutput_BracketAccessReadsSingleElement()
+    {
+        // End-to-end: bracket-syntax access against the multi-dim infer output
+        // (m[y, x]) flows through the evaluator's row-major flat-offset path.
+        // Asserts the depth-map-style chain that motivated multi-dim function
+        // outputs: SQL sees a single Float32 element extracted from a 2-D
+        // ONNX result without having to manually flatten / unflatten.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        dispatcher.NextSession = StubSession.Float32Matrix2x3();
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"], [new object?[] { 10.0f }]));
+
+        catalog.Plan(
+            $"CREATE MODEL gen_matrix(x Float32) RETURNS Array<Float32> USING '{_absoluteUsingPath}' " +
+            $"AS BEGIN RETURN infer(x) END");
+
+        // Row-major: [10, 11, 12, 13, 14, 15] in a 2×3 shape →
+        //   m[0, 0] = 10, m[0, 2] = 12, m[1, 0] = 13, m[1, 2] = 15
+        IQueryPlan plan = catalog.Plan(
+            "SELECT models.gen_matrix(v) AS m," +
+            "       models.gen_matrix(v)[0, 0] AS a," +
+            "       models.gen_matrix(v)[0, 2] AS b," +
+            "       models.gen_matrix(v)[1, 0] AS c," +
+            "       models.gen_matrix(v)[1, 2] AS d" +
+            " FROM data");
+
+        float a = 0, b = 0, c = 0, d = 0;
+        int rowsSeen = 0;
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                a = batch[i]["a"].AsFloat32();
+                b = batch[i]["b"].AsFloat32();
+                c = batch[i]["c"].AsFloat32();
+                d = batch[i]["d"].AsFloat32();
+                rowsSeen++;
+            }
+        }
+        Assert.Equal(1, rowsSeen);
+        Assert.Equal(10f, a);
+        Assert.Equal(12f, b);
+        Assert.Equal(13f, c);
+        Assert.Equal(15f, d);
+    }
+
+    [Fact]
+    public async Task Infer_RankTwoOutput_CardinalityAndArrayShapeWork()
+    {
+        // Regression coverage for the function-boundary side of multi-dim infer
+        // outputs: cardinality() must return product(shape), array_shape() must
+        // return the dim vector, array_ndims() must return ndim, and
+        // array_length(arr, dim) must work per-dim — all against a value built
+        // by infer() rather than a static-shape column.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        dispatcher.NextSession = StubSession.Float32Matrix2x3();
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"], [new object?[] { 10.0f }]));
+
+        catalog.Plan(
+            $"CREATE MODEL gen_matrix(x Float32) RETURNS Array<Float32> USING '{_absoluteUsingPath}' " +
+            $"AS BEGIN RETURN infer(x) END");
+
+        IQueryPlan plan = catalog.Plan(
+            "SELECT cardinality(models.gen_matrix(v))         AS total," +
+            "       array_ndims(models.gen_matrix(v))         AS nd," +
+            "       array_length(models.gen_matrix(v), 1)     AS d1," +
+            "       array_length(models.gen_matrix(v), 2)     AS d2," +
+            "       array_get(models.gen_matrix(v), 1, 2)     AS elem" +
+            " FROM data");
+
+        int total = 0, nd = 0, d1 = 0, d2 = 0;
+        float elem = 0;
+        int rowsSeen = 0;
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                total = batch[i]["total"].AsInt32();
+                nd = batch[i]["nd"].AsInt32();
+                d1 = batch[i]["d1"].AsInt32();
+                d2 = batch[i]["d2"].AsInt32();
+                elem = batch[i]["elem"].AsFloat32();
+                rowsSeen++;
+            }
+        }
+        Assert.Equal(1, rowsSeen);
+        Assert.Equal(6, total);     // product(2, 3)
+        Assert.Equal(2, nd);
+        Assert.Equal(2, d1);
+        Assert.Equal(3, d2);
+        Assert.Equal(15f, elem);    // m[1, 2] = 10 + 5 = 15
+    }
+
+    [Fact]
     public async Task Infer_MultiInput_StructArg_FeedsSessionInputsByFieldName()
     {
         // Multi-input v1: pass a struct of tensors whose field names match
@@ -1292,6 +1441,27 @@ public sealed class ModelRegistrationTests : ServiceTestBase
                 }
                 StubTensorBag output = new();
                 output.Add<float>("output", DataKind.Float32, [doubled.Length], doubled.AsSpan());
+                return output;
+            });
+
+        /// <summary>
+        /// Single Float32-input, single Float32 rank-2 output stub: emits a 2×3
+        /// matrix derived from the scalar input. Exercises the multi-dim output
+        /// construction path — the resulting <c>infer()</c> ValueRef should
+        /// carry <see cref="DataValue.IsMultiDim"/> with shape <c>[2, 3]</c>.
+        /// </summary>
+        public static StubSession Float32Matrix2x3() => new(
+            inputs: [new TensorSpec("input", DataKind.Float32, [1])],
+            outputs: [new TensorSpec("output", DataKind.Float32, [2, 3])],
+            run: bag =>
+            {
+                float v = bag["input"].AsSpan<float>()[0];
+                float[] cells = [
+                    v + 0f, v + 1f, v + 2f,
+                    v + 3f, v + 4f, v + 5f,
+                ];
+                StubTensorBag output = new();
+                output.Add<float>("output", DataKind.Float32, [2, 3], cells.AsSpan());
                 return output;
             });
 

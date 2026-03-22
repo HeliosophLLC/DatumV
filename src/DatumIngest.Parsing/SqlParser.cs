@@ -126,6 +126,20 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Comment))
             .Or(Token.EqualTo(SqlToken.Check));
 
+    /// <summary>
+    /// Identifier-or-soft-keyword token in column-reference position. Includes
+    /// the parameter-clause soft keywords (STEP/UNIT/COMMENT/CHECK) but
+    /// deliberately excludes <see cref="SqlToken.TypeKeyword"/> so that bare
+    /// type names (<c>INTEGER</c>, <c>TEXT</c>, …) keep flowing to
+    /// <c>TypeLiteral</c> rather than being absorbed as column references.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Token<SqlToken>> ColumnNameToken =
+        Token.EqualTo(SqlToken.Identifier)
+            .Or(Token.EqualTo(SqlToken.Step))
+            .Or(Token.EqualTo(SqlToken.Unit))
+            .Or(Token.EqualTo(SqlToken.Comment))
+            .Or(Token.EqualTo(SqlToken.Check));
+
     // ───────────────────── Atomic expressions ─────────────────────
 
     /// <summary>
@@ -135,10 +149,10 @@ public static class SqlParser
     /// has no meaningful shape.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> QualifiedColumn =
-        from first in Token.EqualTo(SqlToken.Identifier)
+        from first in ColumnNameToken
         from second in (
             from dot in Token.EqualTo(SqlToken.Dot)
-            from name in Token.EqualTo(SqlToken.Identifier)
+            from name in ColumnNameToken
                 .Or(Token.EqualTo(SqlToken.Star))
             select name
         ).OptionalOrDefault()
@@ -149,7 +163,7 @@ public static class SqlParser
             // (e.g. concatenation chain) backtracks cleanly.
             second.HasValue && second.Kind != SqlToken.Star
                 ? (from dot in Token.EqualTo(SqlToken.Dot)
-                   from name in Token.EqualTo(SqlToken.Identifier)
+                   from name in ColumnNameToken
                        .Or(Token.EqualTo(SqlToken.Star))
                    select name).Try().OptionalOrDefault()
                 : Superpower.Parse.Return<SqlToken, Token<SqlToken>>(default)
@@ -994,10 +1008,20 @@ public static class SqlParser
         from primary in PrimaryExpression
         from suffixes in (
             (from open in Token.EqualTo(SqlToken.LeftBracket)
-             from index in SP.Ref(() => ExpressionParser!)
+             from first in SP.Ref(() => ExpressionParser!)
+             from rest in (
+                 from comma in Token.EqualTo(SqlToken.Comma)
+                 from idx in SP.Ref(() => ExpressionParser!)
+                 select idx
+             ).Many()
              from close in Token.EqualTo(SqlToken.RightBracket)
              select (Func<Expression, Expression>)(e =>
-                 new IndexAccessExpression(e, index, ToSpan(open))))
+                 new IndexAccessExpression(
+                     e,
+                     rest.Length == 0
+                         ? (IReadOnlyList<Expression>)new[] { first }
+                         : new[] { first }.Concat(rest).ToArray(),
+                     ToSpan(open))))
             .Try()
             .Or(
                 from cc in Token.EqualTo(SqlToken.DoubleColon)
@@ -1355,7 +1379,7 @@ public static class SqlParser
 
             IndexAccessExpression idx => new IndexAccessExpression(
                 SubstituteBinding(idx.Source, bindingName, replacement),
-                SubstituteBinding(idx.Index, bindingName, replacement),
+                idx.Indices.Select(i => SubstituteBinding(i, bindingName, replacement)).ToArray(),
                 idx.Span),
 
             // Leaf nodes that cannot contain the binding name.

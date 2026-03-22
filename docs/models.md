@@ -470,7 +470,7 @@ two-stage OCR pipeline.
   -- Just the detector — visualise box counts per image.
   SELECT
     photo_id,
-    array_length(models.paddleocr_v4_det(photo)) AS line_count
+    cardinality(models.paddleocr_v4_det(photo)) AS line_count
   FROM scanned_pages;
   ```
 

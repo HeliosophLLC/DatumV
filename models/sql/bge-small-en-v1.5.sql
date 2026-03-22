@@ -26,7 +26,7 @@ AS BEGIN
   -- from the ONNX file (`<id>/onnx/model.onnx`). Relative paths resolve
   -- against the model's USING directory, so `../vocab.txt` walks back up.
   DECLARE encoded Struct = tokenizer.encode_bert(text, '../vocab.txt');
-  DECLARE n Int32 = array_length(encoded['input_ids']);
+  DECLARE n Int32 = cardinality(encoded['input_ids']);
   DECLARE last_hidden_state Float32[] = infer(
     encoded,
     {

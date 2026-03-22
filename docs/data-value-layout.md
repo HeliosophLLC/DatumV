@@ -28,12 +28,13 @@ The 16-byte payload region (`_p0`–`_p3`) is reinterpreted per storage shape: a
 0x04  InSidecar     Payload lives in a .datum-blob sidecar.
 0x08  IsArray       This value is a typed array, not a scalar.
 0x10  InlineArray   Array payload packed into _p0–_p3 (≤ 16 bytes total).
-0x20  reserved
+0x20  IsMultiDim    Array carries an explicit shape (ndim ≥ 2) as an int32[ndim]
+                    prefix at the head of its payload bytes. Only valid with IsArray.
 0x40  reserved
 0x80  reserved
 ```
 
-Storage flags are mutually exclusive: `None` = inline, or exactly one of `InArena` / `InSidecar`. `IsNull` overrides every payload interpretation.
+Storage flags are mutually exclusive: `None` = inline, or exactly one of `InArena` / `InSidecar`. `IsNull` overrides every payload interpretation. `IsMultiDim` is orthogonal to the storage flags — it can combine with any of inline / arena / sidecar.
 
 ## Storage shapes
 
@@ -74,6 +75,23 @@ Element bytes pack contiguously into `_p0`–`_p3` (16-byte cap). Element count 
 
 Element bytes live externally; `(_p0, _p1)` or the sidecar slot points at them. `Kind` is the per-element kind. For `Struct` elements stored in a sidecar, each element's slot carries its own TypeId in bytes 13–14 (see "Type registry" below).
 
+### Multi-dim array (`IsArray | IsMultiDim`, combined with any storage flag)
+
+A multi-dim array carries its per-dimension shape as an `int32[ndim]` prefix at the head of its payload bytes — inline, arena, and sidecar tiers all use the same prefix-in-payload layout. Element bytes follow the prefix contiguously in row-major order. `ndim` lives in the high byte of `_charCount`; `Kind` is the per-element kind.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Payload bytes:                                                  │
+│   [int32 × ndim shape prefix][element bytes...]                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Element-access helpers (`AsArraySpan<T>`, `InlineArrayBytes`, `ElementCount`) transparently skip the prefix; `GetShape(store)` exposes the dims as a `ReadOnlySpan<int>`. The flag is only set for `ndim ≥ 2` — 1-D arrays stay flat with no flag and no prefix.
+
+Multi-dim arrays support only fixed-width primitive element kinds. `String`, `Struct`, `Image`, `Audio`, `Video`, `Json`, `PointCloud`, and `UInt8` (byte arrays) are explicitly rejected — they reuse `_charCount` for `storeId` / `TypeId` already, and the byte-array kind collides with the element-count derivation. DDL with a multi-dim shape on a reference-element kind is rejected at `CREATE TABLE` time.
+
+Constructed by `FromArenaMultiDimArray<T>`, `FromInlineMultiDimArray<T>`, `FromMultiDimArrayInSidecar`, or attached at INSERT time by `LiteralCoercion.EnforceFixedShape` when the target column declares `Array<T>(N, M, …)` with `ndim ≥ 2`.
+
 ## The `_charCount` slot
 
 Two bytes at offset 2, repurposed by storage shape:
@@ -84,6 +102,7 @@ Two bytes at offset 2, repurposed by storage shape:
 | Reference-store string / Json | full char count (0 = unknown, 65535 = overflow sentinel) |
 | Sidecar pointer | low byte = `storeId` |
 | Inline array | low byte = element count |
+| **Multi-dim array (any storage)** | **high byte = ndim** (combines with the low-byte usages above) |
 | **Struct** (any storage) | **TypeId — index into per-query `TypeRegistry`** |
 | `Type` value | TypeId of the represented type (when the represented kind is `Struct` or array-of-struct) |
 

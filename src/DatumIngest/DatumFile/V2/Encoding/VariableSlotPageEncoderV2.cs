@@ -239,10 +239,14 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         }
 
         // Typed inline arrays (UInt8 + IsArray + InlineArray, Float32 + IsArray + InlineArray, …).
-        // InlineArrayBytes returns exactly the active payload bytes.
+        // For flat arrays InlineArrayBytes returns exactly the active element bytes; for
+        // multi-dim arrays the on-disk payload must also include the shape prefix so the
+        // decoder can resurrect it — RawArrayBytes returns the full prefix+elements span.
         if (value.IsInlineArray)
         {
-            ReadOnlySpan<byte> bytes = value.InlineArrayBytes;
+            ReadOnlySpan<byte> bytes = value.IsMultiDim
+                ? value.RawArrayBytes(store: null)
+                : value.InlineArrayBytes;
             bytes.CopyTo(slot);
             return bytes.Length;
         }
@@ -274,12 +278,13 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
 
         // Any fixed-width typed-array value (Kind + IsArray, arena-backed) — bytes
         // already live contiguously at (_p0, _p1) in the store, regardless of element
-        // kind. AsArraySpan<byte> is the universal byte-level reader. Must run before
-        // the per-kind arms so byte arrays (UInt8 + IsArray) hit this path rather than
-        // a scalar arm.
+        // kind. RawArrayBytes is the universal byte-level reader that preserves any
+        // shape prefix carried by multi-dim values (AsArraySpan<byte> strips it, which
+        // would lose information the decoder needs). Must run before the per-kind arms
+        // so byte arrays (UInt8 + IsArray) hit this path rather than a scalar arm.
         if (value.IsArray)
         {
-            return value.AsArraySpan<byte>(store!);
+            return value.RawArrayBytes(store!);
         }
 
         // Arena-backed paths — kind dispatch picks the right read-side accessor.

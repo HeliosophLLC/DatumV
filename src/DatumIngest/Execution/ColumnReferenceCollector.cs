@@ -341,7 +341,8 @@ public static class ColumnReferenceCollector
 
             case IndexAccessExpression indexAccess:
                 Walk(indexAccess.Source, references);
-                Walk(indexAccess.Index, references);
+                foreach (Expression i in indexAccess.Indices)
+                    Walk(i, references);
                 break;
 
             case LiteralExpression:

@@ -207,7 +207,7 @@ public sealed class QuerySchemaResolver
                     string outputName = selectColumn.Alias
                         ?? ColumnNameResolver.GetRawName(selectColumn.Expression);
 
-                    (DataKind Kind, bool IsArray)? shape = ExpressionTypeResolver.ResolveTypeShape(
+                    (DataKind Kind, bool IsArray, bool IsMultiDim)? shape = ExpressionTypeResolver.ResolveTypeShape(
                         selectColumn.Expression, flatSourceSchema, _functionRegistry);
 
                     outputColumns.Add(new ResolvedColumn(
@@ -215,7 +215,8 @@ public sealed class QuerySchemaResolver
                         shape?.Kind ?? DataKind.String,
                         Nullable: true,
                         sourceIdentifier,
-                        IsArray: shape?.IsArray ?? false));
+                        IsArray: shape?.IsArray ?? false,
+                        IsMultiDim: shape?.IsMultiDim ?? false));
 
                     if (selectColumn.Alias is not null)
                     {
@@ -319,7 +320,7 @@ public sealed class QuerySchemaResolver
                     string outputName = selectColumn.Alias
                         ?? ColumnNameResolver.GetRawName(selectColumn.Expression);
 
-                    (DataKind Kind, bool IsArray)? shape = ExpressionTypeResolver.ResolveTypeShape(
+                    (DataKind Kind, bool IsArray, bool IsMultiDim)? shape = ExpressionTypeResolver.ResolveTypeShape(
                         selectColumn.Expression, innerSchema, _functionRegistry);
 
                     outputColumns.Add(new ResolvedColumn(
@@ -327,7 +328,8 @@ public sealed class QuerySchemaResolver
                         shape?.Kind ?? DataKind.String,
                         Nullable: true,
                         subquery.Alias,
-                        IsArray: shape?.IsArray ?? false));
+                        IsArray: shape?.IsArray ?? false,
+                        IsMultiDim: shape?.IsMultiDim ?? false));
                     if (selectColumn.Alias is not null)
                     {
                         aliasedPositions.Add(outputColumns.Count - 1);
@@ -397,12 +399,18 @@ public sealed class QuerySchemaResolver
         for (int index = 0; index < schema.Columns.Count; index++)
         {
             ColumnInfo column = schema.Columns[index];
+            // Source columns become multi-dim either explicitly (IsMultiDim flag)
+            // or by carrying a multi-dim FixedShape — keep both paths in sync so
+            // the resolved view is the union.
+            bool isMultiDim = column.IsMultiDim
+                || (column.IsArray && column.FixedShape is { Length: >= 2 });
             columns[index] = new ResolvedColumn(
                 column.Name,
                 column.Kind,
                 column.Nullable,
                 sourceIdentifier,
-                IsArray: column.IsArray);
+                IsArray: column.IsArray,
+                IsMultiDim: isMultiDim);
         }
 
         return columns;
@@ -426,14 +434,22 @@ public sealed class QuerySchemaResolver
                 string qualifiedName = $"{resolved.SourceTableOrAlias}.{resolved.ColumnName}";
                 if (seen.Add(qualifiedName))
                 {
-                    columns.Add(new ColumnInfo(qualifiedName, resolved.Kind, resolved.Nullable) { IsArray = resolved.IsArray });
+                    columns.Add(new ColumnInfo(qualifiedName, resolved.Kind, resolved.Nullable)
+                    {
+                        IsArray = resolved.IsArray,
+                        IsMultiDim = resolved.IsMultiDim,
+                    });
                 }
             }
 
             // Add unqualified name (first occurrence wins).
             if (seen.Add(resolved.ColumnName))
             {
-                columns.Add(new ColumnInfo(resolved.ColumnName, resolved.Kind, resolved.Nullable) { IsArray = resolved.IsArray });
+                columns.Add(new ColumnInfo(resolved.ColumnName, resolved.Kind, resolved.Nullable)
+                {
+                    IsArray = resolved.IsArray,
+                    IsMultiDim = resolved.IsMultiDim,
+                });
             }
         }
 

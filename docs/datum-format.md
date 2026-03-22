@@ -122,6 +122,7 @@ A 1024-row nullable boolean page is 256 bytes (vs 1024 bytes for raw byte-per-ro
 
 - For `String` / `JsonValue`: the active bytes are UTF-8.
 - For typed inline arrays (`UInt8`/`Int32`/`Float32`/… with `IsArray` + `InlineArray` flags): the active bytes are the packed elements.
+- For typed inline arrays whose column declares a multi-dim `FixedShape` (ndim ≥ 2): the active bytes are an `int32[ndim]` shape prefix followed by the packed elements. The decoder reconstructs the multi-dim DataValue via `FromInlineMultiDimRawBytes` using `ndim` from the column descriptor's `FixedShape`.
 - For other variable kinds, the value either spills to the sidecar (most common) or fits the inline tier the same way DataValue does.
 
 **The inline-length array is a deviation from the spec.** The format spec called for the 16 inline bytes to be byte-for-byte equal to `DataValue._p0`–`_p3`. But `DataValue._charCount` (which holds the inline byte length / element count) lives in the 4-byte header *outside* the 16-byte payload region — so a strict byte-for-byte copy loses length info for variable-length kinds. The 1 KiB/page array (1 byte × 1024 rows) is negligible overhead; the reader uses it to slice the slot back to the active payload length when reconstructing the DataValue.
@@ -136,6 +137,8 @@ A 1024-row nullable boolean page is 256 bytes (vs 1024 bytes for raw byte-per-ro
 | 15 | Codec | `SidecarBlobCodec` byte: `0=Raw` (only legal value today), `1=Zstd`, `2=Zstd+ByteShuffle` reserved for future use |
 
 Readers reject any non-zero codec byte with a clear error so a future writer's bytes are never silently misinterpreted by a current reader.
+
+**Multi-dim array payloads.** When a typed-array column declares a multi-dim `FixedShape` (ndim ≥ 2 — see [Per-column block](#per-column-block)), the sidecar bytes at `(Offset, Length)` carry an `int32[ndim]` shape prefix followed by the packed elements. `Length` covers both the prefix and the elements. The decoder reconstructs the multi-dim DataValue via `FromMultiDimArrayInSidecar` using `ndim` from the column descriptor's `FixedShape`. No format-level flag distinguishes multi-dim from flat arrays at the slot level — the column descriptor is the authoritative signal.
 
 ## Footer
 

@@ -92,15 +92,15 @@ public sealed class BatchExecutorTests : ServiceTestBase
     }
 
     [Fact]
-    public async Task Declare_ArrayLiteralInitializer_BindsArrayUsableByArrayLength()
+    public async Task Declare_ArrayLiteralInitializer_BindsArrayUsableByCardinality()
     {
         // Reported bug: storing an array literal under a variable and then
-        // calling array_length() on the variable threw "argument must be an
+        // calling cardinality() on the variable threw "argument must be an
         // array" because the IsArray flag wasn't preserved through the path
         // (DECLARE → variable scope → variable read → function arg).
         BatchResult result = await RunAsync(
             "DECLARE players Array<String> = ['Fighter', 'Wizard', 'Healer']; " +
-            "DECLARE player_count INT32 = ARRAY_LENGTH(players)");
+            "DECLARE player_count INT32 = CARDINALITY(players)");
 
         Assert.Equal(3, Convert.ToInt32(result.FinalBindings["player_count"]));
     }

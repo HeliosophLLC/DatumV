@@ -36,7 +36,7 @@ USING 'toxic-bert/onnx/model.onnx'
 AS BEGIN
   -- vocab.txt sits at the catalog root, one directory up from the ONNX file.
   DECLARE encoded Struct = tokenizer.encode_bert(text, '../vocab.txt');
-  DECLARE n Int32 = array_length(encoded['input_ids']);
+  DECLARE n Int32 = cardinality(encoded['input_ids']);
   DECLARE logits Float32[] = infer(
     encoded,
     {

@@ -61,7 +61,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("detections"),
-                new LiteralExpression(0));
+                [new LiteralExpression(0)]);
 
             DataValue result = await EvalWithRegistryAsync(
                 access, MakeRow(("detections", structArray)), arena, registry);
@@ -96,7 +96,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("detections"),
-                new LiteralExpression(0));
+                [new LiteralExpression(0)]);
 
             DataValue result = await EvalWithRegistryAsync(
                 access, MakeRow(("detections", structArray)), arena, registry);
@@ -131,7 +131,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("arr"),
-                new LiteralExpression(99));
+                [new LiteralExpression(99)]);
 
             DataValue result = await EvalWithRegistryAsync(
                 access, MakeRow(("arr", structArray)), arena, registry);
@@ -158,7 +158,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("arr"),
-                new LiteralExpression(0));
+                [new LiteralExpression(0)]);
 
             DataValue result = await EvalAsync(access, MakeRow(("arr", structArray)), arena);
 
@@ -180,7 +180,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("arr"),
-                new LiteralExpression(1));
+                [new LiteralExpression(1)]);
 
             DataValue result = await EvalAsync(access, MakeRow(("arr", stringArray)), arena);
 
@@ -203,7 +203,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("arr"),
-                new LiteralExpression(2));
+                [new LiteralExpression(2)]);
 
             DataValue result = await EvalAsync(access, MakeRow(("arr", floatArray)), arena);
 
@@ -225,7 +225,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("arr"),
-                new LiteralExpression(99));
+                [new LiteralExpression(99)]);
 
             DataValue result = await EvalAsync(access, MakeRow(("arr", intArray)), arena);
 
@@ -249,7 +249,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("detections"),
-                new LiteralExpression(1));
+                [new LiteralExpression(1)]);
 
             DataValue result = await EvalAsync(access, MakeRow(("detections", structArray)), arena);
 
@@ -273,7 +273,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("arr"),
-                new LiteralExpression("foo"));
+                [new LiteralExpression("foo")]);
 
             InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
                 async () => await EvalAsync(access, MakeRow(("arr", stringArray)), arena));

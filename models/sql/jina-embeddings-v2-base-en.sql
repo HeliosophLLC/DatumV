@@ -23,7 +23,7 @@ AS BEGIN
   -- Jina ships ONNX + vocab.txt at the repo root (no `onnx/` subdir like
   -- BGE), so the tokenizer file resolves directly relative to the model.
   DECLARE encoded Struct = tokenizer.encode_bert(text, 'vocab.txt');
-  DECLARE n Int32 = array_length(encoded['input_ids']);
+  DECLARE n Int32 = cardinality(encoded['input_ids']);
   DECLARE last_hidden_state Float32[] = infer(
     encoded,
     {

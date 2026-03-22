@@ -259,7 +259,7 @@ public static class UdfInliner
             {
                 Fields = sl.Fields.Select(f => new StructField(f.Name, Rewrite(f.Value))).ToList(),
             },
-            IndexAccessExpression ix => ix with { Source = Rewrite(ix.Source), Index = Rewrite(ix.Index) },
+            IndexAccessExpression ix => ix with { Source = Rewrite(ix.Source), Indices = ix.Indices.Select(Rewrite).ToArray() },
             // Leaves
             _ => expression,
         };
@@ -509,7 +509,7 @@ public static class UdfInliner
                         };
 
                     case IndexAccessExpression ix:
-                        return ix with { Source = Walk(ix.Source, activeParams), Index = Walk(ix.Index, activeParams) };
+                        return ix with { Source = Walk(ix.Source, activeParams), Indices = ix.Indices.Select(i => Walk(i, activeParams)).ToArray() };
 
                     // Subqueries are intentionally not walked here. A UDF body
                     // that contains a subquery does not have its outer
