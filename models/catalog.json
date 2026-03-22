@@ -520,6 +520,7 @@
       "attributions": ["Lihe Yang, Bingyi Kang, Zilong Huang, Zhen Zhao, Xiaogang Xu, Jiashi Feng, Hengshuang Zhao — Depth Anything V2 (TikTok / HKU)", "onnx-community (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "onnx-community/depth-anything-v2-small", "revision": "main", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] }],
+      "installSql": "sql/depth-anything-v2-small.sql",
       "approxSizeMb": 100
     },
     {
@@ -532,20 +533,34 @@
       "attributions": ["Lihe Yang, Bingyi Kang, Zilong Huang, Zhen Zhao, Xiaogang Xu, Jiashi Feng, Hengshuang Zhao — Depth Anything V2 (TikTok / HKU)", "onnx-community (ONNX export)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "onnx-community/depth-anything-v2-base", "revision": "main", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] }],
+      "installSql": "sql/depth-anything-v2-base.sql",
       "approxSizeMb": 400
     },
     {
       "id": "zoedepth-nyu-kitti",
       "displayName": "ZoeDepth (NYU+KITTI, Metric Depth)",
-      "description": "**Metric** depth estimation — outputs real-world distances in meters, not just relative depth. DPT-Large backbone + dual metric heads (NYU indoor + KITTI outdoor calibration). Use when absolute scale matters: 3D point-cloud reconstruction at consistent scale across images, distance measurement, AR-style overlays. Much heavier than the relative-depth models (~1.3 GB).",
+      "description": "**Metric** depth estimation — outputs real-world distances in meters, not just relative depth. DPT-Large backbone + dual metric heads (NYU indoor + KITTI outdoor calibration). Use when absolute scale matters: 3D point-cloud reconstruction at consistent scale across images, distance measurement, AR-style overlays. Heavier than the relative-depth models (~1.3 GB); for a smaller deployment footprint use the fp16 sibling entry.",
       "task": "depth-estimation",
       "tags": ["depth", "metric-depth", "zoedepth", "transformer"],
       "licenseIds": ["mit"],
-      "attributions": ["Shariq Farooq Bhat, Reiner Birkl, Diana Wofk, Peter Wonka, Matthias Müller — ZoeDepth (Intel ISL)", "onnx-community (ONNX export)"],
-      "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
-      "sources": [{ "type": "huggingface", "repo": "onnx-community/zoedepth-nyu-kitti", "revision": "main", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] }],
-      "approxSizeMb": 1300,
-      "placeholder": true
+      "attributions": ["Shariq Farooq Bhat, Reiner Birkl, Diana Wofk, Peter Wonka, Matthias Müller — ZoeDepth (Intel ISL)", "Heliosoph (Optimum / torch.onnx.export from Intel/zoedepth-nyu-kitti PyTorch weights)"],
+      "hardware": { "minRamMb": 2048, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/zoedepth-nyu-kitti-onnx", "revision": "c98acf691bb1b7f52744e5e31dcdfa7094fd8a1a", "include": ["model.onnx", "config.json", "preprocessor_config.json"] }],
+      "installSql": "sql/zoedepth-nyu-kitti.sql",
+      "approxSizeMb": 1310
+    },
+    {
+      "id": "zoedepth-nyu-kitti-fp16",
+      "displayName": "ZoeDepth fp16 (NYU+KITTI, Metric Depth)",
+      "description": "Half-precision variant of ZoeDepth (NYU+KITTI). ~660 MB on disk vs ~1.3 GB for fp32 — same metric depth output. Pick when deployment footprint matters (container images, edge bundles); on GPU/NPU with native fp16, expect a modest speedup. On CPU runtimes that upcast fp16→fp32 internally, expect identical latency to fp32 but half the model-load memory.",
+      "task": "depth-estimation",
+      "tags": ["depth", "metric-depth", "zoedepth", "transformer", "fp16"],
+      "licenseIds": ["mit"],
+      "attributions": ["Shariq Farooq Bhat, Reiner Birkl, Diana Wofk, Peter Wonka, Matthias Müller — ZoeDepth (Intel ISL)", "Heliosoph (Optimum + onnxconverter-common fp16 conversion from Intel/zoedepth-nyu-kitti PyTorch weights)"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/zoedepth-nyu-kitti-onnx", "revision": "c98acf691bb1b7f52744e5e31dcdfa7094fd8a1a", "include": ["model_fp16.onnx", "config.json", "preprocessor_config.json"] }],
+      "installSql": "sql/zoedepth-nyu-kitti-fp16.sql",
+      "approxSizeMb": 660
     },
     {
       "id": "glpn-nyu",
@@ -556,7 +571,8 @@
       "licenseIds": ["apache-2.0"],
       "attributions": ["Doyeon Kim, Woonghyun Ka, Pyungwhan Ahn, Donggyu Joo, Sehwan Chun, Junmo Kim — GLPN (KAIST)", "Joshua Lochner / Xenova (ONNX export)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "Xenova/glpn-nyu", "revision": "main", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] }],
+      "sources": [{ "type": "huggingface", "repo": "Xenova/glpn-nyu", "revision": "182fa220c74e8bda314caabed676196967014c08", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] }],
+      "installSql": "sql/glpn-nyu.sql",
       "approxSizeMb": 200
     },
     {
@@ -603,9 +619,9 @@
       "task": "text-recognition",
       "tags": ["ocr", "text-recognition", "trocr", "documents", "transformer"],
       "licenseIds": ["mit"],
-      "attributions": ["Microsoft Research — TrOCR (Li, Lv, Yu, Cui, Lu, Wei, 2021)", "Joshua Lochner / Xenova (ONNX export)"],
+      "attributions": ["Microsoft Research — TrOCR (Li, Lv, Yu, Cui, Lu, Wei, 2021)", "Heliosoph (Optimum ONNX export from microsoft/trocr-base-printed PyTorch weights)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "Xenova/trocr-base-printed", "revision": "cf024f7df347684b6ee92859452962b67c6873fb", "include": ["onnx/encoder_model.onnx", "onnx/decoder_model_merged.onnx", "config.json", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "special_tokens_map.json"] }],
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/trocr-base-printed-onnx", "revision": "4fcdb5c7813942239ddb6c2539daa36be5018480", "include": ["onnx/encoder_model.onnx", "onnx/decoder_model_merged.onnx", "config.json", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "special_tokens_map.json"] }],
       "installSql": "sql/trocr-base-printed.sql",
       "approxSizeMb": 1400
     },
@@ -616,9 +632,9 @@
       "task": "text-recognition",
       "tags": ["ocr", "text-recognition", "trocr", "documents", "transformer", "fp16"],
       "licenseIds": ["mit"],
-      "attributions": ["Microsoft Research — TrOCR (Li, Lv, Yu, Cui, Lu, Wei, 2021)", "Joshua Lochner / Xenova (ONNX export + fp16 quantization)"],
+      "attributions": ["Microsoft Research — TrOCR (Li, Lv, Yu, Cui, Lu, Wei, 2021)", "Heliosoph (Optimum fp16 ONNX export from microsoft/trocr-base-printed PyTorch weights)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "Xenova/trocr-base-printed", "revision": "cf024f7df347684b6ee92859452962b67c6873fb", "include": ["onnx/encoder_model_fp16.onnx", "onnx/decoder_model_merged_fp16.onnx", "config.json", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "special_tokens_map.json"] }],
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/trocr-base-printed-onnx", "revision": "4fcdb5c7813942239ddb6c2539daa36be5018480", "include": ["onnx/encoder_model_fp16.onnx", "onnx/decoder_model_merged_fp16.onnx", "config.json", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "special_tokens_map.json"] }],
       "installSql": "sql/trocr-base-printed-fp16.sql",
       "approxSizeMb": 700
     },
