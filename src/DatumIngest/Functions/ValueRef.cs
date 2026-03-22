@@ -231,14 +231,15 @@ public readonly struct ValueRef
 
     /// <summary>
     /// Byte-array payload. Pass <see cref="DataKind.Image"/>, <see cref="DataKind.Audio"/>,
-    /// <see cref="DataKind.Video"/>, or <see cref="DataKind.Json"/> for the corresponding
-    /// encoded-blob kinds, or <see cref="DataKind.UInt8"/> with <paramref name="isArray"/>
-    /// set to <c>true</c> for generic byte arrays. The DataValue tag carries the kind (and
-    /// IsArray flag for byte arrays); the actual bytes live in <see cref="Materialized"/>.
+    /// <see cref="DataKind.Video"/>, <see cref="DataKind.Json"/>, or <see cref="DataKind.PointCloud"/>
+    /// for the corresponding encoded-blob kinds, or <see cref="DataKind.UInt8"/> with
+    /// <paramref name="isArray"/> set to <c>true</c> for generic byte arrays. The DataValue tag
+    /// carries the kind (and IsArray flag for byte arrays); the actual bytes live in
+    /// <see cref="Materialized"/>.
     /// </summary>
     public static ValueRef FromBytes(DataKind kind, byte[] value, bool isArray = false)
     {
-        if (kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json)
+        if (kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud)
         {
             return new(DataValue.Null(kind), value);
         }
@@ -247,7 +248,7 @@ public readonly struct ValueRef
             return new(DataValue.NullByteArray(), value);
         }
         throw new ArgumentException(
-            $"FromBytes is only valid for Image/Audio/Video/Json or (UInt8 with IsArray=true); got {kind}, isArray={isArray}.",
+            $"FromBytes is only valid for Image/Audio/Video/Json/PointCloud or (UInt8 with IsArray=true); got {kind}, isArray={isArray}.",
             nameof(kind));
     }
 
@@ -259,6 +260,16 @@ public readonly struct ValueRef
     /// </summary>
     public static ValueRef FromImage(SKBitmap bitmap) =>
         new(DataValue.Null(DataKind.Image), bitmap);
+
+    /// <summary>
+    /// PointCloud value carried as a raw byte blob (40-byte header + interleaved
+    /// per-point payload — see <see cref="DatumIngest.Model.Spatial.PointCloudHeader"/>).
+    /// Producers build the full blob in managed memory; arena copy happens once at
+    /// <see cref="ToDataValue"/>. No decoded form — PointCloud has no SKBitmap-equivalent
+    /// because its on-wire layout is already the renderable form.
+    /// </summary>
+    public static ValueRef FromPointCloud(byte[] blob) =>
+        new(DataValue.Null(DataKind.PointCloud), blob);
 
     /// <summary>
     /// JSON payload as a byte slice over canonical CBOR bytes — used by
@@ -507,6 +518,27 @@ public readonly struct ValueRef
         }
         throw new InvalidOperationException(
             $"ValueRef of kind {Kind} does not carry an Image payload "
+            + $"(Materialized: {_materialized?.GetType().Name ?? "<none>"}).");
+    }
+
+    /// <summary>
+    /// Returns the raw PointCloud blob (40-byte header + interleaved per-point
+    /// payload). Asserts <see cref="Kind"/> is <see cref="DataKind.PointCloud"/>.
+    /// Callers parse the header via <see cref="DatumIngest.Model.Spatial.PointCloudHeader.Read"/>.
+    /// </summary>
+    public byte[] AsPointCloud()
+    {
+        if (_inline.Kind != DataKind.PointCloud)
+        {
+            throw new InvalidOperationException(
+                $"AsPointCloud called on a {_inline.Kind} value (expected PointCloud).");
+        }
+        if (_materialized is byte[] bytes)
+        {
+            return bytes;
+        }
+        throw new InvalidOperationException(
+            "PointCloud ValueRef does not carry a byte[] payload "
             + $"(Materialized: {_materialized?.GetType().Name ?? "<none>"}).");
     }
 
@@ -839,6 +871,8 @@ public readonly struct ValueRef
                 DataValue.FromVideo(bytes, targetStore),
             byte[] bytes when _inline.Kind == DataKind.Json && !_inline.IsArray =>
                 DataValue.FromJson(bytes, targetStore),
+            byte[] bytes when _inline.Kind == DataKind.PointCloud && !_inline.IsArray =>
+                DataValue.FromPointCloud(bytes, targetStore),
             // Slice form (json_query subdocument): copy only the slice's bytes into the arena.
             ArraySegment<byte> slice when _inline.Kind == DataKind.Json && !_inline.IsArray =>
                 DataValue.FromJson((ReadOnlySpan<byte>)slice, targetStore),

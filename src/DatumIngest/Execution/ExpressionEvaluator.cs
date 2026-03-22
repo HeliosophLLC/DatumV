@@ -999,7 +999,7 @@ public sealed class ExpressionEvaluator
         }
 
         // Non-inline single-value byte blobs.
-        if (value.Kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json)
+        if (value.Kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud)
         {
             ReadOnlySpan<byte> bytes = value.AsByteSpan(frame.Source, frame.SidecarRegistry);
             return ValueRef.FromBytes(value.Kind, bytes.ToArray());

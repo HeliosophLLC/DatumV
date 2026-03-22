@@ -638,6 +638,19 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ClipMeanFunction>();
         registry.RegisterScalar<Scalar.Image.ClipStdFunction>();
 
+        // Spatial — PointCloud construction + accessors. Constructor consumes an
+        // Image-typed depth map (output of depth_map_to_image on MiDaS/DPT-family
+        // models); accessors mirror image_width/image_height for header fields.
+        registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudCountFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudWidthFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudHeightFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudIsOrganizedFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudHasColorFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudBboxMinFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudBboxMaxFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudDepthFunction>();
+
         // Encoding
         registry.RegisterScalar<Scalar.Encoding.EncodeFunction>();
         registry.RegisterScalar<Scalar.Encoding.DecodeFunction>();
