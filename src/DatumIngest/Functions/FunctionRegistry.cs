@@ -601,6 +601,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Arrays.ArrayConstructorFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayToStringFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayLengthFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayConcatFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayRepeatFunction>();
 
         // UUID
         registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();
@@ -703,6 +705,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<InferFunction>();
         registry.RegisterScalar<InferOutputsFunction>();
         registry.RegisterScalar<DecodeSeq2SeqFunction>();
+        registry.RegisterScalar<DecodeDecoderOnlyFunction>();
 
         // Templates — per-LLM-family chat-template primitives. Three
         // functions per family (open / msg / assistant_turn) for

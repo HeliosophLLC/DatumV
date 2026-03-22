@@ -24,7 +24,15 @@ internal static class ByteLevelBpeDecoder
 
     /// <summary>
     /// Translates a tokenizer-decoded string (which still contains the
-    /// byte-level BPE mojibake) back into UTF-8 text.
+    /// byte-level BPE mojibake) back into UTF-8 text, then strips the
+    /// HuggingFace BART/RoBERTa/Florence-2 special-token markers
+    /// (<c>&lt;s&gt;</c>, <c>&lt;/s&gt;</c>, <c>&lt;pad&gt;</c>, <c>&lt;unk&gt;</c>,
+    /// <c>&lt;mask&gt;</c>) that <c>BpeTokenizer.Decode</c> leaves verbatim.
+    /// Models like Florence-2 emit <c>&lt;s&gt;</c> as the first generated
+    /// token regardless of the decoder_start_token wrapping (HF's
+    /// <c>generate()</c> hides this via <c>skip_special_tokens=True</c>); we
+    /// do the same scrub here so callers get clean text instead of
+    /// <c>"&lt;s&gt;mirror"</c>.
     /// </summary>
     public static string Decode(string raw)
     {
@@ -48,7 +56,26 @@ internal static class ByteLevelBpeDecoder
                 byteIdx += written;
             }
         }
-        return Encoding.UTF8.GetString(bytes, 0, byteIdx);
+        string decoded = Encoding.UTF8.GetString(bytes, 0, byteIdx);
+        return StripSpecialTokens(decoded);
+    }
+
+    // BART/RoBERTa/Florence-2 special-token markers. These are real vocab
+    // entries (e.g. id 0 = <s>) so BpeTokenizer.Decode emits them as literal
+    // text; we strip them after the byte-level inversion since they're never
+    // meaningful caption / OCR output. Order doesn't matter — string.Replace
+    // is a single linear pass per marker.
+    private static readonly string[] SpecialTokens =
+        ["<s>", "</s>", "<pad>", "<unk>", "<mask>"];
+
+    private static string StripSpecialTokens(string text)
+    {
+        foreach (string marker in SpecialTokens)
+        {
+            if (text.Contains(marker, StringComparison.Ordinal))
+                text = text.Replace(marker, string.Empty, StringComparison.Ordinal);
+        }
+        return text;
     }
 
     private static Dictionary<char, byte> BuildUnicodeToByte()

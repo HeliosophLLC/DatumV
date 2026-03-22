@@ -285,6 +285,35 @@ public sealed class ModelResidencyManager : IDisposable
     }
 
     /// <summary>
+    /// Drops the cached <see cref="IModel"/> for <paramref name="modelName"/> if
+    /// one is resident, disposing it when it implements <see cref="IDisposable"/>
+    /// and freeing its VRAM accounting. Used by <c>CREATE OR REPLACE MODEL</c>
+    /// and <c>DROP MODEL</c> so subsequent acquires don't keep handing out the
+    /// stale model whose underlying ONNX sessions the registrar is about to
+    /// dispose. In-flight queries already holding a lease are left to finish
+    /// against the now-removed entry — the registrar tears down sessions
+    /// synchronously today, same race as <c>OR REPLACE</c> for UDFs.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> if an entry was evicted; <see langword="false"/>
+    /// when no model was cached under that name.
+    /// </returns>
+    public bool Evict(string modelName)
+    {
+        lock (_lock)
+        {
+            if (!_resident.TryGetValue(modelName, out Resident? r)) return false;
+            _resident.Remove(modelName);
+            _vramUsedBytes -= r.Bytes;
+            if (r.ModelTask.IsCompletedSuccessfully)
+                (r.ModelTask.Result as IDisposable)?.Dispose();
+            DatumActivity.Operators.Trace(
+                $"[residency] evict-explicit '{modelName}' bytes={r.Bytes} used={_vramUsedBytes}");
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Tests whether <paramref name="estimatedBytes"/> fits in the budget,
     /// evicting LRU non-active entries as needed. Caller holds the lock.
     /// Returns <see langword="true"/> if room was made (or budget is

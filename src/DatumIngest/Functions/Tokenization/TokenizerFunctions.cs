@@ -71,7 +71,8 @@ public sealed class TokenizerEncodeFunction : IFunction, IScalarFunction
         }
 
         string text = args[0].AsString();
-        string resolvedPath = TokenizerPath.ResolveAbsolute(args[1].AsString(), "tokenizer.encode");
+        string resolvedPath = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
+            args[1].AsString(), "tokenizer.encode", frame);
 
         BpeTokenizer tokenizer = TokenizerCache.GetFromTokenizerJson(resolvedPath);
         return new ValueTask<ValueRef>(TokenizerOps.EncodeToValueRef(tokenizer, text));
@@ -130,8 +131,13 @@ public sealed class TokenizerEncodeBpeFunction : IFunction, IScalarFunction
         }
 
         string text = args[0].AsString();
-        string resolvedVocab  = TokenizerPath.ResolveAbsolute(args[1].AsString(), "tokenizer.encode_bpe");
-        string resolvedMerges = TokenizerPath.ResolveAbsolute(args[2].AsString(), "tokenizer.encode_bpe");
+        // Catalog-relative resolution mirrors decode_bpe so SQL model bodies
+        // can name vocab/merges as sibling files of the USING ONNX (e.g.
+        // 'florence-2-base-ft-fp16/vocab.json') without absolute paths.
+        string resolvedVocab  = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
+            args[1].AsString(), "tokenizer.encode_bpe", frame);
+        string resolvedMerges = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
+            args[2].AsString(), "tokenizer.encode_bpe", frame);
 
         BpeTokenizer tokenizer = TokenizerCache.GetFromVocabMerges(resolvedVocab, resolvedMerges);
         return new ValueTask<ValueRef>(TokenizerOps.EncodeToValueRef(tokenizer, text));
@@ -187,7 +193,8 @@ public sealed class TokenizerDecodeFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.String));
         }
 
-        string resolvedPath = TokenizerPath.ResolveAbsolute(args[1].AsString(), "tokenizer.decode");
+        string resolvedPath = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
+            args[1].AsString(), "tokenizer.decode", frame);
 
         BpeTokenizer tokenizer = TokenizerCache.GetFromTokenizerJson(resolvedPath);
         return new ValueTask<ValueRef>(TokenizerOps.DecodeToValueRef(tokenizer, args[0]));
@@ -295,9 +302,10 @@ public sealed class TokenizerByteLevelDecodeFunction : IFunction, IScalarFunctio
         + "(Ġ → space, Ċ → newline, etc.) on a token-decoded string and "
         + "trims surrounding whitespace. Pair with tokenizer.decode_bpe to "
         + "get plain UTF-8 text out of any byte-level BPE model's decoder "
-        + "output. The leading space (artifact of the byte-level encoding "
-        + "always treating the first content token as space-prefixed) is "
-        + "removed by the trim — the canonical caption/OCR post-processing.";
+        + "output. Also strips the HuggingFace special-token markers "
+        + "(<s>, </s>, <pad>, <unk>, <mask>) that BpeTokenizer.Decode "
+        + "leaves verbatim — Florence-2 / BART emit <s> as the first "
+        + "generated token, which would otherwise leak into the caption.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =

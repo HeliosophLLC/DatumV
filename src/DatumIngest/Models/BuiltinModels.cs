@@ -91,11 +91,13 @@ public static class BuiltinModels
         // quantized comparison entry. Same model, different task tokens.
         // OCR-with-region reuses the same files via a different task token
         // and is the license-clean baseline for screenshot text extraction.
-        RegisterFlorence2Caption(modelCatalog);
-        RegisterFlorence2DetailedCaption(modelCatalog);
-        RegisterFlorence2MoreDetailedCaption(modelCatalog);
-        RegisterFlorence2CaptionQuantized(modelCatalog);
-        RegisterFlorence2OcrWithRegion(modelCatalog);
+        // Florence-2 (5 caption/OCR variants × 2 binaries) migrated to
+        // SQL-defined models (models/sql/florence-2-base-ft-fp16.sql and
+        // models/sql/florence-2-base-ft-quantized.sql). Five SQL-visible
+        // catalog names match the original C# registrations:
+        //   florence2_caption, florence2_detailed_caption,
+        //   florence2_more_detailed_caption, florence2_ocr_with_region (fp16),
+        //   florence2_caption_q8 (INT8 quantized).
 
         // Image generation. SD-Turbo is the closing leg of the
         // image-in → caption → LLM-narrative → image-out pipeline.
@@ -141,12 +143,11 @@ public static class BuiltinModels
         RegisterWhisperMedium(modelCatalog);
 
         // VLM zoo — Apache/MIT-licensed alternatives to OmniParser's
-        // AGPL detector. Free-form prompt as the second positional arg:
-        // `models.moondream2(image, 'Describe this screenshot')`.
-        // Phi-3.5-vision uses ORT GenAI for IO-binding-accelerated
-        // generation; Moondream2 is the hand-rolled baseline.
+        // AGPL detector. Phi-3.5-vision uses ORT GenAI for IO-binding-
+        // accelerated generation. Moondream2 migrated to SQL (catalog
+        // installSql → models/sql/moondream2.sql) using the
+        // `decode_decoder_only` scalar; no C# registration here.
         RegisterPhi35Vision(modelCatalog);
-        RegisterMoondream2(modelCatalog);
 
         // Python-bridge models. These show status=bridge in system.models
         // (rather than available/missing) when their worker scripts and
@@ -1560,155 +1561,20 @@ public static class BuiltinModels
             ]));
     }
 
-    /// <summary>Default folder for the fp16 Florence-2 build.</summary>
-    public const string Florence2Fp16Folder = "florence-2-base-ft-fp16";
-
-    /// <summary>Default folder for the int8-quantized Florence-2 build.</summary>
-    public const string Florence2QuantizedFolder = "florence-2-base-ft-quantized";
-
-    /// <summary>
-    /// Files needed for any Florence-2 install (relative to its variant
-    /// folder). The four ONNX file names are interpolated per
-    /// quantization suffix; tokenizer + configs are shared across both.
-    /// </summary>
-    private static IReadOnlyList<string> Florence2Files(string folder, string componentSuffix) =>
-    [
-        $"{folder}/vision_encoder{componentSuffix}.onnx",
-        $"{folder}/embed_tokens{componentSuffix}.onnx",
-        $"{folder}/encoder_model{componentSuffix}.onnx",
-        $"{folder}/decoder_model{componentSuffix}.onnx",
-        $"{folder}/tokenizer.json",
-        $"{folder}/vocab.json",
-        $"{folder}/merges.txt",
-        $"{folder}/config.json",
-        $"{folder}/generation_config.json",
-        $"{folder}/preprocessor_config.json",
-        $"{folder}/special_tokens_map.json",
-    ];
-
-    /// <summary>
-    /// Common backbone for the four Florence-2 caption registrations. Each
-    /// caller passes the catalog name, the task prompt token, and the
-    /// folder/variant to register against.
-    /// </summary>
-    private static void RegisterFlorence2Caption(
-        ModelCatalog catalog,
-        string modelName,
-        string displayName,
-        string taskPrompt,
-        string folder,
-        string componentSuffix,
-        string licenseTag,
-        int maxTokens)
-    {
-        string encoderRelativePath = $"{folder}/vision_encoder{componentSuffix}.onnx";
-
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: encoderRelativePath,
-            InputKinds: [DataKind.Image],
-            OutputKind: DataKind.String,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
-                return new Florence2Model(modelName, encoderPath, taskPrompt, maxTokens);
-            },
-            DisplayName: displayName,
-            Parameters: "232M",
-            License: "MIT",
-            LicenseHolder: "Microsoft",
-            SourceUrl: "https://huggingface.co/onnx-community/Florence-2-base-ft",
-            Category: "captioner",
-            Modalities: ["image", "text"],
-            Files: Florence2Files(folder, componentSuffix)));
-    }
-
-    /// <summary>
-    /// Registers Florence-2 in short-caption mode (fp16). Output is a
-    /// COCO-style single-sentence caption similar to ViT-GPT2 but with
-    /// noticeably better quality.
-    /// </summary>
-    public static void RegisterFlorence2Caption(ModelCatalog catalog) =>
-        RegisterFlorence2Caption(
-            catalog,
-            modelName: "florence2_caption",
-            displayName: "Florence-2 Caption (fp16)",
-            taskPrompt: "<CAPTION>",
-            folder: Florence2Fp16Folder,
-            componentSuffix: "_fp16",
-            licenseTag: "fp16",
-            maxTokens: 50);
-
-    /// <summary>
-    /// Registers Florence-2 in detailed-caption mode (fp16). Outputs a
-    /// fuller sentence with descriptive context.
-    /// </summary>
-    public static void RegisterFlorence2DetailedCaption(ModelCatalog catalog) =>
-        RegisterFlorence2Caption(
-            catalog,
-            modelName: "florence2_detailed_caption",
-            displayName: "Florence-2 Detailed Caption (fp16)",
-            taskPrompt: "<DETAILED_CAPTION>",
-            folder: Florence2Fp16Folder,
-            componentSuffix: "_fp16",
-            licenseTag: "fp16",
-            maxTokens: 150);
-
-    /// <summary>
-    /// Registers Florence-2 in paragraph-caption mode (fp16). Outputs a
-    /// multi-sentence description suitable as an SDXL prompt seed.
-    /// </summary>
-    public static void RegisterFlorence2MoreDetailedCaption(ModelCatalog catalog) =>
-        RegisterFlorence2Caption(
-            catalog,
-            modelName: "florence2_more_detailed_caption",
-            displayName: "Florence-2 More Detailed Caption (fp16)",
-            taskPrompt: "<MORE_DETAILED_CAPTION>",
-            folder: Florence2Fp16Folder,
-            componentSuffix: "_fp16",
-            licenseTag: "fp16",
-            maxTokens: 300);
-
-    /// <summary>
-    /// Registers Florence-2 in short-caption mode using the int8-quantized
-    /// build. Same model, ¼ the disk; useful for quality / size A/B against
-    /// <c>florence2_caption</c>.
-    /// </summary>
-    public static void RegisterFlorence2CaptionQuantized(ModelCatalog catalog) =>
-        RegisterFlorence2Caption(
-            catalog,
-            modelName: "florence2_caption_q8",
-            displayName: "Florence-2 Caption (int8)",
-            taskPrompt: "<CAPTION>",
-            folder: Florence2QuantizedFolder,
-            componentSuffix: "_quantized",
-            licenseTag: "q8",
-            maxTokens: 50);
-
-    /// <summary>
-    /// Registers Florence-2 in OCR-with-region mode (fp16). Output is a
-    /// single string interleaving each detected text run with four
-    /// <c>&lt;loc_*&gt;</c> tokens encoding its bounding box (Florence-2's
-    /// 0–999 quantized-coordinate convention). License-clean substitute for
-    /// the AGPL-encumbered OmniParser detector when the consumer is an LLM
-    /// that can parse the location-token stream itself; structured
-    /// <c>Array&lt;Struct{text, bbox}&gt;</c> parsing is a follow-up.
-    /// </summary>
-    public static void RegisterFlorence2OcrWithRegion(ModelCatalog catalog) =>
-        RegisterFlorence2Caption(
-            catalog,
-            modelName: "florence2_ocr_region",
-            displayName: "Florence-2 OCR with Region (fp16)",
-            taskPrompt: "<OCR_WITH_REGION>",
-            folder: Florence2Fp16Folder,
-            componentSuffix: "_fp16",
-            licenseTag: "fp16",
-            // Dense screenshots can produce many text regions, each
-            // contributing text tokens + four location tokens. 1024 keeps
-            // the generation budget generous without runaway latency.
-            maxTokens: 1024);
+    // Florence-2 (5 task variants) was previously registered here as a set
+    // of C# IModel wrappers (Florence2Model.cs). The fp16 binary serves
+    // four catalog-visible models (florence2_caption,
+    // florence2_detailed_caption, florence2_more_detailed_caption,
+    // florence2_ocr_with_region); the INT8-quantized binary serves a
+    // fifth (florence2_caption_q8). All five now ship as SQL-defined
+    // models in models/sql/florence-2-base-ft-fp16.sql and
+    // models/sql/florence-2-base-ft-quantized.sql, backed by
+    // image_to_tensor_chw, the multi-session encoder/decoder USING form,
+    // array_concat + array_repeat for the visual||prompt concat and
+    // attention mask, and decode_seq2seq's 8-arg inputs_embeds form
+    // (Florence-2's decoder takes inputs_embeds, so embed_tokens runs
+    // each step). The catalog entries' installSql declarations re-register
+    // the SQL forms when the model directories are rehydrated.
 
     // SCRFD-10G was previously registered here as a built-in C# IModel
     // (ScrfdModel.cs). Removed 2026-05-17 after a license review:
@@ -2168,34 +2034,6 @@ public static class BuiltinModels
         => RegisterWhisperVariant(catalog, modelName, WhisperMediumFolder,
             displayName: "Whisper Medium", parameters: "769M", maxTokens: 224);
 
-    /// <summary>Default folder for the Xenova / onnx-community Moondream2 export.</summary>
-    public const string Moondream2Folder = "moondream2-onnx";
-
-    /// <summary>
-    /// File-existence anchor for Moondream2: the fp16 vision encoder.
-    /// The model loader resolves embed_tokens, the merged decoder, and
-    /// tokenizer files relative to this file.
-    /// </summary>
-    public const string Moondream2VisionAnchor = Moondream2Folder + "/onnx/vision_encoder_fp16.onnx";
-
-    /// <summary>
-    /// Files needed for any Moondream2 install (relative to the model
-    /// directory). Tokenizer files live at the export root; the three
-    /// ONNX files live in the <c>onnx/</c> subfolder.
-    /// </summary>
-    private static IReadOnlyList<string> Moondream2Files() =>
-    [
-        Moondream2Folder + "/onnx/vision_encoder_fp16.onnx",
-        Moondream2Folder + "/onnx/embed_tokens_fp16.onnx",
-        Moondream2Folder + "/onnx/decoder_model_merged_fp16.onnx",
-        Moondream2Folder + "/onnx/decoder_model_merged_fp16.onnx_data",
-        Moondream2Folder + "/vocab.json",
-        Moondream2Folder + "/merges.txt",
-        Moondream2Folder + "/tokenizer.json",
-        Moondream2Folder + "/config.json",
-        Moondream2Folder + "/preprocessor_config.json",
-    ];
-
     /// <summary>Default subfolder for the Microsoft GenAI-format Phi-3.5-vision GPU build.</summary>
     public const string Phi35VisionGpuSubfolder = "phi35-vision-onnx/gpu/gpu-int4-rtn-block-32";
 
@@ -2275,50 +2113,9 @@ public static class BuiltinModels
             Files: Phi35VisionFiles()));
     }
 
-    /// <summary>
-    /// Registers Moondream2 — small (1.9B-param) vision-language model
-    /// with a SigLIP-style 378×378 encoder and a Phi-1.5/2 decoder.
-    /// SQL surface: <c>models.moondream2(image, prompt) → string</c>.
-    /// First registration in the catalog with the
-    /// <c>(Image, String) → String</c> shape; pairs with Florence-2's
-    /// fixed-task captioners and OCR-with-region for the screenshot-
-    /// interpretation comparison harness.
-    /// </summary>
-    /// <param name="catalog">Catalog to register against.</param>
-    /// <param name="modelName">SQL-visible name. Defaults to <c>"moondream2"</c>.</param>
-    /// <param name="maxTokens">
-    /// Cap on generated tokens per prompt. 256 is generous for descriptions
-    /// and short Q&amp;A; raise for long-form summarisation.
-    /// </param>
-    public static void RegisterMoondream2(
-        ModelCatalog catalog,
-        string modelName = "moondream2",
-        int maxTokens = 256)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: Moondream2VisionAnchor,
-            InputKinds: [DataKind.Image, DataKind.String],
-            OutputKind: DataKind.String,
-            // Greedy argmax sampling — same image+prompt produces the same
-            // text every call.
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string visionPath = Path.Combine(ctx.ModelDirectory, Moondream2VisionAnchor);
-                return new Moondream2Model(modelName, visionPath, maxTokens: maxTokens);
-            },
-            DisplayName: "Moondream2 (Vision-Language)",
-            ImplementsTaskName: "VisualQA",
-            Parameters: "1.9B",
-            License: "Apache-2.0",
-            LicenseHolder: "vikhyatk",
-            SourceUrl: "https://huggingface.co/Xenova/moondream2",
-            Category: "vlm",
-            Modalities: ["image", "text"],
-            Files: Moondream2Files()));
-    }
+    // Moondream2 migrated to SQL — see models/sql/moondream2.sql, registered
+    // via the catalog's installSql entry. Uses the `decode_decoder_only`
+    // scalar for the KV-cached greedy decoder loop.
 
     /// <summary>
     /// Registers Kokoro-82M TTS under the catalog name <paramref name="modelName"/>

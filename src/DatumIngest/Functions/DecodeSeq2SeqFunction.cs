@@ -79,6 +79,27 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
     [
+        // 8-arg form with embed_tokens session. Used for decoders that take
+        // `inputs_embeds` (BART, Florence-2's decoder) instead of raw
+        // `input_ids`. The embed_tokens session converts token ids →
+        // embeddings each step before the decoder call. Listed BEFORE the
+        // 7-arg form because the matcher tries variants top-to-bottom and
+        // a call with 8 args should never accidentally fall through.
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("decoder_session", DataKindMatcher.Exact(DataKind.String),  IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("encoder_features", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("encoder_attention_mask", DataKindMatcher.Any),
+                new ParameterSpec("prefix_token_ids", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Array),
+                new ParameterSpec("eos_token_id", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("max_tokens", DataKindMatcher.Exact(DataKind.Int32), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("use_kv_cache", DataKindMatcher.Exact(DataKind.Boolean), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("embed_tokens_session", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Int64))),
+        // 7-arg form: decoder takes raw `input_ids`. ViT-GPT2, TrOCR.
         new FunctionSignatureVariant(
             Parameters:
             [
@@ -117,10 +138,10 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         CancellationToken cancellationToken)
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
-        if (args.Length != 7)
+        if (args.Length is not 7 and not 8)
         {
             throw new InvalidOperationException(
-                $"decode_seq2seq() expects 7 arguments; got {args.Length}.");
+                $"decode_seq2seq() expects 7 or 8 arguments; got {args.Length}.");
         }
 
         if (frame.CurrentModel is not { } model)
@@ -199,21 +220,62 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         }
         bool useKvCache = args[6].AsBoolean();
 
+        // The 8-arg form supplies an embed_tokens session alias for decoders
+        // that take `inputs_embeds` rather than `input_ids` (BART, Florence-2).
+        // Resolved + validated up-front so the per-step dispatch is uniform.
+        IInferenceSession? embedTokensSession = null;
+        TensorSpec? embedTokensInputIdsSpec = null;
+        TensorSpec? embedTokensOutputSpec = null;
+        if (args.Length == 8)
+        {
+            if (args[7].IsNull || args[7].Kind != DataKind.String)
+            {
+                throw new InvalidOperationException(
+                    "decode_seq2seq(): embed_tokens_session must be a non-NULL String alias.");
+            }
+            string embedAlias = args[7].AsString();
+            if (!model.BoundSessions.TryGetValue(embedAlias, out embedTokensSession))
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): embed_tokens session alias '{embedAlias}' is not bound. "
+                    + $"Available aliases: [{string.Join(", ", model.BoundSessions.Keys)}].");
+            }
+            embedTokensInputIdsSpec = FindInput(embedTokensSession, "input_ids");
+            if (embedTokensInputIdsSpec is null)
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): embed_tokens session '{embedAlias}' must declare an "
+                    + "'input_ids' input (the token-ids to look up).");
+            }
+            if (embedTokensSession.Outputs.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): embed_tokens session '{embedAlias}' declares no outputs.");
+            }
+            embedTokensOutputSpec = embedTokensSession.Outputs[0];
+        }
+
         // Resolve decoder session input metadata. The decoder must declare
-        // at least `input_ids` and `encoder_hidden_states`; `encoder_attention_mask`
-        // is optional and only consumed when present.
-        TensorSpec? inputIdsSpec = FindInput(decoder, "input_ids");
+        // `encoder_hidden_states` plus either `input_ids` (token-id form)
+        // or `inputs_embeds` (embeddings form, paired with embed_tokens_session).
+        // `encoder_attention_mask` stays optional and runtime-checked.
+        TensorSpec? inputIdsSpec = embedTokensSession is null
+            ? FindInput(decoder, "input_ids")
+            : FindInput(decoder, "inputs_embeds");
         TensorSpec? encoderHiddenSpec = FindInput(decoder, "encoder_hidden_states");
         TensorSpec? encoderMaskSpec = FindInput(decoder, "encoder_attention_mask");
 
         if (inputIdsSpec is null)
         {
+            string expectedInput = embedTokensSession is null ? "input_ids" : "inputs_embeds";
             throw new InvalidOperationException(
-                $"decode_seq2seq(): decoder session '{sessionAlias}' has no 'input_ids' input. "
-                + "v1 supports decoders that take integer token ids directly. "
-                + "Decoders taking `inputs_embeds` (Florence-2, Moondream2) will be "
-                + "supported when those models migrate; until then, use the "
-                + "C# IModel fallback path.");
+                $"decode_seq2seq(): decoder session '{sessionAlias}' has no '{expectedInput}' input. "
+                + (embedTokensSession is null
+                    ? "v1 supports decoders that take integer token ids directly. "
+                      + "Decoders taking `inputs_embeds` require the 8-arg form with an "
+                      + "embed_tokens_session alias as the trailing argument."
+                    : "When embed_tokens_session is supplied the decoder must consume `inputs_embeds`. "
+                      + "Drop the 8th arg if the decoder takes raw `input_ids`."));
         }
         if (encoderHiddenSpec is null)
         {
@@ -289,17 +351,46 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
             + $"encoder=[{encoderSeqLen},{hiddenDim}] mask={(encoderMask is null ? "null" : encoderMask.Length.ToString())} "
             + $"use_kv_cache={useKvCache}");
 
-        long[] result = useKvCache
-            ? await GenerateWithKvCacheAsync(
+        long[] result;
+        if (embedTokensSession is not null)
+        {
+            // inputs_embeds path — Florence-2 family. Runs embed_tokens on
+            // each step's prefix||generated token ids to produce the
+            // decoder's inputs_embeds tensor, then dispatches the decoder.
+            // KV-cache + inputs_embeds combination is not implemented yet
+            // (Florence-2's export is no-cache); flag the gap explicitly
+            // so a future cached-embeds decoder hits a clear error.
+            if (useKvCache)
+            {
+                throw new NotSupportedException(
+                    "decode_seq2seq(): use_kv_cache=true is not yet supported with "
+                    + "an embed_tokens_session. Florence-2 and similar inputs_embeds "
+                    + "decoders ship no-cache; pass false for use_kv_cache, or "
+                    + "file a follow-up when a cached inputs_embeds decoder appears.");
+            }
+            result = await GenerateNoCacheEmbedsAsync(
+                decoder, inputIdsSpec, encoderHiddenSpec, encoderMaskSpec, logitsSpec,
+                embedTokensSession, embedTokensInputIdsSpec!, embedTokensOutputSpec!,
+                prefix, eosTokenId, maxTokens,
+                encoderFeatures, encoderShape, encoderMask, encoderMaskShape,
+                cancellationToken).ConfigureAwait(false);
+        }
+        else if (useKvCache)
+        {
+            result = await GenerateWithKvCacheAsync(
                 decoder, inputIdsSpec, encoderHiddenSpec, encoderMaskSpec, logitsSpec,
                 prefix, eosTokenId, maxTokens,
                 encoderFeatures, encoderShape, encoderMask, encoderMaskShape,
-                sessionAlias, cancellationToken).ConfigureAwait(false)
-            : await GenerateNoCacheAsync(
+                sessionAlias, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            result = await GenerateNoCacheAsync(
                 decoder, inputIdsSpec, encoderHiddenSpec, encoderMaskSpec, logitsSpec,
                 prefix, eosTokenId, maxTokens,
                 encoderFeatures, encoderShape, encoderMask, encoderMaskShape,
                 cancellationToken).ConfigureAwait(false);
+        }
 
         DatumActivity.Scalars.Trace(
             $"[decode_seq2seq] {model.QualifiedName}#{sessionAlias}: "
@@ -360,6 +451,196 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         }
 
         return generated.ToArray();
+    }
+
+    /// <summary>
+    /// No-cache greedy loop for decoders that take <c>inputs_embeds</c>
+    /// rather than raw <c>input_ids</c> — Florence-2 family. Each step:
+    /// (1) builds the current token-id sequence as <c>prefix || generated</c>,
+    /// (2) runs the supplied <c>embed_tokens</c> session to get
+    /// <c>[1, seq, hidden]</c> embeddings, (3) passes those as the
+    /// decoder's <c>inputs_embeds</c> input alongside the fixed
+    /// <c>encoder_hidden_states</c>, (4) argmaxes the last logits row.
+    /// The extra embed_tokens dispatch per step is the cost of supporting
+    /// architectures that inject visual prefixes at the encoder side and
+    /// therefore can't reuse the token-id input shortcut.
+    /// </summary>
+    private static async ValueTask<long[]> GenerateNoCacheEmbedsAsync(
+        IInferenceSession decoder,
+        TensorSpec inputsEmbedsSpec,
+        TensorSpec encoderHiddenSpec,
+        TensorSpec? encoderMaskSpec,
+        TensorSpec logitsSpec,
+        IInferenceSession embedTokensSession,
+        TensorSpec embedTokensInputIdsSpec,
+        TensorSpec embedTokensOutputSpec,
+        long[] prefix,
+        long eosTokenId,
+        int maxTokens,
+        float[] encoderFeatures,
+        int[] encoderShape,
+        long[]? encoderMask,
+        int[]? encoderMaskShape,
+        CancellationToken cancellationToken)
+    {
+        List<long> generated = new(capacity: Math.Min(maxTokens, 32));
+
+        for (int step = 0; step < maxTokens; step++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            int seqLen = prefix.Length + generated.Count;
+            long[] currentIds = new long[seqLen];
+            for (int i = 0; i < prefix.Length; i++) currentIds[i] = prefix[i];
+            for (int i = 0; i < generated.Count; i++) currentIds[prefix.Length + i] = generated[i];
+
+            // Step A: token ids → embeddings via embed_tokens.
+            // Output is [1, seq, hidden_dim] flat Float32.
+            (float[] embeds, int embedHiddenDim) = await RunEmbedTokensAsync(
+                embedTokensSession,
+                embedTokensInputIdsSpec,
+                embedTokensOutputSpec,
+                currentIds,
+                cancellationToken).ConfigureAwait(false);
+
+            // Step B: decoder forward pass against inputs_embeds.
+            long nextToken = await DispatchOneStepEmbedsAsync(
+                decoder,
+                inputsEmbedsSpec,
+                encoderHiddenSpec,
+                encoderMaskSpec,
+                logitsSpec,
+                embeds,
+                new int[] { 1, seqLen, embedHiddenDim },
+                encoderFeatures,
+                encoderShape,
+                encoderMask,
+                encoderMaskShape,
+                cancellationToken).ConfigureAwait(false);
+
+            if (nextToken == eosTokenId) break;
+            generated.Add(nextToken);
+        }
+
+        return generated.ToArray();
+    }
+
+    /// <summary>
+    /// Runs the <c>embed_tokens</c> ONNX session over the supplied token
+    /// id sequence and returns the flat <c>[1, seq, hidden]</c> Float32
+    /// embeddings plus the hidden_dim. The hidden_dim is recovered from
+    /// the output tensor's shape so a single helper works across
+    /// embedding-table widths (Florence-2 BART = 768, future families
+    /// may differ).
+    /// </summary>
+    private static async ValueTask<(float[] Embeds, int HiddenDim)> RunEmbedTokensAsync(
+        IInferenceSession session,
+        TensorSpec inputIdsSpec,
+        TensorSpec outputSpec,
+        long[] tokenIds,
+        CancellationToken cancellationToken)
+    {
+        TensorBag inputBag = session.CreateInputBag();
+        TensorBag? outputBag = null;
+        try
+        {
+            inputBag.Add<long>(
+                inputIdsSpec.Name, DataKind.Int64,
+                new int[] { 1, tokenIds.Length }, tokenIds);
+
+            outputBag = await session.RunAsync(inputBag, cancellationToken).ConfigureAwait(false);
+
+            if (!outputBag.TryGet(outputSpec.Name, out IInferenceTensor outputTensor))
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): embed_tokens did not produce expected output '{outputSpec.Name}'.");
+            }
+            IReadOnlyList<int> shape = outputTensor.Shape;
+            if (shape.Count != 3)
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): embed_tokens output expected rank-3 [batch, seq, hidden]; "
+                    + $"got [{string.Join(", ", shape)}].");
+            }
+            return (outputTensor.AsSpan<float>().ToArray(), shape[2]);
+        }
+        finally
+        {
+            inputBag.Dispose();
+            outputBag?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Sibling of <c>DispatchOneStepAsync</c> for the inputs_embeds form.
+    /// Same shape as the input_ids path except the decoder's first input
+    /// is a Float32 embeddings tensor rather than an Int64 token-ids
+    /// tensor.
+    /// </summary>
+    private static async ValueTask<long> DispatchOneStepEmbedsAsync(
+        IInferenceSession decoder,
+        TensorSpec inputsEmbedsSpec,
+        TensorSpec encoderHiddenSpec,
+        TensorSpec? encoderMaskSpec,
+        TensorSpec logitsSpec,
+        float[] inputsEmbeds,
+        int[] inputsEmbedsShape,
+        float[] encoderFeatures,
+        int[] encoderShape,
+        long[]? encoderMask,
+        int[]? encoderMaskShape,
+        CancellationToken cancellationToken)
+    {
+        TensorBag inputBag = decoder.CreateInputBag();
+        TensorBag? outputBag = null;
+        try
+        {
+            inputBag.Add<float>(
+                inputsEmbedsSpec.Name, DataKind.Float32,
+                inputsEmbedsShape, inputsEmbeds);
+            inputBag.Add<float>(
+                encoderHiddenSpec.Name, DataKind.Float32,
+                encoderShape, encoderFeatures);
+            if (encoderMaskSpec is not null)
+            {
+                inputBag.Add<long>(
+                    encoderMaskSpec.Name, DataKind.Int64,
+                    encoderMaskShape!, encoderMask!);
+            }
+
+            outputBag = await decoder.RunAsync(inputBag, cancellationToken).ConfigureAwait(false);
+
+            if (!outputBag.TryGet(logitsSpec.Name, out IInferenceTensor logitsTensor))
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): decoder did not produce expected output '{logitsSpec.Name}'.");
+            }
+
+            ReadOnlySpan<float> logits = logitsTensor.AsSpan<float>();
+            IReadOnlyList<int> shape = logitsTensor.Shape;
+            if (shape.Count != 3)
+            {
+                throw new InvalidOperationException(
+                    $"decode_seq2seq(): decoder logits expected rank-3 [batch, seq, vocab]; "
+                    + $"got [{string.Join(", ", shape)}].");
+            }
+            int vocab = shape[2];
+            int lastPosStart = (shape[1] - 1) * vocab;
+            ReadOnlySpan<float> lastPos = logits.Slice(lastPosStart, vocab);
+
+            int argmax = 0;
+            float best = lastPos[0];
+            for (int i = 1; i < lastPos.Length; i++)
+            {
+                if (lastPos[i] > best) { best = lastPos[i]; argmax = i; }
+            }
+            return argmax;
+        }
+        finally
+        {
+            inputBag.Dispose();
+            outputBag?.Dispose();
+        }
     }
 
     /// <summary>

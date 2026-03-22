@@ -558,6 +558,40 @@
       "licenseFiles": [
         { "name": "LICENSE", "source": "https://raw.githubusercontent.com/cszn/SCUNet/main/LICENSE" }
       ]
+    },
+    {
+      "repoSuffix": "moondream2-onnx",
+      "sourceFolder": "${DATUM_MODELS}/moondream2-onnx",
+      "expectedSizeMb": 2000,
+      "exportedBy": "Optimum ONNX export from vikhyatk/moondream2 PyTorch weights (manual / one-off; no reproducible script in the repo yet — flag for a future scripts/export-moondream2.ps1 if a clean re-export is ever needed)",
+      "expectedContents": [
+        "vision_encoder.onnx",
+        "decoder_model_merged.onnx",
+        "embed_tokens.onnx",
+        "config.json",
+        "generation_config.json",
+        "preprocessor_config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json"
+      ],
+      "uploadStaging": "Copy the existing local Optimum export at $env:DATUM_MODELS/moondream2-onnx/ into a staging folder. Verify the file list matches expectedContents above (Optimum's exact output filenames depend on the optimum / transformers version used at export time — adjust the list to match what's actually there). Drop README.md + LICENSE into the staging root. The export may produce additional `.onnx.data` sidecars for any component whose weights exceed the protobuf 2GB limit — include those too. Upload the staging folder via huggingface-cli.",
+      "provenance": {
+        "baseModel": "vikhyatk/moondream2 — Apache-2.0 (Vikhyat Korrapati, 2024). 1.86B-param vision-language model: SigLIP vision encoder + Phi-1.5-based text decoder + cross-modal projection.",
+        "exportToolchain": "Optimum ONNX exporter from upstream PyTorch weights. Multi-file export pattern: vision encoder, text decoder (with KV-cache merged), and embed_tokens as separate ONNX files. Original conversion was done locally; the exact toolchain version isn't recorded — re-derivation would need someone to re-run `optimum-cli export onnx --model vikhyatk/moondream2 --task image-to-text` against current Optimum + verify the output matches.",
+        "precision": "fp32",
+        "notes": "Re-hosted under Heliosoph for distribution stability — vikhyatk/moondream2 doesn't ship its own ONNX exports, the file layout drifts across revisions, and runtimes that need ONNX have nowhere upstream to point at. This is the canonical ONNX form for the model. Drive via raw onnxruntime sessions (onnxruntime-genai's model_builder doesn't currently accept Moondream2's architecture)."
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://huggingface.co/vikhyatk/moondream2/blob/main/LICENSE",
+        "confidence": "high",
+        "requiresAcceptance": false,
+        "notes": "Apache-2.0 inherited from the authoritative upstream vikhyatk/moondream2 PyTorch weights. ONNX-export step doesn't change licensing — same model, different serialization."
+      },
+      "licenseFiles": [
+        { "name": "LICENSE", "source": "https://huggingface.co/vikhyatk/moondream2/raw/main/LICENSE" }
+      ]
     }
   ],
   "rejected": [

@@ -241,6 +241,7 @@
       "attributions": ["Microsoft Research"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-fp16-onnx", "revision": "2e11444f5ad958b10719bdefba8bbaf53bb20ac9", "include": ["*.onnx", "*.json", "*.txt"] }],
+      "installSql": "sql/florence-2-base-ft-fp16.sql",
       "approxSizeMb": 523
     },
     {
@@ -253,6 +254,7 @@
       "attributions": ["Microsoft Research"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-quantized-onnx", "revision": "319f5a0a4cafca00d363aeecf43bcbe45e79f48e", "include": ["*.onnx", "*.json", "*.txt"] }],
+      "installSql": "sql/florence-2-base-ft-quantized.sql",
       "approxSizeMb": 266
     },
     {
@@ -265,8 +267,8 @@
       "attributions": ["nlpconnect — Ankur Singh et al."],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/vit-gpt2-image-captioning-onnx", "revision": "3dad8333f9ccef7b81a5bc5e6d71a4a341944ce1", "include": ["*.onnx", "*.json", "*.txt"] }],
-      "approxSizeMb": 1100,
-      "placeholder": true
+      "installSql": "sql/vit-gpt2-image-captioning.sql",
+      "approxSizeMb": 1100
     },
     {
       "id": "phi-3.5-vision-instruct-cpu",
@@ -299,9 +301,16 @@
       "task": "vision-language",
       "tags": ["vlm", "captioning", "vqa", "compact"],
       "licenseIds": ["apache-2.0"],
-      "attributions": ["Vikhyat Korrapati — Moondream"],
+      "attributions": ["Vikhyat Korrapati — Moondream", "Heliosoph (Optimum ONNX export from vikhyatk/moondream2 PyTorch weights)"],
       "hardware": { "minRamMb": 4096, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "vikhyatk/moondream2", "revision": "6b714b26eea5cbd9f31e4edb2541c170afa935ba", "include": ["*.onnx", "*.onnx.data", "*.json", "*.txt"] }],
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/moondream2-onnx", "revision": "a5a7e0a0e55a53de6b1ae349edeba6a33a0d4f83", "include": [
+        "decoder_model_merged_fp16.onnx",
+        "decoder_model_merged_fp16.onnx_data",
+        "embed_tokens_fp16.onnx",
+        "vision_encoder_fp16.onnx",
+        "*.json",
+        "*.txt"] }],
+      "installSql": "sql/moondream2.sql",
       "approxSizeMb": 2000
     },
 
@@ -502,6 +511,55 @@
       "installSql": "sql/midas-small.sql"
     },
     {
+      "id": "depth-anything-v2-small",
+      "displayName": "Depth Anything V2 Small (Monocular Depth)",
+      "description": "Current SOTA permissive-license general-purpose monocular depth. DINOv2 ViT-S encoder + DPT-style decoder, ~24M params. Faster than DPT-Large, often sharper boundaries. Relative depth (not metric). Recommended modern default — best quality-per-MB in this catalog.",
+      "task": "depth-estimation",
+      "tags": ["depth", "depth-anything", "dinov2", "transformer", "edge"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Lihe Yang, Bingyi Kang, Zilong Huang, Zhen Zhao, Xiaogang Xu, Jiashi Feng, Hengshuang Zhao — Depth Anything V2 (TikTok / HKU)", "onnx-community (ONNX export)"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/depth-anything-v2-small", "revision": "main", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] }],
+      "approxSizeMb": 100
+    },
+    {
+      "id": "depth-anything-v2-base",
+      "displayName": "Depth Anything V2 Base (Monocular Depth)",
+      "description": "Mid-size variant of Depth Anything V2 — DINOv2 ViT-B encoder, ~97M params. Quality close to the V2-Large variant without V2-Large's CC-BY-NC-4.0 license issue (V2-Large is non-commercial; V2-Base is Apache-2.0). Pick over the Small variant when accuracy on fine detail matters more than CPU throughput.",
+      "task": "depth-estimation",
+      "tags": ["depth", "depth-anything", "dinov2", "transformer"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Lihe Yang, Bingyi Kang, Zilong Huang, Zhen Zhao, Xiaogang Xu, Jiashi Feng, Hengshuang Zhao — Depth Anything V2 (TikTok / HKU)", "onnx-community (ONNX export)"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/depth-anything-v2-base", "revision": "main", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] }],
+      "approxSizeMb": 400
+    },
+    {
+      "id": "zoedepth-nyu-kitti",
+      "displayName": "ZoeDepth (NYU+KITTI, Metric Depth)",
+      "description": "**Metric** depth estimation — outputs real-world distances in meters, not just relative depth. DPT-Large backbone + dual metric heads (NYU indoor + KITTI outdoor calibration). Use when absolute scale matters: 3D point-cloud reconstruction at consistent scale across images, distance measurement, AR-style overlays. Much heavier than the relative-depth models (~1.3 GB).",
+      "task": "depth-estimation",
+      "tags": ["depth", "metric-depth", "zoedepth", "transformer"],
+      "licenseIds": ["mit"],
+      "attributions": ["Shariq Farooq Bhat, Reiner Birkl, Diana Wofk, Peter Wonka, Matthias Müller — ZoeDepth (Intel ISL)", "onnx-community (ONNX export)"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/zoedepth-nyu-kitti", "revision": "main", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] }],
+      "approxSizeMb": 1300,
+      "placeholder": true
+    },
+    {
+      "id": "glpn-nyu",
+      "displayName": "GLPN-NYU (Lightweight Depth)",
+      "description": "Global-Local Path Network for monocular depth from KAIST (2022). EfficientFormer encoder + custom decoder, ~52M params. Older than Depth Anything V2 but solid as a lightweight baseline — useful as an architectural-diversity row in a comparison demo (different backbone family from the DPT / Depth Anything DINOv2 lineage).",
+      "task": "depth-estimation",
+      "tags": ["depth", "glpn", "edge"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Doyeon Kim, Woonghyun Ka, Pyungwhan Ahn, Donggyu Joo, Sehwan Chun, Junmo Kim — GLPN (KAIST)", "Joshua Lochner / Xenova (ONNX export)"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "Xenova/glpn-nyu", "revision": "main", "include": ["onnx/model.onnx", "config.json", "preprocessor_config.json"] }],
+      "approxSizeMb": 200
+    },
+    {
       "id": "mediapipe-face",
       "displayName": "MediaPipe Face (Detector + 6-point Landmarks)",
       "description": "Two-stage face pipeline: BlazeFace-derived detector + 6-keypoint landmark model (eyes, nose tip, mouth, eye tragions). Tiny (~3 MB combined). Apache-2.0 throughout.",
@@ -548,6 +606,7 @@
       "attributions": ["Microsoft Research — TrOCR (Li, Lv, Yu, Cui, Lu, Wei, 2021)", "Joshua Lochner / Xenova (ONNX export)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Xenova/trocr-base-printed", "revision": "cf024f7df347684b6ee92859452962b67c6873fb", "include": ["onnx/encoder_model.onnx", "onnx/decoder_model_merged.onnx", "config.json", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "special_tokens_map.json"] }],
+      "installSql": "sql/trocr-base-printed.sql",
       "approxSizeMb": 1400
     },
     {
@@ -560,6 +619,7 @@
       "attributions": ["Microsoft Research — TrOCR (Li, Lv, Yu, Cui, Lu, Wei, 2021)", "Joshua Lochner / Xenova (ONNX export + fp16 quantization)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Xenova/trocr-base-printed", "revision": "cf024f7df347684b6ee92859452962b67c6873fb", "include": ["onnx/encoder_model_fp16.onnx", "onnx/decoder_model_merged_fp16.onnx", "config.json", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "special_tokens_map.json"] }],
+      "installSql": "sql/trocr-base-printed-fp16.sql",
       "approxSizeMb": 700
     },
     {

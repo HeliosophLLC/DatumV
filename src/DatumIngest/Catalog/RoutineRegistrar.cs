@@ -888,6 +888,9 @@ internal sealed class RoutineRegistrar
         // ProceduralModelAdapter whose descriptor's sessions are about to
         // be disposed below.
         _catalog.Models?.Unregister(removed.Name);
+        // Evict the residency cache so any newly-acquired lease that races
+        // the disposal below doesn't latch onto the stale ProceduralModelAdapter.
+        _catalog.Models?.ResidencyManager.Evict(removed.Name);
 
         _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
 
@@ -1507,6 +1510,14 @@ internal sealed class RoutineRegistrar
         if (replace)
         {
             models.Unregister(descriptor.Name);
+            // Drop the cached IModel for this name so AcquireAsync re-runs
+            // the loader against the new ModelCatalogEntry. Without this,
+            // the residency manager keeps handing back the displaced
+            // ProceduralModelAdapter whose descriptor's sessions are about
+            // to be disposed by DisposeSessions(displaced) — every
+            // subsequent invocation would then fault inside Session.Run
+            // with "Cannot access a disposed object".
+            models.ResidencyManager.Evict(descriptor.Name);
         }
         models.Register(entry);
     }

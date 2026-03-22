@@ -58,7 +58,7 @@ public sealed class Phi35VisionModelTests : ServiceTestBase
     /// generative loop produces a non-empty answer with no special
     /// tokens leaking through. With IO binding the cost should be a
     /// small fraction of the equivalent hand-rolled
-    /// <see cref="Moondream2Model"/> path.
+    /// <c>decode_decoder_only</c> SQL-defined Moondream2 path.
     /// </summary>
     [Fact]
     public async Task InferBatch_SolidImage_ReturnsNonEmptyAnswer()
