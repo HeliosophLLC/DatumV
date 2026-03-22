@@ -1,8 +1,10 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Text.Json;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions.Json;
 using DatumIngest.Model;
+using DatumIngest.Model.Spatial;
 
 namespace DatumIngest.Web.Execution;
 
@@ -63,6 +65,11 @@ internal static class WebCellFormatter
             return new JsonCell("media", Mime: mime, DataB64: Convert.ToBase64String(bytes));
         }
 
+        if (value.Kind == DataKind.PointCloud)
+        {
+            return FormatPointCloud(value, arena, registry);
+        }
+
         // Json values arrive as canonical CBOR bytes. Decode to JSON text here
         // so the browser can pretty-print and style them; falling through to
         // FormatText would just serialize the raw bytes via DataValue.ToString().
@@ -116,10 +123,61 @@ internal static class WebCellFormatter
         if (value.IsByteArrayKind) return false;          // UInt8[] → media or hex preview
         if (value.Kind == DataKind.Image
             || value.Kind == DataKind.Audio
-            || value.Kind == DataKind.Video) return false; // single-blob already routes elsewhere
+            || value.Kind == DataKind.Video
+            || value.Kind == DataKind.PointCloud) return false; // single-blob already routes elsewhere
         if (value.Kind == DataKind.Struct) return true;
         if (value.IsArray) return true;
         return false;
+    }
+
+    /// <summary>
+    /// Maximum uncompressed PointCloud blob size accepted by the inline transport.
+    /// A 50 MB cap covers a 1920×1080 colored cloud (~33 MB) with headroom, and
+    /// guards against streaming a multi-gigabyte cell that would crash the
+    /// browser's JSON parser. Above this threshold, callers should decimate or
+    /// project to a smaller depth resolution before requesting display.
+    /// </summary>
+    private const int PointCloudInlineCapBytes = 50 * 1024 * 1024;
+
+    /// <summary>
+    /// Formats a single PointCloud value for the wire: parses the header for
+    /// metadata-only summary fields, gzips the raw blob, base64-encodes the
+    /// compressed bytes. The front-end uses the metadata to render a cell-grid
+    /// thumbnail without decoding the blob, and pipes the base64 through
+    /// <c>DecompressionStream("gzip")</c> when the user opens the 3D viewer.
+    /// </summary>
+    private static JsonCell FormatPointCloud(DataValue value, Arena arena, SidecarRegistry registry)
+    {
+        ReadOnlySpan<byte> blob = value.AsByteSpan(arena, registry);
+        if (blob.Length > PointCloudInlineCapBytes)
+        {
+            return new JsonCell(
+                "text",
+                Text: $"<PointCloud too large to display: {blob.Length:N0} bytes; "
+                    + $"inline transport cap is {PointCloudInlineCapBytes:N0} bytes>");
+        }
+
+        PointCloudHeader header = PointCloudHeader.Read(blob);
+
+        using MemoryStream compressed = new(capacity: blob.Length / 2);
+        using (GZipStream gz = new(compressed, CompressionLevel.Fastest, leaveOpen: true))
+        {
+            gz.Write(blob);
+        }
+        string dataB64 = Convert.ToBase64String(compressed.GetBuffer().AsSpan(0, (int)compressed.Length));
+
+        JsonPointCloudInfo info = new(
+            PointCount: checked((int)header.PointCount),
+            HasColor: header.HasColor,
+            Width: checked((int)header.Width),
+            Height: checked((int)header.Height),
+            CoordinateFrame: header.CoordinateFrame.ToString());
+
+        return new JsonCell(
+            Kind: "pointcloud",
+            DataB64: dataB64,
+            Encoding: "gzip",
+            PointCloud: info);
     }
 
     /// <summary>

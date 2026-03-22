@@ -109,7 +109,7 @@ Stride is determined by `DataKind`:
 
 A 1024-row nullable boolean page is 256 bytes (vs 1024 bytes for raw byte-per-row). The 8× density reduction is the reason booleans get their own encoder rather than a `FixedWidth` special case.
 
-### `VariableSlot` (String, JsonValue, Array, Image, Vector, Matrix, Tensor, Struct, typed arrays)
+### `VariableSlot` (String, JsonValue, Array, Image, Audio, Video, PointCloud, Vector, Matrix, Tensor, Struct, typed arrays)
 
 ```
 [null bitmap         : ⌈rows / 8⌉ bytes]   (omitted when the page's HasNullBitmap is false)
@@ -230,7 +230,7 @@ The `Tombstoned` column flag (`0x08`) marks a soft-dropped column — its block 
 
 ```
 uint32 : nullCount
-bool   : hasMinMax                  (false for non-comparable kinds: Vector, Matrix, Tensor, Image, JsonValue, Array, Struct, byte arrays)
+bool   : hasMinMax                  (false for non-comparable kinds: Vector, Matrix, Tensor, Image, Audio, Video, PointCloud, JsonValue, Array, Struct, byte arrays)
 If hasMinMax:
   DataValue : minimum
   DataValue : maximum
@@ -283,7 +283,8 @@ Then kind-specific payload:
   Duration:  int64 (ticks)
   Uuid:      byte[16]
   String / JsonValue: BinaryWriter length-prefixed UTF-8 string
-  Image / byte arrays: int32 length + byte[length]
+  Image / Audio / Video / Json / PointCloud / byte arrays:
+                       int32 length + byte[length]
                        (byte arrays use wire-tag 56 — the legacy
                         UInt8Array enum value, kept as a wire constant
                         independent of the in-memory DataKind enum)

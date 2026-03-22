@@ -28,6 +28,20 @@ export interface JsonCell {
   mime?: string;
   dataB64?: string;
   items?: { mime: string; dataB64: string }[];
+  // Transport encoding for binary payloads (null = raw, "gzip" = the
+  // dataB64 decodes to gzip-compressed bytes that need inflation before
+  // use). Currently emitted only for kind="pointcloud".
+  encoding?: string;
+  // Populated for kind="pointcloud". Lets the grid render a metadata-only
+  // thumbnail without decoding the blob, and gives the 3D viewer the
+  // dimensions it needs to set up BufferAttributes.
+  pointCloud?: {
+    pointCount: number;
+    hasColor: boolean;
+    width: number;
+    height: number;
+    coordinateFrame: string;
+  };
 }
 
 export interface CellResult {

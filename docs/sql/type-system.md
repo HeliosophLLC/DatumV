@@ -68,6 +68,7 @@ SELECT * FROM data WHERE value AS Float64 v AND v > 0.5
 | `Struct` | Named, ordered collection of heterogeneous fields | `DataValue[]` (field names in `ColumnInfo.Fields`) |
 | `Point2D` | 2D point with single-precision X, Y components | `System.Numerics.Vector2` (8 bytes inline) |
 | `Point3D` | 3D point with single-precision X, Y, Z components | `System.Numerics.Vector3` (12 bytes inline) |
+| `PointCloud` | Dense 3D point collection with optional per-point color | `byte[]` (40-byte header + interleaved per-point payload) |
 | `Type` | A type tag describing another DataKind | `DataKind` enum value (stored as byte) |
 
 #### Arrays
@@ -154,6 +155,100 @@ ORDER BY r
 `Point2D` and `Point3D` participate in `typeof()`, `IS Type`, and `CAST` like
 any other DataKind. `point_z` accepts only `Point3D` since `Point2D` has no Z
 component.
+
+#### Point Clouds
+
+`PointCloud` is a dense collection of 3D points with optional per-point color,
+designed for depth-map unprojection, LiDAR / RGB-D scans, and any workflow
+that turns 2D-per-pixel data into 3D structure. Storage is a single byte blob:
+a 40-byte header (point count, axis-aligned bounding box, coordinate-frame
+tag, optional grid dimensions) followed by an interleaved per-point payload
+at a fixed stride — 12 bytes (xyz `Float32`) per point when position-only,
+16 bytes (xyz `Float32` + rgba `UInt8`) when color is present.
+
+A point cloud is **organized** when its declared `width × height` matches its
+point count — points are then laid out row-major in (u, v) order and
+consumers can derive implicit topology (e.g. two triangles per grid cell)
+without any extra metadata. Constructors that work pixel-by-pixel (like
+`point_cloud_from_depth`) produce organized clouds; LiDAR scans,
+photogrammetry outputs, and decimated clouds leave the dimensions at 0 and
+the cloud is treated as an unstructured point set.
+
+Build a colored point cloud from a depth-map Image and a matching color
+Image using one of two constructors that differ in how (X, Y) pixel
+positions scale with depth:
+
+```sql
+-- Orthographic: each pixel's (X, Y) is fixed by its image coordinate;
+-- depth only pushes the point forward or back along Z. The honest
+-- interpretation for normalized inverse depth (MiDaS, DPT) — produces
+-- a "tilted picture" / heightfield reading of the depth map.
+SELECT point_cloud_from_depth_orthographic(image, models.midas_small(image), 60.0) AS cloud
+FROM photos LIMIT 1
+
+-- Pinhole: angular position scales with depth, so close pixels cluster
+-- near the optical axis and far pixels spread to the edges of the
+-- visible frustum. Physically correct when depth values represent
+-- real-world distances (metric depth, RGB-D sensors, LiDAR).
+SELECT point_cloud_from_depth_pinhole(image, models.zoedepth_nyu_kitti(image), 60.0) AS cloud
+FROM photos LIMIT 1
+```
+
+The third argument is the vertical field-of-view in degrees, matching the
+Three.js `PerspectiveCamera` convention; typical values are 60° for phone
+wide cameras, 40° for portrait lenses, 55–65° for depth cameras. The
+depth Image must be a grayscale-as-RGBA inverse-depth map (the standard
+output of `depth_map_to_image` on MiDaS / DPT / ZoeDepth models) at the
+same dimensions as the color Image. Both variants produce clouds in a
+normalized `[-1, -0.1]` Z range in the OpenGL camera frame (right-handed,
++y up, −z forward) — the `-0.1` near plane keeps brightest-intensity
+(closest) pixels at their correct angular position rather than collapsing
+them all to the camera origin. Absolute world-space scale is not preserved
+(`depth_map_to_image` per-image min-max normalizes before either constructor
+ever sees the depth values).
+
+**Which to pick:** orthographic is the right default for today's depth
+models — MiDaS, DPT, ZoeDepth's visualization output — because their
+per-image normalization discards the absolute scale that makes pinhole
+geometry meaningful. Reach for pinhole when you genuinely have real-world
+distances (a future metric-depth constructor that consumes raw `Float32`
+depth in meters, or calibrated RGB-D camera output).
+
+Accessors mirror the `image_width` / `image_height` shape — each reads a
+field from the cloud's header:
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `point_cloud_count(pc)` | `Int32` | Number of points in the cloud. |
+| `point_cloud_width(pc)` | `Int32` | Grid width for organized clouds; `0` for unorganized. |
+| `point_cloud_height(pc)` | `Int32` | Grid height for organized clouds; `0` for unorganized. |
+| `point_cloud_is_organized(pc)` | `Boolean` | True when `width × height` matches the point count. |
+| `point_cloud_has_color(pc)` | `Boolean` | True when the cloud carries per-point RGBA color. |
+| `point_cloud_bbox_min(pc)` | `Point3D` | Component-wise minimum corner of the axis-aligned bounding box. |
+| `point_cloud_bbox_max(pc)` | `Point3D` | Component-wise maximum corner of the axis-aligned bounding box. |
+| `point_cloud_depth(pc)` | `Image` | Reconstructs a grayscale-as-RGBA depth Image from an organized cloud (inverse of `point_cloud_from_depth`); throws for unorganized clouds. |
+
+```sql
+-- Inspect a cloud's shape
+SELECT
+  point_cloud_count(cloud)        AS points,
+  point_cloud_width(cloud)        AS w,
+  point_cloud_height(cloud)       AS h,
+  point_cloud_bbox_min(cloud).z   AS near_z,
+  point_cloud_bbox_max(cloud).z   AS far_z
+FROM (SELECT point_cloud_from_depth(image, models.midas_small(image), 60.0) AS cloud
+      FROM photos LIMIT 1)
+
+-- Round-trip: cloud → depth Image → false-coloured depth visualization
+SELECT apply_colormap(
+         point_cloud_depth(point_cloud_from_depth(image, models.dpt_large(image), 60.0)),
+         'turbo') AS depth_viz
+FROM photos
+```
+
+`PointCloud` participates in `typeof()`, `IS Type`, and column DDL like any
+other DataKind. It cannot be used as a `PRIMARY KEY` or composite-key
+column — see [DDL / DML](ddl-dml.md) for the comparability rules.
 
 ### Type Literals and typeof()
 
@@ -296,7 +391,7 @@ FROM t
 `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`, `Float16`, `Float32`,
 `Float64`, `Decimal`, `String`, `Date`, `DateTime`, `Time`, `Duration`,
 `Uuid`, `Image`, `Audio`, `Video`, `Json`, `Struct`, `Point2D`, `Point3D`,
-`Type`) are reserved in expression position. They produce a `Type` value that can be compared with
+`PointCloud`, `Type`) are reserved in expression position. They produce a `Type` value that can be compared with
 `typeof()` results using `=`, `!=`, `IN`, `CASE`, and `IS`.
 
 To use a type name as a column alias or table name, double-quote it:

@@ -54,7 +54,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     [Fact]
     public async Task Count_ReturnsHeaderPointCount()
     {
-        ValueRef pc = BuildOrganizedColoredCloud(width: 3, height: 4);
+        ValueRef pc = await BuildOrganizedColoredCloud(width: 3, height: 4);
         ValueRef result = await new PointCloudCountFunction().ExecuteAsync(
             new[] { pc }, MakeFrame(), default);
         Assert.Equal(DataKind.Int32, result.Kind);
@@ -64,7 +64,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     [Fact]
     public async Task Width_ReturnsHeaderWidth()
     {
-        ValueRef pc = BuildOrganizedColoredCloud(width: 5, height: 7);
+        ValueRef pc = await BuildOrganizedColoredCloud(width: 5, height: 7);
         ValueRef result = await new PointCloudWidthFunction().ExecuteAsync(
             new[] { pc }, MakeFrame(), default);
         Assert.Equal(5, result.AsInt32());
@@ -73,7 +73,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     [Fact]
     public async Task Height_ReturnsHeaderHeight()
     {
-        ValueRef pc = BuildOrganizedColoredCloud(width: 5, height: 7);
+        ValueRef pc = await BuildOrganizedColoredCloud(width: 5, height: 7);
         ValueRef result = await new PointCloudHeightFunction().ExecuteAsync(
             new[] { pc }, MakeFrame(), default);
         Assert.Equal(7, result.AsInt32());
@@ -82,7 +82,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     [Fact]
     public async Task IsOrganized_TrueForOrganizedCloud()
     {
-        ValueRef pc = BuildOrganizedColoredCloud(width: 4, height: 4);
+        ValueRef pc = await BuildOrganizedColoredCloud(width: 4, height: 4);
         ValueRef result = await new PointCloudIsOrganizedFunction().ExecuteAsync(
             new[] { pc }, MakeFrame(), default);
         Assert.True(result.AsBoolean());
@@ -100,7 +100,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     [Fact]
     public async Task HasColor_TrueForColoredCloud()
     {
-        ValueRef pc = BuildOrganizedColoredCloud(width: 2, height: 2);
+        ValueRef pc = await BuildOrganizedColoredCloud(width: 2, height: 2);
         ValueRef result = await new PointCloudHasColorFunction().ExecuteAsync(
             new[] { pc }, MakeFrame(), default);
         Assert.True(result.AsBoolean());
@@ -138,7 +138,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     [Fact]
     public async Task Depth_ProducesImageMatchingCloudDimensions()
     {
-        ValueRef pc = BuildOrganizedColoredCloud(width: 6, height: 5);
+        ValueRef pc = await BuildOrganizedColoredCloud(width: 6, height: 5);
         ValueRef result = await new PointCloudDepthFunction().ExecuteAsync(
             new[] { pc }, MakeFrame(), default);
 
@@ -235,7 +235,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     // ─────────────────────── Cloud builders ───────────────────────
 
     /// <summary>Build an organized colored cloud by routing through PointCloudFromDepthFunction.</summary>
-    private ValueRef BuildOrganizedColoredCloud(int width, int height)
+    private async Task<ValueRef> BuildOrganizedColoredCloud(int width, int height)
     {
         SKBitmap color = new(width, height, SKColorType.Rgba8888, SKAlphaType.Opaque);
         SKBitmap depth = new(width, height, SKColorType.Rgba8888, SKAlphaType.Opaque);
@@ -247,11 +247,13 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
                 depth.SetPixel(x, y, new SKColor(128, 128, 128, 255));
             }
         }
-        ValueTask<ValueRef> task = new PointCloudFromDepthFunction().ExecuteAsync(
+        // Use the orthographic variant for accessor-test cloud construction —
+        // it's the recommended default for normalized inverse depth, and the
+        // accessors don't care about projection mode anyway.
+        return await new PointCloudFromDepthOrthographicFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
             MakeFrame(),
             default);
-        return task.GetAwaiter().GetResult();
     }
 
     /// <summary>Hand-build a position-only unorganized cloud (Width=Height=0, no color flag).</summary>

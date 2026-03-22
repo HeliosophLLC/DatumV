@@ -5,6 +5,7 @@ import { AlertCircle, Ban, Check, Film, Loader2, Music } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { MediaPreview } from './MediaPreview';
 import { MemoryChip } from './MemoryChip';
+import { PointCloudCell, SingleValuePointCloud } from './PointCloudCell';
 import {
   executionsState,
   type CellResult,
@@ -445,6 +446,9 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
       </div>
     );
   }
+  if (cell.kind === 'pointcloud') {
+    return <SingleValuePointCloud cell={cell} />;
+  }
   // Scalar / JSON / catchall. Use a pre-wrap block so multi-line JSON
   // bodies keep their formatting; large font so the value is readable
   // without zooming.
@@ -484,6 +488,9 @@ function isImageOrVideoCell(cell: JsonCell): boolean {
     return mime.startsWith('image/') || mime.startsWith('video/');
   }
   if (cell.kind === 'media_array') return true;
+  // PointCloud cells render as a chip with metadata + click-to-open; the
+  // tall row mode gives the chip room to show grid dimensions inline.
+  if (cell.kind === 'pointcloud') return true;
   return false;
 }
 
@@ -773,6 +780,7 @@ function CellValue({
     return <BinaryCell cell={cell} />;
   }
   if (cell.kind === 'media_array' && cell.items) return <MediaArrayCell cell={cell} largeMedia={largeMedia} />;
+  if (cell.kind === 'pointcloud') return <PointCloudCell cell={cell} largeMedia={largeMedia} />;
   return <span>{cell.text ?? ''}</span>;
 }
 

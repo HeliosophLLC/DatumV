@@ -59,5 +59,12 @@
   "memoryBudgetNone": "no budget set",
   "memoryAtTimeLabel": "at time",
   "memoryRowShortLabel": "row",
-  "memoryArenaShortLabel": "arena"
+  "memoryArenaShortLabel": "arena",
+  "pointCloudPointsLabel": "pts",
+  "pointCloudColored": "colored",
+  "pointCloudOrganized": "grid",
+  "pointCloudModePoints": "Points",
+  "pointCloudModeMesh": "Mesh",
+  "pointCloudMeshUnavailable": "Mesh mode requires an organized PointCloud (width × height = point count).",
+  "pointCloudDecoding": "Decoding point cloud…"
 }

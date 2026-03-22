@@ -638,10 +638,14 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ClipMeanFunction>();
         registry.RegisterScalar<Scalar.Image.ClipStdFunction>();
 
-        // Spatial — PointCloud construction + accessors. Constructor consumes an
+        // Spatial — PointCloud construction + accessors. Constructors consume an
         // Image-typed depth map (output of depth_map_to_image on MiDaS/DPT-family
-        // models); accessors mirror image_width/image_height for header fields.
-        registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthFunction>();
+        // models). Pinhole variant is physically correct when depth values
+        // represent real-world distances; orthographic variant is the honest
+        // interpretation for normalized inverse depth (relative ordering, no
+        // metric scale). Accessors mirror image_width/image_height for header fields.
+        registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthPinholeFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthOrthographicFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudCountFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudWidthFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudHeightFunction>();
