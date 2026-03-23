@@ -481,10 +481,9 @@ internal static class InsertExecutor
         }
 
         // Typed-array source for typed-array target: shapes must match.
-        // VALUES paths use a single arena (sourceStore == targetArena), so
-        // the array DataValue's offsets are valid in the batch and can be
-        // passed through directly. INSERT … SELECT cross-arena array copy
-        // is a future enhancement — caller's arena equality is the gate.
+        // Same-arena pass-through is free (VALUES path); cross-arena copy
+        // (INSERT … SELECT from another table) reads the raw payload bytes
+        // out of the source store and re-emits them in the target arena.
         if (target.IsArray)
         {
             if (!source.IsArray || source.Kind != target.Kind)
@@ -493,14 +492,11 @@ internal static class InsertExecutor
                     $"INSERT for column '{columnName}': target is {target.Kind}[] but the " +
                     $"supplied value is {source.Kind}{(source.IsArray ? "[]" : "")}.");
             }
-            if (!ReferenceEquals(sourceStore, targetArena))
-            {
-                throw new InvalidOperationException(
-                    $"INSERT for column '{columnName}': cross-arena typed-array copy is not " +
-                    "yet supported. INSERT … SELECT of array columns from another table will " +
-                    "land in a later PR.");
-            }
-            return LiteralCoercion.EnforceFixedShape(source, target, columnName, targetArena);
+
+            DataValue prepared = ReferenceEquals(sourceStore, targetArena) || source.IsInline
+                ? source
+                : CopyTypedArrayToTargetArena(source, sourceStore, sidecarRegistry, targetArena, columnName);
+            return LiteralCoercion.EnforceFixedShape(prepared, target, columnName, targetArena);
         }
 
         // Reject array-to-scalar shape mismatches.
@@ -560,6 +556,65 @@ internal static class InsertExecutor
         object? scalar = source.ToObject(sourceStore, sidecarRegistry);
         return LiteralCoercion.Coerce(scalar, target, targetArena, columnName);
     }
+
+    /// <summary>
+    /// Copies a typed-array <see cref="DataValue"/>'s payload bytes from
+    /// <paramref name="sourceStore"/> (or the source's sidecar) into
+    /// <paramref name="targetArena"/>, returning a new <c>DataValue</c> with
+    /// target-arena offsets and the source's flags + <c>_charCount</c>
+    /// preserved (so multi-dim status and ndim survive the copy).
+    /// Fixed-width primitive element kinds are byte-copyable; reference-
+    /// element kinds (<c>String</c>, <c>Struct</c>, <c>Image</c>, <c>Audio</c>,
+    /// <c>Video</c>, <c>Json</c>, <c>PointCloud</c>) carry <c>ArraySlot</c>
+    /// blocks whose 64-bit slot offsets point into the source store; a raw
+    /// byte copy would leave those offsets dangling, so we reject them with
+    /// a clear pointer at the per-element rewrite path that has not yet
+    /// landed.
+    /// </summary>
+    private static DataValue CopyTypedArrayToTargetArena(
+        DataValue source,
+        IValueStore sourceStore,
+        SidecarRegistry sidecarRegistry,
+        Arena targetArena,
+        string columnName)
+    {
+        if (IsReferenceElementArrayKind(source.Kind))
+        {
+            throw new InvalidOperationException(
+                $"INSERT for column '{columnName}': cross-arena copy of Array<{source.Kind}> " +
+                "is not supported. Reference-element arrays (String, Struct, Image, Audio, " +
+                "Video, Json, PointCloud) carry per-element slot offsets pointing into the " +
+                "source store; a byte copy would leave those offsets dangling. Use a VALUES " +
+                "form for these columns until the per-element slot-rewrite path lands.");
+        }
+
+        // Read raw payload bytes — RawArrayBytes returns the prefix+elements
+        // span for multi-dim sources and the element-only span for flat 1-D,
+        // uniformly across inline / arena / sidecar storage tiers.
+        ReadOnlySpan<byte> raw = source.RawArrayBytes(sourceStore, sidecarRegistry);
+
+        if (source.IsMultiDim)
+        {
+            return DataValue.FromArenaMultiDimRawBytes(raw, source.Kind, source.Ndim, targetArena);
+        }
+        return DataValue.FromArenaArrayBytes(raw, source.Kind, targetArena);
+    }
+
+    /// <summary>
+    /// True when <paramref name="kind"/> is a reference-element array kind —
+    /// <c>String</c>, <c>Struct</c>, or any blob kind. These arrays use the
+    /// 16-byte <c>ArraySlot</c> per-element layout, so a raw byte copy
+    /// across arenas would leave each slot's offset pointing into the
+    /// source store.
+    /// </summary>
+    private static bool IsReferenceElementArrayKind(DataKind kind) =>
+        kind is DataKind.String
+              or DataKind.Struct
+              or DataKind.Image
+              or DataKind.Audio
+              or DataKind.Video
+              or DataKind.Json
+              or DataKind.PointCloud;
 
     /// <summary>
     /// Resolves how each target schema column gets its value: either an
