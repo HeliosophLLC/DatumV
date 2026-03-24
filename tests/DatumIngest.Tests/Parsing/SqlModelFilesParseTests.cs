@@ -43,8 +43,16 @@ public sealed class SqlModelFilesParseTests
         string sqlPath = Path.Combine(ResolveModelsDir(), fileName);
         string source = File.ReadAllText(sqlPath);
 
-        Statement stmt = SqlParser.ParseStatement(source);
-        CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
-        Assert.NotEmpty(create.StatementBody);
+        // Use ParseBatch so multi-statement bundles (Florence-2 fp16 / Q8
+        // ship 4 CREATE MODEL statements per file — one per task variant)
+        // parse end-to-end. Single-statement files still pass since the
+        // batch parser returns a one-element list.
+        IReadOnlyList<Statement> statements = SqlParser.ParseBatch(source);
+        Assert.NotEmpty(statements);
+        foreach (Statement stmt in statements)
+        {
+            CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
+            Assert.NotEmpty(create.StatementBody);
+        }
     }
 }
