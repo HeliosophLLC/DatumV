@@ -236,6 +236,11 @@ public static class TaskTypeRegistry
             [Scalar(DataKind.Image)],
             Scalar(DataKind.Image),
             "Image → per-pixel depth as grayscale Image."),
+        new("DepthEstimatorMetric",
+            [Scalar(DataKind.Image)],
+            ArrayOf(DataKind.Float32),
+            "Image → per-pixel **metric** depth as a shape-aware Float32 array. "
+                + "Bigger value = farther (units: meters for ZoeDepth / GLPN-NYU)."),
 
         // ─── image: generation + transformation ─────────────────────────
         new("ImageUpscaler",

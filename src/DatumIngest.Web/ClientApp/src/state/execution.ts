@@ -108,42 +108,54 @@ const abortByTab = new Map<string, AbortController>();
 // SELECT). Mutating the valtio proxy once per row triggers a re-render
 // per row, which combined with column re-measurement freezes the UI
 // for streams of a few thousand rows. We instead buffer pending rows
-// per (tabId, cellId) here and flush all of them inside a single rAF
-// callback — one mutation, one notification, one render per frame.
+// per (tabId, cellId) here and flush them on a setTimeout cadence —
+// one mutation, one notification, one render per interval.
+//
+// Coalesce interval is adaptive. We start at one frame (~16 ms) so the
+// UI feels live for cheap streams. After each flush we measure how
+// long the commit-and-paint took (rAF fires after React commits its
+// render) and grow the interval up to MAX_COALESCE_MS when commits
+// blow through FRAME_BUDGET_HIGH_MS — heavy rows (dozens of images,
+// point clouds, big float arrays) end up batching at ~2 Hz with rows
+// flowing in chunks rather than freezing the tab. When commits get
+// cheap again we shrink the interval back toward the floor.
 //
 // The buffer lives outside the proxy on purpose (non-serialisable, no
 // reason to deep-wrap). Terminal events (`complete`, `error`,
 // `cell_completed`) flush synchronously so the final state is correct
 // the moment the caller observes it.
+const MIN_COALESCE_MS = 16;
+const MAX_COALESCE_MS = 500;
+// Commit-and-paint duration (measured from flush start to the
+// following rAF) above which we grow the coalesce interval.
+const FRAME_BUDGET_HIGH_MS = 50;
+// Below this we shrink, gradually returning to near-live flush rate
+// once the per-row cost drops (e.g. the stream switches from media
+// cells to scalars).
+const FRAME_BUDGET_LOW_MS = 24;
+
 interface PendingRows {
   cells: Map<string, JsonCell[][]>;
-  rafHandle: number | null;
+  timerHandle: number | null;
+  coalesceMs: number;
 }
 const pendingByTab = new Map<string, PendingRows>();
 
 function getPending(tabId: string): PendingRows {
   let p = pendingByTab.get(tabId);
   if (!p) {
-    p = { cells: new Map(), rafHandle: null };
+    p = { cells: new Map(), timerHandle: null, coalesceMs: MIN_COALESCE_MS };
     pendingByTab.set(tabId, p);
   }
   return p;
 }
 
-function cancelScheduled(handle: number): void {
-  if (typeof cancelAnimationFrame === 'undefined') {
-    window.clearTimeout(handle);
-  } else {
-    cancelAnimationFrame(handle);
-  }
-}
-
 function flushPendingRows(tabId: string): void {
   const pending = pendingByTab.get(tabId);
   if (!pending) return;
-  if (pending.rafHandle !== null) {
-    cancelScheduled(pending.rafHandle);
-    pending.rafHandle = null;
+  if (pending.timerHandle !== null) {
+    window.clearTimeout(pending.timerHandle);
+    pending.timerHandle = null;
   }
   if (pending.cells.size === 0) return;
   const exec = executionsState.byTabId[tabId];
@@ -151,35 +163,48 @@ function flushPendingRows(tabId: string): void {
     pending.cells.clear();
     return;
   }
+  const t0 = performance.now();
   for (const [cellId, rows] of pending.cells) {
     const cell = findCell(exec, cellId);
     if (!cell) continue;
-    // Single bulk push per cell per frame. push(...rows) is fine for the
-    // ~hundreds-per-frame counts we expect; if it ever grew into the
-    // tens of thousands range we'd switch to assigning a fresh array.
+    // Single bulk push per cell per flush. push(...rows) is fine for the
+    // batch sizes we expect; if it ever grew into the tens of thousands
+    // range we'd switch to assigning a fresh array.
     cell.rows.push(...rows);
     cell.rowCount = cell.rows.length;
   }
   pending.cells.clear();
+
+  // Adaptive backoff. rAF fires at the start of the next frame, after
+  // React has applied this mutation's render — so the delta from t0 is
+  // a decent proxy for the commit cost of the batch we just flushed.
+  // Skipped in environments without rAF (jsdom in tests); the interval
+  // stays pinned at MIN_COALESCE_MS, which is what the tests assume.
+  if (typeof requestAnimationFrame !== 'undefined') {
+    requestAnimationFrame(() => {
+      const frameCost = performance.now() - t0;
+      if (frameCost > FRAME_BUDGET_HIGH_MS) {
+        pending.coalesceMs = Math.min(pending.coalesceMs * 2, MAX_COALESCE_MS);
+      } else if (
+        frameCost < FRAME_BUDGET_LOW_MS &&
+        pending.coalesceMs > MIN_COALESCE_MS
+      ) {
+        pending.coalesceMs = Math.max(
+          Math.floor(pending.coalesceMs / 2),
+          MIN_COALESCE_MS,
+        );
+      }
+    });
+  }
 }
 
 function scheduleRowFlush(tabId: string): void {
   const pending = getPending(tabId);
-  if (pending.rafHandle !== null) return;
-  // Fallback to setTimeout when rAF isn't available (Node test
-  // environment); in the browser rAF gives us a natural ~60Hz cadence
-  // that aligns flushes with frame paint.
-  if (typeof requestAnimationFrame === 'undefined') {
-    pending.rafHandle = window.setTimeout(() => {
-      pending.rafHandle = null;
-      flushPendingRows(tabId);
-    }, 16) as unknown as number;
-    return;
-  }
-  pending.rafHandle = requestAnimationFrame(() => {
-    pending.rafHandle = null;
+  if (pending.timerHandle !== null) return;
+  pending.timerHandle = window.setTimeout(() => {
+    pending.timerHandle = null;
     flushPendingRows(tabId);
-  });
+  }, pending.coalesceMs);
 }
 
 interface ExecutionsState {
@@ -398,8 +423,8 @@ export function cancelTab(tabId: string): void {
 export function disposeTabExecution(tabId: string): void {
   cancelTab(tabId);
   const pending = pendingByTab.get(tabId);
-  if (pending && pending.rafHandle !== null) {
-    cancelScheduled(pending.rafHandle);
+  if (pending && pending.timerHandle !== null) {
+    window.clearTimeout(pending.timerHandle);
   }
   pendingByTab.delete(tabId);
   delete executionsState.byTabId[tabId];

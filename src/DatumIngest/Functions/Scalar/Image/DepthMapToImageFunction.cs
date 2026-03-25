@@ -9,9 +9,12 @@ namespace DatumIngest.Functions.Scalar.Image;
 
 /// <summary>
 /// <c>depth_map_to_image(values FLOAT32[], source_h INT, source_w INT,
-/// target_h INT, target_w INT) → Image</c>. Packs a single-channel
-/// Float32 grid into a grayscale image, optionally min-max normalised to
-/// [0, 1], and resizes the result to the requested output dimensions.
+/// target_h INT, target_w INT [, invert BOOL]) → Image</c>. Packs a
+/// single-channel Float32 grid into a grayscale image with per-image
+/// min-max normalisation and bilinear resize to the requested output
+/// dimensions. The optional <c>invert</c> flag flips the brightness
+/// mapping so callers can normalise the bright-vs-dark convention
+/// across the inverse-depth and metric-depth model families.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,12 +29,15 @@ namespace DatumIngest.Functions.Scalar.Image;
 /// <para>
 /// <strong>Math.</strong> Per-image min-max normalisation maps the input's
 /// observed range to [0, 1] — bigger value = brighter pixel. MiDaS and
-/// DPT emit *inverse* depth in arbitrary units, so without per-image
-/// rescale the visible map is washed out and the dynamic range is
-/// meaningless. The output is grayscale-as-RGBA (R=G=B=normalised value,
-/// A=255) to stay uniform with every other image-emitting model. PNG
-/// encoding happens at the <see cref="ValueRef.FromImage(SKBitmap)"/>
-/// boundary.
+/// DPT emit *inverse* depth in arbitrary units (bigger = closer), so the
+/// default mapping reads as "near = bright" for that family. Metric depth
+/// models (ZoeDepth, GLPN-NYU) emit *real* meters where bigger = farther;
+/// passing <c>invert => true</c> on those bodies inverts the post-normalise
+/// brightness to <c>1.0 - normalised</c>, keeping near = bright across
+/// the catalog so model-vs-model visual comparison is consistent. The
+/// output is grayscale-as-RGBA (R=G=B=normalised value, A=255) to stay
+/// uniform with every other image-emitting model. PNG encoding happens
+/// at the <see cref="ValueRef.FromImage(SKBitmap)"/> boundary.
 /// </para>
 /// <para>
 /// <strong>Resize.</strong> Bilinear from the source tensor's
@@ -52,7 +58,10 @@ public sealed class DepthMapToImageFunction : IFunction, IScalarFunction
     public static string Description =>
         "Packs a single-channel Float32 grid into a grayscale image with per-image min-max "
         + "normalisation and bilinear resize: depth_map_to_image(values FLOAT32[], source_h, "
-        + "source_w, target_h, target_w) → Image. Use for MiDaS / DPT / U²-Net outputs.";
+        + "source_w, target_h, target_w [, invert BOOL]) → Image. Use for MiDaS / DPT / U²-Net "
+        + "outputs (default mapping is bigger value = brighter pixel). Pass invert => true on "
+        + "metric depth models (ZoeDepth, GLPN-NYU) so near = bright matches the inverse-depth "
+        + "family convention.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -83,6 +92,13 @@ public sealed class DepthMapToImageFunction : IFunction, IScalarFunction
                         Check: new GreaterThanCheck(0m),
                         Unit: "pixels",
                         Description: "Output image width after bilinear resize. Pass the original image's width to align.")),
+                new ParameterSpec("invert", DataKindMatcher.Exact(DataKind.Boolean), IsOptional: true,
+                    Metadata: new ParameterMetadata(
+                        Description: "When true, the post-normalise brightness is flipped to (1 - normalised). "
+                            + "Use on metric-depth models (ZoeDepth, GLPN-NYU) where bigger value = farther, "
+                            + "so that 'near = bright' matches the default inverse-depth convention. "
+                            + "Defaults to false; existing inverse-depth bodies (MiDaS, DPT, Depth-Anything) "
+                            + "don't need to pass anything.")),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
@@ -109,6 +125,11 @@ public sealed class DepthMapToImageFunction : IFunction, IScalarFunction
         int sourceW = ReadIntArg(args[2], "source_w");
         int targetH = ReadIntArg(args[3], "target_h");
         int targetW = ReadIntArg(args[4], "target_w");
+        // Optional invert flag — when present and true, flip the
+        // post-normalise brightness so callers can keep "near = bright"
+        // visually consistent across inverse-depth and metric-depth
+        // model families.
+        bool invert = args.Length >= 6 && !args[5].IsNull && args[5].AsBoolean();
 
         int planeSize = sourceH * sourceW;
         if (values.Length != planeSize)
@@ -142,6 +163,7 @@ public sealed class DepthMapToImageFunction : IFunction, IScalarFunction
             for (int i = 0; i < planeSize; i++)
             {
                 float v = (values[i] - min) / range;
+                if (invert) v = 1f - v;
                 byte g = ToByte(v);
                 int o = i * 4;
                 dst[o + 0] = g;

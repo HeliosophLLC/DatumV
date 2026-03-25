@@ -607,6 +607,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Arrays.ArrayGetFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayNdimsFunction>();
         registry.RegisterScalar<Scalar.Arrays.CardinalityFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayResize2DFunction>();
 
         // UUID
         registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();
