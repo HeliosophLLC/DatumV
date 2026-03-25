@@ -16,7 +16,17 @@ internal sealed record JsonCell(
     // metadata-only summary in the row grid without decoding the blob, and
     // gives the 3D viewer the dimensions/flags it needs to set up
     // BufferAttributes without re-parsing the header.
-    JsonPointCloudInfo? PointCloud = null);
+    JsonPointCloudInfo? PointCloud = null,
+    // Populated for kind="numeric_array". DataB64 carries the raw
+    // little-endian element bytes (no gzip — the binary form already beats
+    // the JSON-text form ~3× on wire size, and the decode path is a single
+    // typed-array view). Min/Max/Mean are computed server-side so the
+    // front-end can render a stats card without touching the bytes.
+    string? ElementKind = null,
+    int? Count = null,
+    double? Min = null,
+    double? Max = null,
+    double? Mean = null);
 
 internal sealed record JsonMediaItem(string Mime, string DataB64);
 

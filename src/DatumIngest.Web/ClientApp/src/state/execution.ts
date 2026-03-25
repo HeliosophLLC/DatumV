@@ -42,6 +42,16 @@ export interface JsonCell {
     height: number;
     coordinateFrame: string;
   };
+  // Populated for kind="numeric_array". `dataB64` carries raw little-
+  // endian element bytes; the front-end decodes through the matching
+  // TypedArray view ("f32" → Float32Array, "i32" → Int32Array, …).
+  // Stats (min/max/mean) are server-computed so the inline chip and
+  // single-value card can render without touching the bytes.
+  elementKind?: string;
+  count?: number;
+  min?: number;
+  max?: number;
+  mean?: number;
 }
 
 export interface CellResult {

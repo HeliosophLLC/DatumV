@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { AlertCircle, Ban, Check, Film, Loader2, Music } from 'lucide-react';
+import { AlertCircle, Ban, Check, Film, Loader2, Music, Sigma } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { MediaPreview } from './MediaPreview';
 import { MemoryChip } from './MemoryChip';
@@ -449,6 +449,9 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
   if (cell.kind === 'pointcloud') {
     return <SingleValuePointCloud cell={cell} />;
   }
+  if (cell.kind === 'numeric_array') {
+    return <SingleValueNumericArray cell={cell} />;
+  }
   // Scalar / JSON / catchall. Use a pre-wrap block so multi-line JSON
   // bodies keep their formatting; large font so the value is readable
   // without zooming.
@@ -569,6 +572,12 @@ function cellTextForMeasure(cell: JsonCell): string {
   if (cell.kind === 'media_array' && cell.items) {
     return `[${cell.items.length} items]`;
   }
+  if (cell.kind === 'numeric_array') {
+    // Measurement string mirrors the rendered chip — "f32[147456] · [0.00..9.99]".
+    // Just an upper-bound approximation; the chip is short enough that exact
+    // measurement isn't worth a per-cell render walk.
+    return `${cell.elementKind ?? '?'}[${cell.count ?? 0}] · [0.0000..9.9999]`;
+  }
   return cell.text ?? '';
 }
 
@@ -604,7 +613,8 @@ function cellTooltip(cell: JsonCell): string | undefined {
     cell.kind === 'image' ||
     cell.kind === 'audio' ||
     cell.kind === 'video' ||
-    cell.kind === 'media_array'
+    cell.kind === 'media_array' ||
+    cell.kind === 'numeric_array'
   ) {
     return undefined;
   }
@@ -781,6 +791,7 @@ function CellValue({
   }
   if (cell.kind === 'media_array' && cell.items) return <MediaArrayCell cell={cell} largeMedia={largeMedia} />;
   if (cell.kind === 'pointcloud') return <PointCloudCell cell={cell} largeMedia={largeMedia} />;
+  if (cell.kind === 'numeric_array') return <NumericArrayCell cell={cell} />;
   return <span>{cell.text ?? ''}</span>;
 }
 
@@ -924,6 +935,194 @@ function VideoCell({ cell, largeMedia = false }: { cell: JsonCell; largeMedia?: 
         <video src={src} controls className="max-h-[80vh] max-w-[80vw]" />
       </MediaPreview>
     </>
+  );
+}
+
+// ────────── Numeric array (binary transport) ──────────
+//
+// Server-side `WebCellFormatter` switches large fixed-width numeric
+// arrays from JSON-text (`[0.123, 0.456, ...]`) to a `numeric_array`
+// cell carrying raw little-endian bytes in `dataB64` plus pre-computed
+// min/max/mean. The grid chip below renders the stats without ever
+// touching the bytes — that's the point of the wire-format change.
+// Click opens a modal that decodes the bytes into a typed-array view
+// and shows the first chunk inline; full inspection is deferred to a
+// future "View all values" expansion if the user needs it.
+
+function formatStat(value: number): string {
+  if (!Number.isFinite(value)) return value.toString();
+  const abs = Math.abs(value);
+  if (abs !== 0 && (abs < 0.001 || abs >= 1e6)) return value.toExponential(2);
+  return value.toFixed(4).replace(/\.?0+$/, '');
+}
+
+function numericArrayTitle(cell: JsonCell): string {
+  const k = cell.elementKind ?? '?';
+  const n = cell.count ?? 0;
+  const parts = [`${k}[${n.toLocaleString()}]`];
+  if (cell.min !== undefined && cell.max !== undefined) {
+    parts.push(`min ${formatStat(cell.min)}`, `max ${formatStat(cell.max)}`);
+  }
+  if (cell.mean !== undefined) parts.push(`mean ${formatStat(cell.mean)}`);
+  return parts.join(' · ');
+}
+
+function bytesPerElement(elementKind: string | undefined): number {
+  switch (elementKind) {
+    case 'bool':
+    case 'u8':
+    case 'i8':
+      return 1;
+    case 'u16':
+    case 'i16':
+      return 2;
+    case 'u32':
+    case 'i32':
+    case 'f32':
+      return 4;
+    case 'u64':
+    case 'i64':
+    case 'f64':
+      return 8;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Decodes the first `maxCount` elements of the array into a regular
+ * Number[]. We slice the base64 input so we don't allocate the full
+ * typed array — for a 1M-element Float32 cell that's an 8 KB decode
+ * instead of 4 MB. Returns null when the element kind isn't supported
+ * or `dataB64` is missing.
+ */
+function decodeNumericArrayHead(cell: JsonCell, maxCount: number): number[] | null {
+  if (!cell.dataB64 || !cell.elementKind) return null;
+  const bpe = bytesPerElement(cell.elementKind);
+  if (bpe === 0) return null;
+  const wantBytes = Math.min(maxCount, cell.count ?? 0) * bpe;
+  // base64 → bytes; only decode the prefix we actually need. base64 is
+  // groups of 4 chars → 3 bytes, so round up to the next group boundary.
+  const groups = Math.ceil(wantBytes / 3);
+  const headChars = Math.min(cell.dataB64.length, groups * 4);
+  const binStr = atob(cell.dataB64.substring(0, headChars));
+  const bytes = new Uint8Array(binStr.length);
+  for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+  // Trim to a whole-element boundary so the typed view doesn't read
+  // half an element off the end.
+  const usable = Math.floor(bytes.length / bpe) * bpe;
+  const buffer = bytes.buffer.slice(0, usable);
+  const take = Math.min(maxCount, usable / bpe);
+  switch (cell.elementKind) {
+    case 'bool':
+      return Array.from(new Uint8Array(buffer, 0, take), (v) => (v ? 1 : 0));
+    case 'u8':
+      return Array.from(new Uint8Array(buffer, 0, take));
+    case 'i8':
+      return Array.from(new Int8Array(buffer, 0, take));
+    case 'u16':
+      return Array.from(new Uint16Array(buffer, 0, take));
+    case 'i16':
+      return Array.from(new Int16Array(buffer, 0, take));
+    case 'u32':
+      return Array.from(new Uint32Array(buffer, 0, take));
+    case 'i32':
+      return Array.from(new Int32Array(buffer, 0, take));
+    case 'f32':
+      return Array.from(new Float32Array(buffer, 0, take));
+    case 'f64':
+      return Array.from(new Float64Array(buffer, 0, take));
+    case 'u64':
+      // BigUint64Array → Number; precision-lossy near 2^53 but
+      // acceptable for inspection-only display.
+      return Array.from(new BigUint64Array(buffer, 0, take), (v) => Number(v));
+    case 'i64':
+      return Array.from(new BigInt64Array(buffer, 0, take), (v) => Number(v));
+    default:
+      return null;
+  }
+}
+
+function NumericArrayCell({ cell }: { cell: JsonCell }) {
+  const [open, setOpen] = useState(false);
+  const title = numericArrayTitle(cell);
+  const kind = cell.elementKind ?? '?';
+  const count = cell.count ?? 0;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={title}
+        className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer items-center gap-1"
+      >
+        <Sigma className="size-3.5" />
+        <span className="font-mono">
+          {kind}[{count.toLocaleString()}]
+        </span>
+        {cell.min !== undefined && cell.max !== undefined && (
+          <span className="text-foreground/60 font-mono">
+            [{formatStat(cell.min)}..{formatStat(cell.max)}]
+          </span>
+        )}
+      </button>
+      <MediaPreview open={open} onClose={() => setOpen(false)} title={title}>
+        <NumericArrayInspector cell={cell} />
+      </MediaPreview>
+    </>
+  );
+}
+
+function SingleValueNumericArray({ cell }: { cell: JsonCell }) {
+  return (
+    <div className="flex max-h-full w-full max-w-3xl flex-col gap-4 overflow-auto p-4">
+      <NumericArrayInspector cell={cell} />
+    </div>
+  );
+}
+
+/**
+ * Stats grid + first-N values preview. Used by both the modal (opened
+ * from the inline chip) and the single-value pane. The preview decode
+ * is bounded — we never materialise the full array on first render.
+ */
+function NumericArrayInspector({ cell }: { cell: JsonCell }) {
+  const PREVIEW_COUNT = 64;
+  const kind = cell.elementKind ?? '?';
+  const count = cell.count ?? 0;
+  const preview = useMemo(
+    () => decodeNumericArrayHead(cell, PREVIEW_COUNT),
+    [cell],
+  );
+  const stats: { label: string; value: string }[] = [
+    { label: 'kind', value: kind },
+    { label: 'count', value: count.toLocaleString() },
+  ];
+  if (cell.min !== undefined) stats.push({ label: 'min', value: formatStat(cell.min) });
+  if (cell.max !== undefined) stats.push({ label: 'max', value: formatStat(cell.max) });
+  if (cell.mean !== undefined) stats.push({ label: 'mean', value: formatStat(cell.mean) });
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
+        {stats.map((s) => (
+          <div key={s.label} className="contents">
+            <div className="text-muted-foreground font-mono">{s.label}</div>
+            <div className="font-mono">{s.value}</div>
+          </div>
+        ))}
+      </div>
+      {preview && preview.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <div className="text-muted-foreground text-xs">
+            first {preview.length.toLocaleString()} of {count.toLocaleString()}
+          </div>
+          <pre className="bg-muted/40 border-border max-h-96 overflow-auto rounded-xs border p-2 font-mono text-xs whitespace-pre-wrap">
+            {preview.map((v) => formatStat(v)).join(', ')}
+            {count > preview.length ? ', …' : ''}
+          </pre>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions.Json;
@@ -89,6 +90,20 @@ internal static class WebCellFormatter
             }
         }
 
+        // Large fixed-width numeric arrays: ship raw little-endian bytes
+        // + server-computed stats instead of a `[0.123, 0.456, ...]` JSON
+        // string. A 384×384 depth tensor is ~1.4 MB as JSON text and turns
+        // into a similarly-sized DOM text node per cell; the binary form is
+        // ~590 KB on the wire and decodes to a Float32Array in microseconds.
+        // The threshold preserves the JSON-tree path for small arrays where
+        // inline inspection beats a stats card. Returns null when the array
+        // is below threshold, so we fall through to the JSON-tree path.
+        if (IsBinaryNumericArrayKind(value))
+        {
+            JsonCell? binary = TryFormatNumericArray(value, arena, registry);
+            if (binary is not null) return binary;
+        }
+
         // Structured shapes (Struct, Array<Struct>, Array<scalar>, Array<String>)
         // route to the front-end's JSON tree renderer so the user gets a
         // collapsible, copyable view with field-name-aware rendering rather than
@@ -101,6 +116,178 @@ internal static class WebCellFormatter
         }
 
         return new JsonCell("text", Text: FormatText(value, arena, registry, types, translations));
+    }
+
+    /// <summary>
+    /// Element-count threshold above which a fixed-width numeric array
+    /// switches from JSON-text rendering to the binary `numeric_array`
+    /// transport. Tuned by guesswork: arrays this size or smaller render
+    /// inline as readable JSON without obvious freeze; above this, the
+    /// quadratic-feeling cost of multi-MB DOM text nodes + canvas
+    /// measureText dominates. Adjust if profiling pulls a clear knee.
+    /// </summary>
+    private const int NumericArrayBinaryThreshold = 256;
+
+    /// <summary>
+    /// True when <paramref name="value"/> is a flat fixed-width numeric
+    /// array whose element kind the binary transport supports. UInt8
+    /// arrays are excluded — they already route to the image-media path
+    /// above (legacy byte-payload-as-image convention) and never reach
+    /// this check. Size gating happens in <see cref="TryFormatNumericArray"/>
+    /// where the typed span is already in hand.
+    /// </summary>
+    private static bool IsBinaryNumericArrayKind(DataValue value)
+    {
+        if (!value.IsArray) return false;
+        return value.Kind switch
+        {
+            DataKind.Boolean
+            or DataKind.Int8
+            or DataKind.UInt16
+            or DataKind.Int16
+            or DataKind.UInt32
+            or DataKind.Int32
+            or DataKind.UInt64
+            or DataKind.Int64
+            or DataKind.Float32
+            or DataKind.Float64 => true,
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Formats a fixed-width numeric array as a binary <c>numeric_array</c>
+    /// cell, or returns <c>null</c> when the array is below the size
+    /// threshold (caller falls back to the JSON-tree path). DataB64 carries
+    /// raw little-endian element bytes — both ends run on x64 so
+    /// <see cref="MemoryMarshal.AsBytes{T}"/> is a zero-copy reinterpret.
+    /// </summary>
+    private static JsonCell? TryFormatNumericArray(DataValue value, Arena arena, SidecarRegistry registry)
+    {
+        return value.Kind switch
+        {
+            DataKind.Boolean => BuildBoolBinary(value.AsArraySpan<byte>(arena, registry)),
+            DataKind.Int8 => BuildSignedBinary<sbyte>(value.AsArraySpan<sbyte>(arena, registry), "i8", v => v),
+            DataKind.UInt16 => BuildUnsignedBinary<ushort>(value.AsArraySpan<ushort>(arena, registry), "u16", v => v),
+            DataKind.Int16 => BuildSignedBinary<short>(value.AsArraySpan<short>(arena, registry), "i16", v => v),
+            DataKind.UInt32 => BuildUnsignedBinary<uint>(value.AsArraySpan<uint>(arena, registry), "u32", v => v),
+            DataKind.Int32 => BuildSignedBinary<int>(value.AsArraySpan<int>(arena, registry), "i32", v => v),
+            DataKind.UInt64 => BuildUnsignedBinary<ulong>(value.AsArraySpan<ulong>(arena, registry), "u64", v => v),
+            DataKind.Int64 => BuildSignedBinary<long>(value.AsArraySpan<long>(arena, registry), "i64", v => v),
+            DataKind.Float32 => BuildFloat32Binary(value.AsArraySpan<float>(arena, registry)),
+            DataKind.Float64 => BuildFloat64Binary(value.AsArraySpan<double>(arena, registry)),
+            _ => null,
+        };
+    }
+
+    private static JsonCell? BuildBoolBinary(ReadOnlySpan<byte> span)
+    {
+        if (span.Length <= NumericArrayBinaryThreshold) return null;
+        string b64 = Convert.ToBase64String(MemoryMarshal.AsBytes(span));
+        // Bools have no meaningful min/max/mean; surface count only.
+        return new JsonCell(
+            "numeric_array",
+            DataB64: b64,
+            ElementKind: "bool",
+            Count: span.Length);
+    }
+
+    private static JsonCell? BuildSignedBinary<T>(ReadOnlySpan<T> span, string elementKind, Func<T, long> toLong)
+        where T : unmanaged
+    {
+        if (span.Length <= NumericArrayBinaryThreshold) return null;
+        string b64 = Convert.ToBase64String(MemoryMarshal.AsBytes(span));
+        long min = long.MaxValue, max = long.MinValue;
+        double sum = 0;
+        for (int i = 0; i < span.Length; i++)
+        {
+            long v = toLong(span[i]);
+            if (v < min) min = v;
+            if (v > max) max = v;
+            sum += v;
+        }
+        return new JsonCell(
+            "numeric_array",
+            DataB64: b64,
+            ElementKind: elementKind,
+            Count: span.Length,
+            Min: min,
+            Max: max,
+            Mean: sum / span.Length);
+    }
+
+    private static JsonCell? BuildUnsignedBinary<T>(ReadOnlySpan<T> span, string elementKind, Func<T, ulong> toULong)
+        where T : unmanaged
+    {
+        if (span.Length <= NumericArrayBinaryThreshold) return null;
+        string b64 = Convert.ToBase64String(MemoryMarshal.AsBytes(span));
+        ulong min = ulong.MaxValue, max = ulong.MinValue;
+        double sum = 0;
+        for (int i = 0; i < span.Length; i++)
+        {
+            ulong v = toULong(span[i]);
+            if (v < min) min = v;
+            if (v > max) max = v;
+            sum += v;
+        }
+        return new JsonCell(
+            "numeric_array",
+            DataB64: b64,
+            ElementKind: elementKind,
+            Count: span.Length,
+            Min: min,
+            Max: max,
+            Mean: sum / span.Length);
+    }
+
+    private static JsonCell? BuildFloat32Binary(ReadOnlySpan<float> span)
+    {
+        if (span.Length <= NumericArrayBinaryThreshold) return null;
+        string b64 = Convert.ToBase64String(MemoryMarshal.AsBytes(span));
+        double min = double.PositiveInfinity, max = double.NegativeInfinity, sum = 0;
+        int finite = 0;
+        for (int i = 0; i < span.Length; i++)
+        {
+            float v = span[i];
+            if (!float.IsFinite(v)) continue;
+            if (v < min) min = v;
+            if (v > max) max = v;
+            sum += v;
+            finite++;
+        }
+        return new JsonCell(
+            "numeric_array",
+            DataB64: b64,
+            ElementKind: "f32",
+            Count: span.Length,
+            Min: finite > 0 ? min : null,
+            Max: finite > 0 ? max : null,
+            Mean: finite > 0 ? sum / finite : null);
+    }
+
+    private static JsonCell? BuildFloat64Binary(ReadOnlySpan<double> span)
+    {
+        if (span.Length <= NumericArrayBinaryThreshold) return null;
+        string b64 = Convert.ToBase64String(MemoryMarshal.AsBytes(span));
+        double min = double.PositiveInfinity, max = double.NegativeInfinity, sum = 0;
+        int finite = 0;
+        for (int i = 0; i < span.Length; i++)
+        {
+            double v = span[i];
+            if (!double.IsFinite(v)) continue;
+            if (v < min) min = v;
+            if (v > max) max = v;
+            sum += v;
+            finite++;
+        }
+        return new JsonCell(
+            "numeric_array",
+            DataB64: b64,
+            ElementKind: "f64",
+            Count: span.Length,
+            Min: finite > 0 ? min : null,
+            Max: finite > 0 ? max : null,
+            Mean: finite > 0 ? sum / finite : null);
     }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
