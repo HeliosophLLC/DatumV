@@ -661,8 +661,8 @@
       "attributions": ["Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, Radu Timofte — SwinIR (ETH Zurich + others)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/swinir-onnx", "revision": "d2500929641e9bb1e03f7ab83793ba59c307fb06", "include": ["swinir_realsr_x4.onnx"] }],
-      "approxSizeMb": 110,
-      "placeholder": true
+      "installSql": "sql/swinir-realsr-x4.sql",
+      "approxSizeMb": 110
     },
     {
       "id": "swinir-denoising-color-25",
@@ -674,8 +674,8 @@
       "attributions": ["Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, Radu Timofte — SwinIR (ETH Zurich + others)"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/swinir-onnx", "revision": "d2500929641e9bb1e03f7ab83793ba59c307fb06", "include": ["swinir_denoising_color_25.onnx"] }],
-      "approxSizeMb": 45,
-      "placeholder": true
+      "installSql": "sql/swinir-denoising-color-25.sql",
+      "approxSizeMb": 45
     },
     {
       "id": "scunet-color-real-psnr",
@@ -687,8 +687,8 @@
       "attributions": ["Kai Zhang, Yawei Li, Jingyun Liang, Jiezhang Cao, Yulun Zhang, Hao Tang, Deng-Ping Fan, Radu Timofte, Luc Van Gool — SCUNet"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_color_real_psnr.onnx", "scunet_color_real_psnr.onnx.data"] }],
-      "approxSizeMb": 73,
-      "placeholder": true
+      "installSql": "sql/scunet-color-real-psnr.sql",
+      "approxSizeMb": 73
     },
     {
       "id": "scunet-color-real-gan",
@@ -700,8 +700,8 @@
       "attributions": ["Kai Zhang, Yawei Li, Jingyun Liang, Jiezhang Cao, Yulun Zhang, Hao Tang, Deng-Ping Fan, Radu Timofte, Luc Van Gool — SCUNet"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_color_real_gan.onnx", "scunet_color_real_gan.onnx.data"] }],
-      "approxSizeMb": 73,
-      "placeholder": true
+      "installSql": "sql/scunet-color-real-gan.sql",
+      "approxSizeMb": 73
     },
     {
       "id": "scunet-color-15",
@@ -713,8 +713,8 @@
       "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_color_15.onnx", "scunet_color_15.onnx.data"] }],
-      "approxSizeMb": 73,
-      "placeholder": true
+      "installSql": "sql/scunet-color-15.sql",
+      "approxSizeMb": 73
     },
     {
       "id": "scunet-color-25",
@@ -726,8 +726,8 @@
       "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_color_25.onnx", "scunet_color_25.onnx.data"] }],
-      "approxSizeMb": 73,
-      "placeholder": true
+      "installSql": "sql/scunet-color-25.sql",
+      "approxSizeMb": 73
     },
     {
       "id": "scunet-color-50",
@@ -739,8 +739,8 @@
       "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_color_50.onnx", "scunet_color_50.onnx.data"] }],
-      "approxSizeMb": 73,
-      "placeholder": true
+      "installSql": "sql/scunet-color-50.sql",
+      "approxSizeMb": 73
     },
     {
       "id": "scunet-gray-15",
@@ -752,8 +752,7 @@
       "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_gray_15.onnx", "scunet_gray_15.onnx.data"] }],
-      "approxSizeMb": 73,
-      "placeholder": true
+      "approxSizeMb": 73
     },
     {
       "id": "scunet-gray-25",
@@ -780,18 +779,6 @@
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_gray_50.onnx", "scunet_gray_50.onnx.data"] }],
       "approxSizeMb": 73,
       "placeholder": true
-    },
-    {
-      "id": "nafnet-deblur",
-      "displayName": "NAFNet (Image Deblurring)",
-      "description": "Nonlinear Activation-Free Network for single-image deblurring. Removes motion blur and defocus blur from photos. State-of-the-art deblur quality with a compact (~70 MB) CNN backbone — no transformer attention, just residual blocks. Pair with realesrgan-x4v3 for a 'fix + upscale' restoration pipeline.",
-      "task": "image-deblurring",
-      "tags": ["restoration", "deblurring", "nafnet"],
-      "licenseIds": ["mit"],
-      "attributions": ["MEGVII Research — NAFNet (Chen, Chu, Zhang, Sun)", "OpenCV (ONNX export)"],
-      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "opencv/deblurring_nafnet", "revision": "f1f255116cdb628a311d2b5749871189a4639d84", "include": ["deblurring_nafnet_2025may.onnx"] }],
-      "approxSizeMb": 70
     },
     {
       "id": "mobilenetv2",
