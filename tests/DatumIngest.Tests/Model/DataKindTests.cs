@@ -36,6 +36,7 @@ public class DataKindTests : ServiceTestBase
             DataKind.Image,
             DataKind.Struct,
             DataKind.PointCloud,
+            DataKind.Mesh,
         ];
 
         HashSet<DataKind> uniqueKinds = new(expectedKinds);
@@ -52,7 +53,7 @@ public class DataKindTests : ServiceTestBase
     }
 
     [Fact]
-    public void TotalEnumMemberCountIsThirtyOne()
+    public void TotalEnumMemberCountIsThirtyTwo()
     {
         // Tally: Unknown, Type, Boolean,
         // UInt8/16/32/64/128, Int8/16/32/64/128 (10),
@@ -61,9 +62,9 @@ public class DataKindTests : ServiceTestBase
         // String, Uuid (2),
         // Image, Audio, Video, Json (4 encoded blobs),
         // Struct (1),
-        // Point2D, Point3D, PointCloud (3 spatial) → 31 total.
+        // Point2D, Point3D, PointCloud, Mesh (4 spatial) → 32 total.
         DataKind[] allValues = Enum.GetValues<DataKind>();
-        Assert.Equal(31, allValues.Length);
+        Assert.Equal(32, allValues.Length);
     }
 
     [Fact]

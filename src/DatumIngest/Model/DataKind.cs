@@ -161,4 +161,13 @@ public enum DataKind : byte
     /// sidecar storage shape; accessed via <c>AsPointCloud</c> / <c>AsByteSpan</c>.
     /// </summary>
     PointCloud = 74,
+
+    /// <summary>
+    /// A 3D triangle mesh with optional per-vertex attributes (color, normal, UVs) and an optional
+    /// embedded texture. Storage is a single byte blob: a 48-byte header (see <c>MeshHeader</c>)
+    /// followed by an interleaved per-vertex payload, a triangle-index array, and optionally an
+    /// encoded texture image at the tail. Shares <see cref="DataKind.Image"/>'s arena / sidecar
+    /// storage shape; accessed via <c>AsMesh</c> / <c>AsByteSpan</c>.
+    /// </summary>
+    Mesh = 75,
 }

@@ -42,6 +42,21 @@ export interface JsonCell {
     height: number;
     coordinateFrame: string;
   };
+  // Populated for kind="mesh". Parallel to pointCloud — gives the grid
+  // a metadata-only summary chip and the viewer the shape it needs to
+  // set up Three.js BufferAttributes + indices without re-decoding the
+  // 48-byte header twice. Bbox arrays are [x, y, z].
+  mesh?: {
+    vertexCount: number;
+    triangleCount: number;
+    hasColor: boolean;
+    hasNormals: boolean;
+    hasUVs: boolean;
+    hasTexture: boolean;
+    coordinateFrame: string;
+    bboxMin: [number, number, number];
+    bboxMax: [number, number, number];
+  };
   // Populated for kind="numeric_array". `dataB64` carries raw little-
   // endian element bytes; the front-end decodes through the matching
   // TypedArray view ("f32" → Float32Array, "i32" → Int32Array, …).

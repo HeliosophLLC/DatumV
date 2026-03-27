@@ -66,5 +66,10 @@
   "pointCloudModePoints": "Points",
   "pointCloudModeMesh": "Mesh",
   "pointCloudMeshUnavailable": "Mesh mode requires an organized PointCloud (width × height = point count).",
-  "pointCloudDecoding": "Decoding point cloud…"
+  "pointCloudDecoding": "Decoding point cloud…",
+  "meshVerticesLabel": "verts",
+  "meshTrianglesLabel": "tris",
+  "meshColored": "colored",
+  "meshShaded": "shaded",
+  "meshDecoding": "Decoding mesh…"
 }

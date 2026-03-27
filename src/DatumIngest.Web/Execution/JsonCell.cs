@@ -17,6 +17,11 @@ internal sealed record JsonCell(
     // gives the 3D viewer the dimensions/flags it needs to set up
     // BufferAttributes without re-parsing the header.
     JsonPointCloudInfo? PointCloud = null,
+    // Populated for kind="mesh". Parallel to PointCloud — lets the grid
+    // render a metadata-only chip without decoding the blob, and gives
+    // the 3D viewer the shape it needs to set up BufferAttributes /
+    // indices without re-parsing the header.
+    JsonMeshInfo? Mesh = null,
     // Populated for kind="numeric_array". DataB64 carries the raw
     // little-endian element bytes (no gzip — the binary form already beats
     // the JSON-text form ~3× on wire size, and the decode path is a single
@@ -36,3 +41,16 @@ internal sealed record JsonPointCloudInfo(
     int Width,
     int Height,
     string CoordinateFrame);
+
+internal sealed record JsonMeshInfo(
+    int VertexCount,
+    int TriangleCount,
+    bool HasColor,
+    bool HasNormals,
+    bool HasUVs,
+    bool HasTexture,
+    string CoordinateFrame,
+    // Bbox corners for client-side camera framing — saves re-decoding the
+    // 48-byte header before the viewer can compute its initial camera.
+    float[] BboxMin,
+    float[] BboxMax);

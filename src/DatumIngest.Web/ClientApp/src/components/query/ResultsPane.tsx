@@ -6,6 +6,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { MediaPreview } from './MediaPreview';
 import { MemoryChip } from './MemoryChip';
 import { PointCloudCell, SingleValuePointCloud } from './PointCloudCell';
+import { MeshCell, SingleValueMesh } from './MeshCell';
 import {
   executionsState,
   type CellResult,
@@ -449,6 +450,9 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
   if (cell.kind === 'pointcloud') {
     return <SingleValuePointCloud cell={cell} />;
   }
+  if (cell.kind === 'mesh') {
+    return <SingleValueMesh cell={cell} />;
+  }
   if (cell.kind === 'numeric_array') {
     return <SingleValueNumericArray cell={cell} />;
   }
@@ -494,6 +498,8 @@ function isImageOrVideoCell(cell: JsonCell): boolean {
   // PointCloud cells render as a chip with metadata + click-to-open; the
   // tall row mode gives the chip room to show grid dimensions inline.
   if (cell.kind === 'pointcloud') return true;
+  // Mesh cells use the same chip + click-to-open pattern.
+  if (cell.kind === 'mesh') return true;
   return false;
 }
 
@@ -791,6 +797,7 @@ function CellValue({
   }
   if (cell.kind === 'media_array' && cell.items) return <MediaArrayCell cell={cell} largeMedia={largeMedia} />;
   if (cell.kind === 'pointcloud') return <PointCloudCell cell={cell} largeMedia={largeMedia} />;
+  if (cell.kind === 'mesh') return <MeshCell cell={cell} largeMedia={largeMedia} />;
   if (cell.kind === 'numeric_array') return <NumericArrayCell cell={cell} />;
   return <span>{cell.text ?? ''}</span>;
 }

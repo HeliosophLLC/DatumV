@@ -85,6 +85,7 @@ internal static class DataValueReader
             DataKind.Video => ReadVideo(reader, store),
             DataKind.Json => ReadJson(reader, store),
             DataKind.PointCloud => ReadPointCloud(reader, store),
+            DataKind.Mesh => ReadMesh(reader, store),
             DataKind.Uuid => DataValue.FromUuid(new Guid(reader.ReadBytes(16))),
             DataKind.Point2D => DataValue.FromPoint2D(reader.ReadSingle(), reader.ReadSingle()),
             DataKind.Point3D => DataValue.FromPoint3D(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
@@ -124,6 +125,7 @@ internal static class DataValueReader
             DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks(reader.ReadInt64())),
             DataKind.Image => ReadImage(reader),
             DataKind.PointCloud => ReadPointCloud(reader),
+            DataKind.Mesh => ReadMesh(reader),
             DataKind.Uuid => DataValue.FromUuid(new Guid(reader.ReadBytes(16))),
             DataKind.Point2D => DataValue.FromPoint2D(reader.ReadSingle(), reader.ReadSingle()),
             DataKind.Point3D => DataValue.FromPoint3D(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
@@ -220,5 +222,23 @@ internal static class DataValueReader
         int length = reader.ReadInt32();
         byte[] bytes = reader.ReadBytes(length);
         return DataValue.FromPointCloud(bytes, store);
+    }
+
+    private static DataValue ReadMesh(BinaryReader reader)
+    {
+        // The no-store body reader is used by zone-map readers, which never
+        // carry mesh min/max values (meshes aren't comparable). Throw if a
+        // caller hits this — they should be using the store-aware overload.
+        _ = reader.ReadInt32();
+        throw new InvalidOperationException(
+            "Cannot deserialize Mesh body without a target IValueStore. "
+            + "Meshes are not expected in zone-map / no-store wire-format payloads.");
+    }
+
+    private static DataValue ReadMesh(BinaryReader reader, IValueStore store)
+    {
+        int length = reader.ReadInt32();
+        byte[] bytes = reader.ReadBytes(length);
+        return DataValue.FromMesh(bytes, store);
     }
 }

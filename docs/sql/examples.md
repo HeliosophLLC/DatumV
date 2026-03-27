@@ -190,6 +190,74 @@ can sort by depth range, join clouds against classification labels,
 or persist them to `.datum` and run analytics across thousands at a
 time.
 
+### 8. Promote to a Mesh and export as a real 3D asset
+
+A `PointCloud` is renderable inside DatumIngest's viewer, but to share
+the result — open in Blender, slice for 3D printing, hand to a colleague
+who lives in Unity — you need a real 3D asset on disk. `mesh_from_organized`
+promotes an organized cloud to an explicit triangle mesh (with per-vertex
+normals computed from the topology, smooth shading included); the
+`mesh_to_*` exporters serialize to industry-standard formats:
+
+```sql
+-- Blender / Unity / Three.js / browser-built-in 3D viewer
+SELECT mesh_to_gltf(
+  mesh_from_depth_orthographic(file_bytes, models.midas_small(file_bytes), 60.0)
+)
+FROM photos LIMIT 1
+
+-- 3D-printer slicer (Bambu Studio / PrusaSlicer / Cura / Lychee / ChiTuBox)
+SELECT mesh_to_stl(
+  mesh_from_depth_orthographic(file_bytes, models.dpt_large(file_bytes), 60.0)
+)
+FROM photos LIMIT 1
+
+-- MeshLab / CloudCompare / Open3D (preserves per-vertex colors via OBJ extension)
+SELECT mesh_to_obj(
+  mesh_from_depth_orthographic(file_bytes, models.midas_small(file_bytes), 60.0)
+)
+FROM photos LIMIT 1
+```
+
+`mesh_from_depth_orthographic` is the fused shortcut for the common case
+(unproject + triangulate in one call); `mesh_from_organized(point_cloud)`
+is the two-step form when you want to keep the intermediate cloud
+around too.
+
+Mesh triangulation skips cells whose four corner depths span more than
+5% of the cloud's bbox Z range — depth edges produce topology breaks
+rather than rubber-sheet skirts at object boundaries. The result reads
+correctly in any 3D viewer with the expected sharp silhouettes.
+
+### 9. Inspect a mesh's geometry
+
+```sql
+WITH meshes AS (
+  SELECT
+    file_name,
+    mesh_from_depth_orthographic(file_bytes, models.midas_small(file_bytes), 60.0) AS m
+  FROM photos
+)
+SELECT
+  file_name,
+  mesh_vertex_count(m)   AS verts,
+  mesh_triangle_count(m) AS tris,
+  mesh_has_color(m)      AS colored,
+  mesh_has_normals(m)    AS shaded,
+  mesh_bbox_max(m).z - mesh_bbox_min(m).z AS depth_range
+FROM meshes
+ORDER BY tris DESC
+```
+
+The mesh shares the cloud's coordinate frame and bbox conventions
+(OpenGL right-handed, `[-1, -0.1]` Z range for Image-based depth
+sources). The exporters automatically apply the standard glTF / STL /
+OBJ +Y-up orientation regardless of the mesh's declared frame, so
+saved files render correctly in any consumer.
+
+For the full surface — every constructor, accessor, exporter, plus the
+coordinate-frame rules — see [Spatial Types](spatial.md).
+
 ## Multi-dim arrays and bracket indexing
 
 Columns declared with multiple dimensions (`Array<T>(N, M, …)`) carry an

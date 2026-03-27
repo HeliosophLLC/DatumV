@@ -71,6 +71,11 @@ internal static class WebCellFormatter
             return FormatPointCloud(value, arena, registry);
         }
 
+        if (value.Kind == DataKind.Mesh)
+        {
+            return FormatMesh(value, arena, registry);
+        }
+
         // Json values arrive as canonical CBOR bytes. Decode to JSON text here
         // so the browser can pretty-print and style them; falling through to
         // FormatText would just serialize the raw bytes via DataValue.ToString().
@@ -311,7 +316,8 @@ internal static class WebCellFormatter
         if (value.Kind == DataKind.Image
             || value.Kind == DataKind.Audio
             || value.Kind == DataKind.Video
-            || value.Kind == DataKind.PointCloud) return false; // single-blob already routes elsewhere
+            || value.Kind == DataKind.PointCloud
+            || value.Kind == DataKind.Mesh) return false; // single-blob already routes elsewhere
         if (value.Kind == DataKind.Struct) return true;
         if (value.IsArray) return true;
         return false;
@@ -365,6 +371,62 @@ internal static class WebCellFormatter
             DataB64: dataB64,
             Encoding: "gzip",
             PointCloud: info);
+    }
+
+    /// <summary>
+    /// Maximum uncompressed Mesh blob size accepted by the inline transport.
+    /// 200 MB is a generous default sized for the realistic workflow:
+    /// 1080p-derived meshes land around 100 MB uncompressed (~30 MB on the
+    /// wire after gzip). 4K-source meshes (~430 MB) exceed the cap and
+    /// require decimation. Local-first means the user owns the resources,
+    /// so this is a sensible default rather than a hard limit — could
+    /// become a server-side setting later if anyone hits the ceiling.
+    /// </summary>
+    private const int MeshInlineCapBytes = 200 * 1024 * 1024;
+
+    /// <summary>
+    /// Formats a single Mesh value for the wire — same shape as
+    /// <see cref="FormatPointCloud"/>: parse header, extract metadata,
+    /// gzip the raw blob, base64-encode. The front-end inflates via
+    /// <c>DecompressionStream("gzip")</c> on viewer open and builds
+    /// Three.js BufferAttributes + index buffer from the decoded bytes.
+    /// </summary>
+    private static JsonCell FormatMesh(DataValue value, Arena arena, SidecarRegistry registry)
+    {
+        ReadOnlySpan<byte> blob = value.AsByteSpan(arena, registry);
+        if (blob.Length > MeshInlineCapBytes)
+        {
+            return new JsonCell(
+                "text",
+                Text: $"<Mesh too large to display: {blob.Length:N0} bytes; "
+                    + $"inline transport cap is {MeshInlineCapBytes:N0} bytes>");
+        }
+
+        MeshHeader header = MeshHeader.Read(blob);
+
+        using MemoryStream compressed = new(capacity: blob.Length / 2);
+        using (GZipStream gz = new(compressed, CompressionLevel.Fastest, leaveOpen: true))
+        {
+            gz.Write(blob);
+        }
+        string dataB64 = Convert.ToBase64String(compressed.GetBuffer().AsSpan(0, (int)compressed.Length));
+
+        JsonMeshInfo info = new(
+            VertexCount: checked((int)header.VertexCount),
+            TriangleCount: checked((int)header.TriangleCount),
+            HasColor: header.HasColor,
+            HasNormals: header.HasNormals,
+            HasUVs: header.HasUVs,
+            HasTexture: header.HasTexture,
+            CoordinateFrame: header.CoordinateFrame.ToString(),
+            BboxMin: [header.BboxMin.X, header.BboxMin.Y, header.BboxMin.Z],
+            BboxMax: [header.BboxMax.X, header.BboxMax.Y, header.BboxMax.Z]);
+
+        return new JsonCell(
+            Kind: "mesh",
+            DataB64: dataB64,
+            Encoding: "gzip",
+            Mesh: info);
     }
 
     /// <summary>

@@ -103,6 +103,7 @@ public sealed record ColumnDescriptorV2(
                 or DataKind.Video
                 or DataKind.Json
                 or DataKind.PointCloud
+                or DataKind.Mesh
                 or DataKind.Struct
                 => EncoderKind.VariableSlot,
 

@@ -100,7 +100,7 @@ public sealed class PointCloudFromDepthPinholeFunction : IFunction, IScalarFunct
             [
                 new ParameterSpec("color",   DataKindMatcher.Exact(DataKind.Image)),
                 new ParameterSpec("depth",   DataKindMatcher.Exact(DataKind.Image)),
-                new ParameterSpec("fov_deg", DataKindMatcher.Exact(DataKind.Float32)),
+                new ParameterSpec("fov_deg", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.PointCloud)),
@@ -114,7 +114,7 @@ public sealed class PointCloudFromDepthPinholeFunction : IFunction, IScalarFunct
             [
                 new ParameterSpec("color",   DataKindMatcher.Exact(DataKind.Image)),
                 new ParameterSpec("depth",   DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
-                new ParameterSpec("fov_deg", DataKindMatcher.Exact(DataKind.Float32)),
+                new ParameterSpec("fov_deg", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.PointCloud)),
@@ -213,7 +213,15 @@ internal static class PointCloudFromDepthOps
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.PointCloud));
         }
 
-        float fovDeg = fovArg.AsFloat32();
+        // fov_deg accepts any NumericScalar (Int*, UInt*, Float16/32/64,
+        // Decimal). TryToFloat widens uniformly; bail with a clear error
+        // on the corner cases (decimal overflow, exotic numeric kinds).
+        if (!fovArg.TryToFloat(out float fovDeg))
+        {
+            throw new FunctionArgumentException(
+                functionName,
+                $"fov_deg of kind {fovArg.Kind} could not be widened to Float32.");
+        }
         if (!(fovDeg > 0f && fovDeg < 180f))
         {
             throw new FunctionArgumentException(

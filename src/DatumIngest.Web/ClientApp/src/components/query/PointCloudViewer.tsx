@@ -4,6 +4,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { MediaPreview } from './MediaPreview';
+import { decodeCellBytes } from './decodeCellBytes';
 import type { JsonCell } from '@/state/execution';
 import { cn } from '@/lib/utils';
 
@@ -75,7 +76,7 @@ export function PointCloudViewerBody({
     let cancelled = false;
     setDecoded(null);
     setError(null);
-    decodeCellBytes(cell)
+    decodePointCloud(cell)
       .then((d) => {
         if (cancelled) return;
         setDecoded(d);
@@ -288,33 +289,8 @@ function MeshRenderer({ decoded }: { decoded: DecodedCloud }) {
  *   per-point payload (16 bytes when HasColor, 12 when position-only):
  *     float32 x, y, z, then optional uint8 r, g, b, a
  */
-async function decodeCellBytes(cell: JsonCell): Promise<DecodedCloud> {
-  if (cell.dataB64 === undefined) {
-    throw new Error('PointCloud cell missing dataB64 payload');
-  }
-
-  const compressed = base64ToBytes(cell.dataB64);
-
-  let blob: ArrayBuffer;
-  if (cell.encoding === 'gzip') {
-    if (typeof DecompressionStream === 'undefined') {
-      throw new Error('This browser does not support DecompressionStream (Chrome 80+, Firefox 113+, Safari 16.4+)');
-    }
-    // Stream the Uint8Array through DecompressionStream and collect into
-    // a single ArrayBuffer via the Response → arrayBuffer() round-trip.
-    // Wrapping in a Blob first satisfies TS's BodyInit type, which doesn't
-    // include bare Uint8Array even though Response accepts it at runtime.
-    const stream = new Response(new Blob([compressed as BlobPart])).body!.pipeThrough(
-      new DecompressionStream('gzip'),
-    );
-    blob = await new Response(stream).arrayBuffer();
-  } else {
-    blob = compressed.buffer.slice(
-      compressed.byteOffset,
-      compressed.byteOffset + compressed.byteLength,
-    ) as ArrayBuffer;
-  }
-
+async function decodePointCloud(cell: JsonCell): Promise<DecodedCloud> {
+  const blob = await decodeCellBytes(cell);
   const view = new DataView(blob);
   if (view.byteLength < 40) {
     throw new Error(`PointCloud blob too short: ${view.byteLength} bytes (header is 40)`);
@@ -365,15 +341,6 @@ async function decodeCellBytes(cell: JsonCell): Promise<DecodedCloud> {
   }
 
   return { positions, colors, bbox, pointCount, width, height, hasColor };
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
 }
 
 /**

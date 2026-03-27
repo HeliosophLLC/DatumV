@@ -302,15 +302,15 @@ public readonly struct ValueRef
 
     /// <summary>
     /// Byte-array payload. Pass <see cref="DataKind.Image"/>, <see cref="DataKind.Audio"/>,
-    /// <see cref="DataKind.Video"/>, <see cref="DataKind.Json"/>, or <see cref="DataKind.PointCloud"/>
-    /// for the corresponding encoded-blob kinds, or <see cref="DataKind.UInt8"/> with
-    /// <paramref name="isArray"/> set to <c>true</c> for generic byte arrays. The DataValue tag
-    /// carries the kind (and IsArray flag for byte arrays); the actual bytes live in
-    /// <see cref="Materialized"/>.
+    /// <see cref="DataKind.Video"/>, <see cref="DataKind.Json"/>, <see cref="DataKind.PointCloud"/>,
+    /// or <see cref="DataKind.Mesh"/> for the corresponding encoded-blob kinds, or
+    /// <see cref="DataKind.UInt8"/> with <paramref name="isArray"/> set to <c>true</c> for
+    /// generic byte arrays. The DataValue tag carries the kind (and IsArray flag for byte
+    /// arrays); the actual bytes live in <see cref="Materialized"/>.
     /// </summary>
     public static ValueRef FromBytes(DataKind kind, byte[] value, bool isArray = false)
     {
-        if (kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud)
+        if (kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud or DataKind.Mesh)
         {
             return new(DataValue.Null(kind), value);
         }
@@ -319,7 +319,7 @@ public readonly struct ValueRef
             return new(DataValue.NullByteArray(), value);
         }
         throw new ArgumentException(
-            $"FromBytes is only valid for Image/Audio/Video/Json/PointCloud or (UInt8 with IsArray=true); got {kind}, isArray={isArray}.",
+            $"FromBytes is only valid for Image/Audio/Video/Json/PointCloud/Mesh or (UInt8 with IsArray=true); got {kind}, isArray={isArray}.",
             nameof(kind));
     }
 
@@ -341,6 +341,15 @@ public readonly struct ValueRef
     /// </summary>
     public static ValueRef FromPointCloud(byte[] blob) =>
         new(DataValue.Null(DataKind.PointCloud), blob);
+
+    /// <summary>
+    /// Mesh value carried as a raw byte blob (48-byte header + interleaved per-vertex
+    /// payload + triangle indices + optional embedded texture — see
+    /// <see cref="DatumIngest.Model.Spatial.MeshHeader"/>). Producers build the full
+    /// blob in managed memory; arena copy happens once at <see cref="ToDataValue"/>.
+    /// </summary>
+    public static ValueRef FromMesh(byte[] blob) =>
+        new(DataValue.Null(DataKind.Mesh), blob);
 
     /// <summary>
     /// JSON payload as a byte slice over canonical CBOR bytes — used by
@@ -610,6 +619,28 @@ public readonly struct ValueRef
         }
         throw new InvalidOperationException(
             "PointCloud ValueRef does not carry a byte[] payload "
+            + $"(Materialized: {_materialized?.GetType().Name ?? "<none>"}).");
+    }
+
+    /// <summary>
+    /// Returns the raw Mesh blob (48-byte header + interleaved per-vertex
+    /// payload + triangle indices + optional embedded texture). Asserts
+    /// <see cref="Kind"/> is <see cref="DataKind.Mesh"/>. Callers parse the
+    /// header via <see cref="DatumIngest.Model.Spatial.MeshHeader.Read"/>.
+    /// </summary>
+    public byte[] AsMesh()
+    {
+        if (_inline.Kind != DataKind.Mesh)
+        {
+            throw new InvalidOperationException(
+                $"AsMesh called on a {_inline.Kind} value (expected Mesh).");
+        }
+        if (_materialized is byte[] bytes)
+        {
+            return bytes;
+        }
+        throw new InvalidOperationException(
+            "Mesh ValueRef does not carry a byte[] payload "
             + $"(Materialized: {_materialized?.GetType().Name ?? "<none>"}).");
     }
 
@@ -944,6 +975,8 @@ public readonly struct ValueRef
                 DataValue.FromJson(bytes, targetStore),
             byte[] bytes when _inline.Kind == DataKind.PointCloud && !_inline.IsArray =>
                 DataValue.FromPointCloud(bytes, targetStore),
+            byte[] bytes when _inline.Kind == DataKind.Mesh && !_inline.IsArray =>
+                DataValue.FromMesh(bytes, targetStore),
             // Slice form (json_query subdocument): copy only the slice's bytes into the arena.
             ArraySegment<byte> slice when _inline.Kind == DataKind.Json && !_inline.IsArray =>
                 DataValue.FromJson((ReadOnlySpan<byte>)slice, targetStore),

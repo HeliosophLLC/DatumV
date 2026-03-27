@@ -660,6 +660,27 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Spatial.PointCloudBboxMaxFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudDepthFunction>();
 
+        // Spatial — Mesh construction + accessors. Promotes organized PointClouds
+        // to explicit triangle meshes (one mesh per cloud) with depth-discontinuity
+        // edge handling; accessors mirror point_cloud_* for header fields. Phase 1
+        // ships PointCloud-derived meshes; Phase 2 adds mesh_construct + ONNX
+        // mesh-from-image models (TripoSR etc.) + UV / texture support.
+        registry.RegisterScalar<Scalar.Spatial.MeshFromOrganizedFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshFromDepthOrthographicFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshFromDepthPinholeFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshComputeNormalsFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshVertexCountFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshTriangleCountFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshBboxMinFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshBboxMaxFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshHasColorFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshHasNormalsFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshHasUVsFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshHasTextureFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshToGltfFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshToObjFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshToStlFunction>();
+
         // Encoding
         registry.RegisterScalar<Scalar.Encoding.EncodeFunction>();
         registry.RegisterScalar<Scalar.Encoding.DecodeFunction>();

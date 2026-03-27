@@ -83,6 +83,24 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
     [Theory]
     [MemberData(nameof(ProjectionVariants))]
+    public async Task Execute_AcceptsIntegerFov_WidensToFloat32(IScalarFunction fn)
+    {
+        // fov_deg matcher is NumericScalar — passing an Int32 should work
+        // without an explicit cast on the SQL side.
+        using SKBitmap color = MakeSolidColor(4, 4, new SKColor(0, 0, 0, 255));
+        using SKBitmap depth = MakeConstantDepth(4, 4, intensity: 128);
+
+        ValueRef result = await fn.ExecuteAsync(
+            new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromInt32(60) },
+            MakeFrame(),
+            default);
+
+        Assert.Equal(DataKind.PointCloud, result.Kind);
+        Assert.False(result.IsNull);
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectionVariants))]
     public async Task Execute_NullFov_ReturnsNullPointCloud(IScalarFunction fn)
     {
         using SKBitmap color = MakeSolidColor(4, 4, new SKColor(255, 0, 0, 255));
