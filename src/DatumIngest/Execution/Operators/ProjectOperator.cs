@@ -166,7 +166,7 @@ public sealed class ProjectOperator : QueryOperator
                         schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
                         outputBatch ??= context.RentRowBatch(ProjectionSchema.BuildColumnLookup(schema));
 
-                        EvaluationFrame frame = new(row, sourceArena, outputBatch.Arena, context.Accountant, context.OuterRow, context.SidecarRegistry, context.Types, context.TypeIdTranslations);
+                        EvaluationFrame frame = new(row, sourceArena, outputBatch.Arena, context.Accountant, context.OuterRow, context.SidecarRegistry, context.Types, context.TypeIdTranslations, videoRegistry: context.VideoRegistry);
 
                         DataValue[]? projected = await schema.ProjectAsync(
                             frame,

@@ -459,6 +459,27 @@ public readonly struct DataValue : IEquatable<DataValue>
         FromPoint3D(value.X, value.Y, value.Z);
 
     /// <summary>
+    /// Creates a runtime-only <see cref="DataKind.VideoFrame"/> handle pointing at frame
+    /// <paramref name="frameIndex"/> of the video registered under
+    /// <paramref name="videoId"/> in the per-query video registry. The inline payload is
+    /// <c>(videoId, frameIndex)</c> at <c>(_p0, _p1)</c>; no arena bytes are written.
+    /// Materialization is deferred until a consumer routes the handle through the registry.
+    /// </summary>
+    /// <param name="videoId">
+    /// Id assigned by the per-query video registry when the source video was registered.
+    /// Treated as an opaque token by everything outside the registry.
+    /// </param>
+    /// <param name="frameIndex">
+    /// Zero-based index of the target frame within the registered video. Negative values
+    /// are reserved for relative-from-end semantics (e.g. <c>-1</c> = last frame) and
+    /// honoured by the registry's <c>Materialize</c> path.
+    /// </param>
+    public static DataValue FromVideoFrame(uint videoId, int frameIndex) =>
+        new(DataKind.VideoFrame, flags: 0,
+            p0: unchecked((int)videoId),
+            p1: frameIndex);
+
+    /// <summary>
     /// Creates a byte-array value: <see cref="DataKind.UInt8"/> with the
     /// <see cref="DataValueFlags.IsArray"/> flag set. Bytes are written to
     /// <paramref name="store"/>. Use <see cref="AsByteSpan"/> or
@@ -2622,6 +2643,18 @@ public readonly struct DataValue : IEquatable<DataValue>
             BitConverter.Int32BitsToSingle(_p2));
     }
 
+    /// <summary>
+    /// Returns the <see cref="DataKind.VideoFrame"/> handle's inline payload as a
+    /// <c>(VideoId, FrameIndex)</c> tuple. The consumer routes the pair through the
+    /// per-query video registry to obtain pixel bytes.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public (uint VideoId, int FrameIndex) AsVideoFrame()
+    {
+        ThrowIfNullOrWrongKind(DataKind.VideoFrame);
+        return (unchecked((uint)_p0), _p1);
+    }
+
     // ─────────────────────── Widening numeric conversions ───────────────────────
 
     /// <summary>
@@ -3566,6 +3599,9 @@ public readonly struct DataValue : IEquatable<DataValue>
             // same store means identical content. Different offsets → unknown, return false.
             DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud or DataKind.Mesh
                 => _p0 == other._p0 && _p1 == other._p1,
+            // VideoFrame is inline: (videoId, frameIndex) value-equality.
+            DataKind.VideoFrame
+                => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Struct
                 => _meta == other._meta && _p0 == other._p0 && _p1 == other._p1,
             _ => false,
@@ -3646,6 +3682,9 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
             // Offset-based hashing: consistent with offset-equality in Equals.
             DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud or DataKind.Mesh
+                => HashCode.Combine(_kind, _p0, _p1),
+            // VideoFrame: inline value, hash the (videoId, frameIndex) payload.
+            DataKind.VideoFrame
                 => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Struct
                 => HashCode.Combine(_kind, _p0, _p1, _meta),

@@ -175,7 +175,7 @@ A LET binding can unpack a multi-valued result into several named variables in a
 LET (name1, name2, ...) = expression
 ```
 
-Extracts values by **zero-based position**. Works on **Array**, **Vector**, and **Struct** sources.
+Extracts values by **zero-based position**. Works on **Array**, and **Struct** sources.
 
 ```sql
 -- Unpack a float array into named scalars

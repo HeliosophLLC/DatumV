@@ -113,6 +113,30 @@ Load encoded bytes (UInt8Array from ZIP/binary column) as an Image for use with 
 
 Extract raw RGBA pixel bytes as UInt8Array (length H×W×4).
 
+### video_frame_to_image
+
+`video_frame_to_image(frame [, target_width [, target_height]])` → Image | QU: 10 + ⌊px/100K⌋
+
+Materialises a `VideoFrame` handle into an `Image` by routing it through the per-query video registry. Single-argument form decodes at the source video's native resolution; with `target_width`, resizes while preserving the source aspect ratio (height auto-computed); with both `target_width` and `target_height`, resizes to those exact dimensions. The resize fuses with the YUV→BGRA pixel conversion inside swscale — no extra per-frame copy.
+
+```sql
+-- Source resolution
+SELECT video_frame_to_image(f.frame) AS img
+FROM video_unnest_frames('clip.mp4') AS f
+
+-- Aspect-preserved resize to 384px width (e.g. 1920×1080 → 384×216)
+SELECT video_frame_to_image(f.frame, 384) AS img
+FROM videos AS v
+CROSS APPLY video_unnest_frames(v.video) AS f
+
+-- Exact 384×384 (typical depth-model input)
+SELECT models.midas_small(video_frame_to_image(f.frame, 384, 384)) AS depth
+FROM videos AS v
+CROSS APPLY video_unnest_frames(v.video, 0, 5, 50) AS f
+```
+
+Sequential access (frame N → N+1 → N+2) is fast (~3–5 ms/frame at 384px, ~11 ms at 1080p on a reference H.264 source); backward access seeks to the file head and decodes forward. Stay in `frame_index` order whenever possible.
+
 ### image_to_tensor_hwc
 
 `image_to_tensor_hwc(img)` → Tensor | QU: 50 + ⌊px/100K⌋

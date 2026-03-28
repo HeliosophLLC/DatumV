@@ -88,6 +88,14 @@ public sealed class ExpressionEvaluator
     private readonly TypeRegistry? _typeRegistry;
 
     /// <summary>
+    /// Per-query video registry that backs <see cref="DataKind.VideoFrame"/>
+    /// materialisation. Threaded into every <see cref="EvaluationFrame"/> built
+    /// by the convenience overloads. Null when constructed via the field-based
+    /// overload without one (ad-hoc test usage that never materialises frames).
+    /// </summary>
+    private readonly Model.VideoRegistry? _videoRegistry;
+
+    /// <summary>
     /// Plan-wide accountant threaded into every <see cref="EvaluationFrame"/>
     /// built by the convenience overloads. Sourced from
     /// <see cref="ExecutionContext.Accountant"/> when the context ctor is
@@ -220,6 +228,12 @@ public sealed class ExpressionEvaluator
     /// <see langword="null"/>, the evaluator allocates a private throwaway
     /// (no Timer, no resources) so frames always carry a non-null reference.
     /// </param>
+    /// <param name="videoRegistry">
+    /// Optional per-query <see cref="Model.VideoRegistry"/>. Threaded into every
+    /// <see cref="EvaluationFrame"/> built by the convenience overloads so
+    /// scalar functions that materialise <see cref="DataKind.VideoFrame"/>
+    /// handles (e.g. <c>to_image</c>) can route through the warm FFmpeg decoder.
+    /// </param>
     public ExpressionEvaluator(
         FunctionRegistry functions,
         QueryMeter? meter = null,
@@ -231,7 +245,8 @@ public sealed class ExpressionEvaluator
         VariableScope? variableScope = null,
         IValueStore? variableStore = null,
         TypeRegistry? typeRegistry = null,
-        MemoryAccountant? accountant = null)
+        MemoryAccountant? accountant = null,
+        Model.VideoRegistry? videoRegistry = null)
     {
         _functions = functions;
         _meter = meter;
@@ -243,6 +258,7 @@ public sealed class ExpressionEvaluator
         _variableScope = variableScope;
         _variableStore = variableStore;
         _typeRegistry = typeRegistry;
+        _videoRegistry = videoRegistry;
         // Evaluators built without a context (tests, ad-hoc UDF bodies) get
         // a private throwaway accountant. The frame builders below read this
         // field, so frames produced by store-only overloads always carry one.
@@ -273,7 +289,8 @@ public sealed class ExpressionEvaluator
             context.VariableScope,
             context.VariableStore,
             context.Types,
-            context.Accountant)
+            context.Accountant,
+            context.VideoRegistry)
     {
     }
 
@@ -281,6 +298,16 @@ public sealed class ExpressionEvaluator
     /// Gets the <see cref="QueryMeter" /> associated with this <see cref="ExpressionEvaluator"/>
     /// </summary>
     public QueryMeter? QueryMeter => _meter;
+
+    /// <summary>
+    /// The per-query <see cref="Model.VideoRegistry"/> threaded through this
+    /// evaluator. Exposed for operators that build their own
+    /// <see cref="EvaluationFrame"/>s (e.g. ORDER BY key materialisation) and
+    /// need to preserve the registry so downstream scalar functions can
+    /// resolve <see cref="DataKind.VideoFrame"/> handles. Null when the
+    /// evaluator was constructed without a context.
+    /// </summary>
+    public Model.VideoRegistry? VideoRegistry => _videoRegistry;
 
     /// <summary>Resolves a string DataValue against the frame's source arena.</summary>
     private static string Str(DataValue v, EvaluationFrame frame) => v.AsString(frame.Source);
@@ -298,7 +325,7 @@ public sealed class ExpressionEvaluator
         IValueStore store = _store ?? ThrowStoreRequired();
         return EvaluateAsync(
             expression,
-            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry),
+            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry, videoRegistry: _videoRegistry),
             cancellationToken);
     }
 
@@ -312,7 +339,7 @@ public sealed class ExpressionEvaluator
         IValueStore store = _store ?? ThrowStoreRequired();
         return EvaluateAsBooleanAsync(
             expression,
-            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry),
+            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry, videoRegistry: _videoRegistry),
             cancellationToken);
     }
 

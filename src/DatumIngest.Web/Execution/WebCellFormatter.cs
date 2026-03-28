@@ -66,6 +66,17 @@ internal static class WebCellFormatter
             return new JsonCell("media", Mime: mime, DataB64: Convert.ToBase64String(bytes));
         }
 
+        if (value.Kind == DataKind.VideoFrame)
+        {
+            // Lazy handle into the per-query VideoRegistry. We don't materialise
+            // pixels here — the user opts in by calling video_frame_to_image(...)
+            // in SQL. Surfacing the frame index gives them enough context to know
+            // which row in a video_unnest_frames result they're looking at; the
+            // videoId is an opaque registry id with no value to the reader.
+            (_, int frameIndex) = value.AsVideoFrame();
+            return new JsonCell("text", Text: $"videoframe[#{frameIndex}]");
+        }
+
         if (value.Kind == DataKind.PointCloud)
         {
             return FormatPointCloud(value, arena, registry);
@@ -497,6 +508,7 @@ internal static class WebCellFormatter
             DataKind.Image => $"<image: {value.AsByteSpan(arena, registry).Length:N0} bytes>",
             DataKind.Audio => $"<audio: {value.AsByteSpan(arena, registry).Length:N0} bytes>",
             DataKind.Video => $"<video: {value.AsByteSpan(arena, registry).Length:N0} bytes>",
+            DataKind.VideoFrame => FormatVideoFrameInline(value),
             DataKind.Json => DecodeJsonNodeOrFallback(value, arena, registry),
             DataKind.Type => value.FormatType(types),
             _ => value.ToString() ?? string.Empty,
@@ -655,8 +667,22 @@ internal static class WebCellFormatter
             // bare kind name. FormatType degrades to the kind name when the
             // registry can't resolve the carried TypeId.
             DataKind.Type => value.FormatType(types),
+            DataKind.VideoFrame => FormatVideoFrameInline(value),
             _ => value.ToString(),
         };
+    }
+
+    /// <summary>
+    /// Inline text form for a <see cref="DataKind.VideoFrame"/> handle —
+    /// <c>videoframe[#42]</c>. Used both at the top-level cell formatter and
+    /// inside struct / nested contexts. The frame index is the only stable user-
+    /// facing identifier; the registry's videoId is opaque and intentionally
+    /// hidden.
+    /// </summary>
+    private static string FormatVideoFrameInline(DataValue value)
+    {
+        (_, int frameIndex) = value.AsVideoFrame();
+        return $"videoframe[#{frameIndex}]";
     }
 
     private static string FormatArray(

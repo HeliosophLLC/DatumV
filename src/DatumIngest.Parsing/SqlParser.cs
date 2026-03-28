@@ -140,6 +140,16 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Comment))
             .Or(Token.EqualTo(SqlToken.Check));
 
+    /// <summary>
+    /// Column-name token in post-dot position (after a table qualifier).
+    /// Accepts <see cref="ColumnNameToken"/> plus <see cref="SqlToken.TypeKeyword"/>.
+    /// Unlike the leading position, there's no ambiguity post-dot: <c>t.Int32</c>
+    /// can never be a type literal, so a column literally named <c>video</c> /
+    /// <c>image</c> / <c>int32</c> / etc. is unambiguously a column reference.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Token<SqlToken>> PostDotColumnNameToken =
+        ColumnNameToken.Or(Token.EqualTo(SqlToken.TypeKeyword));
+
     // ───────────────────── Atomic expressions ─────────────────────
 
     /// <summary>
@@ -152,7 +162,7 @@ public static class SqlParser
         from first in ColumnNameToken
         from second in (
             from dot in Token.EqualTo(SqlToken.Dot)
-            from name in ColumnNameToken
+            from name in PostDotColumnNameToken
                 .Or(Token.EqualTo(SqlToken.Star))
             select name
         ).OptionalOrDefault()
@@ -163,7 +173,7 @@ public static class SqlParser
             // (e.g. concatenation chain) backtracks cleanly.
             second.HasValue && second.Kind != SqlToken.Star
                 ? (from dot in Token.EqualTo(SqlToken.Dot)
-                   from name in ColumnNameToken
+                   from name in PostDotColumnNameToken
                        .Or(Token.EqualTo(SqlToken.Star))
                    select name).Try().OptionalOrDefault()
                 : Superpower.Parse.Return<SqlToken, Token<SqlToken>>(default)
@@ -1795,13 +1805,21 @@ public static class SqlParser
     }
 
     /// <summary>A table reference with optional schema qualifier, TABLESAMPLE clause, and alias.</summary>
+    /// <remarks>
+    /// Both segments accept <see cref="SqlToken.TypeKeyword"/> so a table named
+    /// after a DataKind (e.g. <c>video</c>, <c>image</c>, <c>int32</c>) is
+    /// addressable both bare and as a schema-qualified pair. There's no
+    /// ambiguity at FROM position: a type literal can't appear here.
+    /// </remarks>
     private static readonly TokenListParser<SqlToken, TableSource> TableReferenceParser =
         from first in Token.EqualTo(SqlToken.Identifier)
             .Or(Token.EqualTo(SqlToken.StringLiteral))
+            .Or(Token.EqualTo(SqlToken.TypeKeyword))
         from schemaQualified in (
             from dot in Token.EqualTo(SqlToken.Dot)
             from second in Token.EqualTo(SqlToken.Identifier)
                 .Or(Token.EqualTo(SqlToken.StringLiteral))
+                .Or(Token.EqualTo(SqlToken.TypeKeyword))
             select second
         ).OptionalOrDefault()
         from tablesample in TablesampleClauseParser.AsNullable().OptionalOrDefault()

@@ -104,6 +104,16 @@ public readonly struct EvaluationFrame
     public ModelDescriptor? CurrentModel { get; }
 
     /// <summary>
+    /// Per-query registry of source videos backing <see cref="DataKind.VideoFrame"/>
+    /// handles. Threaded from <see cref="ExecutionContext.VideoRegistry"/> by frame
+    /// builders so scalar functions that materialise frames (e.g. <c>to_image</c>)
+    /// can route handles through the warm FFmpeg decoder. <see langword="null"/>
+    /// outside the query pipeline (ad-hoc evaluator usage without an execution
+    /// context).
+    /// </summary>
+    public VideoRegistry? VideoRegistry { get; }
+
+    /// <summary>
     /// Creates an evaluation frame. Pass the same store for <paramref name="source"/>
     /// and <paramref name="target"/> when the distinction doesn't matter (e.g. predicates
     /// that produce only inline boolean results and don't allocate strings). Pass
@@ -125,7 +135,8 @@ public readonly struct EvaluationFrame
         SidecarRegistry? sidecarRegistry = null,
         TypeRegistry? types = null,
         TypeIdTranslationTable? typeIdTranslations = null,
-        ModelDescriptor? currentModel = null)
+        ModelDescriptor? currentModel = null,
+        VideoRegistry? videoRegistry = null)
     {
         Row = row;
         Source = source;
@@ -136,16 +147,17 @@ public readonly struct EvaluationFrame
         Types = types;
         TypeIdTranslations = typeIdTranslations;
         CurrentModel = currentModel;
+        VideoRegistry = videoRegistry;
     }
 
     /// <summary>
     /// Returns a new frame with a different <see cref="Row"/>, preserving the arenas,
     /// outer-row context, sidecar registry, type registry, translation table, accountant,
-    /// and current-model binding. Used when the evaluator descends into a derived row
-    /// (e.g. a lambda body's augmented row).
+    /// current-model binding, and video registry. Used when the evaluator descends into
+    /// a derived row (e.g. a lambda body's augmented row).
     /// </summary>
     public EvaluationFrame WithRow(Row row) =>
-        new(row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, CurrentModel);
+        new(row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, CurrentModel, VideoRegistry);
 
     /// <summary>
     /// Returns a new frame with a <see cref="CurrentModel"/> binding,
@@ -154,5 +166,5 @@ public readonly struct EvaluationFrame
     /// when leaving it.
     /// </summary>
     public EvaluationFrame WithCurrentModel(ModelDescriptor? currentModel) =>
-        new(Row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, currentModel);
+        new(Row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, currentModel, VideoRegistry);
 }

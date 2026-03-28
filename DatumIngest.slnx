@@ -21,5 +21,6 @@
     <Project Path="tools/IndexOnce/IndexOnce.csproj" />
     <Project Path="tools/IngestOnce/IngestOnce.csproj" />
     <Project Path="tools/SidecarInspect/SidecarInspect.csproj" />
+    <Project Path="tools/VideoDecodeSpike/VideoDecodeSpike.csproj" />
   </Folder>
 </Solution>

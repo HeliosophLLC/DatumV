@@ -156,7 +156,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
         CancellationToken cancellationToken)
     {
         DataValue[] keys = new DataValue[_orderByItems.Count];
-        EvaluationFrame frame = new(row, sourceArena, targetArena, evaluator.Accountant, outerRow: null, sidecarRegistry, types);
+        EvaluationFrame frame = new(row, sourceArena, targetArena, evaluator.Accountant, outerRow: null, sidecarRegistry, types, videoRegistry: evaluator.VideoRegistry);
         for (int i = 0; i < _orderByItems.Count; i++)
         {
             keys[i] = await evaluator.EvaluateAsync(_orderByItems[i].Expression, frame, cancellationToken).ConfigureAwait(false);

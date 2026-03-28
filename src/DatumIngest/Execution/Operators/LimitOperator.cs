@@ -297,7 +297,8 @@ public sealed class LimitOperator : QueryOperator
             outerRow: context.OuterRow,
             sidecarRegistry: context.SidecarRegistry,
             types: context.Types,
-            typeIdTranslations: context.TypeIdTranslations);
+            typeIdTranslations: context.TypeIdTranslations,
+            videoRegistry: context.VideoRegistry);
         DatumIngest.Model.DataValue value = await evaluator
             .EvaluateAsync(expression, frame, context.CancellationToken)
             .ConfigureAwait(false);

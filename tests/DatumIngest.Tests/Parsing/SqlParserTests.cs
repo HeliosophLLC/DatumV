@@ -993,6 +993,41 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("UNNEST", source.FunctionName);
     }
 
+    [Theory]
+    [InlineData("SELECT t.video FROM t")]
+    [InlineData("SELECT t.image FROM t")]
+    [InlineData("SELECT t.audio FROM t")]
+    [InlineData("SELECT t.int32 FROM t")]
+    [InlineData("SELECT t.float32 FROM t")]
+    [InlineData("SELECT t.json FROM t")]
+    [InlineData("SELECT videos.video FROM videos")]
+    [InlineData("SELECT a FROM t CROSS APPLY video_unnest_frames(t.video, 0, 1, 3) AS f")]
+    public void QualifiedColumnReference_AllowsTypeKeywordAsColumnName(string sql)
+    {
+        // Bug fix: type-keyword tokens (Video, Image, Audio, Json, Int32, ...) are
+        // reserved at leading-token position so `Int32` parses as a TypeLiteral,
+        // but post-dot in a qualified column reference there's no ambiguity —
+        // `t.video` can only be a column reference. The parser must let those
+        // tokens through as column names.
+        Parse(sql);
+    }
+
+    [Theory]
+    [InlineData("SELECT a FROM video")]
+    [InlineData("SELECT a FROM image")]
+    [InlineData("SELECT a FROM audio")]
+    [InlineData("SELECT a FROM int32")]
+    [InlineData("SELECT a FROM media.video")]
+    [InlineData("SELECT a FROM types.int32")]
+    public void TableReference_AllowsTypeKeywordAsTableName(string sql)
+    {
+        // Bug fix: type-keyword tokens are reserved at expression position
+        // (so `Int32` is a TypeLiteral in a CAST) but a FROM clause can't
+        // contain a type literal, so the table-reference parser must accept
+        // them as table names. Symmetric with the QualifiedColumn fix.
+        Parse(sql);
+    }
+
     [Fact]
     public void OuterApply()
     {

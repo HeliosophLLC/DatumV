@@ -63,7 +63,10 @@ SELECT * FROM data WHERE value AS Float64 v AND v > 0.5
 | `Uuid` | 128-bit UUID (RFC 9562) | `Guid` |
 | `Image` | Encoded image bytes (PNG, JPG, WebP, etc.) | `byte[]` |
 | `Audio` | Encoded audio bytes (WAV, MP3, FLAC, OGG, M4A) | `byte[]` |
+| `AudioSlice` | Lazy handle to a windowed slice of `Audio` (runtime-only; reserved for audio inference workloads) | `(audio_id, start_sample, end_sample_exclusive)` inline |
 | `Video` | Encoded video bytes (MP4, WebM, AVI, MKV) | `byte[]` |
+| `VideoFrame` | Lazy handle to a single frame of `Video` (runtime-only) | `(video_id, frame_index)` inline |
+| `VideoSlice` | Lazy handle to a frame-range of `Video` (runtime-only; reserved for temporal-model workloads) | `(video_id, start_frame, end_frame_exclusive)` inline |
 | `Json` | A JSON document, stored as canonical CBOR bytes | `byte[]` (CBOR) |
 | `Struct` | Named, ordered collection of heterogeneous fields | `DataValue[]` (field names in `ColumnInfo.Fields`) |
 | `Point2D` | 2D point with single-precision X, Y components | `System.Numerics.Vector2` (8 bytes inline) |
@@ -115,6 +118,30 @@ Lengths are measured in **characters**, not bytes — `VARCHAR(5)` accepts `'hé
 PG-standard `data_type` (`'character varying'`, `'character'`, `'text'`) and the
 DatumIngest-native `data_kind` (`'String'`), plus `character_maximum_length` and
 `is_blank_padded` for full round-trip.
+
+#### Video Frames
+
+`VideoFrame` is a runtime-only handle into a registered video — `(video_id, frame_index)` packed inline in the `DataValue`, no pixel bytes attached. It exists so iterating frames of a long video doesn't materialise gigabytes of decoded pixels: each frame stays a 12-byte handle until something asks for its pixels.
+
+You'll typically produce `VideoFrame` values from `video_unnest_frames(source [, start_frame [, stride [, max_frames]]])` and consume them with `video_frame_to_image(frame [, target_width [, target_height]])`:
+
+```sql
+-- All frames of a stored video, decoded at source resolution
+SELECT video_frame_to_image(f.frame) AS img
+FROM videos AS v
+CROSS APPLY video_unnest_frames(v.video) AS f
+
+-- Every 5th frame, decoded at 384px width (height auto-preserves aspect)
+SELECT video_frame_to_image(f.frame, 384) AS img
+FROM videos AS v
+CROSS APPLY video_unnest_frames(v.video, 0, 5, 100) AS f
+```
+
+The `Video` source may be a column value (sidecar- or arena-backed), or a STRING file path. Inside a query, every `VideoFrame` resolves through a per-query video registry that holds a warm FFmpeg decoder per source — sequential frame access (frame N → N+1 → N+2) hits the fast path; backward access seeks to the file head and decodes forward.
+
+Cells of kind `VideoFrame` render in the results pane as `videoframe[#42]` — the index identifies the frame within the source video. The pixel content is not implicit; call `video_frame_to_image` to surface an `Image` the viewer can display.
+
+`AudioSlice` and `VideoSlice` follow the same pattern (lazy time-range handles into a registered source) and are reserved for upcoming audio-inference (Whisper, Silero VAD, pyannote) and temporal-video workloads.
 
 #### Points
 
@@ -336,19 +363,31 @@ FROM t
 `DataKind` names (`Boolean`, `Int8`, `Int16`, `Int32`, `Int64`, `Int128`,
 `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`, `Float16`, `Float32`,
 `Float64`, `Decimal`, `String`, `Date`, `DateTime`, `Time`, `Duration`,
-`Uuid`, `Image`, `Audio`, `Video`, `Json`, `Struct`, `Point2D`, `Point3D`,
-`PointCloud`, `Mesh`, `Type`) are reserved in expression position. They produce a `Type` value that can be compared with
-`typeof()` results using `=`, `!=`, `IN`, `CASE`, and `IS`.
+`Uuid`, `Image`, `Audio`, `AudioSlice`, `Video`, `VideoFrame`, `VideoSlice`,
+`Json`, `Struct`, `Point2D`, `Point3D`, `PointCloud`, `Mesh`, `Type`) are
+reserved in expression position. They produce a `Type` value that can be
+compared with `typeof()` results using `=`, `!=`, `IN`, `CASE`, and `IS`.
 
-To use a type name as a column alias or table name, double-quote it:
+Type names are accepted without quoting in name positions: column names in
+DDL, aliases after `AS`, table names after `FROM`, and column names after a
+dot in a qualified reference. Bare type names in expression position
+(`CAST(x AS Video)`, `typeof(x) = Int32`) remain type literals.
 
 ```sql
+SELECT t.video FROM media.video AS t       -- column `video` in table `video`
+WHERE t.float32 > 0                         -- column named `float32`
+SELECT CAST(x AS Video) FROM t              -- type literal in expression position
+
+-- Aliasing-as is still legal:
 SELECT 1 AS "Int32"
-CREATE TEMP TABLE "String" (id Int32, value String)
 ```
 
-Type names in non-expression contexts (column names in DDL, aliases after `AS`,
-table names after `FROM`) are accepted without quoting.
+The handful of edge cases that still require quoting are pure-expression
+positions where the parser must choose between a column reference and a type
+literal — column aliases like `AS "Int32"` (where `Int32` would otherwise be
+read as the cast target) and bare-identifier column references where the
+column is named after a type. Qualified references (`t.video`) and DDL/FROM
+positions never need quoting.
 
 ### Type conversions
 

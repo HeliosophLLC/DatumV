@@ -115,8 +115,43 @@ public enum DataKind : byte
     /// <summary>A byte array containing encoded audio data (e.g. WAV, MP3, FLAC, OGG).</summary>
     Audio = 58,
 
+    /// <summary>
+    /// Reserved slot for a runtime-only lazy handle to a windowed slice of
+    /// <see cref="Audio"/>. Inline payload (when implemented) is
+    /// <c>(audio_id, start_sample, end_sample_exclusive)</c>; PCM materialisation
+    /// is deferred to the consuming accessor. The first audio inference workloads
+    /// (Whisper, Silero VAD, pyannote) all consume fixed-rate PCM windows, so
+    /// "slice" rather than "frame" captures the intended granularity. Pairs with
+    /// <see cref="VideoSlice"/> in the "media + frame-handle + slice-handle"
+    /// convention.
+    /// </summary>
+    AudioSlice = 59,
+
     /// <summary>A byte array containing encoded video data (e.g. MP4, WebM, MKV).</summary>
-    Video = 59,
+    Video = 60,
+
+    /// <summary>
+    /// A runtime-only lazy handle to a single frame of <see cref="Video"/>. The
+    /// inline payload at <c>(_p0, _p1)</c> is <c>(video_id, frame_index)</c>;
+    /// pixel materialisation is deferred to the consuming accessor, which routes
+    /// through a per-query video registry. Writing a VideoFrame to a persisted
+    /// column materialises it to <see cref="Image"/> first.
+    /// </summary>
+    VideoFrame = 61,
+
+    /// <summary>
+    /// Reserved slot for a runtime-only lazy handle to a frame-range of
+    /// <see cref="Video"/>. Inline payload (when implemented) is
+    /// <c>(video_id, start_frame, end_frame_exclusive)</c>. Acts as the input to
+    /// <c>video_unnest_frames</c> for bounded iteration and to temporal-model
+    /// invocations (action recognition, video classification) that operate on
+    /// frame windows rather than single frames. Pairs with <see cref="AudioSlice"/>.
+    /// </summary>
+    VideoSlice = 62,
+
+    // 63 = free
+
+    // ───────────────────────── Collections &amp; composite (64–71) ─────────────────────────
 
     /// <summary>
     /// A JSON document, stored as canonical CBOR bytes (RFC 7049 §3.9). Wire
@@ -125,9 +160,7 @@ public enum DataKind : byte
     /// function family. Canonical encoding lets two semantically-equal JSON
     /// inputs hash and compare via raw byte equality.
     /// </summary>
-    Json = 60,
-
-    // ───────────────────────── Collections &amp; composite (64–71) ─────────────────────────
+    Json = 64,
 
     /// <summary>
     /// A named-field composite value. Field names and kinds are stored once in the

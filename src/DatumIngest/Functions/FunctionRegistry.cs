@@ -619,6 +619,7 @@ public sealed class FunctionRegistry
 
         // Image
         registry.RegisterScalar<Scalar.Image.CreateImageRgbFunction>();
+        registry.RegisterScalar<Scalar.Image.VideoFrameToImageFunction>();
         registry.RegisterScalar<Scalar.Image.YoloxPreprocessFunction>();
         registry.RegisterScalar<Scalar.Image.YoloxPostprocessFunction>();
         registry.RegisterScalar<Scalar.Image.RtdetrPostprocessFunction>();
@@ -772,6 +773,7 @@ public sealed class FunctionRegistry
         // UNNEST retired pending the reference-type-array consolidation; will be
         // rebuilt on the new typed-array surface when a demand actually requires it.
         registry.RegisterTableValued<TableValued.RangeFunction>();
+        registry.RegisterTableValued<TableValued.VideoUnnestFramesFunction>();
 
         // Inference toolkit. Lives in its own `inference` schema so the
         // introspection surface (onnx_inspect, devices, ...) doesn't

@@ -295,7 +295,8 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                 frame.Accountant,
                 outerRow: null,
                 sidecarRegistry: frame.SidecarRegistry,
-                types: frame.Types);
+                types: frame.Types,
+                videoRegistry: frame.VideoRegistry);
         }
 
         ExpressionEvaluator? paramEvaluator = null;
@@ -330,7 +331,8 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                         frame.Accountant,
                         outerRow: null,
                         sidecarRegistry: frame.SidecarRegistry,
-                        types: frame.Types);
+                        types: frame.Types,
+                        videoRegistry: frame.VideoRegistry);
                 }
                 value = await paramEvaluator.EvaluateAsValueRefAsync(param.Default, paramFrame, cancellationToken).ConfigureAwait(false);
             }
@@ -373,7 +375,8 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                         frame.Accountant,
                         outerRow: null,
                         sidecarRegistry: frame.SidecarRegistry,
-                        types: frame.Types);
+                        types: frame.Types,
+                        videoRegistry: frame.VideoRegistry);
                 }
                 DataValue asData = value.ToDataValue(variableStore, value.TypeId, frame.Types);
                 CastExpression cast = new(

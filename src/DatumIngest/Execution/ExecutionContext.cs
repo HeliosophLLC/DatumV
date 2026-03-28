@@ -16,6 +16,7 @@ public sealed class ExecutionContext : IDisposable
 {
     private readonly bool _ownsStore;
     private readonly bool _ownsAccountant;
+    private readonly bool _ownsVideoRegistry;
     private int _disposed;
 
     /// <summary>
@@ -34,11 +35,14 @@ public sealed class ExecutionContext : IDisposable
         AssertionDiagnostics = context.AssertionDiagnostics;
         MaxStratifyClasses = context.MaxStratifyClasses;
         Types = context.Types;
-        // Copy contexts borrow both the Store baseline and the accountant from
-        // the parent — disposing a child must not tear down the parent's
-        // resources.
+        VideoRegistry = context.VideoRegistry;
+        // Copy contexts borrow the Store baseline, the accountant, and the video
+        // registry from the parent — disposing a child must not tear down any of
+        // the parent's resources. The video registry holds warm FFmpeg decoder
+        // state that must outlive any single child query.
         _ownsStore = false;
         _ownsAccountant = false;
+        _ownsVideoRegistry = false;
     }
 
   /// <summary>
@@ -72,6 +76,12 @@ public sealed class ExecutionContext : IDisposable
   /// context constructs and owns its own; the owned accountant is disposed when this
   /// context is disposed.
   /// </param>
+  /// <param name="videoRegistry">
+  /// Optional pre-existing <see cref="Model.VideoRegistry"/> to share with a surrounding
+  /// scope (e.g. a procedural <see cref="BatchContext"/> where registered videos must
+  /// survive across statements). When <see langword="null"/>, the context constructs and
+  /// owns its own; the owned registry is disposed when this context is disposed.
+  /// </param>
   public ExecutionContext(
         CancellationToken cancellationToken,
         FunctionRegistry functionRegistry,
@@ -81,7 +91,8 @@ public sealed class ExecutionContext : IDisposable
         long? memoryBudgetBytes = null,
         Arena? store = null,
         TypeRegistry? types = null,
-        MemoryAccountant? accountant = null)
+        MemoryAccountant? accountant = null,
+        VideoRegistry? videoRegistry = null)
     {
         CancellationToken = cancellationToken;
         FunctionRegistry = functionRegistry;
@@ -121,7 +132,28 @@ public sealed class ExecutionContext : IDisposable
         // sharing one across loop iterations), reuse it so type-ids stamped on
         // values in one query remain resolvable in downstream queries.
         Types = types ?? new TypeRegistry();
+        if (videoRegistry is null)
+        {
+            VideoRegistry = new VideoRegistry();
+            _ownsVideoRegistry = true;
+        }
+        else
+        {
+            VideoRegistry = videoRegistry;
+            _ownsVideoRegistry = false;
+        }
     }
+
+    /// <summary>
+    /// Per-query registry of source videos backing <see cref="DataKind.VideoFrame"/>
+    /// handles. Holds the warm FFmpeg decoder state for each registered video; the
+    /// dictionary is empty (and consumes no FFmpeg state) for queries that touch no
+    /// video columns. Lifetime: owned by this context when constructed without a
+    /// registry argument; borrowed from a <see cref="BatchContext"/> when a procedural
+    /// batch is in scope. See <see cref="Model.VideoRegistry"/> for the materialisation
+    /// model.
+    /// </summary>
+    public VideoRegistry VideoRegistry { get; }
 
 
     /// <summary>
@@ -332,7 +364,8 @@ public sealed class ExecutionContext : IDisposable
             memoryBudgetBytes: null,
             Store,
             types: Types,
-            accountant: Accountant)
+            accountant: Accountant,
+            videoRegistry: VideoRegistry)
         {
             OuterRow = outerRow,
             RowLimit = RowLimit,
@@ -437,5 +470,6 @@ public sealed class ExecutionContext : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         if (_ownsAccountant) Accountant.Dispose();
         if (_ownsStore) Store.ReleaseReference();
+        if (_ownsVideoRegistry) VideoRegistry.Dispose();
     }
 }

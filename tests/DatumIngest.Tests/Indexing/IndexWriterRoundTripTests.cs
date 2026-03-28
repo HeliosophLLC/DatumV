@@ -17,16 +17,21 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
     /// <see cref="DataValueWriter.WriteDataValue(BinaryWriter, DataValue)"/>
     /// overload. These either need an arena-backed payload (Image / Audio /
     /// Video / Json — bytes live in a value store), are recursive composites
-    /// (Struct), or are sentinel values (Unknown). Production callers route
-    /// these through the IValueStore-aware overload instead — the indexable
-    /// = self-contained rule means an indexed key is never one of these.
+    /// (Struct), are sentinel values (Unknown), or are runtime-only lazy
+    /// handles that resolve through a per-query registry rather than an index
+    /// (AudioFrame / VideoFrame). Production callers route these through the
+    /// IValueStore-aware overload instead — the indexable = self-contained
+    /// rule means an indexed key is never one of these.
     /// </summary>
     private static readonly HashSet<DataKind> UnsupportedKinds =
     [
         DataKind.Unknown,
         DataKind.Struct,
         DataKind.Audio,
+        DataKind.AudioSlice,
         DataKind.Video,
+        DataKind.VideoFrame,
+        DataKind.VideoSlice,
         DataKind.Json,
         DataKind.Image,
         DataKind.PointCloud,
@@ -162,6 +167,12 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Image    => DataValue.FromImageInSidecar(offset: 0, length: 4),
         DataKind.Audio    => DataValue.FromAudioInSidecar(offset: 0, length: 12),
         DataKind.Video    => DataValue.FromVideoInSidecar(offset: 0, length: 12),
+        // Runtime-only handles never round-trip through index writers; the
+        // null-with-kind variant is enough to exercise the unsupported-kind
+        // throw path below.
+        DataKind.AudioSlice => DataValue.Null(DataKind.AudioSlice),
+        DataKind.VideoFrame => DataValue.Null(DataKind.VideoFrame),
+        DataKind.VideoSlice => DataValue.Null(DataKind.VideoSlice),
         DataKind.Json     => DataValue.FromJsonInSidecar(offset: 0, length: 4),
         DataKind.PointCloud => DataValue.FromPointCloudInSidecar(offset: 0, length: 40),
         DataKind.Mesh => DataValue.FromMeshInSidecar(offset: 0, length: 48),
