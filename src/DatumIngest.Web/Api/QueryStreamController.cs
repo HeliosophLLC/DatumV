@@ -83,7 +83,9 @@ public sealed class QueryStreamController(QueryStreamService service) : Controll
         }
 
         int maxRows = request.MaxRows is > 0 ? request.MaxRows.Value : 1000;
-        bool trace = request.Trace == true;
+        TraceOptions trace = request.Trace is { } t
+            ? new TraceOptions(t.Operators, t.Scalars)
+            : TraceOptions.Off;
 
         HttpContext.Response.ContentType = "application/x-ndjson";
 

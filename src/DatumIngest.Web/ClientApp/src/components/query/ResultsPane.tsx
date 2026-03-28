@@ -5,6 +5,7 @@ import { AlertCircle, Ban, Check, Film, Loader2, Music, Sigma } from 'lucide-rea
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { MediaPreview } from './MediaPreview';
 import { MemoryChip } from './MemoryChip';
+import { TraceChip } from './TraceChip';
 import { PointCloudCell, SingleValuePointCloud } from './PointCloudCell';
 import { MeshCell, SingleValueMesh } from './MeshCell';
 import {
@@ -13,6 +14,7 @@ import {
   type ExecutionStatus,
   type JsonCell,
   type TabExecution,
+  type TraceState,
 } from '@/state/execution';
 import { panesState, findLeaf } from '@/state/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -67,7 +69,7 @@ export function ResultsPane({ leafId }: { leafId: string }) {
         <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">
           {emptyMessage}
         </div>
-        <StatusBar exec={(exec as TabExecution | undefined) ?? null} />
+        <StatusBar tabId={activeTabId} exec={(exec as TabExecution | undefined) ?? null} />
       </div>
     );
   }
@@ -110,13 +112,8 @@ export function ResultsPane({ leafId }: { leafId: string }) {
             tableMode={tableMode}
           />
         ))}
-        {exec.trace !== null && (
-          <pre className="text-muted-foreground shrink-0 border-t p-2 font-mono text-xs whitespace-pre-wrap">
-            {exec.trace}
-          </pre>
-        )}
       </div>
-      <StatusBar exec={exec as TabExecution} />
+      <StatusBar tabId={activeTabId} exec={exec as TabExecution} />
     </div>
   );
 }
@@ -136,7 +133,19 @@ function isVisibleCell(cell: {
   return false;
 }
 
-function StatusBar({ exec }: { exec: TabExecution | null }) {
+// Frozen placeholder fed to TraceChip when no execution slot exists yet
+// (idle tab, never run). Toggling the chip's checkbox routes through
+// setTraceOperators which lazily creates the slot — at which point the
+// real state takes over on the next render.
+const EMPTY_TRACE_STATE: TraceState = {
+  enabledOperators: false,
+  enabledScalars: false,
+  events: [],
+  dropped: 0,
+  completed: false,
+};
+
+function StatusBar({ tabId, exec }: { tabId: string; exec: TabExecution | null }) {
   const { t } = useTranslation('query');
 
   // Live timer during streaming. The exec's startedAt is fixed; we re-
@@ -194,12 +203,19 @@ function StatusBar({ exec }: { exec: TabExecution | null }) {
   // width (flex items default to min-width: auto, which prevents
   // ellipsis on long status messages).
   const memoryProfile = exec?.memoryProfile ?? null;
+  // Trace chip is always present (idle tabs included) so the user can
+  // flip Trace on *before* the first run, not just after one. When no
+  // execution slot exists yet we feed it a fresh placeholder state;
+  // toggling the checkbox calls setTraceOperators which calls
+  // ensureExecution() so the real slot lands on first click.
+  const trace = exec?.trace ?? EMPTY_TRACE_STATE;
   return (
     <div className="bg-status-bar text-status-bar-foreground border-border flex shrink-0 items-stretch overflow-hidden border-t text-xs">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3 py-1">
         <StatusIcon status={status} hasError={hasError} />
         <span className="truncate">{leftMessage}</span>
       </div>
+      <TraceChip tabId={tabId} trace={trace} />
       {memoryProfile && memoryProfile.latest && (
         <MemoryChip profile={memoryProfile} status={status} />
       )}

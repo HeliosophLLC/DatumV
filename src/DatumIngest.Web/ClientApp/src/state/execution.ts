@@ -103,6 +103,39 @@ export interface MemoryProfile {
   budgetBytes: number | null;
 }
 
+// One completed-span entry streamed from the server's RecentActivityLog
+// via trace_sample events. Mirrors the wire shape (`source` is the short
+// "op" | "fn" tag the server emits — no need to re-map). `tsMs` is offset
+// from the cell-start moment so the popover can render an offset
+// timeline without dealing with absolute timestamps. `cellId` is filled
+// in on receipt so the trace chip can scope its view to a specific cell
+// later — today we render the whole batch.
+export interface TraceEntry {
+  cellId: string;
+  sequence: number;
+  tsMs: number;
+  source: 'op' | 'fn' | string;
+  name: string;
+  parent: string | null;
+  durationMs: number;
+}
+
+// Per-tab trace toggle + accumulated events. `enabledOperators` /
+// `enabledScalars` are the per-tab preferences the run() call reads
+// when deciding what trace scope to request — they survive across
+// runs so toggling them and re-running picks them up. `events` is the
+// running list (across all cells in the batch) for the most-recent
+// run; cleared on the next run start, or via the popover's Clear
+// button. `dropped` is the ring-overflow count summed across all
+// cells — non-zero means the trace is partial.
+export interface TraceState {
+  enabledOperators: boolean;
+  enabledScalars: boolean;
+  events: TraceEntry[];
+  dropped: number;
+  completed: boolean;
+}
+
 export type ExecutionStatus =
   | 'idle'
   | 'streaming'
@@ -117,10 +150,14 @@ export interface TabExecution {
   error: string | null;
   startedAt: number | null;
   elapsedMs: number | null;
-  /** Optional batch-wide trace text (only when the request enabled tracing). */
-  trace: string | null;
   /** Memory profile assembled from `memory_sample` events. `null` until the first sample arrives. */
   memoryProfile: MemoryProfile | null;
+  /**
+   * Per-tab trace state. Enabled flags are user-controlled preferences
+   * that persist across runs (toggling them re-runs into the new scope);
+   * `events`/`dropped`/`completed` reset on each run.
+   */
+  trace: TraceState;
 }
 
 // AbortControllers don't go in the proxy — they're non-serialisable and
@@ -245,9 +282,55 @@ function freshExecution(): TabExecution {
     error: null,
     startedAt: null,
     elapsedMs: null,
-    trace: null,
     memoryProfile: null,
+    trace: freshTraceState(),
   };
+}
+
+function freshTraceState(): TraceState {
+  return {
+    enabledOperators: false,
+    enabledScalars: false,
+    events: [],
+    dropped: 0,
+    completed: false,
+  };
+}
+
+/**
+ * Toggles the operators-trace preference for `tabId`. Affects the
+ * `trace` argument on the next runTab() call; in-flight runs aren't
+ * retroactively rescoped. When neither operators nor scalars is enabled,
+ * the server's listener stays detached and no trace events fire.
+ */
+export function setTraceOperators(tabId: string, enabled: boolean): void {
+  ensureExecution(tabId);
+  executionsState.byTabId[tabId].trace.enabledOperators = enabled;
+}
+
+/** Mirror of {@link setTraceOperators} for the per-row scalar trace. */
+export function setTraceScalars(tabId: string, enabled: boolean): void {
+  ensureExecution(tabId);
+  executionsState.byTabId[tabId].trace.enabledScalars = enabled;
+}
+
+/**
+ * Clears the captured trace events for `tabId` without changing the
+ * enabled preference. Backs the popover's Clear button so the user can
+ * empty the timeline mid-session without rerunning the query.
+ */
+export function clearTrace(tabId: string): void {
+  const exec = executionsState.byTabId[tabId];
+  if (!exec) return;
+  exec.trace.events = [];
+  exec.trace.dropped = 0;
+  exec.trace.completed = exec.status !== 'streaming';
+}
+
+function ensureExecution(tabId: string): void {
+  if (!executionsState.byTabId[tabId]) {
+    executionsState.byTabId[tabId] = freshExecution();
+  }
 }
 
 export function getExecution(tabId: string): TabExecution {
@@ -266,7 +349,6 @@ type StreamEvent =
   | { type: 'row'; cell: string; cells: JsonCell[] }
   | { type: 'chunk'; cell: string; model: string; text: string }
   | { type: 'truncated'; cell: string; rowCount: number }
-  | { type: 'trace'; cell: string; text: string }
   | { type: 'cell_completed'; cell: string; elapsedMs: number }
   | { type: 'complete'; elapsedMs: number }
   | { type: 'error'; cell: string | null; message: string; detail: string | null }
@@ -278,6 +360,25 @@ type StreamEvent =
       arenaBytes: number;
       peakRowBytes: number;
       budgetBytes: number | null;
+    }
+  | {
+      type: 'trace_sample';
+      cell: string;
+      entries: {
+        sequence: number;
+        tsMs: number;
+        source: 'op' | 'fn' | string;
+        name: string;
+        parent: string | null;
+        durationMs: number;
+      }[];
+      dropped: number;
+    }
+  | {
+      type: 'trace_complete';
+      cell: string;
+      totalEntries: number;
+      totalDropped: number;
     };
 
 // ────────── Actions ──────────
@@ -338,27 +439,46 @@ export async function runTab(
   const abort = new AbortController();
   abortByTab.set(tabId, abort);
 
+  // Carry the user's trace preferences forward across runs. The
+  // operators/scalars toggles persist; only the per-run accumulation
+  // resets. Preserving the existing TraceState reference would leak
+  // event arrays — re-create with the same flags so each run starts
+  // with an empty timeline.
+  const priorTrace = existing?.trace ?? freshTraceState();
   executionsState.byTabId[tabId] = {
     status: 'streaming',
     cells: [],
     error: null,
     startedAt: Date.now(),
     elapsedMs: null,
-    trace: null,
     memoryProfile: null,
+    trace: {
+      enabledOperators: priorTrace.enabledOperators,
+      enabledScalars: priorTrace.enabledScalars,
+      events: [],
+      dropped: 0,
+      completed: false,
+    },
   };
+
+  // Wire-shape trace argument. Mirrors server-side TraceOptionsJson:
+  // omit entirely when nothing is enabled so the server takes its
+  // zero-listener fast path; otherwise emit only the flags that are on.
+  const traceEnvelope = priorTrace.enabledOperators || priorTrace.enabledScalars
+    ? { operators: priorTrace.enabledOperators, scalars: priorTrace.enabledScalars }
+    : undefined;
 
   let terminated = false;
   try {
     const iter = opts
       ? postNdjsonMultipart<StreamEvent>(
           '/api/query/stream',
-          buildMultipartBody(sql, opts),
+          buildMultipartBody(sql, opts, traceEnvelope),
           abort.signal,
         )
       : postNdjson<StreamEvent>(
           '/api/query/stream',
-          { sql, maxRows: 1000, trace: false },
+          { sql, maxRows: 1000, trace: traceEnvelope },
           abort.signal,
         );
 
@@ -414,11 +534,15 @@ export async function runTab(
  * is appended per File in `opts.files`, named by the multipart part
  * name the server looks up.
  */
-function buildMultipartBody(sql: string, opts: RunMultipartOpts): FormData {
+function buildMultipartBody(
+  sql: string,
+  opts: RunMultipartOpts,
+  trace: { operators: boolean; scalars: boolean } | undefined,
+): FormData {
   const envelope = {
     sql,
     maxRows: 1000,
-    trace: false,
+    trace,
     parameters: opts.parameters,
   };
   const formData = new FormData();
@@ -522,10 +646,6 @@ function applyEvent(tabId: string, event: StreamEvent): void {
       break;
     }
 
-    case 'trace':
-      exec.trace = event.text;
-      break;
-
     case 'cell_completed': {
       const cell = findCell(exec, event.cell);
       if (cell) cell.elapsedMs = event.elapsedMs;
@@ -553,6 +673,36 @@ function applyEvent(tabId: string, event: StreamEvent): void {
       // happens once, after applyEvent returns. We leave it as a no-op
       // here so exhaustive checks across the union still hold.
       break;
+
+    case 'trace_sample': {
+      // Append-only — entries arrive in time order from the server. The
+      // sequence field is informational (lets the popover de-dupe in
+      // case the server's drain ever returns overlapping windows; today
+      // it doesn't, but the cursor design tolerates it).
+      const incoming = event.entries.map((e) => ({
+        cellId: event.cell,
+        sequence: e.sequence,
+        tsMs: e.tsMs,
+        source: e.source,
+        name: e.name,
+        parent: e.parent,
+        durationMs: e.durationMs,
+      }));
+      exec.trace.events.push(...incoming);
+      exec.trace.dropped += event.dropped;
+      break;
+    }
+
+    case 'trace_complete': {
+      // The server's running totals are authoritative — they include
+      // sample-time drops we may already have accumulated piecewise, so
+      // overwrite rather than add. Marks the popover state as final
+      // (the Clear button is still clickable; further runs reset the
+      // whole state in run()).
+      exec.trace.dropped = event.totalDropped;
+      exec.trace.completed = true;
+      break;
+    }
 
     case 'memory_sample': {
       const sample: MemorySample = {

@@ -40,6 +40,17 @@ public sealed class RecentActivityLog : IDisposable
     // The bool value is unused — ConcurrentDictionary is the only built-in
     // concurrent set type, hence the byte-payload idiom.
     private readonly ConcurrentDictionary<Activity, byte> _live = new();
+    // Monotonic per-entry sequence number assigned at enqueue time and
+    // stored alongside each entry. Drives <see cref="DrainSince"/>: callers
+    // hand back the cursor they last received and get only newer entries.
+    // Never resets across the listener's lifetime so a wraparound takes
+    // ~292 years at 1 billion entries/sec.
+    private long _nextSequence;
+    // Sequence of the most-recently evicted entry (highest seq dropped to
+    // make room for a new one). DrainSince uses this to compute how many
+    // entries the caller missed between their cursor and the oldest still-
+    // present entry.
+    private long _lastEvictedSequence = -1;
     private bool _disposed;
 
     /// <summary>
@@ -87,11 +98,20 @@ public sealed class RecentActivityLog : IDisposable
     {
         if (_disposed) return;
         _live.TryRemove(a, out _);
-        RecentActivityEntry ev = new(a.DisplayName, a.Source.Name, a.Parent?.DisplayName, a.StartTimeUtc, a.Duration);
         lock (_lock)
         {
+            long seq = _nextSequence++;
+            RecentActivityEntry ev = new(seq, a.DisplayName, a.Source.Name, a.Parent?.DisplayName, a.StartTimeUtc, a.Duration);
             _ring.Enqueue(ev);
-            while (_ring.Count > Capacity) _ring.Dequeue();
+            while (_ring.Count > Capacity)
+            {
+                // Track the highest evicted sequence so DrainSince can
+                // report how many entries the caller missed between their
+                // cursor and the oldest entry still in the ring.
+                RecentActivityEntry evicted = _ring.Dequeue();
+                if (evicted.Sequence > _lastEvictedSequence)
+                    _lastEvictedSequence = evicted.Sequence;
+            }
         }
     }
 
@@ -118,6 +138,58 @@ public sealed class RecentActivityLog : IDisposable
         lock (_lock)
         {
             return _ring.Where(e => filter.Contains(e.SourceName)).ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Incremental drain: returns every entry whose sequence is strictly
+    /// greater than <paramref name="cursor"/>, plus the new cursor value
+    /// the caller should pass on the next drain, plus the number of
+    /// entries evicted from the ring between the caller's cursor and the
+    /// oldest entry still present. Pass <c>-1</c> on the first call to
+    /// receive every entry currently in the ring.
+    /// </summary>
+    /// <param name="cursor">The sequence number from the caller's previous drain (or -1 to start fresh).</param>
+    /// <param name="sourceNames">
+    /// Optional source-name filter. When non-empty, only entries whose
+    /// <see cref="RecentActivityEntry.SourceName"/> matches one of the
+    /// supplied names appear in the result — but the returned cursor and
+    /// dropped count still reflect ALL entries (including filtered-out
+    /// ones), so a downgrade from "all sources" to "operators only"
+    /// doesn't leave the caller stuck re-receiving filtered entries.
+    /// </param>
+    public TraceDrainResult DrainSince(long cursor, params string[] sourceNames)
+    {
+        HashSet<string>? filter = sourceNames is { Length: > 0 }
+            ? new HashSet<string>(sourceNames, StringComparer.Ordinal)
+            : null;
+        lock (_lock)
+        {
+            long nextCursor = cursor;
+            int dropped = 0;
+            // Count entries the caller missed: any sequence in (cursor,
+            // oldestSeqInRing) is gone. We approximate by comparing the
+            // caller's cursor to _lastEvictedSequence: every evicted
+            // entry with seq > cursor and seq <= _lastEvictedSequence
+            // is a drop the caller can never see.
+            if (cursor < _lastEvictedSequence)
+            {
+                // Conservative lower bound — exact count would require
+                // walking eviction history; the ring's high-watermark
+                // delta is sufficient to render the "N entries dropped"
+                // badge in the UI.
+                dropped = (int)Math.Min(int.MaxValue, _lastEvictedSequence - cursor);
+            }
+
+            List<RecentActivityEntry> result = new();
+            foreach (RecentActivityEntry e in _ring)
+            {
+                if (e.Sequence <= cursor) continue;
+                if (e.Sequence > nextCursor) nextCursor = e.Sequence;
+                if (filter is not null && !filter.Contains(e.SourceName)) continue;
+                result.Add(e);
+            }
+            return new TraceDrainResult(result.ToArray(), nextCursor, dropped);
         }
     }
 
@@ -189,14 +261,32 @@ public sealed class RecentActivityLog : IDisposable
 
 /// <summary>
 /// One completed-span entry from <see cref="RecentActivityLog"/>. Captures
-/// the operator name, the <see cref="ActivitySource"/> it came from
+/// a monotonic sequence number assigned at enqueue time (used by
+/// <see cref="RecentActivityLog.DrainSince"/> as a cursor), the operator
+/// name, the <see cref="ActivitySource"/> it came from
 /// (<c>"DatumIngest.Operators"</c> vs <c>"DatumIngest.Scalars"</c>), the
 /// display name of its parent activity at start (so callers can render the
 /// pull chain), when it started, and how long it ultimately ran.
 /// </summary>
 public readonly record struct RecentActivityEntry(
+    long Sequence,
     string Name,
     string SourceName,
     string? ParentName,
     DateTimeOffset StartedAt,
     TimeSpan Duration);
+
+/// <summary>
+/// Result of a <see cref="RecentActivityLog.DrainSince"/> call.
+/// </summary>
+/// <param name="Entries">New entries (oldest first) in the requested source set.</param>
+/// <param name="Cursor">Pass this back on the next drain to receive only newer entries.</param>
+/// <param name="Dropped">
+/// Approximate count of entries the caller's cursor was behind by — i.e.
+/// entries that aged out of the ring before this drain could see them.
+/// Lets the host surface a "trace overflow, N events lost" badge.
+/// </param>
+public readonly record struct TraceDrainResult(
+    RecentActivityEntry[] Entries,
+    long Cursor,
+    int Dropped);

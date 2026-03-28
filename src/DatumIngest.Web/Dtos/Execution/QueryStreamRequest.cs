@@ -8,7 +8,12 @@ namespace DatumIngest.Web.Dtos.Execution;
 /// </summary>
 /// <param name="Sql">The SQL text to execute. Multi-statement batches accepted.</param>
 /// <param name="MaxRows">Per-cell row cap; defaults to 1000 when omitted or non-positive.</param>
-/// <param name="Trace">When true, emits a final <c>trace</c> event carrying the engine's diagnostic capture for the batch.</param>
+/// <param name="Trace">
+/// Trace scope for this run. <see langword="null"/> or absent disables tracing;
+/// <c>{ operators: true }</c> captures operator-pull spans;
+/// <c>{ operators: true, scalars: true }</c> additionally captures per-scalar-call
+/// dispatches (much higher volume — opt-in).
+/// </param>
 /// <param name="Parameters">
 /// Optional <c>$name</c> bindings. Inline scalars use <see cref="ParameterJson.Value"/>;
 /// binary kinds (<c>Image</c> / <c>Audio</c> / <c>Video</c> / <c>UInt8</c> array)
@@ -18,8 +23,18 @@ namespace DatumIngest.Web.Dtos.Execution;
 public sealed record QueryStreamRequest(
     string Sql,
     int? MaxRows = null,
-    bool? Trace = null,
+    TraceOptionsJson? Trace = null,
     Dictionary<string, ParameterJson>? Parameters = null);
+
+/// <summary>
+/// Trace-scope JSON envelope. Mirror of the server-side
+/// <see cref="DatumIngest.Web.Execution.TraceOptions"/>.
+/// </summary>
+/// <param name="Operators">When true, captures operator-pull spans.</param>
+/// <param name="Scalars">When true, additionally captures per-scalar-call dispatches.</param>
+public sealed record TraceOptionsJson(
+    bool Operators = false,
+    bool Scalars = false);
 
 /// <summary>
 /// JSON shape for a single <c>$name</c> binding. Exactly one of
