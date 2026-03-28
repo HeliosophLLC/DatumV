@@ -27,4 +27,13 @@ public interface ITableValuedFunctionMetadata
 
     /// <summary>Human-readable description for hover / catalog text.</summary>
     static abstract string Description { get; }
+
+    /// <summary>
+    /// Accepted argument shapes. The runtime check in
+    /// <see cref="ITableValuedFunction.ValidateArguments"/> remains the
+    /// source of truth for execution-time enforcement; this static surface
+    /// is what the language server reads for completion, hover, and
+    /// signature help. Implementations should keep the two in lock-step.
+    /// </summary>
+    static abstract IReadOnlyList<TableValuedFunctionSignatureVariant> Signatures { get; }
 }

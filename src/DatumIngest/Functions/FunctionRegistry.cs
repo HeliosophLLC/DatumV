@@ -38,6 +38,8 @@ public sealed class FunctionRegistry
     private readonly Dictionary<QualifiedName, FunctionDescriptor> _scalarDescriptorsByName = new();
     private readonly List<FunctionDescriptor> _scalarDescriptors = new();
     private readonly Dictionary<QualifiedName, ITableValuedFunction> _tableValuedFunctions = new();
+    private readonly Dictionary<QualifiedName, TableValuedFunctionDescriptor> _tableValuedDescriptorsByName = new();
+    private readonly List<TableValuedFunctionDescriptor> _tableValuedDescriptors = new();
     private readonly Dictionary<QualifiedName, IAggregateFunction> _aggregateFunctions = new();
     private readonly Dictionary<QualifiedName, IWindowFunction> _windowFunctions = new();
     private readonly ConcurrentDictionary<QualifiedName, ModelScalarFunction> _resolvedModelFunctions = new();
@@ -187,10 +189,19 @@ public sealed class FunctionRegistry
     {
         T instance = new();
         QualifiedName key = new(schema, T.Name);
+        TableValuedFunctionDescriptor descriptor = new(
+            PrimaryName: T.Name,
+            Category: T.Category,
+            Description: T.Description,
+            Signatures: T.Signatures,
+            SchemaName: schema);
+
         if (!_tableValuedFunctions.TryAdd(key, instance))
         {
             throw new ArgumentException($"Table-valued function '{key}' is already registered.");
         }
+        _tableValuedDescriptorsByName[key] = descriptor;
+        _tableValuedDescriptors.Add(descriptor);
     }
 
     /// <summary>
@@ -503,6 +514,26 @@ public sealed class FunctionRegistry
 
     /// <summary>Bare names of every registered table-valued function.</summary>
     public IEnumerable<string> TableValuedFunctionNames => _tableValuedFunctions.Keys.Select(k => k.Name);
+
+    /// <summary>
+    /// Returns the descriptor for every registered table-valued function.
+    /// Only populated for entries registered through the generic
+    /// <see cref="RegisterTableValued{T}"/> overload (the instance-only
+    /// overload doesn't carry static metadata).
+    /// </summary>
+    public IReadOnlyList<TableValuedFunctionDescriptor> TableValuedDescriptors => _tableValuedDescriptors;
+
+    /// <summary>
+    /// Looks up the descriptor for a table-valued function by qualified name.
+    /// Returns <see langword="null"/> when the function isn't registered, or
+    /// when it was registered through the instance-only overload that
+    /// doesn't carry static metadata.
+    /// </summary>
+    public TableValuedFunctionDescriptor? TryGetTableValuedDescriptor(QualifiedName name)
+    {
+        _tableValuedDescriptorsByName.TryGetValue(name, out TableValuedFunctionDescriptor? descriptor);
+        return descriptor;
+    }
 
     /// <summary>Every registered aggregate function as <c>(schema, name)</c>.</summary>
     public IEnumerable<QualifiedName> AggregateFunctionQualifiedNames => _aggregateFunctions.Keys;

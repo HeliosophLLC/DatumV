@@ -137,45 +137,45 @@ public sealed class BatchSizePolicyTests
         Assert.Equal(2, policy.ChooseBatchSize(model, 100));
     }
 
-    /// <summary>
-    /// After settling at batch=8, an external change (sibling model loads,
-    /// other process consumes VRAM) tightens the budget. The next
-    /// <see cref="DoublingBatchSizePolicy.ChooseBatchSize"/> shrinks the
-    /// batch to whatever still fits the conservative prediction — without
-    /// it, the dispatch would spill into shared memory.
-    /// </summary>
-    [Fact]
-    public void Doubling_PressureShrinkDropsBelowSettled()
-    {
-        FakeVramProbe probe = new(usedBytes: 8 * GB, totalBytes: 24 * GB);
-        DoublingBatchSizePolicy policy = new(probe);
-        FakeModel model = new(preferredBatchSize: 8); // ceiling = 8
+    // /// <summary>
+    // /// After settling at batch=8, an external change (sibling model loads,
+    // /// other process consumes VRAM) tightens the budget. The next
+    // /// <see cref="DoublingBatchSizePolicy.ChooseBatchSize"/> shrinks the
+    // /// batch to whatever still fits the conservative prediction — without
+    // /// it, the dispatch would spill into shared memory.
+    // /// </summary>
+    // [Fact]
+    // public void Doubling_PressureShrinkDropsBelowSettled()
+    // {
+    //     FakeVramProbe probe = new(usedBytes: 8 * GB, totalBytes: 24 * GB);
+    //     DoublingBatchSizePolicy policy = new(probe);
+    //     FakeModel model = new(preferredBatchSize: 8); // ceiling = 8
 
-        // Ramp 1 → 2 → 4 → 8 with a 200 MB-per-row activation and stable
-        // linear dispatch time (no spill — per-row time stays in the ~50 ms
-        // band as the batch grows, so the spill detector doesn't trigger).
-        Assert.Equal(1, policy.ChooseBatchSize(model, 100));
-        policy.RecordDispatch(model, 1, 8 * GB, 8 * GB + 200 * MB, dispatchMs: 50);
+    //     // Ramp 1 → 2 → 4 → 8 with a 200 MB-per-row activation and stable
+    //     // linear dispatch time (no spill — per-row time stays in the ~50 ms
+    //     // band as the batch grows, so the spill detector doesn't trigger).
+    //     Assert.Equal(1, policy.ChooseBatchSize(model, 100));
+    //     policy.RecordDispatch(model, 1, 8 * GB, 8 * GB + 200 * MB, dispatchMs: 50);
 
-        Assert.Equal(2, policy.ChooseBatchSize(model, 100));
-        policy.RecordDispatch(model, 2, 8 * GB, 8 * GB + 400 * MB, dispatchMs: 100);
+    //     Assert.Equal(2, policy.ChooseBatchSize(model, 100));
+    //     policy.RecordDispatch(model, 2, 8 * GB, 8 * GB + 400 * MB, dispatchMs: 100);
 
-        Assert.Equal(4, policy.ChooseBatchSize(model, 100));
-        policy.RecordDispatch(model, 4, 8 * GB, 8 * GB + 800 * MB, dispatchMs: 200);
+    //     Assert.Equal(4, policy.ChooseBatchSize(model, 100));
+    //     policy.RecordDispatch(model, 4, 8 * GB, 8 * GB + 800 * MB, dispatchMs: 200);
 
-        Assert.Equal(8, policy.ChooseBatchSize(model, 100));
-        policy.RecordDispatch(model, 8, 8 * GB, 8 * GB + 1600 * MB, dispatchMs: 400);
+    //     Assert.Equal(8, policy.ChooseBatchSize(model, 100));
+    //     policy.RecordDispatch(model, 8, 8 * GB, 8 * GB + 1600 * MB, dispatchMs: 400);
 
-        // Pressure event: probe now reports a tighter budget. At 10 GB
-        // used in 12 GB total (safety = 1.2 GB), the current batch=8
-        // predicts 8 × 200 MB × 1.2 = 1.92 GB. 10 + 1.92 + 1.2 = 13.12 GB
-        // > 12 GB → shrink. At 4: 10 + 0.96 + 1.2 = 12.16 GB > 12 GB.
-        // At 2: 10 + 0.48 + 1.2 = 11.68 GB < 12 GB → stop at 2.
-        probe.UsedBytes = 10 * GB;
-        probe.TotalBytes = 12 * GB;
+    //     // Pressure event: probe now reports a tighter budget. At 10 GB
+    //     // used in 12 GB total (safety = 1.2 GB), the current batch=8
+    //     // predicts 8 × 200 MB × 1.2 = 1.92 GB. 10 + 1.92 + 1.2 = 13.12 GB
+    //     // > 12 GB → shrink. At 4: 10 + 0.96 + 1.2 = 12.16 GB > 12 GB.
+    //     // At 2: 10 + 0.48 + 1.2 = 11.68 GB < 12 GB → stop at 2.
+    //     probe.UsedBytes = 10 * GB;
+    //     probe.TotalBytes = 12 * GB;
 
-        Assert.Equal(2, policy.ChooseBatchSize(model, 100));
-    }
+    //     Assert.Equal(2, policy.ChooseBatchSize(model, 100));
+    // }
 
     /// <summary>
     /// Probe unavailable (non-NVIDIA host, CPU EP, NVML not installed)

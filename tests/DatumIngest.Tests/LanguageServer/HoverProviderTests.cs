@@ -104,6 +104,24 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.Contains("Absolute value", result.Contents);
     }
 
+    [Fact]
+    public void GetHover_FunctionName_OnSecondLine_ReturnsSignature()
+    {
+        // Regression: previously FindTokenAtOffset compared the cursor's
+        // absolute document offset against the token's column-within-line,
+        // so any token below the first newline silently missed.
+        HoverProvider provider = CreateProvider();
+
+        // Layout: "SELECT\n  abs(x) FROM t" — `abs` starts at offset 9
+        // (6 chars + '\n' + 2 spaces).
+        const string sql = "SELECT\n  abs(x) FROM t";
+        HoverResult? result = provider.GetHover(sql, 9);
+
+        Assert.NotNull(result);
+        Assert.Contains("abs", result.Contents);
+        Assert.Contains("Absolute value", result.Contents);
+    }
+
     // ───────────────────── Table hover ─────────────────────
 
     [Fact]

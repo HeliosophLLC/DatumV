@@ -115,13 +115,16 @@ public sealed class HoverProvider
             string? procedureHover = GetProcedureHover(callQualifier, name);
             if (procedureHover is not null) return procedureHover;
 
-            // Built-ins live in `system`; an explicit non-system qualifier
-            // shouldn't surface a built-in hover.
-            if (callQualifier is null
-                || string.Equals(callQualifier, "system", StringComparison.OrdinalIgnoreCase))
+            // Built-ins live in many schemas (system, inference, tokenizer,
+            // templates, …) — and TVFs do too. When the user qualified the
+            // call, search that specific schema; otherwise walk search_path.
+            // GetFunctionHover handles both scalar and table-valued entries
+            // off the manifest's Functions list.
+            string? functionHover = GetFunctionHover(callQualifier, name);
+            if (functionHover is not null)
             {
                 docKey = DocumentationIndex.Instance.FindFunctionSection(name);
-                return GetFunctionHover(name);
+                return functionHover;
             }
             return null;
         }
@@ -286,11 +289,18 @@ public sealed class HoverProvider
         return null;
     }
 
-    private string? GetFunctionHover(string name)
+    /// <summary>
+    /// Resolves hover for a function call by name, optionally restricted to
+    /// a specific schema. When <paramref name="explicitSchema"/> is
+    /// <see langword="null"/>, walks the manifest's <see cref="LanguageServerManifest.SearchPath"/>
+    /// the same way <see cref="GetUdfHover"/> and <see cref="GetProcedureHover"/>
+    /// do; when non-null, restricts the lookup to that schema so a qualified
+    /// call like <c>inference.devices()</c> doesn't accidentally match an
+    /// unrelated <c>devices</c> elsewhere.
+    /// </summary>
+    private string? GetFunctionHover(string? explicitSchema, string name)
     {
-        FunctionSignature? function = _manifest.Functions.FirstOrDefault(
-            entry => string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase));
-
+        FunctionSignature? function = ResolveFunctionEntry(explicitSchema, name);
         if (function is null)
         {
             return null;
@@ -303,7 +313,11 @@ public sealed class HoverProvider
         }));
 
         string returnInfo = !string.IsNullOrEmpty(function.ReturnType) ? $" → {function.ReturnType}" : "";
-        string signature = $"**{function.Name}**({parameters}){returnInfo}";
+        string qualifiedName = string.IsNullOrEmpty(function.SchemaName)
+            || string.Equals(function.SchemaName, "system", StringComparison.OrdinalIgnoreCase)
+            ? function.Name
+            : $"{function.SchemaName}.{function.Name}";
+        string signature = $"**{qualifiedName}**({parameters}){returnInfo}";
 
         if (function.IsTableValued)
         {
@@ -315,6 +329,46 @@ public sealed class HoverProvider
         return function.Description is not null
             ? $"{signature}\n\n{categoryLine}\n\n{function.Description}"
             : $"{signature}\n\n{categoryLine}";
+    }
+
+    private FunctionSignature? ResolveFunctionEntry(string? explicitSchema, string name)
+    {
+        if (explicitSchema is not null)
+        {
+            foreach (FunctionSignature f in _manifest.Functions)
+            {
+                if (string.Equals(f.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return f;
+                }
+            }
+            return null;
+        }
+        // Unqualified: prefer a match on a search-path schema so the
+        // user sees the same function the engine will resolve.
+        foreach (string schema in _manifest.SearchPath)
+        {
+            foreach (FunctionSignature f in _manifest.Functions)
+            {
+                if (string.Equals(f.SchemaName, schema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return f;
+                }
+            }
+        }
+        // Fall back to any schema — preserves hover for legacy callers
+        // that don't set SchemaName (e.g. offline JSON manifests where
+        // every entry defaults to "system").
+        foreach (FunctionSignature f in _manifest.Functions)
+        {
+            if (string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return f;
+            }
+        }
+        return null;
     }
 
     private string? GetTableHover(string name)
@@ -574,10 +628,18 @@ public sealed class HoverProvider
             foreach (Token<SqlToken> token in tokens)
             {
                 string text = token.ToStringValue();
-                // Superpower's Position is 1-based.
+                // Superpower's Position is 1-based for Line/Column and
+                // already 0-based for Absolute. We need:
+                //   - Line/Column (0-based) for the hover range Monaco
+                //     paints around the token,
+                //   - Absolute (0-based) to match the cursor offset Monaco
+                //     supplies — line+column alone would only land on
+                //     line-1 tokens, leaving everything below silently
+                //     unhoverable.
                 int line = token.Position.Line - 1;
                 int column = token.Position.Column - 1;
-                result.Add(new TokenHit(token.Kind, text, line, column));
+                int absolute = token.Position.Absolute;
+                result.Add(new TokenHit(token.Kind, text, line, column, absolute));
             }
         }
         catch
@@ -589,35 +651,20 @@ public sealed class HoverProvider
     }
 
     /// <summary>
-    /// Finds the token that contains the given character offset.
+    /// Finds the token whose absolute-offset span contains the cursor.
     /// </summary>
+    /// <remarks>
+    /// Uses <see cref="TokenHit.AbsoluteOffset"/> rather than column, which
+    /// only coincides with the document offset on line 1 — a previous
+    /// column-as-offset heuristic silently returned <see langword="null"/>
+    /// for any token below the first newline, breaking hover on function
+    /// calls, table names, and columns in any multi-line SQL.
+    /// </remarks>
     private static TokenHit? FindTokenAtOffset(List<TokenHit> tokens, int cursorOffset)
     {
-        // Convert cursor offset to an approximate line/column by scanning the source text
-        // is impractical without the source. Instead, use cumulative position tracking.
-        // The tokens already have line/column from Superpower — we need to match cursor offset.
-
-        // Build a character-offset map: for each token, calculate its offset from line/column.
-        // This requires the original text, but we don't have it here. Instead, we match by
-        // checking if cursorOffset falls within each token's span. Since we passed the full
-        // SQL to tokenize, we can reconstruct offsets from position.
-
-        // Simplified approach: the caller passes cursorOffset, we need to find the token.
-        // We'll iterate tokens and track their position within the source text.
-        // Superpower gives us (line, column) in 1-based. We need a different strategy.
-
-        // Actually — let's just use the tokens list by index and accept approximate matching.
-        // A robust approach would track absolute offsets, but for hover this is acceptable.
-
-        // We'll use a heuristic: find the token whose start position is closest to
-        // but not exceeding the cursor offset (converted from line/column).
-        // For single-line SQL (most common for this dialect), column ≈ offset.
-
         foreach (TokenHit token in tokens)
         {
-            // For single-line SQL, column equals offset.
-            // For multi-line, this is approximate but sufficient for hover.
-            int tokenStart = token.Column; // Approximate for single-line
+            int tokenStart = token.AbsoluteOffset;
             int tokenEnd = tokenStart + token.Text.Length;
 
             if (cursorOffset >= tokenStart && cursorOffset < tokenEnd)
@@ -699,5 +746,8 @@ public sealed class HoverProvider
 
 /// <summary>
 /// A token with its position information for hover hit-testing.
+/// <see cref="Line"/> / <see cref="Column"/> are 0-based and drive the
+/// hover range Monaco paints; <see cref="AbsoluteOffset"/> is 0-based and
+/// drives cursor-offset hit-testing in <see cref="HoverProvider"/>.
 /// </summary>
-internal sealed record TokenHit(SqlToken Kind, string Text, int Line, int Column);
+internal sealed record TokenHit(SqlToken Kind, string Text, int Line, int Column, int AbsoluteOffset);

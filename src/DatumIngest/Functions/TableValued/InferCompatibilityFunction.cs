@@ -50,6 +50,14 @@ public sealed class InferCompatibilityFunction : ITableValuedFunctionMetadata, I
         "Compares the file's ai.onnx opset against the backend's supported ceiling; " +
         "per-op compatibility checking is a follow-up.";
 
+    /// <inheritdoc cref="ITableValuedFunctionMetadata"/>
+    public static IReadOnlyList<TableValuedFunctionSignatureVariant> Signatures { get; } =
+    [
+        new TableValuedFunctionSignatureVariant(
+            Parameters: [new ParameterSpec("path", DataKindMatcher.Exact(DataKind.String))],
+            FixedOutputSchema: OutputSchema),
+    ];
+
     string ITableValuedFunction.Name => Name;
 
     /// <inheritdoc />

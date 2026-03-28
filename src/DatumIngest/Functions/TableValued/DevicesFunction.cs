@@ -59,6 +59,14 @@ public sealed class DevicesFunction : ITableValuedFunctionMetadata, ITableValued
         "Unreachable devices carry a reason (platform mismatch, missing driver, EP not built). " +
         "Filter `WHERE available = true` for runnable targets.";
 
+    /// <inheritdoc cref="ITableValuedFunctionMetadata"/>
+    public static IReadOnlyList<TableValuedFunctionSignatureVariant> Signatures { get; } =
+    [
+        new TableValuedFunctionSignatureVariant(
+            Parameters: [],
+            FixedOutputSchema: OutputSchema),
+    ];
+
     string ITableValuedFunction.Name => Name;
 
     /// <inheritdoc />

@@ -63,6 +63,14 @@ public sealed class OnnxInspectFunction : ITableValuedFunctionMetadata, ITableVa
         "Path resolution mirrors CREATE MODEL USING — 'file://' absolute or relative to " +
         "ModelCatalog.ModelDirectory. Dynamic dims surface as -1 in the shape array.";
 
+    /// <inheritdoc cref="ITableValuedFunctionMetadata"/>
+    public static IReadOnlyList<TableValuedFunctionSignatureVariant> Signatures { get; } =
+    [
+        new TableValuedFunctionSignatureVariant(
+            Parameters: [new ParameterSpec("path", DataKindMatcher.Exact(DataKind.String))],
+            FixedOutputSchema: OutputSchema),
+    ];
+
     string ITableValuedFunction.Name => Name;
 
     /// <inheritdoc />

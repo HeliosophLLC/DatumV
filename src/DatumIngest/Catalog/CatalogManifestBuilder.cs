@@ -82,11 +82,11 @@ public static class CatalogManifestBuilder
             }
         }
 
-        // Aggregate / window / table-valued functions don't yet carry static
-        // signature metadata — register-by-instance only — so their argument
-        // lists stay empty until the registries gain descriptors. SchemaName
+        // Aggregate / window functions don't yet carry static signature
+        // metadata — register-by-instance only — so their argument lists
+        // stay empty until the registries gain descriptors. SchemaName
         // flows in from the registry's QualifiedName keys so completion can
-        // filter inference.devices() / templates.X / etc. correctly.
+        // filter templates.X / etc. correctly.
         foreach (QualifiedName qn in functions.AggregateFunctionQualifiedNames)
         {
             functionSigs.Add(new FunctionSignature { SchemaName = qn.Schema, Name = qn.Name, Parameters = [], IsAggregate = true });
@@ -95,8 +95,24 @@ public static class CatalogManifestBuilder
         {
             functionSigs.Add(new FunctionSignature { SchemaName = qn.Schema, Name = qn.Name, Parameters = [], IsWindowFunction = true });
         }
+
+        // Table-valued functions carry static-abstract metadata via
+        // ITableValuedFunctionMetadata.Signatures captured at registration
+        // time as TableValuedFunctionDescriptor.Signatures. Render full
+        // parameter list + (when fixed) the output schema so hover /
+        // signature help land with real detail rather than a bare name.
+        HashSet<QualifiedName> tvfWithDescriptor = new();
+        foreach (TableValuedFunctionDescriptor descriptor in functions.TableValuedDescriptors)
+        {
+            tvfWithDescriptor.Add(new QualifiedName(descriptor.SchemaName, descriptor.PrimaryName));
+            functionSigs.Add(BuildTvfSignatureFromDescriptor(descriptor));
+        }
+        // Fallback for any TVF registered through the instance-only overload
+        // (no static metadata available) — surface as a bare entry so
+        // completion still finds the name.
         foreach (QualifiedName qn in functions.TableValuedFunctionQualifiedNames)
         {
+            if (tvfWithDescriptor.Contains(qn)) continue;
             functionSigs.Add(new FunctionSignature { SchemaName = qn.Schema, Name = qn.Name, Parameters = [], IsTableValued = true });
         }
 
@@ -282,6 +298,75 @@ public static class CatalogManifestBuilder
             ReturnType = returnType,
             Description = descriptor.Description,
             Category = descriptor.Category,
+        };
+    }
+
+    /// <summary>
+    /// Builds a <see cref="FunctionSignature"/> for one table-valued function.
+    /// Reads the first signature variant (most TVFs have one shape) and
+    /// renders the <see cref="TableValuedFunctionSignatureVariant.FixedOutputSchema"/>
+    /// as the return type when present so hover / signature help can show
+    /// "→ table(col1 Kind1, col2 Kind2)". Schema-dependent TVFs (range — the
+    /// column kind follows the widest argument) leave the schema null and
+    /// fall back to "→ table".
+    /// </summary>
+    private static FunctionSignature BuildTvfSignatureFromDescriptor(
+        TableValuedFunctionDescriptor descriptor)
+    {
+        TableValuedFunctionSignatureVariant? first = descriptor.Signatures.Count > 0
+            ? descriptor.Signatures[0]
+            : null;
+
+        List<ParameterSignature> parameters = new();
+        string? returnType = null;
+
+        if (first is not null)
+        {
+            foreach (ParameterSpec spec in first.Parameters)
+            {
+                parameters.Add(new ParameterSignature
+                {
+                    Name = spec.Name,
+                    Kind = spec.Kind.Describe(),
+                    IsOptional = spec.IsOptional,
+                });
+            }
+            if (first.VariadicTrailing is not null)
+            {
+                parameters.Add(new ParameterSignature
+                {
+                    Name = $"...{first.VariadicTrailing.Name}",
+                    Kind = first.VariadicTrailing.Kind.Describe(),
+                    IsOptional = first.VariadicTrailing.MinOccurrences == 0,
+                });
+            }
+
+            if (first.FixedOutputSchema is not null)
+            {
+                Schema schema = first.FixedOutputSchema;
+                List<string> columns = new(schema.Columns.Count);
+                foreach (ColumnInfo column in schema.Columns)
+                {
+                    string kindLabel = column.IsArray ? $"Array<{column.Kind}>" : column.Kind.ToString();
+                    columns.Add($"{column.Name} {kindLabel}");
+                }
+                returnType = $"table({string.Join(", ", columns)})";
+            }
+            else
+            {
+                returnType = "table";
+            }
+        }
+
+        return new FunctionSignature
+        {
+            SchemaName = descriptor.SchemaName,
+            Name = descriptor.PrimaryName,
+            Parameters = parameters,
+            ReturnType = returnType,
+            Description = descriptor.Description,
+            Category = descriptor.Category,
+            IsTableValued = true,
         };
     }
 

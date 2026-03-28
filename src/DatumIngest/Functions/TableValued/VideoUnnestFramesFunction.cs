@@ -47,6 +47,24 @@ public sealed class VideoUnnestFramesFunction : ITableValuedFunctionMetadata, IT
         "Defaults: start_frame=0, stride=1, max_frames=-1 (use the container's reported frame count). " +
         "Columns: (frame_index INT, frame VideoFrame). Pixel decoding is deferred to the consumer.";
 
+    /// <inheritdoc cref="ITableValuedFunctionMetadata"/>
+    public static IReadOnlyList<TableValuedFunctionSignatureVariant> Signatures { get; } =
+    [
+        new TableValuedFunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("source", DataKindMatcher.OneOf(DataKind.String, DataKind.Video)),
+                new ParameterSpec("start_frame", DataKindMatcher.Family(DataKindFamily.NumericScalar), IsOptional: true),
+                new ParameterSpec("stride", DataKindMatcher.Family(DataKindFamily.NumericScalar), IsOptional: true),
+                new ParameterSpec("max_frames", DataKindMatcher.Family(DataKindFamily.NumericScalar), IsOptional: true),
+            ],
+            FixedOutputSchema: new Schema(
+            [
+                new ColumnInfo("frame_index", DataKind.Int32, nullable: false),
+                new ColumnInfo("frame", DataKind.VideoFrame, nullable: false),
+            ])),
+    ];
+
     string ITableValuedFunction.Name => Name;
 
     /// <inheritdoc />

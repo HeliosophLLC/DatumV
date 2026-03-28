@@ -221,14 +221,10 @@ public sealed class SignatureHelpProvider
         SignatureHelp? routine = BuildRoutineSignature(explicitSchema, bareName, activeParameter);
         if (routine is not null) return routine;
 
-        // Built-ins live in `system`; an explicit non-system qualifier should
-        // not resolve to one. Unqualified or explicit `system` falls through.
-        if (explicitSchema is null
-            || string.Equals(explicitSchema, "system", StringComparison.OrdinalIgnoreCase))
-        {
-            return BuildBuiltinSignature(bareName, activeParameter);
-        }
-        return null;
+        // Built-ins live in many schemas (system, inference, tokenizer,
+        // templates, …) and TVFs do too. Search the explicit schema when
+        // qualified; walk search_path when not.
+        return BuildBuiltinSignature(explicitSchema, bareName, activeParameter);
     }
 
     private SignatureHelp? BuildRoutineSignature(string? explicitSchema, string name, int activeParameter)
@@ -378,14 +374,21 @@ public sealed class SignatureHelpProvider
         };
     }
 
-    private SignatureHelp? BuildBuiltinSignature(string name, int activeParameter)
+    private SignatureHelp? BuildBuiltinSignature(string? explicitSchema, string name, int activeParameter)
     {
-        FunctionSignature? entry = FindByName(_manifest.Functions, name, e => e.Name);
+        FunctionSignature? entry = ResolveBuiltin(explicitSchema, name);
         if (entry is null) return null;
 
         IReadOnlyList<ParameterSignature> parameters = entry.Parameters;
+        // Render qualified label when the function lives outside `system`,
+        // so the popup matches what the user typed (inference.devices(...)
+        // rather than just devices(...)).
+        string callableName = string.IsNullOrEmpty(entry.SchemaName)
+            || string.Equals(entry.SchemaName, "system", StringComparison.OrdinalIgnoreCase)
+            ? entry.Name
+            : $"{entry.SchemaName}.{entry.Name}";
         (string label, IReadOnlyList<ParameterInfo> paramInfos) = BuildLabel(
-            entry.Name, parameters, entry.ReturnType);
+            callableName, parameters, entry.ReturnType);
 
         string? doc = entry.Description;
 
@@ -436,6 +439,44 @@ public sealed class SignatureHelpProvider
         string label = $"{callableName}({string.Join(", ", paramLabels)})";
         if (returnType is not null) label += $" → {returnType}";
         return (label, paramInfos);
+    }
+
+    private FunctionSignature? ResolveBuiltin(string? explicitSchema, string name)
+    {
+        if (explicitSchema is not null)
+        {
+            foreach (FunctionSignature f in _manifest.Functions)
+            {
+                if (string.Equals(f.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return f;
+                }
+            }
+            return null;
+        }
+        // Unqualified: prefer a match on a search-path schema.
+        foreach (string schema in _manifest.SearchPath)
+        {
+            foreach (FunctionSignature f in _manifest.Functions)
+            {
+                if (string.Equals(f.SchemaName, schema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return f;
+                }
+            }
+        }
+        // Fall back to any schema for callers (offline JSON manifests, etc.)
+        // whose entries default SchemaName to "system" even when not on path.
+        foreach (FunctionSignature f in _manifest.Functions)
+        {
+            if (string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return f;
+            }
+        }
+        return null;
     }
 
     private static T? FindByName<T>(IReadOnlyList<T> entries, string name, Func<T, string> nameOf)

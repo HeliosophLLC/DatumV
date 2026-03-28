@@ -28,6 +28,23 @@ public sealed class RangeFunction : ITableValuedFunctionMetadata, ITableValuedFu
         "Generates a sequence of rows with a single Value column: RANGE(start, end[, step]). " +
         "The output type matches the widest numeric type among the arguments.";
 
+    /// <inheritdoc cref="ITableValuedFunctionMetadata"/>
+    public static IReadOnlyList<TableValuedFunctionSignatureVariant> Signatures { get; } =
+    [
+        // (start, end) — required pair.
+        new TableValuedFunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("start", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+                new ParameterSpec("end", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+                new ParameterSpec("step", DataKindMatcher.Family(DataKindFamily.NumericScalar), IsOptional: true),
+            ],
+            // Output column kind follows the widest argument (Int32/Int64/Float32/Float64),
+            // so the static schema can't be expressed here — leave null and let hover
+            // render "→ table".
+            FixedOutputSchema: null),
+    ];
+
     string ITableValuedFunction.Name => Name;
 
     /// <inheritdoc />

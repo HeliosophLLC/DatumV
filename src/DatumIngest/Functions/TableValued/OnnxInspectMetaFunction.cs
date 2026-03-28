@@ -48,6 +48,14 @@ public sealed class OnnxInspectMetaFunction : ITableValuedFunctionMetadata, ITab
         "inference.onnx_inspect_meta(path). Path resolution mirrors CREATE MODEL USING. " +
         "Doesn't load weights — parses only the file's protobuf header, so a 7B-param file inspects in milliseconds.";
 
+    /// <inheritdoc cref="ITableValuedFunctionMetadata"/>
+    public static IReadOnlyList<TableValuedFunctionSignatureVariant> Signatures { get; } =
+    [
+        new TableValuedFunctionSignatureVariant(
+            Parameters: [new ParameterSpec("path", DataKindMatcher.Exact(DataKind.String))],
+            FixedOutputSchema: OutputSchema),
+    ];
+
     string ITableValuedFunction.Name => Name;
 
     /// <inheritdoc />
