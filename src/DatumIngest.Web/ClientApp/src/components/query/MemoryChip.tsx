@@ -43,6 +43,18 @@ export function MemoryChip({ profile, status }: MemoryChipProps) {
   const sparkMax = budget ?? Math.max(profile.peakRowBytes, 1);
   const rowValues = profile.samples.map((s) => s.rowBytes);
 
+  // VRAM strip: only render when the probe produced data. Hosts without
+  // an NVIDIA GPU never receive the field and the strip stays hidden.
+  // Uses the latest sample's `vramTotalBytes` as the sparkline ceiling so
+  // the line scales against device capacity, not just observed peak.
+  const vramUsed = profile.latest.vramUsedBytes;
+  const vramTotal = profile.latest.vramTotalBytes;
+  const vramAvailable = vramUsed !== null && vramTotal !== null && vramTotal > 0;
+  const vramFraction = vramAvailable ? vramUsed! / vramTotal! : null;
+  const vramValues = profile.samples.map((s) => s.vramUsedBytes ?? 0);
+  const vramPercentText =
+    vramFraction !== null ? ` ${Math.round(vramFraction * 100)}%` : '';
+
   // Pressure-driven foreground colour. Standalone Tailwind classes so the
   // colour stays sharp against the yellow status-bar background in both
   // light and dark themes.
@@ -78,10 +90,34 @@ export function MemoryChip({ profile, status }: MemoryChipProps) {
           ariaLabel={t('memoryChipLabel')}
         />
         {percentText && <span>{percentText}</span>}
+        {vramAvailable && (
+          <>
+            <span className="text-status-bar-foreground/40 px-1">|</span>
+            <span>{formatBytes(vramUsed!)}</span>
+            <Sparkline
+              values={vramValues}
+              maxValue={vramTotal!}
+              stroke="currentColor"
+              className="h-3 w-12"
+              ariaLabel={t('memoryVramChipLabel')}
+            />
+            <span>{vramPercentText}</span>
+          </>
+        )}
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Positioner side="top" align="end" sideOffset={6}>
-          <Popover.Popup className="bg-popover text-popover-foreground border-border z-50 w-72 rounded-md border p-3 shadow-md">
+        {/* z-index lives on the positioner, not just the popup, so the
+            popover sits above the results table's sticky header (which
+            creates a z-20 stacking context). Base UI's positioner
+            doesn't apply z-index by default, so a popup-only z-50
+            renders behind the header. */}
+        <Popover.Positioner
+          side="top"
+          align="end"
+          sideOffset={6}
+          className="z-[100]"
+        >
+          <Popover.Popup className="bg-popover text-popover-foreground border-border w-72 rounded-md border p-3 shadow-md">
             <MemoryPopoverBody profile={profile} />
           </Popover.Popup>
         </Popover.Positioner>
@@ -96,10 +132,10 @@ interface MemoryPopoverBodyProps {
 
 function MemoryPopoverBody({ profile }: MemoryPopoverBodyProps) {
   const { t } = useTranslation('query');
-  // Hover index is shared across both sparklines so the crosshair stays
-  // aligned vertically across Row + Arena. Each sparkline reports hover
-  // updates via onHover; we mirror back via hoveredIndex prop so both
-  // render the crosshair at the same column.
+  // Hover index is shared across every sparkline so the crosshair stays
+  // aligned vertically across Row / Arena / VRAM. Each sparkline reports
+  // hover updates via onHover; we mirror back via hoveredIndex prop so
+  // all render the crosshair at the same column.
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   if (profile.latest === null) return null;
@@ -108,6 +144,13 @@ function MemoryPopoverBody({ profile }: MemoryPopoverBodyProps) {
   const arenaValues = profile.samples.map((s) => s.arenaBytes);
   const rowMax = profile.budgetBytes ?? Math.max(profile.peakRowBytes, 1);
   const arenaMax = Math.max(...arenaValues, 1);
+
+  // VRAM strip is only present when the probe produced data on at least
+  // the latest sample. Total is taken from the latest sample (device
+  // capacity doesn't change mid-query) and used as the sparkline ceiling.
+  const vramTotal = profile.latest.vramTotalBytes;
+  const vramAvailable = vramTotal !== null && vramTotal > 0;
+  const vramValues = profile.samples.map((s) => s.vramUsedBytes ?? 0);
 
   // Hovered sample: show its values in the bottom row when present, else
   // fall back to the latest sample (mirrors the chip's "current" reading
@@ -163,6 +206,25 @@ function MemoryPopoverBody({ profile }: MemoryPopoverBodyProps) {
         />
       </div>
 
+      {vramAvailable && (
+        <div className="flex flex-col gap-0.5">
+          <div className="text-muted-foreground text-[10px] uppercase tracking-wide">
+            {t('memoryVramBytesLabel')}
+          </div>
+          <Sparkline
+            values={vramValues}
+            maxValue={vramTotal!}
+            fill="rgb(34 197 94 / 0.18)"
+            stroke="rgb(34 197 94)"
+            className="h-8 w-full"
+            ariaLabel={t('memoryVramBytesLabel')}
+            interactive
+            hoveredIndex={hoveredIndex}
+            onHover={setHoveredIndex}
+          />
+        </div>
+      )}
+
       {/* Time axis: start (0s) on the left, total duration on the right.
           Aligns visually with the sparklines above since they fill the
           same width container. Middle is intentionally blank — two
@@ -211,6 +273,17 @@ function MemoryPopoverBody({ profile }: MemoryPopoverBodyProps) {
           </span>
         </div>
       </div>
+
+      {vramAvailable && (
+        <div className="text-muted-foreground flex justify-between gap-2 font-mono text-xs">
+          <span className="text-[10px] uppercase tracking-wide whitespace-nowrap">
+            {t('memoryVramShortLabel')}
+          </span>
+          <span className="text-foreground">
+            {formatBytes(displaySample.vramUsedBytes ?? 0)} / {formatBytes(vramTotal!)}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -1497,7 +1497,8 @@ internal sealed class RoutineRegistrar
             Loader: _ => iModelAdapter,
             OptionalArgKinds: iModelAdapter.OptionalKinds.Count > 0 ? iModelAdapter.OptionalKinds : null,
             EstimatedVramBytes: estimatedVram,
-            DisplayName: descriptor.QualifiedName.ToString());
+            DisplayName: descriptor.QualifiedName.ToString(),
+            Batchable: iModelAdapter.IsBatchable);
 
         if (replace)
         {

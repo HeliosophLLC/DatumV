@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Inference;
@@ -212,9 +215,12 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// <item>Multi-input dispatch (struct argument form) — packing across
     /// rows for struct-shaped inputs is not implemented here; routes back
     /// to per-row.</item>
-    /// <item>Explicit shape argument (the 2-arg <c>infer(value, shape)</c>
-    /// form) — per-row shape variability is the precise case batching
-    /// can't absorb.</item>
+    /// <item>Explicit shape argument with anything other than a uniform
+    /// <c>[1, …]</c> leading-dim across all rows — true per-row shape
+    /// variability is the case batching can't absorb. The uniform
+    /// <c>[1, …]</c> form is recombined as <c>[N, …]</c> and packed (the
+    /// common case for SQL bodies that hardcode a batch-1 shape against
+    /// a dynamic-batch ONNX session).</item>
     /// <item>Session input rank &lt; 2 or with non-dynamic leading dim, or
     /// any non-leading dynamic dim — not a batchable shape.</item>
     /// <item>Row inputs have differing element counts — variable-shape
@@ -229,18 +235,24 @@ public sealed class InferFunction : IFunction, IScalarFunction
         EvaluationFrame frame,
         CancellationToken cancellationToken)
     {
-        // The columnar packing optimisation only applies to the 1-arg
-        // single-input form against a batchable session. Every other
-        // shape (multi-input struct, explicit per-row shape, non-batchable
-        // session) falls back to the default per-row loop. We have to
-        // load the default session here to inspect its input shape; this
-        // is the one place outside DispatchAndReadAsync where lazy session
-        // loading happens before the SQL body actually calls infer().
+        // The columnar packing optimisation applies to single-input calls
+        // against a batchable session — either the 1-arg form or the 2-arg
+        // explicit-shape form when every row passes the same `[1, ...]`
+        // shape (which is what a SQL body using `infer(tensor, [1, 3, H, W])`
+        // produces — uniform across rows because the literal is the same).
+        // Multi-input struct dispatch and non-batchable sessions fall through
+        // to the per-row default. We have to load the default session here
+        // to inspect its input shape; this is the one place outside
+        // DispatchAndReadAsync where lazy session loading happens before the
+        // SQL body actually calls infer().
         if (rowCount <= 1
-            || argumentColumns.Length != 1
+            || (argumentColumns.Length != 1 && argumentColumns.Length != 2)
             || frame.CurrentModel is not { } model
             || !model.BoundSessions.ContainsKey("default"))
         {
+            DatumActivity.Scalars.Trace(
+                $"infer.batch fallback=preconditions rows={rowCount} args={argumentColumns.Length} "
+                + $"model={(frame.CurrentModel?.Name ?? "<none>")}");
             return await ScalarFunctionBatchHelpers.DefaultLoop(
                 this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
         }
@@ -248,14 +260,51 @@ public sealed class InferFunction : IFunction, IScalarFunction
         IInferenceSession session = await model.BoundSessions
             .ResolveAsync("default", cancellationToken)
             .ConfigureAwait(false);
-        if (session.Inputs.Count != 1 || !IsBatchableShape(session.Inputs[0]))
+        if (session.Inputs.Count != 1 || !HasDynamicLeadingDim(session.Inputs[0]))
         {
+            DatumActivity.Scalars.Trace(
+                $"infer.batch fallback=session-shape model={model.Name} inputs={session.Inputs.Count} "
+                + $"shape0={(session.Inputs.Count > 0 ? (session.Inputs[0].Shape.Count > 0 ? (session.Inputs[0].Shape[0]?.ToString() ?? "null") : "rank0") : "n/a")}");
             return await ScalarFunctionBatchHelpers.DefaultLoop(
                 this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
         }
 
+        // Resolve the packed shape's trailing dims. Two sources:
+        //   - 1-arg form: the session spec's trailing dims must all be
+        //     concrete (no other dim source is available).
+        //   - 2-arg form: every row must pass the same `[1, ...]` explicit
+        //     shape (uniform leading 1, identical trailing dims). The
+        //     trailing dims come from the literal, which lets us batch
+        //     even when the session spec leaves them dynamic.
+        int[]? packedShape;
+        if (argumentColumns.Length == 1)
+        {
+            if (!TryBuildPackedShapeFromSpec(session.Inputs[0], rowCount, out packedShape))
+            {
+                DatumActivity.Scalars.Trace(
+                    $"infer.batch fallback=spec-trailing-dynamic model={model.Name} "
+                    + $"sessionShape=[{string.Join(",", session.Inputs[0].Shape.Select(d => d?.ToString() ?? "?"))}]");
+                return await ScalarFunctionBatchHelpers.DefaultLoop(
+                    this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            if (!TryBuildPackedShapeFromExplicit(
+                argumentColumns[1], rowCount, model.QualifiedName.ToString(), out packedShape))
+            {
+                DatumActivity.Scalars.Trace(
+                    $"infer.batch fallback=explicit-shape-not-uniform model={model.Name}");
+                return await ScalarFunctionBatchHelpers.DefaultLoop(
+                    this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        using Activity? batchedSpan = DatumActivity.Scalars.StartActivity(
+            $"infer.batch.run model={model.Name} shape=[{string.Join(",", packedShape)}]");
         return await ExecuteBatchedSingleInputAsync(
-            session, argumentColumns[0], rowCount, model.QualifiedName.ToString(), frame.Source, cancellationToken)
+            session, argumentColumns[0], rowCount, packedShape,
+            model.QualifiedName.ToString(), frame.Source, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -269,6 +318,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
         IInferenceSession session,
         ReadOnlyMemory<ValueRef> valueColumn,
         int rowCount,
+        int[] packedShape,
         string modelName,
         IValueStore? arena,
         CancellationToken cancellationToken)
@@ -320,14 +370,17 @@ public sealed class InferFunction : IFunction, IScalarFunction
             inputs[row] = rowInput;
         }
 
-        // Build the packed [B, feature_dims...] tensor. IsBatchableShape
-        // guarantees shape[0] is dynamic and shape[1..] are concrete.
+        // Build the packed [B, feature_dims...] tensor using the caller-
+        // supplied trailing dims. Caller resolves them from either the
+        // session spec's concrete trailing dims (1-arg form) or the
+        // uniform explicit-shape literal across rows (2-arg form), so
+        // this helper stays agnostic to where the dims came from.
         TensorSpec inputSpec = session.Inputs[0];
-        int[] shape = new int[inputSpec.Shape.Count];
+        int[] shape = new int[packedShape.Length];
         shape[0] = rowCount;
-        for (int i = 1; i < inputSpec.Shape.Count; i++)
+        for (int i = 1; i < packedShape.Length; i++)
         {
-            shape[i] = inputSpec.Shape[i]!.Value;
+            shape[i] = packedShape[i];
         }
 
         // Sanity-check the per-row element count against the packed shape.
@@ -430,14 +483,69 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// classifiers / embedders / recognizers. Mirrors the legacy
     /// <c>InferOperator.IsBatchableShape</c> gate.
     /// </summary>
-    private static bool IsBatchableShape(TensorSpec spec)
+    /// <summary>
+    /// Cheap session-level gate: rank ≥ 2 with a dynamic leading dim.
+    /// That's the minimum requirement for <em>any</em> cross-row batching.
+    /// Whether each row can actually be packed depends on the call-site
+    /// shape (the 1-arg form needs concrete trailing dims on the session
+    /// spec; the 2-arg form supplies them via the explicit shape literal),
+    /// which the per-form <c>TryBuildPackedShape*</c> helpers decide.
+    /// </summary>
+    private static bool HasDynamicLeadingDim(TensorSpec spec)
     {
-        if (spec.Shape.Count < 2) return false;
-        if (spec.Shape[0] is not null) return false;
+        return spec.Shape.Count >= 2 && spec.Shape[0] is null;
+    }
+
+    /// <summary>
+    /// 1-arg form: trailing dims come from the session spec. Returns
+    /// <see langword="false"/> when any non-leading dim is dynamic on the
+    /// session — we have no second source for the dim and can't pack.
+    /// </summary>
+    private static bool TryBuildPackedShapeFromSpec(
+        TensorSpec spec, int rowCount, [NotNullWhen(true)] out int[]? packedShape)
+    {
         for (int i = 1; i < spec.Shape.Count; i++)
         {
-            if (spec.Shape[i] is null) return false;
+            if (spec.Shape[i] is null) { packedShape = null; return false; }
         }
+        int[] shape = new int[spec.Shape.Count];
+        shape[0] = rowCount;
+        for (int i = 1; i < spec.Shape.Count; i++) shape[i] = spec.Shape[i]!.Value;
+        packedShape = shape;
+        return true;
+    }
+
+    /// <summary>
+    /// 2-arg form: every row's explicit shape must lead with 1 AND be
+    /// identical across rows. The literal supplies the trailing dims,
+    /// so this batches even when the session spec leaves trailing dims
+    /// dynamic — exactly the depth-anything / glpn case where the session
+    /// is fully flexible and the SQL author hardcodes the per-row shape.
+    /// Recombines the leading 1 with <paramref name="rowCount"/> to form
+    /// the packed shape.
+    /// </summary>
+    private static bool TryBuildPackedShapeFromExplicit(
+        ReadOnlyMemory<ValueRef> shapeColumn, int rowCount, string modelName,
+        [NotNullWhen(true)] out int[]? packedShape)
+    {
+        ReadOnlySpan<ValueRef> col = shapeColumn.Span;
+        int[]? reference = null;
+        for (int row = 0; row < rowCount; row++)
+        {
+            int[] shape = ReadShapeArray(col[row], modelName);
+            if (shape.Length == 0 || shape[0] != 1) { packedShape = null; return false; }
+            if (reference is null) { reference = shape; continue; }
+            if (reference.Length != shape.Length) { packedShape = null; return false; }
+            for (int i = 0; i < reference.Length; i++)
+            {
+                if (reference[i] != shape[i]) { packedShape = null; return false; }
+            }
+        }
+        if (reference is null) { packedShape = null; return false; }
+        int[] result = new int[reference.Length];
+        result[0] = rowCount;
+        for (int i = 1; i < reference.Length; i++) result[i] = reference[i];
+        packedShape = result;
         return true;
     }
 

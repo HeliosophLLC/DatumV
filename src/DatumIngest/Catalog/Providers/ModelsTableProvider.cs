@@ -60,6 +60,7 @@ internal static class ModelKind
 ///   <item><term>source_url</term><description>Repo / model-zoo URL for re-downloading.</description></item>
 ///   <item><term>status</term><description><c>available</c> / <c>missing</c> / <c>bridge</c>. See class remarks for semantics.</description></item>
 ///   <item><term>kind</term><description><c>builtin</c> (engine-baked entry in <see cref="ModelCatalog"/>) or <c>declared</c> (user-written <c>CREATE MODEL</c> in <see cref="ModelRegistry"/>). The schema-stable origin discriminator.</description></item>
+///   <item><term>batchable</term><description>Whether the engine can dispatch N rows in one cross-row batched call. For <c>declared</c> rows this is derived from a straight-line check on the body (DECLARE / SET / RETURN only). For <c>builtin</c> rows it's whatever the impl reports via <see cref="IModel.IsBatchable"/> (default <see langword="false"/>).</description></item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -242,6 +243,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         cells[12] = DataValue.FromString(status, arena);
         cells[13] = DataValue.FromString(ModelKind.Builtin, arena);
         cells[14] = WriteOptionalString(entry.ImplementsTaskName, arena);
+        cells[15] = DataValue.FromBoolean(entry.Batchable);
     }
 
     /// <summary>
@@ -290,6 +292,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         cells[12] = DataValue.FromString("available", arena); // session is loaded; see method remarks
         cells[13] = DataValue.FromString(ModelKind.Declared, arena);
         cells[14] = WriteOptionalString(descriptor.ImplementsTaskName, arena);
+        cells[15] = DataValue.FromBoolean(ProceduralModelAdapter.IsStraightLineBody(descriptor.StatementBody));
     }
 
     /// <summary>
@@ -347,5 +350,6 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         new ColumnInfo("status",          DataKind.String, nullable: false),
         new ColumnInfo("kind",            DataKind.String, nullable: false),
         new ColumnInfo("task",            DataKind.String, nullable: true),
+        new ColumnInfo("batchable",       DataKind.Boolean, nullable: false),
     ]);
 }

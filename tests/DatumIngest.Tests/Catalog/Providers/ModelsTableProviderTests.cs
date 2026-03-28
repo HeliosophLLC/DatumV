@@ -1,5 +1,6 @@
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Execution;
 using DatumIngest.Inference;
 using DatumIngest.Model;
 using DatumIngest.Models;
@@ -47,7 +48,7 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
 
         Schema schema = provider.GetSchema();
 
-        Assert.Equal(15, schema.Columns.Count);
+        Assert.Equal(16, schema.Columns.Count);
 
         Assert.Equal("name", schema.Columns[0].Name);
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
@@ -83,6 +84,13 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
         Assert.Equal("task", schema.Columns[14].Name);
         Assert.Equal(DataKind.String, schema.Columns[14].Kind);
         Assert.True(schema.Columns[14].Nullable);
+
+        // `batchable` — non-null boolean signalling cross-row dispatch
+        // eligibility for SQL-defined bodies (declared) or impl-self-report
+        // for built-ins.
+        Assert.Equal("batchable", schema.Columns[15].Name);
+        Assert.Equal(DataKind.Boolean, schema.Columns[15].Kind);
+        Assert.False(schema.Columns[15].Nullable);
     }
 
     /// <summary>
@@ -146,6 +154,85 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
         Assert.Equal("https://example.com/fake", row[11].AsString(arena));
         Assert.Equal("available", row[12].AsString(arena));
         Assert.Equal("builtin", row[13].AsString(arena));
+        // batchable defaults to false for builtins that don't opt in.
+        Assert.False(row[15].AsBoolean());
+    }
+
+    /// <summary>
+    /// A SQL-defined model whose body is straight-line (DECLARE/SET/RETURN
+    /// only) reports <c>batchable = true</c>. Drives the columnar-body
+    /// dispatch path eligibility — see <see cref="ProceduralModelAdapter.IsStraightLineBody"/>.
+    /// </summary>
+    [Fact]
+    public async Task ScanAsync_DeclaredModelWithStraightLineBody_ReportsBatchableTrue()
+    {
+        const string filename = "straight.onnx";
+        string filePath = Path.Combine(_tempModelDir, filename);
+        await File.WriteAllBytesAsync(filePath, new byte[8]);
+
+        Pool pool = CreatePool();
+        ModelCatalog catalog = new(_tempModelDir);
+        ModelRegistry declared = new();
+        declared.Register(MakeDescriptor(
+            "straight",
+            $"file://{filePath}",
+            body:
+            [
+                new DatumIngest.Parsing.Ast.DeclareStatement(
+                    VariableName: "x",
+                    TypeName: "Float32",
+                    Initializer: null,
+                    Span: null),
+                new DatumIngest.Parsing.Ast.ReturnStatement(
+                    Value: new LiteralValueExpression(DataValue.FromFloat32(0.0f)),
+                    Span: null),
+            ]));
+
+        using ModelsTableProvider provider = new(pool, catalog, declared);
+        (Row row, Arena arena) = await ReadOnlyRowAsync(provider);
+
+        Assert.Equal("straight", row[0].AsString(arena));
+        Assert.True(row[15].AsBoolean());
+    }
+
+    /// <summary>
+    /// A SQL-defined model whose body contains any control flow (IF / WHILE
+    /// / BLOCK) reports <c>batchable = false</c> — the columnar evaluator
+    /// can't pick a single branch for an N-row column where different rows
+    /// would take different branches.
+    /// </summary>
+    [Fact]
+    public async Task ScanAsync_DeclaredModelWithBranchingBody_ReportsBatchableFalse()
+    {
+        const string filename = "branching.onnx";
+        string filePath = Path.Combine(_tempModelDir, filename);
+        await File.WriteAllBytesAsync(filePath, new byte[8]);
+
+        Pool pool = CreatePool();
+        ModelCatalog catalog = new(_tempModelDir);
+        ModelRegistry declared = new();
+        declared.Register(MakeDescriptor(
+            "branching",
+            $"file://{filePath}",
+            body:
+            [
+                new DatumIngest.Parsing.Ast.IfStatement(
+                    Predicate: new LiteralValueExpression(DataValue.FromBoolean(true)),
+                    Then: new DatumIngest.Parsing.Ast.ReturnStatement(
+                        Value: new LiteralValueExpression(DataValue.FromFloat32(1.0f)),
+                        Span: null),
+                    Else: null,
+                    Span: null),
+                new DatumIngest.Parsing.Ast.ReturnStatement(
+                    Value: new LiteralValueExpression(DataValue.FromFloat32(0.0f)),
+                    Span: null),
+            ]));
+
+        using ModelsTableProvider provider = new(pool, catalog, declared);
+        (Row row, Arena arena) = await ReadOnlyRowAsync(provider);
+
+        Assert.Equal("branching", row[0].AsString(arena));
+        Assert.False(row[15].AsBoolean());
     }
 
     /// <summary>
@@ -298,14 +385,17 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
             rows);
     }
 
-    private static ModelDescriptor MakeDescriptor(string name, string usingPath) => new(
+    private static ModelDescriptor MakeDescriptor(
+        string name,
+        string usingPath,
+        IReadOnlyList<DatumIngest.Parsing.Ast.Statement>? body = null) => new(
         SchemaName: "models",
         Name: name,
         Parameters: Array.Empty<DatumIngest.Parsing.Ast.UdfParameter>(),
         ReturnTypeName: "Float32",
         UsingPath: usingPath,
         ResolvedUsingPath: usingPath,
-        StatementBody: Array.Empty<DatumIngest.Parsing.Ast.Statement>(),
+        StatementBody: body ?? Array.Empty<DatumIngest.Parsing.Ast.Statement>(),
         // Empty alias map — the table-provider tests inspect descriptor
         // metadata only and never trigger a session load, so the dispatcher
         // reference is never dereferenced.

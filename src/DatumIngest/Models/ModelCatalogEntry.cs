@@ -126,6 +126,15 @@ namespace DatumIngest.Models;
 /// dispatch layer (Phase 2) can route uniformly across <c>kind = 'builtin'</c>
 /// and <c>kind = 'declared'</c> entries.
 /// </param>
+/// <param name="Batchable">
+/// Whether the engine can dispatch N rows of this model in one cross-row
+/// batched call. Mirrors <see cref="IModel.IsBatchable"/>: for SQL-defined
+/// models this comes from a straight-line check on the body; for built-in
+/// <see cref="IModel"/>s the impl reports its own answer (default
+/// <see langword="false"/>, since builtins normally handle batching inside
+/// their own <c>InferBatchAsync</c> and don't need the columnar-body path).
+/// Surfaces on <c>system.models.batchable</c> as a diagnostic.
+/// </param>
 public sealed record ModelCatalogEntry(
     string Name,
     string Backend,
@@ -144,7 +153,8 @@ public sealed record ModelCatalogEntry(
     string? Category = null,
     IReadOnlyList<string>? Modalities = null,
     IReadOnlyList<string>? Files = null,
-    string? ImplementsTaskName = null);
+    string? ImplementsTaskName = null,
+    bool Batchable = false);
 
 /// <summary>
 /// Context handed to a <see cref="ModelCatalogEntry.Loader"/> when first instantiating

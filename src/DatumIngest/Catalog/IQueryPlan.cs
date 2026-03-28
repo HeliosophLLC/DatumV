@@ -32,35 +32,15 @@ public interface IQueryPlan
     /// the next one.
     /// </summary>
     IAsyncEnumerable<RowBatch> ExecuteAsync(CancellationToken cancellationToken)
-        => ExecuteAsync(cancellationToken, streamingSink: null, batchContext: null);
+        => ExecuteAsync(cancellationToken, batchContext: null);
 
     /// <summary>
-    /// Same as <see cref="ExecuteAsync(CancellationToken)"/>, but attaches a
-    /// streaming sink to the per-query <c>ExecutionContext</c>. When non-
-    /// <see langword="null"/>, model invocations switch from their batched
-    /// <c>InferBatchAsync</c> path to the per-row <c>InferStreamingAsync</c>
-    /// path and forward each yielded chunk to <paramref name="streamingSink"/>
-    /// as it arrives.
-    /// </summary>
-    /// <remarks>
-    /// Used by <c>CALL &lt;model-call&gt;</c> in the interactive shell to
-    /// render LLM tokens live. Plain <c>SELECT</c>/<c>WHERE</c>/<c>GROUP BY</c>
-    /// callers leave <paramref name="streamingSink"/> at <see langword="null"/>
-    /// — they need the full collected value, not chunks.
-    /// </remarks>
-    IAsyncEnumerable<RowBatch> ExecuteAsync(
-        CancellationToken cancellationToken,
-        IModelStreamingSink? streamingSink)
-        => ExecuteAsync(cancellationToken, streamingSink, batchContext: null);
-
-    /// <summary>
-    /// Full-fidelity execution overload: attaches both an optional streaming
-    /// sink and an optional procedural batch context. When
-    /// <paramref name="batchContext"/> is non-<see langword="null"/>, the
-    /// per-query <c>ExecutionContext</c> is plumbed with the batch's
-    /// variable store and scope chain so bare-name references in this
-    /// query resolve against the enclosing batch's procedural variables
-    /// (variable-first precedence over the row schema).
+    /// Full-fidelity execution overload that attaches an optional procedural
+    /// batch context. When <paramref name="batchContext"/> is non-
+    /// <see langword="null"/>, the per-query <c>ExecutionContext</c> is
+    /// plumbed with the batch's variable store and scope chain so bare-name
+    /// references in this query resolve against the enclosing batch's
+    /// procedural variables (variable-first precedence over the row schema).
     /// </summary>
     /// <remarks>
     /// Used by the procedural batch executor when running a child
@@ -71,6 +51,5 @@ public interface IQueryPlan
     /// </remarks>
     IAsyncEnumerable<RowBatch> ExecuteAsync(
         CancellationToken cancellationToken,
-        IModelStreamingSink? streamingSink,
         BatchContext? batchContext);
 }

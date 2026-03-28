@@ -370,21 +370,6 @@ public sealed class ExecutionContext : IDisposable
     public IModelInvocationTracer? ModelTracer { get; init; }
 
     /// <summary>
-    /// Optional per-query streaming sink for <c>models.X(...)</c> output.
-    /// When non-<see langword="null"/>, <see cref="Operators.ModelInvocationOperator"/>
-    /// switches the active model from its batched <c>InferBatchAsync</c>
-    /// path to the per-row <c>InferStreamingAsync</c> path and forwards
-    /// each yielded chunk to the sink. Used by <c>CALL &lt;model-call&gt;</c>
-    /// in the shell to render LLM tokens live.
-    /// </summary>
-    /// <remarks>
-    /// Plain <c>SELECT</c>/<c>WHERE</c>/<c>GROUP BY</c> never observe a
-    /// streaming sink — only entry points that explicitly opt in (currently
-    /// the streaming overload of <c>IQueryPlan.ExecuteAsync</c>) attach one.
-    /// </remarks>
-    public IModelStreamingSink? StreamingSink { get; init; }
-
-    /// <summary>
     /// Borrowed reference to the enclosing batch's variable-payload arena.
     /// When this query is running inside a procedural batch, the procedural
     /// executor sets this from <see cref="BatchContext.VariableStore"/> so

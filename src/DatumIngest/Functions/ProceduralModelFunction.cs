@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
@@ -160,6 +162,430 @@ public sealed class ProceduralModelFunction : IScalarFunction
         {
             stack.Pop();
         }
+    }
+
+    /// <summary>
+    /// Columnar batched dispatch for a model whose body is straight-line
+    /// (DECLARE / SET / RETURN only, no IF / WHILE / BLOCK — see
+    /// <c>ProceduralModelAdapter.IsStraightLineBody</c>). Walks the
+    /// body's statements once across <c>rowInputs.Count</c> rows, evaluating
+    /// each statement's expression as a column. Cross-row batching kicks in
+    /// at each top-level <see cref="FunctionCallExpression"/>: arguments
+    /// resolve to columns, then the function's
+    /// <see cref="IScalarFunction.ExecuteBatchAsync"/> packs and dispatches
+    /// once (the big win for <c>infer()</c>). Anything the columnar
+    /// evaluator doesn't know how to vectorize falls back to per-row
+    /// evaluation via the existing <see cref="ExpressionEvaluator"/> — same
+    /// results, just no packing for that slot.
+    /// </summary>
+    /// <remarks>
+    /// Parameter binding mirrors the per-row path: each row goes through
+    /// <see cref="BindParametersAsync"/> against a private scope, then
+    /// the per-row bound values are gathered into columns. This pays
+    /// N × bind-cost but inherits the existing CHECK / coercion / default
+    /// semantics exactly. Cycle detection pushes/pops once for the entire
+    /// batch (the body runs once logically).
+    /// </remarks>
+    internal async ValueTask<ValueRef[]> ExecuteModelBatchAsync(
+        IReadOnlyList<IReadOnlyList<ValueRef>> rowInputs,
+        IReadOnlyList<IReadOnlyList<ValueRef>> rowOverrides,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        int rowCount = rowInputs.Count;
+        if (rowCount == 0) return Array.Empty<ValueRef>();
+
+        Stack<string> stack = _invocationStack.Value ??= new Stack<string>();
+        foreach (string active in stack)
+        {
+            if (string.Equals(active, _descriptor.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                string chain = string.Join(" → ", stack.Reverse().Append(_descriptor.Name));
+                throw new InvalidOperationException(
+                    $"Cyclic model call detected: {chain}. " +
+                    "Models cannot call themselves directly or transitively.");
+            }
+        }
+
+        stack.Push(_descriptor.Name);
+        DatumActivity.Scalars.Trace($"[model] {_descriptor.Name}: batched enter, rowCount={rowCount}");
+        try
+        {
+            ValueRef[] results = await ExecuteBatchedBodyAsync(
+                rowInputs, rowOverrides, frame, rowCount, cancellationToken).ConfigureAwait(false);
+            DatumActivity.Scalars.Trace($"[model] {_descriptor.Name}: batched exit, rowCount={rowCount}");
+            return results;
+        }
+        catch (Exception ex)
+        {
+            DatumActivity.Scalars.Trace($"[model] {_descriptor.Name}: batched THREW {ex.GetType().Name}: {ex.Message}");
+            throw;
+        }
+        finally
+        {
+            stack.Pop();
+        }
+    }
+
+    private async ValueTask<ValueRef[]> ExecuteBatchedBodyAsync(
+        IReadOnlyList<IReadOnlyList<ValueRef>> rowInputs,
+        IReadOnlyList<IReadOnlyList<ValueRef>> rowOverrides,
+        EvaluationFrame outerFrame,
+        int rowCount,
+        CancellationToken cancellationToken)
+    {
+        IValueStore variableStore = outerFrame.Target;
+        // One column per declared variable / parameter, each holding rowCount
+        // ValueRefs in row order. Case-insensitive to match VariableScope's
+        // lookup contract.
+        Dictionary<string, ValueRef[]> columns = new(StringComparer.OrdinalIgnoreCase);
+
+        // Per-row parameter binding. Reuses the per-row BindParametersAsync so
+        // CHECK / coercion / default-evaluation semantics are exactly the
+        // same shape as the non-batched path — any error a per-row call would
+        // raise is raised here with the same row identity.
+        for (int row = 0; row < rowCount; row++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            IReadOnlyList<ValueRef> inputs = rowInputs[row];
+            IReadOnlyList<ValueRef> overrides = rowOverrides.Count > row
+                ? rowOverrides[row]
+                : Array.Empty<ValueRef>();
+            int supplied = inputs.Count + overrides.Count;
+            ValueRef[] args = new ValueRef[supplied];
+            for (int i = 0; i < inputs.Count; i++) args[i] = inputs[i];
+            for (int i = 0; i < overrides.Count; i++) args[inputs.Count + i] = overrides[i];
+
+            VariableScope perRowScope = new(outerFrame.Accountant);
+            await BindParametersAsync(args, outerFrame, variableStore, perRowScope, cancellationToken)
+                .ConfigureAwait(false);
+
+            for (int p = 0; p < _descriptor.Parameters.Count; p++)
+            {
+                string name = _descriptor.Parameters[p].Name;
+                if (!columns.TryGetValue(name, out ValueRef[]? col))
+                {
+                    col = new ValueRef[rowCount];
+                    columns[name] = col;
+                }
+                col[row] = perRowScope.Get(name);
+            }
+        }
+
+        // Body frame carries the model descriptor so infer() can resolve its
+        // session, exactly like the per-row body's frame.
+        EvaluationFrame bodyFrame = new(
+            Row.Empty,
+            variableStore,
+            variableStore,
+            outerFrame.Accountant,
+            outerRow: null,
+            sidecarRegistry: outerFrame.SidecarRegistry,
+            types: outerFrame.Types,
+            typeIdTranslations: outerFrame.TypeIdTranslations,
+            currentModel: _descriptor);
+
+        // Walk the body. The IsStraightLineBody contract guarantees the
+        // sequence is DECLARE/SET-only up to a terminal RETURN — no IF /
+        // WHILE / BLOCK / BREAK / CONTINUE to handle.
+        ValueRef[]? resultColumn = null;
+        foreach (Statement stmt in _descriptor.StatementBody)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            switch (stmt)
+            {
+                case DeclareStatement decl:
+                {
+                    ValueRef[] col;
+                    if (decl.Initializer is not null)
+                    {
+                        Expression effective = decl.TypeName is not null
+                            ? new CastExpression(decl.Initializer, decl.TypeName, decl.Span)
+                            : decl.Initializer;
+                        col = await EvaluateColumnAsync(
+                            effective, columns, rowCount, bodyFrame, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    else if (decl.TypeName is not null
+                        && TypeAnnotationResolver.TryParse(decl.TypeName, out DataKind kind, out bool isArray))
+                    {
+                        ValueRef nullValue = isArray ? ValueRef.NullArray(kind) : ValueRef.Null(kind);
+                        col = new ValueRef[rowCount];
+                        for (int i = 0; i < rowCount; i++) col[i] = nullValue;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            $"DECLARE @{decl.VariableName}: cannot resolve type name '{decl.TypeName}'. " +
+                            "Use a recognised SQL type or supply an initializer.");
+                    }
+                    if (columns.ContainsKey(decl.VariableName))
+                    {
+                        throw new InvalidOperationException(
+                            $"Variable '@{decl.VariableName}' is already declared.");
+                    }
+                    columns[decl.VariableName] = col;
+                    break;
+                }
+                case SetStatement set:
+                {
+                    ValueRef[] col = await EvaluateColumnAsync(
+                        set.Value, columns, rowCount, bodyFrame, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (!columns.ContainsKey(set.VariableName))
+                    {
+                        throw new InvalidOperationException(
+                            $"Variable '@{set.VariableName}' is not declared.");
+                    }
+                    columns[set.VariableName] = col;
+                    break;
+                }
+                case ReturnStatement ret:
+                {
+                    resultColumn = await EvaluateColumnAsync(
+                        ret.Value, columns, rowCount, bodyFrame, cancellationToken)
+                        .ConfigureAwait(false);
+                    break;
+                }
+                default:
+                    throw new InvalidOperationException(
+                        $"Statement type '{stmt.GetType().Name}' is not allowed in a batchable model body. " +
+                        "ProceduralModelAdapter.IsStraightLineBody should have rejected this body upstream.");
+            }
+            if (resultColumn is not null) break;
+        }
+
+        if (resultColumn is null)
+        {
+            throw new InvalidOperationException(
+                $"Model '{_descriptor.QualifiedName}' body completed without RETURN.");
+        }
+
+        // Post-process each row's return value exactly as the per-row path
+        // does: kind coercion (when RETURN's kind differs from RETURNS T),
+        // named-type TypeId stamping, and IS NOT NULL enforcement. The per-row
+        // pass keeps these semantics identical between batched and per-row
+        // dispatch — a small per-row cost in exchange for parity.
+        ExpressionEvaluator postEvaluator = new(
+            _functions,
+            meter: null,
+            outerRow: null,
+            sourceSchema: null,
+            letBindingExpressions: null,
+            store: variableStore,
+            sidecarRegistry: outerFrame.SidecarRegistry,
+            variableScope: null,
+            variableStore: variableStore,
+            typeRegistry: outerFrame.Types,
+            accountant: outerFrame.Accountant);
+
+        for (int row = 0; row < rowCount; row++)
+        {
+            ValueRef returnValue = resultColumn[row];
+
+            if (!returnValue.IsNull && returnValue.Kind != _returnKind)
+            {
+                DataValue asData = returnValue.ToDataValue(variableStore, returnValue.TypeId, outerFrame.Types);
+                CastExpression syntheticCast = new(
+                    new LiteralValueExpression(asData),
+                    _descriptor.ReturnTypeName,
+                    Span: null);
+                returnValue = await postEvaluator
+                    .EvaluateAsValueRefAsync(syntheticCast, bodyFrame, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (!returnValue.IsNull
+                && returnValue.Kind == DataKind.Struct
+                && !returnValue.IsArray
+                && returnValue.TypeId == 0
+                && outerFrame.Types is { } types
+                && _descriptor.ReturnTypeName is { } returnTypeName
+                && TypeAnnotationResolver.IsNamedType(returnTypeName))
+            {
+                int namedTypeId = types.GetTypeIdByName(returnTypeName);
+                if (namedTypeId != TypeRegistry.NoType)
+                {
+                    ReadOnlySpan<ValueRef> structFields = returnValue.GetStructFields();
+                    ValueRef[] copy = new ValueRef[structFields.Length];
+                    structFields.CopyTo(copy);
+                    returnValue = ValueRef.FromStruct(copy, (ushort)namedTypeId);
+                }
+            }
+
+            if (_descriptor.ReturnIsNotNull && returnValue.IsNull)
+            {
+                throw new InvalidOperationException(
+                    $"Model '{_descriptor.QualifiedName}' return value must not be null (row {row}).");
+            }
+
+            resultColumn[row] = returnValue;
+        }
+
+        return resultColumn;
+    }
+
+    /// <summary>
+    /// Evaluates <paramref name="expr"/> across <paramref name="rowCount"/>
+    /// rows, producing one <see cref="ValueRef"/> per row. The vectorized
+    /// fast paths are:
+    /// <list type="bullet">
+    /// <item>literal — same value broadcast across every row;</item>
+    /// <item>variable reference — direct column lookup, zero copy;</item>
+    /// <item>function call — recursively evaluate each argument as a column,
+    /// then call <see cref="IScalarFunction.ExecuteBatchAsync"/> once. This
+    /// is where <c>infer()</c>'s packing fires.</item>
+    /// </list>
+    /// Anything else falls back to N invocations of the per-row
+    /// <see cref="ExpressionEvaluator"/> against a synthesized per-row scope.
+    /// The fallback always produces correct results; it just doesn't batch.
+    /// </summary>
+    private async ValueTask<ValueRef[]> EvaluateColumnAsync(
+        Expression expr,
+        Dictionary<string, ValueRef[]> columns,
+        int rowCount,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        switch (expr)
+        {
+            case LiteralValueExpression literal:
+            {
+                ValueRef broadcast = ExpressionEvaluator.ToValueRef(literal.Value, frame);
+                ValueRef[] result = new ValueRef[rowCount];
+                for (int i = 0; i < rowCount; i++) result[i] = broadcast;
+                return result;
+            }
+            case ColumnReference colRef
+                when colRef.TableName is null
+                    && columns.TryGetValue(colRef.ColumnName, out ValueRef[]? col):
+            {
+                // Direct column hit — return the shared array. The caller
+                // never mutates a column it gets back from EvaluateColumnAsync,
+                // so sharing is safe.
+                return col;
+            }
+            case CastExpression cast:
+            {
+                // Evaluate the inner expression columnarly. Then if every
+                // row already matches the declared kind/arrayness, skip the
+                // cast entirely — the common case for typed DECLAREs like
+                // `DECLARE x Float32[] = image_to_tensor_chw(...)` where the
+                // function's return shape already matches the annotation.
+                // Without this fast path, every typed DECLARE falls into the
+                // per-row safety net, which defeats columnar batching at the
+                // statement level.
+                ValueRef[] inner = await EvaluateColumnAsync(
+                    cast.Expression, columns, rowCount, frame, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!TypeAnnotationResolver.TryParse(cast.TargetType, out DataKind targetKind, out bool targetIsArray))
+                {
+                    return await EvaluatePerRowAsync(cast, columns, rowCount, frame, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                bool anyNeedsCoercion = false;
+                for (int i = 0; i < rowCount; i++)
+                {
+                    ValueRef v = inner[i];
+                    if (v.IsNull) continue;
+                    if (v.IsArray != targetIsArray) { anyNeedsCoercion = true; break; }
+                    DataKind effectiveKind = targetIsArray ? v.ArrayElementKind : v.Kind;
+                    if (effectiveKind != targetKind) { anyNeedsCoercion = true; break; }
+                }
+                if (!anyNeedsCoercion) return inner;
+                return await EvaluatePerRowAsync(cast, columns, rowCount, frame, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            case FunctionCallExpression functionCall
+                when CanVectorizeFunctionCall(functionCall):
+            {
+                IScalarFunction? fn = _functions.TryGetScalar(functionCall.FunctionName);
+                if (fn is null)
+                {
+                    DatumActivity.Scalars.Trace(
+                        $"model.{_descriptor.Name}.col-fallback unresolved-fn={functionCall.FunctionName}");
+                    return await EvaluatePerRowAsync(expr, columns, rowCount, frame, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                ReadOnlyMemory<ValueRef>[] argCols =
+                    new ReadOnlyMemory<ValueRef>[functionCall.Arguments.Count];
+                for (int i = 0; i < functionCall.Arguments.Count; i++)
+                {
+                    ValueRef[] argColumn = await EvaluateColumnAsync(
+                        functionCall.Arguments[i], columns, rowCount, frame, cancellationToken)
+                        .ConfigureAwait(false);
+                    argCols[i] = argColumn.AsMemory();
+                }
+                using Activity? span = DatumActivity.Scalars.StartActivity(
+                    $"col.{functionCall.FunctionName}(rows={rowCount})");
+                return await fn.ExecuteBatchAsync(argCols, rowCount, frame, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            default:
+                DatumActivity.Scalars.Trace(
+                    $"model.{_descriptor.Name}.col-fallback expr={expr.GetType().Name}");
+                return await EvaluatePerRowAsync(expr, columns, rowCount, frame, cancellationToken)
+                    .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Per-row safety net for expressions the columnar evaluator doesn't
+    /// know how to vectorize (CASE, binary operators on non-trivial inputs,
+    /// sub-queries, …). Synthesises a row-local <see cref="VariableScope"/>
+    /// populated from <paramref name="columns"/> for the row and invokes the
+    /// regular <see cref="ExpressionEvaluator.EvaluateAsValueRefAsync"/> N
+    /// times.
+    /// </summary>
+    private async ValueTask<ValueRef[]> EvaluatePerRowAsync(
+        Expression expr,
+        Dictionary<string, ValueRef[]> columns,
+        int rowCount,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        IValueStore store = frame.Target;
+        ValueRef[] result = new ValueRef[rowCount];
+        for (int row = 0; row < rowCount; row++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            VariableScope scope = new(frame.Accountant);
+            foreach (KeyValuePair<string, ValueRef[]> kv in columns)
+            {
+                scope.Declare(kv.Key, kv.Value[row]);
+            }
+            ExpressionEvaluator evaluator = new(
+                _functions,
+                meter: null,
+                outerRow: null,
+                sourceSchema: null,
+                letBindingExpressions: null,
+                store: store,
+                sidecarRegistry: frame.SidecarRegistry,
+                variableScope: scope,
+                variableStore: store,
+                typeRegistry: frame.Types,
+                accountant: frame.Accountant);
+            result[row] = await evaluator
+                .EvaluateAsValueRefAsync(expr, frame, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Quickly rejects function calls that carry call-site features the
+    /// columnar evaluator doesn't honour: aggregate ORDER BY, DISTINCT,
+    /// WITHIN GROUP, filter predicates. Such calls fall through to the
+    /// per-row safety net so semantics never silently diverge.
+    /// </summary>
+    private static bool CanVectorizeFunctionCall(FunctionCallExpression fc)
+    {
+        if (fc.Distinct) return false;
+        if (fc.OrderBy is { Count: > 0 }) return false;
+        if (fc.WithinGroupOrderBy is { Count: > 0 }) return false;
+        return true;
     }
 
     private async ValueTask<ValueRef> ExecuteBodyAsync(

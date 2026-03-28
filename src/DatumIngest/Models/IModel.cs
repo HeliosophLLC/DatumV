@@ -254,4 +254,25 @@ public interface IModel
     /// </para>
     /// </remarks>
     int? PreferredBatchSize => null;
+
+    /// <summary>
+    /// Whether this model's body is amenable to columnar cross-row dispatch
+    /// — i.e. running N rows through the body once with each intermediate
+    /// value held as a column, instead of looping <c>InferBatchAsync</c>
+    /// per row. For SQL-defined models the runtime answer comes from a
+    /// straight-line check on the body's statements (DECLARE / SET / RETURN
+    /// only, no IF / WHILE / BLOCK). Built-in <see cref="IModel"/>s that
+    /// already batch internally inside their own <c>InferBatchAsync</c>
+    /// don't need to opt in here — this flag is specifically for the
+    /// SQL-defined-body batching path. Default: <see langword="false"/>.
+    /// </summary>
+    /// <remarks>
+    /// Surfaces on <c>system.models.batchable</c> as a diagnostic for
+    /// users asking "if I call this model on N rows, will the engine
+    /// dispatch them in one GPU call?" The answer also depends on the
+    /// bound ONNX session's input shape (it must have a dynamic leading
+    /// dim), but that check stays at the call site since the session is
+    /// loaded lazily — this flag covers only the body-shape half.
+    /// </remarks>
+    bool IsBatchable => false;
 }

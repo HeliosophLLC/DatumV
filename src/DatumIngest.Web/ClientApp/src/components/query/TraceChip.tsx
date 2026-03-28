@@ -25,6 +25,17 @@ import {
 
 const SPARKLINE_BUCKET_MS = 100; // events-per-bucket for the rate sparkline
 
+// Grid template for the popover's event table.
+//   ts:        ~5.5ch covers "12345.6" (1m+ runs); right-aligned.
+//   source:    fixed 3.5ch — fits "op" / "fn" with room for future tags.
+//   name:      flex column, minmax(0, ...) so truncation works.
+//   parent:    flex column, narrower than name (parents are usually the
+//              owning batch like "ProjectOperator.batch[3]" so a 1fr is
+//              plenty); minmax(0, ...) again for truncation.
+//   duration:  ~7ch covers "999.99ms" with right alignment.
+const TRACE_GRID_TEMPLATE =
+  '5.5rem 3.5rem minmax(0, 2fr) minmax(0, 1fr) 5.5rem';
+
 export interface TraceChipProps {
   tabId: string;
   trace: TraceState;
@@ -34,7 +45,6 @@ export function TraceChip({ tabId, trace }: TraceChipProps) {
   const { t } = useTranslation('query');
 
   const eventCount = trace.events.length;
-  const hasEvents = eventCount > 0;
   const sparkBuckets = useMemo(
     () => bucketEventsPerInterval(trace.events, SPARKLINE_BUCKET_MS),
     [trace.events],
@@ -63,30 +73,43 @@ export function TraceChip({ tabId, trace }: TraceChipProps) {
         <span>{t('traceToggleLabel')}</span>
       </label>
 
-      {/* Chip half — only when events have arrived. */}
-      {hasEvents && (
-        <Popover.Root>
-          <Popover.Trigger
-            className="border-status-bar-foreground/25 text-status-bar-foreground hover:bg-status-bar-foreground/10 flex shrink-0 cursor-pointer items-center gap-1.5 border-l px-3 py-1"
-            aria-label={t('traceChipTooltip')}
-          >
-            <span>{t('traceChipEvents', { count: eventCount })}</span>
-            <MiniSparkline buckets={sparkBuckets} />
-            {trace.dropped > 0 && (
-              <span className="text-amber-700 dark:text-amber-500">
-                {t('traceChipDropped', { count: trace.dropped })}
-              </span>
-            )}
-          </Popover.Trigger>
+      {/* Chip half — always visible so the popover is reachable even
+          before the first run (the user needs to flip Scalars on from
+          inside the popover, which the previous "hide when empty" rule
+          made impossible without first running a throwaway query). */}
+      <Popover.Root>
+        <Popover.Trigger
+          className="border-status-bar-foreground/25 text-status-bar-foreground hover:bg-status-bar-foreground/10 flex shrink-0 cursor-pointer items-center gap-1.5 border-l px-3 py-1"
+          aria-label={t('traceChipTooltip')}
+        >
+          <span>{t('traceChipEvents', { count: eventCount })}</span>
+          {eventCount > 0 && <MiniSparkline buckets={sparkBuckets} />}
+          {trace.dropped > 0 && (
+            <span className="text-amber-700 dark:text-amber-500">
+              {t('traceChipDropped', { count: trace.dropped })}
+            </span>
+          )}
+        </Popover.Trigger>
           <Popover.Portal>
-            <Popover.Positioner side="top" align="end" sideOffset={6}>
-              <Popover.Popup className="bg-popover text-popover-foreground border-border z-50 w-[28rem] rounded-md border p-3 shadow-md">
+            {/* z-index lives on the positioner, not just the popup, so
+                the entire positioned subtree (including the popup) sits
+                above the results table's sticky header (which itself
+                creates a z-20 stacking context inside the scroll
+                container). Base UI's positioner manages its own
+                position/transform but doesn't apply z-index by default,
+                which is why a popup-only z-50 falls behind the header. */}
+            <Popover.Positioner
+              side="top"
+              align="end"
+              sideOffset={6}
+              className="z-[100]"
+            >
+              <Popover.Popup className="bg-popover text-popover-foreground border-border w-[48rem] rounded-md border p-3 shadow-md">
                 <TracePopoverBody tabId={tabId} trace={trace} />
               </Popover.Popup>
             </Popover.Positioner>
-          </Popover.Portal>
-        </Popover.Root>
-      )}
+        </Popover.Portal>
+      </Popover.Root>
     </div>
   );
 }
@@ -191,7 +214,13 @@ function TracePopoverBody({ tabId, trace }: TracePopoverBodyProps) {
         </div>
       )}
 
-      <div className="border-border bg-muted/40 max-h-64 min-h-32 overflow-auto rounded-xs border font-mono text-[11px]">
+      {/* CSS-grid table. Fixed-width gutter columns (ts/src/duration)
+          keep numbers and the source tag aligned; name/parent share
+          the remaining horizontal space with `minmax(0, 1fr)` so they
+          can `truncate` instead of pushing the layout wide. The header
+          row uses `sticky top-0` so it stays visible while the body
+          scrolls — the outer container is the scroll context. */}
+      <div className="border-border bg-muted/40 max-h-80 min-h-32 overflow-auto rounded-xs border font-mono text-[11px]">
         {filtered.length === 0 ? (
           <div className="text-muted-foreground p-2">
             {trace.events.length === 0 && !trace.completed
@@ -199,29 +228,26 @@ function TracePopoverBody({ tabId, trace }: TracePopoverBodyProps) {
               : t('traceEmpty')}
           </div>
         ) : (
-          <ul>
+          <div className="grid" style={{ gridTemplateColumns: TRACE_GRID_TEMPLATE }}>
+            <div className="bg-muted text-muted-foreground border-border sticky top-0 z-10 border-b px-2 py-1 text-right text-[10px] font-medium tracking-wide uppercase">
+              {t('traceColTs')}
+            </div>
+            <div className="bg-muted text-muted-foreground border-border sticky top-0 z-10 border-b px-2 py-1 text-[10px] font-medium tracking-wide uppercase">
+              {t('traceColSource')}
+            </div>
+            <div className="bg-muted text-muted-foreground border-border sticky top-0 z-10 border-b px-2 py-1 text-[10px] font-medium tracking-wide uppercase">
+              {t('traceColName')}
+            </div>
+            <div className="bg-muted text-muted-foreground border-border sticky top-0 z-10 border-b px-2 py-1 text-[10px] font-medium tracking-wide uppercase">
+              {t('traceColParent')}
+            </div>
+            <div className="bg-muted text-muted-foreground border-border sticky top-0 z-10 border-b px-2 py-1 text-right text-[10px] font-medium tracking-wide uppercase">
+              {t('traceColDuration')}
+            </div>
             {filtered.map((e) => (
-              <li
-                key={`${e.cellId}:${e.sequence}`}
-                className="border-border/40 flex items-baseline gap-2 border-b px-2 py-0.5 last:border-b-0"
-                title={formatTraceLine(e)}
-              >
-                <span className="text-muted-foreground tabular-nums">
-                  {e.tsMs.toFixed(1)}
-                </span>
-                <span className="text-muted-foreground">[{e.source}]</span>
-                <span className="truncate">{e.name}</span>
-                {e.parent && (
-                  <span className="text-muted-foreground truncate">
-                    ⇐ {e.parent}
-                  </span>
-                )}
-                <span className="text-muted-foreground tabular-nums ml-auto">
-                  {e.durationMs.toFixed(2)}ms
-                </span>
-              </li>
+              <TraceRow key={`${e.cellId}:${e.sequence}`} entry={e} />
             ))}
-          </ul>
+          </div>
         )}
       </div>
 
@@ -320,4 +346,48 @@ function MiniSparkline({ buckets }: MiniSparklineProps) {
 function formatTraceLine(e: TraceEntry): string {
   const parent = e.parent ? ` ⇐ ${e.parent}` : '';
   return `${e.tsMs.toFixed(2)}ms [${e.source}] ${e.name}${parent}  ${e.durationMs.toFixed(2)}ms`;
+}
+
+// One row in the trace table. Renders five grid cells (matching
+// TRACE_GRID_TEMPLATE) inside the parent grid via React fragments —
+// the outer grid container owns the column layout, so each cell
+// becomes a direct child cell rather than this component owning its
+// own layout. `title` on each cell carries the full formatted line so
+// truncated values stay inspectable on hover.
+function TraceRow({ entry }: { entry: TraceEntry }) {
+  const tooltip = formatTraceLine(entry);
+  return (
+    <>
+      <div
+        className="border-border/40 text-muted-foreground border-b px-2 py-0.5 text-right tabular-nums"
+        title={tooltip}
+      >
+        {entry.tsMs.toFixed(1)}
+      </div>
+      <div
+        className="border-border/40 text-muted-foreground border-b px-2 py-0.5"
+        title={tooltip}
+      >
+        {entry.source}
+      </div>
+      <div
+        className="border-border/40 truncate border-b px-2 py-0.5"
+        title={tooltip}
+      >
+        {entry.name}
+      </div>
+      <div
+        className="border-border/40 text-muted-foreground truncate border-b px-2 py-0.5"
+        title={tooltip}
+      >
+        {entry.parent ?? ''}
+      </div>
+      <div
+        className="border-border/40 text-muted-foreground border-b px-2 py-0.5 text-right tabular-nums"
+        title={tooltip}
+      >
+        {entry.durationMs.toFixed(2)}ms
+      </div>
+    </>
+  );
 }

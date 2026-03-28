@@ -1337,6 +1337,348 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Equal(4.0f, values[0].AsFloat32());
     }
 
+    // ───────────────────── Batched dispatch ─────────────────────
+
+    /// <summary>
+    /// SQL-defined model with a straight-line body (DECLARE/RETURN-only)
+    /// and an ONNX session declaring a dynamic leading dim hits the
+    /// columnar dispatch path: N rows produce ONE <c>Session.Run</c>
+    /// call with a packed <c>[N, ...]</c> shape, not N per-row calls.
+    /// This is the payoff for the IsStraightLineBody flag + InferFunction's
+    /// cross-row packing.
+    /// </summary>
+    [Fact]
+    public async Task BatchedModel_DynamicBatchSession_RunsInferenceOnce_WithPackedShape()
+    {
+        int runCallCount = 0;
+        int[]? observedShape = null;
+
+        StubSession session = new(
+            inputs: [new TensorSpec("input", DataKind.Float32, new int?[] { null, 3 })],
+            outputs: [new TensorSpec("output", DataKind.Float32, new int?[] { null, 3 })],
+            run: bag =>
+            {
+                runCallCount++;
+                IInferenceTensor incoming = bag["input"];
+                observedShape = incoming.Shape.ToArray();
+                ReadOnlySpan<float> data = incoming.AsSpan<float>();
+                float[] passthrough = data.ToArray();
+                StubTensorBag output = new();
+                output.Add<float>("output", DataKind.Float32, observedShape, passthrough.AsSpan());
+                return output;
+            });
+
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        dispatcher.NextSession = session;
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"],
+            [
+                new object?[] { new float[] { 1f, 2f, 3f } },
+                new object?[] { new float[] { 4f, 5f, 6f } },
+                new object?[] { new float[] { 7f, 8f, 9f } },
+                new object?[] { new float[] { 10f, 11f, 12f } },
+            ]));
+
+        catalog.Plan(
+            $"CREATE MODEL passthrough(x Float32[]) RETURNS Float32[] "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN infer(x) END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.passthrough(v) FROM data");
+
+        int rowCount = 0;
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            rowCount += batch.Count;
+        }
+
+        Assert.Equal(4, rowCount);
+        Assert.Equal(1, runCallCount);
+        Assert.Equal(new[] { 4, 3 }, observedShape);
+    }
+
+    /// <summary>
+    /// The 2-arg <c>infer(value, shape)</c> form with a uniform <c>[1, ...]</c>
+    /// shape literal across rows (the SQL-author idiom mirrored by midas-small
+    /// and yolox bodies) also batches: <c>InferFunction.ExecuteBatchAsync</c>
+    /// recognises that every row's explicit shape leads with <c>1</c> and
+    /// is otherwise identical, and recombines them as <c>[N, ...]</c>.
+    /// </summary>
+    [Fact]
+    public async Task BatchedModel_ExplicitBatchOneShape_StillPacksAsBatchN()
+    {
+        int runCallCount = 0;
+        int[]? observedShape = null;
+
+        StubSession session = new(
+            inputs: [new TensorSpec("input", DataKind.Float32, new int?[] { null, 3 })],
+            outputs: [new TensorSpec("output", DataKind.Float32, new int?[] { null, 3 })],
+            run: bag =>
+            {
+                runCallCount++;
+                IInferenceTensor incoming = bag["input"];
+                observedShape = incoming.Shape.ToArray();
+                ReadOnlySpan<float> data = incoming.AsSpan<float>();
+                float[] passthrough = data.ToArray();
+                StubTensorBag output = new();
+                output.Add<float>("output", DataKind.Float32, observedShape, passthrough.AsSpan());
+                return output;
+            });
+
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        dispatcher.NextSession = session;
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"],
+            [
+                new object?[] { new float[] { 1f, 2f, 3f } },
+                new object?[] { new float[] { 4f, 5f, 6f } },
+                new object?[] { new float[] { 7f, 8f, 9f } },
+            ]));
+
+        catalog.Plan(
+            $"CREATE MODEL passthrough2(x Float32[]) RETURNS Float32[] "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN "
+            + $"  RETURN infer(x, [CAST(1 AS Int32), CAST(3 AS Int32)]) "
+            + $"END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.passthrough2(v) FROM data");
+
+        int rowCount = 0;
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            rowCount += batch.Count;
+        }
+
+        Assert.Equal(3, rowCount);
+        Assert.Equal(1, runCallCount);
+        Assert.Equal(new[] { 3, 3 }, observedShape);
+    }
+
+    /// <summary>
+    /// Session shape <c>[-1, 3, -1, -1]</c> — leading batch dim AND trailing
+    /// dims all dynamic, the depth-anything / glpn export shape. The 2-arg
+    /// <c>infer(value, [1, 3, H, W])</c> form supplies the trailing dims via
+    /// the explicit shape literal, so cross-row batching still kicks in
+    /// even though the session spec itself can't tell us H or W. Regression
+    /// guard for the depth-model perf path.
+    /// </summary>
+    [Fact]
+    public async Task BatchedModel_AllDynamicSessionShape_ExplicitShapeSuppliesTrailingDims()
+    {
+        int runCallCount = 0;
+        int[]? observedShape = null;
+
+        StubSession session = new(
+            inputs: [new TensorSpec("input", DataKind.Float32, new int?[] { null, 3, null, null })],
+            outputs: [new TensorSpec("output", DataKind.Float32, new int?[] { null, 1, null, null })],
+            run: bag =>
+            {
+                runCallCount++;
+                IInferenceTensor incoming = bag["input"];
+                observedShape = incoming.Shape.ToArray();
+                // Single-channel output the same H×W per row; emit zeros.
+                int batchN = incoming.Shape[0];
+                int h = incoming.Shape[2];
+                int w = incoming.Shape[3];
+                float[] data = new float[batchN * h * w];
+                StubTensorBag output = new();
+                output.Add<float>("output", DataKind.Float32, [batchN, 1, h, w], data.AsSpan());
+                return output;
+            });
+
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        dispatcher.NextSession = session;
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        // 3 rows, each with a 3*4*4 = 48-element preprocessed tensor — matches
+        // the explicit [1, 3, 4, 4] shape literal product.
+        float[] tensor = new float[48];
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"],
+            [
+                new object?[] { tensor },
+                new object?[] { tensor },
+                new object?[] { tensor },
+            ]));
+
+        catalog.Plan(
+            $"CREATE MODEL flex(x Float32[]) RETURNS Float32[] "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN "
+            + $"  RETURN infer(x, [CAST(1 AS Int32), CAST(3 AS Int32), CAST(4 AS Int32), CAST(4 AS Int32)]) "
+            + $"END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.flex(v) FROM data");
+
+        int rowCount = 0;
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            rowCount += batch.Count;
+        }
+
+        Assert.Equal(3, rowCount);
+        Assert.Equal(1, runCallCount);
+        Assert.Equal(new[] { 3, 3, 4, 4 }, observedShape);
+    }
+
+    /// <summary>
+    /// End-to-end check against a real shipped model body — drives
+    /// <c>models/sql/glpn-nyu.sql</c>'s first CREATE MODEL (the visualization
+    /// variant returning Image) through the columnar batched dispatch with a
+    /// stub session whose input shape mirrors the real ONNX export
+    /// (<c>[-1, 3, -1, -1]</c>, dynamic batch + dynamic H×W). The body's
+    /// <c>infer(tensor, [1, 3, 480, 480])</c> 2-arg form provides the
+    /// trailing dims via the literal, so cross-row batching kicks in even
+    /// against the fully-flexible session. Three input rows → one packed
+    /// <c>Session.Run</c> with shape <c>[3, 3, 480, 480]</c>.
+    /// </summary>
+    [Fact]
+    public async Task ShippedGlpnNyuBody_BatchesAgainstDynamicSessionShape()
+    {
+        // Locate models/sql/glpn-nyu.sql relative to the test binary.
+        DirectoryInfo? dir = new(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "models", "sql")))
+        {
+            dir = dir.Parent;
+        }
+        Assert.NotNull(dir);
+        string sqlPath = Path.Combine(dir!.FullName, "models", "sql", "glpn-nyu.sql");
+        string source = File.ReadAllText(sqlPath);
+
+        // Substitute the relative USING path with our temp file — the
+        // stub dispatcher returns a fake session regardless of the
+        // actual file contents. The shipped SQL declares both the
+        // Image-returning variant (glpn_nyu) and a metric Array<Float32>
+        // variant; we slice off the second statement so the single-statement
+        // Plan API is happy and only the first model is registered.
+        string sqlSource = source.Replace(
+            "'glpn-nyu/onnx/model.onnx'", $"'{_absoluteUsingPath}'");
+        // The single-statement Plan API needs exactly one statement with no
+        // trailing separator. Slice up to and including the first `END`
+        // (closing the glpn_nyu body) and drop everything after — the
+        // statement-separator `;` and the second CREATE MODEL alike.
+        int firstEndSemi = sqlSource.IndexOf("END;", StringComparison.Ordinal);
+        Assert.True(firstEndSemi > 0, "Could not locate end of first CREATE MODEL in glpn-nyu.sql.");
+        sqlSource = sqlSource[..(firstEndSemi + "END".Length)];
+
+        int runCallCount = 0;
+        int[]? observedShape = null;
+
+        StubSession session = new(
+            inputs: [new TensorSpec("pixel_values", DataKind.Float32, new int?[] { null, 3, null, null })],
+            outputs: [new TensorSpec("predicted_depth", DataKind.Float32, new int?[] { null, 1, null, null })],
+            run: bag =>
+            {
+                runCallCount++;
+                IInferenceTensor incoming = bag["pixel_values"];
+                observedShape = incoming.Shape.ToArray();
+                int batchN = incoming.Shape[0];
+                int h = incoming.Shape[2];
+                int w = incoming.Shape[3];
+                float[] depth = new float[batchN * h * w];
+                StubTensorBag output = new();
+                output.Add<float>("predicted_depth", DataKind.Float32, [batchN, 1, h, w], depth.AsSpan());
+                return output;
+            });
+
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        dispatcher.NextSession = session;
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        // Three small bitmaps encoded to PNG bytes. image_to_tensor_chw
+        // stretch-resizes every row to 480×480 internally, so per-row element
+        // counts agree and the explicit [1, 3, 480, 480] shape literal is
+        // uniform across rows. InMemoryTableProvider needs DataKind.Image
+        // explicitly so byte[] cells materialise as Image rather than UInt8[].
+        byte[] png0 = EncodeSolidPng(32, 32, new SkiaSharp.SKColor(200, 150, 100));
+        byte[] png1 = EncodeSolidPng(40, 40, new SkiaSharp.SKColor(50, 100, 200));
+        byte[] png2 = EncodeSolidPng(48, 48, new SkiaSharp.SKColor(150, 200, 50));
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["img"], [DataKind.Image],
+            [
+                new object?[] { png0 },
+                new object?[] { png1 },
+                new object?[] { png2 },
+            ]));
+
+        catalog.Plan(sqlSource);
+
+        IQueryPlan plan = catalog.Plan("SELECT models.glpn_nyu(img) FROM data");
+
+        int rowCount = 0;
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            rowCount += batch.Count;
+        }
+
+        Assert.Equal(3, rowCount);
+        Assert.Equal(1, runCallCount);
+        Assert.Equal(new[] { 3, 3, 480, 480 }, observedShape);
+    }
+
+    private static byte[] EncodeSolidPng(int width, int height, SkiaSharp.SKColor color)
+    {
+        using SkiaSharp.SKBitmap bitmap = new(width, height);
+        using (SkiaSharp.SKCanvas canvas = new(bitmap))
+        {
+            canvas.Clear(color);
+        }
+        using SkiaSharp.SKData encoded = bitmap.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        return encoded.ToArray();
+    }
+
+    /// <summary>
+    /// Single-row dispatch keeps the per-row path even on a batchable body —
+    /// the columnar interpreter is skipped when <c>rowCount &lt;= 1</c>
+    /// because there's no batching win to spend the columnar setup on.
+    /// Assertion is functional (correct output) plus exactly one
+    /// <c>Session.Run</c> call (the per-row path's one dispatch).
+    /// </summary>
+    [Fact]
+    public async Task BatchedModel_SingleRow_UsesPerRowPath()
+    {
+        int runCallCount = 0;
+        StubSession session = new(
+            inputs: [new TensorSpec("input", DataKind.Float32, new int?[] { null, 3 })],
+            outputs: [new TensorSpec("output", DataKind.Float32, new int?[] { null, 3 })],
+            run: bag =>
+            {
+                runCallCount++;
+                IInferenceTensor incoming = bag["input"];
+                ReadOnlySpan<float> data = incoming.AsSpan<float>();
+                float[] passthrough = data.ToArray();
+                StubTensorBag output = new();
+                output.Add<float>("output", DataKind.Float32, incoming.Shape.ToArray(), passthrough.AsSpan());
+                return output;
+            });
+
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        dispatcher.NextSession = session;
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"],
+            [new object?[] { new float[] { 1f, 2f, 3f } }]));
+
+        catalog.Plan(
+            $"CREATE MODEL once(x Float32[]) RETURNS Float32[] "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN infer(x) END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.once(v) FROM data");
+
+        int rowCount = 0;
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            rowCount += batch.Count;
+        }
+
+        Assert.Equal(1, rowCount);
+        Assert.Equal(1, runCallCount);
+    }
+
     // ───────────────────── Stubs ─────────────────────
 
     /// <summary>

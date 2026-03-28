@@ -77,7 +77,6 @@ internal sealed class QueryPlan : IQueryPlan
 
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        IModelStreamingSink? streamingSink,
         BatchContext? batchContext)
     {
         // Plumb the hoist store as context.Store so any operator that needs to
@@ -99,10 +98,6 @@ internal sealed class QueryPlan : IQueryPlan
             // affects subsequently planned queries; queries already
             // running keep the tracer they captured at execution start.
             ModelTracer = _catalog.ModelTracer,
-            // Streaming sink is per-query, not catalog-scoped — only the
-            // call site that wants live chunks (currently CALL in the
-            // shell) attaches one.
-            StreamingSink = streamingSink,
             // Procedural variable substrate: borrowed handles from the
             // enclosing batch context. Null when running outside a
             // procedural batch (every existing query path); references

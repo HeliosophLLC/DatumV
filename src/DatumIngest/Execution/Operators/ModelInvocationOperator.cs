@@ -1,6 +1,3 @@
-using System.Runtime.CompilerServices;
-using System.Text;
-
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Models;
@@ -247,17 +244,11 @@ public sealed class ModelInvocationOperator : QueryOperator
                 }
             }
 
-            // A streaming sink (currently CALL) forces per-row dispatch:
-            // each row's IAsyncEnumerable<ValueRef> needs to be drained
-            // independently to forward chunks live, and cross-row batching
-            // would interleave chunks from different rows on the same sink.
-            // Without a sink, sub-batching follows PreferredBatchSize so
-            // cheap models batch upstream-rows efficiently and expensive
-            // models stream batch-completed groups for UX.
-            IModelStreamingSink? streamingSink = context.StreamingSink;
-            int subBatchSize = streamingSink is not null
-                ? 1
-                : (model.PreferredBatchSize ?? rowsThisBatch);
+            // Sub-batching follows the model's preferred batch size — vision
+            // models with large input tensors (depth, segmentation) cap at a
+            // small N to stay within VRAM; cheap models leave it null and
+            // process the whole upstream batch in one dispatch.
+            int subBatchSize = model.PreferredBatchSize ?? rowsThisBatch;
             if (subBatchSize <= 0) subBatchSize = rowsThisBatch;
 
             for (int chunkStart = 0; chunkStart < rowsThisBatch; chunkStart += subBatchSize)
@@ -324,35 +315,18 @@ public sealed class ModelInvocationOperator : QueryOperator
                 IReadOnlyList<ValueRef> modelOutputs;
                 try
                 {
-                    if (streamingSink is null)
-                    {
-                        // Pass context.Types so dynamic-shape models
-                        // (notably SQL-defined bodies via the procedural
-                        // adapter) intern their result struct/array shapes
-                        // into the caller's per-query registry. Without
-                        // this, the TypeIds stamped inside the body
-                        // resolve against a foreign registry and the
-                        // scatter step below loses struct field names.
-                        modelOutputs = await model
-                            .InferBatchAsync(inputs, overrideValues, context.Types, cancellationToken)
-                            .ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        // Streaming path: chunkSize is forced to 1 above, so
-                        // we drain a single row's stream, forward chunks to
-                        // the sink, and synthesise the final per-row output.
-                        modelOutputs = await DispatchStreamingAsync(
-                            model, inputs, overrideValues, streamingSink, cancellationToken)
-                            .ConfigureAwait(false);
-                    }
+                    // Pass context.Types so dynamic-shape models (notably
+                    // SQL-defined bodies via the procedural adapter) intern
+                    // their result struct/array shapes into the caller's
+                    // per-query registry. Without this, the TypeIds stamped
+                    // inside the body resolve against a foreign registry
+                    // and the scatter step below loses struct field names.
+                    modelOutputs = await model
+                        .InferBatchAsync(inputs, overrideValues, context.Types, cancellationToken)
+                        .ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    if (streamingSink is not null)
-                    {
-                        await streamingSink.OnFailedAsync(_modelName, ex).ConfigureAwait(false);
-                    }
                     tracer?.OnDispatchFailed(
                         _modelName,
                         chunkSize,
@@ -361,10 +335,6 @@ public sealed class ModelInvocationOperator : QueryOperator
                     throw;
                 }
 
-                if (streamingSink is not null)
-                {
-                    await streamingSink.OnCompletedAsync(_modelName).ConfigureAwait(false);
-                }
                 tracer?.OnDispatchCompleted(
                     _modelName,
                     chunkSize,
@@ -453,77 +423,6 @@ public sealed class ModelInvocationOperator : QueryOperator
                 yield break;
             }
         }
-    }
-
-    /// <summary>
-    /// Streaming-path replacement for <c>IModel.InferBatchAsync</c>.
-    /// Drains the model's per-row <see cref="IAsyncEnumerable{ValueRef}"/>,
-    /// forwards each yielded chunk to <paramref name="sink"/> as it arrives,
-    /// and assembles a single output <see cref="ValueRef"/> for the row so
-    /// the operator's scatter step can materialise it into the output batch.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Always called with a single-row dispatch — the operator forces
-    /// <c>chunkSize == 1</c> when a streaming sink is attached so each
-    /// row's IAsyncEnumerable is drained independently. Multi-row inputs
-    /// here would mean cross-row interleaving on the sink, which has no
-    /// well-defined output ordering.
-    /// </para>
-    /// <para>
-    /// <strong>Output assembly.</strong> Zero chunks → null. One chunk →
-    /// the chunk passes through (covers non-streaming models that inherit
-    /// the default <c>InferStreamingAsync</c> single-yield). Two or more
-    /// chunks → string concatenation (LLM path; the only producer of
-    /// multi-chunk streams today).
-    /// </para>
-    /// </remarks>
-    private async Task<IReadOnlyList<ValueRef>> DispatchStreamingAsync(
-        IModel model,
-        ValueRef[][] inputs,
-        ValueRef[][] overrides,
-        IModelStreamingSink sink,
-        CancellationToken cancellationToken)
-    {
-        if (inputs.Length != 1)
-        {
-            throw new InvalidOperationException(
-                $"Streaming dispatch expected 1 row but received {inputs.Length}; " +
-                "ModelInvocationOperator should have clamped subBatchSize to 1 when a streaming sink is attached.");
-        }
-
-        ValueRef[] rowInputs = inputs[0];
-        ValueRef[] rowOverrides = overrides.Length > 0 ? overrides[0] : [];
-
-        List<ValueRef> chunks = [];
-        await foreach (ValueRef chunk in model
-            .InferStreamingAsync(rowInputs, rowOverrides, cancellationToken)
-            .ConfigureAwait(false))
-        {
-            await sink.OnChunkAsync(_modelName, chunk).ConfigureAwait(false);
-            chunks.Add(chunk);
-        }
-
-        ValueRef rowOutput;
-        if (chunks.Count == 0)
-        {
-            rowOutput = default;
-        }
-        else if (chunks.Count == 1)
-        {
-            rowOutput = chunks[0];
-        }
-        else
-        {
-            StringBuilder sb = new();
-            for (int i = 0; i < chunks.Count; i++)
-            {
-                sb.Append(chunks[i].AsString());
-            }
-            rowOutput = ValueRef.FromString(sb.ToString());
-        }
-
-        return [rowOutput];
     }
 
     /// <summary>

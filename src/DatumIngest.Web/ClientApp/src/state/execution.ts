@@ -91,6 +91,12 @@ export interface MemorySample {
   elapsedMs: number;
   rowBytes: number;
   arenaBytes: number;
+  // Device VRAM usage at this sample, system-wide (every process on
+  // GPU 0). `null` on hosts without NVIDIA NVML — non-NVIDIA GPU,
+  // driver missing, or running on Linux/macOS where the probe doesn't
+  // yet support the platform-specific library name.
+  vramUsedBytes: number | null;
+  vramTotalBytes: number | null;
 }
 
 // Per-batch memory profile (one accountant feeds all cells in a batch, so
@@ -360,6 +366,8 @@ type StreamEvent =
       arenaBytes: number;
       peakRowBytes: number;
       budgetBytes: number | null;
+      vramUsedBytes?: number | null;
+      vramTotalBytes?: number | null;
     }
   | {
       type: 'trace_sample';
@@ -709,6 +717,11 @@ function applyEvent(tabId: string, event: StreamEvent): void {
         elapsedMs: event.elapsedMs,
         rowBytes: event.rowBytes,
         arenaBytes: event.arenaBytes,
+        // JsonIgnoreCondition.WhenWritingNull omits VRAM fields when the
+        // probe is unavailable. Normalise undefined → null so downstream
+        // renderers can check with a single `!== null`.
+        vramUsedBytes: event.vramUsedBytes ?? null,
+        vramTotalBytes: event.vramTotalBytes ?? null,
       };
       // Server's JsonIgnoreCondition.WhenWritingNull omits the budget
       // field entirely when the budget is null. JSON.parse hands us

@@ -1,4 +1,7 @@
+using System.Diagnostics;
+
 using DatumIngest.Catalog.Registries;
+using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
@@ -58,6 +61,29 @@ public sealed class ProceduralModelAdapter : IModel
     private readonly DataKind _outputKind;
     private readonly IReadOnlyList<DataKind> _inputKinds;
     private readonly IReadOnlyList<DataKind> _optionalKinds;
+    private readonly bool _isBatchable;
+
+    /// <summary>
+    /// True when <paramref name="body"/> is "straight-line" — every statement
+    /// is a <see cref="DeclareStatement"/>, <see cref="SetStatement"/>, or
+    /// <see cref="ReturnStatement"/>, and the sequence ends with a RETURN.
+    /// Anything that introduces a control-flow split (IF/WHILE/BLOCK/BREAK/
+    /// CONTINUE) breaks the property: columnar evaluation can't pick a single
+    /// branch to run for an N-row column when different rows would take
+    /// different branches. The check is structural and cheap (one walk over
+    /// the top-level statement list); nested expressions can call anything,
+    /// because the body interpreter delegates per-expression evaluation to
+    /// the scalar pipeline.
+    /// </summary>
+    public static bool IsStraightLineBody(IReadOnlyList<Statement> body)
+    {
+        if (body is null || body.Count == 0) return false;
+        for (int i = 0; i < body.Count - 1; i++)
+        {
+            if (body[i] is not (DeclareStatement or SetStatement)) return false;
+        }
+        return body[^1] is ReturnStatement;
+    }
 
     /// <summary>
     /// Builds an adapter for <paramref name="descriptor"/>. The function
@@ -97,6 +123,7 @@ public sealed class ProceduralModelAdapter : IModel
         }
         _inputKinds = required;
         _optionalKinds = optional;
+        _isBatchable = IsStraightLineBody(descriptor.StatementBody);
     }
 
     /// <inheritdoc />
@@ -104,6 +131,36 @@ public sealed class ProceduralModelAdapter : IModel
 
     /// <inheritdoc />
     public bool IsDeterministic => false;
+
+    /// <summary>
+    /// Default mini-batch size for SQL-defined models. Vision models with
+    /// 518×518 or larger input tensors (depth-anything, glpn, dpt-large)
+    /// hit several MB per row in input alone, and 5–10× more in
+    /// intermediate activations — packing 1024 of them into one
+    /// <c>Session.Run</c> blows past most consumer GPUs' VRAM and spills
+    /// into shared memory, which is dramatically slower than the per-row
+    /// path. A conservative <c>4</c> keeps tensor packing within the
+    /// dedicated-VRAM budget for the depth-model class while still
+    /// recovering the dispatch-overhead win of batched ONNX.
+    /// </summary>
+    /// <remarks>
+    /// Per-model overrides are not yet expressible in <c>CREATE MODEL</c>
+    /// syntax. When a follow-up wires a <c>WITH (batch_size = N)</c>
+    /// clause (or similar), thread the descriptor's value through here;
+    /// fall back to this default when the user hasn't specified one. The
+    /// right per-model value depends on input-tensor product × dtype size
+    /// + activation multiplier × physical VRAM — a heuristic computable
+    /// once at session-load time.
+    /// </remarks>
+    public int? PreferredBatchSize => 4;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// True iff the descriptor's body passes <see cref="IsStraightLineBody"/>.
+    /// Computed once at construction; the body shape is immutable across the
+    /// adapter's lifetime.
+    /// </remarks>
+    public bool IsBatchable => _isBatchable;
 
     /// <inheritdoc />
     public IReadOnlyList<DataKind> InputKinds => _inputKinds;
@@ -170,6 +227,32 @@ public sealed class ProceduralModelAdapter : IModel
         using MemoryAccountant accountant = new();
         try
         {
+            EvaluationFrame frame = new(
+                Row.Empty,
+                arena,
+                arena,
+                accountant,
+                outerRow: null,
+                sidecarRegistry: null,
+                types: typeRegistry);
+
+            // Batched path: straight-line body + multi-row batch hits the
+            // columnar interpreter so any in-body call that overrides
+            // IScalarFunction.ExecuteBatchAsync (notably infer()) gets
+            // its packed cross-row dispatch.
+            if (_isBatchable && rowCount > 1)
+            {
+                using Activity? batchedSpan = DatumActivity.Scalars.StartActivity(
+                    $"model.{_descriptor.Name}.batched(rows={rowCount})");
+                ValueRef[] batched = await _function
+                    .ExecuteModelBatchAsync(inputs, overrides, frame, cancellationToken)
+                    .ConfigureAwait(false);
+                return batched;
+            }
+
+            DatumActivity.Scalars.Trace(
+                $"model.{_descriptor.Name}.per-row(rows={rowCount}, batchable={_isBatchable})");
+
             ValueRef[] results = new ValueRef[rowCount];
             for (int row = 0; row < rowCount; row++)
             {
@@ -184,15 +267,6 @@ public sealed class ProceduralModelAdapter : IModel
                 ValueRef[] args = new ValueRef[suppliedCount];
                 for (int i = 0; i < rowInputs.Count; i++) args[i] = rowInputs[i];
                 for (int i = 0; i < rowOverrides.Count; i++) args[rowInputs.Count + i] = rowOverrides[i];
-
-                EvaluationFrame frame = new(
-                    Row.Empty,
-                    arena,
-                    arena,
-                    accountant,
-                    outerRow: null,
-                    sidecarRegistry: null,
-                    types: typeRegistry);
 
                 results[row] = await _function
                     .ExecuteAsync(args.AsMemory(0, suppliedCount), frame, cancellationToken)

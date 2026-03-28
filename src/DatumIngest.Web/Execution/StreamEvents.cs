@@ -14,7 +14,6 @@ internal sealed record ColumnDescriptor(string Name, string Kind, bool IsArray);
 
 internal sealed record SessionEvent(string Type, string Id);
 internal sealed record CellStartedEvent(string Type, string Cell, string Kind, string? Sql);
-internal sealed record ChunkWireEvent(string Type, string Cell, string Model, string Text);
 internal sealed record SchemaEvent(string Type, string Cell, IReadOnlyList<ColumnDescriptor> Columns);
 internal sealed record RowEvent(string Type, string Cell, IReadOnlyList<JsonCell> Cells);
 internal sealed record TruncatedEvent(string Type, string Cell, int RowCount);
@@ -33,7 +32,9 @@ internal sealed record MemorySampleEvent(
     long RowBytes,
     long ArenaBytes,
     long PeakRowBytes,
-    long? BudgetBytes);
+    long? BudgetBytes,
+    long? VramUsedBytes,
+    long? VramTotalBytes);
 
 // One incremental batch of trace entries for the running cell. Emitted
 // at 1Hz by the sidecar timer plus once on cell completion (so the tail

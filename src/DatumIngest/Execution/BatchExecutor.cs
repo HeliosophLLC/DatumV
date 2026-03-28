@@ -4,6 +4,7 @@ using System.Runtime.ExceptionServices;
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Plans;
 using DatumIngest.Catalog.Registries;
+using DatumIngest.Diagnostics;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -52,15 +53,6 @@ public sealed record CellCompletedBatchEvent(string CellId, double ElapsedMs) : 
 public sealed record CellFailedBatchEvent(string CellId, Exception Error) : BatchEvent;
 
 /// <summary>
-/// One chunk of streaming model output produced inside a query/exec
-/// cell. Fired live as the underlying <see cref="IModelStreamingSink.OnChunkAsync"/>
-/// hook fires, before the row that ultimately carries the collected
-/// value lands. For non-LLM models these never fire — only LLMs (and
-/// future streaming-capable backends) emit multi-chunk output.
-/// </summary>
-public sealed record CellChunkBatchEvent(string CellId, string ModelName, string Text) : BatchEvent;
-
-/// <summary>
 /// Diagnostic message emitted by a <c>PRINT</c> statement. Distinct from
 /// <see cref="CellRowBatchEvent"/> so consumers can route procedural
 /// tracing to a separate channel (a debug pane, stderr, a log) without
@@ -87,13 +79,24 @@ public sealed record CellPrintBatchEvent(string CellId, string? Text) : BatchEve
 /// spill budget.</param>
 /// <param name="PeakRowBytes">Highest <see cref="RowBytes"/> seen so far.</param>
 /// <param name="BudgetBytes">Spill budget if configured, otherwise <c>null</c>.</param>
+/// <param name="VramUsedBytes">
+/// Device VRAM currently allocated system-wide (across every process on
+/// GPU 0). <c>null</c> when NVML isn't available — non-NVIDIA hosts,
+/// driver missing, or first-init failed. See <see cref="VramProbe"/>.
+/// </param>
+/// <param name="VramTotalBytes">
+/// Device VRAM capacity for GPU 0. <c>null</c> alongside
+/// <see cref="VramUsedBytes"/> when the probe isn't available.
+/// </param>
 public sealed record CellMemorySampleBatchEvent(
     string CellId,
     double ElapsedMs,
     long RowBytes,
     long ArenaBytes,
     long PeakRowBytes,
-    long? BudgetBytes) : BatchEvent;
+    long? BudgetBytes,
+    long? VramUsedBytes,
+    long? VramTotalBytes) : BatchEvent;
 
 /// <summary>
 /// Executes a parsed procedural batch — a list of <see cref="Statement"/>s
@@ -209,13 +212,22 @@ public sealed class BatchExecutor
         Func<BatchEvent, ValueTask> onEvent)
     {
         MemoryAccountant accountant = batchContext.Accountant;
+        long? vramUsed = null;
+        long? vramTotal = null;
+        if (VramProbe.TryGetUsage(out long usedBytes, out long totalBytes))
+        {
+            vramUsed = usedBytes;
+            vramTotal = totalBytes;
+        }
         return onEvent(new CellMemorySampleBatchEvent(
             cellId,
             stopwatch.Elapsed.TotalMilliseconds,
             accountant.CurrentResidentBytes,
             pool.TotalLiveArenaBytes(),
             accountant.PeakResidentBytes,
-            accountant.MemoryBudgetBytes));
+            accountant.MemoryBudgetBytes,
+            vramUsed,
+            vramTotal));
     }
 
     /// <summary>
@@ -388,13 +400,22 @@ public sealed class BatchExecutor
                             // approach reported zero for the entire
                             // accumulation phase of a blocking operator.
                             long arenaBytes = _catalog.Pool.TotalLiveArenaBytes();
+                            long? vramUsed = null;
+                            long? vramTotal = null;
+                            if (VramProbe.TryGetUsage(out long usedBytes, out long totalBytes))
+                            {
+                                vramUsed = usedBytes;
+                                vramTotal = totalBytes;
+                            }
                             await onEvent(new CellMemorySampleBatchEvent(
                                 cellId,
                                 sw.Elapsed.TotalMilliseconds,
                                 accountant.CurrentResidentBytes,
                                 arenaBytes,
                                 accountant.PeakResidentBytes,
-                                accountant.MemoryBudgetBytes)).ConfigureAwait(false);
+                                accountant.MemoryBudgetBytes,
+                                vramUsed,
+                                vramTotal)).ConfigureAwait(false);
                         }
                     }
                     finally
@@ -666,9 +687,8 @@ public sealed class BatchExecutor
                         IQueryPlan plan = await _catalog.PlanAsync(stmt, sourceText, batchContext).ConfigureAwait(false);
                         if (plan is not EmptyQueryPlan)
                         {
-                            BatchEventStreamingSink sink = new(cellId, onEvent);
                             await foreach (RowBatch batch in plan
-                                .ExecuteAsync(ct, sink, batchContext)
+                                .ExecuteAsync(ct, batchContext)
                                 .ConfigureAwait(false))
                             {
                                 await onEvent(new CellRowBatchEvent(cellId, batch)).ConfigureAwait(false);
@@ -1093,7 +1113,7 @@ public sealed class BatchExecutor
         IQueryPlan plan = await _catalog.PlanAsync(statement, sourceText: null, batchContext).ConfigureAwait(false);
 
         await foreach (RowBatch batch in plan
-            .ExecuteAsync(ct, streamingSink: null, batchContext)
+            .ExecuteAsync(ct, batchContext)
             .ConfigureAwait(false))
         {
             for (int rowIdx = 0; rowIdx < batch.Count; rowIdx++)
@@ -1318,7 +1338,7 @@ public sealed class BatchExecutor
         bool broke = false;
 
         await foreach (RowBatch batch in plan
-            .ExecuteAsync(ct, streamingSink: null, batchContext)
+            .ExecuteAsync(ct, batchContext)
             .ConfigureAwait(false))
         {
             if (broke) break;
@@ -1596,7 +1616,7 @@ public sealed class BatchExecutor
         bool haveValue = false;
         bool tooManyRows = false;
         await foreach (RowBatch batch in innerPlan
-            .ExecuteAsync(ct, streamingSink: null, batchContext)
+            .ExecuteAsync(ct, batchContext)
             .ConfigureAwait(false))
         {
             for (int i = 0; i < batch.Count; i++)
@@ -1685,7 +1705,7 @@ public sealed class BatchExecutor
         DataValue stable = default;
         bool captured = false;
         await foreach (RowBatch batch in plan
-            .ExecuteAsync(ct, streamingSink: null, batchContext)
+            .ExecuteAsync(ct, batchContext)
             .ConfigureAwait(false))
         {
             if (captured) continue; // drain remainder; auto-pool happens on iteration
@@ -1764,49 +1784,6 @@ public sealed class BatchExecutor
             _ => value, // boxed ValueRef — caller can stabilise / inspect manually
         };
     }
-}
-
-/// <summary>
-/// Adapter that turns the synchronous <see cref="IModelStreamingSink"/>
-/// hook into <see cref="CellChunkBatchEvent"/> emissions on the
-/// <see cref="BatchExecutor"/>'s event channel. Constructed per cell
-/// (cellId is captured); attached to <see cref="IQueryPlan.ExecuteAsync(System.Threading.CancellationToken, IModelStreamingSink?)"/>
-/// so model-emitting cells produce live chunk events alongside their
-/// row events.
-/// </summary>
-/// <remarks>
-/// <strong>Sync-over-async contract.</strong> The sink interface is
-/// synchronous (called from inside the operator's await chain), so the
-/// adapter blocks on the consumer's <c>ValueTask</c> if it doesn't
-/// complete synchronously.
-/// </remarks>
-internal sealed class BatchEventStreamingSink : IModelStreamingSink
-{
-    private readonly string _cellId;
-    private readonly Func<BatchEvent, ValueTask> _onEvent;
-
-    public BatchEventStreamingSink(string cellId, Func<BatchEvent, ValueTask> onEvent)
-    {
-        _cellId = cellId;
-        _onEvent = onEvent;
-    }
-
-    public ValueTask OnChunkAsync(string modelName, ValueRef chunk)
-    {
-        if (chunk.IsNull || chunk.Kind != DataKind.String) return ValueTask.CompletedTask;
-        string text = chunk.AsString();
-        if (text.Length == 0) return ValueTask.CompletedTask;
-
-        return _onEvent(new CellChunkBatchEvent(_cellId, modelName, text));
-    }
-
-    public ValueTask OnCompletedAsync(string modelName) => ValueTask.CompletedTask;
-    // Per-cell completion is signalled by CellCompletedBatchEvent emitted
-    // from the executor; nothing to do here.
-
-    public ValueTask OnFailedAsync(string modelName, Exception exception) => ValueTask.CompletedTask;
-    // Per-cell failure is signalled by CellFailedBatchEvent emitted from
-    // the executor's catch handler; nothing to do here.
 }
 
 /// <summary>

@@ -11,63 +11,67 @@ using DatumIngest.Models;
 using DatumIngest.Pooling;
 
 /// <summary>
-/// End-to-end tests for the streaming path through
-/// <see cref="IQueryPlan.ExecuteAsync(CancellationToken, IModelStreamingSink?)"/>.
-/// Synthetic <see cref="EchoStreamingModel"/> yields each input character as
-/// its own chunk so we can assert chunks arrive in order without depending on
-/// real-model nondeterminism.
+/// Tests for the model streaming surface — <see cref="IModel.InferStreamingAsync"/>
+/// invoked directly, mirroring how external streaming consumers (e.g.
+/// <c>LlamaLlmDriver</c> in the web layer) drive the path. SQL execution
+/// always runs through the batched path; streaming consumers bypass SQL
+/// and talk to the model interface directly.
 /// </summary>
 public sealed class ModelStreamingTests : ServiceTestBase
 {
     /// <summary>
-    /// Streaming sink attached → operator drives <c>InferStreamingAsync</c>,
-    /// chunks arrive at the sink in order, and the synthetic SELECT row's
-    /// output column carries the concatenation.
+    /// Direct <c>InferStreamingAsync</c> call yields chunks in arrival order.
+    /// This is the path real consumers take — no SQL, no operator chain,
+    /// just iterating the async-enumerable on the model.
     /// </summary>
     [Fact]
-    public async Task ExecuteAsync_WithSink_ChunksArriveInOrderAndRowIsBuilt()
+    public async Task InferStreamingAsync_YieldsChunksInOrder()
     {
         EchoStreamingModel model = new();
-        ModelCatalog models = BuildModelCatalog(model);
+        ValueRef[] rowInputs = [ValueRef.FromString("abc")];
 
-        TableCatalog catalog = CreateCatalog(
-            tableName: "t",
-            columns: ["name"],
-            new object?[] { "abc" });
-        catalog.Models = models;
-
-        IQueryPlan plan = catalog.Plan("SELECT models.echo_stream(name) FROM t");
-
-        RecordingSink sink = new();
-        List<string> rowOutputs = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None, sink))
+        List<string> chunks = [];
+        await foreach (ValueRef chunk in model.InferStreamingAsync(rowInputs, [], CancellationToken.None))
         {
-            Arena arena = batch.Arena;
-            for (int i = 0; i < batch.Count; i++)
-            {
-                Row row = batch[i];
-                rowOutputs.Add(row[0].AsString(arena));
-            }
+            chunks.Add(chunk.AsString());
         }
 
-        // Three character chunks, in order.
-        Assert.Equal(["a", "b", "c"], sink.Chunks);
-        Assert.Equal(1, sink.CompletedCount);
-        Assert.Null(sink.FailureException);
-
-        // Synthetic SELECT row carries the concatenated value.
-        Assert.Single(rowOutputs);
-        Assert.Equal("abc", rowOutputs[0]);
+        Assert.Equal(["a", "b", "c"], chunks);
     }
 
     /// <summary>
-    /// No sink → operator stays on <c>InferBatchAsync</c>. The result row
-    /// still carries the concatenated value because <c>InferBatchAsync</c>
-    /// in <see cref="EchoStreamingModel"/> collects over its own streaming
-    /// method (mirroring how <c>LlamaModel</c> works after Stage 1).
+    /// Cancellation mid-stream stops the async-enumerable promptly. The
+    /// streaming surface honours the token between yields — important for
+    /// interactive consumers cancelling a long-running LLM generation.
     /// </summary>
     [Fact]
-    public async Task ExecuteAsync_WithoutSink_StillProducesCollectedRow()
+    public async Task InferStreamingAsync_HonoursCancellationBetweenChunks()
+    {
+        EchoStreamingModel model = new();
+        ValueRef[] rowInputs = [ValueRef.FromString("hello")];
+
+        using CancellationTokenSource cts = new();
+        List<string> chunks = [];
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (ValueRef chunk in model.InferStreamingAsync(rowInputs, [], cts.Token))
+            {
+                chunks.Add(chunk.AsString());
+                if (chunks.Count == 2) cts.Cancel();
+            }
+        });
+
+        Assert.Equal(2, chunks.Count);
+    }
+
+    /// <summary>
+    /// SQL execution routes through the batched <c>InferBatchAsync</c> path
+    /// (streaming was removed from SQL execution); the model's
+    /// <c>InferBatchAsync</c> implementation collects over its own streaming
+    /// method so the row carries the concatenated value end-to-end.
+    /// </summary>
+    [Fact]
+    public async Task SqlSelect_RoutesThroughBatchedPath_ProducesCollectedRow()
     {
         EchoStreamingModel model = new();
         ModelCatalog models = BuildModelCatalog(model);
@@ -94,80 +98,6 @@ public sealed class ModelStreamingTests : ServiceTestBase
         Assert.Equal("hi", rowOutputs[0]);
     }
 
-    /// <summary>
-    /// Sink attached but the model has no streaming override (default
-    /// interface impl yields one chunk via <c>InferBatchAsync</c>): sink
-    /// fires <see cref="IModelStreamingSink.OnChunk"/> exactly once, the
-    /// row passes through unchanged. Confirms non-streaming models work
-    /// transparently when CALL is pointed at them.
-    /// </summary>
-    [Fact]
-    public async Task ExecuteAsync_WithSink_NonStreamingModel_FiresExactlyOneChunk()
-    {
-        // EchoModel is the non-streaming singleton — inherits the default
-        // IModel.InferStreamingAsync (single yield via InferBatchAsync).
-        ModelCatalog models = new(modelDirectory: Path.GetTempPath());
-        models.Register(new ModelCatalogEntry(
-            Name: "echo",
-            Backend: "echo",
-            RelativePath: null,
-            InputKinds: [DataKind.String],
-            OutputKind: DataKind.String,
-            IsDeterministic: true,
-            Loader: _ => EchoModel.Instance));
-
-        TableCatalog catalog = CreateCatalog(
-            tableName: "t",
-            columns: ["name"],
-            new object?[] { "alice" });
-        catalog.Models = models;
-
-        IQueryPlan plan = catalog.Plan("SELECT models.echo(name) FROM t");
-
-        RecordingSink sink = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None, sink))
-        {
-            // Drain; row content is asserted via the sink's chunk record.
-        }
-
-        Assert.Single(sink.Chunks);
-        Assert.Equal("alice", sink.Chunks[0]);
-        Assert.Equal(1, sink.CompletedCount);
-    }
-
-    /// <summary>
-    /// Sink attached but no model in the call (e.g. <c>CALL upper('hi')</c>
-    /// lowered to <c>SELECT upper('hi')</c>): no model invocation, no
-    /// chunks. The plan still produces its synthetic row, which the shell's
-    /// CALL fallback path renders via <c>TableFormatter</c>.
-    /// </summary>
-    [Fact]
-    public async Task ExecuteAsync_WithSink_NoModelInPlan_FiresNoChunks()
-    {
-        TableCatalog catalog = CreateCatalog(
-            tableName: "t",
-            columns: ["name"],
-            new object?[] { "alice" });
-
-        IQueryPlan plan = catalog.Plan("SELECT upper(name) FROM t");
-
-        RecordingSink sink = new();
-        List<string> rowOutputs = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None, sink))
-        {
-            Arena arena = batch.Arena;
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rowOutputs.Add(batch[i][0].AsString(arena));
-            }
-        }
-
-        Assert.Empty(sink.Chunks);
-        Assert.Equal(0, sink.CompletedCount);
-        Assert.Single(rowOutputs);
-        Assert.Equal("ALICE", rowOutputs[0]);
-    }
-
     private static ModelCatalog BuildModelCatalog(EchoStreamingModel model)
     {
         ModelCatalog catalog = new(modelDirectory: Path.GetTempPath());
@@ -186,8 +116,7 @@ public sealed class ModelStreamingTests : ServiceTestBase
     /// Test double model: emits each character of its single string input
     /// as its own chunk, exercising the multi-chunk streaming path without
     /// requiring a real LLM. <see cref="InferBatchAsync"/> collects over
-    /// the streaming path so non-sink callers (plain SELECT) still get
-    /// the concatenated value.
+    /// the streaming path so SQL execution still gets the concatenated value.
     /// </summary>
     private sealed class EchoStreamingModel : IModel
     {
@@ -230,35 +159,6 @@ public sealed class ModelStreamingTests : ServiceTestBase
                 outputs[row] = ValueRef.FromString(sb.ToString());
             }
             return outputs;
-        }
-    }
-
-    /// <summary>
-    /// Test double sink that records every chunk and lifecycle event so
-    /// assertions can check both ordering and dispatch counts.
-    /// </summary>
-    private sealed class RecordingSink : IModelStreamingSink
-    {
-        public List<string> Chunks { get; } = [];
-        public int CompletedCount { get; private set; }
-        public Exception? FailureException { get; private set; }
-
-        public ValueTask OnChunkAsync(string modelName, ValueRef chunk)
-        {
-            Chunks.Add(chunk.AsString());
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask OnCompletedAsync(string modelName)
-        {
-            CompletedCount++;
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask OnFailedAsync(string modelName, Exception exception)
-        {
-            FailureException = exception;
-            return ValueTask.CompletedTask;
         }
     }
 }

@@ -305,12 +305,6 @@ public sealed class QueryStreamService
                     break;
                 }
 
-                case CellChunkBatchEvent chunkEvent:
-                    // Live model chunk (LLM token, etc.). Translate 1:1 to a
-                    // wire `chunk` event scoped to the cell that produced it.
-                    await WriteEventAsync(output, jsonOptions, writeLock, new ChunkWireEvent("chunk", chunkEvent.CellId, chunkEvent.ModelName, chunkEvent.Text), ct).ConfigureAwait(false);
-                    break;
-
                 case CellMemorySampleBatchEvent memEvent:
                     // 1Hz residency sample. Translates to a wire `memory_sample`
                     // event the UI feeds into its sparkline + chip.
@@ -325,7 +319,9 @@ public sealed class QueryStreamService
                             memEvent.RowBytes,
                             memEvent.ArenaBytes,
                             memEvent.PeakRowBytes,
-                            memEvent.BudgetBytes),
+                            memEvent.BudgetBytes,
+                            memEvent.VramUsedBytes,
+                            memEvent.VramTotalBytes),
                         ct).ConfigureAwait(false);
                     break;
 

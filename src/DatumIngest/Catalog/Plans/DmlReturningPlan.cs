@@ -93,10 +93,8 @@ internal sealed class DmlReturningPlan : IQueryPlan
     /// <inheritdoc />
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        IModelStreamingSink? streamingSink,
         BatchContext? batchContext)
     {
-        _ = streamingSink;
         _ = batchContext;
         cancellationToken.ThrowIfCancellationRequested();
 

@@ -308,37 +308,13 @@ internal sealed class InteractiveShell
     }
 
     /// <summary>
-    /// Executes a <c>CALL &lt;expression&gt;</c> statement, forwarding model
-    /// chunks live to the terminal as they arrive and falling back to
-    /// table-formatted row rendering if the CALL target wasn't a streaming
-    /// model (e.g. <c>CALL upper('hi')</c>).
+    /// Executes a <c>CALL &lt;expression&gt;</c> statement. CALL lowers to a
+    /// synthetic single-row <c>SELECT</c> in the planner, and the result is
+    /// rendered via the standard table formatter. For LLM streaming use the
+    /// model's <c>InferStreamingAsync</c> entry point directly (see
+    /// <c>LlamaLlmDriver</c>) — the engine no longer routes streaming
+    /// through SQL execution.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// CALL lowers to a synthetic single-row <c>SELECT</c> in the planner; the
-    /// streaming-aware <see cref="IQueryPlan.ExecuteAsync(CancellationToken, IModelStreamingSink?)"/>
-    /// overload attaches a <see cref="TerminalStreamingSink"/> to the per-query
-    /// context. The model invocation operator branches on the sink's presence:
-    /// when set, it switches to <c>InferStreamingAsync</c> and pushes chunks
-    /// through the sink as the model produces them.
-    /// </para>
-    /// <para>
-    /// <strong>Two outcomes:</strong>
-    /// <list type="bullet">
-    ///   <item><description>
-    ///     A streaming model fired chunks → the sink already wrote them to
-    ///     the terminal and printed a "(streamed)" footer. The synthetic
-    ///     SELECT's row is redundant; we skip rendering it.
-    ///   </description></item>
-    ///   <item><description>
-    ///     No streaming model in the call (or a non-streaming function like
-    ///     <c>upper</c>) → no chunks fired. The query still produced a row;
-    ///     buffer its formatted cells and render via
-    ///     <see cref="TableFormatter.RenderPage"/> after draining.
-    ///   </description></item>
-    /// </list>
-    /// </para>
-    /// </remarks>
     private async Task ExecuteCallAsync(string sql)
     {
         IQueryPlan plan;
@@ -356,26 +332,18 @@ internal sealed class InteractiveShell
         _activeQueryCts = cts;
         Stopwatch? sw = _timerEnabled ? Stopwatch.StartNew() : null;
 
-        TerminalStreamingSink sink = new();
         SidecarRegistry registry = _catalog.SidecarRegistry;
 
-        // Buffer formatted cells so we can fall back to table rendering when
-        // the CALL body wasn't a streaming model. Cell strings are copied
-        // out before each MoveNext, so we don't depend on RowBatch lifetime.
+        // Buffer formatted cells so the table renderer can size columns
+        // against the full row set. Cell strings are copied out before
+        // each MoveNext, so we don't depend on RowBatch lifetime.
         Schema? schema = null;
         List<string[]> bufferedRows = [];
 
         try
         {
-            await foreach (RowBatch batch in plan.ExecuteAsync(cts.Token, sink).ConfigureAwait(false))
+            await foreach (RowBatch batch in plan.ExecuteAsync(cts.Token).ConfigureAwait(false))
             {
-                if (sink.ChunksReceived > 0)
-                {
-                    // Streaming already painted the output; the synthetic
-                    // SELECT row is an artefact. Drain and discard.
-                    continue;
-                }
-
                 schema ??= DeriveSchema(batch);
                 Arena arena = batch.Arena;
                 for (int i = 0; i < batch.Count; i++)
@@ -393,11 +361,11 @@ internal sealed class InteractiveShell
                 }
             }
 
-            if (sink.ChunksReceived == 0 && schema is not null && bufferedRows.Count > 0)
+            if (schema is not null && bufferedRows.Count > 0)
             {
                 TableFormatter.RenderPage(bufferedRows, schema, printHeader: true, Console.Out);
             }
-            else if (sink.ChunksReceived == 0 && bufferedRows.Count == 0)
+            else
             {
                 AnsiConsole.MarkupLine("[grey](no result)[/]");
             }

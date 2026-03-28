@@ -399,6 +399,13 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
                 scrollBeyondLastLine: false,
                 wordWrap: 'on',
                 renderLineHighlight: 'all',
+                // Render hover / completion / signature popups in a
+                // position:fixed layer at the document root so they
+                // escape the chain of `overflow-hidden` ancestors
+                // above the editor (resizable panels, leaf shell,
+                // results-pane container) that would otherwise clip
+                // them.
+                fixedOverflowWidgets: true,
               }}
               onChange={(value) => {
                 if (activeTabId !== null && value !== undefined) {
