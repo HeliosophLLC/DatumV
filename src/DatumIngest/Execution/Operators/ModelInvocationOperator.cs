@@ -1,4 +1,8 @@
+using SkiaSharp;
+
+using DatumIngest.Diagnostics;
 using DatumIngest.Functions;
+using DatumIngest.Functions.Image;
 using DatumIngest.Model;
 using DatumIngest.Models;
 using DatumIngest.Parsing.Ast;
@@ -244,18 +248,25 @@ public sealed class ModelInvocationOperator : QueryOperator
                 }
             }
 
-            // Sub-batching follows the model's preferred batch size — vision
-            // models with large input tensors (depth, segmentation) cap at a
-            // small N to stay within VRAM; cheap models leave it null and
-            // process the whole upstream batch in one dispatch.
-            int subBatchSize = model.PreferredBatchSize ?? rowsThisBatch;
-            if (subBatchSize <= 0) subBatchSize = rowsThisBatch;
+            // Sub-batching is driven by the catalog's IBatchSizePolicy.
+            // Default policy (DoublingBatchSizePolicy) ramps from batch=1
+            // and grows by powers of two until VRAM pressure settles it;
+            // each chunk's size is determined fresh so the ramp can adapt
+            // across the upstream rows. Static policies (tests, hosts
+            // without a probe) return a constant size that works the same
+            // as the prior `model.PreferredBatchSize ?? rowsThisBatch`
+            // shape.
+            IBatchSizePolicy policy = context.Catalog.Models?.BatchSizePolicy
+                ?? StaticBatchSizePolicy.Instance;
 
-            for (int chunkStart = 0; chunkStart < rowsThisBatch; chunkStart += subBatchSize)
+            int chunkStart = 0;
+            while (chunkStart < rowsThisBatch)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                int chunkSize = Math.Min(subBatchSize, rowsThisBatch - chunkStart);
+                int rowsRemaining = rowsThisBatch - chunkStart;
+                int chunkSize = policy.ChooseBatchSize(model, rowsRemaining);
+                if (chunkSize <= 0 || chunkSize > rowsRemaining) chunkSize = rowsRemaining;
 
                 // Step 1: rent an output batch sized to this chunk. Bound to
                 // context.Store so it shares the single per-query arena — same
@@ -312,6 +323,13 @@ public sealed class ModelInvocationOperator : QueryOperator
                 tracer?.OnDispatchStarted(_modelName, chunkSize, inputs, overrideValues);
                 long startTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
 
+                // Pre-dispatch VRAM snapshot for the batch-size policy.
+                // -1 sentinel when the probe is unavailable; the policy
+                // ignores measurements with either endpoint negative and
+                // falls back to its static default.
+                long vramBefore = VramProbe.TryGetUsage(
+                    out long usedBefore, out _) ? usedBefore : -1;
+
                 IReadOnlyList<ValueRef> modelOutputs;
                 try
                 {
@@ -335,6 +353,17 @@ public sealed class ModelInvocationOperator : QueryOperator
                     throw;
                 }
 
+                // Post-dispatch VRAM snapshot + elapsed time — feeds the
+                // policy's ramp decision for the next chunk's size. The
+                // duration is the load-bearing signal for spill detection:
+                // when activations spill into shared GPU memory, NVML still
+                // reports dedicated-VRAM at the cap (no growth visible),
+                // but per-kernel latency explodes via PCIe.
+                long vramAfter = VramProbe.TryGetUsage(
+                    out long usedAfter, out _) ? usedAfter : -1;
+                double dispatchMs = System.Diagnostics.Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+                policy.RecordDispatch(model, chunkSize, vramBefore, vramAfter, dispatchMs);
+
                 tracer?.OnDispatchCompleted(
                     _modelName,
                     chunkSize,
@@ -347,6 +376,20 @@ public sealed class ModelInvocationOperator : QueryOperator
                     throw new InvalidOperationException(
                         $"Model '{_modelName}' returned {modelOutputs.Count} outputs for a {chunkSize}-row input chunk.");
                 }
+
+                // Step 3.5: parallel pre-encode of managed Image outputs.
+                // depth_map_to_image and similar functions return SKBitmap-
+                // backed ValueRefs; the default ToDataValue path for those
+                // PNG-encodes during the sequential scatter loop below,
+                // which serializes ~20ms-per-image of CPU work and was
+                // measured at 635ms / 32-row chunk in profiling. Pre-
+                // encoding here amortises the PNG/JPEG step across CPU
+                // cores; the scatter then writes already-encoded byte[]s
+                // into the arena via a cheap memcpy. Cost when no Image
+                // outputs are present is a single linear scan (the
+                // null-check), no allocations.
+                modelOutputs = await PreEncodeImageOutputsAsync(
+                    modelOutputs, cancellationToken).ConfigureAwait(false);
 
                 // Step 4: scatter — for each source row in the chunk, copy
                 // source columns and append the model output. Source values
@@ -411,6 +454,7 @@ public sealed class ModelInvocationOperator : QueryOperator
                 }
 
                 yieldedRows += chunkSize;
+                chunkStart += chunkSize;
                 yield return outputBatch;
             }
 
@@ -436,6 +480,63 @@ public sealed class ModelInvocationOperator : QueryOperator
     /// usual numeric promotion rules); non-numeric kind mismatches still
     /// throw — those are genuine signature errors, not type-tightening.
     /// </summary>
+    /// <summary>
+    /// If any model output is an <see cref="SKBitmap"/>-backed Image
+    /// ValueRef, encode every such output to PNG bytes in parallel on
+    /// the thread pool and return a new array with the encoded
+    /// (<c>byte[]</c>-backed) ValueRefs in place of the originals. When
+    /// no <see cref="SKBitmap"/> outputs are present, returns the
+    /// original array unchanged — single linear scan, no allocations.
+    /// </summary>
+    /// <remarks>
+    /// PNG/JPEG encoding is the expensive step in
+    /// <see cref="ValueRef.ToDataValue"/> for SKBitmap-backed Images —
+    /// measured at ~20 ms per row, serialized across the scatter loop.
+    /// Parallelising the encode amortises that 20 ms × N work across
+    /// CPU cores; the subsequent sequential scatter just memcpy's
+    /// the already-encoded bytes into the arena.
+    /// </remarks>
+    private static async ValueTask<IReadOnlyList<ValueRef>> PreEncodeImageOutputsAsync(
+        IReadOnlyList<ValueRef> outputs, CancellationToken cancellationToken)
+    {
+        // Fast path: scan for any SKBitmap-backed output. None → return
+        // the original list with zero allocation, zero parallel-task
+        // overhead.
+        bool anyBitmap = false;
+        for (int i = 0; i < outputs.Count; i++)
+        {
+            if (outputs[i].Materialized is SKBitmap)
+            {
+                anyBitmap = true;
+                break;
+            }
+        }
+        if (!anyBitmap) return outputs;
+
+        ValueRef[] result = new ValueRef[outputs.Count];
+        await Parallel.ForAsync(0, outputs.Count,
+            new ParallelOptions
+            {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = Environment.ProcessorCount,
+            },
+            (i, ct) =>
+            {
+                ValueRef original = outputs[i];
+                if (original.Materialized is SKBitmap bmp)
+                {
+                    byte[] encoded = ImageEncoder.Encode(bmp, SKEncodedImageFormat.Png, 100);
+                    result[i] = ValueRef.FromImage(encoded);
+                }
+                else
+                {
+                    result[i] = original;
+                }
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+        return result;
+    }
+
     private static ValueRef CoerceToDeclaredKind(
         ValueRef value, DataKind declaredKind, string modelName, int argIdx)
     {

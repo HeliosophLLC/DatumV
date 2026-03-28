@@ -76,6 +76,19 @@ public sealed class ModelCatalog : IDisposable
     public long VramBudgetBytes => ResidencyManager.VramBudgetBytes;
 
     /// <summary>
+    /// Engine-wide batch-size policy consulted by
+    /// <see cref="DatumIngest.Execution.Operators.ModelInvocationOperator"/>
+    /// at each dispatch. Defaults to <see cref="BatchOnePolicy"/> — batched
+    /// cross-row dispatch is shelved pending the column-major + eviction
+    /// operator (see <see cref="BatchOnePolicy"/> remarks). Tests and
+    /// micro-benchmarks that want deterministic per-model dispatch counts
+    /// swap in <see cref="StaticBatchSizePolicy"/>; the doubling tuner
+    /// (<see cref="DoublingBatchSizePolicy"/>) remains in the codebase
+    /// ready to be reinstated once multi-model VRAM coordination exists.
+    /// </summary>
+    public IBatchSizePolicy BatchSizePolicy { get; set; } = BatchOnePolicy.Instance;
+
+    /// <summary>
     /// Resolves a user-supplied model path against the host's model directory,
     /// honouring the <c>file://</c> escape for absolute paths. Shared by
     /// <c>CREATE MODEL USING</c> and any introspection surface (e.g.

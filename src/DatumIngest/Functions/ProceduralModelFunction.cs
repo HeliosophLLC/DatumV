@@ -456,6 +456,37 @@ public sealed class ProceduralModelFunction : IScalarFunction
                 for (int i = 0; i < rowCount; i++) result[i] = broadcast;
                 return result;
             }
+            case LiteralExpression literalExpr:
+            {
+                // Parser-produced literal (the common shape — array literals
+                // like `[1, 3, 518, 518]`, scalar constants like `480`,
+                // boolean `true`, etc.). Identical to a hoisted
+                // LiteralValueExpression for our purposes: evaluate the
+                // constant once via the body's evaluator and broadcast it
+                // across the row column. Without this case the per-row
+                // safety net fires for every literal, blowing the columnar
+                // benefit on real model bodies (the GPU waits while CPU
+                // rebuilds a VariableScope + ExpressionEvaluator N times
+                // per literal per statement).
+                ExpressionEvaluator broadcastEvaluator = new(
+                    _functions,
+                    meter: null,
+                    outerRow: null,
+                    sourceSchema: null,
+                    letBindingExpressions: null,
+                    store: frame.Target,
+                    sidecarRegistry: frame.SidecarRegistry,
+                    variableScope: null,
+                    variableStore: frame.Target,
+                    typeRegistry: frame.Types,
+                    accountant: frame.Accountant);
+                ValueRef broadcast = await broadcastEvaluator
+                    .EvaluateAsValueRefAsync(literalExpr, frame, cancellationToken)
+                    .ConfigureAwait(false);
+                ValueRef[] result = new ValueRef[rowCount];
+                for (int i = 0; i < rowCount; i++) result[i] = broadcast;
+                return result;
+            }
             case ColumnReference colRef
                 when colRef.TableName is null
                     && columns.TryGetValue(colRef.ColumnName, out ValueRef[]? col):

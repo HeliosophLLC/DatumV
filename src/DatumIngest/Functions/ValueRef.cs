@@ -333,6 +333,17 @@ public readonly struct ValueRef
         new(DataValue.Null(DataKind.Image), bitmap);
 
     /// <summary>
+    /// Pre-encoded Image bytes (PNG/JPEG/WebP). Used by MIO's parallel
+    /// scatter pre-encode pass: an <see cref="SKBitmap"/>-backed
+    /// <see cref="ValueRef"/> is encoded to bytes on a worker thread, then
+    /// rewrapped via this factory so the sequential
+    /// <see cref="ToDataValue"/> path falls into the cheap byte[]
+    /// arena-copy branch instead of paying the per-row PNG encode there.
+    /// </summary>
+    public static ValueRef FromImage(byte[] encodedBytes) =>
+        new(DataValue.Null(DataKind.Image), encodedBytes);
+
+    /// <summary>
     /// PointCloud value carried as a raw byte blob (40-byte header + interleaved
     /// per-point payload — see <see cref="DatumIngest.Model.Spatial.PointCloudHeader"/>).
     /// Producers build the full blob in managed memory; arena copy happens once at

@@ -434,15 +434,16 @@ FROM (
 
 ## Performance
 
-SQL-defined models currently dispatch **one row at a time** through the
-scalar pipeline. The engine's batched-dispatch path
-(`ModelInvocationOperator`) is wired only for engine-baked built-in
-models — see [`design-docs/onnx-inference.md`](../design-docs/onnx-inference.md#layer-4-the-hoister-option-a--sql-defined-models-bypass-mio)
-for the rationale. For most models the per-row overhead is dominated by
-the inference cost itself, so the practical impact is small. For very
-cheap models (fast classifiers), batched dispatch can move the needle —
-the platform will grow that path when there's measured evidence to
-justify it.
+SQL-defined models dispatch **one row per `Session.Run`**. Both built-in
+and SQL-defined models route through `ModelInvocationOperator`; SQL
+bodies execute inside a `ProceduralModelAdapter` that interprets the
+DECLARE/RETURN body once per row. For most workloads, per-row dispatch
+cost is dominated by inference itself, so the practical impact of
+single-row dispatch is small. Cross-row batched dispatch (packing N rows
+into one `Session.Run` for sessions with a dynamic leading dim) is
+implemented but not enabled by default — see
+[`design-docs/onnx-inference.md`](../design-docs/onnx-inference.md#batch-sizing)
+for the rationale around multi-model VRAM contention.
 
 ## Persistence
 
@@ -490,11 +491,8 @@ rows: `name`, `backend = "sql"`, `file_name` (the raw `USING` path),
   Float16, Bool, UInt8, and the rest are runtime errors today; each is
   one branch to add.
 - **No persistence.** Re-issue `CREATE MODEL` after process restart.
-- **No CSE / batched dispatch for SQL-defined models** under the per-row
-  scalar path. The lowerer-into-column-pipeline path covers straight-line
-  bodies (single-input `infer`); multi-input bodies (struct-arg
-  `infer`) route through the per-row procedural adapter — see
-  [Performance](#performance).
+- **Dispatch is one row per `Session.Run`** under the current engine
+  default. See [Performance](#performance).
 - **Schema is fixed.** Models always live under `models.X` — no
   user-chosen schema.
 - **Body restrictions.** No `BREAK`/`CONTINUE`; no nested `SELECT`.

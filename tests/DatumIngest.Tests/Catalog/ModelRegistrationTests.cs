@@ -299,7 +299,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // should leave the call site alone and the scalar pipeline should
         // dispatch it through ProceduralModelFunction.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         // Add an in-memory source row so the query has something to scan.
         catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
@@ -904,7 +910,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // backstop, but users should hit the friendly error before any
         // rows are scanned.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
         catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 1.0f }]));
 
@@ -920,7 +932,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // Lock that the gate isn't tricked by nesting — a subquery's
         // expression resolver still walks function calls.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
         catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 1.0f }]));
 
@@ -938,7 +956,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // pulled the bound session, marshalled the scalar into a tensor,
         // and unwrapped the output back to a scalar ValueRef.
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         dispatcher.NextSession = StubSession.Float32Doubler();
 
@@ -973,7 +997,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // `RETURN infer(x)` and the test asserts the resulting value's
         // IsMultiDim / Ndim / GetShape / element values.
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         dispatcher.NextSession = StubSession.Float32Matrix2x3();
 
@@ -1021,7 +1051,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // outputs: SQL sees a single Float32 element extracted from a 2-D
         // ONNX result without having to manually flatten / unflatten.
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         dispatcher.NextSession = StubSession.Float32Matrix2x3();
 
@@ -1071,7 +1107,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // array_length(arr, dim) must work per-dim — all against a value built
         // by infer() rather than a static-shape column.
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         dispatcher.NextSession = StubSession.Float32Matrix2x3();
 
@@ -1123,7 +1165,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // dispatch, name-based input resolution, and the no-explicit-shape
         // fast path (each input's [1] spec resolves without help).
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         dispatcher.NextSession = StubSession.MultiInputInt64Sum();
 
@@ -1161,7 +1209,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // resolution. The test passes only if each shape-struct field
         // routes to its corresponding session input by name.
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         dispatcher.NextSession = StubSession.MultiInputMaskedDotProduct();
 
@@ -1198,7 +1252,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // and "boxes" — and the body destructures both. Tests the typical
         // multi-output shape: detector with separate classification + box outputs.
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         dispatcher.NextSession = StubSession.MultiOutputDual();
 
@@ -1238,7 +1298,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // unstable across exports (PyTorch's numeric default names like
         // "1992" / "out_0").
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         dispatcher.NextSession = StubSession.MultiOutputDual();
 
@@ -1276,7 +1342,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // SQL models that DECLARE the result as Float32[] / Float32). The
         // struct emit is opt-in via infer_outputs().
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         dispatcher.NextSession = StubSession.Float32Doubler();
 
@@ -1308,7 +1380,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // returning the FIRST declared output (the U²-Net / all-MiniLM
         // expectation). The struct emit is reserved for infer_outputs().
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         dispatcher.NextSession = StubSession.MultiOutputDual();
 
@@ -1370,7 +1448,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
         dispatcher.NextSession = session;
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"],
@@ -1428,7 +1512,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
         dispatcher.NextSession = session;
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"],
@@ -1491,7 +1581,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
         dispatcher.NextSession = session;
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         // 3 rows, each with a 3*4*4 = 48-element preprocessed tensor — matches
         // the explicit [1, 3, 4, 4] shape literal product.
@@ -1585,7 +1681,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
         dispatcher.NextSession = session;
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         // Three small bitmaps encoded to PNG bytes. image_to_tensor_chw
         // stretch-resizes every row to 480×480 internally, so per-row element
@@ -1657,7 +1759,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
         dispatcher.NextSession = session;
-        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath());
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            // Existing tests assert deterministic dispatch counts; opt out
+            // of the production DoublingBatchSizePolicy (which would settle
+            // at batch=1 against stub sessions that don't move VRAM).
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
 
         catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"],

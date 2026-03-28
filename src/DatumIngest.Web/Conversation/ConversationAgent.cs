@@ -27,35 +27,38 @@ namespace DatumIngest.Web.Conversation;
 internal sealed class ConversationAgent : IConversationAgent
 {
     private const string BuiltInSystemPrompt =
-        "You are an assistant inside DatumIngest, a local data tool. The user is " +
-        "exploring data on their own machine; compute is local and free, so you can " +
-        "be helpful at length without worrying about token costs. Be concise but " +
-        "informative. When the user asks about their data and you need SQL, write " +
-        "it in fenced code blocks; once SQL tool-calling is wired you'll execute " +
-        "it yourself, but for now describe what you'd run. Do not over explain, keep " +
-        "responses short unless the user asks for a long response, or you notice they " +
-        "may be in need of a longer explanation.";
+        "You are an assistant inside DatumIngest, a local data tool, but you can " +
+        "help with anything the user asks — coding, writing, general questions, " +
+        "not just data. " +
+        "Default to short answers: one or two sentences for simple questions, a " +
+        "short paragraph when it genuinely needs it. The user will ask for more if " +
+        "they want it; don't preempt. " +
+        "When writing SQL, put the query in a fenced ```sql block and add at most " +
+        "one sentence of context. Skip column-by-column walkthroughs unless asked.";
 
-    private readonly ILlmDriver _driver;
+    private readonly LlmDriverHolder _holder;
     private readonly IMessageGraph _graph;
+    private readonly string _systemPrompt;
     private readonly object _accumulatorLock = new();
-    private string _accumulator;
+    private string? _accumulator;
     private CancellationTokenSource? _activeCts;
 
-    public ConversationAgent(ILlmDriver driver, IMessageGraph graph, WebHostOptions options)
+    public ConversationAgent(LlmDriverHolder holder, IMessageGraph graph, WebHostOptions options)
     {
-        _driver = driver;
+        _holder = holder;
         _graph = graph;
-        string systemPrompt = options.SystemPrompt ?? BuiltInSystemPrompt;
-        _accumulator = _driver.Template.Open
-            + _driver.Template.WrapMessage("system", systemPrompt);
+        _systemPrompt = options.SystemPrompt ?? BuiltInSystemPrompt;
     }
 
     public async IAsyncEnumerable<string> SendAsync(
         string userContent,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        Models.Llama.LlamaChatTemplate template = _driver.Template;
+        // First send pays the model-load cost — surfaces here as a delay
+        // before the first chunk streams. Subsequent sends hit the cached
+        // driver and return immediately.
+        ILlmDriver driver = await _holder.GetAsync(ct).ConfigureAwait(false);
+        Models.Llama.LlamaChatTemplate template = driver.Template;
 
         // Link the caller's token with our own internal CTS so CancelActive
         // and ConnectionAborted both terminate the same enumeration. The
@@ -69,6 +72,7 @@ internal sealed class ConversationAgent : IConversationAgent
         string prompt;
         lock (_accumulatorLock)
         {
+            _accumulator ??= template.Open + template.WrapMessage("system", _systemPrompt);
             _accumulator += template.WrapMessage("user", userContent);
             prompt = _accumulator + template.AssistantTurn;
         }
@@ -82,7 +86,7 @@ internal sealed class ConversationAgent : IConversationAgent
         bool wasCancelled = false;
         try
         {
-            await foreach (string chunk in _driver
+            await foreach (string chunk in driver
                 .StreamAsync(prompt, linked.Token)
                 .ConfigureAwait(false))
             {
@@ -111,7 +115,7 @@ internal sealed class ConversationAgent : IConversationAgent
             }
 
             await _graph.AppendAsync(
-                new MessageDraft("assistant", assistantContent, _driver.ModelName),
+                new MessageDraft("assistant", assistantContent, driver.ModelName),
                 CancellationToken.None).ConfigureAwait(false);
         }
 

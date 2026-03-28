@@ -71,7 +71,7 @@ public static class WebHostExtensions
                 // BuiltinModels uses VramBudgetResolver internally (one
                 // nvidia-smi shell-out) and sets catalog.Models. Registrations
                 // are cheap — model loads are lazy via the residency manager,
-                // triggered later by LlmStartupService.
+                // triggered on first chat send via LlmDriverHolder.
                 if (registerBuiltinModels)
                 {
                     BuiltinModels.AttachStandardModels(catalog, effectiveModelsDir);
@@ -107,17 +107,15 @@ public static class WebHostExtensions
             // surface.
             services.AddScoped<QueryStreamService>();
 
-            // Chat LLM wiring. Holder is the singleton consumers depend on;
-            // the hosted service sets it during StartAsync after the model is
-            // loaded. ILlmDriver resolves through the holder so any consumer
-            // (IConversationAgent etc.) gets a fully-loaded driver or a clear
-            // "not initialised yet" error.
+            // Chat LLM wiring. The holder is a singleton lazy loader: the
+            // first /api/chat send awaits LlmDriverHolder.GetAsync, which
+            // selects + acquires the model on first call and caches it for
+            // the process lifetime. No eager startup-time load — the LLM is
+            // a rarely-used surface and was burning VRAM + startup time for
+            // nothing.
             if (registerBuiltinModels)
             {
                 services.AddSingleton<LlmDriverHolder>();
-                services.AddSingleton<ILlmDriver>(sp =>
-                    sp.GetRequiredService<LlmDriverHolder>().Current);
-                services.AddHostedService<LlmStartupService>();
 
                 services.AddSingleton<Messages.IMessageGraph, Messages.MessageGraph>();
                 services.AddSingleton<Conversation.IConversationAgent, Conversation.ConversationAgent>();

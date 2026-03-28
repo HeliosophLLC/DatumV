@@ -121,18 +121,20 @@ Once a `ModelDescriptor` is in `DeclaredModels`, queries need to be able to *cal
 
 **Location**: `src/DatumIngest/Execution/ModelInvocationHoister.cs`, `src/DatumIngest/Models/ProceduralModelAdapter.cs`
 
-The planner lifts every `models.X(...)` call out of expressions into a dedicated `ModelInvocationOperator` (MIO) node — batched dispatch, residency leases, output-struct shape stamping. Both built-in `IModel` classes and SQL-defined `CREATE MODEL` bodies route through MIO; the only difference is which `IModel` MIO ultimately dispatches to:
+The planner lifts every `models.X(...)` call out of expressions into a dedicated `ModelInvocationOperator` (MIO) node — model dispatch, residency leases, output-struct shape stamping. Both built-in `IModel` classes and SQL-defined `CREATE MODEL` bodies route through MIO; the only difference is which `IModel` MIO ultimately dispatches to:
 
 | Source shape | MIO dispatches via | Notes |
 |---|---|---|
-| Built-in `IModel` | the class itself (e.g. `MidasSmallModel.InferBatchAsync`) | Direct path. Full batching + residency + tracer + RowLimit + streaming sink + `PreferredBatchSize` sub-batching. |
+| Built-in `IModel` | the class itself (e.g. `MidasSmallModel.InferBatchAsync`) | Direct path. Residency + tracer + RowLimit; dispatched one row per call. |
 | SQL-defined `CREATE MODEL` body | `ProceduralModelAdapter.InferBatchAsync`, which wraps `ProceduralModelFunction` per row | Same MIO features. The body executes inside one procedural call per row, with DECLARE bindings living in a per-call `VariableScope` — image / tensor / struct values bound once and reused across body statements without re-stabilization through arena boundaries. |
 
 The third residual path (scalar `ProceduralModelFunction` with no MIO at all) survives for **non-hoisted call sites**: `models.X(...)` inside a UDF body, inside an unhoisted clause, etc. Same per-row scalar adapter, no operator-boundary features. The hoister prefers MIO for top-level `SELECT` call sites.
 
-### Cross-row batched dispatch for batchable shapes
+### Batch sizing
 
-For ONNX sessions whose input is rank-≥2 with a dynamic leading dim (`[batch, feature_dims...]`) — BERT-family embedders, MobileNet-style classifiers — `InferFunction.ExecuteBatchAsync` (a columnar `IScalarFunction.ExecuteBatchAsync` override) packs N rows into one `[B, ...]` tensor and calls `Session.Run` once per RowBatch. Falls back to per-row dispatch for non-batchable shapes (rank 1, all-concrete, multi-dynamic), multi-input struct args, explicit per-row shape args, or rows of unequal sizes.
+MIO consults `ModelCatalog.BatchSizePolicy` for each dispatch. The engine default is `BatchOnePolicy` — one row per `Session.Run`. This is deliberate: multi-model queries (two large image models in one `SELECT`) on a single GPU thrash when each model independently sizes its own batch, and ORT can spill activations into shared GPU memory without NVML reflecting the spill. Single-row dispatch costs throughput on single-model queries but eliminates the failure mode.
+
+The `DoublingBatchSizePolicy` and `InferFunction.ExecuteBatchAsync` (a columnar `IScalarFunction.ExecuteBatchAsync` override that packs N rows into one `[B, ...]` tensor for sessions with rank-≥2 inputs and a dynamic leading dim) remain in the codebase but are unreached under the default policy. They are the building blocks for a future row-batch-scoped model-DAG executor that owns intermediate materialization and forced eviction between topo levels — once that operator exists, multi-model VRAM contention is mediated at the plan layer instead of by each model's own policy, and batched dispatch can be re-enabled as the default.
 
 ### Why we *removed* the column-pipeline lowering path
 

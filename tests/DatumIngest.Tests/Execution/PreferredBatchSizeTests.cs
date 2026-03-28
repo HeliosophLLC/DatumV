@@ -67,6 +67,13 @@ public sealed class PreferredBatchSizeTests : ServiceTestBase
 
         RecordingModel model = new() { PreferredBatchSize = preferredBatchSize };
         ModelCatalog models = new(modelDirectory: System.IO.Path.GetTempPath());
+        // These tests assert MIO's sub-batching shape directly, so they
+        // need the deterministic StaticBatchSizePolicy rather than the
+        // production DoublingBatchSizePolicy default. The doubling tuner
+        // can't extract meaningful VRAM deltas from synthetic CPU-only
+        // models and would settle at batch=1 across the board — correct
+        // policy behaviour, wrong fixture for these tests.
+        models.BatchSizePolicy = StaticBatchSizePolicy.Instance;
         models.Register(new ModelCatalogEntry(
             Name: "rec",
             Backend: "rec",

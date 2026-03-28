@@ -1,35 +1,119 @@
+using DatumIngest.Catalog;
+using DatumIngest.Models;
+using DatumIngest.Models.Llama;
+using Microsoft.Extensions.Logging;
+
 namespace DatumIngest.Web.Llm;
 
-// Mutable holder for the singleton ILlmDriver. Set by LlmStartupService
-// during IHostedService.StartAsync; read by any service that depends on
-// the LLM (IConversationAgent, eventually IProactiveAgent). Two-stage
-// registration like this avoids the alternatives:
-//  - A DI factory that performs the eager load synchronously would block
-//    every Resolve until the model is loaded *and* couldn't surface
-//    cancellation cleanly. Async factories aren't a thing in built-in DI.
-//  - A Lazy<Task<ILlmDriver>> would force every consumer to await even
-//    after the load completes, which leaks the async-init concern into
-//    every call site.
+// Lazy single-flight loader for the singleton ILlmDriver. The first caller
+// to GetAsync triggers ModelSelector.Select + ModelLease acquisition + driver
+// construction; concurrent callers await the same task; the loaded driver is
+// cached for the app's lifetime and disposed in DisposeAsync.
 //
-// Setting is one-shot; the holder doesn't support model swap at runtime.
-// When model switching arrives, the holder grows a CompareAndSwap shape.
-internal sealed class LlmDriverHolder
+// Eager preload at startup was dropped in favour of load-on-first-chat: the
+// LLM is a rarely-used surface here and was spending VRAM + startup time for
+// nothing. The chat endpoint pays the load cost on the first user send.
+//
+// One-shot today: model swap at runtime is unsupported. When it lands, the
+// cached task becomes a CompareAndSwap of (modelName, Task<ILlmDriver>).
+internal sealed class LlmDriverHolder : IAsyncDisposable
 {
-    private ILlmDriver? _current;
+    private readonly TableCatalog _tableCatalog;
+    private readonly ILogger<LlmDriverHolder> _logger;
+    private readonly object _gate = new();
+    private Task<ILlmDriver>? _loadTask;
+    private ILlmDriver? _loaded;
 
-    public ILlmDriver Current => _current
-        ?? throw new InvalidOperationException(
-            "LLM driver not initialised yet. LlmStartupService.StartAsync must run before any " +
-            "consumer resolves ILlmDriver. If you're seeing this during app startup, check " +
-            "the hosted-service order — LlmStartupService should run before the agent's first use.");
-
-    public void Set(ILlmDriver driver)
+    public LlmDriverHolder(TableCatalog tableCatalog, ILogger<LlmDriverHolder> logger)
     {
-        if (_current is not null)
+        _tableCatalog = tableCatalog;
+        _logger = logger;
+    }
+
+    public Task<ILlmDriver> GetAsync(CancellationToken cancellationToken)
+    {
+        Task<ILlmDriver> task;
+        lock (_gate)
         {
-            throw new InvalidOperationException(
-                "LLM driver already set. Runtime model swap is not supported in v1.");
+            // On a previous load that faulted, drop the cached task so the
+            // next caller retries from scratch instead of inheriting the
+            // failure for the process lifetime.
+            if (_loadTask is { IsCompletedSuccessfully: false, IsCompleted: true })
+            {
+                _loadTask = null;
+            }
+            // Load runs with CancellationToken.None: once started it runs to
+            // completion regardless of any single caller's cancellation, so a
+            // user who hits Cancel on their first chat doesn't tear down a
+            // load that other callers are waiting on. Each caller's token
+            // only gates their own wait via WaitAsync below.
+            _loadTask ??= Task.Run(() => LoadAsync(), CancellationToken.None);
+            task = _loadTask;
         }
-        _current = driver;
+        return task.WaitAsync(cancellationToken);
+    }
+
+    private async Task<ILlmDriver> LoadAsync()
+    {
+        ModelCatalog? modelCatalog = _tableCatalog.Models
+            ?? throw new InvalidOperationException(
+                "No ModelCatalog attached to TableCatalog — chat surface is unavailable. " +
+                "Set WebHostOptions.RegisterBuiltinModels = true to attach the standard zoo.");
+
+        ModelSelection selection = ModelSelector.Select(modelCatalog);
+        _logger.LogInformation(
+            "Selected LLM '{Name}' ({Display}, ~{Bytes} estimated VRAM, usable budget {Budget}).",
+            selection.Entry.Name,
+            selection.Entry.DisplayName ?? selection.Entry.Name,
+            FormatBytes(selection.EstimatedBytes),
+            FormatBytes(selection.UsableBudgetBytes));
+
+        ModelLease lease = await modelCatalog
+            .AcquireAsync(selection.Entry.Name, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        LlamaChatTemplate template = ResolveTemplate(selection.Entry.Name);
+        LlamaLlmDriver driver = new(lease, selection.Entry.Name, template);
+        _loaded = driver;
+
+        _logger.LogInformation("LLM '{Name}' loaded and ready.", selection.Entry.Name);
+        return driver;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        if (_loaded is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
+        _loaded = null;
+        return ValueTask.CompletedTask;
+    }
+
+    // Map model-catalog name → chat-template family. When ModelCatalogEntry
+    // gains a TemplateFamily field (see project_message_graph_design follow-ups),
+    // replace this with a direct lookup.
+    private static LlamaChatTemplate ResolveTemplate(string modelName)
+    {
+        if (modelName.StartsWith("llama", StringComparison.OrdinalIgnoreCase)) return LlamaChatTemplate.Llama31;
+        if (modelName.StartsWith("phi3", StringComparison.OrdinalIgnoreCase)) return LlamaChatTemplate.Phi3;
+        if (modelName.StartsWith("qwen", StringComparison.OrdinalIgnoreCase)) return LlamaChatTemplate.ChatML;
+        if (modelName.StartsWith("mistral", StringComparison.OrdinalIgnoreCase)) return LlamaChatTemplate.Mistral;
+        if (modelName.StartsWith("gemma", StringComparison.OrdinalIgnoreCase)) return LlamaChatTemplate.Gemma;
+        if (modelName.StartsWith("granite", StringComparison.OrdinalIgnoreCase)) return LlamaChatTemplate.Granite;
+        if (modelName.StartsWith("tinyllama", StringComparison.OrdinalIgnoreCase)) return LlamaChatTemplate.Zephyr;
+        // Fall back to Llama 3.1 if we don't recognise the family — better
+        // than throwing during load; the prompt may be slightly off-format
+        // but the model still responds.
+        return LlamaChatTemplate.Llama31;
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes <= 0) return "0 B";
+        if (bytes == long.MaxValue) return "unbounded";
+        const double GiB = 1024d * 1024d * 1024d;
+        const double MiB = 1024d * 1024d;
+        return bytes >= GiB ? $"{bytes / GiB:F2} GiB" : $"{bytes / MiB:F1} MiB";
     }
 }

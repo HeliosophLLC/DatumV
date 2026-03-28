@@ -132,27 +132,14 @@ public sealed class ProceduralModelAdapter : IModel
     /// <inheritdoc />
     public bool IsDeterministic => false;
 
-    /// <summary>
-    /// Default mini-batch size for SQL-defined models. Vision models with
-    /// 518×518 or larger input tensors (depth-anything, glpn, dpt-large)
-    /// hit several MB per row in input alone, and 5–10× more in
-    /// intermediate activations — packing 1024 of them into one
-    /// <c>Session.Run</c> blows past most consumer GPUs' VRAM and spills
-    /// into shared memory, which is dramatically slower than the per-row
-    /// path. A conservative <c>4</c> keeps tensor packing within the
-    /// dedicated-VRAM budget for the depth-model class while still
-    /// recovering the dispatch-overhead win of batched ONNX.
-    /// </summary>
-    /// <remarks>
-    /// Per-model overrides are not yet expressible in <c>CREATE MODEL</c>
-    /// syntax. When a follow-up wires a <c>WITH (batch_size = N)</c>
-    /// clause (or similar), thread the descriptor's value through here;
-    /// fall back to this default when the user hasn't specified one. The
-    /// right per-model value depends on input-tensor product × dtype size
-    /// + activation multiplier × physical VRAM — a heuristic computable
-    /// once at session-load time.
-    /// </remarks>
-    public int? PreferredBatchSize => 4;
+    // PreferredBatchSize is intentionally left at the IModel default
+    // (null). The catalog's IBatchSizePolicy — DoublingBatchSizePolicy by
+    // default — discovers the right batch size per model by ramping from
+    // 1 and measuring VRAM delta at each step. Hardcoding a single value
+    // here would either spill on VRAM-tight hosts (too high) or leave
+    // throughput on the table on VRAM-rich hosts (too low). The policy's
+    // measurement is per-model and per-host, so each model finds its own
+    // ceiling without user configuration.
 
     /// <inheritdoc />
     /// <remarks>
