@@ -31,7 +31,15 @@ internal sealed record JsonCell(
     int? Count = null,
     double? Min = null,
     double? Max = null,
-    double? Mean = null);
+    double? Mean = null,
+    // Populated for kind="struct". Each entry recursively carries a
+    // full JsonCell so nested numeric arrays / images / sub-structs
+    // get their own dedicated renderer on the client instead of being
+    // flattened into a single JSON text body that inlines megabytes
+    // of base64 / `[0.1, 0.2, ...]`.
+    IReadOnlyList<JsonStructField>? Fields = null);
+
+internal sealed record JsonStructField(string Name, JsonCell Cell);
 
 internal sealed record JsonMediaItem(string Mime, string DataB64);
 

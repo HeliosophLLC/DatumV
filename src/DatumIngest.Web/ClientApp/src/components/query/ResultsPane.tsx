@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { AlertCircle, Ban, Check, Film, Loader2, Music, Sigma } from 'lucide-react';
+import { AlertCircle, Ban, Braces, Check, Film, Loader2, Music, Sigma } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { MediaPreview } from './MediaPreview';
 import { MemoryChip } from './MemoryChip';
@@ -472,6 +472,9 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
   if (cell.kind === 'numeric_array') {
     return <SingleValueNumericArray cell={cell} />;
   }
+  if (cell.kind === 'struct') {
+    return <SingleValueStruct cell={cell} />;
+  }
   // Scalar / JSON / catchall. Use a pre-wrap block so multi-line JSON
   // bodies keep their formatting; large font so the value is readable
   // without zooming.
@@ -600,6 +603,13 @@ function cellTextForMeasure(cell: JsonCell): string {
     // measurement isn't worth a per-cell render walk.
     return `${cell.elementKind ?? '?'}[${cell.count ?? 0}] · [0.0000..9.9999]`;
   }
+  if (cell.kind === 'struct') {
+    // The inline chip shows "{f1, f2, f3, …}" — measure against the joined
+    // field-name list, capped so a wide struct doesn't push every other
+    // column off-screen (the chip itself truncates).
+    const names = (cell.fields ?? []).map((f) => f.name).join(', ');
+    return `{${names.length > 64 ? names.substring(0, 64) + '…' : names}}`;
+  }
   return cell.text ?? '';
 }
 
@@ -636,7 +646,8 @@ function cellTooltip(cell: JsonCell): string | undefined {
     cell.kind === 'audio' ||
     cell.kind === 'video' ||
     cell.kind === 'media_array' ||
-    cell.kind === 'numeric_array'
+    cell.kind === 'numeric_array' ||
+    cell.kind === 'struct'
   ) {
     return undefined;
   }
@@ -815,6 +826,7 @@ function CellValue({
   if (cell.kind === 'pointcloud') return <PointCloudCell cell={cell} largeMedia={largeMedia} />;
   if (cell.kind === 'mesh') return <MeshCell cell={cell} largeMedia={largeMedia} />;
   if (cell.kind === 'numeric_array') return <NumericArrayCell cell={cell} />;
+  if (cell.kind === 'struct') return <StructCell cell={cell} />;
   return <span>{cell.text ?? ''}</span>;
 }
 
@@ -1145,6 +1157,92 @@ function NumericArrayInspector({ cell }: { cell: JsonCell }) {
           </pre>
         </div>
       )}
+    </div>
+  );
+}
+
+// ────────── Struct cell ──────────
+//
+// Server emits kind="struct" for non-array struct values. Each field
+// is itself a fully-formed JsonCell, so we render the tree by recursing
+// through <CellValue>. Nested Float32[] fields hit NumericArrayCell;
+// nested images hit ImageCell; nested sub-structs hit StructCell again.
+// Grid view shows a compact `{f1, f2, …}` chip with click-to-open;
+// the single-value view shows the full key/value table inline.
+
+function structSummary(cell: JsonCell): string {
+  const fields = cell.fields ?? [];
+  if (fields.length === 0) return '{}';
+  const names = fields.map((f) => f.name).join(', ');
+  return `{${names}}`;
+}
+
+function StructCell({ cell }: { cell: JsonCell }) {
+  const [open, setOpen] = useState(false);
+  const fields = cell.fields ?? [];
+  const summary = structSummary(cell);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={`struct · ${fields.length} field${fields.length === 1 ? '' : 's'}`}
+        className="text-muted-foreground hover:text-foreground inline-flex max-w-full cursor-pointer items-center gap-1"
+      >
+        <Braces className="size-3.5 shrink-0" />
+        <span className="truncate font-mono">{summary}</span>
+      </button>
+      <MediaPreview
+        open={open}
+        onClose={() => setOpen(false)}
+        title={`struct · ${fields.length} field${fields.length === 1 ? '' : 's'}`}
+      >
+        <StructFieldTable fields={fields} />
+      </MediaPreview>
+    </>
+  );
+}
+
+function SingleValueStruct({ cell }: { cell: JsonCell }) {
+  const fields = cell.fields ?? [];
+  return (
+    <div className="flex max-h-full w-full max-w-4xl flex-col overflow-auto p-4">
+      <StructFieldTable fields={fields} />
+    </div>
+  );
+}
+
+/**
+ * Two-column key/value tree. Field names left, the recursively-rendered
+ * child cell right. CellValue carries the dispatch — nested numeric
+ * arrays / images / sub-structs reuse the same renderers used in the
+ * grid. We pass `largeMedia` so image/video children render at their
+ * larger inline size, which is the right default in an expanded view.
+ */
+function StructFieldTable({
+  fields,
+}: {
+  fields: { name: string; cell: JsonCell }[];
+}) {
+  if (fields.length === 0) {
+    return (
+      <span className="text-muted-foreground font-mono text-sm italic">
+        empty struct
+      </span>
+    );
+  }
+  return (
+    <div className="grid grid-cols-[auto,1fr] items-start gap-x-4 gap-y-2 text-sm">
+      {fields.map((f, i) => (
+        <div key={`${f.name}-${i}`} className="contents">
+          <div className="text-muted-foreground py-0.5 pr-2 font-mono">
+            {f.name}
+          </div>
+          <div className="min-w-0 font-mono break-words">
+            <CellValue cell={f.cell} largeMedia={true} />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

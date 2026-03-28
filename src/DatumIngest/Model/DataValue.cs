@@ -2244,32 +2244,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     public bool IsArenaBacked => (_flags & DataValueFlags.InArena) != 0;
 
     /// <summary>
-    /// Returns a new <see cref="DataValue"/> with all arena-backed data materialised
-    /// into self-contained managed objects stored in <paramref name="store"/>.
-    /// Non-arena values are returned unchanged.
-    /// </summary>
-    /// <param name="arena">Arena that owns the UTF-8 bytes.</param>
-    /// <param name="store">Store to write the materialised string into.</param>
-    /// <returns>A self-contained value that does not reference the arena.</returns>
-    public DataValue Materialize(Arena arena, IValueStore store)
-    {
-        if (!IsArenaBacked) return this;
-
-        return _kind switch
-        {
-            DataKind.String => FromString(arena.GetString(_p0, _p1), store),
-            _ => this,
-        };
-    }
-
-    /// <summary>
-    /// Returns a new <see cref="DataValue"/> with all arena-backed data materialised.
-    /// </summary>
-    /// <param name="arena">Arena for string and binary data.</param>
-    /// <returns>A self-contained value that does not reference any arena.</returns>
-    public DataValue Materialize(Arena arena) => Materialize(arena, arena);
-
-    /// <summary>
     /// Returns a new arena-backed <see cref="DataValue"/> whose offset has been shifted by
     /// <paramref name="delta"/> bytes.  Used when merging per-column private arenas into a
     /// shared batch arena after parallel decode.
@@ -3298,18 +3272,6 @@ public readonly struct DataValue : IEquatable<DataValue>
         ThrowIfNullOrWrongKind(DataKind.String);
         if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
         return arena.GetString(_p0, _p1);
-    }
-
-    /// <summary>
-    /// Returns the raw UTF-8 bytes for an arena-backed string without allocating.
-    /// </summary>
-    /// <param name="arena">The arena that owns the UTF-8 bytes.</param>
-    /// <returns>A span of UTF-8 bytes.  Valid only while the arena is alive.</returns>
-    /// <exception cref="InvalidOperationException">Wrong kind, null, or not arena-backed.</exception>
-    public ReadOnlySpan<byte> GetArenaStringSpan(Arena arena)
-    {
-        ThrowIfNullOrWrongKind(DataKind.String);
-        return arena.GetSpan(_p0, _p1);
     }
 
 

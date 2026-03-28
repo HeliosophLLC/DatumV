@@ -132,6 +132,16 @@ public static class DataValueRetention
             DataKind.Video => DataValue.FromVideo(
                 value.AsByteSpan(sourceStore).ToArray(),
                 retentionStore),
+            // PointCloud and Mesh are likewise raw-byte container kinds — header +
+            // interleaved per-element payload. Retention is the same byte-copy
+            // shape as Audio/Video; the SCAN accumulator path triggers this when
+            // a PointCloud accumulator value crosses an arena boundary.
+            DataKind.PointCloud => DataValue.FromPointCloud(
+                value.AsByteSpan(sourceStore).ToArray(),
+                retentionStore),
+            DataKind.Mesh => DataValue.FromMesh(
+                value.AsByteSpan(sourceStore).ToArray(),
+                retentionStore),
             // Json carries canonical CBOR bytes; same byte-content shape, takes the span overload.
             DataKind.Json => DataValue.FromJson(
                 value.AsByteSpan(sourceStore),

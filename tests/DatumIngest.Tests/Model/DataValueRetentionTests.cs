@@ -196,4 +196,44 @@ public sealed class DataValueRetentionTests : ServiceTestBase
         Assert.Equal(DataKind.Float32, stable.Kind);
         Assert.True(stable.IsArray);
     }
+
+    // ───────────────────── PointCloud / Mesh byte-blob retention ─────────────────────
+
+    [Fact]
+    public void Stabilize_PointCloud_CopiesBytesToRetentionStore()
+    {
+        Arena source = new();
+        Arena retention = new();
+
+        byte[] blob = new byte[64];
+        for (int i = 0; i < blob.Length; i++) blob[i] = (byte)(i + 1);
+        DataValue original = DataValue.FromPointCloud(blob, source);
+
+        DataValue stable = DataValueRetention.Stabilize(original, source, retention);
+
+        source.Dispose();   // retention copy must survive source disposal
+
+        ReadOnlySpan<byte> recovered = stable.AsByteSpan(retention);
+        Assert.Equal(blob, recovered.ToArray());
+        Assert.Equal(DataKind.PointCloud, stable.Kind);
+    }
+
+    [Fact]
+    public void Stabilize_Mesh_CopiesBytesToRetentionStore()
+    {
+        Arena source = new();
+        Arena retention = new();
+
+        byte[] blob = new byte[96];
+        for (int i = 0; i < blob.Length; i++) blob[i] = (byte)(i * 3 + 7);
+        DataValue original = DataValue.FromMesh(blob, source);
+
+        DataValue stable = DataValueRetention.Stabilize(original, source, retention);
+
+        source.Dispose();
+
+        ReadOnlySpan<byte> recovered = stable.AsByteSpan(retention);
+        Assert.Equal(blob, recovered.ToArray());
+        Assert.Equal(DataKind.Mesh, stable.Kind);
+    }
 }

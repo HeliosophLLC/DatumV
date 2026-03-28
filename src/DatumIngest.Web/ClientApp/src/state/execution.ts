@@ -67,6 +67,11 @@ export interface JsonCell {
   min?: number;
   max?: number;
   mean?: number;
+  // Populated for kind="struct". Each entry is itself a JsonCell, so
+  // nested numeric arrays / images / sub-structs render with their own
+  // dedicated renderer (recursive `<CellValue>`) instead of being
+  // flattened into a one-line JSON text body.
+  fields?: { name: string; cell: JsonCell }[];
 }
 
 export interface CellResult {

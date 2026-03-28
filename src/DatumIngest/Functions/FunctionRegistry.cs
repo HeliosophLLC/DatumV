@@ -686,10 +686,13 @@ public sealed class FunctionRegistry
         // metric scale). Accessors mirror image_width/image_height for header fields.
         registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthPinholeFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthOrthographicFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthOrthographicIntrinsicsFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcEmptyFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcFuseFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcTransformFunction>();
         registry.RegisterScalar<Scalar.Spatial.PoseTranslateFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PcFilterDepthFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PcVoxelDownsampleFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudToPlyFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudCountFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudWidthFunction>();
@@ -838,6 +841,7 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate(new Aggregates.ApproximatePercentileFunction());
         registry.RegisterAggregate(new Aggregates.StringAggregateFunction());
         registry.RegisterAggregate(new Aggregates.ArrayAggregateFunction());
+        registry.RegisterAggregate(new Aggregates.PcFuseAggregateFunction());
         registry.RegisterAggregate(new Aggregates.ArgMaxFunction(findMaximum: true, "ARG_MAX"));
         registry.RegisterAggregate(new Aggregates.ArgMaxFunction(findMaximum: false, "ARG_MIN"));
 

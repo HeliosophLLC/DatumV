@@ -120,7 +120,18 @@ internal static class WebCellFormatter
             if (binary is not null) return binary;
         }
 
-        // Structured shapes (Struct, Array<Struct>, Array<scalar>, Array<String>)
+        // Non-array Struct: emit a structured kind="struct" cell with each
+        // field carrying its own JsonCell (Format'd recursively). Nested
+        // numeric arrays / images / sub-structs go through their dedicated
+        // renderer instead of being flattened into a JSON text body that
+        // would inline megabytes per cell. Array<Struct> still routes
+        // through the JSON-tree path below for now.
+        if (value.Kind == DataKind.Struct && !value.IsArray)
+        {
+            return FormatStruct(value, arena, registry, types, translations);
+        }
+
+        // Structured shapes (Array<Struct>, Array<scalar>, Array<String>)
         // route to the front-end's JSON tree renderer so the user gets a
         // collapsible, copyable view with field-name-aware rendering rather than
         // a one-line {f0: ..., f1: ...} blob.
@@ -329,9 +340,39 @@ internal static class WebCellFormatter
             || value.Kind == DataKind.Video
             || value.Kind == DataKind.PointCloud
             || value.Kind == DataKind.Mesh) return false; // single-blob already routes elsewhere
-        if (value.Kind == DataKind.Struct) return true;
+        // Non-array Struct has its own kind="struct" path (see Format).
+        // Array<Struct> still falls through here.
         if (value.IsArray) return true;
         return false;
+    }
+
+    /// <summary>
+    /// Builds a kind="struct" cell. Each field is recursively
+    /// <see cref="Format"/>-ed, so nested numeric arrays / images /
+    /// sub-structs land on their dedicated renderers rather than being
+    /// flattened into a JSON text body. Field names come from the
+    /// per-value <see cref="TypeDescriptor"/> when available; missing
+    /// names fall back to <c>fN</c>, with disambiguation for the rare
+    /// duplicate-name case.
+    /// </summary>
+    private static JsonCell FormatStruct(
+        DataValue value, Arena arena, SidecarRegistry registry,
+        TypeRegistry? types, TypeIdTranslationTable? translations)
+    {
+        DataValue[] fieldValues = value.AsStruct(arena);
+        TypeDescriptor? typeDesc = value.TypeId != 0 ? types?.GetDescriptor(value.TypeId) : null;
+        JsonStructField[] fields = new JsonStructField[fieldValues.Length];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        for (int i = 0; i < fieldValues.Length; i++)
+        {
+            string name = typeDesc?.Fields is { } tFields && i < tFields.Count
+                ? tFields[i].Name
+                : $"f{i}";
+            if (!seen.Add(name)) name = $"{name}_{i}";
+            JsonCell childCell = Format(fieldValues[i], arena, registry, types, translations);
+            fields[i] = new JsonStructField(name, childCell);
+        }
+        return new JsonCell("struct", Fields: fields);
     }
 
     /// <summary>
