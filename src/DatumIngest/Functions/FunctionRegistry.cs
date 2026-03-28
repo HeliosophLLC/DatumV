@@ -627,6 +627,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ImageCropFunction>();
         registry.RegisterScalar<Scalar.Image.ImageCutoutFunction>();
         registry.RegisterScalar<Scalar.Image.ImageMultiplyFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageCompositeOverFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageResizeForegroundFunction>();
         registry.RegisterScalar<Scalar.Image.ImageDrawBoundingBoxesFunction>();
         registry.RegisterScalar<Scalar.Image.ApplyColormapFunction>();
         registry.RegisterScalar<Scalar.Image.ImageWidthFunction>();
@@ -674,7 +676,10 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Spatial.MeshFromOrganizedFunction>();
         registry.RegisterScalar<Scalar.Spatial.MeshFromDepthOrthographicFunction>();
         registry.RegisterScalar<Scalar.Spatial.MeshFromDepthPinholeFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshFromDensityGridFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshFromTriplaneFunction>();
         registry.RegisterScalar<Scalar.Spatial.MeshComputeNormalsFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshSwapAxesFunction>();
         registry.RegisterScalar<Scalar.Spatial.MeshVertexCountFunction>();
         registry.RegisterScalar<Scalar.Spatial.MeshTriangleCountFunction>();
         registry.RegisterScalar<Scalar.Spatial.MeshBboxMinFunction>();

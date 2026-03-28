@@ -242,6 +242,17 @@ public static class TaskTypeRegistry
             "Image → per-pixel **metric** depth as a shape-aware Float32 array. "
                 + "Bigger value = farther (units: meters for ZoeDepth / GLPN-NYU)."),
 
+        // ─── image: 3D reconstruction ───────────────────────────────────
+        new("MeshFromImage",
+            [Scalar(DataKind.Image)],
+            Scalar(DataKind.Mesh),
+            "Single image → 3D triangle Mesh. The model hallucinates the "
+            + "back / occluded surfaces of the depicted object (complementing "
+            + "DepthEstimator + mesh_from_depth_*, which only capture what the "
+            + "camera sees). Output is a watertight mesh ready for browser "
+            + "rendering or 3D printing. Triplane / NeRF architectures (TripoSR, "
+            + "SF3D, InstantMesh, Hunyuan3D) all fit this contract."),
+
         // ─── image: generation + transformation ─────────────────────────
         new("ImageUpscaler",
             [Scalar(DataKind.Image)],

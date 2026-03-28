@@ -658,6 +658,39 @@
       "licenseFiles": [
         { "name": "LICENSE", "source": "https://huggingface.co/microsoft/trocr-base-printed/raw/main/LICENSE" }
       ]
+    },
+    {
+      "repoSuffix": "triposr-onnx",
+      "sourceFolder": "${DATUM_MODELS}/triposr-staging",
+      "expectedSizeMb": 3360,
+      "exportedBy": "scripts/export-triposr.ps1",
+      "expectedContents": [
+        "triplane.onnx",
+        "triplane.onnx_data",
+        "nerf.onnx",
+        "config.yaml",
+        "requirements.txt",
+        "requirements-torch.txt",
+        "requirements-freeze.txt",
+        "README.txt"
+      ],
+      "uploadStaging": "Run scripts/export-triposr.ps1. The script clones VAST-AI-Research/TripoSR for the `tsr/` architecture module, downloads weights from stabilityai/TripoSR via the HF Hub, and traces two ONNX graphs: triplane.onnx (image→triplane features; weights spill to triplane.onnx_data sidecar via external_data_format) and nerf.onnx (triplane+xyz→density+color). Also writes a reproducibility quartet (requirements.txt / requirements-torch.txt / requirements-freeze.txt / README.txt) capturing the exact venv state. Drop a LICENSE file in the staging root before upload — upstream doesn't ship a LICENSE file (their model card just declares `license: mit` in YAML frontmatter), so write a standard MIT LICENSE text with copyright attributed to Stability AI + Tripo AI / VAST-AI-Research as the model authors. Bundle is ~3.4 GB on the wire — triplane.onnx_data dominates at ~3.1 GB; the .onnx graph file is ~900 KB.",
+      "provenance": {
+        "baseModel": "stabilityai/TripoSR (HF weights at config.yaml + model.ckpt) + VAST-AI-Research/TripoSR (GitHub architecture module). Single-image-to-mesh: DINOv1 image tokenizer + cross-attention triplane transformer + triplane post-processor + NeRF MLP. Tochilkin, Pankratz, Liu, Huang, Letts, Li, Liang, Laforte, Jampani, Cao (2024).",
+        "exportToolchain": "torch.onnx.export from upstream PyTorch weights. Two-graph split: (1) triplane.onnx encapsulates image_tokenizer + tokenizer + backbone + post_processor (the per-image cost); (2) nerf.onnx encapsulates renderer.query_triplane + decoder (the per-chunk cost queried over a 3D point grid). opset 17 (grid_sample), do_constant_folding=True, external_data_format=True for the triplane graph.",
+        "precision": "fp32 (default). Pass -Fp16 to the script for half-precision siblings triplane_fp16.onnx + triplane_fp16.onnx_data + nerf_fp16.onnx, ~half the disk footprint, IO types kept fp32.",
+        "notes": "Re-hosted under Heliosoph for catalog distribution. Marching cubes is NOT part of either ONNX graph — that step lives in the host engine via the mesh_compute_* SQL function family. Standard convention for implicit-field mesh-gen models. The reproducibility quartet (requirements*.txt + README.txt) lets anyone with just these files rebuild the exact venv that produced them — pinned PyPI deps, torch + torchvision cu124 wheels, and the TripoSR architecture-repo commit sha at trace time."
+      },
+      "license": {
+        "spdx": "MIT",
+        "url": "https://huggingface.co/stabilityai/TripoSR",
+        "confidence": "high",
+        "requiresAcceptance": false,
+        "notes": "MIT per the upstream model card's YAML frontmatter (`license: mit`). The stabilityai/TripoSR HF repo is also gated via `extra_gated_fields` requiring a user to provide name/email/affiliation + opt-in to Stability marketing — that's HF's access-gate mechanism, NOT a license-binding click-through. The MIT license alone governs what users can do with the bytes once obtained. Heliosoph re-host: distribute under MIT freely; downstream users get standard MIT terms (no $1M threshold, no AUP propagation requirements). Upstream ships no LICENSE file in the repo, so the Heliosoph mirror should include a freshly-written one with proper MIT copyright attribution to Stability AI + Tripo AI."
+      },
+      "licenseFiles": [
+        { "name": "LICENSE", "source": "https://opensource.org/license/mit", "notes": "Use canonical MIT template — Stability didn't ship a LICENSE file at the upstream repo, just the `license: mit` declaration in the model card YAML. Author the LICENSE locally with `Copyright (c) 2024 Stability AI and Tripo AI / VAST-AI-Research` as the holders before upload." }
+      ]
     }
   ],
   "rejected": [

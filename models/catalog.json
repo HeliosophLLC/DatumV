@@ -563,6 +563,19 @@
       "approxSizeMb": 660
     },
     {
+      "id": "triposr",
+      "displayName": "TripoSR (Single-Image to 3D Mesh)",
+      "description": "Single-image to 3D mesh in one shot. DINOv2 ViT image encoder + triplane decoder + implicit field, all trained jointly so the model can hallucinate the back / occluded sides of an object from a single front-facing photo — the complement to the depth+Poisson pipeline (which only captures what the camera sees). Object-scale, not scene-scale: works best on a single subject centered in frame. Outputs a watertight triangle mesh ready for browser rendering or 3D printing.",
+      "task": "image-to-mesh",
+      "tags": ["3d", "mesh-generation", "triposr", "image-to-3d", "object-reconstruction"],
+      "licenseIds": ["mit"],
+      "attributions": ["Stability AI + Tripo AI / VAST-AI-Research — TripoSR (Tochilkin, Pankratz, Liu, Huang, Letts, Li, Liang, Laforte, Jampani, Cao, 2024)", "Heliosoph (ONNX export from upstream PyTorch weights)"],
+      "hardware": { "minRamMb": 4096, "minVramMb": 4096, "preferred": "gpu" },
+      "sources": [{ "type": "huggingface", "repo": "Heliosoph/triposr-onnx", "revision": "74e81c9afeeb53a236a1ae75dfb09c7fc6d95e58", "include": ["triplane.onnx", "triplane.onnx_data", "nerf.onnx", "config.yaml"] }],
+      "installSql": "sql/triposr.sql",
+      "approxSizeMb": 3360
+    },
+    {
       "id": "glpn-nyu",
       "displayName": "GLPN-NYU (Lightweight Depth)",
       "description": "Global-Local Path Network for monocular depth from KAIST (2022). EfficientFormer encoder + custom decoder, ~52M params. Older than Depth Anything V2 but solid as a lightweight baseline — useful as an architectural-diversity row in a comparison demo (different backbone family from the DPT / Depth Anything DINOv2 lineage).",

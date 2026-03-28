@@ -10,8 +10,6 @@ public class SqlParserTests : ServiceTestBase
         return ((SelectQueryExpression)SqlParser.Parse(sql)).Statement;
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Simple SELECT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
     [Fact]
     public void SimpleSelectSingleColumn()
     {
@@ -2290,8 +2288,6 @@ public class SqlParserTests : ServiceTestBase
             Assert.IsType<IndexAccessExpression>(result.Columns[0].Expression);
         Assert.NotNull(access.Span);
     }
-
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ AT TIME ZONE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void AtTimeZone_ParsesColumnWithStringLiteral()
