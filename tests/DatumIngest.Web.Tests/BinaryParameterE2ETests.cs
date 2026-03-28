@@ -106,7 +106,7 @@ public sealed class BinaryParameterE2ETests : IDisposable
         await _service.ExecuteAsync(
             sql,
             maxRows: 1000,
-            trace: false,
+            trace: TraceOptions.Off,
             parameters,
             output,
             Json,

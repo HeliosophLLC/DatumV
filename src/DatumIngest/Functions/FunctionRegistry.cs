@@ -618,6 +618,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Uuid.UuidExtractVersionFunction>();
 
         // Image
+        registry.RegisterScalar<Scalar.Image.CreateImageRgbFunction>();
         registry.RegisterScalar<Scalar.Image.YoloxPreprocessFunction>();
         registry.RegisterScalar<Scalar.Image.YoloxPostprocessFunction>();
         registry.RegisterScalar<Scalar.Image.RtdetrPostprocessFunction>();
@@ -651,6 +652,11 @@ public sealed class FunctionRegistry
         // metric scale). Accessors mirror image_width/image_height for header fields.
         registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthPinholeFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthOrthographicFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PcEmptyFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PcFuseFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PcTransformFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PoseTranslateFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudToPlyFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudCountFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudWidthFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudHeightFunction>();

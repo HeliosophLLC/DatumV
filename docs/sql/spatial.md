@@ -155,6 +155,43 @@ camera origin. Absolute world-space scale is not preserved for the
 Image variant (`depth_map_to_image`'s per-image min-max normalization
 discards units before the constructor sees the depth).
 
+### Fold primitives
+
+Two seed/combine functions for accumulating clouds across rows — the
+canonical pair for a `SCAN` fold that grows one cloud from a stream of
+per-row inputs (e.g. unprojecting a depth model frame-by-frame and
+combining them into a single artifact).
+
+```sql
+SELECT SCAN world = pc_fuse(world, point_cloud_from_depth_orthographic(image, models.midas_small(image), 60))
+  INIT pc_empty()
+  OVER (ORDER BY idx)
+  AS world_t
+FROM frames
+```
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `pc_empty()` | `PointCloud` | Zero-point, position-only, unorganized cloud. The SCAN INIT seed for PointCloud accumulator folds — the first `pc_fuse` adopts the producer's coordinate frame. |
+| `pc_fuse(a, b)` | `PointCloud` | Concatenates two PointClouds (a.points ++ b.points), unioning bounding boxes. Output is always unorganized. Output carries color iff both inputs do; mixed (one with, one without) drops color rather than inventing it. Coordinate frames must agree, or one side must be `Unspecified`. No deduplication, no voxel-grid downsample. |
+| `pc_transform(pc, pose)` | `PointCloud` | Applies a 4×4 affine transformation matrix (`pose` is a 16-element row-major `Float32[]`) to every position; rows 0–2 hold rotation+translation, row 3 is ignored (no projective division). Translation lives in the 4th column of each row. Color/normals preserved verbatim; coordinate frame tag preserved; bbox recomputed exactly. |
+| `pose_translate(dx, dy, dz)` | `Float32[]` | Builds a 4×4 affine translation matrix as a 16-element row-major `Float32[]`. Equivalent to the literal `[1,0,0,dx, 0,1,0,dy, 0,0,1,dz, 0,0,0,1]::Float32[]`. |
+
+A typical per-frame layout — fold N depth-derived clouds into a shared
+world by shifting each frame's cloud by its frame index along Z:
+
+```sql
+SELECT SCAN world = pc_fuse(world, pc_transform(pc, pose_translate(0, 0, -idx * 0.1)))
+  INIT (pc_empty())
+  OVER (ORDER BY idx)
+  AS world_t
+FROM (
+    SELECT ROW_NUMBER() OVER (ORDER BY file_name) AS idx,
+           point_cloud_from_depth_orthographic(file, models.midas_small(file), 60) AS pc
+    FROM frames
+) t
+```
+
 ### Accessors
 
 | Function | Returns | Description |
@@ -167,6 +204,27 @@ discards units before the constructor sees the depth).
 | `point_cloud_bbox_min(pc)` | `Point3D` | Component-wise minimum corner of the axis-aligned bounding box. |
 | `point_cloud_bbox_max(pc)` | `Point3D` | Component-wise maximum corner of the axis-aligned bounding box. |
 | `point_cloud_depth(pc)` | `Image` | Reconstructs a grayscale-as-RGBA depth Image from an organized cloud (inverse of `point_cloud_from_depth_*`); throws for unorganized clouds. |
+
+### Exporters
+
+| Function | Format | Best for |
+|----------|--------|----------|
+| `point_cloud_to_ply(pc)` | Binary PLY (`.ply`) | Universal point-cloud interchange: MeshLab, CloudCompare, Open3D, PCL, Blender's PLY importer. Emits `binary_little_endian` with x/y/z floats and (when present) red/green/blue uchar per point; alpha is dropped. Always emits in OpenGL right-handed +Y-up frame; auto-converts from `CameraOpenCv` source clouds. |
+
+Returns `UInt8[]` so it composes with the `INTO 'file.ext'` clause the
+same way the mesh exporters do.
+
+```sql
+SELECT point_cloud_to_ply(world_t)
+FROM (
+    SELECT SCAN world = pc_fuse(world, point_cloud_from_depth_orthographic(image, models.midas_small(image), 60))
+      INIT pc_empty()
+      OVER (ORDER BY idx)
+      AS world_t
+    FROM frames
+)
+ORDER BY idx DESC LIMIT 1
+```
 
 ```sql
 -- Inspect a cloud's shape
