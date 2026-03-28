@@ -537,6 +537,18 @@
       "approxSizeMb": 400
     },
     {
+      "id": "depth-anything-v3-large",
+      "displayName": "Depth Anything V3 Large (Depth + Pose)",
+      "description": "Latest Depth Anything generation. Successor to V2 from a partially-new team — large DINOv2 backbone, ~1.4 GB total (external-data ONNX). Headline change: **Apache-2.0 across all variants including Large** (V2-Large was CC-BY-NC, kept it out of the catalog). Additionally produces **camera pose estimation** as a secondary output, not just depth — closer to a unified geometric-understanding model than a depth-only network. Should give visibly smoother surfaces than V2-Base on the surface-noise issues that show up in the depth+Poisson pipeline.",
+      "task": "depth-estimation",
+      "tags": ["depth", "depth-anything", "dinov2", "transformer", "pose-estimation"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": ["Haotong Lin, Sili Chen, Jun Hao Liew, Donny Y. Chen, Zhenyu Li, Guang Shi, Jiashi Feng, Bingyi Kang — Depth Anything V3", "onnx-community / Xenova (ONNX export)"],
+      "hardware": { "minRamMb": 2048, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/depth-anything-v3-large", "revision": "d72462fef85c16988145b33cb5f9a3488ce93a58", "include": ["onnx/model.onnx", "onnx/model.onnx_data", "config.json", "preprocessor_config.json"] }],
+      "approxSizeMb": 1400
+    },
+    {
       "id": "zoedepth-nyu-kitti",
       "displayName": "ZoeDepth (NYU+KITTI, Metric Depth)",
       "description": "**Metric** depth estimation — outputs real-world distances in meters, not just relative depth. DPT-Large backbone + dual metric heads (NYU indoor + KITTI outdoor calibration). Use when absolute scale matters: 3D point-cloud reconstruction at consistent scale across images, distance measurement, AR-style overlays. Heavier than the relative-depth models (~1.3 GB); for a smaller deployment footprint use the fp16 sibling entry.",

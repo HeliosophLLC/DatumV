@@ -114,29 +114,31 @@ public sealed class ArrayResize2DFunction : IFunction, IScalarFunction
                 $"dst_h and dst_w must be > 0; got dst_h={dstH}, dst_w={dstW}.");
         }
 
-        // Resolve source dims. ONNX depth outputs typically arrive as
-        // (1, h, w) — auto-squeeze the leading 1 so callers don't have to.
+        // Resolve source dims. ONNX depth outputs typically arrive with
+        // one or more leading 1-dims wrapping the (h, w) plane:
+        //   (h, w)               — rank 2, direct
+        //   (1, h, w)             — typical batch=1 export (DAv2, ZoeDepth)
+        //   (1, 1, h, w)          — multi-view-capable export with views=1
+        //                           (DAv3 large emits this shape)
+        //   (1, 1, …, 1, h, w)    — any depth of leading 1-dims is squeezed
+        // Anything where the leading dims aren't all 1 is ambiguous (we'd
+        // have to pick a slice) and gets rejected with a clear error.
         DataValue source = arrayArg.ToDataValue(frame.Source);
         int srcH, srcW;
         if (source.IsMultiDim)
         {
             ReadOnlySpan<int> shape = source.GetShape(frame.Source, frame.SidecarRegistry);
-            if (shape.Length == 2)
+            if (shape.Length >= 2 && AllLeadingOnes(shape))
             {
-                srcH = shape[0];
-                srcW = shape[1];
-            }
-            else if (shape.Length == 3 && shape[0] == 1)
-            {
-                srcH = shape[1];
-                srcW = shape[2];
+                srcH = shape[^2];
+                srcW = shape[^1];
             }
             else
             {
                 throw new FunctionArgumentException(Name,
-                    $"input array must be 2-D (h, w) or 3-D (1, h, w); got shape "
-                    + $"[{string.Join(", ", shape.ToArray())}]. Use array_get or "
-                    + "an explicit reshape to extract the 2-D slice first.");
+                    $"input array must be 2-D (h, w) or have only 1-dims before the "
+                    + $"trailing (h, w); got shape [{string.Join(", ", shape.ToArray())}]. "
+                    + "Use array_get or an explicit reshape to extract the 2-D slice first.");
             }
         }
         else
@@ -169,6 +171,21 @@ public sealed class ArrayResize2DFunction : IFunction, IScalarFunction
         float[] dst = BilinearResample(srcElements, srcH, srcW, dstH, dstW);
         return new ValueTask<ValueRef>(
             ValueRef.FromPrimitiveMultiDimArray(dst, [dstH, dstW], DataKind.Float32));
+    }
+
+    /// <summary>
+    /// True when every dimension except the trailing two is 1 — i.e. the
+    /// shape is <c>(1, ..., 1, h, w)</c> for some non-negative number of
+    /// leading 1-dims. Used to auto-squeeze multi-view ONNX exports that
+    /// wrap a 2-D plane in batch / view / channel-1 axes.
+    /// </summary>
+    private static bool AllLeadingOnes(ReadOnlySpan<int> shape)
+    {
+        for (int i = 0; i < shape.Length - 2; i++)
+        {
+            if (shape[i] != 1) return false;
+        }
+        return true;
     }
 
     /// <summary>

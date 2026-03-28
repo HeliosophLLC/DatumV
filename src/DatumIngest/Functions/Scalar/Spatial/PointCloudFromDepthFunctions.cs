@@ -395,22 +395,22 @@ internal static class PointCloudFromDepthOps
         int dh, dw;
         if (depthValue.IsMultiDim)
         {
+            // Accept any rank where leading dims are all 1 — (h, w),
+            // (1, h, w), (1, 1, h, w), etc. — so multi-view-capable
+            // exports (DAv3 emits [batch, views, h, w]) flow through
+            // without forcing the caller to squeeze externally.
             ReadOnlySpan<int> shape = depthValue.GetShape(frame.Source, frame.SidecarRegistry);
-            if (shape.Length == 2)
+            if (shape.Length >= 2 && AllLeadingOnes(shape))
             {
-                dh = shape[0];
-                dw = shape[1];
-            }
-            else if (shape.Length == 3 && shape[0] == 1)
-            {
-                dh = shape[1];
-                dw = shape[2];
+                dh = shape[^2];
+                dw = shape[^1];
             }
             else
             {
                 throw new FunctionArgumentException(
                     functionName,
-                    "depth array must be 2-D (h, w) or 3-D (1, h, w); got shape "
+                    "depth array must be 2-D (h, w) or have only 1-dims before the "
+                    + "trailing (h, w); got shape "
                     + $"[{string.Join(", ", shape.ToArray())}].");
             }
         }
@@ -550,5 +550,20 @@ internal static class PointCloudFromDepthOps
         header.Write(blobSpan[..PointCloudHeader.SizeBytes]);
 
         return ValueRef.FromPointCloud(blob);
+    }
+
+    /// <summary>
+    /// True when every dim except the trailing two is 1 — supports
+    /// arbitrary depth of leading 1-dims (batch, view, channel-1) so the
+    /// shaped-depth path accepts every export shape we've seen in the
+    /// wild without per-model special-casing.
+    /// </summary>
+    private static bool AllLeadingOnes(ReadOnlySpan<int> shape)
+    {
+        for (int i = 0; i < shape.Length - 2; i++)
+        {
+            if (shape[i] != 1) return false;
+        }
+        return true;
     }
 }
