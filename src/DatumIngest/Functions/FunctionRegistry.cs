@@ -694,6 +694,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Spatial.PcFuseFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcTransformFunction>();
         registry.RegisterScalar<Scalar.Spatial.PoseTranslateFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PoseFromRgbdFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcFilterDepthFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcVoxelDownsampleFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudToPlyFunction>();

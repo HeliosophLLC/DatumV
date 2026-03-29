@@ -71,6 +71,15 @@
     -->
     <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" Version="0.13.2" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="0.22.0" />
+    <!--
+      OpenCvSharp4 supplies ORB feature detection, descriptor matching, and
+      Mat-based SVD used by pose_from_rgbd to recover camera pose between
+      consecutive RGB-D frames. Native deps ship in the .runtime.win
+      sub-package (Windows-only for now; add the matching linux/osx
+      runtime packages if the target list grows).
+    -->
+    <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260302" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260302" />
     <PackageReference Include="PureHDF" Version="2.1.1" />
     <PackageReference Include="Parquet.Net" Version="5.5.0" />
     <PackageReference Include="Sdcb.FFmpeg" Version="7.0.0" />
