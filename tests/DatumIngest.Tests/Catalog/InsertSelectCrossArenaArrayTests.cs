@@ -107,21 +107,38 @@ public sealed class InsertSelectCrossArenaArrayTests : ServiceTestBase, IAsyncLi
         Assert.Equal(6f, rows[0]["bottom_right"].AsFloat32());
     }
 
-    // ───────────────────── Reference-element arrays: rejected ─────────────────────
+    // ───────────────────── Reference-element arrays: String + Image ─────────────────────
 
     [Fact]
-    public void StringArray_CrossArenaCopy_RejectedWithClearMessage()
+    public async Task StringArray_CrossArenaCopy_PreservesElements()
     {
         using TableCatalog catalog = NewFileCatalog();
         catalog.Plan("CREATE TABLE source (s Array<String>)");
         catalog.Plan("CREATE TABLE sink (s Array<String>)");
-        catalog.Plan("INSERT INTO source VALUES (['a', 'b', 'c'])");
+        catalog.Plan("INSERT INTO source VALUES (['alpha', 'beta', 'gamma'])");
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => catalog.Plan("INSERT INTO sink SELECT s FROM source"));
-        Assert.Contains("cross-arena", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("String", ex.Message);
+        // Cross-arena copy via existing AsStringArray + FromStringArray pair —
+        // managed string[] intermediate is arena-independent, so the new slot
+        // block + UTF-8 bodies land in the target arena with no source-arena
+        // references surviving.
+        catalog.Plan("INSERT INTO sink SELECT s FROM source");
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT cardinality(s) AS n, s[0] AS first, s[2] AS last FROM sink", catalog);
+
+        Assert.Single(rows);
+        Assert.Equal(3, rows[0]["n"].AsInt32());
+        Assert.Equal("alpha", rows[0]["first"].AsString());
+        Assert.Equal("gamma", rows[0]["last"].AsString());
     }
+
+    // Array<Struct> cross-arena copy is rejected in code (per-field rebinding
+    // not implemented), but the rejection isn't directly testable through SQL
+    // today — struct-typed column DDL with inline field declarations doesn't
+    // parse. The rejection branch in InsertExecutor.CopyTypedArrayToTargetArena
+    // is reachable only via programmatic catalog setup, which is out of scope
+    // for these tests. When struct DDL syntax lands (or per-field rebind
+    // closes the gap), add the corresponding test here.
 
     // ───────────────────── Same-arena pass-through (regression) ─────────────────────
 

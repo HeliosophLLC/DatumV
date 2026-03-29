@@ -572,18 +572,30 @@ internal static class InsertExecutor
     }
 
     /// <summary>
-    /// Copies a typed-array <see cref="DataValue"/>'s payload bytes from
+    /// Copies a typed-array <see cref="DataValue"/>'s payload from
     /// <paramref name="sourceStore"/> (or the source's sidecar) into
-    /// <paramref name="targetArena"/>, returning a new <c>DataValue</c> with
-    /// target-arena offsets and the source's flags + <c>_charCount</c>
-    /// preserved (so multi-dim status and ndim survive the copy).
-    /// Fixed-width primitive element kinds are byte-copyable; reference-
-    /// element kinds (<c>String</c>, <c>Struct</c>, <c>Image</c>, <c>Audio</c>,
-    /// <c>Video</c>, <c>Json</c>, <c>PointCloud</c>) carry <c>ArraySlot</c>
-    /// blocks whose 64-bit slot offsets point into the source store; a raw
-    /// byte copy would leave those offsets dangling, so we reject them with
-    /// a clear pointer at the per-element rewrite path that has not yet
-    /// landed.
+    /// <paramref name="targetArena"/>. Two paths:
+    /// <list type="bullet">
+    ///   <item>Fixed-width primitive element kinds — flat byte payloads with
+    ///   no per-element indirection. Copy via <c>RawArrayBytes</c> + a single
+    ///   <c>StoreBytes</c>; preserves multi-dim status and ndim because the
+    ///   shape prefix is part of the byte payload.</item>
+    ///   <item>Reference-element kinds (<c>String</c>, <c>Image</c>,
+    ///   <c>Struct</c>) — slot-block layout where per-element 64-bit offsets
+    ///   point at element bodies stored elsewhere. A raw byte copy of the
+    ///   slot block would leave those offsets dangling, so we route through
+    ///   the existing per-kind <c>As&lt;Kind&gt;Array</c> ↔
+    ///   <c>From&lt;Kind&gt;Array</c> round-trip primitives which read each
+    ///   element via its slot and re-write the array (slot block + bodies)
+    ///   in the target arena.</item>
+    /// </list>
+    /// <para>
+    /// <c>Audio</c>/<c>Video</c>/<c>Json</c>/<c>PointCloud</c> arrays are
+    /// rejected today — their <c>As&lt;Kind&gt;Array</c> /
+    /// <c>From&lt;Kind&gt;Array</c> pairs don't exist yet. Adding them is
+    /// mechanical (mirror the Image pair); the rejection message points at
+    /// the gap.
+    /// </para>
     /// </summary>
     private static DataValue CopyTypedArrayToTargetArena(
         DataValue source,
@@ -592,21 +604,51 @@ internal static class InsertExecutor
         Arena targetArena,
         string columnName)
     {
-        if (IsReferenceElementArrayKind(source.Kind))
+        // Reference-element arrays — re-emit via the existing managed-intermediate
+        // round-trip primitives. AsStringArray / AsImageArray return managed
+        // string[] / byte[][] respectively, which are arena-independent; the
+        // matching FromXArray writes new slot blocks + per-element bodies in
+        // the target arena. No source-arena references survive into the result.
+        switch (source.Kind)
         {
-            throw new InvalidOperationException(
-                $"INSERT for column '{columnName}': cross-arena copy of Array<{source.Kind}> " +
-                "is not supported. Reference-element arrays (String, Struct, Image, Audio, " +
-                "Video, Json, PointCloud) carry per-element slot offsets pointing into the " +
-                "source store; a byte copy would leave those offsets dangling. Use a VALUES " +
-                "form for these columns until the per-element slot-rewrite path lands.");
+            case DataKind.String:
+                return DataValue.FromStringArray(
+                    source.AsStringArray(sourceStore, sidecarRegistry),
+                    targetArena);
+            case DataKind.Image:
+                return DataValue.FromImageArray(
+                    source.AsImageArray(sourceStore, sidecarRegistry),
+                    targetArena);
+            case DataKind.Struct:
+                // FromStructArray serializes element fields via AppendDataValues
+                // (MemoryMarshal.AsBytes — raw struct bytes), so source-arena
+                // references inside non-inline fields would survive into the
+                // target. Per-field recursive rebind is the right fix; not yet
+                // implemented because no current workload depends on cross-
+                // arena Array<Struct> copy.
+                throw new InvalidOperationException(
+                    $"INSERT for column '{columnName}': cross-arena copy of Array<Struct> " +
+                    "is not yet supported. Struct elements may contain arena-backed " +
+                    "field DataValues (Strings, byte arrays, nested structs) whose " +
+                    "offsets would survive a slot rebuild and dangle into the source " +
+                    "store. Per-field recursive rebind is the right fix; until then, " +
+                    "use a VALUES form for Array<Struct> columns.");
+            case DataKind.Audio:
+            case DataKind.Video:
+            case DataKind.Json:
+            case DataKind.PointCloud:
+                throw new InvalidOperationException(
+                    $"INSERT for column '{columnName}': cross-arena copy of Array<{source.Kind}> " +
+                    $"is not yet supported. The per-kind round-trip primitives " +
+                    $"(As{source.Kind}Array / From{source.Kind}Array) need to be added — " +
+                    "mirror the Image pair in DataValue.cs. Until then, use a VALUES form " +
+                    "for these columns.");
         }
 
-        // Read raw payload bytes — RawArrayBytes returns the prefix+elements
-        // span for multi-dim sources and the element-only span for flat 1-D,
-        // uniformly across inline / arena / sidecar storage tiers.
+        // Fixed-width primitive element kinds (UInt8, Int8/16/32/64, Float16/32/64,
+        // Decimal, Boolean, Date, Time, Duration, Uuid, Point2D/3D, …). The payload
+        // is a flat byte run (with an optional multi-dim shape prefix) — copy as bytes.
         ReadOnlySpan<byte> raw = source.RawArrayBytes(sourceStore, sidecarRegistry);
-
         if (source.IsMultiDim)
         {
             return DataValue.FromArenaMultiDimRawBytes(raw, source.Kind, source.Ndim, targetArena);
@@ -617,9 +659,8 @@ internal static class InsertExecutor
     /// <summary>
     /// True when <paramref name="kind"/> is a reference-element array kind —
     /// <c>String</c>, <c>Struct</c>, or any blob kind. These arrays use the
-    /// 16-byte <c>ArraySlot</c> per-element layout, so a raw byte copy
-    /// across arenas would leave each slot's offset pointing into the
-    /// source store.
+    /// 16-byte <c>ArraySlot</c> per-element layout. Fixed-width primitive
+    /// arrays are byte-copyable; these need per-element re-emission.
     /// </summary>
     private static bool IsReferenceElementArrayKind(DataKind kind) =>
         kind is DataKind.String
