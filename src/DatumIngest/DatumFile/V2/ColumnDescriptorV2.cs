@@ -89,7 +89,8 @@ public sealed record ColumnDescriptorV2(
                 or DataKind.Float16 or DataKind.Float32 or DataKind.Float64
                 or DataKind.Decimal
                 or DataKind.Date or DataKind.Time
-                or DataKind.Duration or DataKind.DateTime
+                or DataKind.Duration
+                or DataKind.Timestamp or DataKind.TimestampTz
                 or DataKind.Uuid
                 or DataKind.Point2D or DataKind.Point3D
                 => EncoderKind.FixedWidth,
@@ -124,8 +125,8 @@ public sealed record ColumnDescriptorV2(
         DataKind.Int16 or DataKind.UInt16 or DataKind.Float16 => 2,
         DataKind.Int32 or DataKind.UInt32 or DataKind.Float32 or DataKind.Date => 4,
         DataKind.Int64 or DataKind.UInt64 or DataKind.Float64 or DataKind.Time or DataKind.Duration => 8,
+        DataKind.Timestamp or DataKind.TimestampTz => 8, // int64 ticks
         DataKind.Point2D => 8,  // 2 × float32
-        DataKind.DateTime => 10, // int64 ticks + int16 offset minutes
         DataKind.Point3D => 12, // 3 × float32
         DataKind.Uuid or DataKind.Decimal or DataKind.UInt128 or DataKind.Int128 => 16,
         _ => throw new InvalidOperationException(

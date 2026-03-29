@@ -1430,9 +1430,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="target">Where the resulting array's payload bytes land.</param>
     /// <param name="registry">Resolves sidecar-backed input element payloads.</param>
     /// <exception cref="NotSupportedException">
-    /// <paramref name="elementKind"/> is <see cref="DataKind.DateTime"/> (offset
-    /// loss in the fixed-width array convention) or has no per-element
-    /// representation.
+    /// <paramref name="elementKind"/> has no per-element representation.
     /// </exception>
     /// <exception cref="InvalidOperationException">An element is null (per-element nulls inside arrays not yet supported).</exception>
     public static DataValue FromTypedArray(
@@ -1447,10 +1445,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.String => BuildStringArrayFromDataValues(elements, source, target, registry),
             DataKind.Image => BuildImageArrayFromDataValues(elements, source, target, registry),
             DataKind.Struct => BuildStructArrayFromDataValues(elements, source, target, registry),
-            DataKind.DateTime => throw new NotSupportedException(
-                "Array<DateTime> is not supported via FromTypedArray. The fixed-width array convention "
-                + "drops the timezone offset; aggregate into Struct{ticks: Int64, offset_minutes: Int32} "
-                + "until an offset-preserving layout is settled."),
             _ => BuildFixedWidthArrayFromDataValues(elementKind, elements, target),
         };
     }
@@ -2290,20 +2284,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <c>ValueRef.BuildFixedWidthArray</c>) packing primitives into typed arrays.
     /// Throws for kinds without a fixed element size.
     /// </summary>
-    /// <remarks>
-    /// Note that <see cref="DataKind.DateTime"/> is reported as 8 bytes — the
-    /// in-memory <see cref="DataValue"/> representation is 12 bytes (8-byte
-    /// ticks + 4-byte UTC offset minutes), but the array-element convention
-    /// keeps only the ticks, dropping the offset. Callers wanting to preserve
-    /// offset should array-aggregate into a struct of (ticks, offset).
-    /// </remarks>
     internal static int ScalarByteSize(DataKind kind) => kind switch
     {
         DataKind.UInt8 or DataKind.Int8 or DataKind.Boolean => 1,
         DataKind.UInt16 or DataKind.Int16 or DataKind.Float16 => 2,
         DataKind.UInt32 or DataKind.Int32 or DataKind.Float32 or DataKind.Date => 4,
         DataKind.UInt64 or DataKind.Int64 or DataKind.Float64
-            or DataKind.DateTime or DataKind.Time or DataKind.Duration
+            or DataKind.Timestamp or DataKind.TimestampTz
+            or DataKind.Time or DataKind.Duration
             or DataKind.Point2D => 8,
         DataKind.Point3D => 12,
         DataKind.Uuid or DataKind.Decimal or DataKind.UInt128 or DataKind.Int128 => 16,
@@ -2321,9 +2309,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <remarks>
     /// Reads directly from the union payload words <c>_p0..._p3</c>. Does
     /// not check <see cref="IsNull"/> or storage flags — callers must pass
-    /// non-null inline scalar values. For <see cref="DataKind.DateTime"/>
-    /// this writes the ticks only; the offset (held in <c>_p2</c>) is
-    /// dropped to match the array-element convention.
+    /// non-null inline scalar values.
     /// </remarks>
     internal void CopyInlineScalarBytes(Span<byte> dest)
     {
@@ -2442,14 +2428,28 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromDate(DateOnly value) =>
         new(DataKind.Date, flags: 0, p0: value.DayNumber);
 
-    /// <summary>Creates a value from a date and time with UTC offset.</summary>
-    public static DataValue FromDateTime(DateTimeOffset value)
+    /// <summary>
+    /// Creates a <see cref="DataKind.TimestampTz"/> value (PG <c>timestamptz</c>).
+    /// The input offset is normalised to UTC at construction and discarded;
+    /// two values for the same instant compare and hash equal regardless of
+    /// the input offset.
+    /// </summary>
+    public static DataValue FromTimestampTz(DateTimeOffset value)
     {
-        long ticks = value.Ticks;
-        return new(DataKind.DateTime, flags: 0,
-            p0: (int)ticks, p1: (int)(ticks >> 32),
-            p2: (int)(value.Offset.Ticks / TimeSpan.TicksPerMinute));
+        long utcTicks = value.UtcTicks;
+        return new(DataKind.TimestampTz, flags: 0,
+            p0: (int)utcTicks, p1: (int)(utcTicks >> 32));
     }
+
+    /// <summary>
+    /// Creates a <see cref="DataKind.Timestamp"/> value (PG <c>timestamp</c>):
+    /// naive wall-clock ticks with no time-zone information. The input's
+    /// <see cref="DateTimeKind"/> is ignored — only <see cref="DateTime.Ticks"/>
+    /// is stored.
+    /// </summary>
+    public static DataValue FromTimestamp(DateTime value) =>
+        new(DataKind.Timestamp, flags: 0,
+            p0: (int)value.Ticks, p1: (int)(value.Ticks >> 32));
 
     /// <summary>
     /// Computes XxHash64 over the UTF-8 encoding of a char span and splits into two int32 halves.
@@ -3100,11 +3100,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     // ─────────────────────── Date/time widening ───────────────────────────────
 
     /// <summary>
-    /// Converts a <see cref="DataKind.Date"/> or <see cref="DataKind.DateTime"/>
-    /// value to <see cref="DateTimeOffset"/>. Date values become midnight UTC.
+    /// Converts a <see cref="DataKind.Date"/>, <see cref="DataKind.Timestamp"/>,
+    /// or <see cref="DataKind.TimestampTz"/> value to <see cref="DateTimeOffset"/>.
+    /// Date values become midnight UTC; Timestamp (naive) is reinterpreted as
+    /// UTC ticks (PG-equivalent of casting timestamp → timestamptz with the
+    /// session TZ pinned to UTC).
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// The value is null or its kind is neither Date nor DateTime.
+    /// The value is null or its kind is none of Date, Timestamp, TimestampTz.
     /// </exception>
     public DateTimeOffset ToDateTimeOffset()
     {
@@ -3112,9 +3115,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         return _kind switch
         {
             DataKind.Date => new DateTimeOffset(AsDate().ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
-            DataKind.DateTime => AsDateTime(),
+            DataKind.TimestampTz => AsTimestampTz(),
+            // PG: timestamp (without tz) → assume UTC when forced into a DateTimeOffset.
+            // The naive ticks are reinterpreted as UTC; callers that need a different
+            // session-tz interpretation must cast explicitly.
+            DataKind.Timestamp => new DateTimeOffset(AsTimestamp().Ticks, TimeSpan.Zero),
             _ => throw new InvalidOperationException(
-                $"Cannot convert DataKind.{_kind} to DateTimeOffset. Expected Date or DateTime."),
+                $"Cannot convert DataKind.{_kind} to DateTimeOffset. Expected Date, Timestamp, or TimestampTz."),
         };
     }
 
@@ -3167,7 +3174,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Decimal   => AsDecimal(),
             DataKind.Boolean   => AsBoolean(),
             DataKind.Date      => AsDate(),
-            DataKind.DateTime  => AsDateTime(),
+            DataKind.Timestamp   => AsTimestamp(),
+            DataKind.TimestampTz => AsTimestampTz(),
             DataKind.Time      => AsTime(),
             DataKind.Duration  => AsDuration(),
             DataKind.Uuid      => AsUuid(),
@@ -3229,7 +3237,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Float16  => AsFloat16().ToString("G"),
             DataKind.Boolean  => AsBoolean() ? "true" : "false",
             DataKind.Date     => AsDate().ToString("yyyy-MM-dd"),
-            DataKind.DateTime => AsDateTime().ToString("O"),
+            DataKind.Timestamp   => AsTimestamp().ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF", System.Globalization.CultureInfo.InvariantCulture),
+            DataKind.TimestampTz => AsTimestampTz().ToString("O"),
             DataKind.Time     => AsTime().ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => AsDuration().ToString("c"),
             DataKind.Uuid     => AsUuid().ToString("D"),
@@ -3723,12 +3732,28 @@ public readonly struct DataValue : IEquatable<DataValue>
         return DateOnly.FromDayNumber(_p0);
     }
 
-    /// <summary>Returns the date and time payload with UTC offset.</summary>
+    /// <summary>
+    /// Returns the UTC timestamp payload (PG <c>timestamptz</c>). The returned
+    /// <see cref="DateTimeOffset"/> always carries an offset of
+    /// <see cref="TimeSpan.Zero"/> — input offsets were discarded at
+    /// construction (see <see cref="FromTimestampTz"/>).
+    /// </summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    public DateTimeOffset AsDateTime()
+    public DateTimeOffset AsTimestampTz()
     {
-        ThrowIfNullOrWrongKind(DataKind.DateTime);
-        return new DateTimeOffset(ReadLong(), new TimeSpan((long)_p2 * TimeSpan.TicksPerMinute));
+        ThrowIfNullOrWrongKind(DataKind.TimestampTz);
+        return new DateTimeOffset(ReadLong(), TimeSpan.Zero);
+    }
+
+    /// <summary>
+    /// Returns the naive timestamp payload (PG <c>timestamp</c>) as a
+    /// <see cref="DateTime"/> with <see cref="DateTimeKind.Unspecified"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public DateTime AsTimestamp()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Timestamp);
+        return new DateTime(ReadLong(), DateTimeKind.Unspecified);
     }
 
     /// <summary>Returns the UUID payload.</summary>
@@ -3941,8 +3966,9 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => CompareStrings(in this, in other),
             DataKind.Uuid
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3,
-            DataKind.DateTime
-                => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2,
+            // Timestamp / TimestampTz are 8-byte ticks; _p2 is unused.
+            DataKind.Timestamp or DataKind.TimestampTz
+                => _p0 == other._p0 && _p1 == other._p1,
             // For reference types without a store, use offset-equality: same (_p0,_p1) in the
             // same store means identical content. Different offsets → unknown, return false.
             DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud or DataKind.Mesh
@@ -4024,8 +4050,8 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => RawContentHash != 0
                     ? HashCode.Combine(_kind, RawContentHash)
                     : ComputeStringHashCode(),
-            DataKind.DateTime
-                => HashCode.Combine(_kind, _p0, _p1, _p2),
+            DataKind.Timestamp or DataKind.TimestampTz
+                => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Uuid
                 => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
             // Offset-based hashing: consistent with offset-equality in Equals.
@@ -4209,7 +4235,8 @@ public readonly struct DataValue : IEquatable<DataValue>
                 ? System.Text.Encoding.UTF8.GetString(InlineUtf8Span)
                 : $"String[arena@{BackedOffset}+{BackedLength}]",
             DataKind.Date => DateOnly.FromDayNumber(_p0).ToString("yyyy-MM-dd"),
-            DataKind.DateTime => AsDateTime().ToString("O"),
+            DataKind.Timestamp => AsTimestamp().ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF", System.Globalization.CultureInfo.InvariantCulture),
+            DataKind.TimestampTz => AsTimestampTz().ToString("O"),
             DataKind.Uuid => AsUuid().ToString("D"),
             DataKind.Boolean => _p0 != 0 ? "true" : "false",
             DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),

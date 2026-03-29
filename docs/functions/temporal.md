@@ -15,7 +15,7 @@ Functions for date, time, duration, and timestamp construction, extraction, form
 
 `date_part(part, val)` -> Float32 | QU: 1
 
-Extract a named component from a Date, DateTime, or Time as Float32.
+Extract a named component from a Date, Timestamp, TimestampTz, or Time as Float32.
 
 ```sql
 SELECT date_part('year', date_col) AS year,
@@ -110,7 +110,7 @@ Backward-compatible aliases (DatumIngest extensions):
 
 ## Date/Time Extraction
 
-Shorthand functions for extracting individual components from Date, DateTime, or Time values. Each returns a Float32.
+Shorthand functions for extracting individual components from Date, Timestamp, TimestampTz, or Time values. Each returns a Float32.
 
 ### year
 
@@ -134,19 +134,19 @@ Extract day of month (1-31).
 
 `hour(date)` -> Float32 | QU: 1
 
-Extract hour (0-23). Accepts Date, DateTime, or Time. Returns 0 for Date inputs.
+Extract hour (0-23). Accepts Date, Timestamp, TimestampTz, or Time. Returns 0 for Date inputs.
 
 ### minute
 
 `minute(date)` -> Float32 | QU: 1
 
-Extract minute (0-59). Accepts Date, DateTime, or Time. Returns 0 for Date inputs.
+Extract minute (0-59). Accepts Date, Timestamp, TimestampTz, or Time. Returns 0 for Date inputs.
 
 ### second
 
 `second(date)` -> Float32 | QU: 1
 
-Extract second (0-59). Accepts Date, DateTime, or Time. Returns 0 for Date inputs.
+Extract second (0-59). Accepts Date, Timestamp, TimestampTz, or Time. Returns 0 for Date inputs.
 
 ### quarter
 
@@ -194,7 +194,7 @@ Current UTC time-of-day. Optional precision `p` truncates to that many fractiona
 
 ### CURRENT_TIMESTAMP
 
-`CURRENT_TIMESTAMP` or `CURRENT_TIMESTAMP(p)` -> DateTime | QU: 1
+`CURRENT_TIMESTAMP` or `CURRENT_TIMESTAMP(p)` -> TimestampTz | QU: 1
 
 Current UTC timestamp. Optional precision `p` truncates to that many fractional-second digits.
 
@@ -206,7 +206,7 @@ Same as `CURRENT_TIME` (no session timezone).
 
 ### LOCALTIMESTAMP
 
-`LOCALTIMESTAMP` or `LOCALTIMESTAMP(p)` -> DateTime | QU: 1
+`LOCALTIMESTAMP` or `LOCALTIMESTAMP(p)` -> TimestampTz | QU: 1
 
 Same as `CURRENT_TIMESTAMP`.
 
@@ -227,25 +227,25 @@ SELECT CURRENT_TIMESTAMP(0) AS ts_no_fractional
 
 ### now
 
-`now()` -> DateTime | QU: 1
+`now()` -> TimestampTz | QU: 1
 
-Current UTC timestamp as DateTime. Transaction-stable (= `CURRENT_TIMESTAMP`).
+Current UTC timestamp as TimestampTz. Transaction-stable (= `CURRENT_TIMESTAMP`).
 
 ### transaction_timestamp
 
-`transaction_timestamp()` -> DateTime | QU: 1
+`transaction_timestamp()` -> TimestampTz | QU: 1
 
 Same as `now()`. Named to clearly reflect what it returns.
 
 ### statement_timestamp
 
-`statement_timestamp()` -> DateTime | QU: 1
+`statement_timestamp()` -> TimestampTz | QU: 1
 
 Start time of the current statement. Same as `transaction_timestamp()` for the first statement in a batch; may differ for subsequent statements.
 
 ### clock_timestamp
 
-`clock_timestamp()` -> DateTime | QU: 1
+`clock_timestamp()` -> TimestampTz | QU: 1
 
 Actual wall-clock time. Changes even within a single statement -- NOT batch-stable.
 
@@ -267,9 +267,9 @@ SELECT make_date(year_col, month_col, 1) AS first_of_month FROM data
 
 ### make_timestamp
 
-`make_timestamp(y, m, d, h, min, s)` -> DateTime | QU: 1
+`make_timestamp(y, m, d, h, min, s)` -> TimestampTz | QU: 1
 
-Construct a DateTime (UTC) from components. Year, month, day, hour, minute are integers; second is numeric (supports fractional seconds).
+Construct a TimestampTz (UTC) from components. Year, month, day, hour, minute are integers; second is numeric (supports fractional seconds).
 
 ### date_diff
 
@@ -283,7 +283,7 @@ SELECT date_diff('day', hire_date, now()) AS tenure_days FROM employees
 
 ### date_add
 
-`date_add(part, amount, date)` -> Date/DateTime | QU: 1
+`date_add(part, amount, date)` -> Date/Timestamp/TimestampTz | QU: 1
 
 Add amount of the specified part to a date. Preserves input kind.
 
@@ -293,7 +293,7 @@ SELECT date_add('month', 3, start_date) AS extended FROM contracts
 
 ### date_trunc
 
-`date_trunc(part, date)` -> Date/DateTime | QU: 1
+`date_trunc(part, date)` -> Date/Timestamp/TimestampTz | QU: 1
 
 Truncate to the specified precision. Week uses ISO 8601 (Monday start). Preserves input kind.
 
@@ -304,7 +304,7 @@ SELECT date_trunc('month', sale_date) AS period, SUM(amount) FROM sales GROUP BY
 
 ### date_bucket
 
-`date_bucket(part, width, date [, origin])` -> Date/DateTime | QU: 1
+`date_bucket(part, width, date [, origin])` -> Date/Timestamp/TimestampTz | QU: 1
 
 Bucket into fixed-width intervals. Default origin is 2000-01-01. Preserves input kind.
 
@@ -315,7 +315,7 @@ SELECT date_bucket('minute', 15, event_time) AS bucket, COUNT(*) FROM logs GROUP
 
 ### date_bin
 
-`date_bin(interval, source, origin)` -> Date/DateTime | QU: 1
+`date_bin(interval, source, origin)` -> Date/Timestamp/TimestampTz | QU: 1
 
 PostgreSQL-compatible binning. Interval is a string like `'15 minutes'` or `'1 hour'`. Preserves input kind.
 
@@ -348,7 +348,7 @@ SELECT current_time() AS now_time
 
 `date_span(start, end)` -> Duration | QU: 1
 
-Elapsed Duration between two Date or DateTime values.
+Elapsed Duration between two Date, Timestamp, or TimestampTz values.
 
 ```sql
 SELECT date_span(start_date, end_date) AS elapsed FROM projects
@@ -357,9 +357,9 @@ SELECT duration_days(date_span(hire_date, now())) AS tenure FROM employees
 
 ### date_offset
 
-`date_offset(date, duration)` -> DateTime/Time | QU: 1
+`date_offset(date, duration)` -> TimestampTz/Time | QU: 1
 
-Add a Duration to a Date, DateTime, or Time. Returns DateTime for Date/DateTime, Time for Time.
+Add a Duration to a Date, Timestamp, TimestampTz, or Time. Returns TimestampTz for Date/TimestampTz, Timestamp for Timestamp, Time for Time.
 
 ```sql
 SELECT date_offset(ship_date, make_duration(3, 0, 0, 0)) AS delivery_date FROM orders
@@ -445,7 +445,7 @@ SELECT duration_days(date_span(hire_date, now())) AS tenure FROM employees
 
 `strftime(date, format)` -> String | QU: 1
 
-Format a Date or DateTime as a String using .NET format strings (e.g., `"yyyy-MM-dd"`).
+Format a Date, Timestamp, or TimestampTz as a String using .NET format strings (e.g., `"yyyy-MM-dd"`).
 
 ```sql
 SELECT strftime(created_at, 'yyyy-MM-dd HH:mm') AS formatted FROM records
@@ -455,7 +455,7 @@ SELECT strftime(created_at, 'yyyy-MM-dd HH:mm') AS formatted FROM records
 
 `is_date(expr)` -> Float32 | QU: 1
 
-Returns 1 if the value is or can be parsed as a date, 0 otherwise. Accepts String, Date, DateTime.
+Returns 1 if the value is or can be parsed as a date, 0 otherwise. Accepts String, Date, Timestamp, TimestampTz.
 
 ```sql
 -- Data quality checks

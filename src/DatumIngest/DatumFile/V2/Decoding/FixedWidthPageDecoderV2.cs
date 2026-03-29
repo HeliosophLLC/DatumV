@@ -90,7 +90,10 @@ internal sealed class FixedWidthPageDecoderV2 : IPageDecoderV2
             DataKind.Date => DataValue.FromDate(DateOnly.FromDayNumber(BinaryPrimitives.ReadInt32LittleEndian(slot))),
             DataKind.Time => DataValue.FromTime(new TimeOnly(BinaryPrimitives.ReadInt64LittleEndian(slot))),
             DataKind.Duration => DataValue.FromDuration(new TimeSpan(BinaryPrimitives.ReadInt64LittleEndian(slot))),
-            DataKind.DateTime => DecodeDateTime(slot),
+            DataKind.TimestampTz => DataValue.FromTimestampTz(
+                new DateTimeOffset(BinaryPrimitives.ReadInt64LittleEndian(slot), TimeSpan.Zero)),
+            DataKind.Timestamp => DataValue.FromTimestamp(
+                new DateTime(BinaryPrimitives.ReadInt64LittleEndian(slot), DateTimeKind.Unspecified)),
             DataKind.Uuid => DataValue.FromUuid(new Guid(slot[..16])),
             DataKind.Point2D => DataValue.FromPoint2D(
                 BinaryPrimitives.ReadSingleLittleEndian(slot[..4]),
@@ -104,10 +107,4 @@ internal sealed class FixedWidthPageDecoderV2 : IPageDecoderV2
         };
     }
 
-    private static DataValue DecodeDateTime(ReadOnlySpan<byte> slot)
-    {
-        long ticks = BinaryPrimitives.ReadInt64LittleEndian(slot[..8]);
-        short offsetMinutes = BinaryPrimitives.ReadInt16LittleEndian(slot.Slice(8, 2));
-        return DataValue.FromDateTime(new DateTimeOffset(ticks, new TimeSpan(offsetMinutes * TimeSpan.TicksPerMinute)));
-    }
 }

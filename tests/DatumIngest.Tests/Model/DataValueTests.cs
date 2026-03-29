@@ -160,13 +160,13 @@ public class DataValueTests : ServiceTestBase
     }
 
     [Fact]
-    public void DateTimeValueStoresDateTime()
+    public void TimestampTzValueStoresUtcTicks()
     {
         DateTimeOffset dateTime = new(2026, 3, 15, 10, 30, 0, TimeSpan.Zero);
-        DataValue value = DataValue.FromDateTime(dateTime);
+        DataValue value = DataValue.FromTimestampTz(dateTime);
 
-        Assert.Equal(DataKind.DateTime, value.Kind);
-        Assert.Equal(dateTime, value.AsDateTime());
+        Assert.Equal(DataKind.TimestampTz, value.Kind);
+        Assert.Equal(dateTime, value.AsTimestampTz());
     }
 
     [Fact]
@@ -193,37 +193,40 @@ public class DataValueTests : ServiceTestBase
     }
 
     [Fact]
-    public void DateTimeWithNonZeroOffsetRoundTrips()
+    public void TimestampTzWithNonZeroOffsetNormalisesToUtc()
     {
-        DateTimeOffset dateTime = new(2026, 4, 6, 14, 30, 0, TimeSpan.FromHours(5));
-        DataValue value = DataValue.FromDateTime(dateTime);
+        // PG-faithful: input offset converted to UTC, original offset discarded.
+        DateTimeOffset input = new(2026, 4, 6, 14, 30, 0, TimeSpan.FromHours(5));
+        DataValue value = DataValue.FromTimestampTz(input);
 
-        Assert.Equal(DataKind.DateTime, value.Kind);
-        Assert.Equal(dateTime, value.AsDateTime());
-        Assert.Equal(TimeSpan.FromHours(5), value.AsDateTime().Offset);
+        Assert.Equal(DataKind.TimestampTz, value.Kind);
+        Assert.Equal(input.UtcDateTime, value.AsTimestampTz().UtcDateTime);
+        Assert.Equal(TimeSpan.Zero, value.AsTimestampTz().Offset);
     }
 
     [Fact]
-    public void DateTimeWithNegativeOffsetRoundTrips()
+    public void TimestampTzWithNegativeOffsetNormalisesToUtc()
     {
-        DateTimeOffset dateTime = new(2026, 4, 6, 8, 0, 0, TimeSpan.FromHours(-8));
-        DataValue value = DataValue.FromDateTime(dateTime);
+        DateTimeOffset input = new(2026, 4, 6, 8, 0, 0, TimeSpan.FromHours(-8));
+        DataValue value = DataValue.FromTimestampTz(input);
 
-        Assert.Equal(dateTime, value.AsDateTime());
-        Assert.Equal(TimeSpan.FromHours(-8), value.AsDateTime().Offset);
+        Assert.Equal(input.UtcDateTime, value.AsTimestampTz().UtcDateTime);
+        Assert.Equal(TimeSpan.Zero, value.AsTimestampTz().Offset);
     }
 
     [Fact]
-    public void DateTimeEquality()
+    public void TimestampTzEqualitySameInstantDifferentInputOffsets()
     {
-        DateTimeOffset dateTime = new(2026, 4, 6, 12, 0, 0, TimeSpan.FromHours(2));
-        DataValue a = DataValue.FromDateTime(dateTime);
-        DataValue b = DataValue.FromDateTime(dateTime);
-        DataValue c = DataValue.FromDateTime(dateTime.ToUniversalTime());
+        // PG-faithful: same instant compares equal regardless of input offset.
+        DateTimeOffset eastern = new(2026, 4, 6, 12, 0, 0, TimeSpan.FromHours(2));
+        DataValue a = DataValue.FromTimestampTz(eastern);
+        DataValue b = DataValue.FromTimestampTz(eastern);
+        DataValue c = DataValue.FromTimestampTz(eastern.ToUniversalTime());
 
         Assert.Equal(a, b);
-        Assert.NotEqual(a, c);
+        Assert.Equal(a, c); // Was NotEqual under the old DateTimeOffset shape.
         Assert.Equal(a.GetHashCode(), b.GetHashCode());
+        Assert.Equal(a.GetHashCode(), c.GetHashCode());
     }
 
     [Fact]

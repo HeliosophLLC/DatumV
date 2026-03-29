@@ -176,7 +176,7 @@ public static class TypeCoercion
             DataKind.UInt8 or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16 or
             DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64 or
             DataKind.Boolean or
-            DataKind.Date or DataKind.DateTime or DataKind.Time or
+            DataKind.Date or DataKind.Timestamp or DataKind.TimestampTz or DataKind.Time or
             DataKind.Duration or DataKind.Uuid;
     }
 
@@ -226,8 +226,11 @@ public static class TypeCoercion
             DataKind.Date when DateOnly.TryParse(text, CultureInfo.InvariantCulture, out DateOnly date)
                 => DataValue.FromDate(date),
 
-            DataKind.DateTime when DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture,
-                DateTimeStyles.None, out DateTimeOffset dateTime) => DataValue.FromDateTime(dateTime),
+            DataKind.TimestampTz when DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out DateTimeOffset dateTime) => DataValue.FromTimestampTz(dateTime),
+
+            DataKind.Timestamp when DateTime.TryParse(text, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeLocal, out DateTime timestamp) => DataValue.FromTimestamp(timestamp),
 
             DataKind.Time when TimeOnly.TryParse(text, CultureInfo.InvariantCulture, out TimeOnly time)
                 => DataValue.FromTime(time),

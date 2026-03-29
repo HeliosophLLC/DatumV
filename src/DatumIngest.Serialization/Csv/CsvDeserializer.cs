@@ -362,9 +362,12 @@ public sealed class CsvDeserializer : IFormatDeserializer
         return kind switch
         {
             DataKind.String => DataValue.FromCharSpan(field, store),
-            DataKind.DateTime => temporalCache.TryParseDateTime(field, columnIndex, out DateTimeOffset dt)
-                ? DataValue.FromDateTime(dt)
-                : DataValue.Null(DataKind.DateTime),
+            DataKind.TimestampTz => temporalCache.TryParseDateTime(field, columnIndex, out DateTimeOffset dt)
+                ? DataValue.FromTimestampTz(dt)
+                : DataValue.Null(DataKind.TimestampTz),
+            DataKind.Timestamp => temporalCache.TryParseDateTime(field, columnIndex, out DateTimeOffset dtNaive)
+                ? DataValue.FromTimestamp(dtNaive.DateTime)
+                : DataValue.Null(DataKind.Timestamp),
             DataKind.Date => temporalCache.TryParseDate(field, columnIndex, out DateOnly d)
                 ? DataValue.FromDate(d)
                 : DataValue.Null(DataKind.Date),

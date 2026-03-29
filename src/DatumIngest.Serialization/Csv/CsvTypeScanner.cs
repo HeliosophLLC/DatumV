@@ -430,10 +430,11 @@ public static class CsvTypeScanner
                 null));
         }
 
-        // Temporal columns — prefer DateTime over Date when both match (DateTime is strictly more general).
+        // Temporal columns — prefer TimestampTz over Date when both match (TimestampTz is strictly more general).
+        // CSV with an offset suffix → TimestampTz; naive timestamps fall through to Date only when time-of-day is zero.
         if (state.DateTimeCandidate)
         {
-            return BuildDateDecision(DataKind.DateTime, SchemaInferenceReason.DateFormatMatched);
+            return BuildDateDecision(DataKind.TimestampTz, SchemaInferenceReason.DateFormatMatched);
         }
         if (state.DateCandidate)
         {

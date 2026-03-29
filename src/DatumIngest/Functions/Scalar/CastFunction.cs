@@ -204,12 +204,27 @@ public sealed class CastFunction : IFunction, IScalarFunction
 
         switch ((input.Kind, targetKind))
         {
-            case (DataKind.Date, DataKind.DateTime):
-                result = ValueRef.FromDateTime(
+            case (DataKind.Date, DataKind.TimestampTz):
+                result = ValueRef.FromTimestampTz(
                     new DateTimeOffset(input.AsDate().ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
                 return true;
-            case (DataKind.DateTime, DataKind.Date):
-                result = ValueRef.FromDate(DateOnly.FromDateTime(input.AsDateTime().DateTime));
+            case (DataKind.Date, DataKind.Timestamp):
+                result = ValueRef.FromTimestamp(input.AsDate().ToDateTime(TimeOnly.MinValue));
+                return true;
+            case (DataKind.TimestampTz, DataKind.Date):
+                result = ValueRef.FromDate(DateOnly.FromDateTime(input.AsTimestampTz().UtcDateTime));
+                return true;
+            case (DataKind.Timestamp, DataKind.Date):
+                result = ValueRef.FromDate(DateOnly.FromDateTime(input.AsTimestamp()));
+                return true;
+            case (DataKind.Timestamp, DataKind.TimestampTz):
+                // PG: assumes session TZ. We assume UTC until session TZ lands.
+                result = ValueRef.FromTimestampTz(
+                    new DateTimeOffset(input.AsTimestamp().Ticks, TimeSpan.Zero));
+                return true;
+            case (DataKind.TimestampTz, DataKind.Timestamp):
+                // PG: converts to session TZ then drops. We keep UTC ticks unchanged.
+                result = ValueRef.FromTimestamp(input.AsTimestampTz().UtcDateTime);
                 return true;
             case (DataKind.String, DataKind.Date):
                 if (DateOnly.TryParse(input.AsString(), CultureInfo.InvariantCulture, out DateOnly d))
@@ -218,18 +233,28 @@ public sealed class CastFunction : IFunction, IScalarFunction
                     return true;
                 }
                 return false;
-            case (DataKind.String, DataKind.DateTime):
+            case (DataKind.String, DataKind.TimestampTz):
                 if (DateTimeOffset.TryParse(input.AsString(), CultureInfo.InvariantCulture, out DateTimeOffset dto))
                 {
-                    result = ValueRef.FromDateTime(dto);
+                    result = ValueRef.FromTimestampTz(dto);
+                    return true;
+                }
+                return false;
+            case (DataKind.String, DataKind.Timestamp):
+                if (DateTime.TryParse(input.AsString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out DateTime dt))
+                {
+                    result = ValueRef.FromTimestamp(dt);
                     return true;
                 }
                 return false;
             case (DataKind.Date, DataKind.String):
                 result = ValueRef.FromString(input.AsDate().ToString("O", CultureInfo.InvariantCulture));
                 return true;
-            case (DataKind.DateTime, DataKind.String):
-                result = ValueRef.FromString(input.AsDateTime().ToString("O", CultureInfo.InvariantCulture));
+            case (DataKind.TimestampTz, DataKind.String):
+                result = ValueRef.FromString(input.AsTimestampTz().ToString("O", CultureInfo.InvariantCulture));
+                return true;
+            case (DataKind.Timestamp, DataKind.String):
+                result = ValueRef.FromString(input.AsTimestamp().ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture));
                 return true;
             case (DataKind.String, DataKind.Time):
                 if (TimeOnly.TryParse(input.AsString(), CultureInfo.InvariantCulture, out TimeOnly t))

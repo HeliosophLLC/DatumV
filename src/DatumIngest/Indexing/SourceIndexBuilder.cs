@@ -124,7 +124,8 @@ public sealed class SourceIndexBuilder
             or DataKind.UInt64
             or DataKind.Boolean
             or DataKind.Date
-            or DataKind.DateTime
+            or DataKind.Timestamp
+            or DataKind.TimestampTz
             or DataKind.Time
             or DataKind.Duration
             or DataKind.Uuid

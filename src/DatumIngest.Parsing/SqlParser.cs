@@ -790,11 +790,11 @@ public static class SqlParser
 
     /// <summary>
     /// PostgreSQL-style typed string literal — <c>DATE 'YYYY-MM-DD'</c>,
-    /// <c>TIMESTAMP '...'</c>, <c>TIMESTAMPTZ '...'</c>,
-    /// <c>DATETIME '...'</c>, <c>TIME '...'</c>. Recognised in expression
-    /// position and lowered to <c>CAST('...' AS &lt;Kind&gt;)</c> so the
-    /// existing string→temporal coercion path produces the typed value at
-    /// runtime; no engine plumbing changes.
+    /// <c>TIMESTAMP '...'</c>, <c>TIMESTAMPTZ '...'</c>, <c>TIME '...'</c>.
+    /// Recognised in expression position and lowered to
+    /// <c>CAST('...' AS &lt;Kind&gt;)</c> so the existing string→temporal
+    /// coercion path produces the typed value at runtime; no engine plumbing
+    /// changes.
     /// <para>
     /// The PG forms that DatumIngest's type system doesn't yet represent —
     /// <c>INTERVAL '...'</c> and <c>TIMETZ '...'</c> — are still recognised
@@ -804,12 +804,10 @@ public static class SqlParser
     /// see.
     /// </para>
     /// <para>
-    /// Semantic note: PG distinguishes <c>timestamp without time zone</c>
-    /// from <c>timestamp with time zone</c>, but DatumIngest's
-    /// <c>DateTime</c> kind is tz-aware (DateTimeOffset). Both
-    /// <c>TIMESTAMP</c> and <c>TIMESTAMPTZ</c> currently produce a
-    /// <c>DateTime</c>; an absent offset is interpreted by
-    /// <c>DateTimeOffset.TryParse</c>'s default rules.
+    /// Semantic note: <c>TIMESTAMP '...'</c> produces a <c>Timestamp</c>
+    /// (PG <c>timestamp without time zone</c>, naive); <c>TIMESTAMPTZ '...'</c>
+    /// produces a <c>TimestampTz</c> (PG <c>timestamp with time zone</c>,
+    /// UTC ticks; input offset normalised at construction).
     /// </para>
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> TypedTemporalLiteral =
@@ -817,7 +815,7 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Time))
             .Or(Token.EqualTo(SqlToken.Identifier))
             .Where(t => IsTypedTemporalPrefixText(GetTokenText(t)),
-                "DATE / TIMESTAMP / TIMESTAMPTZ / DATETIME / TIME / INTERVAL / TIMETZ")
+                "DATE / TIMESTAMP / TIMESTAMPTZ / TIME / INTERVAL / TIMETZ")
         from literal in Token.EqualTo(SqlToken.StringLiteral)
         select BuildTypedTemporalLiteral(prefix, literal);
 
@@ -831,7 +829,6 @@ public static class SqlParser
     private static bool IsTypedTemporalPrefixText(string text)
     {
         return text.Equals("DATE", StringComparison.OrdinalIgnoreCase)
-            || text.Equals("DATETIME", StringComparison.OrdinalIgnoreCase)
             || text.Equals("TIMESTAMP", StringComparison.OrdinalIgnoreCase)
             || text.Equals("TIMESTAMPTZ", StringComparison.OrdinalIgnoreCase)
             || text.Equals("TIME", StringComparison.OrdinalIgnoreCase)
@@ -857,7 +854,8 @@ public static class SqlParser
         return kind switch
         {
             "DATE" => new CastExpression(inner, "Date", span),
-            "TIMESTAMP" or "TIMESTAMPTZ" or "DATETIME" => new CastExpression(inner, "DateTime", span),
+            "TIMESTAMP" => new CastExpression(inner, "Timestamp", span),
+            "TIMESTAMPTZ" => new CastExpression(inner, "TimestampTz", span),
             "TIME" => new CastExpression(inner, "Time", span),
             "INTERVAL" => throw new ParseException(
                 "INTERVAL literals are not yet supported. " +
@@ -2618,6 +2616,21 @@ public static class SqlParser
                 from close in Token.EqualTo(SqlToken.GreaterThan)
                 select $"{GetTokenText(name)}<{inner}>"
             ).Try()
+            // PG multi-word temporal forms:
+            //   `TIMESTAMP WITH TIME ZONE`     → canonical "TimestampTz"
+            //   `TIMESTAMP WITHOUT TIME ZONE`  → canonical "Timestamp"
+            // The tail is matched eagerly; if it doesn't appear, the bare
+            // `TIMESTAMP` token falls through to the standard TypeKeyword
+            // branch below (which resolves to DataKind.Timestamp via
+            // case-insensitive enum parse).
+            .Or(
+                (
+                    from prefix in Token.EqualTo(SqlToken.TypeKeyword)
+                        .Where(t => GetTokenText(t).Equals("TIMESTAMP", StringComparison.OrdinalIgnoreCase),
+                            "TIMESTAMP")
+                    from tail in TimestampZoneTail.Try()
+                    select tail
+                ).Try())
             .Or(
                 Token.EqualTo(SqlToken.TypeKeyword)
                     .Or(Token.EqualTo(SqlToken.Identifier))
@@ -2625,6 +2638,27 @@ public static class SqlParser
                     .Select(GetTokenText))
         from suffix in TypeNameSuffixParser.AsNullable().OptionalOrDefault()
         select ApplyTypeNameSuffix(baseOrWrapper, suffix);
+
+    /// <summary>
+    /// PG multi-word time-zone suffix on TIMESTAMP / TIME. Matches either
+    /// <c>WITH TIME ZONE</c> (→ <c>"TimestampTz"</c>) or
+    /// <c>WITHOUT TIME ZONE</c> (→ <c>"Timestamp"</c>). The leading
+    /// <c>TIMESTAMP</c> token is consumed by the caller.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string> TimestampZoneTail =
+        (
+            from with in Token.EqualTo(SqlToken.With)
+            from time in Token.EqualTo(SqlToken.Time)
+            from zone in Token.EqualTo(SqlToken.Zone)
+            select "TimestampTz"
+        )
+        .Or(
+            from without in Token.EqualTo(SqlToken.Identifier)
+                .Where(t => GetTokenText(t).Equals("WITHOUT", StringComparison.OrdinalIgnoreCase),
+                    "WITHOUT")
+            from time in Token.EqualTo(SqlToken.Time)
+            from zone in Token.EqualTo(SqlToken.Zone)
+            select "Timestamp");
 
     /// <summary>
     /// One of the postfix shapes a type name may carry. Exactly one of

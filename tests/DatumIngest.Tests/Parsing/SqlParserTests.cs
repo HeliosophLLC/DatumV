@@ -1,4 +1,5 @@
-﻿using DatumIngest.Parsing;
+﻿using DatumIngest.Model;
+using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Tests.Parsing;
@@ -8,6 +9,11 @@ public class SqlParserTests : ServiceTestBase
     private static SelectStatement Parse(string sql)
     {
         return ((SelectQueryExpression)SqlParser.Parse(sql)).Statement;
+    }
+
+    private static CreateTableStatement ParseCreateTable(string sql)
+    {
+        return (CreateTableStatement)SqlParser.ParseStatement(sql);
     }
 
     [Fact]
@@ -1307,30 +1313,23 @@ public class SqlParserTests : ServiceTestBase
     }
 
     [Fact]
-    public void TimestampLiteral_LowersToCastToDateTime()
+    public void TimestampLiteral_LowersToCastToTimestamp()
     {
+        // PG: TIMESTAMP '...' is timestamp without time zone.
         SelectStatement result = Parse("SELECT TIMESTAMP '2026-01-02 10:00:00' FROM t");
 
         CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
-        Assert.Equal("DateTime", cast.TargetType);
+        Assert.Equal("Timestamp", cast.TargetType);
     }
 
     [Fact]
-    public void TimestamptzLiteral_LowersToCastToDateTime()
+    public void TimestamptzLiteral_LowersToCastToTimestampTz()
     {
+        // PG: TIMESTAMPTZ '...' is timestamp with time zone.
         SelectStatement result = Parse("SELECT TIMESTAMPTZ '2026-01-02 10:00:00+00' FROM t");
 
         CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
-        Assert.Equal("DateTime", cast.TargetType);
-    }
-
-    [Fact]
-    public void DateTimeLiteral_LowersToCastToDateTime()
-    {
-        SelectStatement result = Parse("SELECT DATETIME '2026-01-02 10:00:00' FROM t");
-
-        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
-        Assert.Equal("DateTime", cast.TargetType);
+        Assert.Equal("TimestampTz", cast.TargetType);
     }
 
     [Fact]
@@ -1340,6 +1339,50 @@ public class SqlParserTests : ServiceTestBase
 
         CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
         Assert.Equal("Time", cast.TargetType);
+    }
+
+    [Fact]
+    public void CreateTable_TimestampColumn_ResolvesToPgTimestamp()
+    {
+        // PG: bare `TIMESTAMP` is `timestamp without time zone` (naive).
+        CreateTableStatement result = ParseCreateTable("CREATE TABLE t (ts TIMESTAMP)");
+        Assert.Equal("TIMESTAMP", result.Columns[0].TypeName);
+    }
+
+    [Fact]
+    public void CreateTable_TimestampTzColumn_ResolvesToPgTimestampTz()
+    {
+        // PG: TIMESTAMPTZ is the short form of `timestamp with time zone`.
+        CreateTableStatement result = ParseCreateTable("CREATE TABLE t (ts TIMESTAMPTZ)");
+        Assert.Equal("TIMESTAMPTZ", result.Columns[0].TypeName);
+    }
+
+    [Fact]
+    public void CreateTable_TimestampWithTimeZone_CanonicalisesToTimestampTz()
+    {
+        // PG canonical multi-word form: `TIMESTAMP WITH TIME ZONE`.
+        CreateTableStatement result = ParseCreateTable(
+            "CREATE TABLE t (ts TIMESTAMP WITH TIME ZONE)");
+        Assert.Equal("TimestampTz", result.Columns[0].TypeName);
+    }
+
+    [Fact]
+    public void CreateTable_TimestampWithoutTimeZone_CanonicalisesToTimestamp()
+    {
+        CreateTableStatement result = ParseCreateTable(
+            "CREATE TABLE t (ts TIMESTAMP WITHOUT TIME ZONE)");
+        Assert.Equal("Timestamp", result.Columns[0].TypeName);
+    }
+
+    [Fact]
+    public void DateTimeKeyword_IsNoLongerResolvable()
+    {
+        // The pre-PG `DATETIME` keyword was retired alongside DataKind.DateTime;
+        // no back-compat alias is provided. The parser accepts it as an arbitrary
+        // identifier (because users can declare custom named types), but
+        // TypeAnnotationResolver rejects it at catalog-build time.
+        bool resolved = TypeAnnotationResolver.TryParse("DATETIME", out _, out _);
+        Assert.False(resolved);
     }
 
     [Fact]

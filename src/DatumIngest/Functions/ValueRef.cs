@@ -255,9 +255,13 @@ public readonly struct ValueRef
     public static ValueRef FromDate(DateOnly value) =>
         new(DataValue.FromDate(value), null);
 
-    /// <summary>DateTime inline value.</summary>
-    public static ValueRef FromDateTime(DateTimeOffset value) =>
-        new(DataValue.FromDateTime(value), null);
+    /// <summary>TimestampTz inline value (PG <c>timestamptz</c>; UTC ticks, input offset discarded).</summary>
+    public static ValueRef FromTimestampTz(DateTimeOffset value) =>
+        new(DataValue.FromTimestampTz(value), null);
+
+    /// <summary>Timestamp inline value (PG <c>timestamp</c>; naive ticks, no tz).</summary>
+    public static ValueRef FromTimestamp(DateTime value) =>
+        new(DataValue.FromTimestamp(value), null);
 
     /// <summary>Time inline value.</summary>
     public static ValueRef FromTime(TimeOnly value) =>
@@ -457,21 +461,8 @@ public readonly struct ValueRef
     /// <typeparamref name="T"/>'s size doesn't match <paramref name="elementKind"/>'s
     /// <see cref="DataValue.ScalarByteSize"/>.
     /// </exception>
-    /// <exception cref="NotSupportedException">
-    /// <paramref name="elementKind"/> is <see cref="DataKind.DateTime"/> — the
-    /// fixed-width array convention drops the timezone offset; aggregate into
-    /// <c>Struct{ticks: Int64, offset_minutes: Int32}</c> instead.
-    /// </exception>
     public static ValueRef FromPrimitiveArray<T>(T[] values, DataKind elementKind) where T : unmanaged
     {
-        if (elementKind == DataKind.DateTime)
-        {
-            throw new NotSupportedException(
-                "Array<DateTime> is not supported via FromPrimitiveArray. The fixed-width "
-                + "array convention drops the timezone offset; aggregate into "
-                + "Struct{ticks: Int64, offset_minutes: Int32} instead.");
-        }
-
         int sizeT = System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
         int kindSize = DataValue.ScalarByteSize(elementKind);
         if (sizeT != kindSize)
@@ -865,8 +856,11 @@ public readonly struct ValueRef
 
     /// <summary>Date accessor (inline only).</summary>
     public DateOnly AsDate() => _inline.AsDate();
-    /// <summary>DateTime accessor (inline only).</summary>
-    public DateTimeOffset AsDateTime() => _inline.AsDateTime();
+    /// <summary>TimestampTz accessor (inline only). Returned offset is always <see cref="TimeSpan.Zero"/>.</summary>
+    public DateTimeOffset AsTimestampTz() => _inline.AsTimestampTz();
+
+    /// <summary>Timestamp accessor (inline only). Returned <see cref="DateTime"/> has <see cref="DateTimeKind.Unspecified"/>.</summary>
+    public DateTime AsTimestamp() => _inline.AsTimestamp();
     /// <summary>Time accessor (inline only).</summary>
     public TimeOnly AsTime() => _inline.AsTime();
     /// <summary>Duration accessor (inline only).</summary>
@@ -926,7 +920,8 @@ public readonly struct ValueRef
             DataKind.Float64 => AsFloat64(),
             DataKind.Decimal => AsDecimal(),
             DataKind.Date => AsDate(),
-            DataKind.DateTime => AsDateTime(),
+            DataKind.Timestamp => AsTimestamp(),
+            DataKind.TimestampTz => AsTimestampTz(),
             DataKind.Time => AsTime(),
             DataKind.Duration => AsDuration(),
             DataKind.Point2D => AsPoint2D(),
@@ -1115,17 +1110,6 @@ public readonly struct ValueRef
             DataKind.String => BuildStringArray(elements, target),
             DataKind.Image => BuildImageArray(elements, target),
             DataKind.Struct => BuildStructArray(elements, target, typeId, types),
-            // DateTime is intentionally not supported here: the per-element
-            // byte-size convention used by typed arrays elsewhere in the
-            // engine treats DateTime as 8 bytes (ticks only) and silently
-            // drops the timezone offset. Until we settle on a packed
-            // (ticks, offset) layout, callers must aggregate into a struct
-            // of the two parts instead.
-            DataKind.DateTime => throw new NotSupportedException(
-                "Array<DateTime> is not yet supported via ValueRef.FromArray. "
-                + "The fixed-width array convention drops the timezone offset; "
-                + "aggregate into Struct{ticks: Int64, offset_minutes: Int32} until "
-                + "an offset-preserving layout is settled."),
             _ => BuildFixedWidthArray(elementKind, elements, target),
         };
     }
@@ -1291,9 +1275,10 @@ public readonly struct ValueRef
     /// targeted at long arrays (embeddings) where inline doesn't apply.
     /// </summary>
     /// <remarks>
-    /// The cast set covers every fixed-width primitive kind. <see cref="DataKind.DateTime"/>
-    /// is rejected at construction (<see cref="FromPrimitiveArray{T}"/>); other
-    /// 8-byte temporal kinds (Time, Duration) accept <c>long[]</c> ticks.
+    /// The cast set covers every fixed-width primitive kind. The 8-byte temporal
+    /// kinds (<see cref="DataKind.Timestamp"/>, <see cref="DataKind.TimestampTz"/>,
+    /// <see cref="DataKind.Time"/>, <see cref="DataKind.Duration"/>) accept
+    /// <c>long[]</c> ticks.
     /// </remarks>
     /// <summary>
     /// Returns the approximate size in bytes of the GC-resident payload behind
@@ -1391,6 +1376,8 @@ public readonly struct ValueRef
             DataKind.Float64  => DataValue.FromArenaArray<double>((double[])values, elementKind, target),
             DataKind.Time     => DataValue.FromArenaArray<long>((long[])values, elementKind, target),
             DataKind.Duration => DataValue.FromArenaArray<long>((long[])values, elementKind, target),
+            DataKind.Timestamp   => DataValue.FromArenaArray<long>((long[])values, elementKind, target),
+            DataKind.TimestampTz => DataValue.FromArenaArray<long>((long[])values, elementKind, target),
             DataKind.Decimal  => DataValue.FromArenaArray<decimal>((decimal[])values, elementKind, target),
             DataKind.UInt128  => DataValue.FromArenaArray<UInt128>((UInt128[])values, elementKind, target),
             DataKind.Int128   => DataValue.FromArenaArray<Int128>((Int128[])values, elementKind, target),

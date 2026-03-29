@@ -81,7 +81,7 @@ public sealed class UuidFunctionTests
 
         Assert.False(result.IsNull);
         // v7 stores millisecond precision — compare at that resolution.
-        Assert.Equal(stamp.ToUnixTimeMilliseconds(), result.AsDateTime().ToUnixTimeMilliseconds());
+        Assert.Equal(stamp.ToUnixTimeMilliseconds(), result.AsTimestampTz().ToUnixTimeMilliseconds());
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public sealed class UuidFunctionTests
         ValueRef result = await new UuidExtractTimestampFunction()
             .ExecuteAsync(new[] { ValueRef.FromUuid(Guid.NewGuid()) }, Frame, default);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.DateTime, result.Kind);
+        Assert.Equal(DataKind.TimestampTz, result.Kind);
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public sealed class UuidFunctionTests
         Assert.False(result.IsNull);
         DateTimeOffset expected = new(2022, 2, 22, 19, 22, 22, TimeSpan.Zero);
         // v1 stores 100ns precision — compare to the nearest second.
-        Assert.Equal(expected.ToUnixTimeSeconds(), result.AsDateTime().ToUnixTimeSeconds());
+        Assert.Equal(expected.ToUnixTimeSeconds(), result.AsTimestampTz().ToUnixTimeSeconds());
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public sealed class UuidFunctionTests
         ValueRef result = await new UuidExtractTimestampFunction()
             .ExecuteAsync(new[] { ValueRef.Null(DataKind.Uuid) }, Frame, default);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.DateTime, result.Kind);
+        Assert.Equal(DataKind.TimestampTz, result.Kind);
     }
 
     [Fact]

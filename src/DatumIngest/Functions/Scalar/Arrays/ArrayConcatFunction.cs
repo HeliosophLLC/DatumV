@@ -21,18 +21,16 @@ namespace DatumIngest.Functions.Scalar.Arrays;
 /// <see cref="ValueRef.FromPrimitiveArray{T}"/>: every integer width
 /// (signed and unsigned, 8/16/32/64/128), every float width
 /// (<c>Float16</c>/<c>Float32</c>/<c>Float64</c>/<c>Decimal</c>),
-/// <c>Boolean</c>, the date/time-without-zone kinds (<c>Date</c>,
-/// <c>Time</c>, <c>Duration</c>), <c>Uuid</c>, and <c>Point2D</c>.
+/// <c>Boolean</c>, the temporal kinds (<c>Date</c>, <c>Time</c>,
+/// <c>Duration</c>, <c>Timestamp</c>, <c>TimestampTz</c>), <c>Uuid</c>,
+/// and <c>Point2D</c>.
 /// </para>
 /// <para>
-/// <strong>Unsupported kinds.</strong> <c>DateTime</c> is rejected
-/// because the fixed-width array convention drops the timezone offset
-/// (aggregate into <c>Array&lt;Struct{ticks, offset_minutes}&gt;</c>
-/// instead). Composite/blob kinds (<c>Struct</c>, <c>String</c>,
-/// <c>Image</c>, <c>Audio</c>, <c>Video</c>, <c>Json</c>) and the meta
-/// kinds (<c>Unknown</c>, <c>Type</c>) are rejected: arrays of those
-/// kinds use a reference-array payload shape that this function doesn't
-/// yet stitch.
+/// <strong>Unsupported kinds.</strong> Composite/blob kinds
+/// (<c>Struct</c>, <c>String</c>, <c>Image</c>, <c>Audio</c>,
+/// <c>Video</c>, <c>Json</c>) and the meta kinds (<c>Unknown</c>,
+/// <c>Type</c>) are rejected: arrays of those kinds use a
+/// reference-array payload shape that this function doesn't yet stitch.
 /// </para>
 /// <para>
 /// <strong>Nulls.</strong> A null array is treated as an empty array;
@@ -125,19 +123,13 @@ public sealed class ArrayConcatFunction : IFunction, IScalarFunction
             DataKind.Float64  => ConcatPrimitive<double>(a, b, DataKind.Float64),
             DataKind.Time     => ConcatPrimitive<long>(a, b, DataKind.Time),
             DataKind.Duration => ConcatPrimitive<long>(a, b, DataKind.Duration),
+            DataKind.Timestamp   => ConcatPrimitive<long>(a, b, DataKind.Timestamp),
+            DataKind.TimestampTz => ConcatPrimitive<long>(a, b, DataKind.TimestampTz),
             DataKind.Decimal  => ConcatPrimitive<decimal>(a, b, DataKind.Decimal),
             DataKind.UInt128  => ConcatPrimitive<UInt128>(a, b, DataKind.UInt128),
             DataKind.Int128   => ConcatPrimitive<Int128>(a, b, DataKind.Int128),
             DataKind.Uuid     => ConcatPrimitive<Guid>(a, b, DataKind.Uuid),
             DataKind.Point2D  => ConcatPrimitive<Vector2>(a, b, DataKind.Point2D),
-
-            // DateTime can't ride the fixed-width array convention — the
-            // tz offset would be silently dropped. Mirrors the explicit
-            // rejection in ValueRef.FromPrimitiveArray.
-            DataKind.DateTime => throw new FunctionArgumentException(Name,
-                "array_concat does not support Array<DateTime>: the fixed-width "
-                + "array convention drops the timezone offset. Aggregate into "
-                + "Array<Struct{ticks: Int64, offset_minutes: Int32}> instead."),
 
             // Reference-array kinds (carried as ValueRef[] / string[] /
             // byte[] payloads, not as a packed typed array). Not yet

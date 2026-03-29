@@ -82,7 +82,7 @@ Every page is uncompressed. The encoder kind is recorded once per column in the 
 
 **Null-bitmap presence is per-page, not per-column.** Each `PageDescriptorV2` carries a `HasNullBitmap` flag (recorded by the encoder when the page was flushed); the decoder reads that flag to know whether the page starts with a bitmap or jumps straight into payload. A single column can have a heterogeneous mix of bitmap-bearing and bitmap-less pages — that's how `ALTER TABLE … ALTER COLUMN c DROP NOT NULL` works without rewriting historical pages.
 
-### `FixedWidth` (Int8/16/32/64, UInt8/16/32/64, Float32/64, Date, Time, Duration, DateTime, Uuid)
+### `FixedWidth` (Int8/16/32/64, UInt8/16/32/64, Float32/64, Date, Time, Duration, Timestamp, TimestampTz, Uuid)
 
 ```
 [null bitmap : ⌈rows / 8⌉ bytes]   (omitted when the page's HasNullBitmap is false)
@@ -96,8 +96,7 @@ Stride is determined by `DataKind`:
 | 1 | Int8, UInt8 |
 | 2 | Int16, UInt16 |
 | 4 | Int32, UInt32, Float32, Date |
-| 8 | Int64, UInt64, Float64, Time, Duration |
-| 10 | DateTime (int64 ticks + int16 offset minutes, packed) |
+| 8 | Int64, UInt64, Float64, Time, Duration, Timestamp (naive ticks), TimestampTz (UTC ticks) |
 | 16 | Uuid |
 
 ### `BitPackedBoolean` (Boolean only)
@@ -281,7 +280,8 @@ Then kind-specific payload:
   Int32/UInt32/Float32: 4 bytes
   Int64/UInt64/Float64: 8 bytes
   Date:      int32 (day number)
-  DateTime:  int64 (UTC ticks) + int16 (offset minutes)
+  Timestamp: int64 (naive wall-clock ticks, no tz)
+  TimestampTz: int64 (UTC ticks; PG `timestamptz`)
   Time:      int64 (ticks of day)
   Duration:  int64 (ticks)
   Uuid:      byte[16]

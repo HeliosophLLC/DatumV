@@ -107,7 +107,8 @@ public static class DataValueRetention
                 or DataKind.Int32 or DataKind.UInt32
                 or DataKind.Int64 or DataKind.UInt64
                 or DataKind.Float32 or DataKind.Float64
-                or DataKind.Date or DataKind.Time or DataKind.Duration or DataKind.DateTime
+                or DataKind.Date or DataKind.Time or DataKind.Duration
+                or DataKind.Timestamp or DataKind.TimestampTz
                 or DataKind.Uuid or DataKind.Type
                 => value,
 

@@ -393,7 +393,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         // Reproduces the exact pattern that surfaced the gap:
         //   INSERT INTO conversations VALUES ('default', 'Chat', now())
         using TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE TEMP TABLE conversations (workspace String, title String, started_at DateTime)");
+        catalog.Plan("CREATE TEMP TABLE conversations (workspace String, title String, started_at TimestampTz)");
 
         DateTimeOffset before = DateTimeOffset.UtcNow.AddSeconds(-1);
         catalog.Plan("INSERT INTO conversations VALUES ('default', 'Chat', now())");
@@ -401,7 +401,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
 
         List<DataValue[]> rows = await ScanAllValues(catalog["conversations"]);
         Assert.Single(rows);
-        DateTimeOffset stored = rows[0][2].AsDateTime();
+        DateTimeOffset stored = rows[0][2].AsTimestampTz();
         Assert.InRange(stored, before, after);
     }
 

@@ -56,7 +56,8 @@ internal static class LiteralCoercion
             DataKind.Uuid => CoerceUuid(literal, columnName),
             DataKind.Date => CoerceDate(literal, columnName),
             DataKind.Time => CoerceTime(literal, columnName),
-            DataKind.DateTime => CoerceDateTime(literal, columnName),
+            DataKind.Timestamp => CoerceTimestamp(literal, columnName),
+            DataKind.TimestampTz => CoerceTimestampTz(literal, columnName),
             DataKind.Duration => CoerceDuration(literal, columnName),
             DataKind.Decimal => CoerceDecimal(literal, columnName),
             _ => throw new InvalidOperationException(
@@ -184,16 +185,31 @@ internal static class LiteralCoercion
             _ => throw IncompatibleLiteral(literal, "Time", columnName),
         };
 
-    private static DataValue CoerceDateTime(object literal, string columnName) =>
+    private static DataValue CoerceTimestampTz(object literal, string columnName) =>
         literal switch
         {
-            DateTimeOffset dto => DataValue.FromDateTime(dto),
-            DateTime dt => DataValue.FromDateTime(new DateTimeOffset(
+            // PG: input offset normalised to UTC at construction, original
+            // offset discarded. FromTimestampTz handles this internally.
+            DateTimeOffset dto => DataValue.FromTimestampTz(dto),
+            DateTime dt => DataValue.FromTimestampTz(new DateTimeOffset(
                 dt.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dt, DateTimeKind.Utc) : dt)),
-            DateOnly d => DataValue.FromDateTime(new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)),
+            DateOnly d => DataValue.FromTimestampTz(new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)),
             string s when DateTimeOffset.TryParse(s, out DateTimeOffset parsed)
-                => DataValue.FromDateTime(parsed),
-            _ => throw IncompatibleLiteral(literal, "DateTime", columnName),
+                => DataValue.FromTimestampTz(parsed),
+            _ => throw IncompatibleLiteral(literal, "TimestampTz", columnName),
+        };
+
+    private static DataValue CoerceTimestamp(object literal, string columnName) =>
+        literal switch
+        {
+            // PG timestamp (without tz): naive ticks. We accept any DateTimeKind
+            // and store .Ticks unchanged; a DateTimeOffset is reduced to its
+            // DateTime component (clock-face value, offset discarded).
+            DateTime dt => DataValue.FromTimestamp(dt),
+            DateTimeOffset dto => DataValue.FromTimestamp(dto.DateTime),
+            DateOnly d => DataValue.FromTimestamp(d.ToDateTime(TimeOnly.MinValue)),
+            string s when DateTime.TryParse(s, out DateTime parsed) => DataValue.FromTimestamp(parsed),
+            _ => throw IncompatibleLiteral(literal, "Timestamp", columnName),
         };
 
     private static DataValue CoerceDuration(object literal, string columnName) =>

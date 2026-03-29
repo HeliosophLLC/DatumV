@@ -222,7 +222,7 @@ public sealed class StatisticsCollector
             accumulators.Add(new BinarySizeAccumulator());
         }
 
-        if (kind is DataKind.Date or DataKind.DateTime or DataKind.Time)
+        if (kind is DataKind.Date or DataKind.Timestamp or DataKind.TimestampTz or DataKind.Time)
         {
             accumulators.Add(new TemporalRangeAccumulator());
         }

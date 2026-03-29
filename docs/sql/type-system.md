@@ -57,7 +57,8 @@ SELECT * FROM data WHERE value AS Float64 v AND v > 0.5
 | `Decimal` | 128-bit decimal floating point | `decimal` |
 | `Date` | Calendar date (no time component) | `DateOnly` |
 | `Time` | Time of day (no date component) | `TimeOnly` |
-| `DateTime` | Date and time with UTC offset | `DateTimeOffset` |
+| `Timestamp` | Naive wall-clock date and time, no time zone (PG `timestamp` / `timestamp without time zone`) | `DateTime` (`DateTimeKind.Unspecified`) |
+| `TimestampTz` | Date and time with time zone (PG `timestamptz` / `timestamp with time zone`). Input offset is normalised to UTC at construction and discarded — two values for the same instant compare and hash equal regardless of input offset. | `DateTimeOffset` (offset always `TimeSpan.Zero` on readback) |
 | `Duration` | Elapsed time span | `TimeSpan` |
 | `String` | Variable-length UTF-8 text | `string` |
 | `Uuid` | 128-bit UUID (RFC 9562) | `Guid` |
@@ -225,7 +226,7 @@ and pinhole projection — lives in [Spatial Types](spatial.md).
 
 ### Type Literals and typeof()
 
-Type names (`Int32`, `Float64`, `String`, `Boolean`, `Date`, `DateTime`, etc.)
+Type names (`Int32`, `Float64`, `String`, `Boolean`, `Date`, `Timestamp`, `TimestampTz`, etc.)
 are reserved keywords in expression position. They produce a `Type` value — a
 first-class type tag rather than a string. This enables type-oriented
 comparisons without string matching.
@@ -362,7 +363,7 @@ FROM t
 
 `DataKind` names (`Boolean`, `Int8`, `Int16`, `Int32`, `Int64`, `Int128`,
 `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`, `Float16`, `Float32`,
-`Float64`, `Decimal`, `String`, `Date`, `DateTime`, `Time`, `Duration`,
+`Float64`, `Decimal`, `String`, `Date`, `Timestamp`, `TimestampTz`, `Time`, `Duration`,
 `Uuid`, `Image`, `Audio`, `AudioSlice`, `Video`, `VideoFrame`, `VideoSlice`,
 `Json`, `Struct`, `Point2D`, `Point3D`, `PointCloud`, `Mesh`, `Type`) are
 reserved in expression position. They produce a `Type` value that can be
@@ -432,10 +433,11 @@ Supported conversions include:
 - **Any numeric ↔ any numeric** — truncates fractional parts, wraps on integer
   overflow (UInt8 saturates at 0–255 instead of wrapping).
 - **Any numeric ↔ Boolean** — zero = false, non-zero = true.
-- **Any numeric/Boolean/Date/DateTime/Time/Duration/Uuid ↔ String** — formats or parses.
-- **Date ↔ DateTime** — midnight UTC or drop time component.
-- **DateTime → Time** — extract time-of-day.
-- **Date/DateTime → numeric** — epoch days or epoch seconds.
+- **Any numeric/Boolean/Date/Timestamp/TimestampTz/Time/Duration/Uuid ↔ String** — formats or parses.
+- **Date ↔ Timestamp / TimestampTz** — midnight UTC or drop time component.
+- **Timestamp ↔ TimestampTz** — reinterprets the wall-clock ticks as UTC. PG converts via the session time zone; until a session-TZ concept lands, DatumIngest assumes UTC for both directions.
+- **Timestamp / TimestampTz → Time** — extract time-of-day.
+- **Date / Timestamp / TimestampTz → numeric** — epoch days or epoch seconds.
 - **Time/Duration ↔ numeric** — seconds since midnight or total seconds.
 - **`UInt8` array ↔ Image / Audio / Video** — byte reinterpretation between a raw byte buffer and the corresponding encoded blob kind.
 - **String ↔ Json** — `cast(text, Json)` parses the JSON text into canonical CBOR; `cast(json, String)` re-emits the canonical form as text. `try_cast` returns NULL on parse failure.
@@ -466,6 +468,8 @@ plus a SQL-ergonomic adjustment for division:
 | Any `Float32` operand (no `Float64`) | `Float32` | `Float32` | `Float32` |
 | Any `Float16` operand (no wider float) | `Float32` | `Float32` | `Float32` |
 | `Duration + Duration`, `Duration - Duration` | `Duration` | n/a | n/a |
+| `Timestamp ± Duration`, `TimestampTz ± Duration` | same timestamp kind | n/a | n/a |
+| `Timestamp - Timestamp`, `TimestampTz - TimestampTz` (same kind) | `Duration` | n/a | n/a |
 | Any other `Time` / `Duration` mix | `Float32` | `Float32` | `Float32` |
 | Any `String` operand | parsed → `Float64` | parsed → `Float64` | parsed → `Float64` |
 
@@ -483,6 +487,30 @@ The promoted result kind also flows through to schema introspection —
 `SELECT a + b` reports the same kind in its output schema that the row
 actually carries.
 
+### Timestamp Semantics and Divergence from PostgreSQL
+
+PostgreSQL `timestamp` (without time zone) and `timestamptz` (with time zone)
+both store **8 bytes of microsecond/tick precision** and DatumIngest's
+`Timestamp` / `TimestampTz` follow that convention. A few practical points:
+
+- **Equality.** Two `TimestampTz` values for the same instant compare and
+  hash equal regardless of the offset in the literal that produced them —
+  `'2026-05-19T12:00:00-07:00'` and `'2026-05-19T19:00:00+00:00'` are
+  byte-identical once stored. This matches PG.
+- **Bare-literal time zone for `TimestampTz`.** PG assumes the **session
+  time zone** when parsing a bare `'2026-05-19 12:00'` into a `timestamptz`.
+  DatumIngest currently has no session-TZ concept and assumes **UTC** for
+  bare literals. Literals with an explicit offset suffix
+  (`'2026-05-19T12:00:00-07:00'`) work identically to PG. This is the
+  one known PG-conformance gap; the workaround is to either include an
+  explicit offset in every `timestamptz` literal or to use
+  `AT TIME ZONE 'zone'` to re-anchor a value after construction.
+- **`AT TIME ZONE`.** Kind-shifting operator — see [§ AT TIME
+  ZONE](#at-time-zone) below.
+- **`timestamp ↔ timestamptz` casts.** PG converts via the session TZ;
+  DatumIngest assumes UTC for both directions. Explicit `AT TIME ZONE`
+  is the recommended path for the few cases where this matters.
+
 ### Transaction-Stable Temporal Constants
 
 PostgreSQL-compatible keywords that return the current date/time. All references within a statement batch resolve to the **same value** (the batch start time), matching PostgreSQL's transaction-stable semantics.
@@ -491,8 +519,8 @@ PostgreSQL-compatible keywords that return the current date/time. All references
 CURRENT_DATE                -- Date (UTC)
 CURRENT_TIME                -- Time (UTC)
 CURRENT_TIME(precision)     -- Time truncated to p fractional-second digits (0–6)
-CURRENT_TIMESTAMP           -- DateTime (UTC)
-CURRENT_TIMESTAMP(precision)-- DateTime truncated to p fractional-second digits
+CURRENT_TIMESTAMP           -- TimestampTz (UTC)
+CURRENT_TIMESTAMP(precision)-- TimestampTz truncated to p fractional-second digits
 LOCALTIME                   -- Same as CURRENT_TIME (no session timezone)
 LOCALTIME(precision)        -- Same as CURRENT_TIME(precision)
 LOCALTIMESTAMP               -- Same as CURRENT_TIMESTAMP
@@ -519,7 +547,7 @@ SELECT CURRENT_TIMESTAMP AS a, CURRENT_TIMESTAMP AS b
 | `transaction_timestamp()` | Batch | Same as `CURRENT_TIMESTAMP` / `now()`. Named to clearly reflect what it returns. |
 | `statement_timestamp()` | Statement | Start time of the current statement. Same as `transaction_timestamp()` for the first statement in a batch; may differ for subsequent statements. |
 | `clock_timestamp()` | None | Actual wall-clock time. Changes even within a single SQL statement. |
-| `timeofday()` | None | Like `clock_timestamp()`, but returns a formatted String instead of DateTime. |
+| `timeofday()` | None | Like `clock_timestamp()`, but returns a formatted String instead of TimestampTz. |
 
 ```sql
 -- transaction_timestamp() = now() = CURRENT_TIMESTAMP within a batch
@@ -543,7 +571,7 @@ PostgreSQL-standard syntax for extracting date/time fields. Desugars to `date_pa
 EXTRACT(field FROM source)
 ```
 
-`field` is a bare keyword (not a string) — any field supported by `date_part()`. `source` is a Date, DateTime, or Time expression.
+`field` is a bare keyword (not a string) — any field supported by `date_part()`. `source` is a Date, Timestamp, TimestampTz, or Time expression.
 
 ```sql
 -- Extract year and month
@@ -568,31 +596,33 @@ SELECT EXTRACT(HOUR FROM start_time) AS h FROM schedule
 
 ### AT TIME ZONE
 
-Converts a `DateTime` value to a specific timezone. The instant in time is preserved — only the UTC offset (and therefore the displayed local time) changes. Uses IANA timezone names.
+PG-style kind-shifting operator that reinterprets a timestamp value against a named time zone. Uses IANA timezone names.
 
 ```sql
 expr AT TIME ZONE 'timezone_name'
 ```
 
+| Input kind | Result kind | Semantics |
+|---|---|---|
+| `TimestampTz` | `Timestamp` | "What does the clock read in this zone?" — converts the UTC instant to wall-clock time in `'timezone_name'` and returns a naive `Timestamp`. |
+| `Timestamp` | `TimestampTz` | "Interpret this wall clock as being in this zone" — treats the naive value as a local time in `'timezone_name'`, converts to UTC, and returns a `TimestampTz`. |
+
 ```sql
--- UTC pickup time → local New York time
-SELECT pickup_datetime AT TIME ZONE 'America/New_York' AS local_time
+-- TimestampTz → Timestamp: pickup_at is 2026-01-15 12:00 UTC, returns 07:00 (EST wall clock)
+SELECT pickup_at AT TIME ZONE 'America/New_York' AS local_clock
 FROM trips
 
--- Compare timestamps across zones (no parentheses needed)
-SELECT * FROM events
-WHERE created_at AT TIME ZONE 'America/New_York' = updated_at AT TIME ZONE 'UTC'
+-- Timestamp → TimestampTz: interpret a naive local time as NY-local, get the UTC instant
+SELECT booking_local_time AT TIME ZONE 'America/New_York' AS utc_instant
+FROM bookings
 
--- Extract local hour after converting
-SELECT date_part('hour', pickup_datetime AT TIME ZONE 'America/New_York') AS local_hour
+-- Round-trip back to the original instant by applying the same zone twice in opposite directions
+SELECT (pickup_at AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York'
 FROM trips
-
--- Extract UTC offset in seconds (e.g. -18000 for EST, -14400 for EDT)
-SELECT date_part('timezone', pickup_datetime AT TIME ZONE 'America/New_York') AS tz_offset
-FROM trips
+-- => Equal to pickup_at: NY wall clock → re-interpret as NY local → back to UTC
 ```
 
-Timezone names follow the [IANA tz database](https://www.iana.org/time-zones) (e.g. `America/New_York`, `Europe/London`, `Asia/Kolkata`, `UTC`). DST transitions are handled automatically.
+Timezone names follow the [IANA tz database](https://www.iana.org/time-zones) (e.g. `America/New_York`, `Europe/London`, `Asia/Kolkata`, `UTC`). DST transitions are handled automatically by the host's `TimeZoneInfo` lookup.
 
 
 ## See Also

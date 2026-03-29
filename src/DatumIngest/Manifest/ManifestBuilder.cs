@@ -199,7 +199,7 @@ public static class ManifestBuilder
             DataKind.Json => BuildJsonManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.String => BuildStringManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Image => BuildImageManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
-            DataKind.Date or DataKind.DateTime or DataKind.Time => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
+            DataKind.Date or DataKind.Timestamp or DataKind.TimestampTz or DataKind.Time => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Boolean => BuildBooleanManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult),
             _ => BuildFallbackManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK)
         };

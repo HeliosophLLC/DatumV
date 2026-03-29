@@ -404,7 +404,7 @@ internal static class ColumnDefinitionResolver
             or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64 or DataKind.Int128
             or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64 or DataKind.UInt128
             or DataKind.Float16 or DataKind.Float32 or DataKind.Float64
-            or DataKind.Date or DataKind.Time or DataKind.DateTime or DataKind.Duration
+            or DataKind.Date or DataKind.Time or DataKind.Timestamp or DataKind.TimestampTz or DataKind.Duration
             or DataKind.Uuid
             or DataKind.String;
 

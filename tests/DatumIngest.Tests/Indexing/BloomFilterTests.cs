@@ -111,7 +111,8 @@ public sealed class BloomFilterTests : ServiceTestBase
     [InlineData(DataKind.UInt8)]
     [InlineData(DataKind.String)]
     [InlineData(DataKind.Date)]
-    [InlineData(DataKind.DateTime)]
+    [InlineData(DataKind.TimestampTz)]
+    [InlineData(DataKind.Timestamp)]
     public void Add_And_MayContain_AllScalarKinds(DataKind kind)
     {
         BloomFilter filter = new(expectedElements: 100);
@@ -122,7 +123,8 @@ public sealed class BloomFilterTests : ServiceTestBase
             DataKind.UInt8 => DataValue.FromUInt8(42),
             DataKind.String => DataValue.FromString("test", Store),
             DataKind.Date => DataValue.FromDate(new DateOnly(2024, 6, 15)),
-            DataKind.DateTime => DataValue.FromDateTime(new DateTimeOffset(2024, 6, 15, 12, 0, 0, TimeSpan.Zero)),
+            DataKind.TimestampTz => DataValue.FromTimestampTz(new DateTimeOffset(2024, 6, 15, 12, 0, 0, TimeSpan.Zero)),
+            DataKind.Timestamp => DataValue.FromTimestamp(new DateTime(2024, 6, 15, 12, 0, 0, DateTimeKind.Unspecified)),
             _ => throw new ArgumentException($"Unsupported kind: {kind}")
         };
 

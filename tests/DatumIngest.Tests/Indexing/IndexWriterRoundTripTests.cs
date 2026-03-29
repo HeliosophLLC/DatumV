@@ -156,8 +156,10 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Boolean  => DataValue.FromBoolean(true),
         DataKind.String   => DataValue.FromString("hello world"),
         DataKind.Date     => DataValue.FromDate(new DateOnly(2026, 4, 15)),
-        DataKind.DateTime => DataValue.FromDateTime(
+        DataKind.TimestampTz => DataValue.FromTimestampTz(
             new DateTimeOffset(2026, 4, 15, 10, 30, 0, TimeSpan.FromHours(-5))),
+        DataKind.Timestamp => DataValue.FromTimestamp(
+            new DateTime(2026, 4, 15, 10, 30, 0, DateTimeKind.Unspecified)),
         DataKind.Time     => DataValue.FromTime(new TimeOnly(14, 30, 59, 123)),
         DataKind.Duration => DataValue.FromDuration(TimeSpan.FromSeconds(90.5)),
         DataKind.Uuid     => DataValue.FromUuid(Guid.Parse("12345678-1234-1234-1234-123456789abc")),
@@ -243,8 +245,11 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
             case DataKind.Date:
                 Assert.Equal(expected.AsDate(), actual.AsDate());
                 break;
-            case DataKind.DateTime:
-                Assert.Equal(expected.AsDateTime(), actual.AsDateTime());
+            case DataKind.TimestampTz:
+                Assert.Equal(expected.AsTimestampTz(), actual.AsTimestampTz());
+                break;
+            case DataKind.Timestamp:
+                Assert.Equal(expected.AsTimestamp(), actual.AsTimestamp());
                 break;
             case DataKind.Time:
                 Assert.Equal(expected.AsTime(), actual.AsTime());

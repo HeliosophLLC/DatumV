@@ -125,8 +125,11 @@ public sealed class CsvSerializer : IFormatSerializer
             case DataKind.Date:
                 writer.Write(value.AsDate().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
                 break;
-            case DataKind.DateTime:
-                writer.Write(value.AsDateTime().ToString("O", CultureInfo.InvariantCulture));
+            case DataKind.TimestampTz:
+                writer.Write(value.AsTimestampTz().ToString("O", CultureInfo.InvariantCulture));
+                break;
+            case DataKind.Timestamp:
+                writer.Write(value.AsTimestamp().ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture));
                 break;
             case DataKind.Time:
                 writer.Write(value.AsTime().ToString("HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture));

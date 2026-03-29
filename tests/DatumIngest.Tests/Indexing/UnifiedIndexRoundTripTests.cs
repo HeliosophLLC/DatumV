@@ -86,7 +86,7 @@ public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
         Schema schema = new([
             new ColumnInfo("id", DataKind.Float32, nullable: false),
             new ColumnInfo("name", DataKind.String, nullable: true),
-            new ColumnInfo("created", DataKind.DateTime, nullable: true),
+            new ColumnInfo("created", DataKind.TimestampTz, nullable: true),
             new ColumnInfo("flag", DataKind.Boolean, nullable: false),
         ]);
         IndexSchema indexSchema = new(schema, 50_000);
@@ -102,7 +102,7 @@ public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
         Assert.False(restored.Schema.Schema.Columns[0].Nullable);
         Assert.Equal("name", restored.Schema.Schema.Columns[1].Name);
         Assert.True(restored.Schema.Schema.Columns[1].Nullable);
-        Assert.Equal(DataKind.DateTime, restored.Schema.Schema.Columns[2].Kind);
+        Assert.Equal(DataKind.TimestampTz, restored.Schema.Schema.Columns[2].Kind);
         Assert.Equal(DataKind.Boolean, restored.Schema.Schema.Columns[3].Kind);
     }
 

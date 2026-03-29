@@ -9,8 +9,10 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
 {
     private DateOnly _minDate = DateOnly.MaxValue;
     private DateOnly _maxDate = DateOnly.MinValue;
-    private DateTimeOffset _minDateTime = DateTimeOffset.MaxValue;
-    private DateTimeOffset _maxDateTime = DateTimeOffset.MinValue;
+    private DateTimeOffset _minTimestampTz = DateTimeOffset.MaxValue;
+    private DateTimeOffset _maxTimestampTz = DateTimeOffset.MinValue;
+    private DateTime _minTimestamp = DateTime.MaxValue;
+    private DateTime _maxTimestamp = DateTime.MinValue;
     private TimeOnly _minTime = TimeOnly.MaxValue;
     private TimeOnly _maxTime = TimeOnly.MinValue;
     private long _count;
@@ -40,21 +42,30 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
                 _maxDate = date;
             }
         }
-        else if (value.Kind == DataKind.DateTime)
+        else if (value.Kind == DataKind.TimestampTz)
         {
-            DateTimeOffset dateTime = value.AsDateTime();
+            DateTimeOffset dateTime = value.AsTimestampTz();
             _count++;
-            _observedKind = DataKind.DateTime;
+            _observedKind = DataKind.TimestampTz;
 
-            if (dateTime < _minDateTime)
+            if (dateTime < _minTimestampTz)
             {
-                _minDateTime = dateTime;
+                _minTimestampTz = dateTime;
             }
 
-            if (dateTime > _maxDateTime)
+            if (dateTime > _maxTimestampTz)
             {
-                _maxDateTime = dateTime;
+                _maxTimestampTz = dateTime;
             }
+        }
+        else if (value.Kind == DataKind.Timestamp)
+        {
+            DateTime ts = value.AsTimestamp();
+            _count++;
+            _observedKind = DataKind.Timestamp;
+
+            if (ts < _minTimestamp) _minTimestamp = ts;
+            if (ts > _maxTimestamp) _maxTimestamp = ts;
         }
         else if (value.Kind == DataKind.Time)
         {
@@ -99,9 +110,17 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
             yield break;
         }
 
+        if (_observedKind == DataKind.Timestamp)
+        {
+            yield return new StatisticResult("temporal_range", new TemporalRangeResult(
+                _minTimestamp.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF"),
+                _maxTimestamp.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF")));
+            yield break;
+        }
+
         yield return new StatisticResult("temporal_range", new TemporalRangeResult(
-            _minDateTime.ToString("O"),
-            _maxDateTime.ToString("O")));
+            _minTimestampTz.ToString("O"),
+            _maxTimestampTz.ToString("O")));
     }
 }
 

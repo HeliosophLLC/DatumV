@@ -38,10 +38,11 @@ internal static class ZoneMapValueSerializer
             case DataKind.Float64:  writer.Write((double)value); break;
             case DataKind.String:   writer.Write((string)value); break;
             case DataKind.Date:     writer.Write(((DateOnly)value).DayNumber); break;
-            case DataKind.DateTime:
-                DateTimeOffset dto = (DateTimeOffset)value;
-                writer.Write(dto.Ticks);
-                writer.Write((short)dto.Offset.TotalMinutes);
+            case DataKind.TimestampTz:
+                writer.Write(((DateTimeOffset)value).UtcTicks);
+                break;
+            case DataKind.Timestamp:
+                writer.Write(((DateTime)value).Ticks);
                 break;
             case DataKind.Time:     writer.Write(((TimeOnly)value).Ticks); break;
             case DataKind.Duration: writer.Write(((TimeSpan)value).Ticks); break;
@@ -71,7 +72,8 @@ internal static class ZoneMapValueSerializer
             DataKind.Float64 => reader.ReadDouble(),
             DataKind.String => reader.ReadString(),
             DataKind.Date => DateOnly.FromDayNumber(reader.ReadInt32()),
-            DataKind.DateTime => ReadDateTimeOffset(reader),
+            DataKind.TimestampTz => new DateTimeOffset(reader.ReadInt64(), TimeSpan.Zero),
+            DataKind.Timestamp => new DateTime(reader.ReadInt64(), DateTimeKind.Unspecified),
             DataKind.Time => new TimeOnly(reader.ReadInt64()),
             DataKind.Duration => new TimeSpan(reader.ReadInt64()),
             DataKind.Uuid => new Guid(reader.ReadBytes(16)),
@@ -80,10 +82,4 @@ internal static class ZoneMapValueSerializer
         };
     }
 
-    private static DateTimeOffset ReadDateTimeOffset(BinaryReader reader)
-    {
-        long ticks = reader.ReadInt64();
-        short offsetMinutes = reader.ReadInt16();
-        return new DateTimeOffset(ticks, TimeSpan.FromMinutes(offsetMinutes));
-    }
 }

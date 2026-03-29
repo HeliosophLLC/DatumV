@@ -110,7 +110,7 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         // gate; per-row evaluation matches PostgreSQL semantics for
         // non-deterministic DEFAULTs.
         using TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE TEMP TABLE t (id Int32, ts DateTime DEFAULT now())");
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, ts TimestampTz DEFAULT now())");
         catalog.Plan("INSERT INTO t (id) VALUES (1), (2)");
 
         List<DateTimeOffset> stamps = new();
@@ -119,7 +119,7 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         {
             for (int r = 0; r < batch.Count; r++)
             {
-                stamps.Add(batch[r][1].AsDateTime());
+                stamps.Add(batch[r][1].AsTimestampTz());
             }
             batch.Dispose();
         }
@@ -318,7 +318,7 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
         catalog.Plan("INSERT INTO t (id) VALUES (1)");
 
-        catalog.Plan("ALTER TABLE t ADD COLUMN created_at DateTime DEFAULT now()");
+        catalog.Plan("ALTER TABLE t ADD COLUMN created_at TimestampTz DEFAULT now()");
         catalog.Plan("INSERT INTO t (id) VALUES (2)");
 
         DateTimeOffset? row2Stamp = null;
@@ -333,7 +333,7 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
                 }
                 else if (batch[r][0].AsInt32() == 2)
                 {
-                    row2Stamp = batch[r][1].AsDateTime();
+                    row2Stamp = batch[r][1].AsTimestampTz();
                 }
             }
             batch.Dispose();
@@ -716,7 +716,7 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         // UtcNow on every INSERT.
         using (TableCatalog catalog = CreateCatalog( CatalogPath))
         {
-            catalog.Plan("CREATE TABLE events (id Int32, ts DateTime DEFAULT now())");
+            catalog.Plan("CREATE TABLE events (id Int32, ts TimestampTz DEFAULT now())");
             catalog.Plan("INSERT INTO events (id) VALUES (1)");
         }
 
@@ -734,7 +734,7 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         {
             for (int r = 0; r < batch.Count; r++)
             {
-                rows.Add((batch[r][0].AsInt32(), batch[r][1].AsDateTime()));
+                rows.Add((batch[r][0].AsInt32(), batch[r][1].AsTimestampTz()));
             }
             batch.Dispose();
         }
@@ -787,7 +787,7 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         // non-deterministic function-call DEFAULTs that DO coerce
         // correctly. Only the explicit type mismatches should fail.
         using TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE TEMP TABLE t (id Int32, ts DateTime DEFAULT now())");
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, ts TimestampTz DEFAULT now())");
 
         Schema schema = catalog["t"].GetSchema();
         Assert.NotNull(schema.Columns[1].DefaultExpression);

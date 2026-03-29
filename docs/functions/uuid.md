@@ -61,7 +61,7 @@ SELECT uuid_extract_version(uuidv7())  -- 7
 
 ## uuid_extract_timestamp
 
-`uuid_extract_timestamp(uuid)` → DateTime | QU: 1
+`uuid_extract_timestamp(uuid)` → TimestampTz | QU: 1
 
 Returns the embedded timestamp from a version 1, 6, or 7 UUID. Returns NULL for other versions (v4 has no embedded time) or non-RFC 9562 variants. v7 timestamps have millisecond precision; v1 timestamps have 100-nanosecond precision.
 

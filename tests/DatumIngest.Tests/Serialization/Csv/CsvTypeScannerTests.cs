@@ -192,7 +192,7 @@ public sealed class CsvTypeScannerTests : ServiceTestBase
         const string csv = "t\n2024-01-15 10:30:00\n2024-02-20 14:45:00\n";
         CsvScanResult scan = await ScanAsync(csv);
 
-        AssertColumn(scan, "t", DataKind.DateTime, SchemaInferenceReason.DateFormatMatched);
+        AssertColumn(scan, "t", DataKind.TimestampTz, SchemaInferenceReason.DateFormatMatched);
     }
 
     [Fact]
@@ -213,7 +213,7 @@ public sealed class CsvTypeScannerTests : ServiceTestBase
             "\"02/20/2024 02:45:00 PM\"\n";
         CsvScanResult scan = await ScanAsync(csv);
 
-        AssertColumn(scan, "t", DataKind.DateTime, SchemaInferenceReason.DateFormatMatched);
+        AssertColumn(scan, "t", DataKind.TimestampTz, SchemaInferenceReason.DateFormatMatched);
     }
 
     // ──────────────── Mixed + all-null ────────────────

@@ -145,6 +145,63 @@ public sealed class CastFunctionTests
     }
 
     [Fact]
+    public async Task Cast_StringToTimestampTz_PreservesOffsetThenNormalises()
+    {
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { ValueRef.FromString("2026-05-19T12:00:00-07:00"), ValueRef.FromType(DataKind.TimestampTz) },
+            Frame, default);
+        Assert.Equal(DataKind.TimestampTz, result.Kind);
+        // FromTimestampTz normalises to UTC; the readback offset is zero.
+        DateTimeOffset got = result.AsTimestampTz();
+        Assert.Equal(new DateTimeOffset(2026, 5, 19, 19, 0, 0, TimeSpan.Zero), got);
+        Assert.Equal(TimeSpan.Zero, got.Offset);
+    }
+
+    [Fact]
+    public async Task Cast_StringToTimestamp_StoresNaiveTicks()
+    {
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { ValueRef.FromString("2026-05-19T12:00:00"), ValueRef.FromType(DataKind.Timestamp) },
+            Frame, default);
+        Assert.Equal(DataKind.Timestamp, result.Kind);
+        DateTime got = result.AsTimestamp();
+        Assert.Equal(new DateTime(2026, 5, 19, 12, 0, 0).Ticks, got.Ticks);
+    }
+
+    [Fact]
+    public async Task Cast_TimestampTzToTimestamp_DropsZoneInfo()
+    {
+        DateTimeOffset src = new(2026, 5, 19, 12, 0, 0, TimeSpan.Zero);
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { ValueRef.FromTimestampTz(src), ValueRef.FromType(DataKind.Timestamp) },
+            Frame, default);
+        Assert.Equal(DataKind.Timestamp, result.Kind);
+        Assert.Equal(src.UtcDateTime.Ticks, result.AsTimestamp().Ticks);
+    }
+
+    [Fact]
+    public async Task Cast_TimestampToTimestampTz_AssumesUtc()
+    {
+        // Documented PG divergence: no session TZ, so we assume UTC.
+        DateTime naive = new(2026, 5, 19, 12, 0, 0, DateTimeKind.Unspecified);
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { ValueRef.FromTimestamp(naive), ValueRef.FromType(DataKind.TimestampTz) },
+            Frame, default);
+        Assert.Equal(DataKind.TimestampTz, result.Kind);
+        Assert.Equal(new DateTimeOffset(naive.Ticks, TimeSpan.Zero), result.AsTimestampTz());
+    }
+
+    [Fact]
+    public async Task Cast_DateToTimestamp_ProducesMidnight()
+    {
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { ValueRef.FromDate(new DateOnly(2026, 5, 19)), ValueRef.FromType(DataKind.Timestamp) },
+            Frame, default);
+        Assert.Equal(DataKind.Timestamp, result.Kind);
+        Assert.Equal(new DateTime(2026, 5, 19, 0, 0, 0).Ticks, result.AsTimestamp().Ticks);
+    }
+
+    [Fact]
     public async Task Cast_TargetAsString_AcceptsNameAndAlias()
     {
         ValueRef byName = await new CastFunction().ExecuteAsync(

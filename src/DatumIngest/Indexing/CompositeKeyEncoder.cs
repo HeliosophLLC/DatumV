@@ -124,10 +124,11 @@ internal static class CompositeKeyEncoder
             case DataKind.Time:     WriteInt64(stream, value.AsTime().Ticks); break;
             case DataKind.Duration: WriteInt64(stream, value.AsDuration().Ticks); break;
 
-            case DataKind.DateTime:
-                DateTimeOffset dto = value.AsDateTime();
-                WriteInt64(stream, dto.UtcTicks);
-                WriteInt16(stream, (short)dto.Offset.TotalMinutes);
+            case DataKind.TimestampTz:
+                WriteInt64(stream, value.AsTimestampTz().UtcTicks);
+                break;
+            case DataKind.Timestamp:
+                WriteInt64(stream, value.AsTimestamp().Ticks);
                 break;
 
             case DataKind.Uuid:

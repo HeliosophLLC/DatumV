@@ -332,7 +332,8 @@ static string FormatSample(DataValue value)
         DataKind.UInt64 => value.AsUInt64().ToString(),
         DataKind.Boolean => value.AsBoolean().ToString().ToLowerInvariant(),
         DataKind.Date => value.AsDate().ToString("yyyy-MM-dd"),
-        DataKind.DateTime => value.AsDateTime().ToString("yyyy-MM-dd HH:mm:ss"),
+        DataKind.TimestampTz => value.AsTimestampTz().ToString("yyyy-MM-dd HH:mm:ss"),
+        DataKind.Timestamp => value.AsTimestamp().ToString("yyyy-MM-dd HH:mm:ss"),
         DataKind.Uuid => value.AsUuid().ToString(),
         _ => $"<{value.Kind}>",
     };

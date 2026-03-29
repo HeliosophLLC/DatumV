@@ -23,7 +23,8 @@ public sealed class SortedIndexKeyEncoderTests : ServiceTestBase
     [InlineData(DataKind.Int64, 8)]
     [InlineData(DataKind.UInt64, 8)]
     [InlineData(DataKind.Float64, 8)]
-    [InlineData(DataKind.DateTime, 8)]
+    [InlineData(DataKind.TimestampTz, 8)]
+    [InlineData(DataKind.Timestamp, 8)]
     [InlineData(DataKind.Time, 8)]
     [InlineData(DataKind.Duration, 8)]
     [InlineData(DataKind.String, 8)]
@@ -211,11 +212,11 @@ public sealed class SortedIndexKeyEncoderTests : ServiceTestBase
     public void RoundTrip_DateTime()
     {
         DateTimeOffset dateTime = new(2026, 4, 7, 14, 30, 0, TimeSpan.FromHours(2));
-        DataValue original = DataValue.FromDateTime(dateTime);
+        DataValue original = DataValue.FromTimestampTz(dateTime);
         DataValue decoded = EncodeThenDecode(original);
 
         // UTC instant is preserved; original offset is lost (decoded as UTC).
-        Assert.Equal(dateTime.UtcTicks, decoded.AsDateTime().UtcTicks);
+        Assert.Equal(dateTime.UtcTicks, decoded.AsTimestampTz().UtcTicks);
     }
 
     [Fact]
@@ -329,9 +330,9 @@ public sealed class SortedIndexKeyEncoderTests : ServiceTestBase
     {
         DataValue[] keys =
         [
-            DataValue.FromDateTime(new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero)),
-            DataValue.FromDateTime(new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero)),
-            DataValue.FromDateTime(new DateTimeOffset(2026, 4, 7, 14, 30, 0, TimeSpan.Zero)),
+            DataValue.FromTimestampTz(new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+            DataValue.FromTimestampTz(new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero)),
+            DataValue.FromTimestampTz(new DateTimeOffset(2026, 4, 7, 14, 30, 0, TimeSpan.Zero)),
         ];
         AssertSortOrderPreservedRaw(keys);
     }
@@ -340,8 +341,8 @@ public sealed class SortedIndexKeyEncoderTests : ServiceTestBase
     public void SortOrder_DateTime_DifferentOffsets_PreservedByUtcTicks()
     {
         // Same UTC instant expressed with different offsets should encode identically.
-        DataValue utc = DataValue.FromDateTime(new DateTimeOffset(2026, 4, 7, 12, 0, 0, TimeSpan.Zero));
-        DataValue eastern = DataValue.FromDateTime(new DateTimeOffset(2026, 4, 7, 8, 0, 0, TimeSpan.FromHours(-4)));
+        DataValue utc = DataValue.FromTimestampTz(new DateTimeOffset(2026, 4, 7, 12, 0, 0, TimeSpan.Zero));
+        DataValue eastern = DataValue.FromTimestampTz(new DateTimeOffset(2026, 4, 7, 8, 0, 0, TimeSpan.FromHours(-4)));
 
         byte[] utcBytes = new byte[8];
         byte[] easternBytes = new byte[8];

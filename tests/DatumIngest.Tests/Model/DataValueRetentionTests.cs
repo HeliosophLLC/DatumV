@@ -46,7 +46,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [InlineData(DataKind.Float64)]
     [InlineData(DataKind.Boolean)]
     [InlineData(DataKind.Date)]
-    [InlineData(DataKind.DateTime)]
+    [InlineData(DataKind.TimestampTz)]
+    [InlineData(DataKind.Timestamp)]
     [InlineData(DataKind.Uuid)]
     public void Stabilize_FixedSizeScalar_PassesThrough(DataKind kind)
     {
@@ -61,8 +62,10 @@ public sealed class DataValueRetentionTests : ServiceTestBase
             DataKind.Float64 => DataValue.FromFloat64(2.71828),
             DataKind.Boolean => DataValue.FromBoolean(true),
             DataKind.Date => DataValue.FromDate(new DateOnly(2025, 1, 31)),
-            DataKind.DateTime => DataValue.FromDateTime(
+            DataKind.TimestampTz => DataValue.FromTimestampTz(
                 new DateTimeOffset(2025, 1, 31, 12, 0, 0, TimeSpan.Zero)),
+            DataKind.Timestamp => DataValue.FromTimestamp(
+                new DateTime(2025, 1, 31, 12, 0, 0, DateTimeKind.Unspecified)),
             DataKind.Uuid => DataValue.FromUuid(Guid.Parse("12345678-1234-1234-1234-123456789abc")),
             _ => throw new ArgumentException($"Unsupported: {kind}"),
         };

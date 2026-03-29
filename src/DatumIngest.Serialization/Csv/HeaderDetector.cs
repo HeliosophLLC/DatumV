@@ -160,7 +160,7 @@ internal static class HeaderDetector
                 if (parsed.TimeOfDay != TimeSpan.Zero) anyHasTime = true;
             }
 
-            if (allDates) kinds[col] = anyHasTime ? DataKind.DateTime : DataKind.Date;
+            if (allDates) kinds[col] = anyHasTime ? DataKind.TimestampTz : DataKind.Date;
         }
 
         // Pass 3: UUIDs in String columns.

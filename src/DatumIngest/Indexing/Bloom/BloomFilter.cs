@@ -266,10 +266,16 @@ public sealed class BloomFilter
                 BinaryPrimitives.WriteDoubleLittleEndian(buffer, value.AsFloat64());
                 return FinalizeHashes(buffer);
             }
-            case DataKind.DateTime:
+            case DataKind.TimestampTz:
             {
                 Span<byte> buffer = stackalloc byte[8];
-                BinaryPrimitives.WriteInt64LittleEndian(buffer, value.AsDateTime().ToUnixTimeMilliseconds());
+                BinaryPrimitives.WriteInt64LittleEndian(buffer, value.AsTimestampTz().UtcTicks);
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.Timestamp:
+            {
+                Span<byte> buffer = stackalloc byte[8];
+                BinaryPrimitives.WriteInt64LittleEndian(buffer, value.AsTimestamp().Ticks);
                 return FinalizeHashes(buffer);
             }
             case DataKind.String:

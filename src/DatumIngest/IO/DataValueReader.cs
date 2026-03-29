@@ -76,8 +76,10 @@ internal static class DataValueReader
             DataKind.Decimal => DataValue.FromDecimal(reader.ReadDecimal()),
             DataKind.String => DataValue.FromString(reader.ReadString(), store),
             DataKind.Date => DataValue.FromDate(DateOnly.FromDayNumber(reader.ReadInt32())),
-            DataKind.DateTime => DataValue.FromDateTime(
-                new DateTimeOffset(reader.ReadInt64(), TimeSpan.FromMinutes(reader.ReadInt16()))),
+            DataKind.TimestampTz => DataValue.FromTimestampTz(
+                new DateTimeOffset(reader.ReadInt64(), TimeSpan.Zero)),
+            DataKind.Timestamp => DataValue.FromTimestamp(
+                new DateTime(reader.ReadInt64(), DateTimeKind.Unspecified)),
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
             DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks(reader.ReadInt64())),
             DataKind.Image => ReadImage(reader, store),
@@ -119,8 +121,10 @@ internal static class DataValueReader
             DataKind.Decimal => DataValue.FromDecimal(reader.ReadDecimal()),
             DataKind.String => DataValue.FromString(reader.ReadString()),
             DataKind.Date => DataValue.FromDate(DateOnly.FromDayNumber(reader.ReadInt32())),
-            DataKind.DateTime => DataValue.FromDateTime(
-                new DateTimeOffset(reader.ReadInt64(), TimeSpan.FromMinutes(reader.ReadInt16()))),
+            DataKind.TimestampTz => DataValue.FromTimestampTz(
+                new DateTimeOffset(reader.ReadInt64(), TimeSpan.Zero)),
+            DataKind.Timestamp => DataValue.FromTimestamp(
+                new DateTime(reader.ReadInt64(), DateTimeKind.Unspecified)),
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
             DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks(reader.ReadInt64())),
             DataKind.Image => ReadImage(reader),

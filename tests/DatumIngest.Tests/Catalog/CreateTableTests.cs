@@ -406,7 +406,7 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
             "u8 UInt8, u16 UInt16, u32 UInt32, u64 UInt64, " +
             "f32 Float32, f64 Float64, " +
             "s String, u Uuid, " +
-            "d Date, t Time, dt DateTime, dur Duration" +
+            "d Date, t Time, dt TimestampTz, dur Duration" +
             ")");
 
         Schema schema = catalog["wide"].GetSchema();
@@ -418,7 +418,7 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(DataKind.Float64, schema.Columns[9].Kind);
         Assert.Equal(DataKind.String, schema.Columns[10].Kind);
         Assert.Equal(DataKind.Uuid, schema.Columns[11].Kind);
-        Assert.Equal(DataKind.DateTime, schema.Columns[14].Kind);
+        Assert.Equal(DataKind.TimestampTz, schema.Columns[14].Kind);
     }
 
     [Fact]

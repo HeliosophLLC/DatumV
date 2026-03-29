@@ -46,7 +46,7 @@ public sealed class LeastFunction : IFunction, IScalarFunction
                 "values",
                 DataKindMatcher.OneOf(
                     DataKind.Decimal, DataKind.Float16, DataKind.Int128, DataKind.UInt128,
-                    DataKind.String, DataKind.Date, DataKind.DateTime, DataKind.Time,
+                    DataKind.String, DataKind.Date, DataKind.Timestamp, DataKind.TimestampTz, DataKind.Time,
                     DataKind.Duration, DataKind.Uuid, DataKind.Boolean),
                 MinOccurrences: 2,
                 RequireSameKindAcrossArgs: true),

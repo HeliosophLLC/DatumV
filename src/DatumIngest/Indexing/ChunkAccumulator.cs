@@ -142,8 +142,11 @@ internal sealed class ChunkAccumulator
             case DataKind.Date:
                 _cardinality!.Add(value.AsDate().DayNumber);
                 break;
-            case DataKind.DateTime:
-                _cardinality!.Add(value.AsDateTime().ToUnixTimeMilliseconds());
+            case DataKind.TimestampTz:
+                _cardinality!.Add(value.AsTimestampTz().UtcTicks);
+                break;
+            case DataKind.Timestamp:
+                _cardinality!.Add(value.AsTimestamp().Ticks);
                 break;
             case DataKind.String:
                 _cardinality!.Add(value.RawContentHash);

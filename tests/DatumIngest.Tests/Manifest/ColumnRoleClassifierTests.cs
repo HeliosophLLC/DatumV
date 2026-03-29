@@ -341,7 +341,7 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
     public void Classify_DateTime_ReturnsTemporal()
     {
         FeatureManifest manifest = MakeFallbackManifest(
-            DataKind.DateTime, estimatedDistinctCount: 10000, nullRatio: 0.0);
+            DataKind.TimestampTz, estimatedDistinctCount: 10000, nullRatio: 0.0);
 
         ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
 

@@ -255,7 +255,8 @@ internal sealed class SamplePreviewCollector
             DataKind.String => value.AsString(store),
             // Date/time types: ISO string for JSON (DateOnly/DateTimeOffset don't serialize well).
             DataKind.Date => value.AsDate().ToString("O"),
-            DataKind.DateTime => value.AsDateTime().ToString("O"),
+            DataKind.TimestampTz => value.AsTimestampTz().ToString("O"),
+            DataKind.Timestamp => value.AsTimestamp().ToString("O"),
             DataKind.Time => value.AsTime().ToString("O"),
             DataKind.Duration => value.AsDuration().ToString(),
             DataKind.Uuid => value.AsUuid().ToString(),

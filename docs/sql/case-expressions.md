@@ -83,7 +83,7 @@ FROM data
 ```
 
 Coercible String targets include: `Float32`, `UInt8`, `Boolean`, `Date`,
-`DateTime`, `Time`, `Duration`, `Uuid`, and `JsonValue`. Types like `Vector`,
+`Timestamp`, `TimestampTz`, `Time`, `Duration`, `Uuid`, and `JsonValue`. Types like `Vector`,
 `Matrix`, `Tensor`, `Image`, and `UInt8Array` cannot be coerced from String.
 
 ## Common Patterns

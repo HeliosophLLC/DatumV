@@ -127,10 +127,12 @@ internal static class DataValueWriter
                 break;
             }
 
-            case DataKind.DateTime:
-                DateTimeOffset dto = value.AsDateTime();
-                writer.Write(dto.Ticks);
-                writer.Write((short)dto.Offset.TotalMinutes);
+            case DataKind.TimestampTz:
+                writer.Write(value.AsTimestampTz().UtcTicks);
+                break;
+
+            case DataKind.Timestamp:
+                writer.Write(value.AsTimestamp().Ticks);
                 break;
 
             case DataKind.String:
@@ -233,10 +235,12 @@ internal static class DataValueWriter
                 writer.Write(date.DayNumber);
                 break;
 
-            case DataKind.DateTime:
-                DateTimeOffset dateTimeOffset = value.AsDateTime();
-                writer.Write(dateTimeOffset.Ticks);
-                writer.Write((short)dateTimeOffset.Offset.TotalMinutes);
+            case DataKind.TimestampTz:
+                writer.Write(value.AsTimestampTz().UtcTicks);
+                break;
+
+            case DataKind.Timestamp:
+                writer.Write(value.AsTimestamp().Ticks);
                 break;
 
             case DataKind.Time:
@@ -374,10 +378,12 @@ internal static class DataValueWriter
                 writer.Write(dateValue.DayNumber);
                 break;
 
-            case DataKind.DateTime:
-                DateTimeOffset dateTimeValue = value.AsDateTime();
-                writer.Write(dateTimeValue.Ticks);
-                writer.Write((short)dateTimeValue.Offset.TotalMinutes);
+            case DataKind.TimestampTz:
+                writer.Write(value.AsTimestampTz().UtcTicks);
+                break;
+
+            case DataKind.Timestamp:
+                writer.Write(value.AsTimestamp().Ticks);
                 break;
 
             case DataKind.Time:

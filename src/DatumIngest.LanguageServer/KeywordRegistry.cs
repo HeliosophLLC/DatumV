@@ -107,7 +107,7 @@ internal static class KeywordRegistry
         "UInt8", "UInt16", "UInt32", "UInt64", "UInt128",
         "Int8", "Int16", "Int32", "Int64", "Int128",
         "Float16", "Float32", "Float64", "Decimal",
-        "Date", "Time", "DateTime", "Duration",
+        "Date", "Time", "Timestamp", "TimestampTz", "Duration",
         "String", "Uuid",
         "Image", "Audio", "Video", "Json",
         "Struct",

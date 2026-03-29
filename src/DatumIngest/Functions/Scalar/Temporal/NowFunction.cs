@@ -5,7 +5,7 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar.Temporal;
 
 /// <summary>
-/// Returns the current UTC timestamp as a <see cref="DataKind.DateTime"/>.
+/// Returns the current UTC timestamp as a <see cref="DataKind.TimestampTz"/> (PG <c>now()</c>).
 /// </summary>
 public sealed class NowFunction : IFunction, IScalarFunction
 {
@@ -24,7 +24,7 @@ public sealed class NowFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters: [],
             VariadicTrailing: null,
-            ReturnType: ReturnTypeRule.Constant(DataKind.DateTime)),
+            ReturnType: ReturnTypeRule.Constant(DataKind.TimestampTz)),
     ];
 
     /// <inheritdoc />
@@ -36,7 +36,7 @@ public sealed class NowFunction : IFunction, IScalarFunction
         ReadOnlyMemory<ValueRef> arguments,
         EvaluationFrame frame,
         CancellationToken cancellationToken) =>
-        new(ValueRef.FromDateTime(DateTimeOffset.UtcNow));
+        new(ValueRef.FromTimestampTz(DateTimeOffset.UtcNow));
 
     // CSE in this codebase is per-row, so "pure" here means "row-local pure":
     // multiple now() references within one row's evaluation collapse to one

@@ -49,7 +49,8 @@ The value sits in the inline payload region. `_charCount` carries kind-specific 
 |---|---|
 | `Int32` / `Float32` | `_p0` |
 | `Int64` / `Float64` | `_p0`+`_p1` |
-| `DateTime` | `_p0`+`_p1` (ticks) + `_p2` (offset minutes) |
+| `Timestamp` (PG `timestamp`, naive wall-clock ticks) | `_p0`+`_p1` |
+| `TimestampTz` (PG `timestamptz`, UTC ticks; input offset discarded at construction) | `_p0`+`_p1` |
 | `Int128` / `UInt128` / `Decimal` / `Uuid` | bytes 0–15 of payload |
 | `Point2D` | two `float32`s in `_p0` / `_p1` |
 | `Point3D` | three `float32`s in `_p0` / `_p1` / `_p2` |

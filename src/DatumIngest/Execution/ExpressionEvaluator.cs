@@ -646,7 +646,8 @@ public sealed class ExpressionEvaluator
         {
             CurrentTimestampKind.CurrentDate => DataValue.FromDate(DateOnly.FromDateTime(now.UtcDateTime)),
             CurrentTimestampKind.CurrentTime => DataValue.FromTime(TimeOnly.FromTimeSpan(now.TimeOfDay)),
-            CurrentTimestampKind.CurrentTimestamp => DataValue.FromDateTime(now),
+            // PG current_timestamp returns timestamptz.
+            CurrentTimestampKind.CurrentTimestamp => DataValue.FromTimestampTz(now),
             _ => throw new InvalidOperationException($"Unknown CurrentTimestampKind: {ct.Kind}"),
         };
     }
@@ -775,6 +776,30 @@ public sealed class ExpressionEvaluator
                 => ValueRef.FromDuration(left.AsDuration() + right.AsDuration()),
             BinaryOperator.Subtract when left.Kind == DataKind.Duration && right.Kind == DataKind.Duration
                 => ValueRef.FromDuration(left.AsDuration() - right.AsDuration()),
+
+            // PG temporal arithmetic. The Timestamp(Tz) ± Duration arms
+            // shift the wall-clock or UTC ticks; the Timestamp(Tz) -
+            // Timestamp(Tz) arms produce a Duration. Same-kind only — mixing
+            // Timestamp and TimestampTz requires an explicit cast (slice 4
+            // cast matrix in TypeCoercion / CastFunction).
+            BinaryOperator.Add when left.Kind == DataKind.TimestampTz && right.Kind == DataKind.Duration
+                => ValueRef.FromTimestampTz(left.AsTimestampTz() + right.AsDuration()),
+            BinaryOperator.Add when left.Kind == DataKind.Duration && right.Kind == DataKind.TimestampTz
+                => ValueRef.FromTimestampTz(right.AsTimestampTz() + left.AsDuration()),
+            BinaryOperator.Subtract when left.Kind == DataKind.TimestampTz && right.Kind == DataKind.Duration
+                => ValueRef.FromTimestampTz(left.AsTimestampTz() - right.AsDuration()),
+            BinaryOperator.Subtract when left.Kind == DataKind.TimestampTz && right.Kind == DataKind.TimestampTz
+                => ValueRef.FromDuration(left.AsTimestampTz() - right.AsTimestampTz()),
+
+            BinaryOperator.Add when left.Kind == DataKind.Timestamp && right.Kind == DataKind.Duration
+                => ValueRef.FromTimestamp(left.AsTimestamp() + right.AsDuration()),
+            BinaryOperator.Add when left.Kind == DataKind.Duration && right.Kind == DataKind.Timestamp
+                => ValueRef.FromTimestamp(right.AsTimestamp() + left.AsDuration()),
+            BinaryOperator.Subtract when left.Kind == DataKind.Timestamp && right.Kind == DataKind.Duration
+                => ValueRef.FromTimestamp(left.AsTimestamp() - right.AsDuration()),
+            BinaryOperator.Subtract when left.Kind == DataKind.Timestamp && right.Kind == DataKind.Timestamp
+                => ValueRef.FromDuration(left.AsTimestamp() - right.AsTimestamp()),
+
             BinaryOperator.Add => DispatchArithmetic(left, right, BinaryOperator.Add),
             BinaryOperator.Subtract => DispatchArithmetic(left, right, BinaryOperator.Subtract),
             BinaryOperator.Multiply => DispatchArithmetic(left, right, BinaryOperator.Multiply),
@@ -1432,11 +1457,6 @@ public sealed class ExpressionEvaluator
     {
         DataValue value = await EvaluateAsync(atz.Expression, frame, cancellationToken).ConfigureAwait(false);
 
-        if (value.IsNull)
-        {
-            return DataValue.Null(DataKind.DateTime);
-        }
-
         DataValue tzValue = await EvaluateAsync(atz.TimeZone, frame, cancellationToken).ConfigureAwait(false);
         string tzName = Str(tzValue, frame);
 
@@ -1446,8 +1466,27 @@ public sealed class ExpressionEvaluator
             _timeZoneCache[tzName] = tz;
         }
 
-        DateTimeOffset converted = TimeZoneInfo.ConvertTime(value.ToDateTimeOffset(), tz);
-        return DataValue.FromDateTime(converted);
+        // PG AT TIME ZONE is a kind-shifting operator:
+        //   timestamptz AT TIME ZONE 'z' → timestamp (wall clock in z)
+        //   timestamp   AT TIME ZONE 'z' → timestamptz (interpret naive value as being in z, store UTC)
+        if (value.Kind == DataKind.TimestampTz)
+        {
+            if (value.IsNull) return DataValue.Null(DataKind.Timestamp);
+            DateTimeOffset converted = TimeZoneInfo.ConvertTime(value.AsTimestampTz(), tz);
+            return DataValue.FromTimestamp(converted.DateTime);
+        }
+        if (value.Kind == DataKind.Timestamp)
+        {
+            if (value.IsNull) return DataValue.Null(DataKind.TimestampTz);
+            DateTime naive = value.AsTimestamp();
+            DateTime utc = TimeZoneInfo.ConvertTimeToUtc(
+                DateTime.SpecifyKind(naive, DateTimeKind.Unspecified), tz);
+            return DataValue.FromTimestampTz(new DateTimeOffset(utc, TimeSpan.Zero));
+        }
+        // Date or other temporal: best-effort via the unified DateTimeOffset path.
+        if (value.IsNull) return DataValue.Null(DataKind.TimestampTz);
+        DateTimeOffset fallback = TimeZoneInfo.ConvertTime(value.ToDateTimeOffset(), tz);
+        return DataValue.FromTimestampTz(fallback);
     }
 
     /// <summary>
@@ -1749,6 +1788,16 @@ public sealed class ExpressionEvaluator
             return DataKind.Float32;
         }
 
+        // PG temporal arithmetic (matched first so Duration-mixed timestamp
+        // cases don't fall through to the Float32 catch-all below):
+        //   timestamp(tz) ± duration → same timestamp kind
+        //   timestamp(tz) - timestamp(tz) (same kind) → duration
+        if (op is BinaryOperator.Add or BinaryOperator.Subtract)
+        {
+            DataKind? temporal = TryPromoteTemporalArithmetic(left, right, op);
+            if (temporal is not null) return temporal.Value;
+        }
+
         // Time / Duration arithmetic falls back to float seconds for the
         // mixed cases (Duration + Duration is special-cased in the caller).
         if (left == DataKind.Time || right == DataKind.Time
@@ -1782,6 +1831,31 @@ public sealed class ExpressionEvaluator
 
         throw new InvalidOperationException(
             $"Cannot perform {op} on operands of kinds {left} and {right}.");
+    }
+
+    /// <summary>
+    /// PG temporal arithmetic promotion table. Returns the result kind for
+    /// the supported (timestamp, duration) and (timestamp, timestamp) pairs;
+    /// returns null when the pair isn't a supported temporal combination so
+    /// the caller can fall through to numeric promotion.
+    /// </summary>
+    private static DataKind? TryPromoteTemporalArithmetic(DataKind left, DataKind right, BinaryOperator op)
+    {
+        // Timestamp(tz) ± Duration → Timestamp(tz). Commutative on Add.
+        if (left == DataKind.TimestampTz && right == DataKind.Duration) return DataKind.TimestampTz;
+        if (left == DataKind.Timestamp   && right == DataKind.Duration) return DataKind.Timestamp;
+        if (op == BinaryOperator.Add)
+        {
+            if (right == DataKind.TimestampTz && left == DataKind.Duration) return DataKind.TimestampTz;
+            if (right == DataKind.Timestamp   && left == DataKind.Duration) return DataKind.Timestamp;
+        }
+        // Timestamp(tz) - Timestamp(tz) → Duration (same kind only).
+        if (op == BinaryOperator.Subtract)
+        {
+            if (left == DataKind.TimestampTz && right == DataKind.TimestampTz) return DataKind.Duration;
+            if (left == DataKind.Timestamp   && right == DataKind.Timestamp)   return DataKind.Duration;
+        }
+        return null;
     }
 
     private static bool AnyFloat64(DataKind l, DataKind r)
@@ -2129,7 +2203,8 @@ public sealed class ExpressionEvaluator
             {
                 DataKind.Boolean => left.AsBoolean().CompareTo(right.AsBoolean()),
                 DataKind.Date => left.AsDate().CompareTo(right.AsDate()),
-                DataKind.DateTime => left.AsDateTime().CompareTo(right.AsDateTime()),
+                DataKind.Timestamp => left.AsTimestamp().CompareTo(right.AsTimestamp()),
+                DataKind.TimestampTz => left.AsTimestampTz().CompareTo(right.AsTimestampTz()),
                 DataKind.Time => left.AsTime().CompareTo(right.AsTime()),
                 DataKind.Duration => left.AsDuration().CompareTo(right.AsDuration()),
                 DataKind.Uuid => left.AsUuid().CompareTo(right.AsUuid()),
@@ -2208,8 +2283,10 @@ public sealed class ExpressionEvaluator
                 result = default; return false;
             case DataKind.Date when DateOnly.TryParse(text, CultureInfo.InvariantCulture, out DateOnly date):
                 result = ValueRef.FromDate(date); return true;
-            case DataKind.DateTime when DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset dtOffset):
-                result = ValueRef.FromDateTime(dtOffset); return true;
+            case DataKind.TimestampTz when DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset dtOffset):
+                result = ValueRef.FromTimestampTz(dtOffset); return true;
+            case DataKind.Timestamp when DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out DateTime dt):
+                result = ValueRef.FromTimestamp(dt); return true;
             case DataKind.Time when TimeOnly.TryParse(text, CultureInfo.InvariantCulture, out TimeOnly time):
                 result = ValueRef.FromTime(time); return true;
             case DataKind.Duration when TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out TimeSpan duration):

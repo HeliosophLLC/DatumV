@@ -1412,9 +1412,10 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task AtTimeZone_UtcToEasternStandardTime()
     {
-        // 2026-01-15 12:00 UTC → 2026-01-15 07:00 EST (-05:00)
+        // PG: timestamptz AT TIME ZONE 'z' → timestamp (wall clock in z).
+        // 2026-01-15 12:00 UTC → naive 2026-01-15 07:00 (NY wall clock).
         DateTimeOffset utc = new(2026, 1, 15, 12, 0, 0, TimeSpan.Zero);
-        Row row = MakeRow(["ts"], DataValue.FromDateTime(utc));
+        Row row = MakeRow(["ts"], DataValue.FromTimestampTz(utc));
 
         Expression expr = new AtTimeZoneExpression(
             new ColumnReference("ts"),
@@ -1422,18 +1423,18 @@ public class ExpressionEvaluatorTests : ServiceTestBase
 
         DataValue result = await _evaluator.EvaluateAsync(expr, row);
 
-        Assert.Equal(DataKind.DateTime, result.Kind);
-        DateTimeOffset converted = result.ToDateTimeOffset();
-        Assert.Equal(7, converted.Hour);
-        Assert.Equal(new TimeSpan(-5, 0, 0), converted.Offset);
+        Assert.Equal(DataKind.Timestamp, result.Kind);
+        DateTime wallClock = result.AsTimestamp();
+        Assert.Equal(7, wallClock.Hour);
+        Assert.Equal(new DateTime(2026, 1, 15, 7, 0, 0, DateTimeKind.Unspecified), wallClock);
     }
 
     [Fact]
     public async Task AtTimeZone_UtcToEasternDaylightTime()
     {
-        // 2026-07-15 12:00 UTC → 2026-07-15 08:00 EDT (-04:00)
+        // 2026-07-15 12:00 UTC → naive 2026-07-15 08:00 (NY EDT wall clock).
         DateTimeOffset utc = new(2026, 7, 15, 12, 0, 0, TimeSpan.Zero);
-        Row row = MakeRow(["ts"], DataValue.FromDateTime(utc));
+        Row row = MakeRow(["ts"], DataValue.FromTimestampTz(utc));
 
         Expression expr = new AtTimeZoneExpression(
             new ColumnReference("ts"),
@@ -1441,15 +1442,15 @@ public class ExpressionEvaluatorTests : ServiceTestBase
 
         DataValue result = await _evaluator.EvaluateAsync(expr, row);
 
-        DateTimeOffset converted = result.ToDateTimeOffset();
-        Assert.Equal(8, converted.Hour);
-        Assert.Equal(new TimeSpan(-4, 0, 0), converted.Offset);
+        Assert.Equal(DataKind.Timestamp, result.Kind);
+        Assert.Equal(8, result.AsTimestamp().Hour);
     }
 
     [Fact]
     public async Task AtTimeZone_NullInputReturnsNull()
     {
-        Row row = MakeRow(["ts"], DataValue.Null(DataKind.DateTime));
+        // timestamptz null → timestamp null (kind-shifted, still null).
+        Row row = MakeRow(["ts"], DataValue.Null(DataKind.TimestampTz));
 
         Expression expr = new AtTimeZoneExpression(
             new ColumnReference("ts"),
@@ -1458,15 +1459,20 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         DataValue result = await _evaluator.EvaluateAsync(expr, row);
 
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.DateTime, result.Kind);
+        Assert.Equal(DataKind.Timestamp, result.Kind);
     }
 
     [Fact]
     public async Task AtTimeZone_RoundTripsBackToUtc()
     {
-        // Convert to New_York and back to UTC — should get the same instant.
+        // PG: timestamptz AT TZ 'NY' → timestamp; timestamp AT TZ 'UTC' →
+        // timestamptz (reinterpret wall clock as UTC). For the round-trip to
+        // recover the original instant, the second AT TIME ZONE must use the
+        // same zone the first call shifted into — i.e. 'America/New_York', not
+        // 'UTC'. (Going through 'UTC' would treat the NY wall clock as UTC
+        // ticks, shifting the instant by 5h.)
         DateTimeOffset utc = new(2026, 6, 15, 18, 0, 0, TimeSpan.Zero);
-        Row row = MakeRow(["ts"], DataValue.FromDateTime(utc));
+        Row row = MakeRow(["ts"], DataValue.FromTimestampTz(utc));
 
         Expression toNy = new AtTimeZoneExpression(
             new ColumnReference("ts"),
@@ -1474,23 +1480,108 @@ public class ExpressionEvaluatorTests : ServiceTestBase
 
         Expression backToUtc = new AtTimeZoneExpression(
             toNy,
-            new LiteralExpression("UTC"));
+            new LiteralExpression("America/New_York"));
 
         DataValue result = await _evaluator.EvaluateAsync(backToUtc, row);
 
-        Assert.Equal(utc.UtcTicks, result.ToDateTimeOffset().UtcTicks);
+        Assert.Equal(DataKind.TimestampTz, result.Kind);
+        Assert.Equal(utc.UtcTicks, result.AsTimestampTz().UtcTicks);
     }
 
     [Fact]
     public async Task AtTimeZone_InvalidTimezone_Throws()
     {
-        Row row = MakeRow(["ts"], DataValue.FromDateTime(DateTimeOffset.UtcNow));
+        Row row = MakeRow(["ts"], DataValue.FromTimestampTz(DateTimeOffset.UtcNow));
 
         Expression expr = new AtTimeZoneExpression(
             new ColumnReference("ts"),
             new LiteralExpression("Not/AZone"));
 
         await Assert.ThrowsAsync<TimeZoneNotFoundException>(async () => await _evaluator.EvaluateAsync(expr, row));
+    }
+
+    // ─────────────── PG temporal arithmetic ───────────────
+
+    [Fact]
+    public async Task TimestampTz_PlusDuration_ReturnsShiftedTimestampTz()
+    {
+        DateTimeOffset baseAt = new(2026, 5, 19, 12, 0, 0, TimeSpan.Zero);
+        Row row = MakeRow(
+            ["ts", "delay"],
+            DataValue.FromTimestampTz(baseAt),
+            DataValue.FromDuration(TimeSpan.FromHours(3)));
+
+        Expression expr = new BinaryExpression(
+            new ColumnReference("ts"),
+            BinaryOperator.Add,
+            new ColumnReference("delay"));
+
+        DataValue result = await _evaluator.EvaluateAsync(expr, row);
+
+        Assert.Equal(DataKind.TimestampTz, result.Kind);
+        Assert.Equal(baseAt.AddHours(3), result.AsTimestampTz());
+    }
+
+    [Fact]
+    public async Task TimestampTz_MinusTimestampTz_ReturnsDuration()
+    {
+        DateTimeOffset start = new(2026, 5, 19, 12, 0, 0, TimeSpan.Zero);
+        DateTimeOffset end   = new(2026, 5, 19, 14, 30, 0, TimeSpan.Zero);
+        Row row = MakeRow(
+            ["end_at", "start_at"],
+            DataValue.FromTimestampTz(end),
+            DataValue.FromTimestampTz(start));
+
+        Expression expr = new BinaryExpression(
+            new ColumnReference("end_at"),
+            BinaryOperator.Subtract,
+            new ColumnReference("start_at"));
+
+        DataValue result = await _evaluator.EvaluateAsync(expr, row);
+
+        Assert.Equal(DataKind.Duration, result.Kind);
+        Assert.Equal(TimeSpan.FromMinutes(150), result.AsDuration());
+    }
+
+    [Fact]
+    public async Task Timestamp_PlusDuration_StaysNaive()
+    {
+        DateTime naive = new(2026, 5, 19, 12, 0, 0, DateTimeKind.Unspecified);
+        Row row = MakeRow(
+            ["ts", "shift"],
+            DataValue.FromTimestamp(naive),
+            DataValue.FromDuration(TimeSpan.FromMinutes(45)));
+
+        Expression expr = new BinaryExpression(
+            new ColumnReference("ts"),
+            BinaryOperator.Add,
+            new ColumnReference("shift"));
+
+        DataValue result = await _evaluator.EvaluateAsync(expr, row);
+
+        Assert.Equal(DataKind.Timestamp, result.Kind);
+        Assert.Equal(naive.AddMinutes(45), result.AsTimestamp());
+    }
+
+    [Fact]
+    public async Task Duration_PlusTimestampTz_IsCommutative()
+    {
+        // PG: interval + timestamptz is the same as timestamptz + interval.
+        DateTimeOffset baseAt = new(2026, 5, 19, 12, 0, 0, TimeSpan.Zero);
+        Row row = MakeRow(
+            ["delay", "ts"],
+            DataValue.FromDuration(TimeSpan.FromHours(3)),
+            DataValue.FromTimestampTz(baseAt));
+
+        Expression expr = new BinaryExpression(
+            new ColumnReference("delay"),
+            BinaryOperator.Add,
+            new ColumnReference("ts"));
+
+        DataValue result = await _evaluator.EvaluateAsync(expr, row);
+
+        Assert.Equal(DataKind.TimestampTz, result.Kind);
+        Assert.Equal(baseAt.AddHours(3), result.AsTimestampTz());
     }
 
     // ─────────────── typeof() and type literals ───────────────

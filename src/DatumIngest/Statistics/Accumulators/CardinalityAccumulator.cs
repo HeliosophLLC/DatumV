@@ -63,8 +63,11 @@ public sealed class CardinalityAccumulator : IStatisticAccumulator
             case DataKind.Date:
                 _estimator.Add(value.AsDate().DayNumber);
                 break;
-            case DataKind.DateTime:
-                _estimator.Add(value.AsDateTime().ToUnixTimeMilliseconds());
+            case DataKind.TimestampTz:
+                _estimator.Add(value.AsTimestampTz().UtcTicks);
+                break;
+            case DataKind.Timestamp:
+                _estimator.Add(value.AsTimestamp().Ticks);
                 break;
             case DataKind.String:
                 // Feed HLL the cached 64-bit XxHash of the UTF-8 bytes instead of

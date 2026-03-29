@@ -32,7 +32,8 @@ internal static class SortedIndexKeyEncoder
         DataKind.Int64 => 8,
         DataKind.UInt64 => 8,
         DataKind.Float64 => 8,
-        DataKind.DateTime => 8,
+        DataKind.Timestamp => 8,
+        DataKind.TimestampTz => 8,
         DataKind.Time => 8,
         DataKind.Duration => 8,
         DataKind.String => 8,
@@ -100,11 +101,17 @@ internal static class SortedIndexKeyEncoder
                 EncodeFloat64(key.AsFloat64(), destination);
                 break;
 
-            case DataKind.DateTime:
+            case DataKind.TimestampTz:
             {
-                DateTimeOffset dateTime = key.AsDateTime();
-                long utcTicks = dateTime.UtcTicks;
+                long utcTicks = key.AsTimestampTz().UtcTicks;
                 BinaryPrimitives.WriteUInt64BigEndian(destination, (ulong)(utcTicks ^ unchecked((long)0x8000000000000000L)));
+                break;
+            }
+
+            case DataKind.Timestamp:
+            {
+                long ticks = key.AsTimestamp().Ticks;
+                BinaryPrimitives.WriteUInt64BigEndian(destination, (ulong)(ticks ^ unchecked((long)0x8000000000000000L)));
                 break;
             }
 
@@ -158,7 +165,8 @@ internal static class SortedIndexKeyEncoder
             DataKind.UInt64 => DataValue.FromUInt64(BinaryPrimitives.ReadUInt64BigEndian(source)),
             DataKind.Int64 => DataValue.FromInt64((long)(BinaryPrimitives.ReadUInt64BigEndian(source) ^ 0x8000000000000000uL)),
             DataKind.Float64 => DataValue.FromFloat64(DecodeFloat64(source)),
-            DataKind.DateTime => DecodeDateTime(source),
+            DataKind.TimestampTz => DecodeTimestampTz(source),
+            DataKind.Timestamp => DecodeTimestamp(source),
             DataKind.Time => DataValue.FromTime(new TimeOnly((long)(BinaryPrimitives.ReadUInt64BigEndian(source) ^ 0x8000000000000000uL))),
             DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks((long)(BinaryPrimitives.ReadUInt64BigEndian(source) ^ 0x8000000000000000uL))),
             DataKind.Uuid => DataValue.FromUuid(new Guid(source[..16])),
@@ -241,12 +249,20 @@ internal static class SortedIndexKeyEncoder
     }
 
     /// <summary>
-    /// Decodes a <see cref="DataKind.DateTime"/> key. The key stores UTC ticks only;
-    /// the decoded <see cref="DateTimeOffset"/> always has a zero UTC offset.
+    /// Decodes a <see cref="DataKind.TimestampTz"/> key from UTC ticks.
     /// </summary>
-    private static DataValue DecodeDateTime(ReadOnlySpan<byte> source)
+    private static DataValue DecodeTimestampTz(ReadOnlySpan<byte> source)
     {
         long utcTicks = (long)(BinaryPrimitives.ReadUInt64BigEndian(source) ^ 0x8000000000000000uL);
-        return DataValue.FromDateTime(new DateTimeOffset(utcTicks, TimeSpan.Zero));
+        return DataValue.FromTimestampTz(new DateTimeOffset(utcTicks, TimeSpan.Zero));
+    }
+
+    /// <summary>
+    /// Decodes a <see cref="DataKind.Timestamp"/> key from naive ticks.
+    /// </summary>
+    private static DataValue DecodeTimestamp(ReadOnlySpan<byte> source)
+    {
+        long ticks = (long)(BinaryPrimitives.ReadUInt64BigEndian(source) ^ 0x8000000000000000uL);
+        return DataValue.FromTimestamp(new DateTime(ticks, DateTimeKind.Unspecified));
     }
 }

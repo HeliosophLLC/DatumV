@@ -436,7 +436,13 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("DECIMAL"), SqlToken.TypeKeyword, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("STRING"), SqlToken.TypeKeyword, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("DATE"), SqlToken.TypeKeyword, requireDelimiters: true)
-            .Match(Span.EqualToIgnoreCase("DATETIME"), SqlToken.TypeKeyword, requireDelimiters: true)
+            // PG-canonical: TIMESTAMP (no tz), TIMESTAMPTZ (with tz).
+            // Multi-word forms `TIMESTAMP WITH TIME ZONE` / `TIMESTAMP WITHOUT
+            // TIME ZONE` are recognised at the parser layer (see TypeAnnotation
+            // combinator) by composing this TIMESTAMP token with the WITH / WITHOUT
+            // / TIME / ZONE word tokens that surround it.
+            .Match(Span.EqualToIgnoreCase("TIMESTAMPTZ"), SqlToken.TypeKeyword, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("TIMESTAMP"), SqlToken.TypeKeyword, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("DURATION"), SqlToken.TypeKeyword, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("UUID"), SqlToken.TypeKeyword, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("IMAGE"), SqlToken.TypeKeyword, requireDelimiters: true)

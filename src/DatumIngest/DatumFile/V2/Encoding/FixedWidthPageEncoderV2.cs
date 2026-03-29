@@ -15,7 +15,8 @@ namespace DatumIngest.DatumFile.V2.Encoding;
 /// <para>
 /// Drives all numeric scalars, <see cref="DataKind.Date"/>,
 /// <see cref="DataKind.Time"/>, <see cref="DataKind.Duration"/>,
-/// <see cref="DataKind.DateTime"/>, and <see cref="DataKind.Uuid"/>. The
+/// <see cref="DataKind.Timestamp"/>, <see cref="DataKind.TimestampTz"/>,
+/// and <see cref="DataKind.Uuid"/>. The
 /// stride per row is determined by
 /// <see cref="ColumnDescriptorV2.FixedWidthStrideBytes"/>.
 /// </para>
@@ -162,15 +163,13 @@ internal sealed class FixedWidthPageEncoderV2 : IPageEncoderV2
             case DataKind.Duration:
                 BinaryPrimitives.WriteInt64LittleEndian(dst, v.AsDuration().Ticks);
                 break;
-            case DataKind.DateTime:
-                DateTimeOffset dto = v.AsDateTime();
-                // Layout matches DataValue.AsDateTime decode side: 8 bytes
-                // ticks (the local-tick value DataValue stores in _p0+_p1)
-                // followed by 2 bytes offset minutes (in DataValue's _p2).
-                BinaryPrimitives.WriteInt64LittleEndian(dst[..8], dto.Ticks);
-                BinaryPrimitives.WriteInt16LittleEndian(
-                    dst.Slice(8, 2),
-                    (short)(dto.Offset.Ticks / TimeSpan.TicksPerMinute));
+            case DataKind.TimestampTz:
+                // PG timestamptz: 8 bytes UTC ticks.
+                BinaryPrimitives.WriteInt64LittleEndian(dst, v.AsTimestampTz().UtcTicks);
+                break;
+            case DataKind.Timestamp:
+                // PG timestamp (without tz): 8 bytes naive ticks.
+                BinaryPrimitives.WriteInt64LittleEndian(dst, v.AsTimestamp().Ticks);
                 break;
             case DataKind.Uuid:
                 if (!v.AsUuid().TryWriteBytes(dst))

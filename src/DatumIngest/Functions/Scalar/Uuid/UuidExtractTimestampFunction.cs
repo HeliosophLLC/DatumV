@@ -28,7 +28,7 @@ public sealed class UuidExtractTimestampFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters: [new ParameterSpec("value", DataKindMatcher.Exact(DataKind.Uuid))],
             VariadicTrailing: null,
-            ReturnType: ReturnTypeRule.Constant(DataKind.DateTime)),
+            ReturnType: ReturnTypeRule.Constant(DataKind.TimestampTz)),
     ];
 
     /// <inheritdoc />
@@ -43,21 +43,21 @@ public sealed class UuidExtractTimestampFunction : IFunction, IScalarFunction
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
         ValueRef input = args[0];
-        if (input.IsNull) return new ValueTask<ValueRef>(ValueRef.Null(DataKind.DateTime));
+        if (input.IsNull) return new ValueTask<ValueRef>(ValueRef.Null(DataKind.TimestampTz));
 
         Span<byte> bytes = stackalloc byte[16];
         input.AsUuid().TryWriteBytes(bytes, bigEndian: true, out _);
 
         if ((bytes[8] & 0xC0) != 0x80)
-            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.DateTime));
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.TimestampTz));
 
         int version = bytes[6] >> 4;
         return version switch
         {
-            1 => new(ValueRef.FromDateTime(ExtractV1Timestamp(bytes))),
-            6 => new(ValueRef.FromDateTime(ExtractV6Timestamp(bytes))),
-            7 => new(ValueRef.FromDateTime(ExtractV7Timestamp(bytes))),
-            _ => new(ValueRef.Null(DataKind.DateTime)),
+            1 => new(ValueRef.FromTimestampTz(ExtractV1Timestamp(bytes))),
+            6 => new(ValueRef.FromTimestampTz(ExtractV6Timestamp(bytes))),
+            7 => new(ValueRef.FromTimestampTz(ExtractV7Timestamp(bytes))),
+            _ => new(ValueRef.Null(DataKind.TimestampTz)),
         };
     }
 

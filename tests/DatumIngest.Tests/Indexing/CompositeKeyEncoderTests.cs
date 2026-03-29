@@ -212,9 +212,9 @@ public sealed class CompositeKeyEncoderTests
     public void DateTime_OrderingPreserved_ByUtcInstant()
     {
         AssertSortedOrder(
-            DataValue.FromDateTime(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)),
-            DataValue.FromDateTime(new DateTimeOffset(2026, 5, 11, 0, 0, 0, TimeSpan.Zero)),
-            DataValue.FromDateTime(new DateTimeOffset(2026, 12, 31, 23, 59, 59, TimeSpan.Zero)));
+            DataValue.FromTimestampTz(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+            DataValue.FromTimestampTz(new DateTimeOffset(2026, 5, 11, 0, 0, 0, TimeSpan.Zero)),
+            DataValue.FromTimestampTz(new DateTimeOffset(2026, 12, 31, 23, 59, 59, TimeSpan.Zero)));
     }
 
     [Fact]
@@ -413,25 +413,20 @@ public sealed class CompositeKeyEncoderTests
     }
 
     [Fact]
-    public void DateTime_SameUtcInstant_DifferentOffset_DistinctEncoding()
+    public void TimestampTz_SameUtcInstant_DifferentOffset_IdenticalEncoding()
     {
-        // Two DateTimeOffsets representing the same UTC instant but with
-        // different offsets are distinct values; the encoder must produce
-        // distinct bytes so equality-by-encoding lines up with equality-
-        // by-DataValue (where offset is part of the value).
-        DataValue dtUtc = DataValue.FromDateTime(
+        // PG-faithful: TimestampTz stores UTC ticks only, input offset is
+        // discarded at construction. Two values for the same instant encode
+        // identically, matching how Equals/GetHashCode treat them.
+        DataValue dtUtc = DataValue.FromTimestampTz(
             new DateTimeOffset(2026, 5, 11, 12, 0, 0, TimeSpan.Zero));
-        DataValue dtPacific = DataValue.FromDateTime(
+        DataValue dtPacific = DataValue.FromTimestampTz(
             new DateTimeOffset(2026, 5, 11, 5, 0, 0, TimeSpan.FromHours(-7)));
 
         byte[] a = CompositeKeyEncoder.EncodeSingle(dtUtc);
         byte[] b = CompositeKeyEncoder.EncodeSingle(dtPacific);
 
-        Assert.NotEqual(a, b);
-        // First 8 bytes (UTC ticks) must match because the instant is the same.
-        Assert.Equal(a.AsSpan(0, 8).ToArray(), b.AsSpan(0, 8).ToArray());
-        // Last 2 bytes (offset minutes) must differ.
-        Assert.NotEqual(a.AsSpan(8, 2).ToArray(), b.AsSpan(8, 2).ToArray());
+        Assert.Equal(a, b);
     }
 
     // ───────────────────────── Rejection ─────────────────────────

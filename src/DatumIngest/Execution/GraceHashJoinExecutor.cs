@@ -33,7 +33,7 @@ namespace DatumIngest.Execution;
 /// </list>
 /// <para>
 /// <strong>Memory estimation strategy</strong>: For schemas where all columns are fixed-width
-/// (Scalar, UInt8, Boolean, Date, DateTime, Time, Duration, Uuid), the row size is computed
+/// (Scalar, UInt8, Boolean, Date, Timestamp, TimestampTz, Time, Duration, Uuid), the row size is computed
 /// exactly from the first row and no sampling is needed. For variable-width schemas (any
 /// String, Vector, Image, byte-array, or Struct column), every 64th row is
 /// sampled to maintain a running average row size. When the estimate crosses 75% of the budget,

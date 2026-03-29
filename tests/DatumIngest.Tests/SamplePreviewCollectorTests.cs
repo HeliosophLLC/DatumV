@@ -132,7 +132,7 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
     public void ConvertValue_DateTime_ReturnsIso8601String()
     {
         DateTimeOffset dateTime = new(2025, 3, 15, 14, 30, 0, TimeSpan.Zero);
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromDateTime(dateTime), _arena);
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromTimestampTz(dateTime), _arena);
 
         string resultString = Assert.IsType<string>(result);
         Assert.Contains("2025-03-15", resultString);

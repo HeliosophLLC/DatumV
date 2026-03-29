@@ -148,10 +148,14 @@ internal static class CsvParser
                 if (DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset ddt))
                     return DataValue.FromDate(DateOnly.FromDateTime(ddt.DateTime));
                 return DataValue.Null(DataKind.Date);
-            case DataKind.DateTime:
+            case DataKind.TimestampTz:
                 return DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset dt)
-                    ? DataValue.FromDateTime(dt)
-                    : DataValue.Null(DataKind.DateTime);
+                    ? DataValue.FromTimestampTz(dt)
+                    : DataValue.Null(DataKind.TimestampTz);
+            case DataKind.Timestamp:
+                return DateTime.TryParse(field, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out DateTime dtNaive)
+                    ? DataValue.FromTimestamp(dtNaive)
+                    : DataValue.Null(DataKind.Timestamp);
             case DataKind.Uuid:
                 return Guid.TryParse(field, out Guid guid)
                     ? DataValue.FromUuid(guid)
@@ -174,10 +178,14 @@ internal static class CsvParser
                 DateTimeStyles.RoundtripKind, out DateTimeOffset dto)
                 => DataValue.FromDate(DateOnly.FromDateTime(dto.DateTime)),
             DataKind.Date => DataValue.Null(DataKind.Date),
-            DataKind.DateTime when DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture,
+            DataKind.TimestampTz when DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture,
                 DateTimeStyles.RoundtripKind, out DateTimeOffset dt)
-                => DataValue.FromDateTime(dt),
-            DataKind.DateTime => DataValue.Null(DataKind.DateTime),
+                => DataValue.FromTimestampTz(dt),
+            DataKind.TimestampTz => DataValue.Null(DataKind.TimestampTz),
+            DataKind.Timestamp when DateTime.TryParse(field, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeLocal, out DateTime dtNaive)
+                => DataValue.FromTimestamp(dtNaive),
+            DataKind.Timestamp => DataValue.Null(DataKind.Timestamp),
             DataKind.Uuid when Guid.TryParse(field, out Guid uuid)
                 => DataValue.FromUuid(uuid),
             DataKind.Uuid => DataValue.Null(DataKind.Uuid),

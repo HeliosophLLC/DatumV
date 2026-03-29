@@ -113,8 +113,8 @@ public static class ColumnRoleClassifier
             return ColumnRole.Binary;
         }
 
-        // Temporal kinds: Date, DateTime, Time, Duration.
-        if (manifest.Kind is DataKind.Date or DataKind.DateTime or DataKind.Time or DataKind.Duration)
+        // Temporal kinds: Date, Timestamp, TimestampTz, Time, Duration.
+        if (manifest.Kind is DataKind.Date or DataKind.Timestamp or DataKind.TimestampTz or DataKind.Time or DataKind.Duration)
         {
             return ColumnRole.Temporal;
         }

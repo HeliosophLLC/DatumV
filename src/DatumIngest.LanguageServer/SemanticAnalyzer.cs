@@ -45,7 +45,7 @@ internal sealed class SemanticAnalyzer
 
     private static readonly HashSet<string> TemporalKinds = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Date", "DateTime", "Time", "Duration",
+        "Date", "Timestamp", "TimestampTz", "Time", "Duration",
     };
 
     /// <summary>Creates a new analyzer bound to the given manifest.</summary>
@@ -797,7 +797,7 @@ internal sealed class SemanticAnalyzer
             return true;
         }
 
-        // Both temporal → compatible (Date/DateTime/Time/Duration).
+        // Both temporal → compatible (Date/Timestamp/TimestampTz/Time/Duration).
         if (TemporalKinds.Contains(actualKind) && TemporalKinds.Contains(expectedKind))
         {
             return true;

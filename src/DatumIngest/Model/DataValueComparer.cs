@@ -149,7 +149,8 @@ internal static class DataValueComparer
             DataKind.UInt128  => left.AsUInt128().CompareTo(right.AsUInt128()),
             DataKind.Boolean  => left.AsBoolean().CompareTo(right.AsBoolean()),
             DataKind.Date     => left.AsDate().CompareTo(right.AsDate()),
-            DataKind.DateTime => left.AsDateTime().CompareTo(right.AsDateTime()),
+            DataKind.Timestamp   => left.AsTimestamp().CompareTo(right.AsTimestamp()),
+            DataKind.TimestampTz => left.AsTimestampTz().CompareTo(right.AsTimestampTz()),
             DataKind.Time     => left.AsTime().CompareTo(right.AsTime()),
             DataKind.Duration => left.AsDuration().CompareTo(right.AsDuration()),
             DataKind.Uuid     => left.AsUuid().CompareTo(right.AsUuid()),
@@ -172,7 +173,7 @@ internal static class DataValueComparer
             or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64 or DataKind.UInt128
             or DataKind.Boolean
             or DataKind.String
-            or DataKind.Date or DataKind.DateTime or DataKind.Time
+            or DataKind.Date or DataKind.Timestamp or DataKind.TimestampTz or DataKind.Time
             or DataKind.Duration or DataKind.Uuid;
 
     /// <summary>
@@ -311,7 +312,8 @@ internal static class DataValueComparer
             DataKind.Float64  => DataValue.FromFloat64((double)boxed),
             DataKind.Decimal  => DataValue.FromDecimal((decimal)boxed),
             DataKind.Date     => DataValue.FromDate((DateOnly)boxed),
-            DataKind.DateTime => DataValue.FromDateTime((DateTimeOffset)boxed),
+            DataKind.TimestampTz => DataValue.FromTimestampTz((DateTimeOffset)boxed),
+            DataKind.Timestamp => DataValue.FromTimestamp((DateTime)boxed),
             DataKind.Time     => DataValue.FromTime((TimeOnly)boxed),
             DataKind.Duration => DataValue.FromDuration((TimeSpan)boxed),
             DataKind.Uuid     => DataValue.FromUuid((Guid)boxed),
@@ -359,7 +361,8 @@ internal static class DataValueComparer
             DataKind.Float64  => double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out _),
             DataKind.Decimal  => decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out _),
             DataKind.Date     => DateOnly.TryParse(value, CultureInfo.InvariantCulture, out _),
-            DataKind.DateTime => DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out _),
+            DataKind.TimestampTz => DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out _),
+            DataKind.Timestamp => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out _),
             DataKind.Time     => TimeOnly.TryParse(value, CultureInfo.InvariantCulture, out _),
             DataKind.Duration => TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out _),
             DataKind.Uuid     => Guid.TryParse(value, out _),
@@ -380,24 +383,29 @@ internal static class DataValueComparer
     {
         return (from, to) switch
         {
-            // Date/DateTime interconversion
-            (DataKind.Date, DataKind.DateTime) => true,
-            (DataKind.DateTime, DataKind.Date) => true,
+            // Date/Timestamp interconversion
+            (DataKind.Date, DataKind.Timestamp) => true,
+            (DataKind.Date, DataKind.TimestampTz) => true,
+            (DataKind.Timestamp, DataKind.Date) => true,
+            (DataKind.TimestampTz, DataKind.Date) => true,
+            (DataKind.Timestamp, DataKind.TimestampTz) => true,
+            (DataKind.TimestampTz, DataKind.Timestamp) => true,
 
             // Temporal → String (formatting)
             (DataKind.Date, DataKind.String) => true,
-            (DataKind.DateTime, DataKind.String) => true,
+            (DataKind.Timestamp, DataKind.String) => true,
+            (DataKind.TimestampTz, DataKind.String) => true,
             (DataKind.Time, DataKind.String) => true,
             (DataKind.Duration, DataKind.String) => true,
             (DataKind.Uuid, DataKind.String) => true,
             (DataKind.Boolean, DataKind.String) => true,
 
-            // Date/DateTime → numeric (epoch conversion)
+            // Date/Timestamp → numeric (epoch conversion)
             (DataKind.Date, DataKind.Float32 or DataKind.Float64 or DataKind.Int32 or DataKind.Int64) => true,
-            (DataKind.DateTime, DataKind.Float32 or DataKind.Float64 or DataKind.Int64) => true,
+            (DataKind.Timestamp or DataKind.TimestampTz, DataKind.Float32 or DataKind.Float64 or DataKind.Int64) => true,
 
-            // DateTime → Time (extract time component)
-            (DataKind.DateTime, DataKind.Time) => true,
+            // Timestamp → Time (extract time component)
+            (DataKind.Timestamp or DataKind.TimestampTz, DataKind.Time) => true,
 
             // Time ↔ numeric (seconds since midnight)
             (DataKind.Time, DataKind.Float32 or DataKind.Float64) => true,
@@ -445,7 +453,8 @@ internal static class DataValueComparer
         // byte[] → UInt8; callers that need the array shape must set IsArray
         // on the descriptor / DataValue separately.
         if (t == typeof(byte[])) return DataKind.UInt8;
-        if (t == typeof(DateTime) || t == typeof(DateTimeOffset)) return DataKind.DateTime;
+        if (t == typeof(DateTimeOffset)) return DataKind.TimestampTz;
+        if (t == typeof(DateTime)) return DataKind.Timestamp;
         if (t == typeof(DateOnly)) return DataKind.Date;
         if (t == typeof(bool)) return DataKind.Boolean;
 

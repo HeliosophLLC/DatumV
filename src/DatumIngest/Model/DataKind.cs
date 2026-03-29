@@ -89,11 +89,27 @@ public enum DataKind : byte
     /// <summary>A time-of-day without a date component.</summary>
     Time = 41,
 
-    /// <summary>A date and time value.</summary>
-    DateTime = 42,
+    /// <summary>
+    /// A timestamp without time zone (PostgreSQL <c>timestamp</c>): an 8-byte
+    /// naive wall-clock tick count with no time-zone information. Stored as
+    /// <see cref="long"/> ticks at <c>_p0</c>+<c>_p1</c>; round-trips through
+    /// <see cref="System.DateTime"/> with <see cref="System.DateTimeKind.Unspecified"/>.
+    /// </summary>
+    Timestamp = 42,
 
     /// <summary>A duration (elapsed time span).</summary>
     Duration = 43,
+
+    /// <summary>
+    /// A timestamp with time zone (PostgreSQL <c>timestamptz</c>): an 8-byte
+    /// UTC tick count. Inputs with a non-UTC offset are converted to UTC at
+    /// construction time and the input offset is discarded — two values with
+    /// the same instant but different input offsets compare and hash equal.
+    /// Stored as <see cref="long"/> UTC ticks at <c>_p0</c>+<c>_p1</c>;
+    /// readback yields a <see cref="System.DateTimeOffset"/> with an offset
+    /// of <see cref="System.TimeSpan.Zero"/>.
+    /// </summary>
+    TimestampTz = 44,
 
     // ───────────────────────── Text &amp; identifiers (48–55) ─────────────────────────
 

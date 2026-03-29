@@ -29,7 +29,8 @@ public class DataKindTests : ServiceTestBase
             DataKind.Decimal,
             DataKind.Date,
             DataKind.Time,
-            DataKind.DateTime,
+            DataKind.Timestamp,
+            DataKind.TimestampTz,
             DataKind.Duration,
             DataKind.String,
             DataKind.Uuid,
@@ -53,18 +54,18 @@ public class DataKindTests : ServiceTestBase
     }
 
     [Fact]
-    public void TotalEnumMemberCountIsThirtyFive()
+    public void TotalEnumMemberCountIsThirtySix()
     {
         // Tally: Unknown, Type, Boolean,
         // UInt8/16/32/64/128, Int8/16/32/64/128 (10),
         // Float16/32/64, Decimal (4),
-        // Date, Time, DateTime, Duration (4),
+        // Date, Time, Timestamp, TimestampTz, Duration (5),
         // String, Uuid (2),
         // Image, Audio, AudioSlice, Video, VideoFrame, VideoSlice, Json (7 media + lazy handles),
         // Struct (1),
-        // Point2D, Point3D, PointCloud, Mesh (4 spatial) → 35 total.
+        // Point2D, Point3D, PointCloud, Mesh (4 spatial) → 36 total.
         DataKind[] allValues = Enum.GetValues<DataKind>();
-        Assert.Equal(35, allValues.Length);
+        Assert.Equal(36, allValues.Length);
     }
 
     [Fact]

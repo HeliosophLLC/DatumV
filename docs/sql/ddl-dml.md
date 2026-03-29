@@ -35,7 +35,7 @@ Persistent `CREATE TABLE` requires a catalog backed by `.datum-catalog.json` (i.
 
 #### Type names
 
-Column types use the kind names from the type system: `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `Float32`, `Float64`, `Boolean`, `String`, `Uuid`, `Date`, `DateTime`, `Time`, `Duration`. See [Type System](type-system.md) for the full set.
+Column types use the kind names from the type system: `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `Float32`, `Float64`, `Boolean`, `String`, `Uuid`, `Date`, `Timestamp`, `TimestampTz`, `Time`, `Duration`. PG-canonical multi-word forms are also accepted: `TIMESTAMP WITH TIME ZONE` ↔ `TimestampTz`, `TIMESTAMP WITHOUT TIME ZONE` ↔ `Timestamp`. See [Type System](type-system.md) for the full set.
 
 Strings accept SQL-standard width syntax: `VARCHAR(N)` and `CHAR(N)` declare a maximum character length (INSERT rejects overlong values; `CHAR(N)` also right-pads short values with spaces). Bare `TEXT` / `VARCHAR` / `String` is unbounded.
 
@@ -46,7 +46,7 @@ Typed arrays accept fixed-length syntax in two equivalent forms: `Float32[N]` (s
 | Modifier | Behavior |
 |----------|----------|
 | `NOT NULL` | Column rejects NULL values on `INSERT`. |
-| `PRIMARY KEY` | Implies `NOT NULL`. Enforces uniqueness on `INSERT` — duplicate key values are rejected with `PrimaryKeyViolationException`. Permitted kinds are scalar primitives (Int*, UInt*, Float*, Boolean), temporal kinds (Date/Time/DateTime/Duration), `Uuid`, and `String` of any length. Array columns (including `UInt8[]`), `Decimal`, `Point2D` / `Point3D`, `PointCloud`, and `Mesh` are rejected — they have no canonical sort encoding. |
+| `PRIMARY KEY` | Implies `NOT NULL`. Enforces uniqueness on `INSERT` — duplicate key values are rejected with `PrimaryKeyViolationException`. Permitted kinds are scalar primitives (Int*, UInt*, Float*, Boolean), temporal kinds (Date/Time/Timestamp/TimestampTz/Duration), `Uuid`, and `String` of any length. Array columns (including `UInt8[]`), `Decimal`, `Point2D` / `Point3D`, `PointCloud`, and `Mesh` are rejected — they have no canonical sort encoding. |
 | `DEFAULT <expr>` | Column receives the value of `<expr>` when omitted from an `INSERT`. Any tableless expression is accepted — literals, arithmetic (`1 + 2`), string concatenation (`'a' \|\| 'b'`), function calls (`now()`, `uuidv4()`), array literals (`[1, 2, 3]`), `CASE` expressions, casts. The expression is evaluated per row, so `DEFAULT now()` captures a fresh timestamp for each row and `DEFAULT uuidv4()` produces a distinct UUID per row. Column references, subqueries, and window functions are rejected — there's no source row in scope at `DEFAULT`-evaluation time. |
 | `IDENTITY` / `IDENTITY(seed, step)` | T-SQL-flavored alias for `GENERATED ALWAYS AS IDENTITY`. Auto-generates an integer value on each `INSERT`; explicit values are rejected. Bare form defaults to `seed=1, step=1`. Step may be negative. At most one `IDENTITY` column per table. The column kind must be a signed or unsigned integer (Int8/16/32/64, UInt8/16/32/64); 128-bit integers are not supported. |
 | `GENERATED ALWAYS AS IDENTITY` / `GENERATED ALWAYS AS IDENTITY(seed, step)` | PG-canonical syntax for `IDENTITY`. Same semantics as bare `IDENTITY` — explicit values rejected on `INSERT`. |

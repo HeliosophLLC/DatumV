@@ -392,14 +392,29 @@ public sealed class NestedValueRefTests : ServiceTestBase
     }
 
     [Fact]
-    public void FromPrimitiveArray_DateTime_ThrowsAtConstruction()
+    public void FromPrimitiveArray_TimestampTz_RoundTrips()
     {
-        // DateTime arrays drop the timezone offset under the fixed-width
-        // packing convention; rejected at construction with a guidance message.
-        NotSupportedException ex = Assert.Throws<NotSupportedException>(() =>
-            ValueRef.FromPrimitiveArray<long>([0L, 1L, 2L], DataKind.DateTime));
-        Assert.Contains("Array<DateTime>", ex.Message);
-        Assert.Contains("offset", ex.Message);
+        // Under the PG-faithful Timestamp/TimestampTz split, TimestampTz is
+        // 8-byte UTC ticks with no per-row offset — a trivial Int64 array.
+        // The previous Array<DateTime> rejection is gone; see
+        // DataValueTimestampTests for the full slice-1 contract.
+        long[] ticks = [0L, 1L, 2L];
+        ValueRef arrayRef = ValueRef.FromPrimitiveArray(ticks, DataKind.TimestampTz);
+
+        Arena arena = RentArena();
+        try
+        {
+            DataValue dv = arrayRef.ToDataValue(arena);
+            Assert.Equal(DataKind.TimestampTz, dv.Kind);
+            Assert.True(dv.IsArray);
+            ReadOnlySpan<long> readback = dv.AsArraySpan<long>(arena);
+            Assert.Equal(ticks.Length, readback.Length);
+            for (int i = 0; i < ticks.Length; i++)
+            {
+                Assert.Equal(ticks[i], readback[i]);
+            }
+        }
+        finally { ReturnArena(arena); }
     }
 
     [Fact]
@@ -435,27 +450,6 @@ public sealed class NestedValueRefTests : ServiceTestBase
         ValueRef arrayRef = ValueRef.FromPrimitiveArray(caller, DataKind.Float32);
 
         Assert.Same(caller, arrayRef.Materialized);
-    }
-
-    [Fact]
-    public void FromArray_DateTime_ThrowsOnMaterialise()
-    {
-        // DateTime is intentionally unsupported because the per-element byte-size
-        // convention drops the timezone offset; the throw points users at the
-        // workaround (Struct of ticks + offset).
-        ValueRef arrayRef = ValueRef.FromArray(DataKind.DateTime,
-        [
-            ValueRef.FromDateTime(new DateTimeOffset(2026, 4, 30, 12, 0, 0, TimeSpan.FromHours(-7))),
-        ]);
-
-        Arena arena = RentArena();
-        try
-        {
-            NotSupportedException ex = Assert.Throws<NotSupportedException>(
-                () => arrayRef.ToDataValue(arena));
-            Assert.Contains("Array<DateTime>", ex.Message);
-        }
-        finally { ReturnArena(arena); }
     }
 
     [Fact]

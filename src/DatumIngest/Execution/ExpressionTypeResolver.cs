@@ -98,12 +98,17 @@ public static class ExpressionTypeResolver
             IsNullExpression => DataKind.Boolean,
             LikeExpression => DataKind.Boolean,
             CastExpression cast => ResolveCast(cast),
-            AtTimeZoneExpression => DataKind.DateTime,
+            // PG AT TIME ZONE is kind-shifting; the timestamptz → timestamp
+            // direction is the common case for queries that re-zone an event log.
+            // The reverse direction (timestamp → timestamptz) returns the same kind
+            // family; pinning to Timestamp here is the PG-correct default until a
+            // child-kind-aware resolver lands (slice 4).
+            AtTimeZoneExpression => DataKind.Timestamp,
             CurrentTimestampExpression ct => ct.Kind switch
             {
                 CurrentTimestampKind.CurrentDate => DataKind.Date,
                 CurrentTimestampKind.CurrentTime => DataKind.Time,
-                CurrentTimestampKind.CurrentTimestamp => DataKind.DateTime,
+                CurrentTimestampKind.CurrentTimestamp => DataKind.TimestampTz,
                 _ => null,
             },
             CaseExpression caseExpr => ResolveCaseExpression(caseExpr, sourceSchema, functions),

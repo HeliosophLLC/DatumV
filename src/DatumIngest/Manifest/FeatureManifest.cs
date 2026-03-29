@@ -345,9 +345,10 @@ public sealed class BinaryFeatureManifest : FeatureManifest
 
 /// <summary>
 /// Feature manifest for temporal columns
-/// (<see cref="DataKind.Date"/>, <see cref="DataKind.DateTime"/>, <see cref="DataKind.Time"/>).
+/// (<see cref="DataKind.Date"/>, <see cref="DataKind.Timestamp"/>,
+/// <see cref="DataKind.TimestampTz"/>, <see cref="DataKind.Time"/>).
 /// <see cref="Earliest"/>/<see cref="Latest"/> are ISO 8601 strings — date for Date,
-/// <c>HH:mm:ss.FFFFFFF</c> for Time, and full ISO timestamp for DateTime.
+/// <c>HH:mm:ss.FFFFFFF</c> for Time, and full ISO timestamp for the timestamp kinds.
 /// </summary>
 public sealed class TemporalFeatureManifest : FeatureManifest
 {
