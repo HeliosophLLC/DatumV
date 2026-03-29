@@ -66,6 +66,16 @@ public sealed class ImageWidthFunction : IFunction, IScalarFunction
         {
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
         }
+        // Fast path: PR7 inline metadata. When ingest populated the dimensions
+        // (ZipDeserializer + ImageHeaderParser), we read 4 bytes inline instead of
+        // running a full SkiaSharp decode just to read W/H.
+        ushort inlineWidth = arg.InlineDataValue.ImageWidth;
+        if (inlineWidth != 0)
+        {
+            return new ValueTask<ValueRef>(ValueRef.FromInt32(inlineWidth));
+        }
+        // Fallback: decode the encoded image bytes. Hit when the value came from
+        // a source that didn't stamp inline metadata (legacy values, model output).
         SKBitmap bmp = arg.AsImage();
         return new ValueTask<ValueRef>(ValueRef.FromInt32(bmp.Width));
     }
@@ -111,6 +121,11 @@ public sealed class ImageHeightFunction : IFunction, IScalarFunction
         if (arg.IsNull)
         {
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
+        }
+        ushort inlineHeight = arg.InlineDataValue.ImageHeight;
+        if (inlineHeight != 0)
+        {
+            return new ValueTask<ValueRef>(ValueRef.FromInt32(inlineHeight));
         }
         SKBitmap bmp = arg.AsImage();
         return new ValueTask<ValueRef>(ValueRef.FromInt32(bmp.Height));

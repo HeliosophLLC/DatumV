@@ -332,11 +332,9 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                         // that haven't been needed yet. For a 12-spill query
                         // that's ~10 GB of transient commit charge. Sizing
                         // up-front means one mmap allocation per cycle.
-                        // Cap at int.MaxValue (Arena uses int internally)
-                        // and use a sensible 64 MB default when no budget is
-                        // configured.
-                        long budget = context.Accountant.MemoryBudgetBytes ?? 64L * 1024 * 1024;
-                        int bufferArenaCapacity = (int)Math.Min(budget, int.MaxValue);
+                        // Arena now uses long internally — pass the budget through
+                        // without clamping. Use a 64 MB default when no budget is configured.
+                        long bufferArenaCapacity = context.Accountant.MemoryBudgetBytes ?? 64L * 1024 * 1024;
                         bufferArena = pool.RentArena(bufferArenaCapacity);
                         // 20 bytes per DataValue cell (overhead) × (field + key) cells
                         // plus a ~64-byte KeyedRow / List slot per row.
@@ -387,7 +385,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                             // Pre-size the fresh arena (see schema-init
                             // comment above for the budget rationale).
                             long postSpillBudget = context.Accountant.MemoryBudgetBytes ?? 64L * 1024 * 1024;
-                            bufferArena = pool.RentArena((int)Math.Min(postSpillBudget, int.MaxValue));
+                            bufferArena = pool.RentArena(postSpillBudget);
                         }
                     }
                 }

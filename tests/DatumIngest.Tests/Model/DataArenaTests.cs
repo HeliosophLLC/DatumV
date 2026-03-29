@@ -12,7 +12,7 @@ public class DataArenaTests : ServiceTestBase
     {
         using Arena arena = new();
         float[] values = [1.0f, 2.5f, 3.75f];
-        (int offset, int count) = arena.AppendFloats(values);
+        (long offset, int count) = arena.AppendFloats(values);
 
         ReadOnlySpan<float> span = arena.GetFloats(offset, count);
 
@@ -24,7 +24,7 @@ public class DataArenaTests : ServiceTestBase
     {
         using Arena arena = new();
         byte[] data = [0xFF, 0x00, 0xAB, 0xCD];
-        (int offset, int length) = arena.AppendBytes(data);
+        (long offset, int length) = arena.AppendBytes(data);
 
         ReadOnlySpan<byte> span = arena.GetBytes(offset, length);
 
@@ -36,7 +36,7 @@ public class DataArenaTests : ServiceTestBase
     {
         using Arena arena = new();
         float[] values = [1.0f, 2.0f];
-        (int offset, int count) = arena.AppendFloats(values);
+        (long offset, int count) = arena.AppendFloats(values);
 
         float[] materialized = arena.MaterializeFloats(offset, count);
 
@@ -49,7 +49,7 @@ public class DataArenaTests : ServiceTestBase
     {
         using Arena arena = new();
         byte[] data = [0x01, 0x02, 0x03];
-        (int offset, int length) = arena.AppendBytes(data);
+        (long offset, int length) = arena.AppendBytes(data);
 
         byte[] materialized = arena.MaterializeBytes(offset, length);
 
@@ -75,7 +75,7 @@ public class DataArenaTests : ServiceTestBase
     {
         using Arena arena = new(initialCapacity: 8);
         float[] large = new float[500];
-        (int offset, int count) = arena.AppendFloats(large);
+        (long offset, int count) = arena.AppendFloats(large);
 
         Assert.Equal(500, count);
         Assert.Equal(large, arena.GetFloats(offset, count).ToArray());
@@ -86,11 +86,11 @@ public class DataArenaTests : ServiceTestBase
     {
         using Arena source = new();
         float[] values = [42.0f, 99.0f];
-        (int sourceOffset, int sourceCount) = source.AppendFloats(values);
+        (long sourceOffset, int sourceCount) = source.AppendFloats(values);
 
         using Arena target = new();
         target.AppendBytes([0x01]);
-        int baseOffset = target.CopyFrom(source);
+        long baseOffset = target.CopyFrom(source);
 
         float[] result = target.MaterializeFloats(baseOffset + sourceOffset, sourceCount);
         Assert.Equal(values, result);

@@ -665,6 +665,9 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ApplyColormapFunction>();
         registry.RegisterScalar<Scalar.Image.ImageWidthFunction>();
         registry.RegisterScalar<Scalar.Image.ImageHeightFunction>();
+        registry.RegisterScalar<Scalar.Video.VideoWidthFunction>();
+        registry.RegisterScalar<Scalar.Video.VideoHeightFunction>();
+        registry.RegisterScalar<Scalar.Audio.AudioSampleRateFunction>();
         registry.RegisterScalar<Scalar.Image.ImageResizeToStrideFunction>();
         registry.RegisterScalar<Scalar.Image.ImageToTensorChwFunction>();
         registry.RegisterScalar<Scalar.Image.ImageToTensorHwcFunction>();

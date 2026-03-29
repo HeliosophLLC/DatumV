@@ -1,5 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using DatumIngest.Functions.Audio;
+using DatumIngest.Functions.Image;
+using DatumIngest.Functions.Video;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -955,9 +958,9 @@ public sealed class InMemoryTableProvider : ITableProvider
             // bytes. Listed before the typed-array branches so an Image
             // column whose CLR cell is `byte[]` lands as a real Image, not
             // a UInt8[].
-            byte[] bytes when expectedKind == DataKind.Image => DataValue.FromImage(bytes, arena),
-            byte[] bytes when expectedKind == DataKind.Audio => DataValue.FromAudio(bytes, arena),
-            byte[] bytes when expectedKind == DataKind.Video => DataValue.FromVideo(bytes, arena),
+            byte[] bytes when expectedKind == DataKind.Image => ImageDataValueFactory.FromEncodedBytes(bytes, arena),
+            byte[] bytes when expectedKind == DataKind.Audio => AudioDataValueFactory.FromEncodedBytes(bytes, arena),
+            byte[] bytes when expectedKind == DataKind.Video => VideoDataValueFactory.FromEncodedBytes(bytes, arena),
             byte[] bytes when expectedKind == DataKind.Json => DataValue.FromJson(bytes, arena),
             byte[] bytes => DataValue.FromByteArray(bytes, arena),
             // Typed primitive arrays. Each lands as a typed array

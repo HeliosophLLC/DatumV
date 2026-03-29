@@ -154,7 +154,7 @@ public sealed class Pool
     /// caller knows a rough upper bound on bytes it will append (e.g. spill consolidation)
     /// to avoid repeated doubling reallocations. Zero (default) uses Arena's built-in default.
     /// </param>
-    public Arena RentArena(int initialCapacity = 0) => Backing.RentArena(initialCapacity);
+    public Arena RentArena(long initialCapacity = 0) => Backing.RentArena(initialCapacity);
 
     /// <summary>
     /// Rents a fresh file-backed <see cref="Arena"/> via the pool. The arena is always
@@ -162,7 +162,7 @@ public sealed class Pool
     /// rent flows through the pool's counter accounting so the leak invariant covers both
     /// anonymous and file-backed arenas uniformly. Terminal release deletes the backing file.
     /// </summary>
-    public Arena RentFileBackedArena(string filePath, int initialCapacity)
+    public Arena RentFileBackedArena(string filePath, long initialCapacity)
         => Backing.RentFileBackedArena(filePath, initialCapacity);
 
     /// <summary>

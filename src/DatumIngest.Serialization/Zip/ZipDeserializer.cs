@@ -159,7 +159,7 @@ public sealed class ZipDeserializer : IFormatDeserializer
 
         int length = (int)length64;
         using Stream entryStream = entry.Open();
-        (int offset, int actualLength) = arena.AppendFromStream(entryStream, length);
+        (long offset, int actualLength) = arena.AppendFromStream(entryStream, length);
 
         ReadOnlySpan<byte> bytes = arena.GetBytes(offset, actualLength);
         if (!DetectImageKind(bytes))
@@ -173,7 +173,7 @@ public sealed class ZipDeserializer : IFormatDeserializer
         }
 
         ImageDimensions? dimensions = ImageHeaderParser.TryParseHeader(bytes);
-        DataValue image = DataValueHelpers.FromArenaSlice(DataKind.Image, offset, actualLength);
+        DataValue image = DataValueHelpers.FromArenaSlice(DataKind.Image, offset, actualLength, dimensions);
         return (image, dimensions, actualLength);
     }
 
@@ -322,12 +322,17 @@ internal static class DataValueHelpers
     /// <paramref name="length"/>. Caller is responsible for ensuring the arena
     /// contains the bytes.
     /// </summary>
-    public static DataValue FromArenaSlice(DataKind kind, int offset, int length)
+    public static DataValue FromArenaSlice(DataKind kind, long offset, int length, ImageDimensions? imageDimensions = null)
         => kind switch
         {
-            DataKind.Image => DataValue.FromImageAtOffset(offset, length),
+            DataKind.Image => imageDimensions is { Width: > 0 and <= ushort.MaxValue, Height: > 0 and <= ushort.MaxValue } d
+                ? DataValue.FromImageAtOffset(offset, length, (ushort)d.Width, (ushort)d.Height, ClampChannels(d.Channels))
+                : DataValue.FromImageAtOffset(offset, length),
             // Byte-array slices use FromByteArrayAtOffset; callers can call that
             // factory directly since byte arrays don't have a single DataKind here.
             _ => throw new NotSupportedException($"FromArenaSlice does not support DataKind.{kind}."),
         };
+
+    private static byte ClampChannels(int channels) =>
+        channels is >= 0 and <= 255 ? (byte)channels : (byte)0;
 }

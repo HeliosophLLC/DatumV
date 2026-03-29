@@ -1,7 +1,10 @@
 using System.Numerics;
 
+using DatumIngest.Functions.Audio;
 using DatumIngest.Functions.Image;
+using DatumIngest.Functions.Video;
 using DatumIngest.Model;
+using DatumIngest.Model.Spatial;
 using SkiaSharp;
 
 namespace DatumIngest.Functions;
@@ -975,19 +978,19 @@ public readonly struct ValueRef
                 DataValue.FromString(s, targetStore),
             byte[] bytes when IsByteArrayKind => DataValue.FromByteArray(bytes, targetStore),
             byte[] bytes when _inline.Kind == DataKind.Image && !_inline.IsArray =>
-                DataValue.FromImage(bytes, targetStore),
+                ImageDataValueFactory.FromEncodedBytes(bytes, targetStore),
             SKBitmap bmp when _inline.Kind == DataKind.Image && !_inline.IsArray =>
-                DataValue.FromImage(ImageEncoder.Encode(bmp, SKEncodedImageFormat.Png, 100), targetStore),
+                ImageDataValueFactory.FromBitmap(bmp, targetStore),
             byte[] bytes when _inline.Kind == DataKind.Audio && !_inline.IsArray =>
-                DataValue.FromAudio(bytes, targetStore),
+                AudioDataValueFactory.FromEncodedBytes(bytes, targetStore),
             byte[] bytes when _inline.Kind == DataKind.Video && !_inline.IsArray =>
-                DataValue.FromVideo(bytes, targetStore),
+                VideoDataValueFactory.FromEncodedBytes(bytes, targetStore),
             byte[] bytes when _inline.Kind == DataKind.Json && !_inline.IsArray =>
                 DataValue.FromJson(bytes, targetStore),
             byte[] bytes when _inline.Kind == DataKind.PointCloud && !_inline.IsArray =>
-                DataValue.FromPointCloud(bytes, targetStore),
+                MaterializePointCloudWithMetadata(bytes, targetStore),
             byte[] bytes when _inline.Kind == DataKind.Mesh && !_inline.IsArray =>
-                DataValue.FromMesh(bytes, targetStore),
+                MaterializeMeshWithMetadata(bytes, targetStore),
             // Slice form (json_query subdocument): copy only the slice's bytes into the arena.
             ArraySegment<byte> slice when _inline.Kind == DataKind.Json && !_inline.IsArray =>
                 DataValue.FromJson((ReadOnlySpan<byte>)slice, targetStore),
@@ -1050,6 +1053,56 @@ public readonly struct ValueRef
     /// route to their slot-block factories; fixed-width primitives pack their
     /// inline payload bytes contiguously via <see cref="BuildFixedWidthArray"/>.
     /// </summary>
+    /// <summary>
+    /// Parses a PointCloud blob header at the <c>ValueRef → DataValue</c> materialization
+    /// boundary and stamps inline metadata (point count + attribute flags) onto the
+    /// resulting DataValue. <see cref="DataValue.PointCloudCount"/> and the SQL accessor
+    /// functions (<c>point_cloud_count</c>, <c>point_cloud_has_color</c>) skip a full
+    /// blob materialization when the inline metadata is populated.
+    /// </summary>
+    private static DataValue MaterializePointCloudWithMetadata(byte[] bytes, IValueStore target)
+    {
+        if (bytes.Length < 40)
+        {
+            return DataValue.FromPointCloud(bytes, target);
+        }
+        try
+        {
+            PointCloudHeader header = PointCloudHeader.Read(bytes);
+            return DataValue.FromPointCloud(bytes, target,
+                pointCount: header.PointCount,
+                attributeFlags: (byte)header.Flags);
+        }
+        catch
+        {
+            return DataValue.FromPointCloud(bytes, target);
+        }
+    }
+
+    /// <summary>
+    /// Parses a Mesh blob header at the <c>ValueRef → DataValue</c> materialization
+    /// boundary and stamps inline metadata (vertex/triangle counts + attribute flags).
+    /// </summary>
+    private static DataValue MaterializeMeshWithMetadata(byte[] bytes, IValueStore target)
+    {
+        if (bytes.Length < 48)
+        {
+            return DataValue.FromMesh(bytes, target);
+        }
+        try
+        {
+            MeshHeader header = MeshHeader.Read(bytes);
+            return DataValue.FromMesh(bytes, target,
+                vertexCount: header.VertexCount,
+                triangleCount: header.TriangleCount,
+                attributeFlags: (byte)header.Flags);
+        }
+        catch
+        {
+            return DataValue.FromMesh(bytes, target);
+        }
+    }
+
     private static DataValue BuildTypedArray(
         DataKind elementKind,
         ValueRef[] elements,

@@ -56,7 +56,7 @@ public sealed class ByteArrayScaffoldingTests : ServiceTestBase
         byte[] payload = [101, 102, 103, 104];
         var (offset, length) = arena.StoreBytes(payload);
 
-        DataValue value = DataValue.FromByteArrayAtOffset(offset, length);
+        DataValue value = DataValue.FromByteArrayAtOffset(offset.Value, length.Value);
 
         Assert.Equal(DataKind.UInt8, value.Kind);
         Assert.True(value.IsArray);

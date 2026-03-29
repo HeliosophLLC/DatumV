@@ -40,9 +40,9 @@ public sealed class Arena : IValueStore, IDisposable
     private MemoryMappedFile? _mmf;
     private MemoryMappedViewAccessor? _accessor;
     private unsafe byte* _pointer;
-    private int _initialCapacity;
-    private int _capacity;
-    private int _position;
+    private long _initialCapacity;
+    private long _capacity;
+    private long _position;
     private bool _disposed;
     private bool _pooled;
     private int _refCount;
@@ -65,16 +65,16 @@ public sealed class Arena : IValueStore, IDisposable
     /// Initial size of the anonymous memory-mapped region in bytes.
     /// The mapping is not allocated until the first write.
     /// </param>
-    public Arena(int initialCapacity = DefaultCapacity)
+    public Arena(long initialCapacity = DefaultCapacity)
         : this(initialCapacity, backingFilePath: null) { }
 
     /// <summary>
     /// Internal ctor shared by anonymous and file-backed factories. <paramref name="backingFilePath"/>
     /// non-null selects the file-backed mode; the file is created lazily on first write.
     /// </summary>
-    private Arena(int initialCapacity, string? backingFilePath)
+    private Arena(long initialCapacity, string? backingFilePath)
     {
-        _initialCapacity = Math.Max(initialCapacity, DefaultCapacity);
+        _initialCapacity = Math.Max(initialCapacity, (long)DefaultCapacity);
         _backingFilePath = backingFilePath;
     }
 
@@ -94,7 +94,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// growth requires unmapping → resizing → remapping, more expensive than anonymous growth's
     /// in-process memcpy. Floored at <see cref="DefaultCapacity"/>.
     /// </param>
-    public static Arena CreateFileBacked(string filePath, int initialCapacity = DefaultCapacity)
+    public static Arena CreateFileBacked(string filePath, long initialCapacity = DefaultCapacity)
     {
         ArgumentException.ThrowIfNullOrEmpty(filePath);
         return new Arena(initialCapacity, filePath);
@@ -128,92 +128,101 @@ public sealed class Arena : IValueStore, IDisposable
     // ───────────────────────── IValueStore ─────────────────────────
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreString(string value)
+    public (ArenaOffset P0, ArenaLength P1) StoreString(string value)
     {
         var (offset, length) = AppendString(value);
-        return (offset, length);
+        return (new ArenaOffset(offset), new ArenaLength(length));
     }
 
     /// <inheritdoc />
-    public string RetrieveString(int p0, int p1) => GetString(p0, p1);
+    public string RetrieveString(ArenaOffset p0, ArenaLength p1) => GetString(p0.Value, checked((int)p1.Value));
 
     /// <inheritdoc />
-    public ReadOnlySpan<byte> RetrieveUtf8Span(int p0, int p1) => GetSpan(p0, p1);
+    public ReadOnlySpan<byte> RetrieveUtf8Span(ArenaOffset p0, ArenaLength p1) => GetSpan(p0.Value, checked((int)p1.Value));
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreUtf8(ReadOnlySpan<byte> utf8) => AppendUtf8(utf8);
+    public (ArenaOffset P0, ArenaLength P1) StoreUtf8(ReadOnlySpan<byte> utf8)
+    {
+        var (offset, length) = AppendUtf8(utf8);
+        return (new ArenaOffset(offset), new ArenaLength(length));
+    }
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreChars(ReadOnlySpan<char> chars) => AppendChars(chars);
+    public (ArenaOffset P0, ArenaLength P1) StoreChars(ReadOnlySpan<char> chars)
+    {
+        var (offset, length) = AppendChars(chars);
+        return (new ArenaOffset(offset), new ArenaLength(length));
+    }
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreBytes(ReadOnlySpan<byte> bytes)
+    public (ArenaOffset P0, ArenaLength P1) StoreBytes(ReadOnlySpan<byte> bytes)
     {
         var (offset, length) = AppendBytes(bytes);
-        return (offset, length);
+        return (new ArenaOffset(offset), new ArenaLength(length));
     }
 
     /// <inheritdoc />
-    public byte[] RetrieveBytes(int p0, int p1) => MaterializeBytes(p0, p1);
+    public byte[] RetrieveBytes(ArenaOffset p0, ArenaLength p1) => MaterializeBytes(p0.Value, checked((int)p1.Value));
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreFloats(ReadOnlySpan<float> floats)
+    public (ArenaOffset P0, ArenaLength P1) StoreFloats(ReadOnlySpan<float> floats)
     {
         var (offset, count) = AppendFloats(floats);
-        return (offset, count);
+        return (new ArenaOffset(offset), new ArenaLength(count));
     }
 
     /// <inheritdoc />
-    public float[] RetrieveFloats(int p0, int p1) => MaterializeFloats(p0, p1);
+    public float[] RetrieveFloats(ArenaOffset p0, ArenaLength p1) => MaterializeFloats(p0.Value, checked((int)p1.Value));
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreTensor(ReadOnlySpan<float> data, ReadOnlySpan<int> shape)
+    public (ArenaOffset P0, ArenaLength P1) StoreTensor(ReadOnlySpan<float> data, ReadOnlySpan<int> shape)
     {
         var (offset, length) = AppendTensor(data, shape);
-        return (offset, length);
+        return (new ArenaOffset(offset), new ArenaLength(length));
     }
 
     /// <inheritdoc />
-    public float[] RetrieveTensor(int p0, int p1, out int[] shape) => MaterializeTensor(p0, p1, out shape);
+    public float[] RetrieveTensor(ArenaOffset p0, ArenaLength p1, out int[] shape) => MaterializeTensor(p0.Value, checked((int)p1.Value), out shape);
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreDataValues(ReadOnlySpan<DataValue> values)
+    public (ArenaOffset P0, ArenaLength P1) StoreDataValues(ReadOnlySpan<DataValue> values)
     {
         var (offset, count) = AppendDataValues(values);
-        return (offset, count);
+        return (new ArenaOffset(offset), new ArenaLength(count));
     }
 
     /// <inheritdoc />
-    public DataValue[] RetrieveDataValues(int p0, int p1) => MaterializeDataValues(p0, p1);
+    public DataValue[] RetrieveDataValues(ArenaOffset p0, ArenaLength p1) => MaterializeDataValues(p0.Value, checked((int)p1.Value));
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreObject(object value)
+    public (ArenaOffset P0, ArenaLength P1) StoreObject(object value)
     {
         ThrowIfPooled();
         lock (_writeLock)
         {
             _objects ??= [];
             _objects.Add(value);
-            return (_objects.Count - 1, 0);
+            return (new ArenaOffset(_objects.Count - 1), ArenaLength.Zero);
         }
     }
 
     /// <inheritdoc />
-    public object RetrieveObject(int p0, int p1)
+    public object RetrieveObject(ArenaOffset p0, ArenaLength p1)
     {
         ThrowIfPooled();
-        if (_objects is null || (uint)p0 >= (uint)_objects.Count)
-            throw new InvalidOperationException($"No object stored at index {p0}.");
-        return _objects[p0];
+        int index = checked((int)p0.Value);
+        if (_objects is null || (uint)index >= (uint)_objects.Count)
+            throw new InvalidOperationException($"No object stored at index {index}.");
+        return _objects[index];
     }
 
     // ───────────────────────── Common ─────────────────────────
 
     /// <summary>Total bytes written so far.</summary>
-    public int BytesWritten => _position;
+    public long BytesWritten => _position;
 
     /// <summary>Current capacity of the backing memory-mapped region in bytes, or zero if not yet allocated.</summary>
-    public int Capacity => _capacity;
+    public long Capacity => _capacity;
 
     /// <summary>
     /// Returns a read-only view over a sub-region ("page") of this arena.
@@ -223,7 +232,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// </summary>
     /// <param name="pageBase">Byte offset at which the page begins within this arena.</param>
     /// <param name="pageLength">Length of the page in bytes.</param>
-    public ArenaSlice Slice(int pageBase, int pageLength)
+    public ArenaSlice Slice(long pageBase, long pageLength)
         => new(this, pageBase, pageLength);
 
     // ───────────────────────── Core write path ─────────────────────────
@@ -233,13 +242,13 @@ public sealed class Arena : IValueStore, IDisposable
     /// flow through this single write path.
     /// </summary>
     /// <returns>The byte offset and length of the written region.</returns>
-    private (int Offset, int Length) WriteBytes(ReadOnlySpan<byte> data)
+    private (long Offset, int Length) WriteBytes(ReadOnlySpan<byte> data)
     {
         ThrowIfPooled();
         lock (_writeLock)
         {
             EnsureCapacity(data.Length);
-            int offset = _position;
+            long offset = _position;
             data.CopyTo(GetSpanForWrite(offset, data.Length));
             _position += data.Length;
             return (offset, data.Length);
@@ -254,7 +263,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// </summary>
     /// <param name="utf8">The encoded bytes to append.</param>
     /// <returns>The byte offset and length within this arena.</returns>
-    public (int Offset, int Length) AppendUtf8(ReadOnlySpan<byte> utf8)
+    public (long Offset, int Length) AppendUtf8(ReadOnlySpan<byte> utf8)
         => WriteBytes(utf8);
 
     /// <summary>
@@ -262,7 +271,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// </summary>
     /// <param name="value">The string to append.</param>
     /// <returns>The byte offset and length within this arena.</returns>
-    public (int Offset, int Length) AppendString(string value)
+    public (long Offset, int Length) AppendString(string value)
     {
         int maxByteCount = Encoding.UTF8.GetMaxByteCount(value.Length);
 
@@ -286,7 +295,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// </summary>
     /// <param name="chars">The char span to encode and append.</param>
     /// <returns>The byte offset and length within this arena.</returns>
-    public (int Offset, int Length) AppendChars(ReadOnlySpan<char> chars)
+    public (long Offset, int Length) AppendChars(ReadOnlySpan<char> chars)
     {
         int maxByteCount = Encoding.UTF8.GetMaxByteCount(chars.Length);
         byte[]? rented = null;
@@ -307,7 +316,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="offset">Byte offset returned by <see cref="AppendUtf8"/>.</param>
     /// <param name="length">Byte length returned by <see cref="AppendUtf8"/>.</param>
     /// <returns>A span over the stored bytes. Valid only while this arena is alive.</returns>
-    public ReadOnlySpan<byte> GetSpan(int offset, int length)
+    public ReadOnlySpan<byte> GetSpan(long offset, int length)
         => GetSpanForRead(offset, length);
 
     /// <summary>
@@ -317,7 +326,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="offset">Byte offset returned by <see cref="AppendUtf8"/>.</param>
     /// <param name="length">Byte length returned by <see cref="AppendUtf8"/>.</param>
     /// <returns>The decoded string.</returns>
-    public unsafe string GetString(int offset, int length)
+    public unsafe string GetString(long offset, int length)
     {
         ThrowIfPooled();
         if (_pointer == null)
@@ -335,7 +344,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// </summary>
     /// <param name="values">The float values to append.</param>
     /// <returns>The byte offset in this arena and the number of elements.</returns>
-    public (int Offset, int Count) AppendFloats(ReadOnlySpan<float> values)
+    public (long Offset, int Count) AppendFloats(ReadOnlySpan<float> values)
     {
         var (offset, _) = WriteBytes(MemoryMarshal.AsBytes(values));
         return (offset, values.Length);
@@ -345,7 +354,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="offset">Byte offset returned by <see cref="AppendFloats"/>.</param>
     /// <param name="count">Element count returned by <see cref="AppendFloats"/>.</param>
     /// <returns>A span over the stored floats. Valid only while this arena is alive.</returns>
-    public ReadOnlySpan<float> GetFloats(int offset, int count)
+    public ReadOnlySpan<float> GetFloats(long offset, int count)
         => MemoryMarshal.Cast<byte, float>(GetSpanForRead(offset, count * sizeof(float)));
 
     /// <summary>
@@ -355,7 +364,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="offset">Byte offset returned by <see cref="AppendFloats"/>.</param>
     /// <param name="count">Element count returned by <see cref="AppendFloats"/>.</param>
     /// <returns>A new array containing the float values.</returns>
-    public float[] MaterializeFloats(int offset, int count)
+    public float[] MaterializeFloats(long offset, int count)
         => GetFloats(offset, count).ToArray();
 
     // ───────────────────────── Byte operations ─────────────────────────
@@ -367,7 +376,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// </summary>
     /// <param name="bytes">The bytes to append.</param>
     /// <returns>The byte offset and length within this arena.</returns>
-    public (int Offset, int Length) AppendBytes(ReadOnlySpan<byte> bytes)
+    public (long Offset, int Length) AppendBytes(ReadOnlySpan<byte> bytes)
         => WriteBytes(bytes);
 
     /// <summary>
@@ -387,13 +396,13 @@ public sealed class Arena : IValueStore, IDisposable
     /// </remarks>
     /// <param name="source">Source stream. Read synchronously; the caller's lock is held for the duration of the read.</param>
     /// <param name="length">Expected byte count. Capacity is pre-grown by this amount.</param>
-    public (int Offset, int Length) AppendFromStream(Stream source, int length)
+    public (long Offset, int Length) AppendFromStream(Stream source, int length)
     {
         ThrowIfPooled();
         lock (_writeLock)
         {
             EnsureCapacity(length);
-            int offset = _position;
+            long offset = _position;
             Span<byte> destination = GetSpanForWrite(offset, length);
             int total = 0;
             while (total < length)
@@ -411,7 +420,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="offset">Byte offset returned by <see cref="AppendBytes(ReadOnlySpan{byte})"/>.</param>
     /// <param name="length">Byte length returned by <see cref="AppendBytes(ReadOnlySpan{byte})"/>.</param>
     /// <returns>A span over the stored bytes. Valid only while this arena is alive.</returns>
-    public ReadOnlySpan<byte> GetBytes(int offset, int length)
+    public ReadOnlySpan<byte> GetBytes(long offset, int length)
         => GetSpanForRead(offset, length);
 
     /// <summary>
@@ -421,17 +430,17 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="offset">Byte offset returned by <see cref="AppendBytes(ReadOnlySpan{byte})"/>.</param>
     /// <param name="length">Byte length returned by <see cref="AppendBytes(ReadOnlySpan{byte})"/>.</param>
     /// <returns>A new array containing the bytes.</returns>
-    public byte[] MaterializeBytes(int offset, int length)
+    public byte[] MaterializeBytes(long offset, int length)
         => GetBytes(offset, length).ToArray();
 
     // ───────────────────────── DataValue array operations ─────────────────────────
 
     /// <summary>
-    /// Appends a <see cref="DataValue"/> array as raw bytes (20 bytes per element).
+    /// Appends a <see cref="DataValue"/> array as raw bytes (<see cref="DataValue.SizeBytes"/> per element).
     /// </summary>
     /// <param name="values">The DataValue array to append.</param>
     /// <returns>The byte offset and element count within this arena.</returns>
-    public (int Offset, int Count) AppendDataValues(ReadOnlySpan<DataValue> values)
+    public (long Offset, int Count) AppendDataValues(ReadOnlySpan<DataValue> values)
     {
         var (offset, _) = WriteBytes(MemoryMarshal.AsBytes(values));
         return (offset, values.Length);
@@ -444,9 +453,9 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="offset">Byte offset returned by <see cref="AppendDataValues"/>.</param>
     /// <param name="count">Element count returned by <see cref="AppendDataValues"/>.</param>
     /// <returns>A new array containing the DataValues.</returns>
-    public DataValue[] MaterializeDataValues(int offset, int count)
+    public DataValue[] MaterializeDataValues(long offset, int count)
     {
-        ReadOnlySpan<byte> bytes = GetSpanForRead(offset, count * 20);
+        ReadOnlySpan<byte> bytes = GetSpanForRead(offset, count * DataValue.SizeBytes);
         DataValue[] result = new DataValue[count];
         MemoryMarshal.Cast<byte, DataValue>(bytes).CopyTo(result);
         return result;
@@ -461,7 +470,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="data">The flat float data.</param>
     /// <param name="shape">The dimension sizes.</param>
     /// <returns>The byte offset and total byte length of the combined region.</returns>
-    public (int Offset, int Length) AppendTensor(ReadOnlySpan<float> data, ReadOnlySpan<int> shape)
+    public (long Offset, int Length) AppendTensor(ReadOnlySpan<float> data, ReadOnlySpan<int> shape)
     {
         int shapeBytes = (1 + shape.Length) * sizeof(int); // rank + dimensions
         int dataBytes = data.Length * sizeof(float);
@@ -502,7 +511,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="length">Byte length returned by <see cref="AppendTensor"/>.</param>
     /// <param name="shape">The reconstructed dimension sizes.</param>
     /// <returns>A new float array containing the tensor data.</returns>
-    public float[] MaterializeTensor(int offset, int length, out int[] shape)
+    public float[] MaterializeTensor(long offset, int length, out int[] shape)
     {
         ReadOnlySpan<byte> region = GetSpanForRead(offset, length);
 
@@ -528,12 +537,30 @@ public sealed class Arena : IValueStore, IDisposable
     /// </summary>
     /// <param name="source">The arena whose contents to copy.</param>
     /// <returns>The base offset in this arena where the copy begins.</returns>
-    public int CopyFrom(Arena source)
+    public long CopyFrom(Arena source)
     {
         if (source._position == 0) return 0;
-        ReadOnlySpan<byte> data = source.GetSpanForRead(0, source._position);
-        var (offset, _) = WriteBytes(data);
-        return offset;
+
+        // Reserve room and capture the base offset, then byte-copy in
+        // int.MaxValue-sized chunks (Span<byte> length is int-capped, so a
+        // single CopyTo can't span the whole region for arenas past 2GB).
+        long totalBytes = source._position;
+        long baseOffset;
+        lock (_writeLock)
+        {
+            EnsureCapacity(totalBytes);
+            baseOffset = _position;
+            long copied = 0;
+            while (copied < totalBytes)
+            {
+                int chunk = (int)Math.Min(totalBytes - copied, int.MaxValue);
+                ReadOnlySpan<byte> src = source.GetSpanForRead(copied, chunk);
+                src.CopyTo(GetSpanForWrite(baseOffset + copied, chunk));
+                copied += chunk;
+            }
+            _position += totalBytes;
+        }
+        return baseOffset;
     }
 
     // ───────────────────────── Reset ─────────────────────────
@@ -637,7 +664,7 @@ public sealed class Arena : IValueStore, IDisposable
     // ───────────────────────── Memory-mapped backing ─────────────────────────
 
     private static unsafe void CreateMapping(
-        string? backingFilePath, int capacity, FileMode fileMode,
+        string? backingFilePath, long capacity, FileMode fileMode,
         out MemoryMappedFile mmf, out MemoryMappedViewAccessor accessor, out byte* pointer)
     {
         mmf = backingFilePath is null
@@ -672,14 +699,14 @@ public sealed class Arena : IValueStore, IDisposable
     /// remaps (Windows refuses <see cref="FileStream.SetLength"/> on a mapped file, so the
     /// unmap window is mandatory — it's safe because <see cref="_writeLock"/> serializes us).
     /// </summary>
-    private unsafe void EnsureCapacity(int additionalBytes)
+    private unsafe void EnsureCapacity(long additionalBytes)
     {
-        int required = _position + additionalBytes;
+        long required = _position + additionalBytes;
 
         // First allocation — deferred from constructor.
         if (_mmf is null)
         {
-            int capacity = Math.Max(_initialCapacity, required);
+            long capacity = Math.Max(_initialCapacity, required);
             CreateMapping(_backingFilePath, capacity, FileMode.CreateNew,
                 out _mmf, out _accessor, out _pointer);
             _capacity = capacity;
@@ -689,16 +716,18 @@ public sealed class Arena : IValueStore, IDisposable
 
         if (required <= _capacity) return;
 
-        int oldCapacity = _capacity;
-        int bytesCopied = _position;
-        int newCapacity = Math.Max(_capacity * 2, required);
+        long oldCapacity = _capacity;
+        long bytesCopied = _position;
+        long newCapacity = Math.Max(_capacity * 2, required);
 
         if (_backingFilePath is null)
         {
             // Anonymous: build new mapping, memcpy prior contents, release old.
+            // Span<byte> is capped at int.MaxValue (2GB); for arenas growing past
+            // that, copy in 2GB-1 chunks rather than a single CopyTo.
             CreateMapping(null, newCapacity, FileMode.CreateNew,
                 out var newMmf, out var newAccessor, out var newPointer);
-            new ReadOnlySpan<byte>(_pointer, _position).CopyTo(new Span<byte>(newPointer, newCapacity));
+            CopyMappedRegion(_pointer, newPointer, _position);
             ReleaseMapping();
             _mmf = newMmf;
             _accessor = newAccessor;
@@ -721,10 +750,26 @@ public sealed class Arena : IValueStore, IDisposable
         DatumDiagnostics.RecordArenaGrow(oldCapacity, newCapacity, bytesCopied);
     }
 
-    private unsafe Span<byte> GetSpanForWrite(int offset, int length)
+    /// <summary>
+    /// Byte-copy from one raw memory region to another in <c>int.MaxValue</c>-sized
+    /// chunks, since <see cref="Span{T}"/> length is capped at <see cref="int.MaxValue"/>.
+    /// Required for anonymous-arena growth past 2GB.
+    /// </summary>
+    private static unsafe void CopyMappedRegion(byte* src, byte* dst, long byteCount)
+    {
+        long copied = 0;
+        while (copied < byteCount)
+        {
+            int chunk = (int)Math.Min(byteCount - copied, int.MaxValue);
+            new ReadOnlySpan<byte>(src + copied, chunk).CopyTo(new Span<byte>(dst + copied, chunk));
+            copied += chunk;
+        }
+    }
+
+    private unsafe Span<byte> GetSpanForWrite(long offset, int length)
         => new(_pointer + offset, length);
 
-    private unsafe ReadOnlySpan<byte> GetSpanForRead(int offset, int length)
+    private unsafe ReadOnlySpan<byte> GetSpanForRead(long offset, int length)
     {
         ThrowIfPooled();
         if (_pointer == null)

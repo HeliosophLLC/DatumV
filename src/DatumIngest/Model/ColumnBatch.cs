@@ -135,7 +135,7 @@ public sealed class ColumnBatch : IDisposable
     /// <param name="column">The column buffer whose values may need offset adjustment.</param>
     /// <param name="rowCount">Number of valid rows in the buffer.</param>
     /// <param name="baseOffset">Byte offset to add to each arena-backed value's stored offset.</param>
-    public static void AdjustArenaOffsets(DataValue[] column, int rowCount, int baseOffset)
+    public static void AdjustArenaOffsets(DataValue[] column, int rowCount, long baseOffset)
     {
         for (int row = 0; row < rowCount; row++)
         {

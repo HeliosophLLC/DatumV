@@ -276,14 +276,9 @@ internal sealed class CommonTableExpressionOperator : QueryOperator, IDisposable
         }
         initialArenaCapacity *= 2;
 
-        // Cap at int.MaxValue — Arena.CreateFileBacked takes int. In practice if we're at
-        // 2 GB of arena bytes we have far worse problems than the cast.
-        int hint = initialArenaCapacity > int.MaxValue
-            ? int.MaxValue
-            : (int)initialArenaCapacity;
-
+        // Arena.CreateFileBacked now takes long — pass the hint through directly.
         _spiller = new SpillReaderWriter(
-            context.Pool, _materializedSchema!, context.SpillDirectory, hint);
+            context.Pool, _materializedSchema!, context.SpillDirectory, initialArenaCapacity);
 
         foreach (RowBatch buffered in _materializedBatches)
         {

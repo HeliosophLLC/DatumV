@@ -14,10 +14,10 @@ namespace DatumIngest.Model;
 public sealed class ArenaSlice : IValueStore
 {
     private readonly Arena _arena;
-    private readonly int _base;
-    private readonly int _length;
+    private readonly long _base;
+    private readonly long _length;
 
-    internal ArenaSlice(Arena arena, int pageBase, int pageLength)
+    internal ArenaSlice(Arena arena, long pageBase, long pageLength)
     {
         _arena = arena;
         _base = pageBase;
@@ -25,61 +25,61 @@ public sealed class ArenaSlice : IValueStore
     }
 
     /// <summary>The byte offset within the backing arena at which this slice begins.</summary>
-    public int Base => _base;
+    public long Base => _base;
 
     /// <summary>The length in bytes of this slice.</summary>
-    public int Length => _length;
+    public long Length => _length;
 
     // ───────────────────────── Reads (page-relative) ─────────────────────────
 
     /// <inheritdoc />
-    public string RetrieveString(int p0, int p1) => _arena.GetString(_base + p0, p1);
+    public string RetrieveString(ArenaOffset p0, ArenaLength p1) => _arena.GetString(_base + p0.Value, checked((int)p1.Value));
 
     /// <inheritdoc />
-    public ReadOnlySpan<byte> RetrieveUtf8Span(int p0, int p1) => _arena.GetSpan(_base + p0, p1);
+    public ReadOnlySpan<byte> RetrieveUtf8Span(ArenaOffset p0, ArenaLength p1) => _arena.GetSpan(_base + p0.Value, checked((int)p1.Value));
 
     /// <inheritdoc />
-    public byte[] RetrieveBytes(int p0, int p1) => _arena.MaterializeBytes(_base + p0, p1);
+    public byte[] RetrieveBytes(ArenaOffset p0, ArenaLength p1) => _arena.MaterializeBytes(_base + p0.Value, checked((int)p1.Value));
 
     /// <inheritdoc />
-    public float[] RetrieveFloats(int p0, int p1) => _arena.MaterializeFloats(_base + p0, p1);
+    public float[] RetrieveFloats(ArenaOffset p0, ArenaLength p1) => _arena.MaterializeFloats(_base + p0.Value, checked((int)p1.Value));
 
     /// <inheritdoc />
-    public float[] RetrieveTensor(int p0, int p1, out int[] shape) => _arena.MaterializeTensor(_base + p0, p1, out shape);
+    public float[] RetrieveTensor(ArenaOffset p0, ArenaLength p1, out int[] shape) => _arena.MaterializeTensor(_base + p0.Value, checked((int)p1.Value), out shape);
 
     /// <inheritdoc />
-    public DataValue[] RetrieveDataValues(int p0, int p1) => _arena.RetrieveDataValues(_base + p0, p1);
+    public DataValue[] RetrieveDataValues(ArenaOffset p0, ArenaLength p1) => _arena.RetrieveDataValues(new ArenaOffset(_base + p0.Value), p1);
 
     /// <inheritdoc />
-    public object RetrieveObject(int p0, int p1) => _arena.RetrieveObject(p0, p1);
+    public object RetrieveObject(ArenaOffset p0, ArenaLength p1) => _arena.RetrieveObject(p0, p1);
 
     // ───────────────────────── Writes (forbidden) ─────────────────────────
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreString(string value) => ThrowWriteNotSupported();
+    public (ArenaOffset P0, ArenaLength P1) StoreString(string value) => ThrowWriteNotSupported();
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreUtf8(ReadOnlySpan<byte> utf8) => ThrowWriteNotSupported();
+    public (ArenaOffset P0, ArenaLength P1) StoreUtf8(ReadOnlySpan<byte> utf8) => ThrowWriteNotSupported();
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreChars(ReadOnlySpan<char> chars) => ThrowWriteNotSupported();
+    public (ArenaOffset P0, ArenaLength P1) StoreChars(ReadOnlySpan<char> chars) => ThrowWriteNotSupported();
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreBytes(ReadOnlySpan<byte> bytes) => ThrowWriteNotSupported();
+    public (ArenaOffset P0, ArenaLength P1) StoreBytes(ReadOnlySpan<byte> bytes) => ThrowWriteNotSupported();
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreFloats(ReadOnlySpan<float> floats) => ThrowWriteNotSupported();
+    public (ArenaOffset P0, ArenaLength P1) StoreFloats(ReadOnlySpan<float> floats) => ThrowWriteNotSupported();
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreTensor(ReadOnlySpan<float> data, ReadOnlySpan<int> shape) => ThrowWriteNotSupported();
+    public (ArenaOffset P0, ArenaLength P1) StoreTensor(ReadOnlySpan<float> data, ReadOnlySpan<int> shape) => ThrowWriteNotSupported();
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreDataValues(ReadOnlySpan<DataValue> values) => ThrowWriteNotSupported();
+    public (ArenaOffset P0, ArenaLength P1) StoreDataValues(ReadOnlySpan<DataValue> values) => ThrowWriteNotSupported();
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreObject(object value) => ThrowWriteNotSupported();
+    public (ArenaOffset P0, ArenaLength P1) StoreObject(object value) => ThrowWriteNotSupported();
 
-    private static (int, int) ThrowWriteNotSupported() =>
+    private static (ArenaOffset, ArenaLength) ThrowWriteNotSupported() =>
         throw new NotSupportedException(
             "ArenaSlice is a read-only view. To write, use the backing arena directly.");
 }

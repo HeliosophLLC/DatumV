@@ -44,6 +44,11 @@ public sealed class MeshVertexCountFunction : IFunction, IScalarFunction
         {
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
         }
+        uint inlineCount = arg.InlineDataValue.MeshVertexCount;
+        if (inlineCount != 0)
+        {
+            return new ValueTask<ValueRef>(ValueRef.FromInt32(checked((int)inlineCount)));
+        }
         MeshHeader header = MeshHeader.Read(arg.AsMesh());
         return new ValueTask<ValueRef>(ValueRef.FromInt32(checked((int)header.VertexCount)));
     }
@@ -87,6 +92,11 @@ public sealed class MeshTriangleCountFunction : IFunction, IScalarFunction
         if (arg.IsNull)
         {
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
+        }
+        uint inlineCount = arg.InlineDataValue.MeshTriangleCount;
+        if (inlineCount != 0)
+        {
+            return new ValueTask<ValueRef>(ValueRef.FromInt32(checked((int)inlineCount)));
         }
         MeshHeader header = MeshHeader.Read(arg.AsMesh());
         return new ValueTask<ValueRef>(ValueRef.FromInt32(checked((int)header.TriangleCount)));

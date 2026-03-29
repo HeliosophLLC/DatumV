@@ -31,9 +31,18 @@ namespace DatumIngest.Model;
 /// <see cref="Null"/> to construct intentional values.
 /// </para>
 /// </remarks>
-[StructLayout(LayoutKind.Explicit, Size = 20)]
+[StructLayout(LayoutKind.Explicit, Size = SizeBytes)]
 public readonly struct DataValue : IEquatable<DataValue>
 {
+    /// <summary>
+    /// Size of one <see cref="DataValue"/> in bytes. Single source of truth for
+    /// row-stride computations, raw spill-buffer sizing, and reinterpret-cast
+    /// validation. Changing this requires re-laying-out the <c>[FieldOffset]</c>
+    /// attributes below; the <c>DataValue_StructSizeMatchesSizeBytesConstant</c>
+    /// test guards the invariant.
+    /// </summary>
+    public const int SizeBytes = 32;
+
     // ───────────────────────── Flag constants ─────────────────────────
 
     /// <summary>
@@ -110,7 +119,18 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Maximum representable length for a sidecar-backed value (40-bit cap, ~1 TiB).</summary>
     private const long SidecarLengthMax = (1L << 40) - 1;
 
-    // ───────────────────────── Fields (20 bytes) ─────────────────────────
+    /// <summary>
+    /// Maximum UTF-8 byte capacity for an inline <see cref="DataKind.String"/> /
+    /// <see cref="DataKind.Json"/> value. Strings whose UTF-8 form fits in this many
+    /// bytes are stored directly in the struct's payload region (struct bytes 4-30,
+    /// spanning <c>_p0</c>-<c>_p6</c> low 3 bytes); longer strings spill to an
+    /// <see cref="IValueStore"/>. Bumped from 16 → 27 in PR6 once the struct widened
+    /// to 32 bytes — common short-format strings (datetimes, identifiers, short
+    /// labels) now skip the arena round-trip.
+    /// </summary>
+    public const int MaxInlineUtf8Bytes = 27;
+
+    // ───────────────────────── Fields (32 bytes) ─────────────────────────
 
     // Header (4 bytes)
     [FieldOffset(0)]  private readonly DataKind _kind;     //  1 byte  — type discriminator
@@ -121,11 +141,19 @@ public readonly struct DataValue : IEquatable<DataValue>
     //           high byte = char count         (0-16)
     [FieldOffset(2)]  private readonly ushort _charCount;
 
-    // Payload — inline interpretation (16 bytes)
+    // Payload (28 bytes). Interpretation depends on Kind + Flags:
+    //   Inline scalars: bytes 4..N hold the value.
+    //   Arena/sidecar: 64-bit offset at bytes 4-11 (overlaps _p0+_p1),
+    //                  40-bit length at bytes 12-16 (overlaps _p2 + low byte _p3),
+    //                  hash (Strings/JSON) at bytes 20-27 (overlaps _p4+_p5).
+    //                  Kind-specific metadata fills bytes 18-31 for other reference kinds.
     [FieldOffset(4)]  private readonly int _p0;            //  4 bytes — payload word 0
     [FieldOffset(8)]  private readonly int _p1;            //  4 bytes — payload word 1
     [FieldOffset(12)] private readonly int _p2;            //  4 bytes — payload word 2
     [FieldOffset(16)] private readonly int _p3;            //  4 bytes — payload word 3
+    [FieldOffset(20)] private readonly int _p4;            //  4 bytes — payload word 4 (hash low for strings)
+    [FieldOffset(24)] private readonly int _p5;            //  4 bytes — payload word 5 (hash high for strings)
+    [FieldOffset(28)] private readonly int _p6;            //  4 bytes — payload word 6 (kind-specific tail)
 
     // Payload — reference interpretation (overlaps _p0/_p1)
     [FieldOffset(4)]  private readonly int _referenceIndex; // overlaps _p0
@@ -141,6 +169,9 @@ public readonly struct DataValue : IEquatable<DataValue>
         _p1 = p1;
         _p2 = p2;
         _p3 = p3;
+        _p4 = 0;
+        _p5 = 0;
+        _p6 = 0;
     }
 
     /// <summary>
@@ -157,24 +188,136 @@ public readonly struct DataValue : IEquatable<DataValue>
         _meta = meta;
         _p2 = 0;
         _p3 = 0;
+        _p4 = 0;
+        _p5 = 0;
+        _p6 = 0;
     }
 
     /// <summary>
-    /// Constructor for struct DataValues that carry a <see cref="TypeId"/>.
-    /// Uses <c>_charCount</c> (ushort at offset 2) as the type-id slot — always zero
-    /// for structs in the other constructors. The <c>ushort</c> 3rd parameter
-    /// distinguishes this overload from the <c>int</c>-based reference constructor.
+    /// Constructor for struct / Type DataValues that carry a <see cref="TypeId"/>. The
+    /// type-id rides in the low 16 bits of <c>_p6</c> — a dedicated slot promoted out
+    /// of <c>_charCount</c> in PR5 so that struct values no longer alias their type-id
+    /// with inline-string byte counts, element counts, ndim, or sidecar storeIds.
+    /// The <c>ushort</c> 3rd parameter distinguishes this overload from the <c>int</c>-based
+    /// reference constructor.
     /// </summary>
     private DataValue(DataKind kind, DataValueFlags flags, ushort typeId, int p0, int p1)
     {
         Unsafe.SkipInit(out this);
         _kind = kind;
         _flags = flags;
-        _charCount = typeId;
+        _charCount = 0;
         _p0 = p0;
         _p1 = p1;
         _p2 = 0;
         _p3 = 0;
+        _p4 = 0;
+        _p5 = 0;
+        _p6 = unchecked((int)(uint)typeId);
+    }
+
+    /// <summary>
+    /// Constructor for arena/sidecar-backed struct values that carry a <see cref="TypeId"/>.
+    /// Encodes offset across <c>_p0+_p1</c>, length across <c>_p2</c> + low byte of <c>_p3</c>,
+    /// and the type-id in the low 16 bits of <c>_p6</c>. Used by struct factories
+    /// (<see cref="FromStruct"/>, <see cref="FromStructArray"/>, <see cref="SynthesiseArenaStruct"/>).
+    /// The <c>ushort typeId</c> parameter slotted before <c>long offset</c> distinguishes
+    /// this overload from the generic arena-backed constructor.
+    /// </summary>
+    private DataValue(DataKind kind, DataValueFlags flags, ushort typeId, long offset, long length)
+    {
+        Unsafe.SkipInit(out this);
+        _kind = kind;
+        _flags = flags;
+        _charCount = 0;
+        _p0 = unchecked((int)offset);
+        _p1 = unchecked((int)(offset >> 32));
+        _p2 = unchecked((int)length);
+        _p3 = unchecked((int)((length >> 32) & 0xFF));
+        _p4 = 0;
+        _p5 = 0;
+        _p6 = unchecked((int)(uint)typeId);
+    }
+
+    /// <summary>
+    /// Constructor for arena/sidecar-backed values with a 64-bit offset and 40-bit length.
+    /// Encodes offset across <c>_p0+_p1</c> and length across <c>_p2</c> + low byte of <c>_p3</c>,
+    /// matching the unified reference-backed payload layout. Used by factories for Image,
+    /// Audio, Video, PointCloud, Mesh, byte arrays, and similar blob kinds that do not need
+    /// a cached content hash. For Strings/JSON that carry an XxHash64, use the overload that
+    /// also takes a <c>hash</c> argument.
+    /// </summary>
+    private DataValue(DataKind kind, DataValueFlags flags, long offset, long length, ushort charCount = 0)
+    {
+        Unsafe.SkipInit(out this);
+        _kind = kind;
+        _flags = flags;
+        _charCount = charCount;
+        _p0 = unchecked((int)offset);
+        _p1 = unchecked((int)(offset >> 32));
+        _p2 = unchecked((int)length);
+        _p3 = unchecked((int)((length >> 32) & 0xFF));
+        _p4 = 0;
+        _p5 = 0;
+        _p6 = 0;
+    }
+
+    /// <summary>
+    /// Generic constructor for arena/sidecar-backed values that carry inline kind-specific
+    /// metadata in <c>_p4</c>/<c>_p5</c>/<c>_p6</c>. The 12 metadata bytes are packed per-kind
+    /// — Image (W/H/channels), Audio (sample_rate/channels/bit_depth/frame_count), Video
+    /// (W/H/fps/frame_count/codec), PointCloud (point_count/flags), Mesh (vertex_count/
+    /// triangle_count/flags). The caller is responsible for the bit layout; accessor
+    /// properties (<see cref="ImageWidth"/>, <c>AudioSampleRate</c>, etc.) read the same
+    /// bits back via shifts/masks.
+    /// </summary>
+    private DataValue(DataKind kind, DataValueFlags flags, long offset, long length, int p4, int p5, int p6, ushort charCount = 0)
+    {
+        Unsafe.SkipInit(out this);
+        _kind = kind;
+        _flags = flags;
+        _charCount = charCount;
+        _p0 = unchecked((int)offset);
+        _p1 = unchecked((int)(offset >> 32));
+        _p2 = unchecked((int)length);
+        _p3 = unchecked((int)((length >> 32) & 0xFF));
+        _p4 = p4;
+        _p5 = p5;
+        _p6 = p6;
+    }
+
+    /// <summary>
+    /// Image-specific overload that packs <c>(width, height)</c> across <c>_p4</c>
+    /// and channels into the low byte of <c>_p5</c>. Forwards to the generic
+    /// metadata constructor.
+    /// </summary>
+    private DataValue(DataKind kind, DataValueFlags flags, long offset, long length, ushort width, ushort height, byte channels, ushort charCount = 0)
+        : this(kind, flags, offset, length,
+            p4: unchecked((int)((uint)width | ((uint)height << 16))),
+            p5: channels,
+            p6: 0,
+            charCount: charCount)
+    { }
+
+    /// <summary>
+    /// Constructor for arena/sidecar-backed Strings/JSON. Encodes offset + length per the
+    /// shared reference-backed layout and stamps a cached XxHash64 across <c>_p4+_p5</c>.
+    /// The <paramref name="hash"/> is the XxHash64 of the value's UTF-8/CBOR bytes; a value
+    /// of zero is the "no cached hash" sentinel honored by <see cref="RawContentHash"/>.
+    /// </summary>
+    private DataValue(DataKind kind, DataValueFlags flags, long offset, long length, ulong hash, ushort charCount = 0)
+    {
+        Unsafe.SkipInit(out this);
+        _kind = kind;
+        _flags = flags;
+        _charCount = charCount;
+        _p0 = unchecked((int)offset);
+        _p1 = unchecked((int)(offset >> 32));
+        _p2 = unchecked((int)length);
+        _p3 = unchecked((int)((length >> 32) & 0xFF));
+        _p4 = unchecked((int)hash);
+        _p5 = unchecked((int)(hash >> 32));
+        _p6 = 0;
     }
 
     /// <summary>The type discriminator for this value.</summary>
@@ -258,17 +401,19 @@ public readonly struct DataValue : IEquatable<DataValue>
     private int ShapePrefixByteCount => IsMultiDim ? (_charCount >> 8) * sizeof(int) : 0;
 
     /// <summary>
-    /// Per-query <see cref="TypeRegistry"/> id for this struct value; 0 (<see cref="TypeRegistry.NoType"/>)
-    /// when no type has been registered. For non-array structs, stored in <c>_charCount</c>.
-    /// For arena-backed <c>Array&lt;Struct&gt;</c> (N≥2), also stored in <c>_charCount</c>
-    /// (the field is otherwise unused for that layout). Inline array (N=0/1) and all
-    /// non-struct kinds always return 0.
+    /// Per-query <see cref="TypeRegistry"/> id for this struct or Type value;
+    /// 0 (<see cref="TypeRegistry.NoType"/>) when no type has been registered.
+    /// Lives in the low 16 bits of <c>_p6</c> — a dedicated slot promoted out of
+    /// <c>_charCount</c> in PR5 so struct values no longer alias their type-id with
+    /// inline-string byte counts, element counts, ndim, or sidecar storeIds. Inline
+    /// reference-array containers (N=0/N=1) and arrays of non-struct elements carry
+    /// no overall TypeId and return 0; <c>Array&lt;Struct&gt;</c> elements carry their
+    /// per-element TypeId in the slot bytes, not on the array container.
     /// </summary>
     public ushort TypeId =>
-        _kind == DataKind.Struct && !IsArray ? _charCount :
-        _kind == DataKind.Struct && IsArray && (_flags & DataValueFlags.InArena) != 0 ? _charCount :
-        _kind == DataKind.Type ? _charCount :
-        (ushort)0;
+        (_kind == DataKind.Struct || _kind == DataKind.Type)
+            ? unchecked((ushort)_p6)
+            : (ushort)0;
 
     /// <summary>
     /// Looks up this value's <see cref="TypeDescriptor"/> in <paramref name="registry"/>.
@@ -296,10 +441,17 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
-    /// Decodes the 64-bit sidecar offset packed across <c>_p0</c> and <c>_p1</c>. Only
-    /// meaningful when <see cref="IsInSidecar"/> is <c>true</c>.
+    /// Decodes the 64-bit offset for reference-backed values (arena or sidecar), packed
+    /// across <c>_p0</c> and <c>_p1</c>. Only meaningful when <see cref="IsArenaBacked"/>
+    /// or <see cref="IsInSidecar"/> is <c>true</c>.
     /// </summary>
-    internal long SidecarOffset => Unsafe.As<int, long>(ref Unsafe.AsRef(in _p0));
+    internal long BackedOffset => Unsafe.As<int, long>(ref Unsafe.AsRef(in _p0));
+
+    /// <summary>
+    /// Sidecar offset alias for <see cref="BackedOffset"/>. Both arena- and sidecar-backed
+    /// values share the same on-struct offset encoding under the 32-byte layout.
+    /// </summary>
+    internal long SidecarOffset => BackedOffset;
 
     /// <summary>
     /// Sidecar <c>storeId</c> packed into the low byte of <c>_charCount</c>. Identifies
@@ -312,10 +464,21 @@ public readonly struct DataValue : IEquatable<DataValue>
     internal byte SidecarStoreId => (byte)(_charCount & 0xFF);
 
     /// <summary>
-    /// Decodes the 40-bit sidecar length packed across <c>_p2</c> and the low byte of
-    /// <c>_p3</c>. Only meaningful when <see cref="IsInSidecar"/> is <c>true</c>.
+    /// Decodes the 40-bit length for reference-backed values (arena or sidecar), packed
+    /// across <c>_p2</c> and the low byte of <c>_p3</c>. Only meaningful when
+    /// <see cref="IsArenaBacked"/> or <see cref="IsInSidecar"/> is <c>true</c>.
     /// </summary>
-    internal long SidecarLength => (long)(uint)_p2 | ((long)(_p3 & 0xFF) << 32);
+    // The (long)(uint)_p2 cast looks redundant but is load-bearing: int → uint
+    // strips sign extension before widening to long, so a negative _p2 (high bit
+    // set in the low 32-bit word) doesn't sign-extend through the bitwise OR with
+    // the high-byte shift. Tools that flag this as "cast is redundant" are wrong.
+    internal long BackedLength => (long)(uint)_p2 | ((long)(_p3 & 0xFF) << 32);
+
+    /// <summary>
+    /// Sidecar length alias for <see cref="BackedLength"/>. Both arena- and sidecar-backed
+    /// values share the same on-struct length encoding under the 32-byte layout.
+    /// </summary>
+    internal long SidecarLength => BackedLength;
 
     /// <summary>
     /// For inline strings, the UTF-8 byte length (0-16) stored in the low byte of <c>_charCount</c>.
@@ -491,7 +654,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(
             DataKind.UInt8,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray,
-            p0: p0, p1: p1);
+            offset: p0.Value, length: p1.Value);
     }
 
     /// <summary>
@@ -543,13 +706,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     public static DataValue FromString(string value)
     {
-        Span<byte> scratch = stackalloc byte[16];
+        Span<byte> scratch = stackalloc byte[MaxInlineUtf8Bytes];
         if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
         {
             return FromInlineUtf8(DataKind.String, scratch[..written], value.Length);
         }
         throw new InvalidOperationException(
-            "FromString(value) without a store only supports strings whose UTF-8 form fits in 16 bytes. " +
+            $"FromString(value) without a store only supports strings whose UTF-8 form fits in {MaxInlineUtf8Bytes} bytes. " +
             "Use FromString(value, store) for longer strings.");
     }
 
@@ -562,68 +725,69 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="store">The store to use for storage and later retrieval.</param>
     public static DataValue FromString(string value, IValueStore store)
     {
-        Span<byte> scratch = stackalloc byte[16];
+        Span<byte> scratch = stackalloc byte[MaxInlineUtf8Bytes];
         if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
         {
             return FromInlineUtf8(DataKind.String, scratch[..written], value.Length);
         }
 
         var (p0, p1) = store.StoreString(value);
-        var (hashLo, hashHi) = HashString(value.AsSpan());
+        ulong hash = HashString(value.AsSpan());
         ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
-        return new(DataKind.String, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+        return new(DataKind.String, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value, hash: hash, charCount: cc);
     }
 
     /// <summary>Creates a string value from a char span without allocating a managed string.</summary>
     public static DataValue FromCharSpan(ReadOnlySpan<char> chars, IValueStore store)
     {
-        Span<byte> scratch = stackalloc byte[16];
+        Span<byte> scratch = stackalloc byte[MaxInlineUtf8Bytes];
         if (System.Text.Encoding.UTF8.TryGetBytes(chars, scratch, out int written))
         {
             return FromInlineUtf8(DataKind.String, scratch[..written], chars.Length);
         }
 
         var (p0, p1) = store.StoreChars(chars);
-        var (hashLo, hashHi) = HashString(chars);
+        ulong hash = HashString(chars);
         ushort cc = chars.Length <= ushort.MaxValue ? (ushort)chars.Length : ushort.MaxValue;
-        return new(DataKind.String, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+        return new(DataKind.String, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value, hash: hash, charCount: cc);
     }
 
     /// <summary>Creates a string value from raw UTF-8 bytes without allocating a managed string.</summary>
     public static DataValue FromUtf8Span(ReadOnlySpan<byte> utf8, int charCount, IValueStore store)
     {
-        if (utf8.Length <= 16)
+        if (utf8.Length <= MaxInlineUtf8Bytes)
         {
             return FromInlineUtf8(DataKind.String, utf8, charCount);
         }
 
         var (p0, p1) = store.StoreUtf8(utf8);
-        var (hashLo, hashHi) = HashUtf8(utf8);
+        ulong hash = HashUtf8(utf8);
         ushort cc = charCount <= ushort.MaxValue ? (ushort)charCount : ushort.MaxValue;
-        return new(DataKind.String, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+        return new(DataKind.String, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value, hash: hash, charCount: cc);
     }
 
     /// <summary>
     /// Creates an inline <see cref="DataKind.String"/> whose UTF-8 bytes live directly
-    /// in <c>_p0</c>-<c>_p3</c>. Requires
-    /// <paramref name="utf8Bytes"/>.Length &lt;= 16 and <paramref name="charCount"/> &lt;= 16.
-    /// Unused payload bytes are zeroed. Byte length and char count are packed into
+    /// in the struct's payload region (<c>_p0</c>-<c>_p6</c> low 3 bytes, struct bytes 4-30).
+    /// Requires <paramref name="utf8Bytes"/>.Length &lt;= <see cref="MaxInlineUtf8Bytes"/>
+    /// and <paramref name="charCount"/> &lt;= <see cref="MaxInlineUtf8Bytes"/>. Unused
+    /// payload bytes are zeroed. Byte length and char count are packed into
     /// <c>_charCount</c> (low byte = bytes, high byte = chars).
     /// </summary>
     private static DataValue FromInlineUtf8(DataKind kind, ReadOnlySpan<byte> utf8Bytes, int charCount)
     {
-        Span<byte> padded = stackalloc byte[16];
+        // Stage into a 28-byte buffer (7 ints' worth) so the byte-to-int cast lines up
+        // with the struct's 7 payload int slots. _p6's high byte (struct[31]) ends up zero
+        // — we never write more than 27 bytes of UTF-8.
+        Span<byte> padded = stackalloc byte[28];
         padded.Clear();
         utf8Bytes.CopyTo(padded);
 
-        // Reinterpret the 16-byte buffer as four native-order int32 words, matching how
-        // the struct stores _p0-_p3 in memory. InlineUtf8Span reads the same bytes back
-        // by casting the fields to a byte span, so the round-trip is endian-neutral.
         Span<int> asInts = MemoryMarshal.Cast<byte, int>(padded);
 
         ushort packed = (ushort)((utf8Bytes.Length & 0xFF) | ((charCount & 0xFF) << 8));
 
-        return new(
+        DataValue result = new(
             kind,
             flags: 0,
             p0: asInts[0],
@@ -631,6 +795,15 @@ public readonly struct DataValue : IEquatable<DataValue>
             p2: asInts[2],
             p3: asInts[3],
             charCount: packed);
+
+        // The 4-int ctor above zeros _p4/_p5/_p6. For inline strings ≥17 bytes we need
+        // the spillover into those slots. Unsafe-write the staged buffer over the entire
+        // 28-byte payload region.
+        ref byte payloadStart = ref Unsafe.As<int, byte>(ref Unsafe.AsRef(in result._p0));
+        Span<byte> destination = MemoryMarshal.CreateSpan(ref payloadStart, 28);
+        padded.CopyTo(destination);
+
+        return result;
     }
 
     /// <summary>
@@ -641,8 +814,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     /// <param name="offset">Byte offset into the owning <see cref="Arena"/>.</param>
     /// <param name="length">Byte length of the UTF-8 encoded string.</param>
-    public static DataValue FromStringSlice(int offset, int length) =>
-        new(DataKind.String, flags: DataValueFlags.InArena, p0: offset, p1: length);
+    public static DataValue FromStringSlice(long offset, long length) =>
+        new(DataKind.String, flags: DataValueFlags.InArena, offset: offset, length: length);
 
     // ───────────────────────── Reference-type arrays ─────────────────────────
     //
@@ -674,9 +847,9 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         if (elements.Length == 1)
         {
-            (int elementP0, int elementP1) = store.StoreString(elements[0]);
+            var (elementP0, elementP1) = store.StoreString(elements[0]);
             Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
-            ArraySlot.Write(slotBytes, elementP0, elementP1);
+            ArraySlot.Write(slotBytes, elementP0.Value, elementP1.Value);
             int p0 = MemoryMarshal.Read<int>(slotBytes[..4]);
             int p1 = MemoryMarshal.Read<int>(slotBytes[4..8]);
             int p2 = MemoryMarshal.Read<int>(slotBytes[8..12]);
@@ -692,18 +865,18 @@ public readonly struct DataValue : IEquatable<DataValue>
         byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
         for (int i = 0; i < elements.Length; i++)
         {
-            (int elementP0, int elementP1) = store.StoreString(elements[i]);
+            var (elementP0, elementP1) = store.StoreString(elements[i]);
             ArraySlot.Write(
                 slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
-                elementP0,
-                elementP1);
+                elementP0.Value,
+                elementP1.Value);
         }
-        (int blockP0, int blockP1) = store.StoreBytes(slotBlock);
+        var (blockP0, blockP1) = store.StoreBytes(slotBlock);
         return new(
             DataKind.String,
             flags: DataValueFlags.IsArray | DataValueFlags.InArena,
-            p0: blockP0,
-            p1: blockP1);
+            offset: blockP0.Value,
+            length: blockP1.Value);
     }
 
     /// <summary>
@@ -753,11 +926,11 @@ public readonly struct DataValue : IEquatable<DataValue>
             MemoryMarshal.Write(slotBytes[8..12], _p2);
             MemoryMarshal.Write(slotBytes[12..16], _p3);
             ArraySlot.Read(slotBytes, out long elementOffset, out long elementLength, out _, out _);
-            return [store.RetrieveString((int)elementOffset, (int)elementLength)];
+            return [store.RetrieveString(new ArenaOffset((int)elementOffset), new ArenaLength((int)elementLength))];
         }
 
         // N ≥ 2 arena-backed — slot block lives at (_p0, _p1) in the array's store.
-        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(_p0, _p1);
+        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
         int n = arenaBlock.Length / ArraySlot.SizeBytes;
         string[] arenaResult = new string[n];
         for (int i = 0; i < n; i++)
@@ -768,7 +941,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 out long elementLength,
                 out _,
                 out _);
-            arenaResult[i] = store.RetrieveString((int)elementOffset, (int)elementLength);
+            arenaResult[i] = store.RetrieveString(new ArenaOffset((int)elementOffset), new ArenaLength((int)elementLength));
         }
         return arenaResult;
     }
@@ -815,7 +988,30 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromImage(byte[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.Image, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+        return new(DataKind.Image, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value);
+    }
+
+    /// <summary>
+    /// Creates a value from encoded image bytes plus inline dimensions metadata.
+    /// Width/height fit in <see cref="ushort"/> per the design — codec specs cap at
+    /// 65535×65535 and gigapixel imagery is tiled in practice. When dimensions are
+    /// available at ingest time (e.g. from <c>ImageHeaderParser</c>), this overload
+    /// lets accessors like <see cref="ImageWidth"/> and
+    /// <c>image_width()</c> read W/H without a full SkiaSharp decode.
+    /// </summary>
+    /// <param name="value">Encoded image bytes (PNG/JPEG/WebP/etc.).</param>
+    /// <param name="store">Backing store for the encoded bytes.</param>
+    /// <param name="width">Pixel width; pass 0 when unknown.</param>
+    /// <param name="height">Pixel height; pass 0 when unknown.</param>
+    /// <param name="channels">Channel count (1=grayscale, 3=RGB, 4=RGBA); 0 when unknown.</param>
+    public static DataValue FromImage(byte[] value, IValueStore store, ushort width, ushort height, byte channels = 0)
+    {
+        var (p0, p1) = store.StoreBytes(value);
+        return new(
+            DataKind.Image,
+            flags: DataValueFlags.InArena,
+            offset: p0.Value, length: p1.Value,
+            width: width, height: height, channels: channels);
     }
 
     /// <summary>
@@ -827,7 +1023,21 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromPointCloud(byte[] blob, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(blob);
-        return new(DataKind.PointCloud, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+        return new(DataKind.PointCloud, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value);
+    }
+
+    /// <summary>
+    /// Variant of <see cref="FromPointCloud(byte[], IValueStore)"/> that stamps inline
+    /// metadata (<paramref name="pointCount"/> + <paramref name="attributeFlags"/>) so
+    /// accessors like <see cref="PointCloudCount"/> and the <c>point_cloud_count()</c>
+    /// SQL function can read the count without dereferencing the blob.
+    /// </summary>
+    public static DataValue FromPointCloud(byte[] blob, IValueStore store, uint pointCount, byte attributeFlags = 0)
+    {
+        var (p0, p1) = store.StoreBytes(blob);
+        return new(DataKind.PointCloud, flags: DataValueFlags.InArena,
+            offset: p0.Value, length: p1.Value,
+            p4: unchecked((int)pointCount), p5: attributeFlags, p6: 0);
     }
 
     /// <summary>
@@ -840,7 +1050,20 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromMesh(byte[] blob, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(blob);
-        return new(DataKind.Mesh, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+        return new(DataKind.Mesh, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value);
+    }
+
+    /// <summary>
+    /// Variant of <see cref="FromMesh(byte[], IValueStore)"/> that stamps inline metadata
+    /// (vertex/triangle counts + attribute flags). Read via <see cref="MeshVertexCount"/>,
+    /// <see cref="MeshTriangleCount"/>, <see cref="MeshAttributes"/>.
+    /// </summary>
+    public static DataValue FromMesh(byte[] blob, IValueStore store, uint vertexCount, uint triangleCount, byte attributeFlags = 0)
+    {
+        var (p0, p1) = store.StoreBytes(blob);
+        return new(DataKind.Mesh, flags: DataValueFlags.InArena,
+            offset: p0.Value, length: p1.Value,
+            p4: unchecked((int)vertexCount), p5: unchecked((int)triangleCount), p6: attributeFlags);
     }
 
     /// <summary>Creates a value from encoded audio bytes.</summary>
@@ -852,7 +1075,24 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromAudio(byte[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.Audio, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+        return new(DataKind.Audio, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value);
+    }
+
+    /// <summary>
+    /// Variant of <see cref="FromAudio(byte[], IValueStore)"/> that stamps inline metadata.
+    /// Substrate for future <c>audio_sample_rate()</c> / <c>audio_channels()</c> SQL
+    /// functions; no consumer exists yet — when one is added, route it through the
+    /// inline accessors (<see cref="AudioSampleRate"/>, etc.) first and fall back to a
+    /// header-parse-on-decode path only when metadata is absent.
+    /// </summary>
+    public static DataValue FromAudio(byte[] value, IValueStore store, uint sampleRate, byte channels = 0, byte bitDepth = 0, uint frameCount = 0)
+    {
+        var (p0, p1) = store.StoreBytes(value);
+        return new(DataKind.Audio, flags: DataValueFlags.InArena,
+            offset: p0.Value, length: p1.Value,
+            p4: unchecked((int)sampleRate),
+            p5: channels | (bitDepth << 8),
+            p6: unchecked((int)frameCount));
     }
 
     /// <summary>Creates a value from encoded video bytes.</summary>
@@ -864,7 +1104,22 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromVideo(byte[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.Video, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+        return new(DataKind.Video, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value);
+    }
+
+    /// <summary>
+    /// Variant of <see cref="FromVideo(byte[], IValueStore)"/> that stamps inline metadata
+    /// (W/H + FPS as 8.8 fixed-point + codec + frame_count). Substrate for future
+    /// <c>video_width()</c> / <c>video_codec()</c> SQL functions; no consumer exists yet.
+    /// </summary>
+    public static DataValue FromVideo(byte[] value, IValueStore store, ushort width, ushort height, ushort fpsX256 = 0, byte codec = 0, uint frameCount = 0)
+    {
+        var (p0, p1) = store.StoreBytes(value);
+        return new(DataKind.Video, flags: DataValueFlags.InArena,
+            offset: p0.Value, length: p1.Value,
+            p4: unchecked((int)((uint)width | ((uint)height << 16))),
+            p5: fpsX256 | (codec << 16),
+            p6: unchecked((int)frameCount));
     }
 
     /// <summary>Creates a JSON value from canonical CBOR bytes.</summary>
@@ -881,7 +1136,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromJson(byte[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.Json, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+        return new(DataKind.Json, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value);
     }
 
     /// <summary>
@@ -893,12 +1148,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromJson(ReadOnlySpan<byte> value, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.Json, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+        return new(DataKind.Json, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value);
     }
 
     /// <summary>
     /// Creates a <see cref="DataKind.Json"/> value whose canonical CBOR bytes
-    /// live in a <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar"/>.
+    /// live in a <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar(long, long, byte)"/>.
     /// </summary>
     public static DataValue FromJsonInSidecar(long offset, long length, byte storeId = 0) =>
         BuildSidecar(DataKind.Json, offset, length, storeId);
@@ -917,29 +1172,57 @@ public readonly struct DataValue : IEquatable<DataValue>
         BuildSidecar(DataKind.Image, offset, length, storeId);
 
     /// <summary>
+    /// Variant of <see cref="FromImageInSidecar(long, long, byte)"/> that also stamps
+    /// inline width/height/channels onto the DataValue. The dimensions live in
+    /// <c>_p4</c>+<c>_p5</c> alongside the sidecar pointer in <c>_p0</c>+<c>_p1</c>+
+    /// <c>_p2</c>+<c>_p3</c> — read via <see cref="ImageWidth"/> / <see cref="ImageHeight"/>
+    /// / <see cref="ImageChannels"/> without needing to dereference the sidecar.
+    /// </summary>
+    public static DataValue FromImageInSidecar(long offset, long length, byte storeId, ushort width, ushort height, byte channels)
+    {
+        if (offset < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(offset), offset, "Sidecar offset must be non-negative.");
+        }
+        if (length < 0 || length > SidecarLengthMax)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(length), length,
+                $"Sidecar length must be in [0, {SidecarLengthMax}] (40-bit cap).");
+        }
+        return new(
+            DataKind.Image,
+            flags: DataValueFlags.InSidecar,
+            offset: offset, length: length,
+            width: width, height: height, channels: channels,
+            charCount: storeId);
+    }
+
+    /// <summary>
     /// Creates a <see cref="DataKind.Audio"/> value whose encoded bytes live in a
-    /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar"/>.
+    /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar(long, long, byte)"/>.
     /// </summary>
     public static DataValue FromAudioInSidecar(long offset, long length, byte storeId = 0) =>
         BuildSidecar(DataKind.Audio, offset, length, storeId);
 
     /// <summary>
     /// Creates a <see cref="DataKind.Video"/> value whose encoded bytes live in a
-    /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar"/>.
+    /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar(long, long, byte)"/>.
     /// </summary>
     public static DataValue FromVideoInSidecar(long offset, long length, byte storeId = 0) =>
         BuildSidecar(DataKind.Video, offset, length, storeId);
 
     /// <summary>
     /// Creates a <see cref="DataKind.PointCloud"/> value whose blob lives in a
-    /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar"/>.
+    /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar(long, long, byte)"/>.
     /// </summary>
     public static DataValue FromPointCloudInSidecar(long offset, long length, byte storeId = 0) =>
         BuildSidecar(DataKind.PointCloud, offset, length, storeId);
 
     /// <summary>
     /// Creates a <see cref="DataKind.Mesh"/> value whose blob lives in a
-    /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar"/>.
+    /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar(long, long, byte)"/>.
     /// </summary>
     public static DataValue FromMeshInSidecar(long offset, long length, byte storeId = 0) =>
         BuildSidecar(DataKind.Mesh, offset, length, storeId);
@@ -963,9 +1246,9 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         if (elements.Length == 1)
         {
-            (int elementP0, int elementP1) = store.StoreBytes(elements[0]);
+            var (elementP0, elementP1) = store.StoreBytes(elements[0]);
             Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
-            ArraySlot.Write(slotBytes, elementP0, elementP1);
+            ArraySlot.Write(slotBytes, elementP0.Value, elementP1.Value);
             int p0 = MemoryMarshal.Read<int>(slotBytes[..4]);
             int p1 = MemoryMarshal.Read<int>(slotBytes[4..8]);
             int p2 = MemoryMarshal.Read<int>(slotBytes[8..12]);
@@ -980,18 +1263,18 @@ public readonly struct DataValue : IEquatable<DataValue>
         byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
         for (int i = 0; i < elements.Length; i++)
         {
-            (int elementP0, int elementP1) = store.StoreBytes(elements[i]);
+            var (elementP0, elementP1) = store.StoreBytes(elements[i]);
             ArraySlot.Write(
                 slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
-                elementP0,
-                elementP1);
+                elementP0.Value,
+                elementP1.Value);
         }
-        (int blockP0, int blockP1) = store.StoreBytes(slotBlock);
+        var (blockP0, blockP1) = store.StoreBytes(slotBlock);
         return new(
             DataKind.Image,
             flags: DataValueFlags.IsArray | DataValueFlags.InArena,
-            p0: blockP0,
-            p1: blockP1);
+            offset: blockP0.Value,
+            length: blockP1.Value);
     }
 
     /// <summary>
@@ -1030,10 +1313,10 @@ public readonly struct DataValue : IEquatable<DataValue>
             MemoryMarshal.Write(slotBytes[8..12], _p2);
             MemoryMarshal.Write(slotBytes[12..16], _p3);
             ArraySlot.Read(slotBytes, out long elementOffset, out long elementLength, out _, out _);
-            return [store.RetrieveBytes((int)elementOffset, (int)elementLength)];
+            return [store.RetrieveBytes(new ArenaOffset((int)elementOffset), new ArenaLength((int)elementLength))];
         }
 
-        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(_p0, _p1);
+        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
         int n = arenaBlock.Length / ArraySlot.SizeBytes;
         byte[][] arenaResult = new byte[n][];
         for (int i = 0; i < n; i++)
@@ -1044,7 +1327,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 out long elementLength,
                 out _,
                 out _);
-            arenaResult[i] = store.RetrieveBytes((int)elementOffset, (int)elementLength);
+            arenaResult[i] = store.RetrieveBytes(new ArenaOffset((int)elementOffset), new ArenaLength((int)elementLength));
         }
         return arenaResult;
     }
@@ -1075,9 +1358,9 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         if (elements.Length == 1)
         {
-            (int elementP0, int elementP1) = store.StoreDataValues(elements[0]);
+            var (elementP0, elementP1) = store.StoreDataValues(elements[0]);
             Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
-            ArraySlot.Write(slotBytes, elementP0, elementP1, typeId);
+            ArraySlot.Write(slotBytes, elementP0.Value, elementP1.Value, typeId);
             int p0 = MemoryMarshal.Read<int>(slotBytes[..4]);
             int p1 = MemoryMarshal.Read<int>(slotBytes[4..8]);
             int p2 = MemoryMarshal.Read<int>(slotBytes[8..12]);
@@ -1092,19 +1375,19 @@ public readonly struct DataValue : IEquatable<DataValue>
         byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
         for (int i = 0; i < elements.Length; i++)
         {
-            (int elementP0, int elementP1) = store.StoreDataValues(elements[i]);
+            var (elementP0, elementP1) = store.StoreDataValues(elements[i]);
             ArraySlot.Write(
                 slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
-                elementP0,
-                elementP1,
+                elementP0.Value,
+                elementP1.Value,
                 typeId);
         }
-        (int blockP0, int blockP1) = store.StoreBytes(slotBlock);
+        var (blockP0, blockP1) = store.StoreBytes(slotBlock);
         return new(
             DataKind.Struct,
             flags: DataValueFlags.IsArray | DataValueFlags.InArena,
-            p0: blockP0,
-            p1: blockP1,
+            offset: blockP0.Value,
+            length: blockP1.Value,
             charCount: 0);
     }
 
@@ -1322,10 +1605,10 @@ public readonly struct DataValue : IEquatable<DataValue>
                 out long elementLength,
                 out ushort elementTypeId,
                 out _);
-            return [SynthesiseArenaStruct((int)elementOffset, (int)elementLength, elementTypeId)];
+            return [SynthesiseArenaStruct(elementOffset, elementLength, elementTypeId)];
         }
 
-        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(_p0, _p1);
+        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
         int n = arenaBlock.Length / ArraySlot.SizeBytes;
         DataValue[] arenaResult = new DataValue[n];
         for (int i = 0; i < n; i++)
@@ -1336,7 +1619,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 out long elementLength,
                 out ushort elementTypeId,
                 out _);
-            arenaResult[i] = SynthesiseArenaStruct((int)elementOffset, (int)elementLength, elementTypeId);
+            arenaResult[i] = SynthesiseArenaStruct(elementOffset, elementLength, elementTypeId);
         }
         return arenaResult;
     }
@@ -1348,8 +1631,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <see cref="AsStructArray"/> to materialise per-element struct values from
     /// their slot data.
     /// </summary>
-    private static DataValue SynthesiseArenaStruct(int fieldArrayOffset, int fieldCount, ushort typeId) =>
-        new(DataKind.Struct, DataValueFlags.InArena, typeId, fieldArrayOffset, fieldCount);
+    private static DataValue SynthesiseArenaStruct(long fieldArrayOffset, long fieldCount, ushort typeId) =>
+        new(DataKind.Struct, DataValueFlags.InArena, typeId: typeId, offset: fieldArrayOffset, length: fieldCount);
 
     /// <summary>
     /// Deserialises a single struct's field bytes (uint16 fieldCount + N
@@ -1396,15 +1679,12 @@ public readonly struct DataValue : IEquatable<DataValue>
                 $"Sidecar length must be in [0, {SidecarLengthMax}] (40-bit cap).");
         }
 
-        int p0 = (int)offset;
-        int p1 = (int)(offset >> 32);
-        int p2 = (int)length;
-        int p3 = (int)((length >> 32) & 0xFF);  // high 8 bits of length; high 24 bits of _p3 reserved
-
         DataValueFlags flags = DataValueFlags.InSidecar;
         if (isArray) flags |= DataValueFlags.IsArray;
 
-        return new(kind, flags: flags, p0: p0, p1: p1, p2: p2, p3: p3, charCount: storeId);
+        // No cached hash: sidecar-backed Strings/JSON read as RawContentHash=0 today,
+        // forcing CompareStrings down its no-hash path. The hash slot at _p4/_p5 stays zero.
+        return new(kind, flags: flags, offset: offset, length: length, charCount: storeId);
     }
 
     // ───────────────────────── Inline arrays ─────────────────────────
@@ -1519,7 +1799,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(
             elementKind,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray,
-            p0: p0, p1: p1);
+            offset: p0.Value, length: p1.Value);
     }
 
     /// <summary>
@@ -1540,7 +1820,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(
             elementKind,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray,
-            p0: p0, p1: p1);
+            offset: p0.Value, length: p1.Value);
     }
 
     // ───────────────────────── Multi-dim arrays ─────────────────────────
@@ -1692,7 +1972,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(
             elementKind,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray | DataValueFlags.IsMultiDim,
-            p0: p0, p1: p1, charCount: cc);
+            offset: p0.Value, length: p1.Value, charCount: cc);
     }
 
     /// <summary>
@@ -1834,7 +2114,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 "GetShape: arena-backed multi-dim array requires an IValueStore. " +
                 "Pass the frame's Source arena.");
         }
-        ReadOnlySpan<byte> bytes = store.RetrieveUtf8Span(_p0, shapeBytes);
+        ReadOnlySpan<byte> bytes = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(shapeBytes));
         return MemoryMarshal.Cast<byte, int>(bytes);
     }
 
@@ -1871,7 +2151,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             throw new InvalidOperationException(
                 "RawArrayBytes: arena-backed array requires an IValueStore.");
         }
-        return store.RetrieveUtf8Span(_p0, _p1);
+        return store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
     }
 
     /// <summary>
@@ -1948,7 +2228,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(
             elementKind,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray | DataValueFlags.IsMultiDim,
-            p0: p0, p1: p1, charCount: cc);
+            offset: p0.Value, length: p1.Value, charCount: cc);
     }
 
     /// <summary>
@@ -2120,7 +2400,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 "AsArraySpan: arena-backed array requires an IValueStore. " +
                 "Pass the frame's Source arena.");
         }
-        ReadOnlySpan<byte> arenaBytes = store.RetrieveUtf8Span(_p0, _p1);
+        ReadOnlySpan<byte> arenaBytes = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
         return MemoryMarshal.Cast<byte, T>(arenaBytes[shapePrefix..]);
     }
 
@@ -2132,21 +2412,31 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <c>byte[]</c> allocation that <see cref="FromImage(byte[], IValueStore)"/>
     /// would otherwise force.
     /// </summary>
-    public static DataValue FromImageAtOffset(int offset, int length) =>
-        new(DataKind.Image, flags: DataValueFlags.InArena, p0: offset, p1: length);
+    public static DataValue FromImageAtOffset(long offset, long length) =>
+        new(DataKind.Image, flags: DataValueFlags.InArena, offset: offset, length: length);
+
+    /// <summary>
+    /// Variant of the basic image-at-offset factory that also stamps inline dimensions
+    /// metadata. Pass dimensions parsed from the image header so accessors like
+    /// <see cref="ImageWidth"/>/<see cref="ImageHeight"/> work without decoding.
+    /// </summary>
+    public static DataValue FromImageAtOffset(long offset, long length, ushort width, ushort height, byte channels = 0) =>
+        new(DataKind.Image, flags: DataValueFlags.InArena,
+            offset: offset, length: length,
+            width: width, height: height, channels: channels);
 
     /// <summary>
     /// Creates a byte-array value that references bytes already written to an
     /// <see cref="IValueStore"/> at the given offset and length. Parallel to
-    /// <see cref="FromImageAtOffset"/> for generic binary payloads where the
+    /// <see cref="FromImageAtOffset(long, long)"/> for generic binary payloads where the
     /// bytes are already arena-resident. Produces <see cref="DataKind.UInt8"/>
     /// with the <see cref="DataValueFlags.IsArray"/> flag.
     /// </summary>
-    public static DataValue FromByteArrayAtOffset(int offset, int length) =>
+    public static DataValue FromByteArrayAtOffset(long offset, long length) =>
         new(
             DataKind.UInt8,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray,
-            p0: offset, p1: length);
+            offset: offset, length: length);
 
     /// <summary>Creates a value from a calendar date.</summary>
     public static DataValue FromDate(DateOnly value) =>
@@ -2174,7 +2464,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         return HashCode.Combine(_kind, _p0, _p1);
     }
 
-    private static (int Lo, int Hi) HashString(ReadOnlySpan<char> chars)
+    private static ulong HashString(ReadOnlySpan<char> chars)
     {
         int maxBytes = System.Text.Encoding.UTF8.GetMaxByteCount(chars.Length);
         byte[]? rented = null;
@@ -2182,17 +2472,13 @@ public readonly struct DataValue : IEquatable<DataValue>
             ? stackalloc byte[maxBytes]
             : (rented = System.Buffers.ArrayPool<byte>.Shared.Rent(maxBytes));
         int written = System.Text.Encoding.UTF8.GetBytes(chars, utf8);
-        var result = HashUtf8(utf8[..written]);
+        ulong result = HashUtf8(utf8[..written]);
         if (rented is not null) System.Buffers.ArrayPool<byte>.Shared.Return(rented);
         return result;
     }
 
-    /// <summary>Computes XxHash64 over raw UTF-8 bytes and splits into two int32 halves.</summary>
-    private static (int Lo, int Hi) HashUtf8(ReadOnlySpan<byte> utf8)
-    {
-        ulong hash = XxHash64.HashToUInt64(utf8);
-        return ((int)hash, (int)(hash >> 32));
-    }
+    /// <summary>Computes XxHash64 over raw UTF-8 bytes.</summary>
+    private static ulong HashUtf8(ReadOnlySpan<byte> utf8) => XxHash64.HashToUInt64(utf8);
 
     /// <summary>Creates a value from a 128-bit universally unique identifier.</summary>
     public static DataValue FromUuid(Guid value)
@@ -2229,7 +2515,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// id describing the rich shape (struct field names, nested array element types).
     /// </summary>
     public static DataValue FromType(DataKind value, ushort typeId = 0) =>
-        new(DataKind.Type, flags: 0, p0: (int)value, charCount: typeId);
+        new(DataKind.Type, flags: 0, typeId: typeId, p0: (int)value, p1: 0);
 
     // ───────────────────────── Arena state ─────────────────────────
 
@@ -2239,20 +2525,30 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// offset/length pair (<c>_p0</c>/<c>_p1</c>) into the store. True for variable-size
     /// reference types (vectors, matrices, images, arrays, structs, byte arrays) and for
     /// strings/JSON whose UTF-8 form exceeds 16 bytes or were produced via
-    /// <see cref="FromStringSlice(int, int)"/>.
+    /// <see cref="FromStringSlice(long, long)"/>.
     /// </summary>
     public bool IsArenaBacked => (_flags & DataValueFlags.InArena) != 0;
 
     /// <summary>
     /// Returns a new arena-backed <see cref="DataValue"/> whose offset has been shifted by
-    /// <paramref name="delta"/> bytes.  Used when merging per-column private arenas into a
+    /// <paramref name="delta"/> bytes. Used when merging per-column private arenas into a
     /// shared batch arena after parallel decode.
     /// </summary>
+    /// <remarks>
+    /// Preserves every other byte of the value verbatim — kind-specific metadata
+    /// (String hash, Image dimensions, future Audio/Video metadata in <c>_p4</c>-<c>_p6</c>)
+    /// rounds through unchanged. Done by struct-copying <c>this</c> and overwriting only
+    /// the two offset words (<c>_p0</c>, <c>_p1</c>) via <c>Unsafe.AsRef</c>.
+    /// </remarks>
     /// <param name="delta">Number of bytes to add to the current offset.</param>
-    /// <returns>An adjusted value whose length is unchanged.</returns>
-    internal DataValue WithArenaOffset(int delta)
+    /// <returns>An adjusted value whose length and kind-specific metadata are unchanged.</returns>
+    internal DataValue WithArenaOffset(long delta)
     {
-        return new DataValue(_kind, flags: _flags, p0: _p0 + delta, p1: _p1, p2: _p2, p3: _p3, charCount: _charCount);
+        long newOffset = BackedOffset + delta;
+        DataValue result = this;
+        Unsafe.AsRef(in result._p0) = unchecked((int)newOffset);
+        Unsafe.AsRef(in result._p1) = unchecked((int)(newOffset >> 32));
+        return result;
     }
 
     /// <summary>
@@ -2281,7 +2577,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromStruct(DataValue[] fields, IValueStore store, ushort typeId)
     {
         var (p0, count) = store.StoreDataValues(fields);
-        return new(DataKind.Struct, DataValueFlags.InArena, typeId, p0, count);
+        return new(DataKind.Struct, DataValueFlags.InArena, typeId: typeId, offset: p0.Value, length: count.Value);
     }
 
     /// <summary>
@@ -2971,7 +3267,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         {
             return ReadSidecarBytes(registry).ToArray();
         }
-        return store.RetrieveBytes(_p0, _p1);
+        return store.RetrieveBytes(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
     }
 
     /// <summary>
@@ -3021,7 +3317,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         {
             return ReadSidecarBytes(registry);
         }
-        return store.RetrieveUtf8Span(_p0, _p1);
+        return store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
     }
 
     /// <summary>
@@ -3084,7 +3380,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         ThrowIfNullOrWrongKind(DataKind.String);
         if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
         if (IsInSidecar) return System.Text.Encoding.UTF8.GetString(ReadSidecarBytes(registry));
-        return store.RetrieveString(_p0, _p1);
+        return store.RetrieveString(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
     }
 
     /// <summary>
@@ -3104,7 +3400,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         // 0 = unknown (e.g. FromStringSlice) → also fall back.
         return _charCount is not 0 and not ushort.MaxValue
             ? _charCount
-            : System.Text.Encoding.UTF8.GetCharCount(store.RetrieveUtf8Span(_p0, _p1));
+            : System.Text.Encoding.UTF8.GetCharCount(store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength)));
     }
 
     /// <summary>
@@ -3159,11 +3455,14 @@ public readonly struct DataValue : IEquatable<DataValue>
                 return 0;
             }
 
-            // Arena-backed. _p1 already covers the shape prefix when IsMultiDim is set.
-            if (IsArray || IsBlobKind) return _p1;
+            // Arena-backed. BackedLength already covers the shape prefix when IsMultiDim is set.
+            // BackedLength is a 40-bit value (~1 TiB cap); a value > int.MaxValue would mean a
+            // single arena-backed payload exceeded 2 GB, which int-returning callers can't
+            // represent — surface that as an explicit overflow instead of silent truncation.
+            if (IsArray || IsBlobKind) return checked((int)BackedLength);
             return _kind switch
             {
-                DataKind.String => _p1,
+                DataKind.String => checked((int)BackedLength),
                 _ => 0,
             };
         }
@@ -3198,10 +3497,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         get
         {
-            // Inline strings don't cache a hash — _p2 and _p3 hold payload bytes, not hash bits.
-            // XxHash64 over a <=16-byte span is a single stripe, effectively free.
+            // Inline strings don't cache a hash — the inline payload bytes don't have room
+            // for a hash slot beyond the UTF-8 content. XxHash64 over a <=16-byte span is
+            // a single stripe, effectively free.
             if (IsInline) return XxHash64.HashToUInt64(InlineUtf8Span);
-            return (uint)_p2 | ((ulong)(uint)_p3 << 32);
+            // Arena/sidecar-backed: cache lives in _p4+_p5 (payload bytes 16-23). For values
+            // constructed without a hash (e.g. sidecar-backed reads or arena-slice paths),
+            // the slot is zero — the "no cached hash" sentinel honored by CompareStrings.
+            return (uint)_p4 | ((ulong)(uint)_p5 << 32);
         }
     }
 
@@ -3217,16 +3520,16 @@ public readonly struct DataValue : IEquatable<DataValue>
         get
         {
             // Byte arrays are not allowed to carry IsMultiDim (asserted at construction);
-            // _p1 is the raw byte count which equals the element count.
-            if (IsByteArrayKind) return _p1;
+            // BackedLength is the raw byte count which equals the element count.
+            if (IsByteArrayKind) return checked((int)BackedLength);
             if (IsInlineArray) return InlineArrayElementCount;
             if (!IsArray) return -1;
             if ((_flags & DataValueFlags.InArena) != 0)
             {
                 int elementSize = ScalarByteSize(_kind);
                 if (elementSize <= 0) return -1;
-                int elementBytes = _p1 - ShapePrefixByteCount;
-                return elementBytes / elementSize;
+                long elementBytes = BackedLength - ShapePrefixByteCount;
+                return checked((int)(elementBytes / elementSize));
             }
             if (IsInSidecar)
             {
@@ -3257,7 +3560,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         ThrowIfNullOrWrongKind(DataKind.String);
         if (IsInline) return InlineUtf8Span;
         if (IsInSidecar) return ReadSidecarBytes(registry);
-        return store.RetrieveUtf8Span(_p0, _p1);
+        return store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
     }
 
     /// <summary>
@@ -3271,7 +3574,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ThrowIfNullOrWrongKind(DataKind.String);
         if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
-        return arena.GetString(_p0, _p1);
+        return arena.GetString(BackedOffset, checked((int)BackedLength));
     }
 
 
@@ -3289,8 +3592,91 @@ public readonly struct DataValue : IEquatable<DataValue>
         {
             return ReadSidecarBytes(registry).ToArray();
         }
-        return store.RetrieveBytes(_p0, _p1);
+        return store.RetrieveBytes(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
     }
+
+    // ───────────────────────── Image inline metadata ─────────────────────────
+
+    /// <summary>
+    /// Inline pixel width for <see cref="DataKind.Image"/> values, populated at ingest
+    /// time when the image header was parsed (e.g. <c>ImageHeaderParser</c>). Returns
+    /// 0 when not populated (legacy values or sources that didn't parse the header) —
+    /// callers should fall back to a full decode if they need authoritative dimensions.
+    /// Lives in the low 16 bits of <c>_p4</c>.
+    /// </summary>
+    public ushort ImageWidth => _kind == DataKind.Image ? unchecked((ushort)_p4) : (ushort)0;
+
+    /// <summary>
+    /// Inline pixel height for <see cref="DataKind.Image"/> values; companion to
+    /// <see cref="ImageWidth"/>. Lives in the high 16 bits of <c>_p4</c>.
+    /// </summary>
+    public ushort ImageHeight => _kind == DataKind.Image ? unchecked((ushort)(_p4 >> 16)) : (ushort)0;
+
+    /// <summary>
+    /// Inline channel count for <see cref="DataKind.Image"/> values (1=grayscale,
+    /// 3=RGB, 4=RGBA, …). Returns 0 when not populated. Lives in the low byte of <c>_p5</c>.
+    /// </summary>
+    public byte ImageChannels => _kind == DataKind.Image ? unchecked((byte)_p5) : (byte)0;
+
+    // ───────────────────────── Audio inline metadata ─────────────────────────
+
+    /// <summary>Inline sample rate (Hz) for Audio values; 0 when not stamped. <c>_p4</c>.</summary>
+    public uint AudioSampleRate => _kind == DataKind.Audio ? unchecked((uint)_p4) : 0u;
+
+    /// <summary>Inline channel count for Audio values; 0 when not stamped. Low byte of <c>_p5</c>.</summary>
+    public byte AudioChannels => _kind == DataKind.Audio ? unchecked((byte)_p5) : (byte)0;
+
+    /// <summary>Inline bit depth for Audio values (8/16/24/32); 0 when not stamped. Byte 1 of <c>_p5</c>.</summary>
+    public byte AudioBitDepth => _kind == DataKind.Audio ? unchecked((byte)(_p5 >> 8)) : (byte)0;
+
+    /// <summary>Inline frame count (samples per channel) for Audio values; 0 when not stamped. <c>_p6</c>.</summary>
+    public uint AudioFrameCount => _kind == DataKind.Audio ? unchecked((uint)_p6) : 0u;
+
+    // ───────────────────────── Video inline metadata ─────────────────────────
+
+    /// <summary>Inline pixel width for Video values; 0 when not stamped. Low 16 bits of <c>_p4</c>.</summary>
+    public ushort VideoWidth => _kind == DataKind.Video ? unchecked((ushort)_p4) : (ushort)0;
+
+    /// <summary>Inline pixel height for Video values; 0 when not stamped. High 16 bits of <c>_p4</c>.</summary>
+    public ushort VideoHeight => _kind == DataKind.Video ? unchecked((ushort)(_p4 >> 16)) : (ushort)0;
+
+    /// <summary>
+    /// Inline frame rate as 8.8 fixed-point — multiply by <c>1/256.0</c> to recover the FPS
+    /// as a float (e.g. raw 7680 = 30.0 fps; raw 6133 ≈ 23.967 fps). 0 when not stamped.
+    /// Low 16 bits of <c>_p5</c>.
+    /// </summary>
+    public ushort VideoFpsX256 => _kind == DataKind.Video ? unchecked((ushort)_p5) : (ushort)0;
+
+    /// <summary>Inline codec identifier (enum byte: H264/H265/AV1/VP9/…). Byte 2 of <c>_p5</c>.</summary>
+    public byte VideoCodec => _kind == DataKind.Video ? unchecked((byte)(_p5 >> 16)) : (byte)0;
+
+    /// <summary>Inline frame count for Video values; 0 when not stamped. <c>_p6</c>.</summary>
+    public uint VideoFrameCount => _kind == DataKind.Video ? unchecked((uint)_p6) : 0u;
+
+    // ───────────────────────── PointCloud inline metadata ─────────────────────────
+
+    /// <summary>Inline point count for PointCloud values; 0 when not stamped. <c>_p4</c>.</summary>
+    public uint PointCloudCount => _kind == DataKind.PointCloud ? unchecked((uint)_p4) : 0u;
+
+    /// <summary>
+    /// Inline attribute flag byte for PointCloud values. Bits: 0=has_color, 1=has_normal,
+    /// 2=has_intensity, 3=organized. 0 when not stamped. Low byte of <c>_p5</c>.
+    /// </summary>
+    public byte PointCloudAttributes => _kind == DataKind.PointCloud ? unchecked((byte)_p5) : (byte)0;
+
+    // ───────────────────────── Mesh inline metadata ─────────────────────────
+
+    /// <summary>Inline vertex count for Mesh values; 0 when not stamped. <c>_p4</c>.</summary>
+    public uint MeshVertexCount => _kind == DataKind.Mesh ? unchecked((uint)_p4) : 0u;
+
+    /// <summary>Inline triangle count for Mesh values; 0 when not stamped. <c>_p5</c>.</summary>
+    public uint MeshTriangleCount => _kind == DataKind.Mesh ? unchecked((uint)_p5) : 0u;
+
+    /// <summary>
+    /// Inline attribute flag byte for Mesh values. Bits: 0=has_color, 1=has_normals,
+    /// 2=has_uvs, 3=has_texture. 0 when not stamped. Low byte of <c>_p6</c>.
+    /// </summary>
+    public byte MeshAttributes => _kind == DataKind.Mesh ? unchecked((byte)_p6) : (byte)0;
 
     /// <summary>
     /// Returns the raw PointCloud blob (40-byte header followed by interleaved
@@ -3307,7 +3693,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         {
             return ReadSidecarBytes(registry).ToArray();
         }
-        return store.RetrieveBytes(_p0, _p1);
+        return store.RetrieveBytes(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
     }
 
     /// <summary>
@@ -3326,7 +3712,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         {
             return ReadSidecarBytes(registry).ToArray();
         }
-        return store.RetrieveBytes(_p0, _p1);
+        return store.RetrieveBytes(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
     }
 
     /// <summary>Returns the calendar date payload.</summary>
@@ -3473,7 +3859,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public DataValue[] AsStruct(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.Struct);
-        return store.RetrieveDataValues(_p0, _p1);
+        return store.RetrieveDataValues(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
     }
 
 
@@ -3697,12 +4083,12 @@ public readonly struct DataValue : IEquatable<DataValue>
         if (left._p0 == right._p0 && left._p1 == right._p1)
             return true;
 
-        bool leftHasHash = (left._p2 | left._p3) != 0;
-        bool rightHasHash = (right._p2 | right._p3) != 0;
+        bool leftHasHash = (left._p4 | left._p5) != 0;
+        bool rightHasHash = (right._p4 | right._p5) != 0;
 
         // Both have hashes: compare directly.
         if (leftHasHash && rightHasHash)
-            return left._p2 == right._p2 && left._p3 == right._p3;
+            return left._p4 == right._p4 && left._p5 == right._p5;
 
         // Mixed or neither has hash: without a store we cannot resolve content, return false.
         // Callers should use the store-based Equals overloads for cross-origin comparison.
@@ -3797,10 +4183,9 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         if (IsByteArrayKind)
         {
-            // Sidecar layout packs length across _p2/_p3 (40 bits); inline
-            // arena layout keeps length in _p1. Reading _p1 unconditionally
-            // would print the high 32 bits of the sidecar offset instead.
-            long byteLen = IsInSidecar ? SidecarLength : _p1;
+            // Arena and sidecar layouts both pack length across _p2 + low byte of _p3
+            // (40-bit field, ~1 TiB cap). BackedLength decodes both uniformly.
+            long byteLen = BackedLength;
             return $"UInt8[{byteLen} bytes]";
         }
 
@@ -3822,7 +4207,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Int128 => AsInt128().ToString(System.Globalization.CultureInfo.InvariantCulture),
             DataKind.String => IsInline
                 ? System.Text.Encoding.UTF8.GetString(InlineUtf8Span)
-                : $"String[arena@{_p0}+{_p1}]",
+                : $"String[arena@{BackedOffset}+{BackedLength}]",
             DataKind.Date => DateOnly.FromDayNumber(_p0).ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),
             DataKind.Uuid => AsUuid().ToString("D"),

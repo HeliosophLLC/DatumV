@@ -1,3 +1,6 @@
+using DatumIngest.Functions.Audio;
+using DatumIngest.Functions.Image;
+using DatumIngest.Functions.Video;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -146,9 +149,9 @@ public static class LiteralHoister
             // arena-backed DataValue.
             BinaryParameter binary => binary.Kind switch
             {
-                DataKind.Image => DataValue.FromImage(binary.Bytes, store),
-                DataKind.Audio => DataValue.FromAudio(binary.Bytes, store),
-                DataKind.Video => DataValue.FromVideo(binary.Bytes, store),
+                DataKind.Image => ImageDataValueFactory.FromEncodedBytes(binary.Bytes, store),
+                DataKind.Audio => AudioDataValueFactory.FromEncodedBytes(binary.Bytes, store),
+                DataKind.Video => VideoDataValueFactory.FromEncodedBytes(binary.Bytes, store),
                 DataKind.UInt8 => DataValue.FromByteArray(binary.Bytes, store),
                 _ => throw new InvalidOperationException(
                     $"BinaryParameter kind {binary.Kind} is not a recognised binary kind. " +

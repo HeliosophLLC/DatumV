@@ -2,6 +2,8 @@ using DatumIngest.Catalog.Plans;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
+using DatumIngest.Functions.Audio;
+using DatumIngest.Functions.Video;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -528,9 +530,21 @@ internal static class InsertExecutor
             ReadOnlySpan<byte> bytes = source.AsByteSpan(sourceStore, sidecarRegistry);
             return source.Kind switch
             {
-                DataKind.Image => DataValue.FromImage(bytes.ToArray(), targetArena),
-                DataKind.Audio => DataValue.FromAudio(bytes.ToArray(), targetArena),
-                DataKind.Video => DataValue.FromVideo(bytes.ToArray(), targetArena),
+                // Image: forward the source's inline dimensions through the cross-arena
+                // copy. When the source had none (zero sentinels), the metadata-bearing
+                // factory still writes zeros — same as the no-metadata path. Avoids a
+                // second header re-parse since the source already carries the metadata
+                // if upstream ingest stamped it.
+                DataKind.Image => DataValue.FromImage(bytes.ToArray(), targetArena,
+                    source.ImageWidth, source.ImageHeight, source.ImageChannels),
+                // Audio/Video: forward inline metadata across the cross-arena copy
+                // when present (same shape as the Image case above). When metadata
+                // wasn't stamped (zero sentinels) the metadata-bearing factory writes
+                // zeros — equivalent to the no-metadata path.
+                DataKind.Audio => DataValue.FromAudio(bytes.ToArray(), targetArena,
+                    source.AudioSampleRate, source.AudioChannels, source.AudioBitDepth, source.AudioFrameCount),
+                DataKind.Video => DataValue.FromVideo(bytes.ToArray(), targetArena,
+                    source.VideoWidth, source.VideoHeight, source.VideoFpsX256, source.VideoCodec, source.VideoFrameCount),
                 DataKind.Json => DataValue.FromJson(bytes, targetArena),
                 _ => throw new InvalidOperationException(
                     $"INSERT for column '{columnName}': unhandled blob kind {source.Kind}."),

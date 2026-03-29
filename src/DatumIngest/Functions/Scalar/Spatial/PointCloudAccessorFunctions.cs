@@ -48,6 +48,13 @@ public sealed class PointCloudCountFunction : IFunction, IScalarFunction
         {
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
         }
+        // Fast path: inline metadata (PR7.x). Avoids the full PointCloud blob byte[]
+        // allocation that AsPointCloud() does just to parse a 40-byte header.
+        uint inlineCount = arg.InlineDataValue.PointCloudCount;
+        if (inlineCount != 0)
+        {
+            return new ValueTask<ValueRef>(ValueRef.FromInt32(checked((int)inlineCount)));
+        }
         PointCloudHeader header = PointCloudHeader.Read(arg.AsPointCloud());
         return new ValueTask<ValueRef>(ValueRef.FromInt32(checked((int)header.PointCount)));
     }
@@ -232,6 +239,15 @@ public sealed class PointCloudHasColorFunction : IFunction, IScalarFunction
         if (arg.IsNull)
         {
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Boolean));
+        }
+        // Fast path: inline attribute flags (PointCloudFlags bit layout matches the
+        // PointCloudAttributes byte). PointCloudAttributes returns 0 for values
+        // constructed without inline metadata — that's "unknown", fall back to a
+        // header read so we don't return a stale "no color" for legacy values.
+        byte attrs = arg.InlineDataValue.PointCloudAttributes;
+        if (attrs != 0)
+        {
+            return new ValueTask<ValueRef>(ValueRef.FromBoolean((attrs & (byte)PointCloudFlags.HasColor) != 0));
         }
         PointCloudHeader header = PointCloudHeader.Read(arg.AsPointCloud());
         return new ValueTask<ValueRef>(ValueRef.FromBoolean(header.HasColor));

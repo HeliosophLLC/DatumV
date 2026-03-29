@@ -270,7 +270,7 @@ public sealed class PoolBacking
     /// Zero (default) uses Arena's built-in default. The Arena constructor floors this
     /// at its own minimum.
     /// </param>
-    public Arena RentArena(int initialCapacity = 0)
+    public Arena RentArena(long initialCapacity = 0)
     {
         Interlocked.Increment(ref _arenaRentCount);
 
@@ -305,7 +305,7 @@ public sealed class PoolBacking
     /// <see cref="Arena.Dispose"/>.</param>
     /// <param name="initialCapacity">Pre-size the file to this many bytes. See
     /// <see cref="Arena.CreateFileBacked"/> for sizing guidance.</param>
-    public Arena RentFileBackedArena(string filePath, int initialCapacity)
+    public Arena RentFileBackedArena(string filePath, long initialCapacity)
     {
         Interlocked.Increment(ref _arenaRentCount);
 
@@ -447,8 +447,8 @@ public sealed class PoolBacking
     {
         /* Logic:
          *  - row batches are typically 1024
-         *  - single DataValue arrays are 20 bytes
-         *  - 256 columns * 1024 rows * 20 bytes = 5MB
+         *  - single DataValue arrays are DataValue.SizeBytes
+         *  - 256 columns * 1024 rows * DataValue.SizeBytes = ~5MB at current width
         */
         const int maxArenaCapacity = 5 * 1024 * 1024;
 

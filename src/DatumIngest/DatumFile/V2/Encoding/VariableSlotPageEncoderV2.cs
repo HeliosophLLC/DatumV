@@ -125,13 +125,31 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
             EncodePointerSlot(slot, blockOffset, blockLength, codec: SidecarBlobCodec.Raw);
             _zoneMap.Record(value, store);
         }
-        else if (value.IsInline)
+        else if (value.IsInline && CanEncodeInline(value))
         {
             // Inline path — copy the inline payload bytes into the slot.
             // The inline length is kind-specific; the helper extracts it.
             int inlineLength = ExtractInlinePayload(value, slot);
             _inlineBitmap[byteIndex] |= (byte)bitMask;
             _inlineLengths[_rowCount] = (byte)inlineLength;
+            _zoneMap.Record(value, store);
+        }
+        else if (value.IsInline)
+        {
+            // In-memory inline string/array that's larger than the on-disk
+            // VariableSlot can hold (slot is 16 bytes; PR6 widened the in-memory
+            // inline string cap to 27). Spill to sidecar — same path as
+            // arena-backed values, but we resolve the inline bytes directly
+            // from the struct rather than through a store.
+            if (sidecar is null)
+            {
+                throw new InvalidOperationException(
+                    $"Column kind {_column.Kind} produced an inline DataValue too large for the on-disk slot " +
+                    "but no IBlobSink was supplied.");
+            }
+            ReadOnlySpan<byte> bytes = ResolveInlinePayloadForSpill(value);
+            (long offset, long length) = sidecar.Append(bytes);
+            EncodePointerSlot(slot, offset, length, codec: SidecarBlobCodec.Raw);
             _zoneMap.Record(value, store);
         }
         else if (value.IsInSidecar)
@@ -219,6 +237,50 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         Array.Clear(_slots, 0, _rowCount * DatumFormatV2.VariableSlotBytes);
         _zoneMap.Reset();
         _rowCount = 0;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="value"/>'s inline payload fits in the on-disk
+    /// <see cref="DatumFormatV2.VariableSlotBytes"/> (16-byte) slot. PR6 widened
+    /// the in-memory inline string cap to 27 bytes, but the on-disk format wasn't
+    /// re-cut; in-memory inline strings 17-27 bytes long must spill to the sidecar
+    /// at encode time.
+    /// </summary>
+    private static bool CanEncodeInline(DataValue value)
+    {
+        if (value.Kind == DataKind.String)
+        {
+            return value.ContentByteLength <= DatumFormatV2.VariableSlotBytes;
+        }
+        if (value.IsInlineArray)
+        {
+            ReadOnlySpan<byte> bytes = value.IsMultiDim
+                ? value.RawArrayBytes(store: null)
+                : value.InlineArrayBytes;
+            return bytes.Length <= DatumFormatV2.VariableSlotBytes;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Resolves an in-memory inline payload (string UTF-8 / array bytes) without an
+    /// <see cref="IValueStore"/>. Used by the spill-on-encode path for inline values
+    /// that exceed the on-disk slot capacity.
+    /// </summary>
+    private static ReadOnlySpan<byte> ResolveInlinePayloadForSpill(DataValue value)
+    {
+        if (value.Kind == DataKind.String)
+        {
+            return value.AsUtf8Span(store: null!);
+        }
+        if (value.IsInlineArray)
+        {
+            return value.IsMultiDim
+                ? value.RawArrayBytes(store: null)
+                : value.InlineArrayBytes;
+        }
+        throw new NotSupportedException(
+            $"Inline-spill not implemented for DataKind.{value.Kind} (IsArray={value.IsArray}).");
     }
 
     /// <summary>

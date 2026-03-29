@@ -34,7 +34,7 @@ public static class DatumDiagnostics
     /// or is recycled.
     /// </summary>
     [Conditional("DATUM_DIAGNOSTICS")]
-    public static void RecordArenaGrow(int oldCapacity, int newCapacity, int bytesCopied)
+    public static void RecordArenaGrow(long oldCapacity, long newCapacity, long bytesCopied)
     {
         Interlocked.Increment(ref _arenaGrowCount);
         Interlocked.Add(ref _arenaBytesCopiedOnGrow, bytesCopied);
@@ -52,7 +52,7 @@ public static class DatumDiagnostics
     /// deferred allocation in <c>EnsureCapacity</c>).
     /// </summary>
     [Conditional("DATUM_DIAGNOSTICS")]
-    public static void RecordArenaInitialMapping(int capacity)
+    public static void RecordArenaInitialMapping(long capacity)
     {
         Interlocked.Increment(ref _arenaMmfCreateCount);
         UpdateMax(ref _arenaMaxCapacity, capacity);
@@ -64,7 +64,7 @@ public static class DatumDiagnostics
     /// and was discarded instead of pooled.
     /// </summary>
     [Conditional("DATUM_DIAGNOSTICS")]
-    public static void RecordArenaDispose(int capacityAtDispose)
+    public static void RecordArenaDispose(long capacityAtDispose)
     {
         Interlocked.Increment(ref _arenaDisposeCount);
         Interlocked.Increment(ref _arenaMmfReleaseCount);

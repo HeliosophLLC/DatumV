@@ -119,29 +119,40 @@ public static class DataValueRetention
 
             // Image is just encoded bytes now — the legacy ImageHandle-in-object-slot
             // path is gone, since image functions are lowered to fused pipelines that
-            // emit raw bytes at the boundaries. So retention is the same as UInt8Array.
+            // emit raw bytes at the boundaries. Forward the inline metadata (W/H/channels)
+            // through to retention so the metadata-bearing accessors keep working after
+            // the stabilise copy; when the source has no inline dimensions stamped (zero
+            // sentinel), the metadata-bearing factory still writes zero and behaviour
+            // matches the old non-metadata path.
             DataKind.Image => DataValue.FromImage(
                 value.AsImage(sourceStore),
-                retentionStore),
+                retentionStore,
+                value.ImageWidth,
+                value.ImageHeight,
+                value.ImageChannels),
 
             // Audio and Video share the encoded-blob shape with Image — read bytes
             // via the kind-agnostic AsByteSpan and rebuild against the retention store.
+            // Forward inline metadata (zero sentinels when not stamped).
             DataKind.Audio => DataValue.FromAudio(
                 value.AsByteSpan(sourceStore).ToArray(),
-                retentionStore),
+                retentionStore,
+                value.AudioSampleRate, value.AudioChannels, value.AudioBitDepth, value.AudioFrameCount),
             DataKind.Video => DataValue.FromVideo(
                 value.AsByteSpan(sourceStore).ToArray(),
-                retentionStore),
+                retentionStore,
+                value.VideoWidth, value.VideoHeight, value.VideoFpsX256, value.VideoCodec, value.VideoFrameCount),
             // PointCloud and Mesh are likewise raw-byte container kinds — header +
-            // interleaved per-element payload. Retention is the same byte-copy
-            // shape as Audio/Video; the SCAN accumulator path triggers this when
-            // a PointCloud accumulator value crosses an arena boundary.
+            // interleaved per-element payload. Forward inline metadata so accessors
+            // like point_cloud_count() and mesh_vertex_count() keep their fast path.
             DataKind.PointCloud => DataValue.FromPointCloud(
                 value.AsByteSpan(sourceStore).ToArray(),
-                retentionStore),
+                retentionStore,
+                value.PointCloudCount, value.PointCloudAttributes),
             DataKind.Mesh => DataValue.FromMesh(
                 value.AsByteSpan(sourceStore).ToArray(),
-                retentionStore),
+                retentionStore,
+                value.MeshVertexCount, value.MeshTriangleCount, value.MeshAttributes),
             // Json carries canonical CBOR bytes; same byte-content shape, takes the span overload.
             DataKind.Json => DataValue.FromJson(
                 value.AsByteSpan(sourceStore),

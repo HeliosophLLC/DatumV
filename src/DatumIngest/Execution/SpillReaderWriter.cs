@@ -70,7 +70,7 @@ internal sealed class SpillReaderWriter : IDisposable
     private int RowStrideBytes => _schema.Count * DataValueRawSize;
 
     /// <summary>Size of a single <see cref="DataValue"/> on disk. Mirrors RowSerializer's compact codec stride.</summary>
-    private const int DataValueRawSize = 20;
+    private const int DataValueRawSize = DataValue.SizeBytes;
 
     /// <summary>
     /// Creates a spiller bound to <paramref name="pool"/> and <paramref name="schema"/>.
@@ -101,7 +101,7 @@ internal sealed class SpillReaderWriter : IDisposable
         Pool pool,
         ColumnLookup schema,
         string spillDirectory,
-        int initialArenaCapacity = 1024 * 1024,
+        long initialArenaCapacity = 1024 * 1024,
         int partitionCount = 1)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(partitionCount, 1);

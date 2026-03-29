@@ -6,9 +6,9 @@ namespace DatumIngest.Tests.Model;
 public class DataValueTests : ServiceTestBase
 {
     [Fact]
-    public void DataValue_Is20Bytes()
+    public void DataValue_StructSizeMatchesSizeBytesConstant()
     {
-        Assert.Equal(20, Unsafe.SizeOf<DataValue>());
+        Assert.Equal(DataValue.SizeBytes, Unsafe.SizeOf<DataValue>());
     }
 
     [Fact]

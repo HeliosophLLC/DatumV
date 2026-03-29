@@ -5,6 +5,9 @@ using System.Text.RegularExpressions;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Diagnostics;
 using DatumIngest.Functions;
+using DatumIngest.Functions.Audio;
+using DatumIngest.Functions.Image;
+using DatumIngest.Functions.Video;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -485,9 +488,9 @@ public sealed class ExpressionEvaluator
     {
         return binary.Kind switch
         {
-            DataKind.Image => DataValue.FromImage(binary.Bytes, target),
-            DataKind.Audio => DataValue.FromAudio(binary.Bytes, target),
-            DataKind.Video => DataValue.FromVideo(binary.Bytes, target),
+            DataKind.Image => ImageDataValueFactory.FromEncodedBytes(binary.Bytes, target),
+            DataKind.Audio => AudioDataValueFactory.FromEncodedBytes(binary.Bytes, target),
+            DataKind.Video => VideoDataValueFactory.FromEncodedBytes(binary.Bytes, target),
             DataKind.UInt8 => DataValue.FromByteArray(binary.Bytes, target),
             _ => throw new InvalidOperationException(
                 $"BinaryParameter kind {binary.Kind} is not a recognised binary kind. " +
@@ -2423,7 +2426,7 @@ public sealed class ExpressionEvaluator
                 {
                     return DataValue.Null(DataKind.Image);
                 }
-                return DataValue.FromImage(elements[position], frame.Target);
+                return ImageDataValueFactory.FromEncodedBytes(elements[position], frame.Target);
             }
             case DataKind.Struct:
             {

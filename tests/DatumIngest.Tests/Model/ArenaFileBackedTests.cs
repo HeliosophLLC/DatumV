@@ -77,7 +77,7 @@ public sealed class ArenaFileBackedTests : ServiceTestBase
             using Arena arena = Arena.CreateFileBacked(filePath, initialCapacity: 1024 * 1024);
 
             const string payload = "the quick brown fox jumps over the lazy dog";
-            (int offset, int length) = arena.AppendString(payload);
+            (long offset, int length) = arena.AppendString(payload);
 
             string readBack = arena.GetString(offset, length);
             Assert.Equal(payload, readBack);
@@ -100,14 +100,14 @@ public sealed class ArenaFileBackedTests : ServiceTestBase
             using Arena arena = Arena.CreateFileBacked(filePath, initialCapacity: 1024 * 1024);
 
             const string sentinel1 = "FIRST-MARKER-BEFORE-GROW";
-            (int off1, int len1) = arena.AppendString(sentinel1);
+            (long off1, int len1) = arena.AppendString(sentinel1);
 
             // Force grow by writing >1 MB of data.
             string big = new string('x', 1_500_000);
-            (int off2, int len2) = arena.AppendString(big);
+            (long off2, int len2) = arena.AppendString(big);
 
             const string sentinel2 = "SECOND-MARKER-AFTER-GROW";
-            (int off3, int len3) = arena.AppendString(sentinel2);
+            (long off3, int len3) = arena.AppendString(sentinel2);
 
             // File should be large enough to hold all that.
             FileInfo fi = new(filePath);

@@ -13,7 +13,7 @@ public class StringArenaTests : ServiceTestBase
     {
         using Arena arena = new();
         byte[] utf8 = Encoding.UTF8.GetBytes("hello");
-        (int offset, int length) = arena.AppendUtf8(utf8);
+        (long offset, int length) = arena.AppendUtf8(utf8);
 
         ReadOnlySpan<byte> span = arena.GetSpan(offset, length);
 
@@ -24,7 +24,7 @@ public class StringArenaTests : ServiceTestBase
     public void AppendStringAndMaterialise()
     {
         using Arena arena = new();
-        (int offset, int length) = arena.AppendString("world");
+        (long offset, int length) = arena.AppendString("world");
 
         string result = arena.GetString(offset, length);
 
@@ -35,8 +35,8 @@ public class StringArenaTests : ServiceTestBase
     public void MultipleAppendsAreContiguous()
     {
         using Arena arena = new();
-        (int offset1, int length1) = arena.AppendString("first");
-        (int offset2, int length2) = arena.AppendString("second");
+        (long offset1, int length1) = arena.AppendString("first");
+        (long offset2, int length2) = arena.AppendString("second");
 
         Assert.Equal(0, offset1);
         Assert.Equal(length1, offset2);
@@ -62,7 +62,7 @@ public class StringArenaTests : ServiceTestBase
     {
         using Arena arena = new(initialCapacity: 8);
         string longString = new('x', 1000);
-        (int offset, int length) = arena.AppendString(longString);
+        (long offset, int length) = arena.AppendString(longString);
 
         Assert.Equal(longString, arena.GetString(offset, length));
     }
@@ -71,11 +71,11 @@ public class StringArenaTests : ServiceTestBase
     public void CopyFromTransfersAllBytes()
     {
         using Arena source = new();
-        (int sourceOffset, int sourceLength) = source.AppendString("transferred");
+        (long sourceOffset, int sourceLength) = source.AppendString("transferred");
 
         using Arena target = new();
         target.AppendString("prefix");
-        int baseOffset = target.CopyFrom(source);
+        long baseOffset = target.CopyFrom(source);
 
         string result = target.GetString(baseOffset + sourceOffset, sourceLength);
         Assert.Equal("transferred", result);
@@ -95,7 +95,7 @@ public class StringArenaTests : ServiceTestBase
     {
         using Arena arena = new();
         string emoji = "Hello \U0001F600 World";
-        (int offset, int length) = arena.AppendString(emoji);
+        (long offset, int length) = arena.AppendString(emoji);
 
         Assert.Equal(emoji, arena.GetString(offset, length));
     }

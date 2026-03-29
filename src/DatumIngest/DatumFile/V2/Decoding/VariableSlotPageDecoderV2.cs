@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Functions.Image;
 using DatumIngest.IO;
 using DatumIngest.Model;
 
@@ -177,7 +178,7 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
             DataKind.String
                 => DataValue.FromStringInSidecar(offset, length, _sidecarStoreId),
             DataKind.Image
-                => DataValue.FromImageInSidecar(offset, length, _sidecarStoreId),
+                => DecodeImageWithInlineDimensions(offset, length),
             DataKind.Audio
                 => DataValue.FromAudioInSidecar(offset, length, _sidecarStoreId),
             DataKind.Video
@@ -191,6 +192,41 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
                 $"(kind={_column.Kind}, isArray={_column.IsArray}). Add a sidecar DataValue factory for this kind."),
         };
     }
+
+    /// <summary>
+    /// Constructs a sidecar-backed <see cref="DataKind.Image"/> <see cref="DataValue"/>
+    /// and opportunistically stamps inline width/height/channels by peeking the encoded
+    /// image header from the sidecar. The peek reads at most <see cref="HeaderPeekBytes"/>
+    /// bytes (covers PNG / JPEG / WebP / HEIC / AVIF without thumbnail metadata); for
+    /// pathological cases where the header is past the peek window, <see cref="ImageHeaderParser"/>
+    /// returns <c>null</c> and we fall back to the no-metadata factory — accessors
+    /// return zero sentinels and <c>image_width()</c> falls back to a full SkiaSharp decode.
+    /// The sidecar bytes are mmap-resident; the peek triggers at most one page fault per row
+    /// on a cold scan and is free on hot reads.
+    /// </summary>
+    private DataValue DecodeImageWithInlineDimensions(long offset, long length)
+    {
+        if (_sidecarSource is null)
+        {
+            return DataValue.FromImageInSidecar(offset, length, _sidecarStoreId);
+        }
+        long peekLength = Math.Min(length, HeaderPeekBytes);
+        ReadOnlySpan<byte> header = _sidecarSource.Read(offset, peekLength);
+        ImageDimensions? dims = ImageHeaderParser.TryParseHeader(header);
+        if (dims is { Width: > 0 and <= ushort.MaxValue, Height: > 0 and <= ushort.MaxValue })
+        {
+            return DataValue.FromImageInSidecar(
+                offset, length, _sidecarStoreId,
+                (ushort)dims.Width, (ushort)dims.Height, ClampChannels(dims.Channels));
+        }
+        return DataValue.FromImageInSidecar(offset, length, _sidecarStoreId);
+    }
+
+    /// <summary>Header-peek window for opportunistic dimension extraction at decode time.</summary>
+    private const int HeaderPeekBytes = 4096;
+
+    private static byte ClampChannels(int c) =>
+        c is >= 0 and <= 255 ? (byte)c : (byte)0;
 
     /// <summary>
     /// Eagerly materializes a struct from sidecar bytes: reads the

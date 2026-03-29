@@ -18,10 +18,14 @@ public sealed class DataValueInlineStringTests : ServiceTestBase
     [InlineData("")]        // 0 bytes
     [InlineData("a")]       // 1 byte ASCII
     [InlineData("hello")]   // 5 bytes ASCII
-    [InlineData("1234567890")]          // 10 bytes ASCII
-    [InlineData("abcdefghijklmno")]     // 15 bytes ASCII
-    [InlineData("abcdefghijklmnop")]    // 16 bytes ASCII (boundary)
-    public void FromString_UpTo16Bytes_IsInline(string value)
+    [InlineData("1234567890")]                    // 10 bytes ASCII
+    [InlineData("abcdefghijklmno")]               // 15 bytes ASCII
+    [InlineData("abcdefghijklmnop")]              // 16 bytes ASCII
+    [InlineData("2026-05-22T13:45:00")]           // 19 bytes — common datetime format
+    [InlineData("abcdefghijklmnopqrstuvwxyz")]    // 26 bytes ASCII
+    [InlineData("abcdefghijklmnopqrstuvwxy1")]    // 26 bytes ASCII
+    [InlineData("abcdefghijklmnopqrstuvwxyzA")]   // 27 bytes ASCII (boundary)
+    public void FromString_UpTo27Bytes_IsInline(string value)
     {
         DataValue dv = DataValue.FromString(value, Store);
         Assert.True(dv.IsInline, $"expected inline for length {value.Length}");
@@ -30,9 +34,9 @@ public sealed class DataValueInlineStringTests : ServiceTestBase
     }
 
     [Theory]
-    [InlineData("abcdefghijklmnopq")]   // 17 bytes ASCII (over)
-    [InlineData("this string is definitely longer than sixteen bytes")]
-    public void FromString_Over16Bytes_UsesStore(string value)
+    [InlineData("abcdefghijklmnopqrstuvwxyzAB")]  // 28 bytes ASCII (over)
+    [InlineData("this string is definitely longer than twenty-seven bytes")]
+    public void FromString_Over27Bytes_UsesStore(string value)
     {
         DataValue dv = DataValue.FromString(value, Store);
         Assert.False(dv.IsInline);
@@ -47,15 +51,17 @@ public sealed class DataValueInlineStringTests : ServiceTestBase
         Assert.True(inline.IsInline);
         Assert.Equal("café", inline.AsString(Store));
 
-        // 8 multi-byte chars = 16 UTF-8 bytes (é = 2 bytes × 8) — also inline at boundary.
-        DataValue atBoundary = DataValue.FromString("ééééééé", Store); // 7 × 2 = 14 bytes
-        Assert.True(atBoundary.IsInline);
-        Assert.Equal("ééééééé", atBoundary.AsString(Store));
+        // 13 multi-byte chars = 26 UTF-8 bytes — fits within the 27-byte cap.
+        string thirteenE = new('é', 13);
+        DataValue underCap = DataValue.FromString(thirteenE, Store);
+        Assert.True(underCap.IsInline, $"expected inline for {thirteenE.Length} chars / {System.Text.Encoding.UTF8.GetByteCount(thirteenE)} UTF-8 bytes");
+        Assert.Equal(thirteenE, underCap.AsString(Store));
 
-        // 9 multi-byte chars = 18 bytes — spills to store.
-        DataValue overflow = DataValue.FromString("éééééééééé", Store); // 10 × 2 = 20 bytes
+        // 14 multi-byte chars = 28 bytes — spills to store.
+        string fourteenE = new('é', 14);
+        DataValue overflow = DataValue.FromString(fourteenE, Store);
         Assert.False(overflow.IsInline);
-        Assert.Equal("éééééééééé", overflow.AsString(Store));
+        Assert.Equal(fourteenE, overflow.AsString(Store));
     }
 
     // ───────────────────── Accessors ─────────────────────
@@ -190,9 +196,9 @@ public sealed class DataValueInlineStringTests : ServiceTestBase
     // ───────────────────── Size invariant ─────────────────────
 
     [Fact]
-    public void DataValue_StillTwentyBytes()
+    public void DataValue_SizeMatchesSizeBytesConstant()
     {
         // Inline storage must not change the struct size.
-        Assert.Equal(20, System.Runtime.CompilerServices.Unsafe.SizeOf<DataValue>());
+        Assert.Equal(DataValue.SizeBytes, System.Runtime.CompilerServices.Unsafe.SizeOf<DataValue>());
     }
 }
