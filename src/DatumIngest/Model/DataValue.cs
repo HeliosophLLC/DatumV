@@ -1228,6 +1228,160 @@ public readonly struct DataValue : IEquatable<DataValue>
         BuildSidecar(DataKind.Mesh, offset, length, storeId);
 
     /// <summary>
+    /// Creates an <c>Array&lt;Audio&gt;</c> value. Mirrors
+    /// <see cref="FromImageArray"/> for the audio kind — each element's encoded
+    /// bytes are written to <paramref name="store"/>; for N≥2 a slot block is
+    /// also written. Used by the cross-arena <c>INSERT … SELECT</c> path for
+    /// audio-array columns and by any caller that builds an audio array from
+    /// a managed <c>byte[][]</c>.
+    /// </summary>
+    public static DataValue FromAudioArray(ReadOnlySpan<byte[]> elements, IValueStore store) =>
+        BuildBlobArray(elements, DataKind.Audio, store);
+
+    /// <summary>Reads an <c>Array&lt;Audio&gt;</c> value as a <see cref="byte"/>[][].</summary>
+    public byte[][] AsAudioArray(IValueStore store, SidecarRegistry? registry = null) =>
+        ReadBlobArray(DataKind.Audio, store, registry);
+
+    /// <summary>
+    /// Creates an <c>Array&lt;Video&gt;</c> value. Mirrors <see cref="FromImageArray"/>.
+    /// </summary>
+    public static DataValue FromVideoArray(ReadOnlySpan<byte[]> elements, IValueStore store) =>
+        BuildBlobArray(elements, DataKind.Video, store);
+
+    /// <summary>Reads an <c>Array&lt;Video&gt;</c> value as a <see cref="byte"/>[][].</summary>
+    public byte[][] AsVideoArray(IValueStore store, SidecarRegistry? registry = null) =>
+        ReadBlobArray(DataKind.Video, store, registry);
+
+    /// <summary>
+    /// Creates an <c>Array&lt;Json&gt;</c> value. Mirrors <see cref="FromImageArray"/>.
+    /// </summary>
+    public static DataValue FromJsonArray(ReadOnlySpan<byte[]> elements, IValueStore store) =>
+        BuildBlobArray(elements, DataKind.Json, store);
+
+    /// <summary>Reads an <c>Array&lt;Json&gt;</c> value as a <see cref="byte"/>[][].</summary>
+    public byte[][] AsJsonArray(IValueStore store, SidecarRegistry? registry = null) =>
+        ReadBlobArray(DataKind.Json, store, registry);
+
+    /// <summary>
+    /// Creates an <c>Array&lt;PointCloud&gt;</c> value. Mirrors <see cref="FromImageArray"/>.
+    /// </summary>
+    public static DataValue FromPointCloudArray(ReadOnlySpan<byte[]> elements, IValueStore store) =>
+        BuildBlobArray(elements, DataKind.PointCloud, store);
+
+    /// <summary>Reads an <c>Array&lt;PointCloud&gt;</c> value as a <see cref="byte"/>[][].</summary>
+    public byte[][] AsPointCloudArray(IValueStore store, SidecarRegistry? registry = null) =>
+        ReadBlobArray(DataKind.PointCloud, store, registry);
+
+    /// <summary>
+    /// Shared builder for blob-element typed arrays — Audio / Video / Json /
+    /// PointCloud. The layout is identical to <see cref="FromImageArray"/>:
+    /// N=0 → empty inline value; N=1 → single slot inline; N≥2 → per-element
+    /// blob writes + a slot block at the end. The element kind goes on
+    /// <see cref="Kind"/>; <see cref="DataValueFlags.IsArray"/> is set.
+    /// </summary>
+    private static DataValue BuildBlobArray(ReadOnlySpan<byte[]> elements, DataKind kind, IValueStore store)
+    {
+        if (elements.Length == 0)
+        {
+            return new(
+                kind,
+                flags: DataValueFlags.IsArray,
+                p0: 0,
+                charCount: 0);
+        }
+
+        if (elements.Length == 1)
+        {
+            var (elementP0, elementP1) = store.StoreBytes(elements[0]);
+            Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
+            ArraySlot.Write(slotBytes, elementP0.Value, elementP1.Value);
+            int p0 = MemoryMarshal.Read<int>(slotBytes[..4]);
+            int p1 = MemoryMarshal.Read<int>(slotBytes[4..8]);
+            int p2 = MemoryMarshal.Read<int>(slotBytes[8..12]);
+            int p3 = MemoryMarshal.Read<int>(slotBytes[12..16]);
+            return new(
+                kind,
+                flags: DataValueFlags.IsArray,
+                p0: p0, p1: p1, p2: p2, p3: p3,
+                charCount: 1);
+        }
+
+        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            var (elementP0, elementP1) = store.StoreBytes(elements[i]);
+            ArraySlot.Write(
+                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                elementP0.Value,
+                elementP1.Value);
+        }
+        var (blockP0, blockP1) = store.StoreBytes(slotBlock);
+        return new(
+            kind,
+            flags: DataValueFlags.IsArray | DataValueFlags.InArena,
+            offset: blockP0.Value,
+            length: blockP1.Value);
+    }
+
+    /// <summary>
+    /// Shared reader for blob-element typed arrays — Audio / Video / Json /
+    /// PointCloud. Mirrors <see cref="AsImageArray"/>'s storage-tier dispatch
+    /// (sidecar / inline / arena) but with the element-kind discriminator
+    /// passed in.
+    /// </summary>
+    private byte[][] ReadBlobArray(DataKind kind, IValueStore store, SidecarRegistry? registry)
+    {
+        ThrowIfNotReferenceArray(kind);
+
+        if (IsInSidecar)
+        {
+            IBlobSource src = ResolveSidecarSource(registry);
+            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry);
+            int elementCount = blockBytes.Length / ArraySlot.SizeBytes;
+            byte[][] result = new byte[elementCount][];
+            for (int i = 0; i < elementCount; i++)
+            {
+                ArraySlot.Read(
+                    blockBytes.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                    out long elementOffset,
+                    out long elementLength,
+                    out _,
+                    out _);
+                result[i] = src.Read(elementOffset, elementLength).ToArray();
+            }
+            return result;
+        }
+
+        if (IsInline)
+        {
+            if (_charCount == 0) return [];
+
+            Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
+            MemoryMarshal.Write(slotBytes[..4], _p0);
+            MemoryMarshal.Write(slotBytes[4..8], _p1);
+            MemoryMarshal.Write(slotBytes[8..12], _p2);
+            MemoryMarshal.Write(slotBytes[12..16], _p3);
+            ArraySlot.Read(slotBytes, out long elementOffset, out long elementLength, out _, out _);
+            return [store.RetrieveBytes(new ArenaOffset((int)elementOffset), new ArenaLength((int)elementLength))];
+        }
+
+        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
+        int n = arenaBlock.Length / ArraySlot.SizeBytes;
+        byte[][] arenaResult = new byte[n][];
+        for (int i = 0; i < n; i++)
+        {
+            ArraySlot.Read(
+                arenaBlock.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                out long elementOffset,
+                out long elementLength,
+                out _,
+                out _);
+            arenaResult[i] = store.RetrieveBytes(new ArenaOffset((int)elementOffset), new ArenaLength((int)elementLength));
+        }
+        return arenaResult;
+    }
+
+    /// <summary>
     /// Creates an <c>Array&lt;Image&gt;</c> value. Each element's encoded bytes are
     /// written to <paramref name="store"/>; for N≥2 a slot block is also written.
     /// Layout matches <see cref="FromStringArray"/> — see

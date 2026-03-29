@@ -22,11 +22,14 @@ namespace DatumIngest.Indexing.BTree.Mutable;
 /// </code>
 /// <para>Internal page layout (PageSize bytes):</para>
 /// <code>
-/// [PageType: 1B] [KeyCount: 2B] [Reserved: 1B]              ← common header (4B)
-/// [Key₀..Keyₙ₋₁: WriteDataValue format]                     ← separator keys
-/// [Child₀..Childₙ: uint32]                                  ← KeyCount + 1 child page ids
+/// [PageType: 1B] [SepCount: 2B] [Reserved: 1B]              ← common header (4B)
+/// [Sep₀..Sepₙ₋₁: WriteDataValue + Int32 ChunkIdx + Int64 RowOff]
+/// [Child₀..Childₙ: uint32]                                  ← SepCount + 1 child page ids
 /// [Zero padding to PageSize]
 /// </code>
+/// <para>Each separator is a full composite (Key, ChunkIndex, RowOffsetInChunk) — the
+/// first composite of the right-child leaf at the time of split. Key-only separators
+/// can't disambiguate duplicate-key inserts; see <see cref="MutableInternalPage"/>.</para>
 /// <para>Free page layout (PageSize bytes):</para>
 /// <code>
 /// [PageType: 1B] [0: 2B] [Reserved: 1B]                     ← common header (4B)
@@ -169,20 +172,22 @@ internal static class MutablePageCodec
     }
 
     /// <summary>
-    /// Encodes an internal page (separator keys + child page ids) into a page-size buffer.
+    /// Encodes an internal page (composite separators + child page ids) into a
+    /// page-size buffer. Each separator is encoded as
+    /// <c>WriteDataValue(Key) + Int32 ChunkIndex + Int64 RowOffsetInChunk</c>.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when the encoded keys + child pointers exceed the page capacity.
+    /// Thrown when the encoded separators + child pointers exceed the page capacity.
     /// </exception>
     internal static byte[] EncodeInternalPage(
         PageGeometry geom,
-        ReadOnlySpan<DataValue> keys,
+        ReadOnlySpan<ValueIndexEntry> separators,
         ReadOnlySpan<uint> childPageIds)
     {
-        if (childPageIds.Length != keys.Length + 1)
+        if (childPageIds.Length != separators.Length + 1)
         {
             throw new ArgumentException(
-                $"Internal page child count ({childPageIds.Length}) must equal key count + 1 ({keys.Length + 1}).",
+                $"Internal page child count ({childPageIds.Length}) must equal separator count + 1 ({separators.Length + 1}).",
                 nameof(childPageIds));
         }
 
@@ -193,12 +198,14 @@ internal static class MutablePageCodec
 
         // Common header.
         writer.Write((byte)MutableBPlusTreePageType.Internal);
-        writer.Write((ushort)keys.Length);
+        writer.Write((ushort)separators.Length);
         writer.Write((byte)0);
 
-        foreach (DataValue key in keys)
+        foreach (ValueIndexEntry sep in separators)
         {
-            DataValueWriter.WriteDataValue(writer, key);
+            DataValueWriter.WriteDataValue(writer, sep.Key);
+            writer.Write(sep.ChunkIndex);
+            writer.Write(sep.RowOffsetInChunk);
         }
 
         foreach (uint childId in childPageIds)
@@ -213,7 +220,7 @@ internal static class MutablePageCodec
         {
             throw new InvalidOperationException(
                 $"Internal page payload ({bytesWritten} bytes) exceeds page size " +
-                $"({geom.PageSize} bytes) for {keys.Length} keys.");
+                $"({geom.PageSize} bytes) for {separators.Length} separators.");
         }
 
         stream.Position = 0;
@@ -223,27 +230,29 @@ internal static class MutablePageCodec
     }
 
     /// <summary>
-    /// Returns the encoded byte size for an internal page with the given key list
-    /// (key count + 1 child pointers). Serializes to a measurement stream.
+    /// Returns the encoded byte size for an internal page with the given separator
+    /// list (separator count + 1 child pointers). Serializes to a measurement stream.
     /// </summary>
-    internal static int MeasureInternalPage(PageGeometry geom, ReadOnlySpan<DataValue> keys)
+    internal static int MeasureInternalPage(PageGeometry geom, ReadOnlySpan<ValueIndexEntry> separators)
     {
         using MemoryStream stream = new(geom.PageSize);
         using BufferedWriter writer = new(stream);
 
         // Common header (always 4 bytes).
         writer.Write((byte)MutableBPlusTreePageType.Internal);
-        writer.Write((ushort)keys.Length);
+        writer.Write((ushort)separators.Length);
         writer.Write((byte)0);
 
-        foreach (DataValue key in keys)
+        foreach (ValueIndexEntry sep in separators)
         {
-            DataValueWriter.WriteDataValue(writer, key);
+            DataValueWriter.WriteDataValue(writer, sep.Key);
+            writer.Write(sep.ChunkIndex);
+            writer.Write(sep.RowOffsetInChunk);
         }
 
-        // Child pointers: (KeyCount + 1) × uint32. We don't have actual ids here —
-        // just account for the byte count.
-        for (int i = 0; i <= keys.Length; i++)
+        // Child pointers: (SeparatorCount + 1) × uint32. We don't have actual ids
+        // here — just account for the byte count.
+        for (int i = 0; i <= separators.Length; i++)
         {
             writer.Write(0u);
         }
@@ -270,10 +279,10 @@ internal static class MutablePageCodec
                 $"Expected internal page type ({MutableBPlusTreePageType.Internal}), got {(MutableBPlusTreePageType)pageBytes[0]}.");
         }
 
-        ushort keyCount = BinaryPrimitives.ReadUInt16LittleEndian(pageBytes.AsSpan(1, 2));
+        ushort sepCount = BinaryPrimitives.ReadUInt16LittleEndian(pageBytes.AsSpan(1, 2));
 
-        DataValue[] keys = new DataValue[keyCount];
-        uint[] childPageIds = new uint[keyCount + 1];
+        ValueIndexEntry[] separators = new ValueIndexEntry[sepCount];
+        uint[] childPageIds = new uint[sepCount + 1];
 
         using MemoryStream stream = new(
             pageBytes,
@@ -282,17 +291,20 @@ internal static class MutablePageCodec
             writable: false);
         using BinaryReader reader = new(stream, Encoding.UTF8, leaveOpen: true);
 
-        for (int i = 0; i < keyCount; i++)
+        for (int i = 0; i < sepCount; i++)
         {
-            keys[i] = DataValueReader.ReadDataValue(reader);
+            DataValue key = DataValueReader.ReadDataValue(reader);
+            int chunkIndex = reader.ReadInt32();
+            long rowOffset = reader.ReadInt64();
+            separators[i] = new ValueIndexEntry(key, chunkIndex, rowOffset);
         }
 
-        for (int i = 0; i <= keyCount; i++)
+        for (int i = 0; i <= sepCount; i++)
         {
             childPageIds[i] = reader.ReadUInt32();
         }
 
-        return new MutableInternalPage(pageId, keys, childPageIds);
+        return new MutableInternalPage(pageId, separators, childPageIds);
     }
 
     /// <summary>

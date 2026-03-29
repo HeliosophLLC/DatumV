@@ -193,7 +193,7 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
         for (int level = 0; level < _activeHeader.TreeHeight - 1; level++)
         {
             MutableBytesInternalPage internalPage = ReadInternalPage(pageId);
-            int slot = internalPage.FindChildSlot(entry.Key);
+            int slot = internalPage.FindChildSlot(entry);
             path.Add(new PathStep(internalPage, slot));
             pageId = internalPage.GetChildPageId(slot);
         }
@@ -221,11 +221,12 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
         }
 
         uint pageId = _activeHeader.RootPageId;
+        BytesIndexEntry probe = MutableBytesInternalPage.MaxCompositeForKey(key.ToArray());
 
         for (int level = 0; level < _activeHeader.TreeHeight - 1; level++)
         {
             MutableBytesInternalPage internalPage = ReadInternalPage(pageId);
-            int slot = internalPage.FindChildSlot(key);
+            int slot = internalPage.FindChildSlot(probe);
             pageId = internalPage.GetChildPageId(slot);
         }
 
@@ -476,7 +477,7 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
         for (int level = 0; level < _activeHeader.TreeHeight - 1; level++)
         {
             MutableBytesInternalPage internalPage = ReadInternalPage(pageId);
-            int slot = internalPage.FindChildSlot(entry.Key);
+            int slot = internalPage.FindChildSlot(entry);
             path.Add(new PathStep(internalPage, slot));
             pageId = internalPage.GetChildPageId(slot);
         }
@@ -624,11 +625,12 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
     {
         List<PathStep> path = new(_activeHeader.TreeHeight);
         uint pageId = _activeHeader.RootPageId;
+        BytesIndexEntry probe = MutableBytesInternalPage.MinCompositeForKey(key.ToArray());
 
         for (int level = 0; level < _activeHeader.TreeHeight - 1; level++)
         {
             MutableBytesInternalPage internalPage = ReadInternalPage(pageId);
-            int slot = internalPage.FindChildSlot(key);
+            int slot = internalPage.FindChildSlot(probe);
             path.Add(new PathStep(internalPage, slot));
             pageId = internalPage.GetChildPageId(slot);
         }
@@ -739,8 +741,11 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
         WritePage(leftId, leftBytes);
         WritePage(rightId, rightBytes);
 
-        byte[] separatorKey = rightEntries[0].Key;
-        uint newRootIdSplit = PropagateSplit(path, leftId, rightId, separatorKey, ref newPageCount, ref newTreeHeight);
+        // Promote the first composite of the right half to the parent. Composite
+        // separators are required: key-only separators can't disambiguate
+        // duplicate-key inserts that straddle the split.
+        BytesIndexEntry separator = rightEntries[0];
+        uint newRootIdSplit = PropagateSplit(path, leftId, rightId, separator, ref newPageCount, ref newTreeHeight);
 
         CommitNewHeader(
             rootPageId: newRootIdSplit,
@@ -759,8 +764,8 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
             uint[] newChildIds = step.Page.ChildPageIds.ToArray();
             newChildIds[step.SlotIndex] = currentChildId;
 
-            byte[][] keys = step.Page.Keys.ToArray();
-            byte[] pageBytes = MutableBPlusTreeBytesPageCodec.EncodeInternalPage(_geometry, keys, newChildIds);
+            BytesIndexEntry[] separators = step.Page.Separators.ToArray();
+            byte[] pageBytes = MutableBPlusTreeBytesPageCodec.EncodeInternalPage(_geometry, separators, newChildIds);
 
             uint newId = AllocatePage(ref newPageCount);
             WritePage(newId, pageBytes);
@@ -774,35 +779,35 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
         List<PathStep> path,
         uint leftChildId,
         uint rightChildId,
-        byte[] separatorKey,
+        BytesIndexEntry separator,
         ref uint newPageCount,
         ref ushort newTreeHeight)
     {
         uint currentLeftId = leftChildId;
         uint currentRightId = rightChildId;
-        byte[] currentSeparator = separatorKey;
+        BytesIndexEntry currentSeparator = separator;
 
         for (int i = path.Count - 1; i >= 0; i--)
         {
             PathStep step = path[i];
 
-            byte[][] mergedKeys = new byte[step.Page.KeyCount + 1][];
+            BytesIndexEntry[] mergedSeparators = new BytesIndexEntry[step.Page.SeparatorCount + 1];
             uint[] mergedChildren = new uint[step.Page.ChildCount + 1];
 
-            step.Page.Keys[..step.SlotIndex].CopyTo(mergedKeys.AsSpan(0, step.SlotIndex));
-            mergedKeys[step.SlotIndex] = currentSeparator;
-            step.Page.Keys[step.SlotIndex..].CopyTo(mergedKeys.AsSpan(step.SlotIndex + 1));
+            step.Page.Separators[..step.SlotIndex].CopyTo(mergedSeparators.AsSpan(0, step.SlotIndex));
+            mergedSeparators[step.SlotIndex] = currentSeparator;
+            step.Page.Separators[step.SlotIndex..].CopyTo(mergedSeparators.AsSpan(step.SlotIndex + 1));
 
             step.Page.ChildPageIds[..step.SlotIndex].CopyTo(mergedChildren.AsSpan(0, step.SlotIndex));
             mergedChildren[step.SlotIndex] = currentLeftId;
             mergedChildren[step.SlotIndex + 1] = currentRightId;
             step.Page.ChildPageIds[(step.SlotIndex + 1)..].CopyTo(mergedChildren.AsSpan(step.SlotIndex + 2));
 
-            int encodedSize = MutableBPlusTreeBytesPageCodec.MeasureInternalPage(mergedKeys);
+            int encodedSize = MutableBPlusTreeBytesPageCodec.MeasureInternalPage(mergedSeparators);
 
             if (encodedSize <= _geometry.PageSize)
             {
-                byte[] pageBytes = MutableBPlusTreeBytesPageCodec.EncodeInternalPage(_geometry, mergedKeys, mergedChildren);
+                byte[] pageBytes = MutableBPlusTreeBytesPageCodec.EncodeInternalPage(_geometry, mergedSeparators, mergedChildren);
                 uint newId = AllocatePage(ref newPageCount);
                 WritePage(newId, pageBytes);
 
@@ -810,30 +815,30 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
             }
 
             // Internal split.
-            int splitIndex = FindInternalSplitIndex(mergedKeys);
-            byte[][] leftKeys = mergedKeys[..splitIndex];
+            int splitIndex = FindInternalSplitIndex(mergedSeparators);
+            BytesIndexEntry[] leftSeparators = mergedSeparators[..splitIndex];
             uint[] leftChildren = mergedChildren[..(splitIndex + 1)];
-            byte[] promotedKey = mergedKeys[splitIndex];
-            byte[][] rightKeys = mergedKeys[(splitIndex + 1)..];
+            BytesIndexEntry promotedSeparator = mergedSeparators[splitIndex];
+            BytesIndexEntry[] rightSeparators = mergedSeparators[(splitIndex + 1)..];
             uint[] rightChildren = mergedChildren[(splitIndex + 1)..];
 
             uint newLeftId = AllocatePage(ref newPageCount);
             uint newRightId = AllocatePage(ref newPageCount);
 
-            byte[] leftBytes = MutableBPlusTreeBytesPageCodec.EncodeInternalPage(_geometry, leftKeys, leftChildren);
-            byte[] rightBytes = MutableBPlusTreeBytesPageCodec.EncodeInternalPage(_geometry, rightKeys, rightChildren);
+            byte[] leftBytes = MutableBPlusTreeBytesPageCodec.EncodeInternalPage(_geometry, leftSeparators, leftChildren);
+            byte[] rightBytes = MutableBPlusTreeBytesPageCodec.EncodeInternalPage(_geometry, rightSeparators, rightChildren);
             WritePage(newLeftId, leftBytes);
             WritePage(newRightId, rightBytes);
 
             currentLeftId = newLeftId;
             currentRightId = newRightId;
-            currentSeparator = promotedKey;
+            currentSeparator = promotedSeparator;
         }
 
         // Root split — create a new root.
-        byte[][] rootKeys = { currentSeparator };
+        BytesIndexEntry[] rootSeparators = { currentSeparator };
         uint[] rootChildren = { currentLeftId, currentRightId };
-        byte[] rootBytes = MutableBPlusTreeBytesPageCodec.EncodeInternalPage(_geometry, rootKeys, rootChildren);
+        byte[] rootBytes = MutableBPlusTreeBytesPageCodec.EncodeInternalPage(_geometry, rootSeparators, rootChildren);
         uint newRootId = AllocatePage(ref newPageCount);
         WritePage(newRootId, rootBytes);
         newTreeHeight++;
@@ -878,23 +883,23 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
         return lastIndex;
     }
 
-    private int FindInternalSplitIndex(ReadOnlySpan<byte[]> mergedKeys)
+    private int FindInternalSplitIndex(ReadOnlySpan<BytesIndexEntry> mergedSeparators)
     {
-        int midpoint = mergedKeys.Length / 2;
+        int midpoint = mergedSeparators.Length / 2;
 
-        for (int delta = 0; delta <= mergedKeys.Length / 2; delta++)
+        for (int delta = 0; delta <= mergedSeparators.Length / 2; delta++)
         {
             for (int sign = -1; sign <= 1; sign += 2)
             {
                 int candidate = midpoint + (delta * sign);
 
-                if (candidate <= 0 || candidate >= mergedKeys.Length - 1)
+                if (candidate <= 0 || candidate >= mergedSeparators.Length - 1)
                 {
                     continue;
                 }
 
-                ReadOnlySpan<byte[]> left = mergedKeys[..candidate];
-                ReadOnlySpan<byte[]> right = mergedKeys[(candidate + 1)..];
+                ReadOnlySpan<BytesIndexEntry> left = mergedSeparators[..candidate];
+                ReadOnlySpan<BytesIndexEntry> right = mergedSeparators[(candidate + 1)..];
 
                 int leftBytes = MutableBPlusTreeBytesPageCodec.MeasureInternalPage(left);
                 int rightBytes = MutableBPlusTreeBytesPageCodec.MeasureInternalPage(right);
@@ -908,7 +913,7 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
         }
 
         throw new InvalidOperationException(
-            $"Cannot split internal page with {mergedKeys.Length} keys; no balanced split fits " +
+            $"Cannot split internal page with {mergedSeparators.Length} separators; no balanced split fits " +
             $"in {_geometry.PageSize} bytes.");
     }
 

@@ -7,7 +7,7 @@
 CREATE TABLE __schema_migrations (
     version Int32 PRIMARY KEY,
     name String NOT NULL,
-    applied_at DateTime NOT NULL DEFAULT now()
+    applied_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
 CREATE TABLE messages (
@@ -17,5 +17,5 @@ CREATE TABLE messages (
     model String,
     input_tokens Int32,
     output_tokens Int32,
-    created_at DateTime NOT NULL DEFAULT now()
+    created_at TIMESTAMP NOT NULL DEFAULT now()
 );

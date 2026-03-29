@@ -620,29 +620,23 @@ internal static class InsertExecutor
                     source.AsImageArray(sourceStore, sidecarRegistry),
                     targetArena);
             case DataKind.Struct:
-                // FromStructArray serializes element fields via AppendDataValues
-                // (MemoryMarshal.AsBytes — raw struct bytes), so source-arena
-                // references inside non-inline fields would survive into the
-                // target. Per-field recursive rebind is the right fix; not yet
-                // implemented because no current workload depends on cross-
-                // arena Array<Struct> copy.
-                throw new InvalidOperationException(
-                    $"INSERT for column '{columnName}': cross-arena copy of Array<Struct> " +
-                    "is not yet supported. Struct elements may contain arena-backed " +
-                    "field DataValues (Strings, byte arrays, nested structs) whose " +
-                    "offsets would survive a slot rebuild and dangle into the source " +
-                    "store. Per-field recursive rebind is the right fix; until then, " +
-                    "use a VALUES form for Array<Struct> columns.");
+                return CopyStructArrayToTargetArena(source, sourceStore, sidecarRegistry, targetArena);
             case DataKind.Audio:
+                return DataValue.FromAudioArray(
+                    source.AsAudioArray(sourceStore, sidecarRegistry),
+                    targetArena);
             case DataKind.Video:
+                return DataValue.FromVideoArray(
+                    source.AsVideoArray(sourceStore, sidecarRegistry),
+                    targetArena);
             case DataKind.Json:
+                return DataValue.FromJsonArray(
+                    source.AsJsonArray(sourceStore, sidecarRegistry),
+                    targetArena);
             case DataKind.PointCloud:
-                throw new InvalidOperationException(
-                    $"INSERT for column '{columnName}': cross-arena copy of Array<{source.Kind}> " +
-                    $"is not yet supported. The per-kind round-trip primitives " +
-                    $"(As{source.Kind}Array / From{source.Kind}Array) need to be added — " +
-                    "mirror the Image pair in DataValue.cs. Until then, use a VALUES form " +
-                    "for these columns.");
+                return DataValue.FromPointCloudArray(
+                    source.AsPointCloudArray(sourceStore, sidecarRegistry),
+                    targetArena);
         }
 
         // Fixed-width primitive element kinds (UInt8, Int8/16/32/64, Float16/32/64,
@@ -655,6 +649,127 @@ internal static class InsertExecutor
         }
         return DataValue.FromArenaArrayBytes(raw, source.Kind, targetArena);
     }
+
+    /// <summary>
+    /// Cross-arena copy for <c>Array&lt;Struct&gt;</c>. Walks each struct
+    /// element's fields and re-emits any arena/sidecar-backed reference
+    /// fields (Strings, byte arrays, blob kinds, nested structs, nested
+    /// arrays) into <paramref name="targetArena"/> before assembling the
+    /// new <c>Array&lt;Struct&gt;</c> via <see cref="DataValue.FromStructArray"/>.
+    /// Per-element TypeIds are preserved as-is (same-query <c>TypeRegistry</c>
+    /// is shared between source scan and INSERT writer).
+    /// </summary>
+    private static DataValue CopyStructArrayToTargetArena(
+        DataValue source,
+        IValueStore sourceStore,
+        SidecarRegistry? sidecarRegistry,
+        Arena targetArena)
+    {
+        DataValue[] elements = source.AsStructArray(sourceStore, sidecarRegistry);
+        if (elements.Length == 0)
+        {
+            return DataValue.FromStructArray(Array.Empty<DataValue[]>(), targetArena, typeId: 0);
+        }
+
+        DataValue[][] reboundElements = new DataValue[elements.Length][];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            DataValue[] fields = elements[i].AsStruct(sourceStore);
+            DataValue[] reboundFields = new DataValue[fields.Length];
+            for (int j = 0; j < fields.Length; j++)
+            {
+                reboundFields[j] = RebindToTargetArena(fields[j], sourceStore, sidecarRegistry, targetArena);
+            }
+            reboundElements[i] = reboundFields;
+        }
+
+        // Pull the per-element TypeId from the first element; FromStructArray
+        // applies it uniformly across slots. Same-query shared TypeRegistry
+        // means the id is directly portable; no translation needed.
+        ushort elementTypeId = elements[0].TypeId;
+        return DataValue.FromStructArray(reboundElements, targetArena, elementTypeId);
+    }
+
+    /// <summary>
+    /// Recursively rebinds a <see cref="DataValue"/> from
+    /// <paramref name="sourceStore"/> into <paramref name="targetArena"/>.
+    /// Inline / null values pass through unchanged (self-contained); reference
+    /// kinds are materialized through their per-kind round-trip primitive and
+    /// re-emitted in the target. Used by <see cref="CopyStructArrayToTargetArena"/>
+    /// to rebind struct fields whose bytes live in the source store.
+    /// </summary>
+    private static DataValue RebindToTargetArena(
+        DataValue field,
+        IValueStore sourceStore,
+        SidecarRegistry? sidecarRegistry,
+        Arena targetArena)
+    {
+        if (field.IsNull || field.IsInline) return field;
+
+        // Arrays: route back through the cross-arena array copy for the
+        // matching element kind (handles flat primitive arrays + the 4 blob
+        // arrays + String arrays + nested Array<Struct> recursively).
+        if (field.IsArray)
+        {
+            return CopyTypedArrayToTargetArena(
+                field, sourceStore, sidecarRegistry ?? new SidecarRegistry(), targetArena, columnName: "<struct-field>");
+        }
+
+        return field.Kind switch
+        {
+            DataKind.String => DataValue.FromString(
+                field.AsString(sourceStore, sidecarRegistry), targetArena),
+            DataKind.Image => DataValue.FromImage(
+                field.AsImage(sourceStore, sidecarRegistry), targetArena),
+            DataKind.Audio => DataValue.FromAudio(
+                field.AsByteSpan(sourceStore, sidecarRegistry).ToArray(), targetArena),
+            DataKind.Video => DataValue.FromVideo(
+                field.AsByteSpan(sourceStore, sidecarRegistry).ToArray(), targetArena),
+            DataKind.Json => DataValue.FromJson(
+                field.AsByteSpan(sourceStore, sidecarRegistry), targetArena),
+            DataKind.PointCloud => DataValue.FromPointCloud(
+                field.AsPointCloud(sourceStore, sidecarRegistry), targetArena),
+            DataKind.Struct => RebindStructToTargetArena(field, sourceStore, sidecarRegistry, targetArena),
+            _ => throw new InvalidOperationException(
+                $"RebindToTargetArena: kind {field.Kind} is reference-backed in the source but " +
+                "has no cross-arena rebind path. Add the per-kind arm to RebindToTargetArena " +
+                "when this kind becomes a struct-field consumer."),
+        };
+    }
+
+    /// <summary>
+    /// Cross-arena copy for a single scalar <c>Struct</c> value (not an array).
+    /// Materializes each field through <see cref="RebindToTargetArena"/> and
+    /// re-emits as a struct in the target arena. Handles nested struct fields
+    /// inside <see cref="CopyStructArrayToTargetArena"/>.
+    /// </summary>
+    private static DataValue RebindStructToTargetArena(
+        DataValue source,
+        IValueStore sourceStore,
+        SidecarRegistry? sidecarRegistry,
+        Arena targetArena)
+    {
+        DataValue[] fields = source.AsStruct(sourceStore);
+        DataValue[] rebound = new DataValue[fields.Length];
+        for (int i = 0; i < fields.Length; i++)
+        {
+            rebound[i] = RebindToTargetArena(fields[i], sourceStore, sidecarRegistry, targetArena);
+        }
+        return DataValue.FromStruct(rebound, targetArena, source.TypeId);
+    }
+
+    /// <summary>
+    /// Test-only entry point exposing <see cref="CopyStructArrayToTargetArena"/>
+    /// without requiring an InsertExecutor pipeline. Used by
+    /// <c>StructArrayCrossArenaTests</c> to exercise the rebind path
+    /// directly.
+    /// </summary>
+    internal static DataValue CopyStructArrayToTargetArenaForTests(
+        DataValue source,
+        IValueStore sourceStore,
+        SidecarRegistry? registry,
+        Arena targetArena)
+        => CopyStructArrayToTargetArena(source, sourceStore, registry, targetArena);
 
     /// <summary>
     /// True when <paramref name="kind"/> is a reference-element array kind —

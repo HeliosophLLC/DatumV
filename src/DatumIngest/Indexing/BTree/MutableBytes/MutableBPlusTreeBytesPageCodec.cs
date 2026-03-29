@@ -20,19 +20,22 @@ namespace DatumIngest.Indexing.BTree.MutableBytes;
 /// </code>
 /// <para>Internal page layout (PageSize bytes):</para>
 /// <code>
-/// [PageType: 1B] [KeyCount: 2B] [Reserved: 1B]                ← common header (4B)
-/// [KeyCount × [KeyLen: 4B][KeyBytes]]                         ← separator keys
-/// [KeyCount + 1 × uint32]                                     ← child page ids
+/// [PageType: 1B] [SepCount: 2B] [Reserved: 1B]                ← common header (4B)
+/// [SepCount × [KeyLen: 4B][KeyBytes][ChunkIdx: 4B][RowOff: 8B]] ← composite separators
+/// [SepCount + 1 × uint32]                                     ← child page ids
 /// [Zero padding to PageSize]
 /// </code>
+/// <para>Each separator is a full composite (Key, ChunkIndex, RowOffsetInChunk) — the
+/// first composite of the right-child leaf at the time of split. See
+/// <see cref="MutableBytesInternalPage"/> for the rationale.</para>
 /// </remarks>
 internal static class MutableBPlusTreeBytesPageCodec
 {
     /// <summary>Encoded byte overhead for a single leaf entry (excluding key length).</summary>
     private const int LeafEntryFixedOverhead = 4 /* keyLen */ + 4 /* chunkIdx */ + 8 /* rowOff */;
 
-    /// <summary>Encoded byte overhead for a single internal-page separator key (excluding key length).</summary>
-    private const int InternalKeyFixedOverhead = 4 /* keyLen */;
+    /// <summary>Encoded byte overhead for a single internal-page composite separator (excluding key length).</summary>
+    private const int InternalSeparatorFixedOverhead = 4 /* keyLen */ + 4 /* chunkIdx */ + 8 /* rowOff */;
 
     /// <summary>
     /// Encodes a leaf page into a fresh page-size buffer. Callers own the
@@ -147,40 +150,44 @@ internal static class MutableBPlusTreeBytesPageCodec
         return new MutableBytesLeafPage(pageId, entries, prevLeaf, nextLeaf);
     }
 
-    /// <summary>Encodes an internal page (separator keys + child page ids).</summary>
+    /// <summary>Encodes an internal page (composite separators + child page ids).</summary>
     internal static byte[] EncodeInternalPage(
         PageGeometry geom,
-        ReadOnlySpan<byte[]> keys,
+        ReadOnlySpan<BytesIndexEntry> separators,
         ReadOnlySpan<uint> childPageIds)
     {
-        if (childPageIds.Length != keys.Length + 1)
+        if (childPageIds.Length != separators.Length + 1)
         {
             throw new ArgumentException(
-                $"Internal page child count ({childPageIds.Length}) must equal key count + 1 ({keys.Length + 1}).",
+                $"Internal page child count ({childPageIds.Length}) must equal separator count + 1 ({separators.Length + 1}).",
                 nameof(childPageIds));
         }
 
         byte[] page = new byte[geom.PageSize];
 
         page[0] = (byte)MutableBPlusTreePageType.Internal;
-        BinaryPrimitives.WriteUInt16LittleEndian(page.AsSpan(1, 2), (ushort)keys.Length);
+        BinaryPrimitives.WriteUInt16LittleEndian(page.AsSpan(1, 2), (ushort)separators.Length);
         page[3] = 0;
 
         int offset = MutableBPlusTreeConstants.CommonPageHeaderSize;
 
-        for (int i = 0; i < keys.Length; i++)
+        for (int i = 0; i < separators.Length; i++)
         {
-            byte[] key = keys[i];
-            int needed = InternalKeyFixedOverhead + key.Length;
+            BytesIndexEntry sep = separators[i];
+            int needed = InternalSeparatorFixedOverhead + sep.Key.Length;
             if (offset + needed > geom.PageSize)
             {
                 throw new InvalidOperationException(
                     $"Internal page payload ({offset + needed} bytes) exceeds page size ({geom.PageSize} bytes).");
             }
-            BinaryPrimitives.WriteInt32LittleEndian(page.AsSpan(offset, 4), key.Length);
+            BinaryPrimitives.WriteInt32LittleEndian(page.AsSpan(offset, 4), sep.Key.Length);
             offset += 4;
-            key.CopyTo(page.AsSpan(offset));
-            offset += key.Length;
+            sep.Key.CopyTo(page.AsSpan(offset));
+            offset += sep.Key.Length;
+            BinaryPrimitives.WriteInt32LittleEndian(page.AsSpan(offset, 4), sep.ChunkIndex);
+            offset += 4;
+            BinaryPrimitives.WriteInt64LittleEndian(page.AsSpan(offset, 8), sep.RowOffsetInChunk);
+            offset += 8;
         }
 
         int childrenBytes = childPageIds.Length * 4;
@@ -200,17 +207,18 @@ internal static class MutableBPlusTreeBytesPageCodec
     }
 
     /// <summary>
-    /// Returns the encoded byte size for an internal page with the given key
-    /// list (key count + 1 child pointers). Includes the common header.
+    /// Returns the encoded byte size for an internal page with the given
+    /// separator list (separator count + 1 child pointers). Includes the
+    /// common header.
     /// </summary>
-    internal static int MeasureInternalPage(ReadOnlySpan<byte[]> keys)
+    internal static int MeasureInternalPage(ReadOnlySpan<BytesIndexEntry> separators)
     {
         int total = MutableBPlusTreeConstants.CommonPageHeaderSize;
-        for (int i = 0; i < keys.Length; i++)
+        for (int i = 0; i < separators.Length; i++)
         {
-            total += InternalKeyFixedOverhead + keys[i].Length;
+            total += InternalSeparatorFixedOverhead + separators[i].Key.Length;
         }
-        total += (keys.Length + 1) * 4; // child ids
+        total += (separators.Length + 1) * 4; // child ids
         return total;
     }
 
@@ -229,26 +237,31 @@ internal static class MutableBPlusTreeBytesPageCodec
                 $"Expected internal page type ({MutableBPlusTreePageType.Internal}), got {(MutableBPlusTreePageType)pageBytes[0]}.");
         }
 
-        ushort keyCount = BinaryPrimitives.ReadUInt16LittleEndian(pageBytes.AsSpan(1, 2));
+        ushort sepCount = BinaryPrimitives.ReadUInt16LittleEndian(pageBytes.AsSpan(1, 2));
 
-        byte[][] keys = new byte[keyCount][];
-        uint[] childPageIds = new uint[keyCount + 1];
+        BytesIndexEntry[] separators = new BytesIndexEntry[sepCount];
+        uint[] childPageIds = new uint[sepCount + 1];
 
         int offset = MutableBPlusTreeConstants.CommonPageHeaderSize;
-        for (int i = 0; i < keyCount; i++)
+        for (int i = 0; i < sepCount; i++)
         {
             int keyLen = BinaryPrimitives.ReadInt32LittleEndian(pageBytes.AsSpan(offset, 4));
             offset += 4;
-            keys[i] = pageBytes.AsSpan(offset, keyLen).ToArray();
+            byte[] key = pageBytes.AsSpan(offset, keyLen).ToArray();
             offset += keyLen;
+            int chunkIndex = BinaryPrimitives.ReadInt32LittleEndian(pageBytes.AsSpan(offset, 4));
+            offset += 4;
+            long rowOffset = BinaryPrimitives.ReadInt64LittleEndian(pageBytes.AsSpan(offset, 8));
+            offset += 8;
+            separators[i] = new BytesIndexEntry(key, chunkIndex, rowOffset);
         }
 
-        for (int i = 0; i <= keyCount; i++)
+        for (int i = 0; i <= sepCount; i++)
         {
             childPageIds[i] = BinaryPrimitives.ReadUInt32LittleEndian(pageBytes.AsSpan(offset, 4));
             offset += 4;
         }
 
-        return new MutableBytesInternalPage(pageId, keys, childPageIds);
+        return new MutableBytesInternalPage(pageId, separators, childPageIds);
     }
 }

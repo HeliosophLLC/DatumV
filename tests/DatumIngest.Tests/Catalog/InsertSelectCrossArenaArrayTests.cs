@@ -132,6 +132,14 @@ public sealed class InsertSelectCrossArenaArrayTests : ServiceTestBase, IAsyncLi
         Assert.Equal("gamma", rows[0]["last"].AsString());
     }
 
+    // Array<Audio>, Array<Video>, Array<Json>, Array<PointCloud> cross-arena
+    // copy is unit-tested at the DataValue.From*Array / As*Array round-trip
+    // level in tests/DatumIngest.Tests/Model/ReferenceArrayBlobKindsTests.cs —
+    // those kinds don't have SQL literal syntax, so we can't drive the
+    // catalog-level cross-arena path from a SQL test. Unit tests cover the
+    // factory pair correctness; the InsertExecutor dispatch arm just routes
+    // through that same pair.
+
     // Array<Struct> cross-arena copy is rejected in code (per-field rebinding
     // not implemented), but the rejection isn't directly testable through SQL
     // today — struct-typed column DDL with inline field declarations doesn't

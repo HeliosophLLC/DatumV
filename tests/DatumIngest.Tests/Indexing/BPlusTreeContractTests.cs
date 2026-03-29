@@ -519,29 +519,25 @@ public abstract class BPlusTreeContractTests : IDisposable
     public void FindAll_WithDuplicatesAcrossLeafSplit_ReturnsAllMatches()
     {
         string path = PathFor("findall_dups_split");
-        // NOTE: kept at the default 8 KiB page size. Smaller pages expose a real
-        // bug where FindAll loses entries when duplicates of one key straddle a
-        // leaf-split boundary (descent by key alone doesn't always reach the
-        // leftmost leaf holding the key). Until that's fixed, this test runs at
-        // production page size — where dups of one key fit in a single leaf —
-        // and only asserts the multi-level-tree shape via unique entries.
-        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, allowDuplicates: true);
+        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, allowDuplicates: true, pageSize: SmallPageSize);
 
         // Force a leaf split, then pile many duplicates on a single key so the
-        // duplicates straddle the split boundary.
-        for (int i = 0; i < 800; i++)
+        // duplicates straddle the split boundary. Composite separators are what
+        // make this work — key-only separators can't route a new (50, c, r) to
+        // the correct leaf when key 50 spans multiple leaves.
+        for (int i = 0; i < 80; i++)
         {
             tree.Insert(new ValueIndexEntry(DataValue.FromInt32(i), 0, i));
         }
-        for (int rep = 0; rep < 100; rep++)
+        for (int rep = 0; rep < 30; rep++)
         {
-            tree.Insert(new ValueIndexEntry(DataValue.FromInt32(500), 1, rep));
+            tree.Insert(new ValueIndexEntry(DataValue.FromInt32(50), 1, rep));
         }
 
         Assert.True(tree.TreeHeight >= 2);
 
-        IReadOnlyList<ValueIndexEntry> hits = tree.FindAll(DataValue.FromInt32(500));
-        Assert.Equal(101, hits.Count); // 1 original + 100 duplicates
+        IReadOnlyList<ValueIndexEntry> hits = tree.FindAll(DataValue.FromInt32(50));
+        Assert.Equal(31, hits.Count); // 1 original + 30 duplicates
     }
 
     // ───────────────────────── Duplicate tie-breaker order ─────────────────────────
@@ -604,37 +600,35 @@ public abstract class BPlusTreeContractTests : IDisposable
     public void TraverseForward_DuplicatesAcrossLeafSplit_OrdersByChunkThenRow()
     {
         string path = PathFor("traverse_dup_split");
-        // NOTE: kept at the default 8 KiB page size. See the companion test
-        // FindAll_WithDuplicatesAcrossLeafSplit_ReturnsAllMatches for the
-        // bug-disclaimer — small pages expose a duplicate-routing issue in
-        // FindAll that's out of scope for this contract suite to assert.
-        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, allowDuplicates: true);
+        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, allowDuplicates: true, pageSize: SmallPageSize);
 
         // Force tree height >= 2, then pile out-of-order duplicates on one key
-        // so the duplicates straddle a leaf-split boundary.
-        for (int i = 0; i < 800; i++)
+        // so the duplicates straddle a leaf-split boundary. With composite
+        // separators each new (50, c, r) insert routes to the correct leaf,
+        // preserving the global composite-sort invariant.
+        for (int i = 0; i < 80; i++)
         {
             tree.Insert(new ValueIndexEntry(DataValue.FromInt32(i), 0, i));
         }
 
-        // Insert 100 duplicates of key=500 with (chunk, row) reversed:
+        // Insert 30 duplicates of key=50 with (chunk, row) reversed:
         // chunk decreases, row decreases. Expected natural order is ascending.
-        for (int rep = 99; rep >= 0; rep--)
+        for (int rep = 29; rep >= 0; rep--)
         {
-            tree.Insert(new ValueIndexEntry(DataValue.FromInt32(500), ChunkIndex: rep / 10, RowOffsetInChunk: rep));
+            tree.Insert(new ValueIndexEntry(DataValue.FromInt32(50), ChunkIndex: rep / 10, RowOffsetInChunk: rep));
         }
 
         Assert.True(tree.TreeHeight >= 2);
 
-        IReadOnlyList<ValueIndexEntry> hits = tree.FindAll(DataValue.FromInt32(500));
-        Assert.Equal(101, hits.Count); // 1 original (0, 500) + 100 duplicates
+        IReadOnlyList<ValueIndexEntry> hits = tree.FindAll(DataValue.FromInt32(50));
+        Assert.Equal(31, hits.Count); // 1 original (0, 50) + 30 duplicates
 
-        // The original is at (chunk=0, row=500); the 100 dups span (0,0)..(9,99).
+        // The original is at (chunk=0, row=50); the 30 dups span (0,0)..(2,29).
         // Expected order:
         //   (0, 0), (0, 1), ..., (0, 9),       // chunk=0 dups
-        //   (0, 500),                          // original
+        //   (0, 50),                           // original
         //   (1, 10), (1, 11), ..., (1, 19),    // chunk=1 dups
-        //   (2, 20), ..., (9, 99).
+        //   (2, 20), ..., (2, 29).
         (int chunk, long row)[] expected = BuildExpectedSplitOrder();
         (int chunk, long row)[] actual = hits
             .Select(h => (h.ChunkIndex, h.RowOffsetInChunk))
@@ -648,9 +642,9 @@ public abstract class BPlusTreeContractTests : IDisposable
             // chunk=0 dups (rows 0..9)
             for (int r = 0; r < 10; r++) e.Add((0, r));
             // original
-            e.Add((0, 500));
-            // chunks 1..9, each with 10 rows
-            for (int c = 1; c < 10; c++)
+            e.Add((0, 50));
+            // chunks 1..2, each with 10 rows
+            for (int c = 1; c < 3; c++)
             {
                 for (int r = c * 10; r < (c + 1) * 10; r++)
                 {
