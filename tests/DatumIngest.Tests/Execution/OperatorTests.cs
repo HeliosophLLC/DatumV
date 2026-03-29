@@ -276,7 +276,7 @@ public class OperatorTests : ServiceTestBase
         ProjectOperator project = new(source,
         [
             new SelectColumn(
-                new FunctionCallExpression("len", [new ColumnReference("name")]),
+                new FunctionCallExpression("length", [new ColumnReference("name")]),
                 "name_len")
         ]);
 
@@ -292,15 +292,15 @@ public class OperatorTests : ServiceTestBase
         ProjectOperator project = new(source,
         [
             new SelectColumn(
-                new FunctionCallExpression("len", [new ColumnReference("name")])),
+                new FunctionCallExpression("length", [new ColumnReference("name")])),
             new SelectColumn(
-                new FunctionCallExpression("len", [new ColumnReference("name")]))
+                new FunctionCallExpression("length", [new ColumnReference("name")]))
         ]);
 
         List<Row> rows = await CollectAsync(project);
         Assert.Equal(2, rows[0].FieldCount);
-        Assert.Equal("len_1", rows[0].ColumnNames[0]);
-        Assert.Equal("len_2", rows[0].ColumnNames[1]);
+        Assert.Equal("length_1", rows[0].ColumnNames[0]);
+        Assert.Equal("length_2", rows[0].ColumnNames[1]);
     }
 
     [Fact]
@@ -311,11 +311,11 @@ public class OperatorTests : ServiceTestBase
         ProjectOperator project = new(source,
         [
             new SelectColumn(
-                new FunctionCallExpression("len", [new ColumnReference("name")]))
+                new FunctionCallExpression("length", [new ColumnReference("name")]))
         ]);
 
         List<Row> rows = await CollectAsync(project);
-        Assert.Equal("len", rows[0].ColumnNames[0]);
+        Assert.Equal("length", rows[0].ColumnNames[0]);
     }
 
     [Fact]

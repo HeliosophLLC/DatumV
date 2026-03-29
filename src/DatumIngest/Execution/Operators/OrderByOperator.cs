@@ -78,6 +78,15 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
     internal int SortedRunCount { get; private set; }
 
     /// <inheritdoc/>
+    public override QueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
+    {
+        IReadOnlyList<OrderByItem> rewrittenItems = _orderByItems
+            .Select(item => new OrderByItem(rewriter(item.Expression), item.Direction))
+            .ToList();
+        return new OrderByOperator(_source.RewriteExpressions(rewriter), rewrittenItems, _topNRows);
+    }
+
+    /// <inheritdoc/>
     protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         List<string> items = [];

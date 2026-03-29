@@ -26,9 +26,9 @@ public class QueryMeteringTests : ServiceTestBase
     {
         Row row = MakeRow(["x"], [DataValue.FromString("hello")]);
 
-        // `len` has a QU cost of 1 (default).
+        // `length` has a QU cost of 1 (default).
         await _evaluator.EvaluateAsync(
-            new FunctionCallExpression("len", [new ColumnReference("x")]),
+            new FunctionCallExpression("length", [new ColumnReference("x")]),
             row);
 
         Assert.Equal(1, _evaluator.QueryMeter!.QueryUnits);

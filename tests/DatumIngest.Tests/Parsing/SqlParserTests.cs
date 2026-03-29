@@ -1430,7 +1430,7 @@ public class SqlParserTests : ServiceTestBase
             "SELECT resize(load_image(file_bytes), 224, 224) AS img, caption "
             + "FROM (SELECT file_name, file_bytes FROM images) AS inner_q "
             + "LEFT JOIN captions ON inner_q.file_name = captions.file_name "
-            + "WHERE len(caption) > 10 "
+            + "WHERE length(caption) > 10 "
             + "INTO 'output.parquet' SHARD ON sample_count 5000 "
             + "ORDER BY file_name ASC "
             + "LIMIT 100 OFFSET 0");
@@ -2569,7 +2569,7 @@ public class SqlParserTests : ServiceTestBase
     public void TypeNarrow_InOrBranches_EachBranchIndependent()
     {
         SelectStatement result = Parse(
-            "SELECT * FROM t WHERE (x AS Int32 y AND y > 0) OR (x AS String z AND len(z) > 3)");
+            "SELECT * FROM t WHERE (x AS Int32 y AND y > 0) OR (x AS String z AND length(z) > 3)");
 
         BinaryExpression or = Assert.IsType<BinaryExpression>(result.Where);
         Assert.Equal(BinaryOperator.Or, or.Operator);
@@ -2578,13 +2578,13 @@ public class SqlParserTests : ServiceTestBase
         BinaryExpression leftAnd = Assert.IsType<BinaryExpression>(or.Left);
         Assert.Equal(BinaryOperator.And, leftAnd.Operator);
 
-        // Right branch: typeof(x) = String AND len(CAST(x AS String)) > 3
+        // Right branch: typeof(x) = String AND length(CAST(x AS String)) > 3
         BinaryExpression rightAnd = Assert.IsType<BinaryExpression>(or.Right);
         Assert.Equal(BinaryOperator.And, rightAnd.Operator);
 
         BinaryExpression lenCmp = Assert.IsType<BinaryExpression>(rightAnd.Right);
         FunctionCallExpression lenCall = Assert.IsType<FunctionCallExpression>(lenCmp.Left);
-        Assert.Equal("len", lenCall.FunctionName);
+        Assert.Equal("length", lenCall.FunctionName);
         Assert.IsType<CastExpression>(lenCall.Arguments[0]);
     }
 

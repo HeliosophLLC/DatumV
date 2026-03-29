@@ -9,65 +9,30 @@ PostgreSQL-compatible string functions. All functions return NULL when any requi
 
 ## Length
 
-### len
-
-`len(val)` → Int32 | QU: 1
-
-Length of string, collection, or array. Also works on Vector, UInt8Array, Matrix, Tensor, JsonValue, and Array.
-
-```sql
-SELECT len('hello') -- 5
-```
-
 ### length
 
 `length(str)` → Int32 | QU: 1
 
-Number of characters. Alias for `len()`.
+Number of Unicode code points in the string. Surrogate-pair characters (emoji, ancient scripts, mathematical alphanumerics) count as 1, matching PostgreSQL semantics.
 
 ```sql
-SELECT length('hello') -- 5
-```
-
-### char_length
-
-`char_length(str)` → Int32 | QU: 1
-
-SQL standard alias for `len()`.
-
-```sql
-SELECT char_length('hello') -- 5
-```
-
-### character_length
-
-`character_length(str)` → Int32 | QU: 1
-
-SQL standard alias for `len()`.
-
-```sql
-SELECT character_length('hello') -- 5
+SELECT length('hello')   -- 5
+SELECT length('cafe')    -- 4
+-- Surrogate-pair characters (emoji, ancient scripts) count as 1 here, in
+-- contrast to .NET string.Length / UTF-16 code-unit counts.
 ```
 
 ### octet_length
 
 `octet_length(str)` → Int32 | QU: 1
 
-Number of bytes in the string (UTF-8 encoded).
+Number of UTF-8 bytes in the string.
 
 ```sql
-SELECT octet_length('hello') -- 5
-SELECT octet_length('cafe\u0301') -- more than char count for multi-byte chars
-```
-
-### bit_length
-
-`bit_length(str)` → Int32 | QU: 1
-
-Number of bits in the string (8 x `octet_length`).
-
-```sql
-SELECT bit_length('hello') -- 40
+SELECT octet_length('hello')   -- 5
+SELECT octet_length('cafe')    -- 4
+-- Surrogate-pair characters (emoji, ancient scripts) encode as 4 UTF-8 bytes
+-- each but count as 1 code point under length().
 ```
 
 ## Case Conversion

@@ -463,7 +463,7 @@ DatumIngest's EXPLODE combines the best of each: Spark's concise keyword, Presto
 ## Synergies
 
 - **LET bindings** — compute derived arrays via LET, then explode them: `LET tokens = split_part(text, ' ', ...) ... EXPLODE tokens AS token`. The array is computed once (memoized) and expanded.
-- **Lambda expressions** (proposed) — filter or transform arrays before explosion: `EXPLODE array_filter(tags, t -> len(t) > 3) AS tag`. Avoids exploding elements that will be immediately filtered out.
+- **Lambda expressions** (proposed) — filter or transform arrays before explosion: `EXPLODE array_filter(tags, t -> length(t) > 3) AS tag`. Avoids exploding elements that will be immediately filtered out.
 - **SPLIT INTO** (proposed) — explode then split: `EXPLODE ... SPLIT INTO ('train.parquet' WHERE ..., 'test.parquet' WHERE ...)`.
 - **IMPUTE** (proposed) — fill NULL arrays before explosion: `IMPUTE tags WITH CONSTANT array('untagged') ... EXPLODE tags AS tag`.
 - **Struct type** — exploding an array of structs produces struct-typed rows, which can then be accessed via `field(struct_col, 'name')` or tuple destructuring.

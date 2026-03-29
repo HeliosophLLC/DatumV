@@ -12,10 +12,13 @@ namespace DatumIngest.Functions.Scalar.Video;
 /// extract dimensions at construction time. Returns NULL only when FFmpeg fails
 /// to open the bytes (corrupt input, missing demuxer, no video stream).
 /// </summary>
-public sealed class VideoWidthFunction : IFunction, IScalarFunction
+public sealed class VideoWidthFunction : IFunction, IScalarFunction, IInlineMetadataAccessor
 {
     /// <inheritdoc />
     public static string Name => "video_width";
+
+    /// <inheritdoc />
+    public InlineAccessorField Field => InlineAccessorField.VideoWidth;
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Image;
@@ -61,10 +64,13 @@ public sealed class VideoWidthFunction : IFunction, IScalarFunction
 /// <c>video_height(v Video) → Int32</c>. Sibling to <see cref="VideoWidthFunction"/>.
 /// Returns NULL when inline metadata wasn't stamped at ingest.
 /// </summary>
-public sealed class VideoHeightFunction : IFunction, IScalarFunction
+public sealed class VideoHeightFunction : IFunction, IScalarFunction, IInlineMetadataAccessor
 {
     /// <inheritdoc />
     public static string Name => "video_height";
+
+    /// <inheritdoc />
+    public InlineAccessorField Field => InlineAccessorField.VideoHeight;
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Image;

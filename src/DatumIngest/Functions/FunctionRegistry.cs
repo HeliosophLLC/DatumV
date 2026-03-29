@@ -571,7 +571,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Strings.ConcatWsFunction>();
         registry.RegisterScalar<Scalar.Strings.UpperFunction>();
         registry.RegisterScalar<Scalar.Strings.LowerFunction>();
-        registry.RegisterScalar<Scalar.Strings.LenFunction>();
+        registry.RegisterScalar<Scalar.Strings.LengthFunction>();
+        registry.RegisterScalar<Scalar.Strings.OctetLengthFunction>();
         registry.RegisterScalar<Scalar.Strings.TrimFunction>();
         registry.RegisterScalarAlias<Scalar.Strings.TrimFunction>("btrim");
         registry.RegisterScalar<Scalar.Strings.LtrimFunction>();

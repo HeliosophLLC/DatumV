@@ -203,7 +203,14 @@ public sealed class QueryPlanner
         // shape changes have a hook; currently it's a no-op walk.
         QueryOperator afterBodyLower = ModelBodyLowerer.LowerSqlDefinedBodies(
             afterModelHoist, _catalog.DeclaredModels);
-        return CommonSubexpressionEliminator.Eliminate(afterBodyLower, _functionRegistry);
+        // Rewrite IInlineMetadataAccessor calls (image_width, video_height, ...)
+        // into InlineAccessorExpression so the evaluator skips IScalarFunction
+        // dispatch on the common stamped-metadata path. Must run BEFORE CSE so
+        // repeated accessor calls in WHERE + SELECT + ORDER BY dedup on the
+        // rewritten node's record equality.
+        QueryOperator afterAccessorElide = InlineAccessorElider.Elide(
+            afterBodyLower, _functionRegistry, _catalog.SearchPath);
+        return CommonSubexpressionEliminator.Eliminate(afterAccessorElide, _functionRegistry);
     }
 
     /// <summary>

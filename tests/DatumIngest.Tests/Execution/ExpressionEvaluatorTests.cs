@@ -863,11 +863,11 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     // ─────────────── Function calls ───────────────
 
     [Fact]
-    public async Task FunctionCall_Len()
+    public async Task FunctionCall_Length()
     {
         Row row = MakeRow(["name"], DataValue.FromString("hello"));
         DataValue result = await _evaluator.EvaluateAsync(
-            new FunctionCallExpression("len", [new ColumnReference("name")]),
+            new FunctionCallExpression("length", [new ColumnReference("name")]),
             row);
         Assert.Equal(5, result.AsInt32());
     }

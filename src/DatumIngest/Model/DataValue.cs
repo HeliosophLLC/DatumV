@@ -481,14 +481,91 @@ public readonly struct DataValue : IEquatable<DataValue>
     internal long SidecarLength => BackedLength;
 
     /// <summary>
-    /// For inline strings, the UTF-8 byte length (0-16) stored in the low byte of <c>_charCount</c>.
+    /// For inline strings, the UTF-8 byte length (0-27) stored in the low byte of <c>_charCount</c>.
     /// </summary>
     private byte InlineByteLength => (byte)(_charCount & 0xFF);
 
     /// <summary>
-    /// For inline strings, the char count (0-16) stored in the high byte of <c>_charCount</c>.
+    /// For inline strings, the char count (0-27) stored in the high byte of <c>_charCount</c>.
     /// </summary>
     private byte InlineCharCount => (byte)(_charCount >> 8);
+
+    /// <summary>
+    /// UTF-8 byte length of a <see cref="DataKind.String"/> value, for any
+    /// storage tier (inline, arena-backed, sidecar-backed). Returns 0 for
+    /// non-string kinds — callers gate on <see cref="Kind"/> first, or check
+    /// <see cref="IsNull"/>. The byte count is a stored field on every tier
+    /// (inline: low byte of <c>_charCount</c>; arena/sidecar:
+    /// <see cref="BackedLength"/>), so this is a constant-time read with
+    /// no UTF-8 walking.
+    /// </summary>
+    /// <remarks>
+    /// Backs <c>octet_length(text)</c> and the per-tier fast path for
+    /// <c>length(text)</c> on inline strings. Internal because the only
+    /// consumers are the string-length function bodies and the
+    /// elider-emitted accessor branch in <see cref="DatumIngest.Execution.ExpressionEvaluator"/>;
+    /// they live in this assembly so no public surface is required.
+    /// </remarks>
+    internal int StringUtf8ByteLength
+    {
+        get
+        {
+            if (_kind != DataKind.String) return 0;
+            return IsInline ? InlineByteLength : checked((int)BackedLength);
+        }
+    }
+
+    /// <summary>
+    /// Unicode code-point count of an <em>inline</em> <see cref="DataKind.String"/>
+    /// value, read from the high byte of <c>_charCount</c>. Returns 0 for arena- /
+    /// sidecar-backed strings (whose count lives in the wider <c>_charCount</c>
+    /// ushort, not this byte) and for non-string kinds — callers fall back to
+    /// walking the UTF-8 bytes when the inline tier doesn't apply. Inline strings
+    /// always carry this field, populated at construction
+    /// (see <see cref="FromInlineUtf8"/>).
+    /// </summary>
+    internal byte InlineStringCodePointCount =>
+        _kind == DataKind.String && IsInline ? InlineCharCount : (byte)0;
+
+    /// <summary>
+    /// Counts Unicode code points in <paramref name="utf8"/> by counting
+    /// non-continuation bytes (every UTF-8 leading byte starts a new code point).
+    /// Single-pass byte walk, no decoding, no allocations. The result matches PG
+    /// <c>length(text)</c> semantics — surrogate-pair characters (e.g. emoji)
+    /// count as 1, in contrast to <see cref="string.Length"/> /
+    /// <see cref="System.Text.Encoding.GetCharCount(System.ReadOnlySpan{byte})"/>
+    /// which count UTF-16 code units.
+    /// </summary>
+    /// <remarks>
+    /// A byte is a continuation byte iff its top two bits are <c>10</c>
+    /// (mask <c>0xC0</c> → <c>0x80</c>); every other byte is the first byte
+    /// of a code point. Assumes well-formed UTF-8.
+    /// </remarks>
+    internal static int CountUtf8CodePoints(ReadOnlySpan<byte> utf8)
+    {
+        int count = 0;
+        for (int i = 0; i < utf8.Length; i++)
+        {
+            if ((utf8[i] & 0xC0) != 0x80) count++;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Code-point count of <paramref name="chars"/>, matching PG <c>length(text)</c>:
+    /// surrogate pairs count as 1. Use this when stamping <c>_charCount</c> for a
+    /// String built from a char span; <see cref="System.ReadOnlySpan{T}.Length"/>
+    /// counts UTF-16 code units instead and is wrong for surrogate-pair characters.
+    /// </summary>
+    internal static int CountCharSpanCodePoints(ReadOnlySpan<char> chars)
+    {
+        int count = 0;
+        foreach (System.Text.Rune _ in chars.EnumerateRunes())
+        {
+            count++;
+        }
+        return count;
+    }
 
     /// <summary>
     /// Returns a span over the 16 inline payload bytes, sliced to the UTF-8 byte length.
@@ -709,7 +786,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         Span<byte> scratch = stackalloc byte[MaxInlineUtf8Bytes];
         if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
         {
-            return FromInlineUtf8(DataKind.String, scratch[..written], value.Length);
+            return FromInlineUtf8(DataKind.String, scratch[..written], CountUtf8CodePoints(scratch[..written]));
         }
         throw new InvalidOperationException(
             $"FromString(value) without a store only supports strings whose UTF-8 form fits in {MaxInlineUtf8Bytes} bytes. " +
@@ -728,12 +805,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         Span<byte> scratch = stackalloc byte[MaxInlineUtf8Bytes];
         if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
         {
-            return FromInlineUtf8(DataKind.String, scratch[..written], value.Length);
+            return FromInlineUtf8(DataKind.String, scratch[..written], CountUtf8CodePoints(scratch[..written]));
         }
 
         var (p0, p1) = store.StoreString(value);
         ulong hash = HashString(value.AsSpan());
-        ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
+        int codePoints = CountCharSpanCodePoints(value.AsSpan());
+        ushort cc = codePoints <= ushort.MaxValue ? (ushort)codePoints : ushort.MaxValue;
         return new(DataKind.String, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value, hash: hash, charCount: cc);
     }
 
@@ -743,26 +821,34 @@ public readonly struct DataValue : IEquatable<DataValue>
         Span<byte> scratch = stackalloc byte[MaxInlineUtf8Bytes];
         if (System.Text.Encoding.UTF8.TryGetBytes(chars, scratch, out int written))
         {
-            return FromInlineUtf8(DataKind.String, scratch[..written], chars.Length);
+            return FromInlineUtf8(DataKind.String, scratch[..written], CountUtf8CodePoints(scratch[..written]));
         }
 
         var (p0, p1) = store.StoreChars(chars);
         ulong hash = HashString(chars);
-        ushort cc = chars.Length <= ushort.MaxValue ? (ushort)chars.Length : ushort.MaxValue;
+        int codePoints = CountCharSpanCodePoints(chars);
+        ushort cc = codePoints <= ushort.MaxValue ? (ushort)codePoints : ushort.MaxValue;
         return new(DataKind.String, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value, hash: hash, charCount: cc);
     }
 
-    /// <summary>Creates a string value from raw UTF-8 bytes without allocating a managed string.</summary>
-    public static DataValue FromUtf8Span(ReadOnlySpan<byte> utf8, int charCount, IValueStore store)
+    /// <summary>
+    /// Creates a string value from raw UTF-8 bytes without allocating a managed
+    /// string. Code-point count is computed from the bytes via
+    /// <see cref="CountUtf8CodePoints"/> — single byte walk, no decode — so the
+    /// stamped <c>_charCount</c> always matches PG <c>length(text)</c> semantics
+    /// (surrogate-pair characters count as 1).
+    /// </summary>
+    public static DataValue FromUtf8Span(ReadOnlySpan<byte> utf8, IValueStore store)
     {
+        int codePoints = CountUtf8CodePoints(utf8);
         if (utf8.Length <= MaxInlineUtf8Bytes)
         {
-            return FromInlineUtf8(DataKind.String, utf8, charCount);
+            return FromInlineUtf8(DataKind.String, utf8, codePoints);
         }
 
         var (p0, p1) = store.StoreUtf8(utf8);
         ulong hash = HashUtf8(utf8);
-        ushort cc = charCount <= ushort.MaxValue ? (ushort)charCount : ushort.MaxValue;
+        ushort cc = codePoints <= ushort.MaxValue ? (ushort)codePoints : ushort.MaxValue;
         return new(DataKind.String, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value, hash: hash, charCount: cc);
     }
 
@@ -3547,34 +3633,38 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
-    /// Returns the character count of a string or JSON value without accessing the store.
-    /// Cached in <c>_p2</c> at creation time for values built from a managed <see cref="string"/>.
-    /// For arena-slice values where <c>_p2</c> is 0, falls back to UTF-8 decode counting
-    /// via <paramref name="store"/>.
+    /// Unicode code-point count of a String value — matches PG <c>length(text)</c>
+    /// semantics (surrogate-pair characters count as 1, in contrast to
+    /// <see cref="string.Length"/> / <see cref="System.Text.Encoding.GetCharCount(System.ReadOnlySpan{byte})"/>
+    /// which count UTF-16 code units). Cached in <c>_charCount</c> at construction;
+    /// for arena-slice values where the cache reads as 0 (no count stamped) or 65535
+    /// (overflow sentinel for very long strings), falls back to a single
+    /// non-continuation-byte walk via <paramref name="store"/>.
     /// </summary>
-    /// <param name="store">Fallback store for arena-slice values where the char count was not cached.</param>
-    /// <returns>The number of <see cref="char"/> units in the string.</returns>
+    /// <param name="store">Fallback store for arena-slice values where the count was not cached.</param>
+    /// <returns>The number of Unicode code points in the string.</returns>
     public int StringCharCount(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
-        // Inline: char count is cached in the high byte of _charCount at construction.
+        // Inline: code-point count cached in the high byte of _charCount.
         if (IsInline) return InlineCharCount;
-        // _charCount holds the full char count (ushort). 65535 = overflow sentinel → fall back to decode.
-        // 0 = unknown (e.g. FromStringSlice) → also fall back.
+        // _charCount holds the full code-point count (ushort). 65535 = overflow
+        // sentinel → walk the bytes. 0 = unknown (e.g. FromStringSlice) → walk.
         return _charCount is not 0 and not ushort.MaxValue
             ? _charCount
-            : System.Text.Encoding.UTF8.GetCharCount(store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength)));
+            : CountUtf8CodePoints(store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength)));
     }
 
     /// <summary>
-    /// Returns the cached char count as-is, without falling back to a UTF-8 decode.
+    /// Returns the cached code-point count as-is, without falling back to a byte walk.
     /// Returns <c>0</c> for values that never cached the count (e.g. <see cref="FromStringSlice"/>),
-    /// and <c>65535</c> for strings that overflowed the 16-bit cache.
+    /// and <c>65535</c> for strings that overflowed the 16-bit cache. Same PG-compatible
+    /// code-point semantics as <see cref="StringCharCount(IValueStore)"/>.
     /// </summary>
     /// <remarks>
     /// Zero-allocation hot-path reader for callers that only need a coarse "how big is this string"
     /// signal (e.g. the auto-indexing size threshold). Callers that need exact lengths for strings
-    /// near or above 65535 chars should use <see cref="StringCharCount(IValueStore)"/> instead.
+    /// near or above 65535 code points should use <see cref="StringCharCount(IValueStore)"/> instead.
     /// </remarks>
     public int RawCharCount => IsInline ? InlineCharCount : _charCount;
 

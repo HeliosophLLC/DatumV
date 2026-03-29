@@ -80,6 +80,28 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
     public bool StreamingSorted => _streamingSorted;
 
     /// <inheritdoc/>
+    public override QueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
+    {
+        IReadOnlyList<Expression> rewrittenKeys = _groupByExpressions
+            .Select(rewriter)
+            .ToList();
+        IReadOnlyList<AggregateColumn> rewrittenAggregates = _aggregateColumns
+            .Select(ac => ac with
+            {
+                ArgumentExpressions = ac.ArgumentExpressions.Select(rewriter).ToList(),
+                OrderBy = ac.OrderBy?
+                    .Select(ob => ob with { Expression = rewriter(ob.Expression) })
+                    .ToList(),
+            })
+            .ToList();
+        return new GroupByOperator(
+            _source.RewriteExpressions(rewriter),
+            rewrittenKeys,
+            rewrittenAggregates,
+            _streamingSorted);
+    }
+
+    /// <inheritdoc/>
     protected override OperatorPlanDescription DescribeForExplainImpl()
     {
         Dictionary<string, string> properties = new();

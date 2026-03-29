@@ -335,7 +335,7 @@ SELECT, ORDER BY, or any other clause.
 WHERE x AS Int32 y AND y > 0 AND y < 100
 
 -- OR branches — each bind is independent
-WHERE (x AS Int32 y AND y > 0) OR (x AS String z AND len(z) > 3)
+WHERE (x AS Int32 y AND y > 0) OR (x AS String z AND length(z) > 3)
 
 -- Complex source expressions — avoids repeating the expression
 WHERE json_value(data, '$.score') AS Float64 score AND score > 0.5
@@ -353,7 +353,7 @@ Simple CASE with `typeof()` enables type-driven branching:
 SELECT CASE typeof(x)
     WHEN Int32   THEN round(x, 0)
     WHEN Float64 THEN round(x, 2)
-    WHEN String  THEN len(x)
+    WHEN String  THEN length(x)
     ELSE NULL
 END AS result
 FROM t

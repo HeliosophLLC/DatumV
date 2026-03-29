@@ -34,7 +34,7 @@ SELECT load_image(file_bytes) AS raw_image FROM archive
 SELECT resize(raw_image, 224, 224) FROM (
   SELECT load_image(file_bytes) AS raw_image, caption FROM archive
 ) AS inner
-WHERE len(caption) > 20
+WHERE length(caption) > 20
 ```
 
 ## Projection and predicate pushdown

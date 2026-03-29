@@ -12,10 +12,13 @@ namespace DatumIngest.Functions.Scalar.Spatial;
 /// <summary>
 /// <c>point_cloud_count(pc PointCloud) → Int32</c>. Number of points in the cloud.
 /// </summary>
-public sealed class PointCloudCountFunction : IFunction, IScalarFunction
+public sealed class PointCloudCountFunction : IFunction, IScalarFunction, IInlineMetadataAccessor
 {
     /// <inheritdoc />
     public static string Name => "point_cloud_count";
+
+    /// <inheritdoc />
+    public InlineAccessorField Field => InlineAccessorField.PointCloudCount;
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Image;
@@ -203,10 +206,13 @@ public sealed class PointCloudIsOrganizedFunction : IFunction, IScalarFunction
 /// <c>point_cloud_has_color(pc PointCloud) → Boolean</c>. True when the cloud
 /// carries per-point RGBA color in addition to position.
 /// </summary>
-public sealed class PointCloudHasColorFunction : IFunction, IScalarFunction
+public sealed class PointCloudHasColorFunction : IFunction, IScalarFunction, IInlineMetadataAccessor
 {
     /// <inheritdoc />
     public static string Name => "point_cloud_has_color";
+
+    /// <inheritdoc />
+    public InlineAccessorField Field => InlineAccessorField.PointCloudHasColor;
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Image;

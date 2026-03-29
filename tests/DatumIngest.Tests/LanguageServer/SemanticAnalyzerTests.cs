@@ -571,14 +571,14 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     {
         LanguageServerManifest manifest = CreateManifest(
             tables: [TypedTable("t", TypedColumn("price", "Float32"))],
-            functions: [TypedFunction("len", "Int32", ("value", "String"))]);
+            functions: [TypedFunction("length", "Int32", ("value", "String"))]);
 
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT len(price) FROM t", manifest);
+            "SELECT length(price) FROM t", manifest);
 
         Assert.Contains(diagnostics, diagnostic =>
             diagnostic.Severity == DiagnosticSeverity.Warning &&
-            diagnostic.Message.Contains("len") &&
+            diagnostic.Message.Contains("length") &&
             diagnostic.Message.Contains("Float32"));
     }
 
@@ -601,10 +601,10 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     {
         LanguageServerManifest manifest = CreateManifest(
             tables: [Table("t", "x")],
-            functions: [TypedFunction("len", "Int32", ("value", "String"))]);
+            functions: [TypedFunction("length", "Int32", ("value", "String"))]);
 
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT len('hello') FROM t", manifest);
+            "SELECT length('hello') FROM t", manifest);
 
         Assert.Empty(diagnostics);
     }

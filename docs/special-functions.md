@@ -64,7 +64,7 @@ array_filter(array, element -> Boolean) → Array
 SELECT array_filter(scores, s -> s > 50) FROM students
 
 -- Keep non-empty strings
-SELECT array_filter(names, n -> len(n) > 0) FROM data
+SELECT array_filter(names, n -> length(n) > 0) FROM data
 ```
 
 ---

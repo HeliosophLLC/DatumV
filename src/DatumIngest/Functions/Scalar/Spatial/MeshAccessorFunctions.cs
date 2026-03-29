@@ -8,10 +8,13 @@ namespace DatumIngest.Functions.Scalar.Spatial;
 /// <summary>
 /// <c>mesh_vertex_count(m Mesh) → Int32</c>. Number of vertices in the mesh.
 /// </summary>
-public sealed class MeshVertexCountFunction : IFunction, IScalarFunction
+public sealed class MeshVertexCountFunction : IFunction, IScalarFunction, IInlineMetadataAccessor
 {
     /// <inheritdoc />
     public static string Name => "mesh_vertex_count";
+
+    /// <inheritdoc />
+    public InlineAccessorField Field => InlineAccessorField.MeshVertexCount;
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Image;
@@ -57,10 +60,13 @@ public sealed class MeshVertexCountFunction : IFunction, IScalarFunction
 /// <summary>
 /// <c>mesh_triangle_count(m Mesh) → Int32</c>. Number of triangles in the mesh.
 /// </summary>
-public sealed class MeshTriangleCountFunction : IFunction, IScalarFunction
+public sealed class MeshTriangleCountFunction : IFunction, IScalarFunction, IInlineMetadataAccessor
 {
     /// <inheritdoc />
     public static string Name => "mesh_triangle_count";
+
+    /// <inheritdoc />
+    public InlineAccessorField Field => InlineAccessorField.MeshTriangleCount;
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Image;

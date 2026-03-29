@@ -29,10 +29,13 @@ namespace DatumIngest.Functions.Scalar.Image;
 /// three-valued logic.
 /// </para>
 /// </remarks>
-public sealed class ImageWidthFunction : IFunction, IScalarFunction
+public sealed class ImageWidthFunction : IFunction, IScalarFunction, IInlineMetadataAccessor
 {
     /// <inheritdoc />
     public static string Name => "image_width";
+
+    /// <inheritdoc />
+    public InlineAccessorField Field => InlineAccessorField.ImageWidth;
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Image;
@@ -85,10 +88,13 @@ public sealed class ImageWidthFunction : IFunction, IScalarFunction
 /// Returns the pixel height of an <see cref="DataKind.Image"/> value, as
 /// <see cref="DataKind.Int32"/>. Sibling to <see cref="ImageWidthFunction"/>.
 /// </summary>
-public sealed class ImageHeightFunction : IFunction, IScalarFunction
+public sealed class ImageHeightFunction : IFunction, IScalarFunction, IInlineMetadataAccessor
 {
     /// <inheritdoc />
     public static string Name => "image_height";
+
+    /// <inheritdoc />
+    public InlineAccessorField Field => InlineAccessorField.ImageHeight;
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Image;

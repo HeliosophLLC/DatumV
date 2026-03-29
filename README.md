@@ -91,7 +91,7 @@ datum-ingest query "
   FROM images AS image_files
   INNER JOIN captions AS image_captions ON image_captions.file_name = GET_FILENAME(image_files.file_name)
   INNER JOIN captions AS cap ON img.id = image_captions.image_id
-  WHERE len(cap.caption) > 20
+  WHERE length(cap.caption) > 20
   INTO 'dataset.h5'
 " --source "images=./train2017.zip" --source "captions=./captions.json"
 ```

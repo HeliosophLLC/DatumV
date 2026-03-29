@@ -113,9 +113,11 @@ public static class DataValueRetention
                 => value,
 
             // Reference-type payloads: copy into the retention store.
+            // FromUtf8Span recomputes the code-point count from the bytes, so
+            // we don't need to forward the (potentially stale) cached count
+            // from the source value.
             DataKind.String => DataValue.FromUtf8Span(
                 value.AsUtf8Span(sourceStore),
-                value.StringCharCount(sourceStore),
                 retentionStore),
 
             // Image is just encoded bytes now — the legacy ImageHandle-in-object-slot

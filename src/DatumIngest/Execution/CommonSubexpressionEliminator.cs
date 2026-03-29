@@ -952,6 +952,13 @@ public static class CommonSubexpressionEliminator
                     && IsCseEligible(atz.TimeZone, letNames, functions);
             case FunctionCallExpression fn:
                 return IsFunctionCallCseEligible(fn, letNames, functions);
+            case InlineAccessorExpression iax:
+                // The elider only emits these from functions that implement
+                // IInlineMetadataAccessor — every accessor we mark is pure (reads
+                // a payload byte), so eligibility reduces to whether the argument
+                // is itself CSE-eligible. Lets `image_width(t.img)` in WHERE +
+                // SELECT collapse onto the elided record-equal node.
+                return IsCseEligible(iax.Argument, letNames, functions);
 
             // Conservative skips:
             case LambdaExpression:           // alpha-equivalence not done in this slice

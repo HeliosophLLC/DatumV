@@ -19,7 +19,7 @@ public sealed class FunctionRegistryQualifiedTests
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
-        Assert.NotNull(registry.TryGetScalar(new QualifiedName("system", "len")));
+        Assert.NotNull(registry.TryGetScalar(new QualifiedName("system", "length")));
         Assert.NotNull(registry.TryGetScalar(new QualifiedName("system", "concat")));
         // Aliases inherit the primary's schema.
         Assert.NotNull(registry.TryGetScalar(new QualifiedName("system", "gen_random_uuid")));
@@ -31,7 +31,7 @@ public sealed class FunctionRegistryQualifiedTests
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
-        Assert.Null(registry.TryGetScalar(new QualifiedName("public", "len")));
+        Assert.Null(registry.TryGetScalar(new QualifiedName("public", "length")));
     }
 
     [Fact]
@@ -68,8 +68,8 @@ public sealed class FunctionRegistryQualifiedTests
         // search_path is irrelevant when an explicit schema is given.
         IReadOnlyList<string> wrongPath = new[] { "public" };
 
-        Assert.NotNull(registry.TryGetScalar(explicitSchema: "system", "len", wrongPath));
-        Assert.Null(registry.TryGetScalar(explicitSchema: "public", "len", wrongPath));
+        Assert.NotNull(registry.TryGetScalar(explicitSchema: "system", "length", wrongPath));
+        Assert.Null(registry.TryGetScalar(explicitSchema: "public", "length", wrongPath));
     }
 
     [Fact]
@@ -78,7 +78,7 @@ public sealed class FunctionRegistryQualifiedTests
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
         IReadOnlyList<string> defaultPath = new[] { "public", "system" };
 
-        Assert.NotNull(registry.TryGetScalar(explicitSchema: null, "len", defaultPath));
+        Assert.NotNull(registry.TryGetScalar(explicitSchema: null, "length", defaultPath));
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class FunctionRegistryQualifiedTests
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
-        Assert.Null(registry.TryGetScalar(explicitSchema: null, "len", Array.Empty<string>()));
+        Assert.Null(registry.TryGetScalar(explicitSchema: null, "length", Array.Empty<string>()));
     }
 
     [Fact]
@@ -95,21 +95,21 @@ public sealed class FunctionRegistryQualifiedTests
         FunctionRegistry registry = new();
         // Two registrations of the same name under different schemas;
         // the search path decides which one resolves.
-        registry.RegisterScalar<DatumIngest.Functions.Scalar.Strings.LenFunction>(schema: "system");
-        registry.RegisterScalar<DatumIngest.Functions.Scalar.Strings.LenFunction>(schema: "public");
+        registry.RegisterScalar<DatumIngest.Functions.Scalar.Strings.LengthFunction>(schema: "system");
+        registry.RegisterScalar<DatumIngest.Functions.Scalar.Strings.LengthFunction>(schema: "public");
 
         IScalarFunction? systemFirst = registry.TryGetScalar(
-            explicitSchema: null, "len", new[] { "system", "public" });
+            explicitSchema: null, "length", new[] { "system", "public" });
         IScalarFunction? publicFirst = registry.TryGetScalar(
-            explicitSchema: null, "len", new[] { "public", "system" });
+            explicitSchema: null, "length", new[] { "public", "system" });
 
         Assert.NotNull(systemFirst);
         Assert.NotNull(publicFirst);
         Assert.Same(
-            registry.TryGetScalar(new QualifiedName("system", "len")),
+            registry.TryGetScalar(new QualifiedName("system", "length")),
             systemFirst);
         Assert.Same(
-            registry.TryGetScalar(new QualifiedName("public", "len")),
+            registry.TryGetScalar(new QualifiedName("public", "length")),
             publicFirst);
     }
 
@@ -121,7 +121,7 @@ public sealed class FunctionRegistryQualifiedTests
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
         // Pre-S7 call shape — every existing call site uses this.
-        Assert.NotNull(registry.TryGetScalar("len"));
+        Assert.NotNull(registry.TryGetScalar("length"));
         Assert.NotNull(registry.TryGetAggregate("count"));
         Assert.NotNull(registry.TryGetWindow("row_number"));
         Assert.NotNull(registry.TryGetTableValued("range"));
@@ -137,7 +137,7 @@ public sealed class FunctionRegistryQualifiedTests
         FunctionRegistry registry = new();
         registry.RegisterScalarInstance(
             "udf.my_udf",
-            new DatumIngest.Functions.Scalar.Strings.LenFunction());
+            new DatumIngest.Functions.Scalar.Strings.LengthFunction());
 
         Assert.NotNull(registry.TryGetScalar("udf.my_udf"));
         Assert.NotNull(registry.TryGetScalar(new QualifiedName("udf", "my_udf")));
@@ -165,7 +165,7 @@ public sealed class FunctionRegistryQualifiedTests
         FunctionRegistry registry = new();
         registry.RegisterScalarInstance(
             "udf.tmp",
-            new DatumIngest.Functions.Scalar.Strings.LenFunction(),
+            new DatumIngest.Functions.Scalar.Strings.LengthFunction(),
             descriptor: new FunctionDescriptor(
                 "tmp",
                 Array.Empty<string>(),

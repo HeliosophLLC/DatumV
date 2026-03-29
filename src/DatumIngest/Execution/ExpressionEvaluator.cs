@@ -373,6 +373,7 @@ public sealed class ExpressionEvaluator
                 BinaryExpression binary => await EvaluateBinaryAsync(binary, frame, cancellationToken).ConfigureAwait(false),
                 UnaryExpression unary => await EvaluateUnaryAsync(unary, frame, cancellationToken).ConfigureAwait(false),
                 FunctionCallExpression function => await EvaluateFunctionAsync(function, frame, cancellationToken).ConfigureAwait(false),
+                InlineAccessorExpression inlineAccessor => await EvaluateInlineAccessorAsync(inlineAccessor, frame, cancellationToken).ConfigureAwait(false),
                 InExpression inExpr => await EvaluateInAsync(inExpr, frame, cancellationToken).ConfigureAwait(false),
                 BetweenExpression between => await EvaluateBetweenAsync(between, frame, cancellationToken).ConfigureAwait(false),
                 IsNullExpression isNull => await EvaluateIsNullAsync(isNull, frame, cancellationToken).ConfigureAwait(false),
@@ -968,6 +969,154 @@ public sealed class ExpressionEvaluator
     }
 
     /// <summary>
+    /// DataValue-returning entry for the post-elision accessor node.
+    /// Materialises the ValueRef-native result through <see cref="ToDataValue"/>,
+    /// mirroring the <see cref="EvaluateFunctionAsync"/> shape so the elision
+    /// is transparent to callers that consume <see cref="DataValue"/>.
+    /// </summary>
+    private async ValueTask<DataValue> EvaluateInlineAccessorAsync(
+        InlineAccessorExpression accessor, EvaluationFrame frame, CancellationToken cancellationToken) =>
+        ToDataValue(await EvaluateInlineAccessorAsValueRefAsync(accessor, frame, cancellationToken).ConfigureAwait(false), frame);
+
+    /// <summary>
+    /// Fast path for <see cref="InlineAccessorExpression"/>: evaluates the
+    /// single argument, reads the requested per-kind inline-metadata byte
+    /// (or set of bytes) directly off <see cref="DataValue"/>, and returns
+    /// a <see cref="ValueRef"/> without invoking
+    /// <see cref="IScalarFunction.ExecuteAsync"/> on the stamped path.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// When inline metadata reads as the zero sentinel (the producing path
+    /// didn't stamp it — typically a model output or a legacy value), the
+    /// handler delegates to the original
+    /// <see cref="IInlineMetadataAccessor"/> function's <c>ExecuteAsync</c>
+    /// so the slow-path decode behaviour is preserved bit-for-bit. The
+    /// fallback dispatch reuses the standard
+    /// <see cref="ArrayPool{T}"/>-rented argument array and per-call
+    /// activity span so observability stays identical to the un-elided path.
+    /// </para>
+    /// <para>
+    /// Per-argument NULL handling matches the original functions: a NULL
+    /// input yields a NULL result of the descriptor's
+    /// <see cref="InlineAccessorDescriptors.Descriptor.ResultKind"/>.
+    /// </para>
+    /// </remarks>
+    private async ValueTask<ValueRef> EvaluateInlineAccessorAsValueRefAsync(
+        InlineAccessorExpression accessor, EvaluationFrame frame, CancellationToken cancellationToken)
+    {
+        ValueRef arg = await EvaluateAsValueRefAsync(accessor.Argument, frame, cancellationToken).ConfigureAwait(false);
+
+        InlineAccessorDescriptors.Descriptor descriptor = InlineAccessorDescriptors.Get(accessor.Field);
+
+        if (arg.IsNull)
+        {
+            return ValueRef.Null(descriptor.ResultKind);
+        }
+
+        // Fast path: per-kind inline metadata. Returns a stamped ValueRef
+        // when the producing path populated the relevant payload bytes; the
+        // common case for ingest-sourced media values.
+        ValueRef? stamped = TryReadInlineMetadata(accessor.Field, arg.InlineDataValue);
+        if (stamped is { } v)
+        {
+            return v;
+        }
+
+        // Slow path: delegate to the original function's full decode. The
+        // registry lookup mirrors EvaluateFunctionAsValueRefAsync's path so
+        // any test-time function shadow / override is honoured here too.
+        IScalarFunction? fallback = _functions.TryGetScalar(descriptor.FunctionName);
+        if (fallback is null)
+        {
+            throw new InvalidOperationException(
+                $"Inline accessor fallback function '{descriptor.FunctionName}' is not registered. " +
+                "The elider produced an InlineAccessorExpression but the registry lost the function — " +
+                "this indicates a planner/registry inconsistency.");
+        }
+
+        ValueRef[] arguments = ArrayPool<ValueRef>.Shared.Rent(1);
+        try
+        {
+            arguments[0] = arg;
+            using Activity? scalarSpan = DatumActivity.Scalars.StartActivity(descriptor.FunctionName);
+            ValueRef result = await fallback.ExecuteAsync(arguments.AsMemory(0, 1), frame, cancellationToken).ConfigureAwait(false);
+            _meter?.Add(fallback.QueryUnitCost);
+            return result;
+        }
+        finally
+        {
+            arguments.AsSpan(0, 1).Clear();
+            ArrayPool<ValueRef>.Shared.Return(arguments);
+        }
+    }
+
+    /// <summary>
+    /// Reads the inline-metadata byte(s) for <paramref name="field"/> off
+    /// <paramref name="dv"/>. Returns <see langword="null"/> when the bytes
+    /// read as the zero "unstamped" sentinel — the caller falls back to
+    /// the original function's full decode path. Each accessor here
+    /// mirrors the fast-path branch of the matching
+    /// <see cref="IInlineMetadataAccessor"/> function.
+    /// </summary>
+    private static ValueRef? TryReadInlineMetadata(InlineAccessorField field, DataValue dv)
+    {
+        switch (field)
+        {
+            case InlineAccessorField.ImageWidth:
+                ushort iw = dv.ImageWidth;
+                return iw != 0 ? ValueRef.FromInt32(iw) : null;
+            case InlineAccessorField.ImageHeight:
+                ushort ih = dv.ImageHeight;
+                return ih != 0 ? ValueRef.FromInt32(ih) : null;
+            case InlineAccessorField.AudioSampleRate:
+                uint rate = dv.AudioSampleRate;
+                return rate != 0 ? ValueRef.FromInt32(checked((int)rate)) : null;
+            case InlineAccessorField.VideoWidth:
+                ushort vw = dv.VideoWidth;
+                return vw != 0 ? ValueRef.FromInt32(vw) : null;
+            case InlineAccessorField.VideoHeight:
+                ushort vh = dv.VideoHeight;
+                return vh != 0 ? ValueRef.FromInt32(vh) : null;
+            case InlineAccessorField.PointCloudCount:
+                uint pc = dv.PointCloudCount;
+                return pc != 0 ? ValueRef.FromInt32(checked((int)pc)) : null;
+            case InlineAccessorField.PointCloudHasColor:
+                byte pcAttrs = dv.PointCloudAttributes;
+                return pcAttrs != 0
+                    ? ValueRef.FromBoolean((pcAttrs & (byte)Model.Spatial.PointCloudFlags.HasColor) != 0)
+                    : null;
+            case InlineAccessorField.MeshVertexCount:
+                uint mv = dv.MeshVertexCount;
+                return mv != 0 ? ValueRef.FromInt32(checked((int)mv)) : null;
+            case InlineAccessorField.MeshTriangleCount:
+                uint mt = dv.MeshTriangleCount;
+                return mt != 0 ? ValueRef.FromInt32(checked((int)mt)) : null;
+            case InlineAccessorField.StringByteLength:
+                // Inline String: byte length cached in _charCount.low — always
+                // present for inline strings. Non-inline reaches here as a
+                // managed-string ValueRef whose InlineDataValue is the null
+                // carrier (IsInline=false) — return null to fall back to the
+                // function's char-walk on the materialised string.
+                if (dv.IsInline && dv.Kind == DataKind.String)
+                {
+                    return ValueRef.FromInt32(dv.StringUtf8ByteLength);
+                }
+                return null;
+            case InlineAccessorField.StringCodePointLength:
+                // Inline String: code-point count cached in _charCount.high.
+                // Non-inline: fall back to the function's Rune walk.
+                if (dv.IsInline && dv.Kind == DataKind.String)
+                {
+                    return ValueRef.FromInt32(dv.InlineStringCodePointCount);
+                }
+                return null;
+            default:
+                throw new InvalidOperationException($"Unhandled InlineAccessorField: {field}");
+        }
+    }
+
+    /// <summary>
     /// Evaluates an expression as a <see cref="ValueRef"/>. Function call
     /// expressions short-circuit to <see cref="EvaluateFunctionAsValueRefAsync"/>
     /// to keep nested chains in managed memory; everything else falls back to
@@ -995,6 +1144,8 @@ public sealed class ExpressionEvaluator
         {
             case FunctionCallExpression functionCall:
                 return await EvaluateFunctionAsValueRefAsync(functionCall, frame, cancellationToken).ConfigureAwait(false);
+            case InlineAccessorExpression inlineAccessor:
+                return await EvaluateInlineAccessorAsValueRefAsync(inlineAccessor, frame, cancellationToken).ConfigureAwait(false);
             case BinaryExpression binary:
                 return await EvaluateBinaryAsValueRefAsync(binary, frame, cancellationToken).ConfigureAwait(false);
             case UnaryExpression unary:

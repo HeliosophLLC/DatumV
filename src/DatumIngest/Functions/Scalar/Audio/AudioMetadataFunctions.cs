@@ -17,10 +17,13 @@ namespace DatumIngest.Functions.Scalar.Audio;
 /// <c>audio_bit_depth</c>, <c>audio_frame_count</c>) follow the same pattern; add
 /// them when needed.
 /// </remarks>
-public sealed class AudioSampleRateFunction : IFunction, IScalarFunction
+public sealed class AudioSampleRateFunction : IFunction, IScalarFunction, IInlineMetadataAccessor
 {
     /// <inheritdoc />
     public static string Name => "audio_sample_rate";
+
+    /// <inheritdoc />
+    public InlineAccessorField Field => InlineAccessorField.AudioSampleRate;
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Image;

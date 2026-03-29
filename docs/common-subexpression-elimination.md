@@ -177,3 +177,4 @@ The duplicate `upper(name)` rewrites to a reference to `u`. No `__cse_*` column 
 - [Operators](operators.md) — runtime contract for `RowEnricherOperator` and `ModelInvocationOperator`.
 - [Execution Plans](execution-plans.md) — how these operators render in EXPLAIN.
 - [LET Bindings](sql/let-bindings.md) — the user-visible memoisation primitive that CSE complements.
+- [Planner-Time Inline-Metadata Accessor Elision](planner-time-elision.md) — sibling pass that runs immediately before CSE; rewrites cheap inline-metadata reads (`image_width`, `length`, …) so their elided form deduplicates here.

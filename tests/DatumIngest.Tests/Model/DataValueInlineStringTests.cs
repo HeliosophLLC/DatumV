@@ -123,7 +123,6 @@ public sealed class DataValueInlineStringTests : ServiceTestBase
         // (we construct an explicit >16 byte version to compare hashes for the equal-content case).
         DataValue shortViaStore = DataValue.FromUtf8Span(
             System.Text.Encoding.UTF8.GetBytes(shortForm),
-            charCount: shortForm.Length,
             Store);
         // shortForm is 5 bytes → also inline. Use a longer string for the cross check.
 

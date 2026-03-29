@@ -114,8 +114,11 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
     {
         if (_column.Kind == DataKind.String)
         {
-            int charCount = System.Text.Encoding.UTF8.GetCharCount(payload);
-            return DataValue.FromUtf8Span(payload, charCount, store: null!);
+            // FromUtf8Span computes the code-point count from the bytes itself
+            // — the same single byte walk that would be needed here, so no
+            // duplicate count required at the call site. The inline branch
+            // (payload <= MaxInlineUtf8Bytes) skips the unused store argument.
+            return DataValue.FromUtf8Span(payload, store: null!);
         }
 
         // All fixed-width typed-array kinds (UInt8/Int8/.../Float64, plus the new

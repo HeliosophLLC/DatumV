@@ -832,6 +832,7 @@ public static class QueryExplainer
             LikeExpression like => $"{FormatExpression(like.Expression)} {(like.CaseInsensitive ? "ILIKE" : "LIKE")} {FormatExpression(like.Pattern)} ESCAPE {FormatExpression(like.EscapeCharacter)}",
             UnaryExpression unary => FormatUnary(unary),
             FunctionCallExpression func => FormatFunctionCall(func),
+            InlineAccessorExpression iax => $"{InlineAccessorDescriptors.Get(iax.Field).FunctionName}({FormatExpression(iax.Argument)})",
             InExpression inExpr => $"{FormatExpression(inExpr.Expression)} {(inExpr.Negated ? "NOT IN" : "IN")} ({string.Join(", ", inExpr.Values.Select(FormatExpression))})",
             BetweenExpression between => $"{FormatExpression(between.Expression)} {(between.Negated ? "NOT BETWEEN" : "BETWEEN")} {FormatExpression(between.Low)} AND {FormatExpression(between.High)}",
             IsNullExpression isNull => $"{FormatExpression(isNull.Expression)} {(isNull.Negated ? "IS NOT NULL" : "IS NULL")}",
@@ -893,6 +894,11 @@ public static class QueryExplainer
             LikeExpression like => $"{Fingerprint(like.Expression)} {(like.CaseInsensitive ? "ILIKE" : "LIKE")} {Fingerprint(like.Pattern)} ESCAPE {Fingerprint(like.EscapeCharacter)}",
             UnaryExpression unary => FingerprintUnary(unary),
             FunctionCallExpression func => $"{func.FunctionName.ToLowerInvariant()}({(func.Distinct ? "DISTINCT " : "")}{string.Join(", ", func.Arguments.Select(Fingerprint))})",
+            // Elided accessor: fingerprint as the canonical function name so the
+            // CSE/dedup buckets line up with both the pre-elision call and any
+            // hand-written ones still in the tree. Equality on InlineAccessorExpression
+            // is the structural gate; Fingerprint exists only for human readability.
+            InlineAccessorExpression iax => $"{InlineAccessorDescriptors.Get(iax.Field).FunctionName}({Fingerprint(iax.Argument)})",
             InExpression inExpr => $"{Fingerprint(inExpr.Expression)} {(inExpr.Negated ? "NOT IN" : "IN")} ({string.Join(", ", inExpr.Values.Select(Fingerprint))})",
             BetweenExpression between => $"{Fingerprint(between.Expression)} {(between.Negated ? "NOT BETWEEN" : "BETWEEN")} {Fingerprint(between.Low)} AND {Fingerprint(between.High)}",
             IsNullExpression isNull => $"{Fingerprint(isNull.Expression)} {(isNull.Negated ? "IS NOT NULL" : "IS NULL")}",
