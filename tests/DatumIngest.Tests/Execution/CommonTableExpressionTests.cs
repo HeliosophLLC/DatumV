@@ -321,6 +321,35 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Regression for the SELECT * + aliased source leak. When a CTE body is
+    /// <c>SELECT * FROM t inner_alias</c>, the inner alias previously qualified
+    /// the CTE's output column names (e.g. <c>inner_alias.col</c>), so when the
+    /// outer query re-aliased the CTE (<c>cte outer_alias</c>) and referenced
+    /// <c>outer_alias.col</c>, the lookup failed. The output column names of a
+    /// single-source <c>SELECT *</c> must be unqualified — PostgreSQL semantics
+    /// for <c>SELECT * FROM t alias</c>.
+    /// </summary>
+    [Fact]
+    public async Task Execute_CteWithStarOnAliasedSource_OuterAliasResolvesColumns()
+    {
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "val"],
+            [1f, 10f],
+            [2f, 20f]);
+
+        List<Row> results = await ExecuteQueryAsync(
+            "WITH frames AS (SELECT * FROM t inner_alias) " +
+            "SELECT outer_alias.id, outer_alias.val FROM frames outer_alias",
+            catalog);
+
+        Assert.Equal(2, results.Count);
+        Assert.Equal(1f, results[0]["id"].AsFloat32());
+        Assert.Equal(10f, results[0]["val"].AsFloat32());
+        Assert.Equal(2f, results[1]["id"].AsFloat32());
+        Assert.Equal(20f, results[1]["val"].AsFloat32());
+    }
+
+    /// <summary>
     /// <see cref="QuerySchemaResolver"/> should return only the columns projected by the
     /// CTE's SELECT clause, not all columns from the underlying table. This matches what
     /// execution actually emits and what the shell header should display.

@@ -1072,33 +1072,52 @@ public sealed class QueryPlanner
         // ProjectOperator emits columns in the original FROM/JOIN declaration
         // order even when greedy join reordering has swapped the physical probe
         // and build sides.
-        if (statement.Joins is not null
-            && projectionColumns.Count == 1
+        //
+        // For single-source SELECT * where the source carries an explicit alias,
+        // expand to `alias.*` with QualifyOutput=false. The AliasOperator wraps
+        // the source's columns with qualified physical names (`alias.col`); without
+        // this rewrite the wildcard passthrough leaks those qualified names into
+        // the output, breaking outer-query references when the result is later
+        // re-aliased (e.g. `WITH cte AS (SELECT * FROM t a) SELECT c.col FROM cte c`
+        // would fail to resolve `c.col` because the CTE's output column is `a.col`).
+        if (projectionColumns.Count == 1
             && projectionColumns[0] is SelectAllColumns selectAll)
         {
-            List<SelectColumn> expanded = new();
-
-            if (statement.From is not null)
+            if (statement.Joins is not null)
             {
-                string? fromAlias = GetSourceAlias(statement.From.Source);
-                if (fromAlias is not null)
+                List<SelectColumn> expanded = new();
+
+                if (statement.From is not null)
                 {
-                    expanded.Add(new SelectTableColumns(fromAlias, ExcludedColumns: selectAll.ExcludedColumns, ReplacedColumns: selectAll.ReplacedColumns, QualifyOutput: true));
+                    string? fromAlias = GetSourceAlias(statement.From.Source);
+                    if (fromAlias is not null)
+                    {
+                        expanded.Add(new SelectTableColumns(fromAlias, ExcludedColumns: selectAll.ExcludedColumns, ReplacedColumns: selectAll.ReplacedColumns, QualifyOutput: true));
+                    }
+                }
+
+                foreach (JoinClause join in statement.Joins)
+                {
+                    string? joinAlias = GetSourceAlias(join.Source);
+                    if (joinAlias is not null)
+                    {
+                        expanded.Add(new SelectTableColumns(joinAlias, ExcludedColumns: selectAll.ExcludedColumns, ReplacedColumns: selectAll.ReplacedColumns, QualifyOutput: true));
+                    }
+                }
+
+                if (expanded.Count > 0)
+                {
+                    projectionColumns = expanded;
                 }
             }
-
-            foreach (JoinClause join in statement.Joins)
+            else if (statement.From is not null
+                && GetExplicitSourceAlias(statement.From.Source) is string explicitAlias)
             {
-                string? joinAlias = GetSourceAlias(join.Source);
-                if (joinAlias is not null)
-                {
-                    expanded.Add(new SelectTableColumns(joinAlias, ExcludedColumns: selectAll.ExcludedColumns, ReplacedColumns: selectAll.ReplacedColumns, QualifyOutput: true));
-                }
-            }
-
-            if (expanded.Count > 0)
-            {
-                projectionColumns = expanded;
+                projectionColumns = [new SelectTableColumns(
+                    explicitAlias,
+                    ExcludedColumns: selectAll.ExcludedColumns,
+                    ReplacedColumns: selectAll.ReplacedColumns,
+                    QualifyOutput: false)];
             }
         }
 
@@ -3336,6 +3355,22 @@ public sealed class QueryPlanner
         {
             TableReference tableRef => tableRef.Alias ?? tableRef.Name,
             SubquerySource subquery => subquery.Alias,
+            FunctionSource functionSource => functionSource.Alias,
+            _ => null,
+        };
+    }
+
+    // Returns the source's *explicit* alias only. Differs from GetSourceAlias
+    // by not falling back to the table name when no AS clause was written —
+    // used to detect whether an AliasOperator wraps the source (and thus
+    // whether its physical columns carry a qualified `alias.col` prefix).
+    // FunctionSource without an alias is left unwrapped by the planner;
+    // SubquerySource is wrapped by SubqueryOperator (passthrough, no prefix).
+    private static string? GetExplicitSourceAlias(TableSource source)
+    {
+        return source switch
+        {
+            TableReference tableRef => tableRef.Alias,
             FunctionSource functionSource => functionSource.Alias,
             _ => null,
         };
