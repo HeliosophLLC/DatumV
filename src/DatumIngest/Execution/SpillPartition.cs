@@ -43,7 +43,15 @@ internal sealed class SpillPartition : IDisposable
     private List<Row>? _buildRows = new();
     private List<Row>? _probeRows = new();
 
-    private SpillReaderWriter? _spiller;
+    // Build and probe sides spill to separate SpillReaderWriter instances. They legitimately
+    // have different schemas (different aliases, and — in a JOIN — different column counts
+    // when projections trim each side independently), so a single shared spiller's per-slot
+    // schema would mismatch the row stride and crash mid-write. Each spiller uses its own
+    // file-backed consolidated arena; for JOIN keys (typically inline values) cross-arena
+    // equality "just works", so the shared-arena invariant the doc claims for hash-partitioned
+    // set operations doesn't apply here.
+    private SpillReaderWriter? _buildSpiller;
+    private SpillReaderWriter? _probeSpiller;
     private bool _buildSpilled;
     private bool _probeSpilled;
     private int _spilledBuildRowCount;
@@ -51,15 +59,13 @@ internal sealed class SpillPartition : IDisposable
 
     private RowBatch? _buildStaging;
     private RowBatch? _probeStaging;
+    private bool _disposed;
 
     /// <summary>
-    /// Per-slot column lookup. Build and probe rows typically have different
-    /// schemas (different aliases), so a single shared <see cref="_spillSchema"/>
-    /// would carry the wrong column names for one side at replay time. The
-    /// spiller's row-stride uses <see cref="_spillSchema"/>'s column count
-    /// (which must match both sides' counts), but each replay yields rows
-    /// rebound to its slot's lookup so column-name resolution works on
-    /// either side.
+    /// Per-slot column lookup. Build and probe rows have legitimately different schemas —
+    /// different aliases and (under independent projection) different column counts.
+    /// Each side's spiller is constructed with the matching schema so the row stride and
+    /// column-iteration loops use the correct count.
     /// </summary>
     private ColumnLookup? _buildSchema;
     private ColumnLookup? _probeSchema;
@@ -74,7 +80,6 @@ internal sealed class SpillPartition : IDisposable
     private readonly Pool _arenaPool;
     private readonly ExecutionContext _context;
     private Arena? _retentionArena;
-    private ColumnLookup? _spillSchema;
 
     /// <summary>
     /// Creates a new partition.
@@ -143,7 +148,6 @@ internal sealed class SpillPartition : IDisposable
     /// </param>
     internal void AddBuildRow(Row row, Arena? sourceArena)
     {
-        _spillSchema ??= row.ColumnLookup;
         _buildSchema ??= row.ColumnLookup;
 
         if (_buildSpilled)
@@ -161,7 +165,6 @@ internal sealed class SpillPartition : IDisposable
     /// </summary>
     internal void AddProbeRow(Row row, Arena? sourceArena)
     {
-        _spillSchema ??= row.ColumnLookup;
         _probeSchema ??= row.ColumnLookup;
 
         if (_probeSpilled)
@@ -200,10 +203,11 @@ internal sealed class SpillPartition : IDisposable
 
     private void AppendToStaging(ref RowBatch? staging, Row row, Arena? sourceArena, int spillSlot)
     {
-        EnsureSpiller();
+        SpillReaderWriter spiller = EnsureSpiller(spillSlot);
+        ColumnLookup slotSchema = spillSlot == BuildSlot ? _buildSchema! : _probeSchema!;
         if (staging is null)
         {
-            staging = _arenaPool.RentRowBatch(_spillSchema!, SpillStagingCapacity, arena: null);
+            staging = _arenaPool.RentRowBatch(slotSchema, SpillStagingCapacity, arena: null);
         }
 
         DataValue[] values = _arenaPool.RentDataValues(row.RawValues.Length);
@@ -225,11 +229,18 @@ internal sealed class SpillPartition : IDisposable
 
         if (staging.IsFull)
         {
+            // Null the field BEFORE handing the batch to the spiller. If
+            // spiller.Write throws mid-body, its finally still disposes the
+            // batch — leaving the field pointing at a disposed batch would
+            // cause SpillPartition.Dispose() to throw an ObjectDisposedException
+            // in its own finally, replacing the original exception and hiding
+            // the real failure cause.
             int flushed = staging.Count;
-            _spiller!.Write(staging, spillSlot);
+            RowBatch toFlush = staging;
+            staging = null;
+            spiller.Write(toFlush, partition: 0);
             if (spillSlot == BuildSlot) _spilledBuildRowCount += flushed;
             else _spilledProbeRowCount += flushed;
-            staging = null;
         }
     }
 
@@ -244,8 +255,11 @@ internal sealed class SpillPartition : IDisposable
             return;
         }
 
-        EnsureSpiller();
-        FlushInMemoryRowsToSpill(_buildRows, BuildSlot);
+        if (_buildSchema is not null)
+        {
+            EnsureSpiller(BuildSlot);
+            FlushInMemoryRowsToSpill(_buildRows, BuildSlot);
+        }
         ReturnInMemoryArrays(_buildRows);
         _buildRows = null;
         _buildSpilled = true;
@@ -262,40 +276,70 @@ internal sealed class SpillPartition : IDisposable
             return;
         }
 
-        EnsureSpiller();
-        FlushInMemoryRowsToSpill(_probeRows, ProbeSlot);
+        if (_probeSchema is not null)
+        {
+            EnsureSpiller(ProbeSlot);
+            FlushInMemoryRowsToSpill(_probeRows, ProbeSlot);
+        }
         ReturnInMemoryArrays(_probeRows);
         _probeRows = null;
         _probeSpilled = true;
     }
 
-    private void EnsureSpiller()
+    /// <summary>
+    /// Returns the spiller for the given slot, lazily constructing it. Each slot has its
+    /// own <see cref="SpillReaderWriter"/> with its own file-backed consolidated arena
+    /// because build and probe schemas — and therefore row strides — legitimately differ.
+    /// </summary>
+    private SpillReaderWriter EnsureSpiller(int spillSlot)
     {
-        if (_spiller is not null)
+        if (spillSlot == BuildSlot)
         {
-            return;
+            if (_buildSpiller is null)
+            {
+                if (_buildSchema is null)
+                {
+                    throw new InvalidOperationException(
+                        "SpillPartition build-side spiller requested before the first " +
+                        "build row established the schema.");
+                }
+                Directory.CreateDirectory(_spillDirectory);
+                _buildSpiller = new SpillReaderWriter(
+                    _arenaPool,
+                    _buildSchema,
+                    Path.Combine(_spillDirectory, "build"));
+            }
+            return _buildSpiller;
         }
-
-        if (_spillSchema is null)
+        else
         {
-            // No rows ever added — defer until something is actually written. The spill
-            // flag is set regardless so future AddBuildRow/AddProbeRow take the spilled path,
-            // which captures the schema from the first row.
-            return;
+            if (_probeSpiller is null)
+            {
+                if (_probeSchema is null)
+                {
+                    throw new InvalidOperationException(
+                        "SpillPartition probe-side spiller requested before the first " +
+                        "probe row established the schema.");
+                }
+                Directory.CreateDirectory(_spillDirectory);
+                _probeSpiller = new SpillReaderWriter(
+                    _arenaPool,
+                    _probeSchema,
+                    Path.Combine(_spillDirectory, "probe"));
+            }
+            return _probeSpiller;
         }
-
-        Directory.CreateDirectory(_spillDirectory);
-        _spiller = new SpillReaderWriter(_arenaPool, _spillSchema, _spillDirectory, partitionCount: 2);
     }
 
     private void FlushInMemoryRowsToSpill(List<Row>? rows, int spillSlot)
     {
-        if (rows is null || rows.Count == 0 || _spillSchema is null)
+        if (rows is null || rows.Count == 0)
         {
             return;
         }
 
-        EnsureSpiller();
+        SpillReaderWriter spiller = EnsureSpiller(spillSlot);
+        ColumnLookup slotSchema = spillSlot == BuildSlot ? _buildSchema! : _probeSchema!;
 
         // Chunk the in-memory rows into batches that share the retention arena. Stabilize is a
         // no-op when source equals target, so the spiller's Stabilize-on-write detects that the
@@ -308,7 +352,7 @@ internal sealed class SpillPartition : IDisposable
         for (int start = 0; start < total; start += chunkSize)
         {
             int batchSize = System.Math.Min(chunkSize, total - start);
-            RowBatch batch = _arenaPool.RentRowBatch(_spillSchema, batchSize, retention);
+            RowBatch batch = _arenaPool.RentRowBatch(slotSchema, batchSize, retention);
 
             for (int i = 0; i < batchSize; i++)
             {
@@ -320,7 +364,7 @@ internal sealed class SpillPartition : IDisposable
             // pool.ReturnRowBatch → PoolBacking.ReturnRowBatch. Both LocalBufferPool.Rent and
             // PoolBacking.RentDataValues hand out arrays from the same backing PoolBacking, so the
             // return path is symmetric.
-            _spiller!.Write(batch, spillSlot);
+            spiller.Write(batch, partition: 0);
             if (spillSlot == BuildSlot) _spilledBuildRowCount += batchSize;
             else _spilledProbeRowCount += batchSize;
         }
@@ -377,21 +421,26 @@ internal sealed class SpillPartition : IDisposable
 
     private void FlushStagingToSpill(ref RowBatch? staging, int spillSlot)
     {
-        if (staging is null || staging.Count == 0)
+        if (staging is null) return;
+
+        // Same null-before-act pattern as AppendToStaging: capture the batch in a
+        // local, null the field, then dispatch. If the pool/spiller throws while
+        // returning or writing, the field is already null and Dispose won't trip
+        // on a half-disposed batch in its own finally.
+        RowBatch toFlush = staging;
+        staging = null;
+
+        if (toFlush.Count == 0)
         {
-            if (staging is not null)
-            {
-                _arenaPool.ReturnRowBatch(staging);
-                staging = null;
-            }
+            _arenaPool.ReturnRowBatch(toFlush);
             return;
         }
 
-        int flushed = staging.Count;
-        _spiller!.Write(staging, spillSlot);
+        int flushed = toFlush.Count;
+        SpillReaderWriter spiller = EnsureSpiller(spillSlot);
+        spiller.Write(toFlush, partition: 0);
         if (spillSlot == BuildSlot) _spilledBuildRowCount += flushed;
         else _spilledProbeRowCount += flushed;
-        staging = null;
     }
 
     private async IAsyncEnumerable<Row> ReplaySlotAsync(
@@ -399,15 +448,16 @@ internal sealed class SpillPartition : IDisposable
         ColumnLookup outputLookup,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if (_spiller is null)
+        SpillReaderWriter? spiller = spillSlot == BuildSlot ? _buildSpiller : _probeSpiller;
+        if (spiller is null)
         {
             yield break;
         }
 
         _replayBatches ??= new List<RowBatch>();
 
-        await foreach (RowBatch batch in _spiller
-            .ReplayPartitionAsync(_context, outputLookup, spillSlot)
+        await foreach (RowBatch batch in spiller
+            .ReplayPartitionAsync(_context, outputLookup, partition: 0)
             .WithCancellation(cancellationToken)
             .ConfigureAwait(false))
         {
@@ -422,9 +472,23 @@ internal sealed class SpillPartition : IDisposable
     /// <summary>
     /// Disposes the partition: closes spill files, returns retained replay batches and the
     /// retention arena, and deletes the temporary spill directory.
+    /// Throws on double-Dispose — a second call indicates a bug in the caller's
+    /// lifecycle (e.g. both a normal-path Dispose and a finally-path Dispose firing
+    /// for the same partition instance), and we want the stack trace to localise it
+    /// rather than silently corrupting pool accounting.
     /// </summary>
     public void Dispose()
     {
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(
+                nameof(SpillPartition),
+                "SpillPartition.Dispose() called twice on the same instance. " +
+                "This indicates a lifecycle bug in the join executor — each partition " +
+                "should be disposed exactly once at the end of the join.");
+        }
+        _disposed = true;
+
         if (_buildStaging is not null)
         {
             _arenaPool.ReturnRowBatch(_buildStaging);
@@ -465,8 +529,10 @@ internal sealed class SpillPartition : IDisposable
         _buildRows = null;
         _probeRows = null;
 
-        _spiller?.Dispose();
-        _spiller = null;
+        _buildSpiller?.Dispose();
+        _buildSpiller = null;
+        _probeSpiller?.Dispose();
+        _probeSpiller = null;
 
         if (_retentionArena is not null && _arenaPool is not null)
         {

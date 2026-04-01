@@ -456,6 +456,170 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Regression for the SpillPartition single-schema assumption. Build side
+    /// has 4 columns, probe side has 2 — under spill, the shared
+    /// <c>_spillSchema</c> is set from whichever side gets there first, then
+    /// <c>SpillReaderWriter.Write</c> iterates <c>columnCount = _schema.Count</c>
+    /// against a row whose <c>RawValues.Length</c> doesn't match, throwing
+    /// ArgumentOutOfRangeException from <c>Row.get_Item</c>. The current code
+    /// path docs this as an invariant ("must match both sides' counts") but
+    /// doesn't enforce it — JOINs where the two sides legitimately have
+    /// different column counts crash when spill kicks in.
+    /// </summary>
+    [Fact]
+    public async Task Execute_JoinWithSpill_DifferentColumnCounts_DoesNotThrow()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("a", ["k", "v1", "v2", "v3"],
+            [1f, 10f, 100f, 1000f],
+            [2f, 20f, 200f, 2000f]));
+        catalog.Add(CreateProvider("b", ["k", "w"],
+            [1f, 11f],
+            [2f, 22f]));
+
+        ExecutionContext context = CreateExecutionContext(
+            catalog: catalog,
+            memoryBudgetBytes: 1); // Force spill.
+
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "SELECT a.k, a.v1, a.v2, a.v3, b.w FROM a JOIN b ON a.k = b.k")).Statement;
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+        QueryOperator plan = planner.Plan(statement);
+        List<Row> results = await plan.CollectRowsAsync(context);
+
+        Assert.Equal(2, results.Count);
+    }
+
+    /// <summary>
+    /// Regression for "Cannot access a disposed object: 'RowBatch'" with stack
+    ///   RowBatch.get_Arena() → PoolBacking.Return → SpillPartition.Dispose
+    ///   ← GraceHashJoinExecutor.ExecuteAsync ← JoinOperator
+    ///   ← ProjectOperator ← RecursiveCommonTableExpressionOperator.MaterializeAsync
+    /// Forces the GraceHashJoin spill path inside the recursive member by setting
+    /// a tiny memory budget; the JOIN's probe side spills (AppendToStaging into
+    /// _probeStaging), and SpillPartition.Dispose later trips on a disposed batch
+    /// whose field reference was never nulled.
+    /// </summary>
+    [Fact]
+    public async Task Execute_RecursiveCte_JoinWithSpill_DoesNotDisposeRowBatch()
+    {
+        TableCatalog catalog = CreateCatalog("seq",
+            columns: ["n"],
+            [0f], [1f], [2f], [3f], [4f]);
+
+        ExecutionContext context = CreateExecutionContext(
+            catalog: catalog,
+            memoryBudgetBytes: 1, // Forces spill immediately on any add.
+            maxRecursionDepth: 100);
+
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH RECURSIVE " +
+            "steps AS (SELECT n, [n * 1.0, n * 2.0] AS val FROM seq), " +
+            "accumulated AS (" +
+            "  SELECT n, val AS cumulative FROM steps WHERE n = 0 " +
+            "  UNION ALL " +
+            "  SELECT s.n, [a.cumulative[0] + s.val[0], a.cumulative[1] + s.val[1]] " +
+            "  FROM accumulated a JOIN steps s ON s.n = a.n + 1" +
+            ") " +
+            "SELECT n FROM accumulated")).Statement;
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+        QueryOperator plan = planner.Plan(statement);
+        List<Row> results = await plan.CollectRowsAsync(context);
+
+        Assert.Equal(5, results.Count);
+    }
+
+    /// <summary>
+    /// Regression for "Cannot access a disposed object: 'RowBatch'" reproduced from
+    /// a recursive pose-chain query. The user's failing query chains four CTEs:
+    /// <c>frames</c> (TVF) → <c>prev_curr</c> (LEFT SELF-JOIN of frames) →
+    /// <c>step_poses</c> (per-frame computation) → <c>accumulated</c> (RECURSIVE,
+    /// joins working table against step_poses). The structural elements likely
+    /// involved: <c>frames</c> referenced twice in <c>prev_curr</c> (auto-materialised),
+    /// <c>step_poses</c> referenced twice in <c>accumulated</c> (anchor + recursive
+    /// member, auto-materialised), recursive member JOIN against a materialised
+    /// helper CTE, and Array-kind columns carrying arena-backed payloads across
+    /// iterations.
+    /// </summary>
+    [Fact]
+    public async Task Execute_RecursiveCte_ChainedCtesWithArrayColumns_DoesNotDisposeRowBatch()
+    {
+        TableCatalog catalog = CreateCatalog("seq",
+            columns: ["n"],
+            [0f], [1f], [2f], [3f], [4f]);
+
+        // Mirrors the user's CTE chain shape:
+        //   frames-equivalent: SELECT n FROM seq
+        //   prev_curr: LEFT SELF-JOIN of frames (frames referenced twice → auto-mat)
+        //   step_poses: per-row computation including an array column (step_poses
+        //               referenced twice in accumulated → auto-mat)
+        //   accumulated: RECURSIVE seed at n=0, recurse via JOIN with step_poses
+        List<Row> results = await ExecuteQueryAsync(
+            "WITH RECURSIVE " +
+            "frames AS (SELECT n FROM seq), " +
+            "prev_curr AS (" +
+            "  SELECT f1.n, f2.n AS prev " +
+            "  FROM frames f1 LEFT JOIN frames f2 ON f2.n = f1.n - 1" +
+            "), " +
+            "step_poses AS (" +
+            "  SELECT n, [n * 1.0, n * 2.0, n * 3.0] AS step " +
+            "  FROM prev_curr" +
+            "), " +
+            "accumulated AS (" +
+            "  SELECT n, step AS cumulative FROM step_poses WHERE n = 0 " +
+            "  UNION ALL " +
+            "  SELECT s.n, [a.cumulative[0] + s.step[0], a.cumulative[1] + s.step[1], a.cumulative[2] + s.step[2]] " +
+            "  FROM accumulated a JOIN step_poses s ON s.n = a.n + 1" +
+            ") " +
+            "SELECT n, cumulative FROM accumulated",
+            catalog);
+
+        Assert.Equal(5, results.Count);
+    }
+
+    /// <summary>
+    /// Regression for "Cannot access a disposed object: 'RowBatch'" when the recursive
+    /// member JOINs the working table against a separately-defined non-recursive CTE.
+    /// Shape: anchor seeds from the helper CTE at n=0; each iteration joins working
+    /// table against the helper CTE on n = a.n + 1. Reproduces a recursive pose-chain
+    /// pattern (anchor + cumulative-composition via JOIN against per-frame data).
+    /// </summary>
+    [Fact]
+    public async Task Execute_RecursiveCte_JoinsHelperCte_DoesNotDisposeRowBatch()
+    {
+        TableCatalog catalog = CreateCatalog("seq",
+            columns: ["n", "val"],
+            [0f, 10f],
+            [1f, 20f],
+            [2f, 30f],
+            [3f, 40f],
+            [4f, 50f]);
+
+        List<Row> results = await ExecuteQueryAsync(
+            "WITH RECURSIVE " +
+            "steps AS (SELECT n, val FROM seq), " +
+            "accumulated AS (" +
+            "  SELECT n, val AS cumulative FROM steps WHERE n = 0 " +
+            "  UNION ALL " +
+            "  SELECT s.n, a.cumulative + s.val " +
+            "  FROM accumulated a JOIN steps s ON s.n = a.n + 1" +
+            ") " +
+            "SELECT n, cumulative FROM accumulated",
+            catalog);
+
+        Assert.Equal(5, results.Count);
+        // Each row's cumulative = sum of vals 10 + 20 + ... up to that frame.
+        float[] expected = [10f, 30f, 60f, 100f, 150f];
+        for (int i = 0; i < 5; i++)
+        {
+            Assert.Equal(i, (int)results[i]["n"].AsFloat32());
+            Assert.Equal(expected[i], results[i]["cumulative"].AsFloat32());
+        }
+    }
+
+    /// <summary>
     /// Recursive CTE under a tiny memory budget transitions to spill mode at an iteration
     /// boundary. All rows (anchor + every iteration) must round-trip through the spill file
     /// and replay correctly. Load-bearing for the multi-tenant story: a runaway recursion
