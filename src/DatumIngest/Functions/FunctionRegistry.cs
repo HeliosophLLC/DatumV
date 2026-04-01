@@ -640,6 +640,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Arrays.ArrayNdimsFunction>();
         registry.RegisterScalar<Scalar.Arrays.CardinalityFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayResize2DFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayMinFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayMaxFunction>();
 
         // UUID
         registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();
