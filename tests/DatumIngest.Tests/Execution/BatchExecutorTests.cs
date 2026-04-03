@@ -586,10 +586,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
         BatchResult result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
             "FOR row IN (SELECT id, amount FROM orders) " +
-            "  SET sum = sum + row[1]",
+            "  SET sum = sum + row[2]",
             catalog);
 
-        // 10 + 20 + 30 — positional access via ordinal index 1 picks `amount`.
+        // 10 + 20 + 30 — positional access via 1-based ordinal index 2 picks `amount`.
         Assert.Equal(60, Convert.ToInt32(result.FinalBindings["sum"]));
         // row went out of scope.
         Assert.False(result.FinalBindings.ContainsKey("row"));

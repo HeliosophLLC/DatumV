@@ -48,8 +48,8 @@ public sealed class MultiDimFlatteningTests : ServiceTestBase, IAsyncLifetime
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT cardinality(array_concat(a, b)) AS total," +
             "       array_ndims(array_concat(a, b))  AS nd," +
-            "       array_get(array_concat(a, b), 0) AS first," +
-            "       array_get(array_concat(a, b), 7) AS last " +
+            "       array_get(array_concat(a, b), 1) AS first," +
+            "       array_get(array_concat(a, b), 8) AS last " +
             "FROM t", catalog);
 
         Assert.Equal(8, rows[0]["total"].AsInt32());  // 4 + 4 flat
@@ -70,10 +70,10 @@ public sealed class MultiDimFlatteningTests : ServiceTestBase, IAsyncLifetime
 
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT cardinality(array_concat(m, v))   AS total," +
-            "       array_get(array_concat(m, v), 0)  AS first_from_m," +
-            "       array_get(array_concat(m, v), 5)  AS last_from_m," +
-            "       array_get(array_concat(m, v), 6)  AS first_from_v," +
-            "       array_get(array_concat(m, v), 7)  AS last_from_v " +
+            "       array_get(array_concat(m, v), 1)  AS first_from_m," +
+            "       array_get(array_concat(m, v), 6)  AS last_from_m," +
+            "       array_get(array_concat(m, v), 7)  AS first_from_v," +
+            "       array_get(array_concat(m, v), 8)  AS last_from_v " +
             "FROM t", catalog);
 
         Assert.Equal(8, rows[0]["total"].AsInt32());
@@ -114,12 +114,12 @@ public sealed class MultiDimFlatteningTests : ServiceTestBase, IAsyncLifetime
         // m as a flat span via array_concat with an empty-equivalent (m itself)
         // and then read positions 0..5 to confirm row-major order.
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT array_get(m, 0, 0) AS r0c0," +
-            "       array_get(m, 0, 1) AS r0c1," +
-            "       array_get(m, 0, 2) AS r0c2," +
-            "       array_get(m, 1, 0) AS r1c0," +
-            "       array_get(m, 1, 1) AS r1c1," +
-            "       array_get(m, 1, 2) AS r1c2 " +
+            "SELECT array_get(m, 1, 1) AS r0c0," +
+            "       array_get(m, 1, 2) AS r0c1," +
+            "       array_get(m, 1, 3) AS r0c2," +
+            "       array_get(m, 2, 1) AS r1c0," +
+            "       array_get(m, 2, 2) AS r1c1," +
+            "       array_get(m, 2, 3) AS r1c2 " +
             "FROM t", catalog);
 
         Assert.Equal(1, rows[0]["r0c0"].AsInt32());

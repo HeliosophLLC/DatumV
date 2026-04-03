@@ -6,15 +6,16 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar.Vector;
 
 /// <summary>
-/// <c>argmax(values FLOAT32[]) → INT32</c>. Returns the index of the
-/// largest element. The classic classifier read: <c>argmax(logits)</c>
-/// gives you the predicted class id.
+/// <c>argmax(values FLOAT32[]) → INT32</c>. Returns the 1-based index of
+/// the largest element so the result is directly usable with the SQL
+/// bracket accessor (e.g. <c>labels[argmax(probs)]</c>).
 /// </summary>
 /// <remarks>
-/// Ties resolve to the lowest index — same convention as
-/// <c>numpy.argmax</c> / PyTorch's <c>torch.argmax</c>. <c>NaN</c>
-/// behaviour matches the IEEE-754 default (NaN doesn't compare greater).
-/// Empty input throws — there is no defensible "argmax of nothing."
+/// Ties resolve to the lowest index. <c>NaN</c> behaviour matches the
+/// IEEE-754 default (NaN doesn't compare greater). Empty input throws —
+/// there is no defensible "argmax of nothing." Result is 1-based to
+/// match PostgreSQL-style array indexing; subtract 1 if you need a
+/// numpy-style offset.
 /// </remarks>
 public sealed class ArgmaxFunction : IFunction, IScalarFunction
 {
@@ -26,7 +27,7 @@ public sealed class ArgmaxFunction : IFunction, IScalarFunction
 
     /// <inheritdoc />
     public static string Description =>
-        "Returns the index of the largest element in a Float32 vector: " +
+        "Returns the 1-based index of the largest element in a Float32 vector: " +
         "argmax(values FLOAT32[]) → INT32. " +
         "Ties resolve to the lowest index; empty input throws.";
 
@@ -74,16 +75,17 @@ public sealed class ArgmaxFunction : IFunction, IScalarFunction
                 best = i;
             }
         }
-        return new(ValueRef.FromInt32(best));
+        // 1-based to match SQL bracket accessor: labels[argmax(probs)].
+        return new(ValueRef.FromInt32(best + 1));
     }
 }
 
 /// <summary>
-/// <c>topk(values FLOAT32[], k INT) → INT32[]</c>. Returns the indices of
-/// the top-k elements sorted by value, descending. Users index back into
-/// the original array for the values; keeping the function's return type
-/// flat (just indices) makes it SQL-composable without needing
-/// struct-shaped returns.
+/// <c>topk(values FLOAT32[], k INT) → INT32[]</c>. Returns the 1-based
+/// indices of the top-k elements sorted by value, descending. Users index
+/// back into the original array for the values; keeping the function's
+/// return type flat (just indices) makes it SQL-composable without
+/// needing struct-shaped returns.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -106,7 +108,7 @@ public sealed class TopkFunction : IFunction, IScalarFunction
 
     /// <inheritdoc />
     public static string Description =>
-        "Returns indices of the top-k elements in descending order of value: " +
+        "Returns 1-based indices of the top-k elements in descending order of value: " +
         "topk(values FLOAT32[], k INT) → INT32[]. " +
         "When k > length, returns all indices; ties resolve to ascending index.";
 
@@ -164,8 +166,10 @@ public sealed class TopkFunction : IFunction, IScalarFunction
             return cmp != 0 ? cmp : a.CompareTo(b);     // tie → ascending by index
         });
 
+        // 1-based output so callers can index back via SQL brackets:
+        //   array_get(values, topk(values, k)[i])
         int[] output = new int[kClamped];
-        Array.Copy(indices, output, kClamped);
+        for (int i = 0; i < kClamped; i++) output[i] = indices[i] + 1;
         return new(ValueRef.FromPrimitiveArray(output, DataKind.Int32));
     }
 }

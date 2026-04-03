@@ -90,10 +90,10 @@ public sealed class ArrayShapeGetFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])");
 
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT array_get(m, 0, 0) AS a, " +
-            "       array_get(m, 0, 2) AS b, " +
-            "       array_get(m, 1, 0) AS c, " +
-            "       array_get(m, 1, 2) AS d " +
+            "SELECT array_get(m, 1, 1) AS a, " +
+            "       array_get(m, 1, 3) AS b, " +
+            "       array_get(m, 2, 1) AS c, " +
+            "       array_get(m, 2, 3) AS d " +
             "FROM t",
             catalog);
 
@@ -111,9 +111,9 @@ public sealed class ArrayShapeGetFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("INSERT INTO t VALUES ([0, 1, 2, 3, 4, 5, 6, 7])");
 
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT array_get(cube, 0, 0, 0) AS a, " +
-            "       array_get(cube, 1, 1, 1) AS b, " +
-            "       array_get(cube, 0, 1, 0) AS c " +
+            "SELECT array_get(cube, 1, 1, 1) AS a, " +
+            "       array_get(cube, 2, 2, 2) AS b, " +
+            "       array_get(cube, 1, 2, 1) AS c " +
             "FROM t",
             catalog);
 
@@ -130,7 +130,7 @@ public sealed class ArrayShapeGetFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("INSERT INTO t VALUES ([10.0, 20.0, 30.0, 40.0])");
 
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT array_get(v, 0) AS a, array_get(v, 3) AS b FROM t",
+            "SELECT array_get(v, 1) AS a, array_get(v, 4) AS b FROM t",
             catalog);
 
         Assert.Equal(10f, rows[0]["a"].AsFloat32());
@@ -160,7 +160,7 @@ public sealed class ArrayShapeGetFunctionTests : ServiceTestBase, IAsyncLifetime
 
         // 2-D array, only 1 index supplied → expected to throw at execution.
         await Assert.ThrowsAsync<DatumIngest.Execution.ExpressionEvaluationException>(
-            () => ExecuteQueryAsync("SELECT array_get(m, 0) FROM t", catalog));
+            () => ExecuteQueryAsync("SELECT array_get(m, 1) FROM t", catalog));
     }
 
     [Fact]
@@ -170,8 +170,8 @@ public sealed class ArrayShapeGetFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (m Array<Float32>(2,3))");
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])");
 
-        // Second dim is 3 (valid indices 0..2); 5 is out of range.
+        // Second dim is 3 (valid indices 1..3); 5 is out of range.
         await Assert.ThrowsAsync<DatumIngest.Execution.ExpressionEvaluationException>(
-            () => ExecuteQueryAsync("SELECT array_get(m, 0, 5) FROM t", catalog));
+            () => ExecuteQueryAsync("SELECT array_get(m, 1, 5) FROM t", catalog));
     }
 }

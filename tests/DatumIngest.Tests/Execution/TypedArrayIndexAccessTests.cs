@@ -61,7 +61,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("detections"),
-                [new LiteralExpression(0)]);
+                [new LiteralExpression(1)]);
 
             DataValue result = await EvalWithRegistryAsync(
                 access, MakeRow(("detections", structArray)), arena, registry);
@@ -96,7 +96,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("detections"),
-                [new LiteralExpression(0)]);
+                [new LiteralExpression(1)]);
 
             DataValue result = await EvalWithRegistryAsync(
                 access, MakeRow(("detections", structArray)), arena, registry);
@@ -158,7 +158,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("arr"),
-                [new LiteralExpression(0)]);
+                [new LiteralExpression(1)]);
 
             DataValue result = await EvalAsync(access, MakeRow(("arr", structArray)), arena);
 
@@ -180,7 +180,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("arr"),
-                [new LiteralExpression(1)]);
+                [new LiteralExpression(2)]);
 
             DataValue result = await EvalAsync(access, MakeRow(("arr", stringArray)), arena);
 
@@ -203,7 +203,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("arr"),
-                [new LiteralExpression(2)]);
+                [new LiteralExpression(3)]);
 
             DataValue result = await EvalAsync(access, MakeRow(("arr", floatArray)), arena);
 
@@ -249,7 +249,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
             IndexAccessExpression access = new(
                 new ColumnReference("detections"),
-                [new LiteralExpression(1)]);
+                [new LiteralExpression(2)]);
 
             DataValue result = await EvalAsync(access, MakeRow(("detections", structArray)), arena);
 

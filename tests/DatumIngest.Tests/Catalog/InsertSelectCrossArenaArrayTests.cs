@@ -44,7 +44,7 @@ public sealed class InsertSelectCrossArenaArrayTests : ServiceTestBase, IAsyncLi
         catalog.Plan("INSERT INTO sink SELECT v FROM source");
 
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT cardinality(v) AS n, v[0] AS first, v[3] AS last FROM sink", catalog);
+            "SELECT cardinality(v) AS n, v[1] AS first, v[4] AS last FROM sink", catalog);
 
         Assert.Equal(2, rows.Count);
         Assert.Equal(4, rows[0]["n"].AsInt32());
@@ -95,8 +95,8 @@ public sealed class InsertSelectCrossArenaArrayTests : ServiceTestBase, IAsyncLi
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_shape(m) AS shape," +
             "       array_ndims(m) AS nd," +
-            "       m[0, 0]        AS top_left," +
-            "       m[1, 2]        AS bottom_right" +
+            "       m[1, 1]        AS top_left," +
+            "       m[2, 3]        AS bottom_right" +
             " FROM sink", catalog, store: arena);
 
         Assert.Single(rows);
@@ -124,7 +124,7 @@ public sealed class InsertSelectCrossArenaArrayTests : ServiceTestBase, IAsyncLi
         catalog.Plan("INSERT INTO sink SELECT s FROM source");
 
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT cardinality(s) AS n, s[0] AS first, s[2] AS last FROM sink", catalog);
+            "SELECT cardinality(s) AS n, s[1] AS first, s[3] AS last FROM sink", catalog);
 
         Assert.Single(rows);
         Assert.Equal(3, rows[0]["n"].AsInt32());
@@ -179,7 +179,7 @@ public sealed class InsertSelectCrossArenaArrayTests : ServiceTestBase, IAsyncLi
         catalog.Plan("INSERT INTO sink SELECT b FROM source");
 
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT cardinality(b) AS n, b[0] AS first, b[3] AS last FROM sink", catalog);
+            "SELECT cardinality(b) AS n, b[1] AS first, b[4] AS last FROM sink", catalog);
         Assert.Single(rows);
         Assert.Equal(4, rows[0]["n"].AsInt32());
         Assert.Equal((byte)10, rows[0]["first"].AsUInt8());

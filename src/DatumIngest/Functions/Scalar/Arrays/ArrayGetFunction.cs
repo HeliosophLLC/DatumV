@@ -8,9 +8,9 @@ namespace DatumIngest.Functions.Scalar.Arrays;
 /// Reads a single element from a typed array by positional indices. The
 /// number of trailing index arguments must equal the array's dimensionality:
 /// <c>array_get(arr, i)</c> for a 1-D array, <c>array_get(arr, y, x)</c> for
-/// a 2-D array, and so on. Indices are zero-based, row-major. Out-of-range
-/// indices yield a typed null of the element kind. Provided as a runtime
-/// substitute for the future <c>arr[y, x]</c> bracket syntax so multi-dim
+/// a 2-D array, and so on. Indices are 1-based, row-major (PostgreSQL semantics).
+/// Out-of-range indices yield a typed null of the element kind. Provided as a
+/// runtime substitute for the <c>arr[y, x]</c> bracket syntax so multi-dim
 /// arrays can be exercised by SQL today.
 /// </summary>
 public sealed class ArrayGetFunction : IFunction, IScalarFunction
@@ -83,7 +83,8 @@ public sealed class ArrayGetFunction : IFunction, IScalarFunction
                 throw new FunctionArgumentException(Name,
                     $"array is 1-dimensional but {indexCount} indices were supplied.");
             }
-            flatOffset = args[1].ToInt32();
+            // PostgreSQL-style 1-based index → 0-based internal offset.
+            flatOffset = args[1].ToInt32() - 1;
         }
 
         return new ValueTask<ValueRef>(ReadElement(source, flatOffset, frame));
@@ -100,12 +101,14 @@ public sealed class ArrayGetFunction : IFunction, IScalarFunction
         long offset = 0;
         for (int i = 0; i < indices.Length; i++)
         {
-            int dimIndex = indices[i].ToInt32();
+            // PostgreSQL-style 1-based indices → 0-based internal offset.
+            int userIndex = indices[i].ToInt32();
+            int dimIndex = userIndex - 1;
             int dimSize = shape[i];
             if (dimIndex < 0 || dimIndex >= dimSize)
             {
                 throw new FunctionArgumentException(Name,
-                    $"index {i} out of range: {dimIndex} not in [0, {dimSize - 1}].");
+                    $"index {i} out of range: {userIndex} not in [1, {dimSize}].");
             }
             offset = offset * dimSize + dimIndex;
         }

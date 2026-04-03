@@ -519,7 +519,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             "accumulated AS (" +
             "  SELECT n, val AS cumulative FROM steps WHERE n = 0 " +
             "  UNION ALL " +
-            "  SELECT s.n, [a.cumulative[0] + s.val[0], a.cumulative[1] + s.val[1]] " +
+            "  SELECT s.n, [a.cumulative[1] + s.val[1], a.cumulative[2] + s.val[2]] " +
             "  FROM accumulated a JOIN steps s ON s.n = a.n + 1" +
             ") " +
             "SELECT n FROM accumulated")).Statement;
@@ -570,7 +570,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             "accumulated AS (" +
             "  SELECT n, step AS cumulative FROM step_poses WHERE n = 0 " +
             "  UNION ALL " +
-            "  SELECT s.n, [a.cumulative[0] + s.step[0], a.cumulative[1] + s.step[1], a.cumulative[2] + s.step[2]] " +
+            "  SELECT s.n, [a.cumulative[1] + s.step[1], a.cumulative[2] + s.step[2], a.cumulative[3] + s.step[3]] " +
             "  FROM accumulated a JOIN step_poses s ON s.n = a.n + 1" +
             ") " +
             "SELECT n, cumulative FROM accumulated",

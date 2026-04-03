@@ -4358,7 +4358,9 @@ public sealed class QueryPlanner
             {
                 for (int i = 0; i < pattern.Names.Count; i++)
                 {
-                    Expression index = new LiteralExpression((float)i);
+                    // IndexAccessExpression uses 1-based indices to match PG;
+                    // shift from the 0-based loop counter at desugar time.
+                    Expression index = new LiteralExpression((float)(i + 1));
                     expanded.Add(new LetBinding(
                         pattern.Names[i],
                         new IndexAccessExpression(hiddenRef, new[] { index }),

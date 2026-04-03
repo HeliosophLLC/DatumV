@@ -2553,7 +2553,8 @@ public sealed class ExpressionEvaluator
                         throw new InvalidOperationException(
                             $"Multi-dim array index {i} must be numeric; got {idxValue.Kind}.");
                     }
-                    int dimIndex = (int)ToFloat(idxValue);
+                    // PostgreSQL-style 1-based indices: shift to 0-based internal offset.
+                    int dimIndex = (int)ToFloat(idxValue) - 1;
                     int dimSize = shape[i];
                     if (dimIndex < 0 || dimIndex >= dimSize)
                     {
@@ -2581,7 +2582,8 @@ public sealed class ExpressionEvaluator
                     $"use positional destructuring: LET (a, b, ...) = expr.");
             }
 
-            int position = (int)ToFloat(index);
+            // PostgreSQL-style 1-based indexing: arr[1] is the first element.
+            int position = (int)ToFloat(index) - 1;
             return ReadTypedArrayElement(source, position, frame);
         }
 
@@ -2600,7 +2602,9 @@ public sealed class ExpressionEvaluator
             if (IsPositionalIndexKind(index.Kind))
             {
                 DataValue[] fields = source.AsStruct(frame.Source);
-                int position = (int)ToFloat(index);
+                // PostgreSQL-style 1-based ordinal: struct[1] is the first field,
+                // mirroring the array bracket accessor.
+                int position = (int)ToFloat(index) - 1;
                 if (position < 0 || position >= fields.Length)
                 {
                     return DataValue.NullStruct(source.TypeId);

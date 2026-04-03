@@ -89,15 +89,17 @@ public sealed class Tier3PostprocessTests : ServiceTestBase
     [Fact]
     public async Task Argmax_TieBreaksToLowestIndex()
     {
+        // 1-based output: ties resolve to the lowest 1-based index.
         ValueRef result = await InvokeAsync(new ArgmaxFunction(), F32(0.5f, 0.5f, 0.5f));
-        Assert.Equal(0, result.ToInt32());
+        Assert.Equal(1, result.ToInt32());
     }
 
     [Fact]
     public async Task Argmax_PicksTheLargest()
     {
+        // 1-based output: element 0.7 is at 1-based index 2.
         ValueRef result = await InvokeAsync(new ArgmaxFunction(), F32(0.1f, 0.7f, 0.2f));
-        Assert.Equal(1, result.ToInt32());
+        Assert.Equal(2, result.ToInt32());
     }
 
     [Fact]
@@ -111,12 +113,12 @@ public sealed class Tier3PostprocessTests : ServiceTestBase
     [Fact]
     public async Task Topk_ReturnsIndicesDescending()
     {
-        // values: [0.1, 0.5, 0.3, 0.9, 0.2] — top-3 indices by value
-        // descending are [3 (0.9), 1 (0.5), 2 (0.3)].
+        // 1-based output. values: [0.1, 0.5, 0.3, 0.9, 0.2] — top-3 indices by
+        // value descending are [4 (0.9), 2 (0.5), 3 (0.3)].
         ValueRef result = await InvokeAsync(new TopkFunction(),
             F32(0.1f, 0.5f, 0.3f, 0.9f, 0.2f),
             ValueRef.FromInt32(3));
-        Assert.Equal([3, 1, 2], AsIntArr(result));
+        Assert.Equal([4, 2, 3], AsIntArr(result));
     }
 
     [Fact]

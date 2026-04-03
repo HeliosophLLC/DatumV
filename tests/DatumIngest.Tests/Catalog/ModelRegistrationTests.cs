@@ -1068,14 +1068,14 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL gen_matrix(x Float32) RETURNS Array<Float32> USING '{_absoluteUsingPath}' " +
             $"AS BEGIN RETURN infer(x) END");
 
-        // Row-major: [10, 11, 12, 13, 14, 15] in a 2×3 shape →
-        //   m[0, 0] = 10, m[0, 2] = 12, m[1, 0] = 13, m[1, 2] = 15
+        // Row-major: [10, 11, 12, 13, 14, 15] in a 2×3 shape (1-based) →
+        //   m[1, 1] = 10, m[1, 3] = 12, m[2, 1] = 13, m[2, 3] = 15
         IQueryPlan plan = catalog.Plan(
             "SELECT models.gen_matrix(v) AS m," +
-            "       models.gen_matrix(v)[0, 0] AS a," +
-            "       models.gen_matrix(v)[0, 2] AS b," +
-            "       models.gen_matrix(v)[1, 0] AS c," +
-            "       models.gen_matrix(v)[1, 2] AS d" +
+            "       models.gen_matrix(v)[1, 1] AS a," +
+            "       models.gen_matrix(v)[1, 3] AS b," +
+            "       models.gen_matrix(v)[2, 1] AS c," +
+            "       models.gen_matrix(v)[2, 3] AS d" +
             " FROM data");
 
         float a = 0, b = 0, c = 0, d = 0;
@@ -1129,7 +1129,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             "       array_ndims(models.gen_matrix(v))         AS nd," +
             "       array_length(models.gen_matrix(v), 1)     AS d1," +
             "       array_length(models.gen_matrix(v), 2)     AS d2," +
-            "       array_get(models.gen_matrix(v), 1, 2)     AS elem" +
+            "       array_get(models.gen_matrix(v), 2, 3)     AS elem" +
             " FROM data");
 
         int total = 0, nd = 0, d1 = 0, d2 = 0;
@@ -1152,7 +1152,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Equal(2, nd);
         Assert.Equal(2, d1);
         Assert.Equal(3, d2);
-        Assert.Equal(15f, elem);    // m[1, 2] = 10 + 5 = 15
+        Assert.Equal(15f, elem);    // m[2, 3] (1-based) = 10 + 5 = 15
     }
 
     [Fact]
@@ -1272,7 +1272,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             + "AS BEGIN "
             + "  DECLARE outputs Struct = infer_outputs(x); "
             + "  DECLARE boxes Float32[] = outputs['boxes']; "
-            + "  RETURN boxes[0] "
+            + "  RETURN boxes[1] "
             + "END");
 
         IQueryPlan plan = catalog.Plan("SELECT models.pick_boxes(v) FROM data");
@@ -1286,17 +1286,17 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             }
         }
         Assert.Single(values);
-        // Stub: boxes[0] = input * 10 = 20.0
+        // Stub: boxes[1] (1-based, first element) = input * 10 = 20.0
         Assert.Equal(20.0f, values[0].AsFloat32());
     }
 
     [Fact]
     public async Task InferOutputs_PositionalAccess_PicksFirstOutput()
     {
-        // outputs[0] grabs the first declared output via the struct's
-        // positional-access path. Useful when the output names are
-        // unstable across exports (PyTorch's numeric default names like
-        // "1992" / "out_0").
+        // outputs[1] grabs the first declared output via the struct's
+        // positional-access path (1-based ordinal). Useful when the output
+        // names are unstable across exports (PyTorch's numeric default
+        // names like "1992" / "out_0").
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
         catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
         {
@@ -1315,8 +1315,8 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL pick_first(x Float32) RETURNS Float32 USING '{_absoluteUsingPath}' "
             + "AS BEGIN "
             + "  DECLARE outputs Struct = infer_outputs(x); "
-            + "  DECLARE logits Float32[] = outputs[0]; "
-            + "  RETURN logits[0] "
+            + "  DECLARE logits Float32[] = outputs[1]; "
+            + "  RETURN logits[1] "
             + "END");
 
         IQueryPlan plan = catalog.Plan("SELECT models.pick_first(v) FROM data");
@@ -1330,7 +1330,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             }
         }
         Assert.Single(values);
-        // Stub: logits[0] = input * 2 = 4.0
+        // Stub: logits[1] (1-based, first element) = input * 2 = 4.0
         Assert.Equal(4.0f, values[0].AsFloat32());
     }
 
@@ -1397,7 +1397,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL first_only(x Float32) RETURNS Float32 USING '{_absoluteUsingPath}' "
             + "AS BEGIN "
             + "  DECLARE logits Float32[] = infer(x); "
-            + "  RETURN logits[0] "
+            + "  RETURN logits[1] "
             + "END");
 
         IQueryPlan plan = catalog.Plan("SELECT models.first_only(v) FROM data");
@@ -1411,7 +1411,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             }
         }
         Assert.Single(values);
-        // Stub: logits[0] = input * 2 = 4.0 (first declared output)
+        // Stub: logits[1] (1-based, first element) = input * 2 = 4.0 (first declared output)
         Assert.Equal(4.0f, values[0].AsFloat32());
     }
 

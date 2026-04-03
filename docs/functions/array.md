@@ -82,11 +82,12 @@ SELECT array_shape(matrix_2x3)                -- [2, 3]
 
 `array_get(arr, i0, i1, ...)` → element kind | QU: 1
 
-Read a single element by positional indices. The number of indices must equal the array's `ndim`. Returns NULL for out-of-bounds element access; throws on dimension-count or per-dim-index range errors. (Pending the `arr[y, x]` bracket-syntax accessor.)
+Read a single element by positional indices. The number of indices must equal the array's `ndim`. Indices are 1-based (PostgreSQL semantics) and row-major. Equivalent to the `arr[i]` / `arr[y, x]` bracket-syntax accessor. Returns NULL for a 1-D out-of-bounds index; throws on dimension-count or per-dim multi-dim-index range errors.
 
 ```sql
-SELECT array_get(array(10, 20, 30), 1)        -- 20
-SELECT array_get(matrix_2x3, 0, 2)            -- element at row 0, col 2
+SELECT array_get(array(10, 20, 30), 1)        -- 10 (first element)
+SELECT array_get(array('a', 'b', 'c'), 2)     -- 'b'
+SELECT array_get(matrix_2x3, 1, 3)            -- element at row 1, col 3
 ```
 
 ### array_join
@@ -167,16 +168,6 @@ Concatenate two arrays. Both must share the same element kind.
 
 ```sql
 SELECT array_concat(array(1, 2), array(3, 4)) -- [1, 2, 3, 4]
-```
-
-### array_get
-
-`array_get(arr, index)` → element type | QU: 1
-
-Element at a 1-based index. Returns null if index is out of bounds or either argument is null. Return type matches the array's element kind.
-
-```sql
-SELECT array_get(array('a', 'b', 'c'), 2) -- 'b'
 ```
 
 ### array_min

@@ -109,7 +109,7 @@ public sealed class MultiDimProjectionPropagationTests : ServiceTestBase, IAsync
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])");
 
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT m[1, 2] AS e FROM (SELECT m FROM t) sub", catalog);
+            "SELECT m[2, 3] AS e FROM (SELECT m FROM t) sub", catalog);
 
         Assert.Single(rows);
         Assert.Equal(6f, rows[0]["e"].AsFloat32());

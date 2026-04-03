@@ -43,7 +43,7 @@ public sealed class MultiDimBracketAccessTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])");
 
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT m[0, 0] AS a, m[0, 2] AS b, m[1, 0] AS c, m[1, 2] AS d FROM t",
+            "SELECT m[1, 1] AS a, m[1, 3] AS b, m[2, 1] AS c, m[2, 3] AS d FROM t",
             catalog);
 
         Assert.Equal(1f, rows[0]["a"].AsFloat32());
@@ -62,9 +62,9 @@ public sealed class MultiDimBracketAccessTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("INSERT INTO t VALUES ([0, 1, 2, 3, 4, 5, 6, 7])");
 
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT cube[0, 0, 0] AS a, " +
-            "       cube[1, 1, 1] AS b, " +
-            "       cube[0, 1, 0] AS c " +
+            "SELECT cube[1, 1, 1] AS a, " +
+            "       cube[2, 2, 2] AS b, " +
+            "       cube[1, 2, 1] AS c " +
             "FROM t",
             catalog);
 
@@ -83,7 +83,7 @@ public sealed class MultiDimBracketAccessTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("INSERT INTO t VALUES ([10.0, 20.0, 30.0, 40.0])");
 
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT v[0] AS first, v[3] AS last FROM t", catalog);
+            "SELECT v[1] AS first, v[4] AS last FROM t", catalog);
 
         Assert.Equal(10f, rows[0]["first"].AsFloat32());
         Assert.Equal(40f, rows[0]["last"].AsFloat32());
@@ -99,7 +99,7 @@ public sealed class MultiDimBracketAccessTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])");
 
         List<Row> rows = await ExecuteQueryAsync(
-            "SELECT m[0, 99] AS too_high, m[5, 0] AS too_low FROM t", catalog);
+            "SELECT m[1, 99] AS too_high, m[6, 1] AS too_low FROM t", catalog);
 
         Assert.True(rows[0]["too_high"].IsNull);
         Assert.True(rows[0]["too_low"].IsNull);
@@ -116,7 +116,7 @@ public sealed class MultiDimBracketAccessTests : ServiceTestBase, IAsyncLifetime
 
         // 2-D column, only 1 index supplied.
         await Assert.ThrowsAsync<DatumIngest.Execution.ExpressionEvaluationException>(
-            () => ExecuteQueryAsync("SELECT m[0] FROM t", catalog));
+            () => ExecuteQueryAsync("SELECT m[1] FROM t", catalog));
     }
 
     // ───────────────────── Struct field access still works ─────────────────────
