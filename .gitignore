@@ -1,7 +1,8 @@
 **/obj/
 **/bin/
 .vs/
-/BenchmarkDotNet.Artifacts/**
+**/BenchmarkDotNet.Artifacts/
+**/BenchmarkDotNet.Artifacts.bench/
 /Nuget.Config
 
 # Jekyll (docs-site)

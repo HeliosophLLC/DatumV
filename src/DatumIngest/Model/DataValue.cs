@@ -300,10 +300,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     { }
 
     /// <summary>
-    /// Constructor for arena/sidecar-backed Strings/JSON. Encodes offset + length per the
+    /// Constructor for arena/sidecar-backed Strings/JSON and arena-backed typed
+    /// arrays (Float32[]/Float64[]/Int*[]/byte[]). Encodes offset + length per the
     /// shared reference-backed layout and stamps a cached XxHash64 across <c>_p4+_p5</c>.
-    /// The <paramref name="hash"/> is the XxHash64 of the value's UTF-8/CBOR bytes; a value
-    /// of zero is the "no cached hash" sentinel honored by <see cref="RawContentHash"/>.
+    /// The <paramref name="hash"/> is the XxHash64 of the value's UTF-8/CBOR/raw bytes;
+    /// a value of zero is the "no cached hash" sentinel honored by
+    /// <see cref="RawContentHash"/> and by the cached-hash branches of Equals /
+    /// GetHashCode for arrays.
     /// </summary>
     private DataValue(DataKind kind, DataValueFlags flags, long offset, long length, ulong hash, ushort charCount = 0)
     {
@@ -2029,11 +2032,18 @@ public readonly struct DataValue : IEquatable<DataValue>
         IValueStore store)
         where T : unmanaged
     {
-        var (p0, p1) = store.StoreBytes(MemoryMarshal.AsBytes(elements));
+        ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(elements);
+        ulong hash = XxHash64.HashToUInt64(bytes);
+        var (p0, p1) = store.StoreBytes(bytes);
+        // Stamp the content hash across _p4+_p5 (matches the String/JSON
+        // cached-hash layout) so cross-arena equal-content arrays compare equal
+        // through the hash fast path in Equals / GetHashCode without the
+        // dictionary blowing up on per-batch offset drift.
         return new(
             elementKind,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray,
-            offset: p0.Value, length: p1.Value);
+            offset: p0.Value, length: p1.Value,
+            hash: hash);
     }
 
     /// <summary>
@@ -2050,11 +2060,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         DataKind elementKind,
         IValueStore store)
     {
+        ulong hash = XxHash64.HashToUInt64(bytes);
         var (p0, p1) = store.StoreBytes(bytes);
         return new(
             elementKind,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray,
-            offset: p0.Value, length: p1.Value);
+            offset: p0.Value, length: p1.Value,
+            hash: hash);
     }
 
     // ───────────────────────── Multi-dim arrays ─────────────────────────
@@ -3624,6 +3636,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 "SidecarRegistry. The DataValue references a sidecar that wasn't opened by " +
                 "this query — likely the table provider didn't register its IBlobSource.");
 
+        DatumIngest.Diagnostics.HashGateStats.RecordSidecarFetch();
         return source.Read(SidecarOffset, SidecarLength);
     }
 
@@ -4199,13 +4212,39 @@ public readonly struct DataValue : IEquatable<DataValue>
         // any Array<Struct> typeId carried in _charCount is included.
         if (IsArray)
         {
-            return other.IsArray
-                && _flags == other._flags
-                && _charCount == other._charCount
-                && _p0 == other._p0
-                && _p1 == other._p1
-                && _p2 == other._p2
-                && _p3 == other._p3;
+            if (!other.IsArray
+                || _flags != other._flags
+                || _charCount != other._charCount)
+            {
+                return false;
+            }
+
+            // Same offset+length+_p2/_p3: same store, identical bytes — fast path.
+            if (_p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3)
+            {
+                return true;
+            }
+
+            // Cross-arena: consult the cached content hash stamped at construction
+            // (FromArenaArray / FromArenaArrayBytes write XxHash64 into _p4+_p5).
+            // XxHash64 collision rate is ~1/2^64, so equal hashes are treated as
+            // equal content — matches the String cached-hash branch.
+            ulong leftHash = (uint)_p4 | ((ulong)(uint)_p5 << 32);
+            ulong rightHash = (uint)other._p4 | ((ulong)(uint)other._p5 << 32);
+            if (leftHash != 0 && rightHash != 0)
+            {
+                if (leftHash != rightHash)
+                {
+                    DatumIngest.Diagnostics.HashGateStats.RecordHashShortCircuit();
+                    return false;
+                }
+                return true;
+            }
+
+            // Legacy path: at least one side has no cached hash (e.g. inline array
+            // or pre-hash-stamping construction). Fall back to byte-identity via
+            // offset comparison, which is conservative-false across arenas.
+            return false;
         }
 
         return _kind switch
@@ -4279,6 +4318,18 @@ public readonly struct DataValue : IEquatable<DataValue>
         // _p0), which would collide for inline arrays sharing a first element.
         if (IsArray)
         {
+            // Prefer the cached content hash when present (arena arrays stamp
+            // XxHash64 across _p4+_p5 at FromArenaArray time) so equal-content
+            // arrays stored in different arenas hash to the same bucket — the
+            // dictionary deduplicates correctly across batches.
+            ulong cachedHash = (uint)_p4 | ((ulong)(uint)_p5 << 32);
+            if (cachedHash != 0)
+            {
+                return HashCode.Combine(_kind, _flags, _charCount, cachedHash);
+            }
+
+            // Legacy path (inline arrays, pre-hash-stamping arena arrays): hash
+            // the layout words. Inline arrays pack bytes across _p0–_p3 directly.
             HashCode hash = new();
             hash.Add(_kind);
             hash.Add(_flags);

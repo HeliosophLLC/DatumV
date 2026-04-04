@@ -1,9 +1,24 @@
 {
     "files.watcherExclude": {
         "**/BenchmarkDotNet.Artifacts/**": true,
+        "**/BenchmarkDotNet.Artifacts.bench/**": true,
         "**/bin/**": true,
         "**/obj/**": true,
         "**/traces/**": true
+    },
+    "files.exclude": {
+        "**/BenchmarkDotNet.Artifacts": true,
+        "**/BenchmarkDotNet.Artifacts.bench": true,
+        "**/bin": true,
+        "**/obj": true,
+        "**/traces": true
+    },
+    "search.exclude": {
+        "**/BenchmarkDotNet.Artifacts": true,
+        "**/BenchmarkDotNet.Artifacts.bench": true,
+        "**/bin": true,
+        "**/obj": true,
+        "**/traces": true
     },
     "dotnet.unitTests.runSettingsPath": "tests/DatumIngest.Tests/DatumIngest.Tests.runsettings"
 }
