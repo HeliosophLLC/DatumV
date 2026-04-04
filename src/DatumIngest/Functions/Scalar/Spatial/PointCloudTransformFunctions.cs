@@ -239,3 +239,179 @@ public sealed class PoseTranslateFunction : IFunction, IScalarFunction
         return value;
     }
 }
+
+/// <summary>
+/// <c>pose_identity() → Float32[]</c>. Returns the 4×4 identity matrix as a
+/// 16-element row-major Float32 array. Use as the seed value of a recursive
+/// CTE that accumulates per-frame pose composition.
+/// </summary>
+public sealed class PoseIdentityFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "pose_identity";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Spatial;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Returns the 4x4 identity matrix as a 16-element row-major Float32 "
+        + "array. Equivalent to the literal [1,0,0,0, 0,1,0,0, 0,0,1,0, "
+        + "0,0,0,1]::Float32[]. Use as the seed of a recursive CTE that "
+        + "accumulates frame-to-frame pose via pose_compose, or as the "
+        + "no-op pose for pc_transform.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters: [],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<PoseIdentityFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        float[] matrix =
+        [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ];
+        return new ValueTask<ValueRef>(ValueRef.FromPrimitiveArray(matrix, DataKind.Float32));
+    }
+}
+
+/// <summary>
+/// <c>pose_compose(a Float32[], b Float32[]) → Float32[]</c>. Multiplies two
+/// 4×4 row-major pose matrices: <c>result = a · b</c>. Use to accumulate
+/// frame-to-frame poses recovered by <see cref="PoseFromRgbdFunction"/>
+/// into a single transform that lands a later frame's cloud in an earlier
+/// frame's coordinate system.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Order matters.</strong> Matrix multiplication is not commutative.
+/// For chained reconstruction across frames 0, 1, …, N:
+/// </para>
+/// <code>
+/// accumulated_N = accumulated_(N-1) · pose_from_rgbd(frame_(N-1), frame_N)
+/// </code>
+/// <para>
+/// The "step" pose goes on the RIGHT — applying <c>accumulated_N</c> to a
+/// point in frame N's local space yields its position in frame 0's space.
+/// Reversing the order produces a different (incorrect) transform.
+/// </para>
+/// <para>
+/// <strong>Affine only.</strong> Both inputs are treated as affine 4×4
+/// matrices; the bottom row of each is assumed to be <c>[0, 0, 0, 1]</c>
+/// and the output is constructed with that row verbatim. This matches the
+/// convention used by <see cref="PcTransformFunction"/> — pose matrices
+/// here never carry a projective component.
+/// </para>
+/// </remarks>
+public sealed class PoseComposeFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "pose_compose";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Spatial;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Multiplies two 4x4 row-major pose matrices (16-element Float32 "
+        + "arrays): result = a * b. Use to accumulate per-frame poses from "
+        + "pose_from_rgbd into a cumulative transform for chained "
+        + "reconstruction. Order is significant: for accumulated_N = "
+        + "accumulated_(N-1) * step_N, the cumulative pose goes on the left "
+        + "and the new single-step pose on the right. Affine-only — bottom "
+        + "row is set to [0,0,0,1].";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("a", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("b", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<PoseComposeFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ValueRef aArg = arguments.Span[0];
+        ValueRef bArg = arguments.Span[1];
+        if (aArg.IsNull || bArg.IsNull)
+        {
+            return new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.Float32));
+        }
+
+        ReadOnlySpan<float> a = aArg.ToDataValue(frame.Source).AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
+        ReadOnlySpan<float> b = bArg.ToDataValue(frame.Source).AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
+        if (a.Length != 16)
+        {
+            throw new FunctionArgumentException(
+                Name,
+                $"a must be exactly 16 Float32 values (a 4x4 row-major matrix); got {a.Length}.");
+        }
+        if (b.Length != 16)
+        {
+            throw new FunctionArgumentException(
+                Name,
+                $"b must be exactly 16 Float32 values (a 4x4 row-major matrix); got {b.Length}.");
+        }
+
+        // Affine-only: read 3x4 from each, fix bottom row to [0,0,0,1].
+        // Hoist a's rows to locals so the inner accumulation stays in registers.
+        float a00 = a[0],  a01 = a[1],  a02 = a[2],  a03 = a[3];
+        float a10 = a[4],  a11 = a[5],  a12 = a[6],  a13 = a[7];
+        float a20 = a[8],  a21 = a[9],  a22 = a[10], a23 = a[11];
+
+        float b00 = b[0],  b01 = b[1],  b02 = b[2],  b03 = b[3];
+        float b10 = b[4],  b11 = b[5],  b12 = b[6],  b13 = b[7];
+        float b20 = b[8],  b21 = b[9],  b22 = b[10], b23 = b[11];
+
+        float[] r =
+        [
+            a00 * b00 + a01 * b10 + a02 * b20,
+            a00 * b01 + a01 * b11 + a02 * b21,
+            a00 * b02 + a01 * b12 + a02 * b22,
+            a00 * b03 + a01 * b13 + a02 * b23 + a03,
+
+            a10 * b00 + a11 * b10 + a12 * b20,
+            a10 * b01 + a11 * b11 + a12 * b21,
+            a10 * b02 + a11 * b12 + a12 * b22,
+            a10 * b03 + a11 * b13 + a12 * b23 + a13,
+
+            a20 * b00 + a21 * b10 + a22 * b20,
+            a20 * b01 + a21 * b11 + a22 * b21,
+            a20 * b02 + a21 * b12 + a22 * b22,
+            a20 * b03 + a21 * b13 + a22 * b23 + a23,
+
+            0, 0, 0, 1,
+        ];
+
+        return new ValueTask<ValueRef>(ValueRef.FromPrimitiveArray(r, DataKind.Float32));
+    }
+}

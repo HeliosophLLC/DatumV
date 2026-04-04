@@ -152,6 +152,76 @@ public sealed class PoseFromRgbdFunctionTests : ServiceTestBase
         Assert.Equal(1f, pose[15]);
     }
 
+    [Fact]
+    public async Task Execute_HugeDepthValues_HomogeneousBottomRowSurvives()
+    {
+        // Regression probe: real-world bug report showed pose matrices
+        // with garbage in the bottom row (positions 12-15) instead of
+        // [0, 0, 0, 1], when the depth model was emitting catastrophic
+        // values. Even though Kabsch produces garbage R/t from garbage
+        // 3D points (depth in the 1e+15 range → unprojected positions
+        // astronomically large → SVD over huge covariance), the
+        // hardcoded bottom row should still come through verbatim. This
+        // pins that contract: whatever weirdness happens in R, t, the
+        // bottom row of the returned 16-element Float32 is exactly
+        // (0, 0, 0, 1). If this test ever fails, the float[] literal
+        // construction at the end of ExecuteAsync has either been
+        // mis-edited or there's a serialization issue downstream of
+        // the function return.
+        const int w = 256;
+        const int h = 192;
+        const float fx = 500f;
+        const float fy = 500f;
+        const float cx = w / 2f;
+        const float cy = h / 2f;
+        const float Z = 1.5e+15f;  // depth in the 1e+15 metres range
+        const int dxPixels = 20;
+
+        const int margin = 64;
+        int patternWidth = w + margin * 2;
+        using SKBitmap pattern = MakeRandomTexture(patternWidth, h, seed: 99);
+        using SKBitmap prevImg = CropFrom(pattern, srcX: margin,            srcY: 0, w: w, h: h);
+        using SKBitmap currImg = CropFrom(pattern, srcX: margin + dxPixels, srcY: 0, w: w, h: h);
+
+        ValueRef depth = MakeConstantDepth(w, h, Z);
+        ValueRef intrinsics = MakeIntrinsics(fx, fy, cx, cy);
+
+        PoseFromRgbdFunction fn = new();
+        ValueRef result;
+        try
+        {
+            result = await fn.ExecuteAsync(
+                new ValueRef[]
+                {
+                    ValueRef.FromImage(prevImg),
+                    depth,
+                    ValueRef.FromImage(currImg),
+                    depth,
+                    intrinsics,
+                },
+                MakeFrame(),
+                default);
+        }
+        catch (FunctionArgumentException)
+        {
+            // Garbage inputs can legitimately make RANSAC fail to find
+            // a consensus — that throws. Either outcome (throw or
+            // produce a 16-element array with valid bottom row) is
+            // acceptable; the inadmissible outcome is producing an
+            // array whose bottom row is not [0, 0, 0, 1].
+            return;
+        }
+
+        Assert.False(result.IsNull);
+        EvaluationFrame f = MakeFrame();
+        ReadOnlySpan<float> pose = result.ToDataValue(f.Source).AsArraySpan<float>(f.Source, f.SidecarRegistry);
+        Assert.Equal(16, pose.Length);
+        Assert.Equal(0f, pose[12]);
+        Assert.Equal(0f, pose[13]);
+        Assert.Equal(0f, pose[14]);
+        Assert.Equal(1f, pose[15]);
+    }
+
     // ─────────────────────── Helpers ───────────────────────
 
     private static SKBitmap MakeSolidColor(int width, int height, SKColor color)

@@ -168,19 +168,24 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
         {
             throw new FunctionArgumentException(
                 Name,
-                $"prev_image has non-positive dimensions ({width}×{height}).");
+                $"prev_image has non-positive dimensions ({width}x{height}).");
         }
         if (currSrc.Width != width || currSrc.Height != height)
         {
             throw new FunctionArgumentException(
                 Name,
                 $"prev_image and curr_image dimensions must match: "
-                + $"prev={width}×{height}, curr={currSrc.Width}×{currSrc.Height}.");
+                + $"prev={width}x{height}, curr={currSrc.Width}x{currSrc.Height}.");
         }
 
         // ─── Depth maps ─────────────────────────────────────────────────
-        ReadOnlySpan<float> prevDepth = ReadShapedDepth(prevDepthArg, frame, width, height, "prev_depth");
-        ReadOnlySpan<float> currDepth = ReadShapedDepth(currDepthArg, frame, width, height, "curr_depth");
+        // Materialize into managed float[] we own. The arena-backed
+        // ReadOnlySpan returned by AsArraySpan is only safe to hold for
+        // the duration of the call; ORB+matcher work between read and
+        // sample can trigger GC/arena recycling that invalidates the
+        // span (manifests as AccessViolationException in SampleDepth).
+        float[] prevDepth = ReadShapedDepth(prevDepthArg, frame, width, height, "prev_depth");
+        float[] currDepth = ReadShapedDepth(currDepthArg, frame, width, height, "curr_depth");
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -354,7 +359,7 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
 
     // ─────────────────────── Helpers ───────────────────────
 
-    private static ReadOnlySpan<float> ReadShapedDepth(
+    private static float[] ReadShapedDepth(
         ValueRef depthArg, EvaluationFrame frame, int width, int height, string paramName)
     {
         DataValue value = depthArg.ToDataValue(frame.Source);
@@ -376,9 +381,9 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
         {
             throw new FunctionArgumentException(
                 Name,
-                $"{paramName} dimensions ({dh}×{dw}) don't match image ({height}×{width}).");
+                $"{paramName} dimensions ({dh}x{dw}) don't match image ({height}x{width}).");
         }
-        return value.AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
+        return value.AsArraySpan<float>(frame.Source, frame.SidecarRegistry).ToArray();
     }
 
     private static bool AllLeadingOnes(ReadOnlySpan<int> shape)
@@ -426,7 +431,7 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
     /// producing depths that exist nowhere in the scene and pulling
     /// matched 3D points off-surface.
     /// </summary>
-    private static float SampleDepthNearest(ReadOnlySpan<float> depth, int width, int height, float u, float v)
+    private static float SampleDepthNearest(float[] depth, int width, int height, float u, float v)
     {
         int iu = (int)MathF.Round(u);
         int iv = (int)MathF.Round(v);
@@ -543,15 +548,18 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
             H[6] += qz * dx; H[7] += qz * dy; H[8] += qz * dz;
         }
 
-        // SVD via OpenCV. Mat.FromPixelData with a managed array uses the
-        // pinned buffer — we keep H alive for the duration of SVDecomp.
+        // SVD via OpenCV. Pre-allocate outputs as CV_64F 3x3 so SVDecomp
+        // reuses the buffers rather than allocating fresh Mats whose
+        // element type we'd have to discover at runtime — defending
+        // against version-specific behaviour where new Mat() outputs
+        // come back as CV_32F and silently corrupt the post-SVD math.
         GCHandle hH = GCHandle.Alloc(H, GCHandleType.Pinned);
         try
         {
             using Mat Hm = Mat.FromPixelData(3, 3, MatType.CV_64F, hH.AddrOfPinnedObject());
-            using Mat W = new();
-            using Mat U = new();
-            using Mat Vt = new();
+            using Mat W = new(3, 1, MatType.CV_64F);
+            using Mat U = new(3, 3, MatType.CV_64F);
+            using Mat Vt = new(3, 3, MatType.CV_64F);
             try
             {
                 Cv2.SVDecomp(Hm, W, U, Vt, SVD.Flags.FullUV);
@@ -566,8 +574,10 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
             // The diag(1,1,-1) flip corrects an improper rotation back to SO(3).
             double[] Uarr = new double[9];
             double[] Vtarr = new double[9];
-            CopyMat3x3(U, Uarr);
-            CopyMat3x3(Vt, Vtarr);
+            if (!TryCopyMat3x3(U, Uarr) || !TryCopyMat3x3(Vt, Vtarr))
+            {
+                return false;
+            }
 
             // V = Vt^T; compute det(V * U^T) = det(Vt^T * U^T) = det((U*Vt)^T) = det(U*Vt).
             double[] UVt = Mul3x3(Uarr, Vtarr);
@@ -592,23 +602,64 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
         t[1] = pym - (R[3] * cxm + R[4] * cym + R[5] * czm);
         t[2] = pzm - (R[6] * cxm + R[7] * cym + R[8] * czm);
 
-        // Sanity: all entries finite. Degenerate (co-planar / co-linear)
-        // triples occasionally make SVD emit NaN — surface that to the
-        // RANSAC loop so it just tries another sample.
-        for (int i = 0; i < 9; i++) if (!double.IsFinite(R[i])) return false;
-        for (int i = 0; i < 3; i++) if (!double.IsFinite(t[i])) return false;
+        // Sanity checks. A proper rotation has |R_ij| <= 1 strictly and
+        // det(R) = +1. Reject anything wildly outside those bounds — a
+        // garbage R typically signals SVD pathology on degenerate input
+        // (co-linear / co-planar inlier triple) or a type-mismatch read
+        // that escaped the TryCopyMat3x3 guard. Bound is generous (10×
+        // the legal range) to allow numerical slop without admitting
+        // matrices whose entries would later overflow float32 when fed
+        // through pose_compose.
+        for (int i = 0; i < 9; i++)
+        {
+            if (!double.IsFinite(R[i]) || System.Math.Abs(R[i]) > 10.0) return false;
+        }
+        for (int i = 0; i < 3; i++)
+        {
+            if (!double.IsFinite(t[i])) return false;
+        }
+        double detR = Det3x3(R);
+        if (!(detR > 0.5 && detR < 1.5)) return false;
+
         return true;
     }
 
-    private static void CopyMat3x3(Mat src, double[] dst)
+    /// <summary>
+    /// Copies a 3×3 Mat into a managed double[9]. Returns false (rather
+    /// than reading garbage) if the Mat isn't 3×3 of a supported numeric
+    /// type. Defensive against the version-specific OpenCvSharp behaviour
+    /// where <c>new Mat()</c> output buffers came back as CV_32F despite
+    /// CV_64F input — <c>Mat.At&lt;double&gt;</c> on a CV_32F buffer reads
+    /// 8 bytes per cell from a 4-byte-per-cell stride and produces
+    /// nonsense values in the 1e+30 range.
+    /// </summary>
+    private static bool TryCopyMat3x3(Mat src, double[] dst)
     {
-        for (int r = 0; r < 3; r++)
+        if (src.Rows != 3 || src.Cols != 3) return false;
+        MatType t = src.Type();
+        if (t == MatType.CV_64F)
         {
-            for (int c = 0; c < 3; c++)
+            for (int r = 0; r < 3; r++)
             {
-                dst[r * 3 + c] = src.At<double>(r, c);
+                for (int c = 0; c < 3; c++)
+                {
+                    dst[r * 3 + c] = src.At<double>(r, c);
+                }
             }
+            return true;
         }
+        if (t == MatType.CV_32F)
+        {
+            for (int r = 0; r < 3; r++)
+            {
+                for (int c = 0; c < 3; c++)
+                {
+                    dst[r * 3 + c] = src.At<float>(r, c);
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     private static double[] Mul3x3(double[] a, double[] b)
