@@ -294,10 +294,13 @@ public readonly struct ValueRef
     /// <summary>
     /// DataKind tag (the value of <c>typeof(x)</c>). When <paramref name="typeId"/>
     /// is non-zero, the tag carries a <see cref="TypeRegistry"/> id describing the
-    /// rich shape (struct field names, nested array element types).
+    /// rich shape (struct field names, nested array element types). For primitive
+    /// arrays (no descriptor), <paramref name="describesArray"/> /
+    /// <paramref name="describesMultiDim"/> let <c>FormatType</c> render
+    /// <c>Array&lt;...&gt;</c> from the annotation.
     /// </summary>
-    public static ValueRef FromType(DataKind value, ushort typeId = 0) =>
-        new(DataValue.FromType(value, typeId), null);
+    public static ValueRef FromType(DataKind value, ushort typeId = 0, bool describesArray = false, bool describesMultiDim = false) =>
+        new(DataValue.FromType(value, typeId, describesArray, describesMultiDim), null);
 
     /// <summary>
     /// String value carried as a managed payload. The boundary conversion

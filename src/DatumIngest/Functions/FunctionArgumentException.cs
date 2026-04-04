@@ -149,17 +149,32 @@ public sealed class FunctionArgumentException(string functionName, string messag
             if (i > 0) builder.Append(", ");
             ParameterSpec p = variant.Parameters[i];
             if (p.IsOptional) builder.Append('[');
-            builder.Append(p.Name).Append(": ").Append(p.Kind.Describe());
+            builder.Append(p.Name).Append(": ").Append(DescribeShape(p.Kind, p.IsArray));
             if (p.IsOptional) builder.Append(']');
         }
         if (variant.VariadicTrailing is not null)
         {
             if (variant.Parameters.Count > 0) builder.Append(", ");
             builder.Append("...").Append(variant.VariadicTrailing.Name)
-                   .Append(": ").Append(variant.VariadicTrailing.Kind.Describe());
+                   .Append(": ").Append(DescribeShape(variant.VariadicTrailing.Kind, variant.VariadicTrailing.IsArray));
         }
         builder.Append(") -> ").Append(variant.ReturnType.Describe());
     }
+
+    /// <summary>
+    /// Renders a parameter's declared shape for error messages — wraps the kind
+    /// matcher's name in <c>Array&lt;...&gt;</c> when the slot's
+    /// <see cref="ArrayMatch"/> requires (or distinguishes) an array. Without
+    /// this, signatures that take <c>Float32[]</c> were described as
+    /// <c>Float32</c>, hiding the actual mismatch from the caller.
+    /// </summary>
+    private static string DescribeShape(DataKindMatcher kind, ArrayMatch arrayMatch) => arrayMatch switch
+    {
+        ArrayMatch.Array => $"Array<{kind.Describe()}>",
+        ArrayMatch.FlatArray => $"Array<{kind.Describe()}> (1-D)",
+        ArrayMatch.MultiDimArray => $"Array<{kind.Describe()}> (multi-dim)",
+        _ => kind.Describe(),
+    };
 
     private static string FormatFunctionName(string functionName)
     {

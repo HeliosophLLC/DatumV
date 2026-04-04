@@ -2753,9 +2753,43 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Creates a type tag value that describes another <see cref="DataKind"/>. When
     /// <paramref name="typeId"/> is non-zero, the tag carries a <see cref="TypeRegistry"/>
     /// id describing the rich shape (struct field names, nested array element types).
+    /// For primitive arrays (no descriptor interned), pass <paramref name="describesArray"/>
+    /// (and <paramref name="describesMultiDim"/> if the source carried a shape prefix) so
+    /// <see cref="FormatType"/> can render <c>Array&lt;...&gt;</c> from the annotation.
     /// </summary>
-    public static DataValue FromType(DataKind value, ushort typeId = 0) =>
-        new(DataKind.Type, flags: 0, typeId: typeId, p0: (int)value, p1: 0);
+    /// <remarks>
+    /// The array annotation rides in <c>_p1</c> rather than the value's
+    /// <see cref="DataValueFlags.IsArray"/> flag deliberately: a Type tag is a
+    /// scalar value carrying type *metadata*, never an array of types. Reusing
+    /// the IsArray flag would make every "this is a typed-array" consumer
+    /// (<c>WebCellFormatter.ShouldRouteToJson</c>, accessor routing, …) mis-treat
+    /// the Type tag as if it were an array.
+    /// </remarks>
+    public static DataValue FromType(DataKind value, ushort typeId = 0, bool describesArray = false, bool describesMultiDim = false)
+    {
+        int p1 = 0;
+        if (describesArray) p1 |= TypeTagDescribesArrayBit;
+        if (describesMultiDim) p1 |= TypeTagDescribesMultiDimBit;
+        return new(DataKind.Type, flags: 0, typeId: typeId, p0: (int)value, p1: p1);
+    }
+
+    private const int TypeTagDescribesArrayBit = 0x01;
+    private const int TypeTagDescribesMultiDimBit = 0x02;
+
+    /// <summary>
+    /// For a <see cref="DataKind.Type"/> tag: whether the described type is an array
+    /// (i.e. the value <c>typeof()</c> was called on had its IsArray flag set).
+    /// Always <c>false</c> for non-Type values.
+    /// </summary>
+    public bool TypeDescribesArray =>
+        _kind == DataKind.Type && (_p1 & TypeTagDescribesArrayBit) != 0;
+
+    /// <summary>
+    /// For a <see cref="DataKind.Type"/> tag: whether the described array is multi-dim.
+    /// Always <c>false</c> for non-Type values, and for scalar Type tags.
+    /// </summary>
+    public bool TypeDescribesMultiDim =>
+        _kind == DataKind.Type && (_p1 & TypeTagDescribesMultiDimBit) != 0;
 
     // ───────────────────────── Arena state ─────────────────────────
 
@@ -4072,6 +4106,15 @@ public readonly struct DataValue : IEquatable<DataValue>
             TypeDescriptor? desc = registry.GetDescriptor(typeId);
             if (desc is not null)
                 return FormatTypeDescriptor(desc, registry);
+        }
+        // Primitive arrays carry no descriptor — the array-ness rides on the
+        // Type-tag-private annotation in _p1 (stamped by typeof() at the
+        // source). Render Array<...> from the annotation so
+        // typeof([1::float32]) surfaces as "Array<Float32>" rather than just
+        // "Float32".
+        if (TypeDescribesArray)
+        {
+            return $"Array<{kind}>";
         }
         return kind.ToString();
     }

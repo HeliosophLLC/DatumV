@@ -53,6 +53,8 @@ public sealed class TypeofFunction : IFunction, IScalarFunction
 
         DataKind kind = arg.Kind;
         ushort typeId = arg.TypeId;
+        bool describesArray = arg.IsArray;
+        bool describesMultiDim = arg.IsMultiDim;
 
         // Forcing function: a *scalar* struct that flowed through query
         // execution without a registered type is the symptom of a missing
@@ -63,7 +65,7 @@ public sealed class TypeofFunction : IFunction, IScalarFunction
         // TypeId rides in each slot's reserved bytes rather than on the array
         // container, so the array itself has no shape identity to surface.
         // Use `typeof(arr[i])` for per-element shape info.
-        if (kind == DataKind.Struct && !arg.IsArray && typeId == 0)
+        if (kind == DataKind.Struct && !describesArray && typeId == 0)
         {
             throw new InvalidOperationException(
                 "typeof() called on a struct value with no registered type. "
@@ -72,7 +74,7 @@ public sealed class TypeofFunction : IFunction, IScalarFunction
                 + "TypeRegistry and stamp the resulting TypeId on the DataValue.");
         }
 
-        return new ValueTask<ValueRef>(ValueRef.FromType(kind, typeId));
+        return new ValueTask<ValueRef>(ValueRef.FromType(kind, typeId, describesArray, describesMultiDim));
     }
 
     /// <inheritdoc />

@@ -76,12 +76,105 @@ public static class ExpressionTypeResolver
             {
                 return ResolveFunctionShape(function, sourceSchema, functions);
             }
+            case CaseExpression caseExpression:
+            {
+                return ResolveCaseExpressionShape(caseExpression, sourceSchema, functions);
+            }
+            case IndexAccessExpression indexAccess:
+            {
+                return ResolveIndexAccessShape(indexAccess, sourceSchema, functions);
+            }
         }
 
         // All other branches can't produce IsArray = true. Reuse the kind
         // resolution path and tag IsArray = false.
         DataKind? kind = ResolveTypeKindOnly(expression, sourceSchema, functions);
         return kind is null ? null : (kind.Value, false, false);
+    }
+
+    /// <summary>
+    /// Shape-aware analog of <see cref="ResolveCaseExpression"/>. Unifies branch
+    /// kinds via <see cref="UnifyCaseBranchKinds"/> (preserving the existing
+    /// kind-precedence semantics) and ORs the per-branch IsArray / IsMultiDim
+    /// flags — if any branch is an array, the CASE result is an array. Without
+    /// this overload, <see cref="ResolveTypeShape"/> would fall through to the
+    /// kind-only path and tag every CASE result as <c>IsArray = false</c>, which
+    /// silently strips array-ness off any CASE that mixes a typed-array branch
+    /// with a NULL else (a very common LEFT-JOIN gating pattern).
+    /// </summary>
+    private static (DataKind Kind, bool IsArray, bool IsMultiDim)? ResolveCaseExpressionShape(
+        CaseExpression caseExpression, Schema sourceSchema, FunctionRegistry functions)
+    {
+        DataKind? commonKind = null;
+        bool anyIsArray = false;
+        bool anyIsMultiDim = false;
+
+        foreach (WhenClause whenClause in caseExpression.WhenClauses)
+        {
+            (DataKind Kind, bool IsArray, bool IsMultiDim)? branch = ResolveTypeShape(
+                whenClause.Result, sourceSchema, functions);
+            if (branch is null) return null;
+
+            commonKind = commonKind is null
+                ? branch.Value.Kind
+                : UnifyCaseBranchKinds(commonKind.Value, branch.Value.Kind);
+            if (commonKind is null) return null;
+
+            anyIsArray |= branch.Value.IsArray;
+            anyIsMultiDim |= branch.Value.IsMultiDim;
+        }
+
+        if (caseExpression.ElseResult is not null)
+        {
+            (DataKind Kind, bool IsArray, bool IsMultiDim)? elseBranch = ResolveTypeShape(
+                caseExpression.ElseResult, sourceSchema, functions);
+            if (elseBranch is not null && commonKind is not null)
+            {
+                commonKind = UnifyCaseBranchKinds(commonKind.Value, elseBranch.Value.Kind);
+                anyIsArray |= elseBranch.Value.IsArray;
+                anyIsMultiDim |= elseBranch.Value.IsMultiDim;
+            }
+        }
+
+        return commonKind is null ? null : (commonKind.Value, anyIsArray, anyIsMultiDim);
+    }
+
+    /// <summary>
+    /// Shape-aware resolution of <c>source[index]</c>. Three cases carry array-ness:
+    /// <list type="bullet">
+    ///   <item>Struct field access (named or positional) — the field's
+    ///   <see cref="ColumnInfo.IsArray"/> / <see cref="ColumnInfo.IsMultiDim"/>
+    ///   from the source's <see cref="ColumnInfo.Fields"/>. Without this, a
+    ///   chain like <c>array_resize_2d(model_output[1], h, w)</c> would lose
+    ///   the field's array-ness and downstream signature matching would fail
+    ///   to find the correct variant.</item>
+    ///   <item>Indexing into a typed-array column yields a scalar of the
+    ///   element kind — array-ness is stripped.</item>
+    ///   <item>Indexing into a function call that returns an array — same:
+    ///   element kind, no array.</item>
+    /// </list>
+    /// Falls back to the kind-only path (with IsArray=false) for anything else.
+    /// </summary>
+    private static (DataKind Kind, bool IsArray, bool IsMultiDim)? ResolveIndexAccessShape(
+        IndexAccessExpression indexAccess, Schema sourceSchema, FunctionRegistry functions)
+    {
+        DataKind? sourceKind = ResolveType(indexAccess.Source, sourceSchema, functions);
+
+        if (sourceKind == DataKind.Struct && indexAccess.Indices.Count == 1)
+        {
+            ColumnInfo? field = ResolveStructFieldInfo(indexAccess, sourceSchema, functions);
+            if (field is not null)
+            {
+                bool fieldIsMultiDim = field.IsArray
+                    && (field.IsMultiDim || field.FixedShape is { Length: >= 2 });
+                return (field.Kind, field.IsArray, fieldIsMultiDim);
+            }
+        }
+
+        // Indexing into a typed array (column or function-call source) yields
+        // a scalar element. Keep the kind, drop the array flags.
+        DataKind? elementKind = ResolveTypeKindOnly(indexAccess, sourceSchema, functions);
+        return elementKind is null ? null : (elementKind.Value, false, false);
     }
 
     private static DataKind? ResolveTypeKindOnly(Expression expression, Schema sourceSchema, FunctionRegistry functions)
@@ -232,37 +325,89 @@ public static class ExpressionTypeResolver
             }
         }
 
-        if (sourceKind == DataKind.Struct
-            && indexAccess.Indices.Count == 1
-            && indexAccess.Indices[0] is LiteralExpression { Value: string fieldName })
+        if (sourceKind == DataKind.Struct && indexAccess.Indices.Count == 1)
         {
-            // Struct field access by name: resolve via ColumnInfo.Fields.
-            IReadOnlyList<ColumnInfo>? fields = null;
-
-            if (indexAccess.Source is ColumnReference colRef)
+            ColumnInfo? fieldInfo = ResolveStructFieldInfo(indexAccess, sourceSchema, functions);
+            if (fieldInfo is not null)
             {
-                fields = ResolveColumnInfo(colRef, sourceSchema)?.Fields;
-            }
-            else if (indexAccess.Source is StructLiteralExpression literal)
-            {
-                // Build a transient field list from the literal's AST names.
-                // We only need the names here; kinds are resolved next.
-                fields = BuildFieldColumnInfos(literal, sourceSchema, functions);
-            }
-
-            if (fields is not null)
-            {
-                foreach (ColumnInfo fieldInfo in fields)
-                {
-                    if (string.Equals(fieldInfo.Name, fieldName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return fieldInfo.Kind;
-                    }
-                }
+                return fieldInfo.Kind;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Resolves the struct field <see cref="ColumnInfo"/> targeted by a
+    /// <c>struct[index]</c> expression. Supports two index forms:
+    /// <list type="bullet">
+    ///   <item><c>struct['fieldname']</c> — looks up by name (case-insensitive).</item>
+    ///   <item><c>struct[1]</c> — looks up by 1-based ordinal, matching the
+    ///   runtime positional-access behaviour in <see cref="ExpressionEvaluator"/>.
+    ///   Required so signatures like <c>array_resize_2d(model_output[1], …)</c>
+    ///   resolve the field's full shape (kind + IsArray + IsMultiDim) at plan
+    ///   time, not just the kind.</item>
+    /// </list>
+    /// Returns <c>null</c> when the source isn't a struct whose fields we can
+    /// inspect (a transient struct literal source builds field metadata on the
+    /// fly), when the named field is missing, or when the ordinal is out of
+    /// range. Callers that only want the kind use <c>.Kind</c>; callers that
+    /// need the full shape read <c>IsArray</c> / <c>IsMultiDim</c> directly.
+    /// </summary>
+    private static ColumnInfo? ResolveStructFieldInfo(
+        IndexAccessExpression indexAccess, Schema sourceSchema, FunctionRegistry functions)
+    {
+        IReadOnlyList<ColumnInfo>? fields = null;
+        if (indexAccess.Source is ColumnReference colRef)
+        {
+            fields = ResolveColumnInfo(colRef, sourceSchema)?.Fields;
+        }
+        else if (indexAccess.Source is StructLiteralExpression literal)
+        {
+            fields = BuildFieldColumnInfos(literal, sourceSchema, functions);
+        }
+
+        if (fields is null) return null;
+
+        Expression index = indexAccess.Indices[0];
+        if (index is LiteralExpression { Value: string fieldName })
+        {
+            foreach (ColumnInfo fieldInfo in fields)
+            {
+                if (string.Equals(fieldInfo.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return fieldInfo;
+                }
+            }
+            return null;
+        }
+
+        if (index is LiteralExpression lit && TryReadIntegerLiteral(lit.Value, out int ordinal))
+        {
+            // PostgreSQL-style 1-based ordinal, matching the runtime path in
+            // ExpressionEvaluator.EvaluateIndexAccessAsync's struct branch.
+            int zeroBased = ordinal - 1;
+            if (zeroBased < 0 || zeroBased >= fields.Count) return null;
+            return fields[zeroBased];
+        }
+
+        return null;
+    }
+
+    private static bool TryReadIntegerLiteral(object? value, out int result)
+    {
+        switch (value)
+        {
+            case sbyte v: result = v; return true;
+            case byte v: result = v; return true;
+            case short v: result = v; return true;
+            case ushort v: result = v; return true;
+            case int v: result = v; return true;
+            case uint v: result = (int)v; return true;
+            case long v when v >= int.MinValue && v <= int.MaxValue: result = (int)v; return true;
+            case ulong v when v <= int.MaxValue: result = (int)v; return true;
+            default: result = 0; return false;
+        }
     }
 
     /// <summary>
