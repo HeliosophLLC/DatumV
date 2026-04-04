@@ -173,7 +173,11 @@ public sealed class ZipDeserializer : IFormatDeserializer
         }
 
         ImageDimensions? dimensions = ImageHeaderParser.TryParseHeader(bytes);
-        DataValue image = DataValueHelpers.FromArenaSlice(DataKind.Image, offset, actualLength, dimensions);
+        // Bytes are warm in cache from AppendFromStream — XxHash64 the span so
+        // downstream Image-keyed dedup / joins can short-circuit cross-arena
+        // Equals without re-fetching from the arena.
+        uint hash32 = unchecked((uint)System.IO.Hashing.XxHash64.HashToUInt64(bytes));
+        DataValue image = DataValueHelpers.FromArenaSlice(DataKind.Image, offset, actualLength, dimensions, hash32);
         return (image, dimensions, actualLength);
     }
 
@@ -216,8 +220,13 @@ public sealed class ZipDeserializer : IFormatDeserializer
             }
 
             ImageDimensions? dimensions = ImageHeaderParser.TryParseHeader(bytes);
+            // Bytes are in the pooled buffer — XxHash64 the span so cross-sidecar
+            // Equals / GetHashCode can short-circuit without fetching the payload.
+            uint hash32 = unchecked((uint)System.IO.Hashing.XxHash64.HashToUInt64(bytes));
             (long offset, long appended) = sidecar.Append(bytes);
-            DataValue image = DataValue.FromImageInSidecar(offset, appended);
+            DataValue image = dimensions is { Width: > 0 and <= ushort.MaxValue, Height: > 0 and <= ushort.MaxValue } d
+                ? DataValue.FromImageInSidecar(offset, appended, storeId: 0, (ushort)d.Width, (ushort)d.Height, DataValueHelpers.ClampChannels(d.Channels), hash32)
+                : DataValue.FromImageInSidecar(offset, appended);
             return (image, dimensions, appended);
         }
         finally
@@ -322,17 +331,19 @@ internal static class DataValueHelpers
     /// <paramref name="length"/>. Caller is responsible for ensuring the arena
     /// contains the bytes.
     /// </summary>
-    public static DataValue FromArenaSlice(DataKind kind, long offset, int length, ImageDimensions? imageDimensions = null)
+    public static DataValue FromArenaSlice(DataKind kind, long offset, int length, ImageDimensions? imageDimensions = null, uint hash32 = 0)
         => kind switch
         {
             DataKind.Image => imageDimensions is { Width: > 0 and <= ushort.MaxValue, Height: > 0 and <= ushort.MaxValue } d
-                ? DataValue.FromImageAtOffset(offset, length, (ushort)d.Width, (ushort)d.Height, ClampChannels(d.Channels))
+                ? (hash32 != 0
+                    ? DataValue.FromImageAtOffset(offset, length, (ushort)d.Width, (ushort)d.Height, ClampChannels(d.Channels), hash32)
+                    : DataValue.FromImageAtOffset(offset, length, (ushort)d.Width, (ushort)d.Height, ClampChannels(d.Channels)))
                 : DataValue.FromImageAtOffset(offset, length),
             // Byte-array slices use FromByteArrayAtOffset; callers can call that
             // factory directly since byte arrays don't have a single DataKind here.
             _ => throw new NotSupportedException($"FromArenaSlice does not support DataKind.{kind}."),
         };
 
-    private static byte ClampChannels(int channels) =>
+    internal static byte ClampChannels(int channels) =>
         channels is >= 0 and <= 255 ? (byte)channels : (byte)0;
 }

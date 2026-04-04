@@ -289,13 +289,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>
     /// Image-specific overload that packs <c>(width, height)</c> across <c>_p4</c>
     /// and channels into the low byte of <c>_p5</c>. Forwards to the generic
-    /// metadata constructor.
+    /// metadata constructor. Optional <paramref name="hash32"/> stamps the low 32
+    /// bits of XxHash64-over-encoded-bytes into <c>_p6</c> so Equals / GetHashCode
+    /// can short-circuit on cross-arena / cross-sidecar comparisons; pass 0 when
+    /// the bytes aren't available at construction time (legacy fallback path).
     /// </summary>
-    private DataValue(DataKind kind, DataValueFlags flags, long offset, long length, ushort width, ushort height, byte channels, ushort charCount = 0)
+    private DataValue(DataKind kind, DataValueFlags flags, long offset, long length, ushort width, ushort height, byte channels, ushort charCount = 0, uint hash32 = 0)
         : this(kind, flags, offset, length,
             p4: unchecked((int)((uint)width | ((uint)height << 16))),
             p5: channels,
-            p6: 0,
+            p6: unchecked((int)hash32),
             charCount: charCount)
     { }
 
@@ -1074,10 +1077,18 @@ public readonly struct DataValue : IEquatable<DataValue>
         throw new InvalidOperationException("Use FromImage(value, store). ReferenceStore is no longer available.");
 
     /// <summary>Creates a value from encoded image bytes using an explicit <see cref="IValueStore"/>.</summary>
+    /// <remarks>
+    /// Stamps the low 32 bits of <c>XxHash64(value)</c> into <c>_p6</c> so cross-arena
+    /// Equals / GetHashCode short-circuits without re-reading the bytes — same shape
+    /// as the arena-array hash slot.
+    /// </remarks>
     public static DataValue FromImage(byte[] value, IValueStore store)
     {
+        uint hash32 = unchecked((uint)XxHash64.HashToUInt64(value));
         var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.Image, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value);
+        return new(DataKind.Image, flags: DataValueFlags.InArena,
+            offset: p0.Value, length: p1.Value,
+            width: 0, height: 0, channels: 0, hash32: hash32);
     }
 
     /// <summary>
@@ -1095,12 +1106,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="channels">Channel count (1=grayscale, 3=RGB, 4=RGBA); 0 when unknown.</param>
     public static DataValue FromImage(byte[] value, IValueStore store, ushort width, ushort height, byte channels = 0)
     {
+        uint hash32 = unchecked((uint)XxHash64.HashToUInt64(value));
         var (p0, p1) = store.StoreBytes(value);
         return new(
             DataKind.Image,
             flags: DataValueFlags.InArena,
             offset: p0.Value, length: p1.Value,
-            width: width, height: height, channels: channels);
+            width: width, height: height, channels: channels,
+            hash32: hash32);
     }
 
     /// <summary>
@@ -1161,28 +1174,115 @@ public readonly struct DataValue : IEquatable<DataValue>
         throw new InvalidOperationException("Use FromAudio(value, store). ReferenceStore is no longer available.");
 
     /// <summary>Creates a value from encoded audio bytes using an explicit <see cref="IValueStore"/>.</summary>
+    /// <remarks>
+    /// Stamps the low 32 bits of <c>XxHash64(value)</c> into <c>_p6</c> so cross-arena
+    /// / cross-sidecar Audio Equals short-circuits without re-reading the bytes.
+    /// </remarks>
     public static DataValue FromAudio(byte[] value, IValueStore store)
     {
-        var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.Audio, flags: DataValueFlags.InArena, offset: p0.Value, length: p1.Value);
-    }
-
-    /// <summary>
-    /// Variant of <see cref="FromAudio(byte[], IValueStore)"/> that stamps inline metadata.
-    /// Substrate for future <c>audio_sample_rate()</c> / <c>audio_channels()</c> SQL
-    /// functions; no consumer exists yet — when one is added, route it through the
-    /// inline accessors (<see cref="AudioSampleRate"/>, etc.) first and fall back to a
-    /// header-parse-on-decode path only when metadata is absent.
-    /// </summary>
-    public static DataValue FromAudio(byte[] value, IValueStore store, uint sampleRate, byte channels = 0, byte bitDepth = 0, uint frameCount = 0)
-    {
+        uint hash32 = unchecked((uint)XxHash64.HashToUInt64(value));
         var (p0, p1) = store.StoreBytes(value);
         return new(DataKind.Audio, flags: DataValueFlags.InArena,
             offset: p0.Value, length: p1.Value,
-            p4: unchecked((int)sampleRate),
-            p5: channels | (bitDepth << 8),
-            p6: unchecked((int)frameCount));
+            p4: 0, p5: 0, p6: unchecked((int)hash32));
     }
+
+    /// <summary>
+    /// Variant of <see cref="FromAudio(byte[], IValueStore)"/> that stamps inline metadata
+    /// (sample-rate, channels, bit-depth, frame-count). Substrate for the
+    /// <c>audio_sample_rate()</c> SQL function and the planner-time inline-accessor
+    /// elision path; the per-field accessors (<see cref="AudioSampleRate"/>, etc.)
+    /// read the same bits back without decoding.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Layout (post-Round-2 repack to free <c>_p6</c> for the content hash):
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description><c>_p4</c>: <c>sampleRate(24 b)</c> | <c>channels(4 b)</c> | <c>bitDepthCode(4 b)</c></description></item>
+    /// <item><description><c>_p5</c>: <c>frameCount(32 b)</c></description></item>
+    /// <item><description><c>_p6</c>: low 32 bits of <c>XxHash64(value)</c></description></item>
+    /// </list>
+    /// <para>
+    /// Caps: <paramref name="sampleRate"/> ≤ 16,777,215 Hz (16.7 MHz; ~20× headroom
+    /// over the 768 kHz pro-audio ceiling); <paramref name="channels"/> ≤ 15
+    /// (covers Atmos 7.1.4 = 12); <paramref name="bitDepth"/> must be 0 (unknown),
+    /// 8, 16, 24, 32, or 64. Out-of-range inputs throw
+    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// </para>
+    /// </remarks>
+    public static DataValue FromAudio(byte[] value, IValueStore store, uint sampleRate, byte channels = 0, byte bitDepth = 0, uint frameCount = 0)
+    {
+        int packedP4 = PackAudioP4(sampleRate, channels, bitDepth);
+        uint hash32 = unchecked((uint)XxHash64.HashToUInt64(value));
+        var (p0, p1) = store.StoreBytes(value);
+        return new(DataKind.Audio, flags: DataValueFlags.InArena,
+            offset: p0.Value, length: p1.Value,
+            p4: packedP4,
+            p5: unchecked((int)frameCount),
+            p6: unchecked((int)hash32));
+    }
+
+    private const uint AudioMaxSampleRate = 0x00FF_FFFFu; // 24-bit cap
+    private const byte AudioMaxChannels = 0x0F;            // 4-bit cap
+
+    /// <summary>
+    /// Packs the Audio metadata triple into <c>_p4</c> per the post-Round-2 layout.
+    /// Throws when any input exceeds its bit budget — these are caller-side errors
+    /// (e.g. a future codec returning a wildly out-of-range sample-rate) that
+    /// need fixing upstream rather than silent truncation.
+    /// </summary>
+    private static int PackAudioP4(uint sampleRate, byte channels, byte bitDepth)
+    {
+        if (sampleRate > AudioMaxSampleRate)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(sampleRate), sampleRate,
+                $"Audio sample rate exceeds the {AudioMaxSampleRate}-Hz inline cap.");
+        }
+        if (channels > AudioMaxChannels)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(channels), channels,
+                $"Audio channel count exceeds the {AudioMaxChannels}-channel inline cap.");
+        }
+
+        byte bitDepthCode = EncodeAudioBitDepth(bitDepth);
+
+        return unchecked((int)(
+            sampleRate
+            | ((uint)(channels & AudioMaxChannels) << 24)
+            | ((uint)bitDepthCode << 28)));
+    }
+
+    /// <summary>
+    /// Maps a literal bit-depth value (0 / 8 / 16 / 24 / 32 / 64) to its 4-bit
+    /// storage code. Any other value throws — the inline metadata slot does not
+    /// model arbitrary bit-depths.
+    /// </summary>
+    private static byte EncodeAudioBitDepth(byte bitDepth) => bitDepth switch
+    {
+        0 => 0,
+        8 => 1,
+        16 => 2,
+        24 => 3,
+        32 => 4,
+        64 => 5,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(bitDepth), bitDepth,
+            "Audio bit-depth must be 0 (unknown), 8, 16, 24, 32, or 64."),
+    };
+
+    /// <summary>Inverse of <see cref="EncodeAudioBitDepth"/>; returns 0 for unrecognised codes.</summary>
+    private static byte DecodeAudioBitDepth(byte code) => code switch
+    {
+        1 => 8,
+        2 => 16,
+        3 => 24,
+        4 => 32,
+        5 => 64,
+        _ => 0,
+    };
 
     /// <summary>Creates a value from encoded video bytes.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromVideo(byte[], IValueStore)"/> instead.</remarks>
@@ -1268,6 +1368,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// / <see cref="ImageChannels"/> without needing to dereference the sidecar.
     /// </summary>
     public static DataValue FromImageInSidecar(long offset, long length, byte storeId, ushort width, ushort height, byte channels)
+        => FromImageInSidecar(offset, length, storeId, width, height, channels, hash32: 0);
+
+    /// <summary>
+    /// Variant of <see cref="FromImageInSidecar(long, long, byte, ushort, ushort, byte)"/>
+    /// that also stamps a pre-computed 32-bit content hash into <c>_p6</c>. Use from
+    /// ingest paths that have the encoded bytes in hand so cross-sidecar Equals
+    /// short-circuits without fetching the payload. Pass the low 32 bits of
+    /// <c>XxHash64</c> over the encoded image bytes.
+    /// </summary>
+    public static DataValue FromImageInSidecar(long offset, long length, byte storeId, ushort width, ushort height, byte channels, uint hash32)
     {
         if (offset < 0)
         {
@@ -1285,7 +1395,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             flags: DataValueFlags.InSidecar,
             offset: offset, length: length,
             width: width, height: height, channels: channels,
-            charCount: storeId);
+            charCount: storeId,
+            hash32: hash32);
     }
 
     /// <summary>
@@ -2664,6 +2775,18 @@ public readonly struct DataValue : IEquatable<DataValue>
             width: width, height: height, channels: channels);
 
     /// <summary>
+    /// Variant of <see cref="FromImageAtOffset(long, long, ushort, ushort, byte)"/> that
+    /// also stamps a pre-computed 32-bit content hash into <c>_p6</c>. Use from ingest
+    /// paths that have the encoded bytes in hand (e.g. <c>ZipDeserializer</c>) so
+    /// downstream Equals / GetHashCode can short-circuit without bytes; pass the low
+    /// 32 bits of <c>XxHash64</c> over the encoded image payload.
+    /// </summary>
+    public static DataValue FromImageAtOffset(long offset, long length, ushort width, ushort height, byte channels, uint hash32) =>
+        new(DataKind.Image, flags: DataValueFlags.InArena,
+            offset: offset, length: length,
+            width: width, height: height, channels: channels, hash32: hash32);
+
+    /// <summary>
     /// Creates a byte-array value that references bytes already written to an
     /// <see cref="IValueStore"/> at the given offset and length. Parallel to
     /// <see cref="FromImageAtOffset(long, long)"/> for generic binary payloads where the
@@ -3919,18 +4042,22 @@ public readonly struct DataValue : IEquatable<DataValue>
     public byte ImageChannels => _kind == DataKind.Image ? unchecked((byte)_p5) : (byte)0;
 
     // ───────────────────────── Audio inline metadata ─────────────────────────
+    // Post-Round-2 layout:
+    //   _p4 (32 b): sampleRate(24) | channels(4) | bitDepthCode(4)
+    //   _p5 (32 b): frameCount
+    //   _p6 (32 b): low 32 bits of XxHash64(bytes)
 
-    /// <summary>Inline sample rate (Hz) for Audio values; 0 when not stamped. <c>_p4</c>.</summary>
-    public uint AudioSampleRate => _kind == DataKind.Audio ? unchecked((uint)_p4) : 0u;
+    /// <summary>Inline sample rate (Hz) for Audio values; 0 when not stamped. Low 24 bits of <c>_p4</c>.</summary>
+    public uint AudioSampleRate => _kind == DataKind.Audio ? unchecked((uint)_p4 & AudioMaxSampleRate) : 0u;
 
-    /// <summary>Inline channel count for Audio values; 0 when not stamped. Low byte of <c>_p5</c>.</summary>
-    public byte AudioChannels => _kind == DataKind.Audio ? unchecked((byte)_p5) : (byte)0;
+    /// <summary>Inline channel count for Audio values; 0 when not stamped. Bits 24-27 of <c>_p4</c>.</summary>
+    public byte AudioChannels => _kind == DataKind.Audio ? unchecked((byte)((_p4 >> 24) & AudioMaxChannels)) : (byte)0;
 
-    /// <summary>Inline bit depth for Audio values (8/16/24/32); 0 when not stamped. Byte 1 of <c>_p5</c>.</summary>
-    public byte AudioBitDepth => _kind == DataKind.Audio ? unchecked((byte)(_p5 >> 8)) : (byte)0;
+    /// <summary>Inline bit depth for Audio values (8/16/24/32/64); 0 when unknown or not stamped. Bits 28-31 of <c>_p4</c> via <see cref="DecodeAudioBitDepth"/>.</summary>
+    public byte AudioBitDepth => _kind == DataKind.Audio ? DecodeAudioBitDepth(unchecked((byte)((_p4 >> 28) & 0xF))) : (byte)0;
 
-    /// <summary>Inline frame count (samples per channel) for Audio values; 0 when not stamped. <c>_p6</c>.</summary>
-    public uint AudioFrameCount => _kind == DataKind.Audio ? unchecked((uint)_p6) : 0u;
+    /// <summary>Inline frame count (samples per channel) for Audio values; 0 when not stamped. <c>_p5</c>.</summary>
+    public uint AudioFrameCount => _kind == DataKind.Audio ? unchecked((uint)_p5) : 0u;
 
     // ───────────────────────── Video inline metadata ─────────────────────────
 
@@ -4295,9 +4422,22 @@ public readonly struct DataValue : IEquatable<DataValue>
             // Timestamp / TimestampTz are 8-byte ticks; _p2 is unused.
             DataKind.Timestamp or DataKind.TimestampTz
                 => _p0 == other._p0 && _p1 == other._p1,
+            // Image: prefer the cached 32-bit content hash in _p6 (stamped at
+            // ingest time when the bytes were in hand) so cross-arena / cross-sidecar
+            // images compare equal without a payload fetch. Falls back to
+            // offset-equality when either side lacks the cached hash (legacy
+            // FromImageAtOffset / FromImageInSidecar callers that didn't plumb it).
+            DataKind.Image
+                => CompareImage(in this, in other),
+            // Audio: same shape as Image — cached 32-bit content hash in _p6 with
+            // offset-equality as the legacy fallback. The repacked _p4/_p5 metadata
+            // is content-identifying (sampleRate/channels/bitDepth/frameCount), so
+            // equal hashes imply equal metadata too.
+            DataKind.Audio
+                => CompareAudio(in this, in other),
             // For reference types without a store, use offset-equality: same (_p0,_p1) in the
             // same store means identical content. Different offsets → unknown, return false.
-            DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud or DataKind.Mesh
+            DataKind.Video or DataKind.Json or DataKind.PointCloud or DataKind.Mesh
                 => _p0 == other._p0 && _p1 == other._p1,
             // VideoFrame is inline: (videoId, frameIndex) value-equality.
             DataKind.VideoFrame
@@ -4392,8 +4532,16 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Uuid
                 => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
+            // Image / Audio: use the cached 32-bit content hash in _p6 when stamped
+            // (the ingest path provided the bytes); fall back to offset-based hashing
+            // when absent. Cross-arena dedup requires the cached hash — offsets drift
+            // per scan so without it the dictionary fragments.
+            DataKind.Image or DataKind.Audio
+                => _p6 != 0
+                    ? HashCode.Combine(_kind, (uint)_p6)
+                    : HashCode.Combine(_kind, _p0, _p1),
             // Offset-based hashing: consistent with offset-equality in Equals.
-            DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud or DataKind.Mesh
+            DataKind.Video or DataKind.Json or DataKind.PointCloud or DataKind.Mesh
                 => HashCode.Combine(_kind, _p0, _p1),
             // VideoFrame: inline value, hash the (videoId, frameIndex) payload.
             DataKind.VideoFrame
@@ -4418,6 +4566,66 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// same batch share offset/length identity; cross-arena comparison requires
     /// materialisation before calling <see cref="Equals(DataValue)"/>.
     /// </summary>
+    /// <summary>
+    /// Compares two <see cref="DataKind.Image"/> values. Same offset+length in the
+    /// same store ⇒ identical content (fast path). Otherwise, when both sides
+    /// carry the cached 32-bit content hash in <c>_p6</c>, compare those;
+    /// mismatch ⇒ definitely unequal (records a hash short-circuit). Match ⇒
+    /// treated as equal (32-bit collision rate ~1 in 4B is acceptable for a
+    /// fast-negative gate). Legacy path with no cached hash returns false
+    /// conservatively — same shape as the non-string reference kinds.
+    /// </summary>
+    private static bool CompareImage(in DataValue left, in DataValue right)
+    {
+        if (left._p0 == right._p0 && left._p1 == right._p1)
+        {
+            return true;
+        }
+
+        uint leftHash = (uint)left._p6;
+        uint rightHash = (uint)right._p6;
+        if (leftHash != 0 && rightHash != 0)
+        {
+            if (leftHash != rightHash)
+            {
+                DatumIngest.Diagnostics.HashGateStats.RecordHashShortCircuit();
+                return false;
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Audio counterpart to <see cref="CompareImage"/>. Same shape: fast path on
+    /// same offset+length, cached 32-bit content hash in <c>_p6</c> otherwise,
+    /// legacy fallback returns false. Inline metadata in <c>_p4</c>/<c>_p5</c>
+    /// (sampleRate/channels/bitDepth/frameCount) is content-derived, so equal
+    /// content hashes imply equal metadata.
+    /// </summary>
+    private static bool CompareAudio(in DataValue left, in DataValue right)
+    {
+        if (left._p0 == right._p0 && left._p1 == right._p1)
+        {
+            return true;
+        }
+
+        uint leftHash = (uint)left._p6;
+        uint rightHash = (uint)right._p6;
+        if (leftHash != 0 && rightHash != 0)
+        {
+            if (leftHash != rightHash)
+            {
+                DatumIngest.Diagnostics.HashGateStats.RecordHashShortCircuit();
+                return false;
+            }
+            return true;
+        }
+
+        return false;
+    }
+
     private static bool CompareStrings(in DataValue left, in DataValue right)
     {
         bool leftInline = left.IsInline;
