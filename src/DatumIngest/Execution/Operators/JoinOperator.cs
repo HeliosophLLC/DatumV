@@ -215,7 +215,31 @@ public sealed class JoinOperator : QueryOperator
                 QueryOperator buildSide = _flipped ? _left : _right;
                 long? estimatedBuildRows = GetEstimatedRowCount(buildSide);
                 DatumActivity.Operators.Trace($"JOIN GraceHash starting  build={GetOperatorLabel(buildSide)}  estimatedBuild={estimatedBuildRows}");
-                GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi, _flipped, label: GetOperatorLabel(buildSide), estimatedBuildRows: estimatedBuildRows);
+
+                // Bloom pruning is unsafe for LeftAntiSemi (would skip probe-side left rows
+                // that must be emitted as unmatched). Allowed for inner/outer/LeftSemi.
+                bool isSemiJoin = _joinType is JoinType.LeftSemi or JoinType.LeftAntiSemi;
+                IReadOnlyList<int>? bloomKeyIndices = null;
+                Action<IReadOnlyDictionary<int, HashSet<DataValue>>>? onBloomKeysReady = null;
+                if (!isSemiJoin)
+                {
+                    List<BloomPruningPlanEntry> plan = ComputeBloomPruningPlan(extraction.KeyPairs);
+                    if (plan.Count > 0)
+                    {
+                        int[] indices = new int[plan.Count];
+                        for (int i = 0; i < plan.Count; i++)
+                        {
+                            indices[i] = plan[i].KeyIndex;
+                        }
+                        bloomKeyIndices = indices;
+                        onBloomKeysReady = keys => PushBloomKeysToScans(plan, keys);
+                    }
+                }
+
+                GraceHashJoinExecutor graceExecutor = new(
+                    _joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi, _flipped,
+                    label: GetOperatorLabel(buildSide), estimatedBuildRows: estimatedBuildRows,
+                    bloomKeyIndices: bloomKeyIndices, onBloomKeysReady: onBloomKeysReady);
 
                 await foreach (RowBatch batch in graceExecutor.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
                 {
@@ -1081,13 +1105,51 @@ public sealed class JoinOperator : QueryOperator
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
         IJoinHashTable hashTable)
     {
+        List<BloomPruningPlanEntry> plan = ComputeBloomPruningPlan(keyPairs);
+        if (plan.Count == 0)
+        {
+            return;
+        }
+
+        Dictionary<int, HashSet<DataValue>> keysByIndex = new(plan.Count);
+        foreach (BloomPruningPlanEntry entry in plan)
+        {
+            HashSet<DataValue> keys = new();
+            hashTable.CollectDistinctKeysAt(entry.KeyIndex, keys);
+            keysByIndex[entry.KeyIndex] = keys;
+        }
+
+        PushBloomKeysToScans(plan, keysByIndex);
+    }
+
+    /// <summary>
+    /// One bloom/sorted-index pruning target: a join-key index, the corresponding
+    /// probe-side column name, and the probe-side <see cref="ScanOperator"/> instances
+    /// that have bloom filters and/or sorted indices on that column.
+    /// </summary>
+    private readonly record struct BloomPruningPlanEntry(
+        int KeyIndex,
+        string ColumnName,
+        List<ScanOperator> ScansWithBloom,
+        List<ScanOperator> ScansWithSortedIndex);
+
+    /// <summary>
+    /// Inspects the probe-side scan tree and returns a per-key-index plan of which
+    /// columns can be pruned via bloom filter or sorted index. Returns an empty list
+    /// when no probe scan exposes a prunable column for any equi-join key.
+    /// </summary>
+    private List<BloomPruningPlanEntry> ComputeBloomPruningPlan(
+        IReadOnlyList<(Expression Left, Expression Right)> keyPairs)
+    {
+        List<BloomPruningPlanEntry> plan = new();
+
         QueryOperator probeOperator = _flipped ? _right : _left;
         List<ScanOperator> probeScans = new();
         CollectScanOperators(probeOperator, probeScans);
 
         if (probeScans.Count == 0)
         {
-            return;
+            return plan;
         }
 
         for (int keyIndex = 0; keyIndex < keyPairs.Count; keyIndex++)
@@ -1099,7 +1161,8 @@ public sealed class JoinOperator : QueryOperator
             }
 
             string columnName = columnReference.ColumnName;
-            HashSet<DataValue>? distinctKeys = null;
+            List<ScanOperator>? bloomScans = null;
+            List<ScanOperator>? sortedScans = null;
 
             foreach (ScanOperator probeScan in probeScans)
             {
@@ -1107,32 +1170,54 @@ public sealed class JoinOperator : QueryOperator
                     && bloomFilters.HasColumn(columnName);
                 bool hasSortedIndex = probeScan.TableProvider.TryGetColumnIndex(columnName, out _);
 
-                if (!hasBloom && !hasSortedIndex)
-                {
-                    continue;
-                }
-
-                // Lazily collect distinct keys on first matching scan.
-                if (distinctKeys is null)
-                {
-                    distinctKeys = new HashSet<DataValue>();
-                    hashTable.CollectDistinctKeysAt(keyIndex, distinctKeys);
-
-                    if (distinctKeys.Count == 0)
-                    {
-                        break;
-                    }
-                }
-
                 if (hasBloom)
                 {
-                    probeScan.AddBloomPruningKeys(columnName, distinctKeys);
+                    (bloomScans ??= new()).Add(probeScan);
                 }
 
                 if (hasSortedIndex)
                 {
-                    probeScan.AddSortedIndexPruningKeys(columnName, distinctKeys);
+                    (sortedScans ??= new()).Add(probeScan);
                 }
+            }
+
+            if (bloomScans is not null || sortedScans is not null)
+            {
+                plan.Add(new BloomPruningPlanEntry(
+                    keyIndex,
+                    columnName,
+                    bloomScans ?? new List<ScanOperator>(),
+                    sortedScans ?? new List<ScanOperator>()));
+            }
+        }
+
+        return plan;
+    }
+
+    /// <summary>
+    /// Pushes the collected distinct build-side keys (by key-index) into each probe-side
+    /// scan that the <paramref name="plan"/> identifies as having a bloom filter or
+    /// sorted index for the corresponding column. Empty key sets are skipped.
+    /// </summary>
+    private static void PushBloomKeysToScans(
+        List<BloomPruningPlanEntry> plan,
+        IReadOnlyDictionary<int, HashSet<DataValue>> keysByIndex)
+    {
+        foreach (BloomPruningPlanEntry entry in plan)
+        {
+            if (!keysByIndex.TryGetValue(entry.KeyIndex, out HashSet<DataValue>? keys) || keys.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (ScanOperator scan in entry.ScansWithBloom)
+            {
+                scan.AddBloomPruningKeys(entry.ColumnName, keys);
+            }
+
+            foreach (ScanOperator scan in entry.ScansWithSortedIndex)
+            {
+                scan.AddSortedIndexPruningKeys(entry.ColumnName, keys);
             }
         }
     }

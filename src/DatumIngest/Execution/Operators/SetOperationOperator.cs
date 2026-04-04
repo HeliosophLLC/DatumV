@@ -25,9 +25,11 @@ namespace DatumIngest.Execution.Operators;
 /// rows for that partition, then probed against the spilled left rows.
 /// </para>
 /// <para>
-/// All output rows are stabilised into a long-lived <c>hashSetArena</c> rented from the
-/// pool, so emitted batches resolve correctly after their source input batches return.
-/// Per-row pool rentals (output <see cref="DataValue"/>[]s, partition buffers, the
+/// All output rows are stabilised into <see cref="ExecutionContext.Store"/> (the per-query
+/// arena), so emitted batches resolve correctly after their source input batches return AND
+/// downstream operators that splice values without re-stabilizing (e.g.
+/// <c>JoinSchema.CombinePooledValues</c>) read the offsets against the same arena the bytes
+/// live in. Per-row pool rentals (output <see cref="DataValue"/>[]s, partition buffers, the
 /// <c>compositeKeyScratch</c>) are returned in each iterator's <c>finally</c>, keeping
 /// <see cref="PoolBacking.ArenaRentCount"/> / <see cref="PoolBacking.RowBatchRentCount"/>
 /// / <see cref="PoolBacking.DataValueArrayRentCount"/> balanced for clean leak detection.
@@ -189,7 +191,10 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
         // Long-lived arena for output-row stabilization. Lazily rented on first non-empty
         // batch (we need the schema). Output batches share this arena so consumers can
         // resolve arena-backed values after the input batches have been returned.
-        Arena? hashSetArena = null;
+        // hashSetArena was a private rented arena; values escaped into outputBatches
+        // backed by context.Store causing the SpillPartition-shape cross-arena bug
+        // (DataValue.BackedOffset valid in one arena, read against the other). Now we
+        // use context.Store throughout — one arena per query, mutually addressable.
 
         // Hash-partitioned spiller — replaces the inline BinaryWriter[] arrays. Lazily
         // constructed when the budget is first exceeded.
@@ -223,7 +228,6 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                     if (schema is null && inputBatch.Count > 0)
                     {
                         schema = inputBatch.ColumnLookup;
-                        hashSetArena = pool.RentArena();
                     }
 
                     for (int i = 0; i < inputBatch.Count; i++)
@@ -271,7 +275,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                             int spillPartition = AssignPartition(spillHashCode);
                             partitionBuffers![spillPartition] ??= pool.RentRowBatch(
-                                schema!, context.BatchSize, hashSetArena!);
+                                schema!, context.BatchSize, context.Store);
                             pool.RentAndCopyToOutput(inputBatch, i, partitionBuffers[spillPartition]!);
 
                             if (partitionBuffers[spillPartition]!.IsFull)
@@ -322,7 +326,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                                 // branch above and go to spill only.
                             }
 
-                            outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                            outputBatch ??= context.RentRowBatch(schema!);
                             pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
                             if (outputBatch.IsFull)
@@ -422,7 +426,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                                 if (isNew)
                                 {
-                                    outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                                    outputBatch ??= context.RentRowBatch(schema!);
                                     pool.RentAndCopyToOutput(spilledBatch, i, outputBatch);
                                     DrainEmittedRowCount++;
 
@@ -479,7 +483,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
             if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
             spiller?.Dispose();
-            if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
+            // No hashSetArena release here: we don't own context.Store.
         }
     }
 
@@ -518,7 +522,10 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
         long perRowBytes = 0;
         long residentBytesNotified = 0;
 
-        Arena? hashSetArena = null;
+        // hashSetArena was a private rented arena; values escaped into outputBatches
+        // backed by context.Store causing the SpillPartition-shape cross-arena bug
+        // (DataValue.BackedOffset valid in one arena, read against the other). Now we
+        // use context.Store throughout — one arena per query, mutually addressable.
         SpillReaderWriter? rightSpiller = null;
         SpillReaderWriter? leftSpiller = null;
         RowBatch?[]? rightPartitionBuffers = null;
@@ -553,7 +560,6 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                     if (schema is null && rightBatch.Count > 0)
                     {
                         schema = rightBatch.ColumnLookup;
-                        hashSetArena = pool.RentArena();
                     }
 
                     for (int i = 0; i < rightBatch.Count; i++)
@@ -600,7 +606,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                             int partition = AssignPartition(spillHash);
                             rightPartitionBuffers![partition] ??= pool.RentRowBatch(
-                                schema!, context.BatchSize, hashSetArena!);
+                                schema!, context.BatchSize, context.Store);
                             pool.RentAndCopyToOutput(rightBatch, i, rightPartitionBuffers[partition]!);
 
                             if (rightPartitionBuffers[partition]!.IsFull)
@@ -709,7 +715,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         if (partitionIsSpilled)
                         {
                             leftPartitionBuffers![partition] ??= pool.RentRowBatch(
-                                schema!, context.BatchSize, hashSetArena!);
+                                schema!, context.BatchSize, context.Store);
                             pool.RentAndCopyToOutput(leftBatch, i, leftPartitionBuffers[partition]!);
 
                             if (leftPartitionBuffers[partition]!.IsFull)
@@ -739,7 +745,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                         if (isNew)
                         {
-                            outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                            outputBatch ??= context.RentRowBatch(schema!);
                             pool.RentAndCopyToOutput(leftBatch, i, outputBatch);
 
                             if (outputBatch.IsFull)
@@ -876,7 +882,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                                 if (isNew)
                                 {
-                                    outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                                    outputBatch ??= context.RentRowBatch(schema!);
                                     pool.RentAndCopyToOutput(spilledLeftBatch, i, outputBatch);
 
                                     if (outputBatch.IsFull)
@@ -953,7 +959,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
             }
             rightSpiller?.Dispose();
             leftSpiller?.Dispose();
-            if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
+            // No hashSetArena release here: we don't own context.Store.
         }
     }
 
@@ -979,7 +985,10 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
         long perRowBytes = 0;
         long residentBytesNotified = 0;
 
-        Arena? hashSetArena = null;
+        // hashSetArena was a private rented arena; values escaped into outputBatches
+        // backed by context.Store causing the SpillPartition-shape cross-arena bug
+        // (DataValue.BackedOffset valid in one arena, read against the other). Now we
+        // use context.Store throughout — one arena per query, mutually addressable.
         SpillReaderWriter? rightSpiller = null;
         SpillReaderWriter? leftSpiller = null;
         RowBatch?[]? rightPartitionBuffers = null;
@@ -1008,7 +1017,6 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                     if (schema is null && rightBatch.Count > 0)
                     {
                         schema = rightBatch.ColumnLookup;
-                        hashSetArena = pool.RentArena();
                     }
 
                     for (int i = 0; i < rightBatch.Count; i++)
@@ -1051,7 +1059,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                             int partition = AssignPartition(spillHash);
                             rightPartitionBuffers![partition] ??= pool.RentRowBatch(
-                                schema!, context.BatchSize, hashSetArena!);
+                                schema!, context.BatchSize, context.Store);
                             pool.RentAndCopyToOutput(rightBatch, i, rightPartitionBuffers[partition]!);
 
                             if (rightPartitionBuffers[partition]!.IsFull)
@@ -1145,7 +1153,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         if (partitionIsSpilled)
                         {
                             leftPartitionBuffers![partition] ??= pool.RentRowBatch(
-                                schema!, context.BatchSize, hashSetArena!);
+                                schema!, context.BatchSize, context.Store);
                             pool.RentAndCopyToOutput(leftBatch, i, leftPartitionBuffers[partition]!);
 
                             if (leftPartitionBuffers[partition]!.IsFull)
@@ -1158,7 +1166,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                         if (DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
                         {
-                            outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                            outputBatch ??= context.RentRowBatch(schema!);
                             pool.RentAndCopyToOutput(leftBatch, i, outputBatch);
 
                             if (outputBatch.IsFull)
@@ -1239,7 +1247,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                                 if (decremented)
                                 {
-                                    outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                                    outputBatch ??= context.RentRowBatch(schema!);
                                     pool.RentAndCopyToOutput(spilledLeftBatch, i, outputBatch);
 
                                     if (outputBatch.IsFull)
@@ -1313,7 +1321,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
             }
             rightSpiller?.Dispose();
             leftSpiller?.Dispose();
-            if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
+            // No hashSetArena release here: we don't own context.Store.
         }
     }
 
@@ -1338,7 +1346,10 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
         long perRowBytes = 0;
         long residentBytesNotified = 0;
 
-        Arena? hashSetArena = null;
+        // hashSetArena was a private rented arena; values escaped into outputBatches
+        // backed by context.Store causing the SpillPartition-shape cross-arena bug
+        // (DataValue.BackedOffset valid in one arena, read against the other). Now we
+        // use context.Store throughout — one arena per query, mutually addressable.
         SpillReaderWriter? rightSpiller = null;
         SpillReaderWriter? leftSpiller = null;
         RowBatch?[]? rightPartitionBuffers = null;
@@ -1372,7 +1383,6 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                     if (schema is null && rightBatch.Count > 0)
                     {
                         schema = rightBatch.ColumnLookup;
-                        hashSetArena = pool.RentArena();
                     }
 
                     for (int i = 0; i < rightBatch.Count; i++)
@@ -1409,7 +1419,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                             int partition = AssignPartition(spillHash);
                             rightPartitionBuffers![partition] ??= pool.RentRowBatch(
-                                schema!, context.BatchSize, hashSetArena!);
+                                schema!, context.BatchSize, context.Store);
                             pool.RentAndCopyToOutput(rightBatch, i, rightPartitionBuffers[partition]!);
 
                             if (rightPartitionBuffers[partition]!.IsFull)
@@ -1487,7 +1497,6 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                     if (schema is null && leftBatch.Count > 0)
                     {
                         schema = leftBatch.ColumnLookup;
-                        hashSetArena = pool.RentArena();
                     }
 
                     for (int i = 0; i < leftBatch.Count; i++)
@@ -1527,7 +1536,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         if (partitionIsSpilled)
                         {
                             leftPartitionBuffers![partition] ??= pool.RentRowBatch(
-                                schema!, context.BatchSize, hashSetArena!);
+                                schema!, context.BatchSize, context.Store);
                             pool.RentAndCopyToOutput(leftBatch, i, leftPartitionBuffers[partition]!);
 
                             if (leftPartitionBuffers[partition]!.IsFull)
@@ -1560,7 +1569,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                         if (isNew)
                         {
-                            outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                            outputBatch ??= context.RentRowBatch(schema!);
                             pool.RentAndCopyToOutput(leftBatch, i, outputBatch);
 
                             if (outputBatch.IsFull)
@@ -1681,7 +1690,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                                 if (isNew)
                                 {
-                                    outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                                    outputBatch ??= context.RentRowBatch(schema!);
                                     pool.RentAndCopyToOutput(spilledLeftBatch, i, outputBatch);
 
                                     if (outputBatch.IsFull)
@@ -1758,7 +1767,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
             }
             rightSpiller?.Dispose();
             leftSpiller?.Dispose();
-            if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
+            // No hashSetArena release here: we don't own context.Store.
         }
     }
 
@@ -1819,7 +1828,10 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
         long perRowBytes = 0;
         long residentBytesNotified = 0;
 
-        Arena? hashSetArena = null;
+        // hashSetArena was a private rented arena; values escaped into outputBatches
+        // backed by context.Store causing the SpillPartition-shape cross-arena bug
+        // (DataValue.BackedOffset valid in one arena, read against the other). Now we
+        // use context.Store throughout — one arena per query, mutually addressable.
         SpillReaderWriter? rightSpiller = null;
         SpillReaderWriter? leftSpiller = null;
         RowBatch?[]? rightPartitionBuffers = null;
@@ -1848,7 +1860,6 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                     if (schema is null && rightBatch.Count > 0)
                     {
                         schema = rightBatch.ColumnLookup;
-                        hashSetArena = pool.RentArena();
                     }
 
                     for (int i = 0; i < rightBatch.Count; i++)
@@ -1884,7 +1895,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                             int partition = AssignPartition(spillHash);
                             rightPartitionBuffers![partition] ??= pool.RentRowBatch(
-                                schema!, context.BatchSize, hashSetArena!);
+                                schema!, context.BatchSize, context.Store);
                             pool.RentAndCopyToOutput(rightBatch, i, rightPartitionBuffers[partition]!);
 
                             if (rightPartitionBuffers[partition]!.IsFull)
@@ -1949,7 +1960,6 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                     if (schema is null && leftBatch.Count > 0)
                     {
                         schema = leftBatch.ColumnLookup;
-                        hashSetArena = pool.RentArena();
                     }
 
                     for (int i = 0; i < leftBatch.Count; i++)
@@ -1988,7 +1998,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         if (partitionIsSpilled)
                         {
                             leftPartitionBuffers![partition] ??= pool.RentRowBatch(
-                                schema!, context.BatchSize, hashSetArena!);
+                                schema!, context.BatchSize, context.Store);
                             pool.RentAndCopyToOutput(leftBatch, i, leftPartitionBuffers[partition]!);
 
                             if (leftPartitionBuffers[partition]!.IsFull)
@@ -2004,7 +2014,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         // against null sets, so empty-right correctly emits every left row.
                         if (!DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
                         {
-                            outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                            outputBatch ??= context.RentRowBatch(schema!);
                             pool.RentAndCopyToOutput(leftBatch, i, outputBatch);
 
                             if (outputBatch.IsFull)
@@ -2080,7 +2090,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                                 if (!decremented)
                                 {
-                                    outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                                    outputBatch ??= context.RentRowBatch(schema!);
                                     pool.RentAndCopyToOutput(spilledLeftBatch, i, outputBatch);
 
                                     if (outputBatch.IsFull)
@@ -2154,7 +2164,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
             }
             rightSpiller?.Dispose();
             leftSpiller?.Dispose();
-            if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
+            // No hashSetArena release here: we don't own context.Store.
         }
     }
 

@@ -178,17 +178,22 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
     private async IAsyncEnumerable<RowBatch> ExecuteTopNAsync(
         int topN, ExpressionEvaluator evaluator, ExecutionContext context, Pool pool)
     {
-        // Heap rows live in bufferArena: stabilised at insertion so input batches can
+        // Heap rows live in context.Store: stabilised at insertion so input batches can
         // return to the pool immediately. The heap is a max-heap (reverse comparison)
         // — its peek is the worst-of-the-best, which is what gets evicted on overflow.
-        Arena? bufferArena = null;
+        //
+        // Previous design used a private rented arena; that broke the one-arena-per-query
+        // invariant — the emitted batches' Arena was the private one, but downstream
+        // operators that splice values without re-stabilizing (e.g.
+        // JoinSchema.CombinePooledValues) read offsets against context.Store, getting
+        // garbage. See SpillPartition's docstring for the full bug write-up.
         SidecarRegistry? sidecarRegistry = context.SidecarRegistry;
         ColumnLookup? schema = null;
         PriorityQueue<KeyedRow, KeyedRow> heap = new(
             Comparer<KeyedRow>.Create((left, right) =>
                 -CompareKeys(
-                    left.Keys, bufferArena!, sidecarRegistry,
-                    right.Keys, bufferArena!, sidecarRegistry)));
+                    left.Keys, context.Store, sidecarRegistry,
+                    right.Keys, context.Store, sidecarRegistry)));
         RowBatch? outputBatch = null;
 
         try
@@ -200,7 +205,6 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                     if (schema is null && inputBatch.Count > 0)
                     {
                         schema = inputBatch.ColumnLookup;
-                        bufferArena = pool.RentArena();
                     }
 
                     for (int i = 0; i < inputBatch.Count; i++)
@@ -212,10 +216,10 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                         if (heap.Count < topN)
                         {
                             DataValue[] copy = pool.RentAndCopyDataValues(
-                                sourceRow, inputBatch.Arena, bufferArena!);
+                                sourceRow, inputBatch.Arena, context.Store);
                             Row stableRow = new(sourceRow.ColumnLookup, copy);
                             DataValue[] keys = await EvaluateKeysAsync(
-                                evaluator, stableRow, bufferArena!, bufferArena!, sidecarRegistry, context.Types, context.CancellationToken).ConfigureAwait(false);
+                                evaluator, stableRow, context.Store, context.Store, sidecarRegistry, context.Types, context.CancellationToken).ConfigureAwait(false);
                             KeyedRow keyedRow = new(stableRow, keys);
                             heap.Enqueue(keyedRow, keyedRow);
                         }
@@ -226,20 +230,20 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                             // to the pool) and insert the new row (rented + stabilised).
                             // Asymmetric arenas: the source row's payloads live in the
                             // input batch's arena, while the heap row was already
-                            // stabilised into bufferArena. Pre-evaluate the candidate's
+                            // stabilised into context.Store. Pre-evaluate the candidate's
                             // keys against the input arena before deciding.
                             DataValue[] candidateKeys = await EvaluateKeysAsync(
-                                evaluator, sourceRow, inputBatch.Arena, bufferArena!, sidecarRegistry, context.Types, context.CancellationToken).ConfigureAwait(false);
+                                evaluator, sourceRow, inputBatch.Arena, context.Store, sidecarRegistry, context.Types, context.CancellationToken).ConfigureAwait(false);
                             KeyedRow worst = heap.Peek();
                             if (CompareKeys(
-                                    candidateKeys, bufferArena!, sidecarRegistry,
-                                    worst.Keys, bufferArena!, sidecarRegistry) < 0)
+                                    candidateKeys, context.Store, sidecarRegistry,
+                                    worst.Keys, context.Store, sidecarRegistry) < 0)
                             {
                                 KeyedRow evicted = heap.Dequeue();
                                 pool.ReturnRow(evicted.Row);
 
                                 DataValue[] copy = pool.RentAndCopyDataValues(
-                                    sourceRow, inputBatch.Arena, bufferArena!);
+                                    sourceRow, inputBatch.Arena, context.Store);
                                 Row stableRow = new(sourceRow.ColumnLookup, copy);
                                 KeyedRow keyedRow = new(stableRow, candidateKeys);
                                 heap.Enqueue(keyedRow, keyedRow);
@@ -264,13 +268,13 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
             }
             sorted.Sort((left, right) =>
                 CompareKeys(
-                    left.Keys, bufferArena!, sidecarRegistry,
-                    right.Keys, bufferArena!, sidecarRegistry));
+                    left.Keys, context.Store, sidecarRegistry,
+                    right.Keys, context.Store, sidecarRegistry));
 
             for (int i = 0; i < sorted.Count; i++)
             {
                 Row row = sorted[i].Row;
-                outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, bufferArena!);
+                outputBatch ??= context.RentRowBatch(schema!);
                 DataValue[] outValues = pool.RentDataValues(row.FieldCount);
                 row.RawValues.CopyTo(outValues);
                 outputBatch.Add(outValues);
@@ -300,7 +304,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                 pool.ReturnRow(heap.Dequeue().Row);
             }
             if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
-            if (bufferArena is not null) pool.ReturnArena(bufferArena);
+            // No bufferArena release: heap rows lived in context.Store, owned by the query.
         }
     }
 
@@ -321,7 +325,6 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
         ColumnLookup? schema = null;
         List<KeyedRow> buffer = [];
         List<SpillReaderWriter> sortedRuns = [];
-        Arena? outputArena = null;
         RowBatch? outputBatch = null;
 
         try
@@ -412,12 +415,18 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                         left.Keys, bufferArena!, sidecarRegistry,
                         right.Keys, bufferArena!, sidecarRegistry));
 
+                // Emit batches backed by context.Store so downstream operators
+                // that splice values without re-stabilizing (e.g.
+                // JoinSchema.CombinePooledValues) resolve offsets against the
+                // same arena the bytes live in. Re-stabilize each value from
+                // bufferArena into context.Store on copy-out — bufferArena
+                // is private to this operator and will be released below.
                 for (int i = 0; i < buffer.Count; i++)
                 {
                     Row row = buffer[i].Row;
-                    outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, bufferArena!);
-                    DataValue[] outValues = pool.RentDataValues(row.FieldCount);
-                    row.RawValues.CopyTo(outValues);
+                    outputBatch ??= context.RentRowBatch(schema!);
+                    DataValue[] outValues = pool.RentAndCopyDataValues(
+                        row.RawValues, bufferArena!, context.Store);
                     outputBatch.Add(outValues);
 
                     if (outputBatch.IsFull)
@@ -457,7 +466,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                     residentBytesNotified = 0;
                 }
             }
-            // Buffer arena's last round — release it; merge phase uses a separate output arena.
+            // Buffer arena's last round — release it; merge phase emits via context.Store.
             if (bufferArena is not null)
             {
                 pool.ReturnArena(bufferArena);
@@ -465,11 +474,14 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
             }
 
             // K-way merge across all sorted runs. Output rows are stabilised into
-            // outputArena via RentAndCopyToOutput, so the consumer sees a single
-            // arena regardless of which run a given row came from.
-            outputArena = pool.RentArena();
+            // context.Store via RentAndCopyToOutput, so downstream operators that
+            // splice values without re-stabilizing (e.g. JoinSchema.CombinePooledValues)
+            // resolve offsets against the same arena the bytes live in. The previous
+            // design used a private outputArena rented from the pool — that broke
+            // the one-arena-per-query invariant; see SpillPartition's docstring for
+            // the full bug write-up.
             await foreach (RowBatch mergedBatch in MergeSortedRunsAsync(
-                sortedRuns, schema!, evaluator, context, pool, outputArena).ConfigureAwait(false))
+                sortedRuns, schema!, evaluator, context, pool).ConfigureAwait(false))
             {
                 yield return mergedBatch;
             }
@@ -497,7 +509,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                 run.Dispose();
             }
             if (bufferArena is not null) pool.ReturnArena(bufferArena);
-            if (outputArena is not null) pool.ReturnArena(outputArena);
+            // No outputArena release: merge phase emitted into context.Store, owned by the query.
         }
     }
 
@@ -536,8 +548,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
         ColumnLookup schema,
         ExpressionEvaluator evaluator,
         ExecutionContext context,
-        Pool pool,
-        Arena outputArena)
+        Pool pool)
     {
         List<RunReader> readers = new(runs.Count);
         SidecarRegistry? sidecarRegistry = context.SidecarRegistry;
@@ -576,7 +587,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
 
                 RunReader winner = heap.Dequeue();
 
-                outputBatch ??= pool.RentRowBatch(schema, context.BatchSize, outputArena);
+                outputBatch ??= context.RentRowBatch(schema);
                 pool.RentAndCopyToOutput(winner.CurrentBatch, winner.CurrentIndex, outputBatch);
 
                 if (outputBatch.IsFull)

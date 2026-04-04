@@ -14,18 +14,20 @@ namespace DatumIngest.Execution.Operators.GroupBy;
 /// each emit site.
 /// </summary>
 /// <remarks>
-/// One writer per pipeline. The arena passed at construction is used both for
-/// renting the output batch and must match the <see cref="InvocationFrame.Target"/>
-/// supplied to <see cref="AddAsync"/> — accumulator results that need a
-/// long-lived store land there.
+/// One writer per pipeline. Output batches are rented via
+/// <see cref="ExecutionContext.RentRowBatch(ColumnLookup)"/>, which threads
+/// <c>Types</c> + <c>TypeIdTranslations</c> onto the batch and backs it with
+/// <see cref="ExecutionContext.Store"/> — the canonical per-query arena.
+/// Caller-supplied <see cref="InvocationFrame.Target"/> in <see cref="AddAsync"/>
+/// must match <see cref="ExecutionContext.Store"/> so emitted accumulator
+/// values resolve correctly against the output batch's arena.
 /// </remarks>
 internal sealed class OutputBatchWriter
 {
     private readonly IReadOnlyList<Expression> _groupByExpressions;
     private readonly IReadOnlyList<AggregateColumn> _aggregateColumns;
+    private readonly ExecutionContext _context;
     private readonly Pool _pool;
-    private readonly int _batchSize;
-    private readonly Arena _outputArena;
 
     private ColumnLookup? _outputLookup;
     private RowBatch? _current;
@@ -33,15 +35,12 @@ internal sealed class OutputBatchWriter
     public OutputBatchWriter(
         IReadOnlyList<Expression> groupByExpressions,
         IReadOnlyList<AggregateColumn> aggregateColumns,
-        Pool pool,
-        int batchSize,
-        Arena outputArena)
+        ExecutionContext context)
     {
         _groupByExpressions = groupByExpressions;
         _aggregateColumns = aggregateColumns;
-        _pool = pool;
-        _batchSize = batchSize;
-        _outputArena = outputArena;
+        _context = context;
+        _pool = context.Pool;
     }
 
     /// <summary>
@@ -52,7 +51,7 @@ internal sealed class OutputBatchWriter
     public async ValueTask<RowBatch?> AddAsync(GroupState group, bool isGlobalAggregation, InvocationFrame frame)
     {
         Row emitted = await EmitGroupRowAsync(group, isGlobalAggregation, frame).ConfigureAwait(false);
-        _current ??= _pool.RentRowBatch(_outputLookup!, _batchSize, _outputArena);
+        _current ??= _context.RentRowBatch(_outputLookup!);
         _current.Add(emitted.RawValues);
         if (_current.IsFull)
         {

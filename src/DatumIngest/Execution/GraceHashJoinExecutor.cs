@@ -66,6 +66,21 @@ internal sealed class GraceHashJoinExecutor
     private readonly long? _estimatedBuildRows;
 
     /// <summary>
+    /// Join-key indices for which the caller wants distinct build-side values collected
+    /// during Phase 1a (build partitioning) so they can be pushed to probe-side scans
+    /// for bloom-filter / sorted-index chunk pruning before Phase 1b begins. Null when
+    /// no probe-side scan exposes a prunable column.
+    /// </summary>
+    private readonly IReadOnlyList<int>? _bloomKeyIndices;
+
+    /// <summary>
+    /// Callback invoked exactly once after Phase 1a completes (and before Phase 1b starts)
+    /// with the distinct build-side values collected for each requested key index. Wired
+    /// only when <see cref="_bloomKeyIndices"/> is non-null.
+    /// </summary>
+    private readonly Action<IReadOnlyDictionary<int, HashSet<DataValue>>>? _onBloomKeysReady;
+
+    /// <summary>
     /// Creates a new Grace hash join executor.
     /// </summary>
     /// <param name="joinType">The type of join (Inner, Left, Right, FullOuter, LeftSemi, LeftAntiSemi).</param>
@@ -86,6 +101,16 @@ internal sealed class GraceHashJoinExecutor
     /// Optional estimated build-side row count. Used to pre-size partition lists
     /// and avoid LOH-crossing doublings that drive Gen2 GC pressure.
     /// </param>
+    /// <param name="bloomKeyIndices">
+    /// Join-key indices for which distinct build-side values should be collected
+    /// during Phase 1a so the <paramref name="onBloomKeysReady"/> callback can push
+    /// them to probe-side scans for chunk pruning. Null disables collection.
+    /// </param>
+    /// <param name="onBloomKeysReady">
+    /// Callback invoked once after Phase 1a (and before Phase 1b) with the collected
+    /// distinct build keys per requested index. Required when <paramref name="bloomKeyIndices"/>
+    /// is non-null; ignored otherwise.
+    /// </param>
     internal GraceHashJoinExecutor(
         JoinType joinType,
         JoinKeyExtractionResult extraction,
@@ -94,7 +119,9 @@ internal sealed class GraceHashJoinExecutor
         bool nullSensitiveAntiSemi = false,
         bool flipped = false,
         string label = "",
-        long? estimatedBuildRows = null)
+        long? estimatedBuildRows = null,
+        IReadOnlyList<int>? bloomKeyIndices = null,
+        Action<IReadOnlyDictionary<int, HashSet<DataValue>>>? onBloomKeysReady = null)
     {
         _joinType = joinType;
         _extraction = extraction;
@@ -104,6 +131,8 @@ internal sealed class GraceHashJoinExecutor
         _flipped = flipped;
         _label = label;
         _estimatedBuildRows = estimatedBuildRows;
+        _bloomKeyIndices = bloomKeyIndices;
+        _onBloomKeysReady = onBloomKeysReady;
         _spillDirectory = Path.Combine(Path.GetTempPath(), $"datum-join-{Guid.NewGuid():N}");
     }
 
@@ -154,6 +183,18 @@ internal sealed class GraceHashJoinExecutor
             long inMemoryRowCount = 0;
             DataValue[] keyScratch = useSingleKey ? [] : new DataValue[keyPairs.Count];
 
+            // Bloom-pruning key collection: allocate per-index sets if the caller
+            // requested any. Filled below as each build row is partitioned.
+            Dictionary<int, HashSet<DataValue>>? bloomSets = null;
+            if (_bloomKeyIndices is { Count: > 0 })
+            {
+                bloomSets = new Dictionary<int, HashSet<DataValue>>(_bloomKeyIndices.Count);
+                for (int i = 0; i < _bloomKeyIndices.Count; i++)
+                {
+                    bloomSets[_bloomKeyIndices[i]] = new HashSet<DataValue>();
+                }
+            }
+
             DatumActivity.Operators.Trace($"JOIN Phase1a iterating buildOperator type={buildOperator.GetType().Name}");
             await foreach (RowBatch buildBatch in buildOperator.ExecuteAsync(context).ConfigureAwait(false))
             {
@@ -191,6 +232,22 @@ internal sealed class GraceHashJoinExecutor
                     int partitionIndex = await AssignPartitionAsync(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
                     partitions[partitionIndex].AddBuildRow(buildRow, buildBatch.Arena);
 
+                    // Collect distinct values for any join-key index the bloom-pruning
+                    // hook is interested in. Skip nulls (they can't appear in any bloom).
+                    if (bloomSets is not null)
+                    {
+                        for (int bi = 0; bi < _bloomKeyIndices!.Count; bi++)
+                        {
+                            int kidx = _bloomKeyIndices[bi];
+                            Expression keyExpr = buildKeyIsRight ? keyPairs[kidx].Right : keyPairs[kidx].Left;
+                            DataValue keyVal = await _evaluator.EvaluateAsync(keyExpr, buildRow, context.CancellationToken).ConfigureAwait(false);
+                            if (!keyVal.IsNull)
+                            {
+                                bloomSets[kidx].Add(keyVal);
+                            }
+                        }
+                    }
+
                     // Only count rows that landed in memory (not appended to an already-spilled partition).
                     if (!partitions[partitionIndex].IsBuildSpilled)
                     {
@@ -227,6 +284,13 @@ internal sealed class GraceHashJoinExecutor
             if (_nullSensitiveAntiSemi && hasNullKey)
             {
                 yield break;
+            }
+
+            // Bloom pruning hand-off: hand collected distinct build keys to the caller
+            // so it can push them into probe-side ScanOperators before Phase 1b reads them.
+            if (bloomSets is not null && _onBloomKeysReady is not null)
+            {
+                _onBloomKeysReady(bloomSets);
             }
 
             // Null build template can be computed as soon as Phase 1a completes.
@@ -506,12 +570,17 @@ internal sealed class GraceHashJoinExecutor
         Pool pool = context.Pool;
         bool buildKeyIsRight = !_flipped;
         List<(int Index, Row Row)>? matches = null;
+        bool probeKeyHasNull = false;
 
         if (useSingleKey)
         {
             DataValue probeKey = await _evaluator.EvaluateAsync(
                 buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow, cancellationToken).ConfigureAwait(false);
-            if (!probeKey.IsNull)
+            if (probeKey.IsNull)
+            {
+                probeKeyHasNull = true;
+            }
+            else
             {
                 table.SingleKeyTable!.TryGetValue(probeKey, out matches);
             }
@@ -519,7 +588,11 @@ internal sealed class GraceHashJoinExecutor
         else
         {
             await EvaluateKeyPartsIntoAsync(keyPairs, probeRow, !buildKeyIsRight, keyScratch, cancellationToken).ConfigureAwait(false);
-            if (!HasNull(keyScratch))
+            if (HasNull(keyScratch))
+            {
+                probeKeyHasNull = true;
+            }
+            else
             {
                 table.CompositeKeyTable!.TryGetValue(keyScratch.AsSpan(), out matches);
             }
@@ -569,8 +642,11 @@ internal sealed class GraceHashJoinExecutor
 
         if (isSemiJoin)
         {
+            // Null-sensitive LeftAntiSemi (NOT IN semantics): a probe row with a NULL
+            // key against a non-empty build side is UNKNOWN, not TRUE — so suppress
+            // emission. (Empty build is handled earlier by hasNullKey/build-rule.)
             if ((_joinType == JoinType.LeftSemi && hasMatch) ||
-                (_joinType == JoinType.LeftAntiSemi && !hasMatch))
+                (_joinType == JoinType.LeftAntiSemi && !hasMatch && !(_nullSensitiveAntiSemi && probeKeyHasNull)))
             {
                 // probeRow's RawValues are owned by the upstream batch; copy into a
                 // fresh pool-rented array so the yielded Row can be added to the

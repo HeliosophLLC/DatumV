@@ -45,6 +45,7 @@ public sealed class ExecutionContext : IDisposable
         _ownsVideoRegistry = false;
     }
 
+
   /// <summary>
   /// Creates a new execution context.
   /// </summary>
@@ -53,12 +54,14 @@ public sealed class ExecutionContext : IDisposable
   /// <param name="catalog">Registry of named tables and provider factories.</param>
   /// <param name="queryMeter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
   /// <param name="memoryBudgetBytes">
-  /// Optional memory budget in bytes for operators that support spill-to-disk.
-  /// When <see langword="null"/>, operators keep all intermediate state in memory.
-  /// When set, operators spill to temporary files when estimated memory exceeds this budget.
-  /// Ignored when <paramref name="accountant"/> is non-null — the supplied accountant carries its own budget.
-  /// Supported operators: hash join, ORDER BY, GROUP BY, DISTINCT, PIVOT, UNION/INTERSECT/EXCEPT,
-  /// and materialised CTEs.
+  /// Memory budget in bytes for operators that support spill-to-disk. When
+  /// <see langword="null"/>. Pass <see cref="long.MaxValue"/> for
+  /// effectively-unbounded memory (skips spill but keeps the spill-capable
+  /// code paths exercised). When set, operators spill to temporary files when
+  /// estimated memory exceeds this budget. Ignored when
+  /// <paramref name="accountant"/> is non-null — the supplied accountant carries
+  /// its own budget. Supported operators: hash join, ORDER BY, GROUP BY, DISTINCT,
+  /// PIVOT, UNION/INTERSECT/EXCEPT, and materialised CTEs.
   /// </param>
   /// <param name="pool">Pool for reusing buffers during query execution.</param>
   /// <param name="store">
@@ -94,6 +97,9 @@ public sealed class ExecutionContext : IDisposable
         MemoryAccountant? accountant = null,
         VideoRegistry? videoRegistry = null)
     {
+        // Null no longer means "no budget" — it means "use the default" so every
+        // execution path goes through the spill-capable operators. Callers who
+        // want unbounded memory must pass long.MaxValue explicitly.
         CancellationToken = cancellationToken;
         FunctionRegistry = functionRegistry;
         Catalog = catalog;

@@ -620,6 +620,149 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Regression: a <c>LET</c> binding that produces an Image value, in a CTE
+    /// referenced by both the anchor and recursive halves of a recursive CTE,
+    /// causes a sibling <c>Float32[]</c> literal column to be corrupted in
+    /// iterations after the anchor. Frame 0 (anchor) reads the literal
+    /// correctly; frame 1+ (via JOIN against the materialised helper CTE)
+    /// reads bytes from inside the image's PNG payload instead. Diagnostic
+    /// fingerprint: <c>arr[0]</c> becomes <c>52816.535f</c>
+    /// (<c>0x474E5089</c> little-endian = the PNG signature bytes
+    /// <c>89 50 4E 47</c>).
+    ///
+    /// <strong>Important</strong>: the bug only surfaces through the
+    /// <c>QueryPlan</c> execution path, which runs
+    /// <c>LiteralHoister</c> at plan construction to bake literal values
+    /// into a plan-scoped <c>_hoistStore</c> arena. The direct
+    /// <see cref="ServiceTestBase.ExecuteQueryAsync"/> path skips that step
+    /// — that's why the simpler test variant passes. This test uses
+    /// <c>TableCatalog.PlanQuery</c> (the path the Web layer's
+    /// <c>BatchExecutor</c> takes) so <c>LiteralHoister</c> runs and the
+    /// hoisted DataValue is the one the operators actually see during
+    /// recursive iteration.
+    /// </summary>
+    [Fact]
+    public async Task Execute_RecursiveCte_LetBindingProducesImage_DoesntCorruptSiblingFloat32Literal()
+    {
+        TableCatalog catalog = CreateCatalog("seq",
+            columns: ["n"],
+            [0f], [1f], [2f]);
+
+        // Go through TableCatalog.PlanQuery → QueryPlan (internal). QueryPlan's
+        // constructor runs LiteralHoister, which bakes literals into a
+        // plan-scoped arena. This is the same path the Web BatchExecutor uses;
+        // the simpler ExecuteQueryAsync path skips LiteralHoister and so does
+        // not reproduce the bug.
+        QueryExpression query = SqlParser.Parse(
+            "WITH RECURSIVE " +
+            "step_poses AS (" +
+            "  SELECT " +
+            "    LET img = create_image_rgb(400, 200, 200, 200, 100), " +
+            "    [488.91904::Float32, 0::Float32, 200::Float32, " +
+            "     0::Float32, 276.2173::Float32, 112.5::Float32, " +
+            "     0::Float32, 0::Float32, 1::Float32] AS arr, " +
+            "    value AS n " +
+            "  FROM range(0, 2)" +
+            "), " +
+            "accumulated AS (" +
+            "  SELECT n, arr FROM step_poses WHERE n = 0 " +
+            "  UNION ALL " +
+            "  SELECT s.n, s.arr " +
+            "  FROM accumulated a JOIN step_poses s ON s.n = a.n + 1" +
+            ") " +
+            "SELECT n, arr FROM accumulated");
+
+        IQueryPlan plan = catalog.PlanQuery(query);
+
+        // The arr literal's DataValue carries an offset into the plan's
+        // _hoistStore (which QueryPlan.ExecuteAsync plumbs as context.Store
+        // and therefore batch.Arena). The values are only readable while
+        // their batch is alive — same constraint the Web layer's
+        // QueryStreamService observes. Read+assert inline; don't copy
+        // DataValues out and try to resolve them against a different arena.
+        float[] expected = [488.91904f, 0f, 200f, 0f, 276.2173f, 112.5f, 0f, 0f, 1f];
+        int rowsSeen = 0;
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None, batchContext: null))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                Row row = batch[i];
+                DataValue arrValue = row["arr"];
+                Assert.True(arrValue.IsArray, $"row {rowsSeen}: arr should be an array");
+                Assert.Equal(DataKind.Float32, arrValue.Kind);
+
+                ReadOnlySpan<float> arr = arrValue.AsArraySpan<float>(batch.Arena);
+                Assert.Equal(9, arr.Length);
+                for (int j = 0; j < expected.Length; j++)
+                {
+                    // Diagnostic fingerprint when this fails: arr[0] becomes
+                    // 52816.535 (PNG signature 89 50 4E 47 reinterpreted as Float32).
+                    Assert.Equal(expected[j], arr[j]);
+                }
+                rowsSeen++;
+            }
+        }
+
+        Assert.Equal(3, rowsSeen);
+    }
+
+    /// <summary>
+    /// Control for <see cref="Execute_RecursiveCte_LetBindingProducesImage_DoesntCorruptSiblingFloat32Literal"/>:
+    /// the same query shape, but the image expression is a regular aliased
+    /// projection (<c>create_image_rgb(...) AS img</c>) instead of a
+    /// <c>LET</c> binding. This form is known to work; the test pins that
+    /// behaviour so that whatever fix lands for the LET path doesn't
+    /// regress the aliased-projection path along the way.
+    /// </summary>
+    [Fact]
+    public async Task Execute_RecursiveCte_AliasedImageProjection_DoesntCorruptSiblingFloat32Literal()
+    {
+        TableCatalog catalog = CreateCatalog("seq",
+            columns: ["n"],
+            [0f], [1f], [2f]);
+
+        Pool pool = GetService<Pool>();
+        Arena store = pool.Backing.RentArena();
+
+        try
+        {
+            List<Row> results = await ExecuteQueryAsync(
+                "WITH RECURSIVE " +
+                "step_poses AS (" +
+                "  SELECT " +
+                "    create_image_rgb(8, 8, 200, 100, 50) AS img, " +
+                "    [42.0::Float32, 43.0::Float32, 44.0::Float32] AS arr, " +
+                "    n " +
+                "  FROM seq" +
+                "), " +
+                "accumulated AS (" +
+                "  SELECT n, arr FROM step_poses WHERE n = 0 " +
+                "  UNION ALL " +
+                "  SELECT s.n, s.arr " +
+                "  FROM accumulated a JOIN step_poses s ON s.n = a.n + 1" +
+                ") " +
+                "SELECT n, arr FROM accumulated",
+                catalog,
+                store: store);
+
+            Assert.Equal(3, results.Count);
+
+            for (int i = 0; i < 3; i++)
+            {
+                ReadOnlySpan<float> arr = results[i]["arr"].AsArraySpan<float>(store);
+                Assert.Equal(3, arr.Length);
+                Assert.Equal(42f, arr[0]);
+                Assert.Equal(43f, arr[1]);
+                Assert.Equal(44f, arr[2]);
+            }
+        }
+        finally
+        {
+            pool.ReturnArena(store);
+        }
+    }
+
+    /// <summary>
     /// Recursive CTE under a tiny memory budget transitions to spill mode at an iteration
     /// boundary. All rows (anchor + every iteration) must round-trip through the spill file
     /// and replay correctly. Load-bearing for the multi-tenant story: a runaway recursion

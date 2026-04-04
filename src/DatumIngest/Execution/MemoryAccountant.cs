@@ -36,6 +36,30 @@ namespace DatumIngest.Execution;
 /// </remarks>
 public sealed class MemoryAccountant : IDisposable
 {
+    /// <summary>
+    /// Default memory budget when a caller doesn't supply one: <c>min(half-RAM, 4 GB)</c>.
+    /// Computed once at type initialisation from <c>GC.GetGCMemoryInfo()</c>'s
+    /// <c>TotalAvailableMemoryBytes</c> (the process-visible RAM ceiling, which respects
+    /// container limits / cgroups).
+    /// </summary>
+    /// <remarks>
+    /// Historically <see cref="MemoryBudgetBytes"/> defaulted to <see langword="null"/>
+    /// (= "no budget, never spill"). That had the side effect that any test or in-process
+    /// caller that didn't set a budget silently bypassed every spill-aware code path —
+    /// hiding real bugs in <see cref="DatumIngest.Execution.GraceHashJoinExecutor"/> and
+    /// friends until they hit production. We now always have a real budget; callers that
+    /// genuinely want unbounded memory must pass <see cref="long.MaxValue"/> explicitly
+    /// to make that intent visible at the call site.
+    /// </remarks>
+    public static readonly long DefaultMemoryBudgetBytes = ComputeDefaultMemoryBudgetBytes();
+
+    private static long ComputeDefaultMemoryBudgetBytes()
+    {
+        long halfRam = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 2;
+        const long fourGB = 4L * 1024 * 1024 * 1024;
+        return Math.Min(halfRam, fourGB);
+    }
+
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
     private readonly Func<long>? _arenaBytesProbe;
     private long _residentBytes;
@@ -55,7 +79,7 @@ public sealed class MemoryAccountant : IDisposable
     /// for a procedural batch. <c>null</c> records zero arena bytes in samples.</param>
     public MemoryAccountant(long? memoryBudgetBytes = null, Func<long>? arenaBytesProbe = null)
     {
-        MemoryBudgetBytes = memoryBudgetBytes;
+        MemoryBudgetBytes = memoryBudgetBytes ?? DefaultMemoryBudgetBytes;
         _arenaBytesProbe = arenaBytesProbe;
         Profile = new MemoryProfile();
     }

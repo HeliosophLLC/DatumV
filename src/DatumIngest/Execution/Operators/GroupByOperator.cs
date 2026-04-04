@@ -161,7 +161,13 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
         Pool pool = context.Pool;
         ExpressionEvaluator evaluator = new(context);
 
-        Arena? operatorArena = null;
+        // Stabilize aggregate results and emit output rows into the per-query
+        // Store rather than a private rented arena. See the SpillPartition
+        // commit's docstring for the rationale: any operator that emits
+        // DataValues into a private arena risks downstream "splice without
+        // re-stabilize" reads (notably JoinSchema.CombinePooledValues)
+        // resolving offsets against the wrong arena. Under one-arena-per-query,
+        // every operator's output is mutually addressable in context.Store.
         OutputBatchWriter? writer = null;
 
         GroupState? currentGroup = null;
@@ -177,12 +183,11 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
                 {
                     if (inputBatch.Count == 0) continue;
 
-                    operatorArena ??= pool.RentArena();
-                    writer ??= new OutputBatchWriter(_groupByExpressions, _aggregateColumns, pool, context.BatchSize, operatorArena);
+                    writer ??= new OutputBatchWriter(_groupByExpressions, _aggregateColumns, context);
 
                     InvocationFrame frame = new(
                         inputBatch.Arena,
-                        operatorArena,
+                        context.Store,
                         context.SidecarRegistry);
 
                     for (int i = 0; i < inputBatch.Count; i++)
@@ -222,9 +227,8 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
             // Emit the final group.
             if (currentGroup is not null)
             {
-                operatorArena ??= pool.RentArena();
-                writer ??= new OutputBatchWriter(_groupByExpressions, _aggregateColumns, pool, context.BatchSize, operatorArena);
-                InvocationFrame trailingFrame = new(operatorArena, operatorArena, context.SidecarRegistry);
+                writer ??= new OutputBatchWriter(_groupByExpressions, _aggregateColumns, context);
+                InvocationFrame trailingFrame = new(context.Store, context.Store, context.SidecarRegistry);
                 FlushOrderedBuffersForGroup(currentGroup, context, in trailingFrame);
                 RowBatch? ready = await writer.AddAsync(currentGroup, isGlobalAggregation: false, trailingFrame).ConfigureAwait(false);
                 pool.Backing.Return(currentGroup);
@@ -238,7 +242,6 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
         {
             if (currentGroup is not null) pool.Backing.Return(currentGroup);
             if (writer?.Flush() is RowBatch leftover) context.ReturnRowBatch(leftover);
-            if (operatorArena is not null) pool.ReturnArena(operatorArena);
         }
     }
 
@@ -304,7 +307,6 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
         bool useSingleKey = _groupByExpressions.Count == 1;
         bool isGlobalAggregation = _groupByExpressions.Count == 0;
         CancellationToken cancellationToken = context.CancellationToken;
-        Arena? operatorArena = null;
 
         // Acquire worker slots from the optional global budget.
         int desiredWorkers = context.DegreeOfParallelism;
@@ -445,16 +447,15 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
                 bool globalHasOrderedAggregates = _aggregateColumns.Any(
                     column => column.OrderBy is not null);
 
-                operatorArena ??= pool.RentArena();
                 InvocationFrame globalEmitFrame = new(
-                    context.Store, operatorArena, context.SidecarRegistry);
+                    context.Store, context.Store, context.SidecarRegistry);
 
                 if (globalHasOrderedAggregates)
                 {
                     FlushOrderedBuffers([workerGlobalGroups[0]], context, in globalEmitFrame);
                 }
 
-                OutputBatchWriter globalWriter = new(_groupByExpressions, _aggregateColumns, pool, context.BatchSize, operatorArena);
+                OutputBatchWriter globalWriter = new(_groupByExpressions, _aggregateColumns, context);
                 if (await globalWriter.AddAsync(workerGlobalGroups[0], isGlobalAggregation: true, globalEmitFrame).ConfigureAwait(false) is RowBatch globalReady)
                     yield return globalReady;
                 if (globalWriter.Flush() is RowBatch globalTrailing)
@@ -470,8 +471,6 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
             {
                 context.ParallelismBudget!.Release(acquiredFromBudget);
             }
-
-            if (operatorArena is not null) pool.ReturnArena(operatorArena);
         }
     }
 
@@ -496,7 +495,6 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
         Pool pool,
         bool isGlobalAggregation)
     {
-        Arena? operatorArena = null;
         ExpressionEvaluator evaluator = new(context);
 
         IHashGroupTable? hashTable = isGlobalAggregation
@@ -580,11 +578,12 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
             bool hasOrderedAggregates = _aggregateColumns.Any(c => c.OrderBy is not null);
 
             // Output frame: Source = context.Store (where accumulator state lives),
-            // Target = operatorArena (where result-batch values land). Lazily build
-            // operatorArena since the global path may need it before in-memory emit.
-            operatorArena ??= pool.RentArena();
-            InvocationFrame emitFrame = new(context.Store, operatorArena, context.SidecarRegistry);
-            writer = new OutputBatchWriter(_groupByExpressions, _aggregateColumns, pool, context.BatchSize, operatorArena);
+            // Target = context.Store (where result-batch values land). Under one-arena-
+            // per-query, output bytes and accumulator bytes live in the same arena;
+            // downstream operators reading via batch.Arena resolve offsets correctly
+            // without depending on any consumer's re-stabilize behaviour.
+            InvocationFrame emitFrame = new(context.Store, context.Store, context.SidecarRegistry);
+            writer = new OutputBatchWriter(_groupByExpressions, _aggregateColumns, context);
 
             if (isGlobalAggregation)
             {
@@ -651,7 +650,6 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
             }
             spillCoordinator?.Dispose();
             if (writer?.Flush() is RowBatch leftover) context.ReturnRowBatch(leftover);
-            if (operatorArena is not null) pool.ReturnArena(operatorArena);
         }
     }
 

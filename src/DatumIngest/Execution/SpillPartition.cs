@@ -79,7 +79,6 @@ internal sealed class SpillPartition : IDisposable
     private readonly string _spillDirectory;
     private readonly Pool _arenaPool;
     private readonly ExecutionContext _context;
-    private Arena? _retentionArena;
 
     /// <summary>
     /// Creates a new partition.
@@ -110,11 +109,23 @@ internal sealed class SpillPartition : IDisposable
     }
 
     /// <summary>
-    /// Retention arena for in-memory rows. Lazily allocated on first stabilization.
+    /// Retention store for in-memory rows: the per-query <see cref="ExecutionContext.Store"/>.
     /// Exposed so callers handing rows from one partition to another (e.g. recursive
     /// repartitioning) can pass it as the source arena.
     /// </summary>
-    internal Arena? RetentionArena => _retentionArena;
+    /// <remarks>
+    /// Historically this was a freshly-rented per-partition arena. That broke the
+    /// one-arena-per-query invariant: build-side <see cref="DataValue"/>s ended up
+    /// with offsets relative to the private retention arena, but <c>JoinSchema.CombinePooledValues</c>
+    /// spliced them into combined rows that downstream operators then read against
+    /// <c>outputBatch.Arena</c> (the query Store) — at the same offset, in a different
+    /// arena, getting whatever bytes happened to be there. The fix is to stabilize
+    /// into <see cref="ExecutionContext.Store"/> from the start: same-arena stabilization
+    /// is the <see cref="DataValueRetention.Stabilize"/> fast path (no copy), and
+    /// cross-arena stabilization lands the bytes in the arena the consumers actually
+    /// read from.
+    /// </remarks>
+    internal Arena RetentionArena => _context.Store;
 
     /// <summary>The number of build-side rows currently held in memory.</summary>
     internal int InMemoryBuildRowCount => _buildRows?.Count ?? 0;
@@ -191,10 +202,25 @@ internal sealed class SpillPartition : IDisposable
         }
         else
         {
-            _retentionArena ??= _arenaPool.Backing.RentArena();
+            // Stabilize into the per-query Store, not a private partition arena.
+            // Under one-arena-per-query (sourceArena == context.Store), this is the
+            // Stabilize fast path — DataValues pass through unchanged. When source
+            // and Store differ (e.g. a sidecar-resident input arena, or a fresh
+            // arena from a future operator), the bytes get copied into Store so
+            // every downstream consumer that reads via outputBatch.Arena resolves
+            // the offset against the same arena the bytes actually live in.
+            //
+            // Previous design used a per-partition retention arena, which broke
+            // the invariant: JoinSchema.CombinePooledValues splices left + right
+            // values without re-stabilizing, and the JOIN's outputBatch.Arena is
+            // context.Store (rented via context.RentRowBatch). Build-side values'
+            // BackedOffsets pointed into the private retention arena; downstream
+            // reads against Store at those offsets returned whatever bytes
+            // happened to share the offset, manifesting as "Float32 array
+            // reading as PNG image bytes" in production.
             for (int i = 0; i < source.Length; i++)
             {
-                copy[i] = DataValueRetention.Stabilize(source[i], sourceArena, _retentionArena);
+                copy[i] = DataValueRetention.Stabilize(source[i], sourceArena, _context.Store);
             }
         }
 
@@ -341,11 +367,11 @@ internal sealed class SpillPartition : IDisposable
         SpillReaderWriter spiller = EnsureSpiller(spillSlot);
         ColumnLookup slotSchema = spillSlot == BuildSlot ? _buildSchema! : _probeSchema!;
 
-        // Chunk the in-memory rows into batches that share the retention arena. Stabilize is a
-        // no-op when source equals target, so the spiller's Stabilize-on-write detects that the
-        // values already point at the retention arena and copies into the consolidated arena
-        // exactly once.
-        Arena? retention = _retentionArena;
+        // Chunk the in-memory rows into batches that share the retention arena (the per-query
+        // Store). Stabilize is a no-op when source equals target, so the spiller's
+        // Stabilize-on-write detects that the values already point at the retention arena and
+        // copies into the consolidated arena exactly once.
+        Arena retention = _context.Store;
         int total = rows.Count;
         int chunkSize = SpillStagingCapacity;
 
@@ -534,10 +560,7 @@ internal sealed class SpillPartition : IDisposable
         _probeSpiller?.Dispose();
         _probeSpiller = null;
 
-        if (_retentionArena is not null && _arenaPool is not null)
-        {
-            _arenaPool.Backing.TryReturn(_retentionArena);
-            _retentionArena = null;
-        }
+        // No retention-arena release here: we don't own context.Store. The
+        // ExecutionContext disposes it when the query ends.
     }
 }
