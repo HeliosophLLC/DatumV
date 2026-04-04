@@ -28,6 +28,11 @@ public sealed class CompletionProvider
     public CompletionItem[] GetCompletions(string sql, int cursorOffset)
     {
         CompletionZone zone = CompletionContext.Classify(sql, cursorOffset);
+        // CTE projection schemas are resolved by parsing the SQL — the
+        // manifest-free classifier above doesn't know about them. Result
+        // is empty when there are no CTEs or when parsing failed, so the
+        // existing zones keep working unchanged for CTE-less queries.
+        CteSchemaResult cteSchemas = CteSchemaResolver.Resolve(sql, _manifest);
         List<CompletionItem> items = new();
 
         // Variables declared earlier in the fragment (DECLARE @x, FOR @i,
@@ -46,7 +51,7 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterSelect:
-                AddColumns(items, zone.TablesInScope);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
@@ -68,21 +73,21 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterWhere:
-                AddColumns(items, zone.TablesInScope);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddScalarFunctions(items);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterOn:
-                AddColumns(items, zone.TablesInScope);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddScalarFunctions(items);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.Expression:
-                AddColumns(items, zone.TablesInScope);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddScalarFunctions(items);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
@@ -100,30 +105,30 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterOrderBy:
-                AddColumns(items, zone.TablesInScope);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterGroupBy:
-                AddColumns(items, zone.TablesInScope);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterHaving:
-                AddColumns(items, zone.TablesInScope);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddAggregateFunctions(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterQualify:
-                AddColumns(items, zone.TablesInScope);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterAssert:
-                AddColumns(items, zone.TablesInScope);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
@@ -136,7 +141,7 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.InFunctionArguments:
-                AddColumns(items, zone.TablesInScope);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
@@ -165,7 +170,7 @@ public sealed class CompletionProvider
                         AddModels(items);
                         break;
                     }
-                    AddQualifiedColumns(items, zone.TableQualifier);
+                    AddQualifiedColumns(items, zone.TableQualifier, zone.TvfAliasesInScope, cteSchemas);
                     AddSchemaRoutines(items, zone.TableQualifier);
                 }
                 break;
@@ -228,7 +233,7 @@ public sealed class CompletionProvider
                 // RETURNING. Target table is in scope via the augmented
                 // tablesInScope walk (picks up UPDATE x / INSERT INTO x /
                 // DELETE FROM x).
-                AddColumns(items, zone.TablesInScope);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddScalarFunctions(items);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
@@ -368,9 +373,24 @@ public sealed class CompletionProvider
     /// </summary>
     private void AddColumns(List<CompletionItem> items, IReadOnlyList<string>? tablesInScope)
     {
+        AddColumns(items, tablesInScope, tvfAliases: null, cteSchemas: CteSchemaResolver.Empty);
+    }
+
+    private void AddColumns(
+        List<CompletionItem> items,
+        IReadOnlyList<string>? tablesInScope,
+        IReadOnlyDictionary<string, string>? tvfAliases,
+        CteSchemaResult cteSchemas)
+    {
         // Empty list = "FROM scope was extracted and there's nothing in it" —
         // surfacing every catalog column would be the bug we're fixing.
-        if (tablesInScope is { Count: 0 }) return;
+        // Exception: an empty table scope with TVF aliases or CTE schemas
+        // present means the only sources are TVFs / CTEs; we still want
+        // those columns.
+        bool tablesEmpty = tablesInScope is { Count: 0 };
+        bool tvfEmpty = tvfAliases is null or { Count: 0 };
+        bool cteEmpty = cteSchemas.Schemas.Count == 0;
+        if (tablesEmpty && tvfEmpty && cteEmpty) return;
 
         foreach (TableSchemaEntry table in _manifest.Tables)
         {
@@ -393,6 +413,144 @@ public sealed class CompletionProvider
                 });
             }
         }
+
+        AddTvfColumns(items, tvfAliases);
+        AddCteColumns(items, tablesInScope, cteSchemas);
+    }
+
+    /// <summary>
+    /// Appends columns from every CTE source in <paramref name="tablesInScope"/>.
+    /// A CTE source surfaces when its name (or an alias bound to it) appears
+    /// in the FROM/JOIN scope. Without this branch, references like
+    /// <c>SELECT frame_index FROM frames</c> wouldn't get column completions
+    /// because <c>frames</c> isn't a persistent table.
+    /// </summary>
+    private static void AddCteColumns(
+        List<CompletionItem> items,
+        IReadOnlyList<string>? tablesInScope,
+        CteSchemaResult cteSchemas)
+    {
+        if (cteSchemas.Schemas.Count == 0) return;
+
+        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in cteSchemas.Schemas)
+        {
+            // Only surface a CTE's columns when it (or an alias bound to
+            // it) is actually in the FROM/JOIN scope at the cursor.
+            // Otherwise typing inside one CTE's body would dump every
+            // other CTE's projection into the popup.
+            if (tablesInScope is not null && !CteVisibleInScope(cte.Key, tablesInScope, cteSchemas.FromAliasToCteName))
+            {
+                continue;
+            }
+            foreach (TableColumnEntry column in cte.Value)
+            {
+                string nullable = column.Nullable ? " (nullable)" : "";
+                items.Add(new CompletionItem
+                {
+                    Label = column.Name,
+                    Kind = CompletionItemKind.Column,
+                    Detail = $"{column.Kind}{nullable} — {cte.Key}",
+                    SortOrder = 1,
+                });
+            }
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="cteName"/> is in scope — either referenced
+    /// directly by name or via an alias that the CTE-collection pass bound
+    /// to that name.
+    /// </summary>
+    private static bool CteVisibleInScope(
+        string cteName,
+        IReadOnlyList<string> tablesInScope,
+        IReadOnlyDictionary<string, string> fromAliasToCte)
+    {
+        for (int i = 0; i < tablesInScope.Count; i++)
+        {
+            string scoped = tablesInScope[i];
+            if (string.Equals(scoped, cteName, StringComparison.OrdinalIgnoreCase)) return true;
+            if (fromAliasToCte.TryGetValue(scoped, out string? alias)
+                && string.Equals(alias, cteName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Appends columns from every TVF source in <paramref name="tvfAliases"/>
+    /// to the completion list. Mirrors the persistent-table column path —
+    /// same shape, same SortOrder bucket so the two kinds interleave
+    /// alphabetically in the popup. Skips TVFs whose manifest entry has
+    /// no fixed output schema (the entry's column list is null) so
+    /// completions don't promise columns the engine can't statically
+    /// validate.
+    /// </summary>
+    private void AddTvfColumns(List<CompletionItem> items, IReadOnlyDictionary<string, string>? tvfAliases)
+    {
+        if (tvfAliases is null || tvfAliases.Count == 0) return;
+        foreach (KeyValuePair<string, string> entry in tvfAliases)
+        {
+            FunctionSignature? signature = LookupTvfSignature(entry.Value);
+            if (signature?.OutputColumns is null) continue;
+            string sourceLabel = $"{entry.Key} ({signature.Name})";
+            foreach (TableColumnEntry column in signature.OutputColumns)
+            {
+                string nullable = column.Nullable ? " (nullable)" : "";
+                items.Add(new CompletionItem
+                {
+                    Label = column.Name,
+                    Kind = CompletionItemKind.Column,
+                    Detail = $"{column.Kind}{nullable} — {sourceLabel}",
+                    SortOrder = 1,
+                });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolves a dot qualifier (the <c>X</c> in <c>X.col</c>) against the
+    /// CTE schema map. Matches a direct CTE name first, then a FROM alias
+    /// bound to a CTE. <paramref name="cteName"/> receives the resolved CTE
+    /// name so the completion popup can show it as the column source.
+    /// </summary>
+    private static bool TryGetCteColumns(
+        string qualifier,
+        CteSchemaResult cteSchemas,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? cteName,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IReadOnlyList<TableColumnEntry>? columns)
+    {
+        if (cteSchemas.Schemas.TryGetValue(qualifier, out IReadOnlyList<TableColumnEntry>? direct))
+        {
+            cteName = qualifier;
+            columns = direct;
+            return true;
+        }
+        if (cteSchemas.FromAliasToCteName.TryGetValue(qualifier, out string? mapped)
+            && cteSchemas.Schemas.TryGetValue(mapped, out IReadOnlyList<TableColumnEntry>? aliasCols))
+        {
+            cteName = mapped;
+            columns = aliasCols;
+            return true;
+        }
+        cteName = null;
+        columns = null;
+        return false;
+    }
+
+    private FunctionSignature? LookupTvfSignature(string functionName)
+    {
+        foreach (FunctionSignature signature in _manifest.Functions)
+        {
+            if (!signature.IsTableValued) continue;
+            if (string.Equals(signature.Name, functionName, StringComparison.OrdinalIgnoreCase))
+            {
+                return signature;
+            }
+        }
+        return null;
     }
 
     private static bool ContainsIgnoreCase(IReadOnlyList<string> names, string target)
@@ -436,6 +594,59 @@ public sealed class CompletionProvider
 
     private void AddQualifiedColumns(List<CompletionItem> items, string tableQualifier)
     {
+        AddQualifiedColumns(items, tableQualifier, tvfAliases: null, cteSchemas: CteSchemaResolver.Empty);
+    }
+
+    private void AddQualifiedColumns(
+        List<CompletionItem> items,
+        string tableQualifier,
+        IReadOnlyDictionary<string, string>? tvfAliases,
+        CteSchemaResult cteSchemas)
+    {
+        // TVF aliases first — when the user typed `vid.`, we want the
+        // popup to show the TVF's output columns rather than fall through
+        // to a persistent-table lookup that wouldn't match anyway.
+        if (tvfAliases is not null
+            && tvfAliases.TryGetValue(tableQualifier, out string? functionName))
+        {
+            FunctionSignature? signature = LookupTvfSignature(functionName);
+            if (signature?.OutputColumns is not null)
+            {
+                foreach (TableColumnEntry column in signature.OutputColumns)
+                {
+                    string nullable = column.Nullable ? " (nullable)" : "";
+                    items.Add(new CompletionItem
+                    {
+                        Label = column.Name,
+                        Kind = CompletionItemKind.Column,
+                        Detail = $"{column.Kind}{nullable} — {signature.Name}",
+                        SortOrder = 0,
+                    });
+                }
+                return;
+            }
+        }
+
+        // CTE aliases (and bare CTE names) next: `f1.frame_index` →
+        // f1 ↦ frames ↦ frames' projected columns. Same precedence as TVFs
+        // because a SELECT-list reference qualifies a row source, not a
+        // schema. Schema-qualified table lookup is the natural fallback.
+        if (TryGetCteColumns(tableQualifier, cteSchemas, out string? cteName, out IReadOnlyList<TableColumnEntry>? cteCols))
+        {
+            foreach (TableColumnEntry column in cteCols)
+            {
+                string nullable = column.Nullable ? " (nullable)" : "";
+                items.Add(new CompletionItem
+                {
+                    Label = column.Name,
+                    Kind = CompletionItemKind.Column,
+                    Detail = $"{column.Kind}{nullable} — {cteName}",
+                    SortOrder = 0,
+                });
+            }
+            return;
+        }
+
         // tableQualifier is what the user typed before the dot — could be
         // a schema-qualified name or just an unqualified table name.
         // Manifest stores tables fully-qualified, so accept either.

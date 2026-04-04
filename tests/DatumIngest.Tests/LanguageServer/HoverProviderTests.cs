@@ -33,6 +33,24 @@ public sealed class HoverProviderTests : ServiceTestBase
                     ReturnType = "Float32",
                     Description = "Absolute value.",
                 },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "video_unnest_frames",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "source", Kind = "String" },
+                        new ParameterSignature { Name = "start_frame", Kind = "Int32", IsOptional = true },
+                    ],
+                    ReturnType = "table(frame_index Int32, frame VideoFrame)",
+                    Description = "Emits one row per video frame.",
+                    IsTableValued = true,
+                    OutputColumns =
+                    [
+                        new TableColumnEntry { Name = "frame_index", Kind = "Int32", Nullable = false },
+                        new TableColumnEntry { Name = "frame", Kind = "VideoFrame", Nullable = false },
+                    ],
+                },
             ],
             Keywords = ["SELECT", "FROM", "WHERE"],
         };
@@ -151,6 +169,121 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.NotNull(result);
         Assert.Contains("id", result.Contents);
         Assert.Contains("Float32", result.Contents);
+    }
+
+    // ───────────────────── TVF output column hover ─────────────────────
+
+    [Fact]
+    public void GetHover_UnqualifiedTvfOutputColumn_ReturnsTypeInfo()
+    {
+        HoverProvider provider = CreateProvider();
+
+        const string sql = "SELECT frame_index FROM video_unnest_frames('x.mp4') vid";
+        // "frame_index" starts at offset 7.
+        HoverResult? result = provider.GetHover(sql, 7);
+
+        Assert.NotNull(result);
+        Assert.Contains("frame_index", result.Contents);
+        Assert.Contains("Int32", result.Contents);
+        Assert.Contains("video_unnest_frames", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_QualifiedTvfOutputColumn_ResolvesThroughAlias()
+    {
+        HoverProvider provider = CreateProvider();
+
+        const string sql = "SELECT vid.frame FROM video_unnest_frames('x.mp4') vid";
+        // "frame" inside "vid.frame" starts at offset 11.
+        HoverResult? result = provider.GetHover(sql, 11);
+
+        Assert.NotNull(result);
+        Assert.Contains("frame", result.Contents);
+        Assert.Contains("VideoFrame", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_TvfOutputColumn_VisibleAcrossCteBoundary()
+    {
+        HoverProvider provider = CreateProvider();
+
+        // The TVF source is defined in a CTE; the hover target sits in the
+        // outer SELECT. Validates that the alias map is collected
+        // statement-wide (CTEs included), not just from the immediate FROM.
+        const string sql =
+            "WITH frames AS (SELECT frame_index, frame FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT frame_index FROM frames";
+        int offset = sql.IndexOf("SELECT frame_index FROM frames", StringComparison.Ordinal)
+            + "SELECT ".Length;
+
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("frame_index", result.Contents);
+        Assert.Contains("Int32", result.Contents);
+    }
+
+    // ───────────────────── CTE projection hover ─────────────────────
+
+    [Fact]
+    public void GetHover_QualifiedCteColumn_ResolvesThroughCteSchema()
+    {
+        HoverProvider provider = CreateProvider();
+
+        const string sql =
+            "WITH frames AS (SELECT frame_index, frame FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT f1.frame_index FROM frames f1";
+        int offset = sql.LastIndexOf("f1.frame_index", StringComparison.Ordinal)
+            + "f1.".Length;
+
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("frame_index", result.Contents);
+        Assert.Contains("Int32", result.Contents);
+        Assert.Contains("CTE", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_UnqualifiedCteColumn_ResolvesThroughCteSchema()
+    {
+        HoverProvider provider = CreateProvider();
+
+        // Cursor on the unqualified `frame_index` in the outer SELECT,
+        // referencing the projected column from the `frames` CTE.
+        const string sql =
+            "WITH frames AS (SELECT frame_index FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT frame_index FROM frames";
+        int offset = sql.LastIndexOf("SELECT frame_index FROM frames", StringComparison.Ordinal)
+            + "SELECT ".Length;
+
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("frame_index", result.Contents);
+        Assert.Contains("Int32", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_RenamedCteColumn_SurfacesAliasedName()
+    {
+        HoverProvider provider = CreateProvider();
+
+        // `prev_curr` renames `frames.frame` to `prev`. Hovering on `prev`
+        // through the outer FROM should resolve to VideoFrame (the
+        // renamed column's underlying kind).
+        const string sql =
+            "WITH frames AS (SELECT frame_index, frame FROM video_unnest_frames('x.mp4') vid)," +
+            "prev_curr AS (SELECT f1.frame AS prev FROM frames f1) " +
+            "SELECT prev FROM prev_curr";
+        int offset = sql.LastIndexOf("SELECT prev FROM prev_curr", StringComparison.Ordinal)
+            + "SELECT ".Length;
+
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("prev", result.Contents);
+        Assert.Contains("VideoFrame", result.Contents);
     }
 
     // ───────────────────── Hover span ─────────────────────

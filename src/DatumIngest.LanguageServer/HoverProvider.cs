@@ -1,6 +1,8 @@
 namespace DatumIngest.LanguageServer;
 
 using DatumIngest.Manifest;
+using DatumIngest.Parsing;
+using DatumIngest.Parsing.Ast;
 using DatumIngest.Parsing.Tokens;
 using Superpower.Model;
 
@@ -43,11 +45,22 @@ public sealed class HoverProvider
             return null;
         }
 
+        // Build an alias map of TVF sources visible in the SQL. Per-hover
+        // parsing is cheap (error-recovering parser, no I/O) and avoids
+        // staleness — typing a new FROM clause is reflected immediately.
+        // No per-cursor scoping yet: an alias defined anywhere in the
+        // statement is visible everywhere. Scope-aware lookup is a follow-up.
+        Dictionary<string, FunctionSignature> tvfAliases = BuildTvfAliasMap(sql);
+        // CTE projection schemas — same global-scope simplification as the
+        // TVF alias map. A bare CTE name or a FROM alias bound to a CTE
+        // resolves to the CTE's derived output columns.
+        CteSchemaResult cteSchemas = CteSchemaResolver.Resolve(sql, _manifest);
+
         string? docKey = null;
 
         string? markdown = hit.Kind switch
         {
-            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, out docKey),
+            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, tvfAliases, cteSchemas, out docKey),
             SqlToken.TypeKeyword => TypeDescriptions.TryGetValue(hit.Text, out string? typeDesc) ? typeDesc : null,
             SqlToken.Arrow => "**`->`** Lambda arrow — separates parameter(s) from the body expression.\n\n" +
                 "Usage: `x -> expr` or `(a, b) -> expr` inside higher-order functions " +
@@ -85,8 +98,20 @@ public sealed class HoverProvider
 
     /// <summary>
     /// Resolves hover for an identifier by checking if it's a function, table, or column name.
+    /// <paramref name="tvfAliases"/> maps each TVF source alias visible in the
+    /// SQL to its manifest signature so column hovers originating from a
+    /// table-valued function source (e.g. <c>FROM video_unnest_frames(...) vid</c>)
+    /// can resolve to the TVF's output columns — the persistent-table column
+    /// lookup doesn't know about these. <paramref name="cteSchemas"/> serves
+    /// the same purpose for <c>WITH</c>-clause CTEs.
     /// </summary>
-    private string? ResolveIdentifierHover(string name, List<TokenHit> tokens, TokenHit currentToken, out string? docKey)
+    private string? ResolveIdentifierHover(
+        string name,
+        List<TokenHit> tokens,
+        TokenHit currentToken,
+        Dictionary<string, FunctionSignature> tvfAliases,
+        CteSchemaResult cteSchemas,
+        out string? docKey)
     {
         docKey = null;
 
@@ -156,6 +181,17 @@ public sealed class HoverProvider
                 return qualifiedTableHover;
             }
 
+            // `alias.column` where `alias` is a TVF source — look up the
+            // column in the TVF's output schema before falling back to the
+            // persistent-table column path.
+            string? tvfQualifiedHover = GetTvfColumnHover(qualifier, name, tvfAliases);
+            if (tvfQualifiedHover is not null) return tvfQualifiedHover;
+
+            // CTE alias or bare CTE name (e.g. `frames.frame_index` or
+            // `f1.frame_index` where `f1` is `FROM frames f1`).
+            string? cteQualifiedHover = GetCteColumnHover(qualifier, name, cteSchemas);
+            if (cteQualifiedHover is not null) return cteQualifiedHover;
+
             return GetQualifiedColumnHover(qualifier, name);
         }
 
@@ -178,7 +214,273 @@ public sealed class HoverProvider
             return tableHover;
         }
 
+        // Unqualified column referenced from a TVF source. Walk every TVF
+        // alias in the SQL — first match wins. Same-name collisions across
+        // different TVFs in one statement are rare and best resolved by
+        // the user qualifying the reference.
+        string? tvfUnqualifiedHover = GetTvfColumnHoverUnqualified(name, tvfAliases);
+        if (tvfUnqualifiedHover is not null) return tvfUnqualifiedHover;
+
+        // Unqualified CTE column — same first-match-wins policy. Walks
+        // every CTE projection in the statement.
+        string? cteUnqualifiedHover = GetCteColumnHoverUnqualified(name, cteSchemas);
+        if (cteUnqualifiedHover is not null) return cteUnqualifiedHover;
+
         return GetColumnHover(name);
+    }
+
+    /// <summary>
+    /// Renders a CTE-column hover for <c>qualifier.columnName</c>. Resolves
+    /// the qualifier as a direct CTE name first, then as a FROM alias bound
+    /// to a CTE; returns <see langword="null"/> when neither matches the
+    /// requested column.
+    /// </summary>
+    private static string? GetCteColumnHover(string qualifier, string columnName, CteSchemaResult cteSchemas)
+    {
+        if (!TryResolveCteSchema(qualifier, cteSchemas, out string? cteName, out IReadOnlyList<TableColumnEntry>? cols))
+        {
+            return null;
+        }
+        foreach (TableColumnEntry column in cols)
+        {
+            if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return FormatCteColumnHover(qualifier, cteName, column);
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Walks every resolved CTE projection looking for an output column
+    /// matching <paramref name="columnName"/>. First match wins — mirrors
+    /// the unqualified TVF lookup; collisions are rare in practice and
+    /// best disambiguated by qualifying the reference.
+    /// </summary>
+    private static string? GetCteColumnHoverUnqualified(string columnName, CteSchemaResult cteSchemas)
+    {
+        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> entry in cteSchemas.Schemas)
+        {
+            foreach (TableColumnEntry column in entry.Value)
+            {
+                if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return FormatCteColumnHover(entry.Key, entry.Key, column);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static bool TryResolveCteSchema(
+        string qualifier,
+        CteSchemaResult cteSchemas,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? cteName,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IReadOnlyList<TableColumnEntry>? columns)
+    {
+        if (cteSchemas.Schemas.TryGetValue(qualifier, out IReadOnlyList<TableColumnEntry>? direct))
+        {
+            cteName = qualifier;
+            columns = direct;
+            return true;
+        }
+        if (cteSchemas.FromAliasToCteName.TryGetValue(qualifier, out string? mapped)
+            && cteSchemas.Schemas.TryGetValue(mapped, out IReadOnlyList<TableColumnEntry>? aliasCols))
+        {
+            cteName = mapped;
+            columns = aliasCols;
+            return true;
+        }
+        cteName = null;
+        columns = null;
+        return false;
+    }
+
+    private static string FormatCteColumnHover(string qualifier, string cteName, TableColumnEntry column)
+    {
+        string nullable = column.Nullable ? " *(nullable)*" : "";
+        string source = string.Equals(qualifier, cteName, StringComparison.OrdinalIgnoreCase)
+            ? cteName
+            : $"{cteName} (via `{qualifier}`)";
+        return $"**{qualifier}.{column.Name}**: {column.Kind}{nullable}\n\nSource: CTE `{source}`";
+    }
+
+    /// <summary>
+    /// Renders a column hover from a TVF alias map entry. Returns
+    /// <see langword="null"/> when the alias isn't a TVF source or the
+    /// column name doesn't match any of its declared output columns.
+    /// </summary>
+    private static string? GetTvfColumnHover(
+        string alias, string columnName, Dictionary<string, FunctionSignature> tvfAliases)
+    {
+        if (!tvfAliases.TryGetValue(alias, out FunctionSignature? signature)) return null;
+        if (signature.OutputColumns is null) return null;
+        foreach (TableColumnEntry column in signature.OutputColumns)
+        {
+            if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return FormatTvfColumnHover(alias, signature, column);
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Unqualified column lookup across every TVF alias in the SQL. First
+    /// match wins; deterministic by enumeration order over the dictionary.
+    /// </summary>
+    private static string? GetTvfColumnHoverUnqualified(
+        string columnName, Dictionary<string, FunctionSignature> tvfAliases)
+    {
+        foreach (KeyValuePair<string, FunctionSignature> entry in tvfAliases)
+        {
+            if (entry.Value.OutputColumns is null) continue;
+            foreach (TableColumnEntry column in entry.Value.OutputColumns)
+            {
+                if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return FormatTvfColumnHover(entry.Key, entry.Value, column);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static string FormatTvfColumnHover(string alias, FunctionSignature signature, TableColumnEntry column)
+    {
+        string nullable = column.Nullable ? " *(nullable)*" : "";
+        string qualifiedFn = string.IsNullOrEmpty(signature.SchemaName)
+            || string.Equals(signature.SchemaName, "system", StringComparison.OrdinalIgnoreCase)
+            ? signature.Name
+            : $"{signature.SchemaName}.{signature.Name}";
+        return $"**{alias}.{column.Name}**: {column.Kind}{nullable}\n\nSource: `{qualifiedFn}(...)` *(table-valued)*";
+    }
+
+    /// <summary>
+    /// Parses the SQL with the error-recovering parser and walks the
+    /// resulting tree to collect every <see cref="FunctionSource"/> mapped
+    /// to its manifest <see cref="FunctionSignature"/>. Key is the source's
+    /// alias when present, otherwise the function call name — matching the
+    /// resolution rule the engine uses for FROM-clause aliases.
+    /// </summary>
+    /// <remarks>
+    /// Per-hover parse cost is negligible against keystroke cadence; no
+    /// caching layer yet. If hover latency ever becomes an issue, hash the
+    /// SQL and memoise on the last seen hash.
+    /// </remarks>
+    private Dictionary<string, FunctionSignature> BuildTvfAliasMap(string sql)
+    {
+        Dictionary<string, FunctionSignature> result = new(StringComparer.OrdinalIgnoreCase);
+        ParseResult parseResult;
+        try
+        {
+            parseResult = SqlParser.TryParseRecovering(sql);
+        }
+        catch
+        {
+            return result;
+        }
+
+        if (parseResult.Query is null) return result;
+
+        foreach (FunctionSource source in EnumerateFunctionSources(parseResult.Query))
+        {
+            FunctionSignature? signature = LookupTvfSignature(source);
+            if (signature is null) continue;
+            string aliasKey = source.Alias ?? source.FunctionName;
+            // First-wins on alias clashes — preserves the natural document
+            // order so the leftmost source surfaces under shared aliases.
+            if (!result.ContainsKey(aliasKey)) result[aliasKey] = signature;
+        }
+
+        return result;
+    }
+
+    private FunctionSignature? LookupTvfSignature(FunctionSource source)
+    {
+        foreach (FunctionSignature signature in _manifest.Functions)
+        {
+            if (!signature.IsTableValued) continue;
+            if (!string.Equals(signature.Name, source.FunctionName, StringComparison.OrdinalIgnoreCase)) continue;
+            if (source.SchemaName is not null
+                && !string.Equals(signature.SchemaName, source.SchemaName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            return signature;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Yields every <see cref="FunctionSource"/> reachable from
+    /// <paramref name="query"/> — top-level FROM/JOIN, CTE bodies (anchor
+    /// and recursive sides), subqueries embedded as FROM sources, and
+    /// nested subquery expressions in the SELECT list. Subquery-as-table
+    /// sources have their inner statement walked too, so a TVF inside an
+    /// inline subquery still surfaces.
+    /// </summary>
+    private static IEnumerable<FunctionSource> EnumerateFunctionSources(QueryExpression query)
+    {
+        switch (query)
+        {
+            case SelectQueryExpression select:
+                foreach (FunctionSource fs in EnumerateInStatement(select.Statement))
+                    yield return fs;
+                break;
+            case CompoundQueryExpression compound:
+                foreach (FunctionSource fs in EnumerateFunctionSources(compound.Left))
+                    yield return fs;
+                foreach (FunctionSource fs in EnumerateFunctionSources(compound.Right))
+                    yield return fs;
+                break;
+        }
+    }
+
+    private static IEnumerable<FunctionSource> EnumerateInStatement(SelectStatement statement)
+    {
+        if (statement.CommonTableExpressions is not null)
+        {
+            foreach (CommonTableExpression cte in statement.CommonTableExpressions)
+            {
+                foreach (FunctionSource fs in EnumerateFunctionSources(cte.Body))
+                    yield return fs;
+                if (cte.RecursiveQuery is not null)
+                {
+                    foreach (FunctionSource fs in EnumerateInStatement(cte.RecursiveQuery))
+                        yield return fs;
+                }
+            }
+        }
+
+        if (statement.From is not null)
+        {
+            foreach (FunctionSource fs in EnumerateInTableSource(statement.From.Source))
+                yield return fs;
+        }
+
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                foreach (FunctionSource fs in EnumerateInTableSource(join.Source))
+                    yield return fs;
+            }
+        }
+    }
+
+    private static IEnumerable<FunctionSource> EnumerateInTableSource(TableSource source)
+    {
+        switch (source)
+        {
+            case FunctionSource fs:
+                yield return fs;
+                break;
+            case SubquerySource sub:
+                foreach (FunctionSource inner in EnumerateInStatement(sub.Query))
+                    yield return inner;
+                break;
+        }
     }
 
     /// <summary>

@@ -52,6 +52,24 @@ public sealed class CompletionProviderTests : ServiceTestBase
                     Description = "Expands a vector column.",
                     IsTableValued = true,
                 },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "video_unnest_frames",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "source", Kind = "String" },
+                        new ParameterSignature { Name = "start_frame", Kind = "Int32", IsOptional = true },
+                    ],
+                    ReturnType = "table(frame_index Int32, frame VideoFrame)",
+                    Description = "Emits one row per video frame.",
+                    IsTableValued = true,
+                    OutputColumns =
+                    [
+                        new TableColumnEntry { Name = "frame_index", Kind = "Int32", Nullable = false },
+                        new TableColumnEntry { Name = "frame", Kind = "VideoFrame", Nullable = false },
+                    ],
+                },
             ],
             Keywords = ["SELECT", "FROM", "WHERE", "JOIN", "ON", "ORDER", "BY", "AS", "INTO"],
         };
@@ -102,6 +120,123 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.Contains(items, item => item.Label == "name");
         Assert.DoesNotContain(items, item => item.Label == "id");
         Assert.DoesNotContain(items, item => item.Label == "abs");
+    }
+
+    // ───────────────────── TVF output columns ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterSelect_OffersTvfOutputColumns()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        const string sql = "SELECT  FROM video_unnest_frames('x.mp4') vid";
+        // Cursor sits in the gap after SELECT.
+        CompletionItem[] items = provider.GetCompletions(sql, 7);
+
+        Assert.Contains(items, item => item.Label == "frame_index" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "frame" && item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterAliasDot_ResolvesToTvfOutputColumns()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        // `vid.` — cursor right after the dot.
+        const string sql = "SELECT vid. FROM video_unnest_frames('x.mp4') vid";
+        int offset = sql.IndexOf("vid.", StringComparison.Ordinal) + "vid.".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "frame_index" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "frame" && item.Kind == CompletionItemKind.Column);
+        // Persistent-table columns must not bleed into a TVF alias dot lookup.
+        Assert.DoesNotContain(items, item => item.Label == "id");
+    }
+
+    [Fact]
+    public void GetCompletions_PrefixFilteringWorksOverTvfColumns()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        const string sql = "SELECT fram FROM video_unnest_frames('x.mp4') vid";
+        int offset = sql.IndexOf("fram", StringComparison.Ordinal) + "fram".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "frame_index");
+        Assert.Contains(items, item => item.Label == "frame");
+    }
+
+    // ───────────────────── CTE projections ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterCteAliasDot_OffersCteProjectedColumns()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        // The cursor is positioned right after `f1.` in an otherwise
+        // parseable query — using a complete query keeps the recovering
+        // parser happy so the CTE schema is built, but the classifier still
+        // sees AfterDot at the cursor.
+        const string sql =
+            "WITH frames AS (SELECT frame_index, frame FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT f1.frame_index FROM frames f1";
+        int offset = sql.LastIndexOf("f1.", StringComparison.Ordinal) + "f1.".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "frame_index" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "frame" && item.Kind == CompletionItemKind.Column);
+        Assert.DoesNotContain(items, item => item.Label == "id");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterCteNameDot_OffersCteProjectedColumns()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        // No alias on the FROM source — bare CTE name should still qualify.
+        const string sql =
+            "WITH frames AS (SELECT frame_index FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT frames.frame_index FROM frames";
+        int offset = sql.LastIndexOf("frames.", StringComparison.Ordinal) + "frames.".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "frame_index");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterSelect_OffersUnqualifiedCteColumns()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        const string sql =
+            "WITH frames AS (SELECT frame_index, frame FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT frame_index FROM frames";
+        // Position cursor right after `SELECT ` (offset 76) so the
+        // classifier lands in AfterSelect.
+        int offset = sql.LastIndexOf("SELECT frame_index FROM frames", StringComparison.Ordinal)
+            + "SELECT ".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "frame_index");
+        Assert.Contains(items, item => item.Label == "frame");
+    }
+
+    [Fact]
+    public void GetCompletions_RenamedCteColumn_UsesAlias()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        // `f1.frame AS prev` renames the column in prev_curr's output.
+        const string sql =
+            "WITH frames AS (SELECT frame_index, frame FROM video_unnest_frames('x.mp4') vid)," +
+            "prev_curr AS (SELECT f1.frame_index, f1.frame AS prev FROM frames f1) " +
+            "SELECT prev_curr.prev FROM prev_curr";
+        int offset = sql.LastIndexOf("prev_curr.", StringComparison.Ordinal) + "prev_curr.".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "frame_index");
+        Assert.Contains(items, item => item.Label == "prev");
+        Assert.DoesNotContain(items, item => item.Label == "frame");
     }
 
     // ───────────────────── After FROM ─────────────────────

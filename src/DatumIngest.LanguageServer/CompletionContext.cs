@@ -78,6 +78,14 @@ public static class CompletionContext
             : TokenizeSafely(sql);
         IReadOnlyList<string> tablesInScope = ExtractTablesInScope(fullTokens);
 
+        // Table-valued function sources bound in FROM / JOIN, mapped from
+        // alias (or bare call name) to the TVF's name so the completion
+        // provider can look up its output columns in the manifest.
+        // ExtractTablesInScope already includes function call names in its
+        // scope list (so `FROM range(...) AS r` surfaces both `range` and
+        // `r`); this companion map is the alias-to-function bridge.
+        IReadOnlyDictionary<string, string> tvfAliasesInScope = ExtractTvfAliasesInScope(fullTokens);
+
         // Check if cursor is in the middle of typing an identifier (for prefix filtering).
         string? prefix = ExtractPrefix(textToCursor, tokens);
 
@@ -86,7 +94,7 @@ public static class CompletionContext
         if (tableQualifier is not null)
         {
             return new CompletionZone(
-                CompletionZoneKind.AfterDot, prefix, tableQualifier, variablesInScope, tablesInScope);
+                CompletionZoneKind.AfterDot, prefix, tableQualifier, variablesInScope, tablesInScope, tvfAliasesInScope);
         }
 
         // Walk backwards through tokens to find the governing keyword.
@@ -100,7 +108,7 @@ public static class CompletionContext
         CompletionZoneKind zone = ClassifyFromTokens(tokens, hasPrefix: prefixIsLastToken);
 
         return new CompletionZone(
-            zone, prefix, TableQualifier: null, variablesInScope, tablesInScope);
+            zone, prefix, TableQualifier: null, variablesInScope, tablesInScope, tvfAliasesInScope);
     }
 
     /// <summary>
@@ -170,9 +178,16 @@ public static class CompletionContext
             if (string.IsNullOrEmpty(tableName)) continue;
             if (seen.Add(tableName)) ordered.Add(tableName);
 
-            // Capture an optional alias: `FROM users u` or `FROM users AS u`.
-            // The alias is also a valid qualifier inside the query body.
+            // Alias hunt — handles three shapes:
+            //   FROM users [AS] u
+            //   FROM video_unnest_frames(...) [AS] vid    (TVF call)
+            //   FROM schema.tvf(...) [AS] vid             (qualified TVF call)
+            // For the TVF cases we skip past the balanced argument list so
+            // the alias still gets bound. Without this, every TVF alias was
+            // silently dropped from scope and `vid.frame_index` had nothing
+            // to resolve against.
             int aliasIdx = next + 1;
+            aliasIdx = SkipSchemaQualifierAndArgList(tokens, aliasIdx);
             if (aliasIdx < tokens.Count && tokens[aliasIdx].Kind == SqlToken.As)
             {
                 aliasIdx++;
@@ -188,6 +203,114 @@ public static class CompletionContext
         }
 
         return ordered.Count == 0 ? Array.Empty<string>() : ordered;
+    }
+
+    /// <summary>
+    /// Walks <c>FROM</c> / <c>JOIN</c> sources and returns a map from each
+    /// table-valued-function source's alias (or bare call name if no alias
+    /// was given) to the TVF's unqualified function name. Companion to
+    /// <see cref="ExtractTablesInScope"/> — that helper records the names
+    /// for column-source matching, while this map carries the alias-to-
+    /// function link that <c>CompletionProvider</c> needs to read the
+    /// TVF's <c>FunctionSignature.OutputColumns</c> out of the manifest.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> ExtractTvfAliasesInScope(List<TokenInfo> tokens)
+    {
+        if (tokens.Count == 0) return EmptyTvfAliases;
+        Dictionary<string, string>? result = null;
+
+        for (int i = 0; i + 1 < tokens.Count; i++)
+        {
+            SqlToken k = tokens[i].Kind;
+            if (k != SqlToken.From && k != SqlToken.Join) continue;
+            int next = i + 1;
+            if (tokens[next].Kind != SqlToken.Identifier) continue;
+
+            string functionName = tokens[next].Text;
+            int afterName = next + 1;
+
+            // Optional schema qualifier: `schema.fn(...)`.
+            if (afterName + 1 < tokens.Count
+                && tokens[afterName].Kind == SqlToken.Dot
+                && tokens[afterName + 1].Kind == SqlToken.Identifier)
+            {
+                functionName = tokens[afterName + 1].Text;
+                afterName += 2;
+            }
+
+            // TVF call is `<name> ( args )`. No left paren → this is a
+            // plain table reference, not a TVF source. Skip.
+            if (afterName >= tokens.Count || tokens[afterName].Kind != SqlToken.LeftParen) continue;
+
+            int afterArgs = SkipBalancedParens(tokens, afterName);
+            if (afterArgs < 0) continue;
+
+            int aliasIdx = afterArgs;
+            if (aliasIdx < tokens.Count && tokens[aliasIdx].Kind == SqlToken.As)
+            {
+                aliasIdx++;
+            }
+            string aliasKey = aliasIdx < tokens.Count && tokens[aliasIdx].Kind == SqlToken.Identifier
+                ? tokens[aliasIdx].Text
+                : functionName;
+            if (string.IsNullOrEmpty(aliasKey)) continue;
+
+            result ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // First-wins on alias clash — preserves document order so the
+            // earliest declaration in the SQL is what completion uses.
+            if (!result.ContainsKey(aliasKey)) result[aliasKey] = functionName;
+        }
+
+        return result ?? EmptyTvfAliases;
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> EmptyTvfAliases =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns the token index that follows an optional <c>schema.</c>
+    /// qualifier and an optional <c>(...)</c> argument list starting at
+    /// <paramref name="startIndex"/>. Lets the alias hunt advance past a
+    /// TVF call's argument list without misreading the function's first
+    /// argument as the table alias.
+    /// </summary>
+    private static int SkipSchemaQualifierAndArgList(List<TokenInfo> tokens, int startIndex)
+    {
+        int idx = startIndex;
+        // Optional `.subname` qualifier.
+        if (idx + 1 < tokens.Count
+            && tokens[idx].Kind == SqlToken.Dot
+            && tokens[idx + 1].Kind == SqlToken.Identifier)
+        {
+            idx += 2;
+        }
+        // Optional `(...)`. Unmatched parens leave the cursor untouched.
+        if (idx < tokens.Count && tokens[idx].Kind == SqlToken.LeftParen)
+        {
+            int after = SkipBalancedParens(tokens, idx);
+            if (after >= 0) idx = after;
+        }
+        return idx;
+    }
+
+    /// <summary>
+    /// Returns the index immediately past the matching right paren for the
+    /// left paren at <paramref name="leftParenIndex"/>, or <c>-1</c> when no
+    /// match is found (unbalanced parens — common while the user is mid-edit).
+    /// </summary>
+    private static int SkipBalancedParens(List<TokenInfo> tokens, int leftParenIndex)
+    {
+        int depth = 0;
+        for (int j = leftParenIndex; j < tokens.Count; j++)
+        {
+            if (tokens[j].Kind == SqlToken.LeftParen) depth++;
+            else if (tokens[j].Kind == SqlToken.RightParen)
+            {
+                depth--;
+                if (depth == 0) return j + 1;
+            }
+        }
+        return -1;
     }
 
     private static IReadOnlyList<string> ExtractVariablesInScope(List<TokenInfo> tokens)
@@ -1326,12 +1449,19 @@ internal readonly record struct CursorContext(CursorContextKind Kind, int Splice
 /// "scope not extracted" (legacy callers); empty list means "extracted
 /// and there's nothing in scope".
 /// </param>
+/// <param name="TvfAliasesInScope">
+/// Map of table-valued-function source alias (or bare call name) to the
+/// TVF's unqualified function name. Lets the completion provider read
+/// the TVF's declared output columns out of the manifest for both
+/// qualified (<c>vid.frame_index</c>) and unqualified column completions.
+/// </param>
 public sealed record CompletionZone(
     CompletionZoneKind Kind,
     string? Prefix,
     string? TableQualifier,
     IReadOnlyList<string>? VariablesInScope = null,
-    IReadOnlyList<string>? TablesInScope = null);
+    IReadOnlyList<string>? TablesInScope = null,
+    IReadOnlyDictionary<string, string>? TvfAliasesInScope = null);
 
 /// <summary>
 /// The kind of SQL context the cursor is in, determining which completions to offer.

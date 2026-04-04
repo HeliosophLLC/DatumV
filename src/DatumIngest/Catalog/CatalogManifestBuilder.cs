@@ -319,6 +319,7 @@ public static class CatalogManifestBuilder
 
         List<ParameterSignature> parameters = new();
         string? returnType = null;
+        List<TableColumnEntry>? outputColumns = null;
 
         if (first is not null)
         {
@@ -345,10 +346,17 @@ public static class CatalogManifestBuilder
             {
                 Schema schema = first.FixedOutputSchema;
                 List<string> columns = new(schema.Columns.Count);
+                outputColumns = new List<TableColumnEntry>(schema.Columns.Count);
                 foreach (ColumnInfo column in schema.Columns)
                 {
                     string kindLabel = column.IsArray ? $"Array<{column.Kind}>" : column.Kind.ToString();
                     columns.Add($"{column.Name} {kindLabel}");
+                    outputColumns.Add(new TableColumnEntry
+                    {
+                        Name = column.Name,
+                        Kind = kindLabel,
+                        Nullable = column.Nullable,
+                    });
                 }
                 returnType = $"table({string.Join(", ", columns)})";
             }
@@ -367,6 +375,7 @@ public static class CatalogManifestBuilder
             Description = descriptor.Description,
             Category = descriptor.Category,
             IsTableValued = true,
+            OutputColumns = outputColumns,
         };
     }
 

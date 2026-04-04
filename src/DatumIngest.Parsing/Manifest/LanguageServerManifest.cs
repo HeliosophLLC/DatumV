@@ -191,6 +191,18 @@ public sealed class FunctionSignature
     /// <summary>Whether this is a table-valued function (used in FROM/JOIN) rather than a scalar function.</summary>
     public bool IsTableValued { get; init; }
 
+    /// <summary>
+    /// Output columns emitted by a table-valued function, when its output
+    /// schema is fixed (independent of argument values). Drives hover on
+    /// columns referenced via a TVF source — without it, the language
+    /// server has no per-column type info for <c>SELECT a, b FROM tvf(...)</c>.
+    /// <see langword="null"/> for scalar functions and for TVFs whose schema
+    /// depends on the call site (e.g. <c>range</c>'s column kind follows the
+    /// widest argument); those keep falling back to the
+    /// <see cref="ReturnType"/> string rendering.
+    /// </summary>
+    public IReadOnlyList<TableColumnEntry>? OutputColumns { get; init; }
+
     /// <summary>Whether this is an aggregate function (used in SELECT with GROUP BY).</summary>
     public bool IsAggregate { get; init; }
 
