@@ -36,6 +36,17 @@ contextBridge.exposeInMainWorld('electronHost', {
   // daemon installed).
   notify: (opts: { title: string; body: string }) => ipcRenderer.invoke('notify', opts),
 
+  // Native OS context menu. Resolves with the clicked item's id, or
+  // null if the user dismissed without picking. The spec is renderer-
+  // owned so each surface (results table today; tab strip / tree
+  // tomorrow) can hand in its own labels and item ids.
+  showContextMenu: (spec: {
+    items: Array<
+      | { id: string; label: string; accelerator?: string; enabled?: boolean }
+      | { type: 'separator' }
+    >;
+  }) => ipcRenderer.invoke('contextMenu.show', spec) as Promise<string | null>,
+
   // Native file/folder picker. Returns Electron's OpenDialogReturnValue
   // shape: { canceled: boolean, filePaths: string[] }.
   showOpenDialog: (options: unknown) => ipcRenderer.invoke('fs.showOpenDialog', options),

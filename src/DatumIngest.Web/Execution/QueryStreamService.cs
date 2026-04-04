@@ -351,6 +351,7 @@ public sealed class QueryStreamService
                     {
                         await traceState.DrainAndEmitAsync(isFinal: true, ct).ConfigureAwait(false);
                     }
+                    Console.WriteLine($"CELL FAILED: {failed.Error}");
                     await WriteEventAsync(output, jsonOptions, writeLock, new ErrorEvent("error", failed.CellId, failed.Error.Message, failed.Error.ToString()), ct).ConfigureAwait(false);
                     // Exception propagates after this event; ExecuteAsync
                     // catches it and, seeing cellErrorEmitted, skips the
@@ -376,7 +377,7 @@ public sealed class QueryStreamService
             // on moderately large workloads rather than running for tens of
             // minutes before the budget engages. Hosted / server deployments
             // can override via configuration once that's wired up.
-            const long WebQueryBudgetBytes = 300L * 1024 * 1024;
+            const long WebQueryBudgetBytes = 1000L * 1024 * 1024;
             await executor.RunWithEventsAsync(pairs, OnEvent, ct, memoryBudgetBytes: WebQueryBudgetBytes).ConfigureAwait(false);
         }
         catch when (cellErrorEmitted)

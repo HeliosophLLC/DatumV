@@ -451,6 +451,62 @@ ipcMain.handle('notify', (_event, opts: { title: string; body: string }) => {
   new Notification({ title: opts.title, body: opts.body }).show();
 });
 
+// Native OS context menu. The renderer hands us a spec (labels + ids
+// per item, plus optional separators); we build the Menu, pop it at
+// the cursor on the sender's window, and resolve with the clicked
+// item's id (or null if dismissed without a selection). Action
+// dispatch lives in the renderer — main just plays template + popup
+// so the menu picks up the OS look-and-feel (Win11 acrylic, native
+// macOS rendering, etc.).
+interface ContextMenuItemSpec {
+  id: string;
+  label: string;
+  accelerator?: string;
+  enabled?: boolean;
+}
+interface ContextMenuSpec {
+  items: Array<ContextMenuItemSpec | { type: 'separator' }>;
+}
+
+ipcMain.handle(
+  'contextMenu.show',
+  (event, spec: ContextMenuSpec): Promise<string | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return Promise.resolve(null);
+    return new Promise<string | null>((resolve) => {
+      let settled = false;
+      const settle = (result: string | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+      const template: Electron.MenuItemConstructorOptions[] = spec.items.map(
+        (it): Electron.MenuItemConstructorOptions => {
+          if ('type' in it) {
+            return { type: 'separator' };
+          }
+          return {
+            label: it.label,
+            accelerator: it.accelerator,
+            enabled: it.enabled !== false,
+            click: () => settle(it.id),
+          };
+        },
+      );
+      const menu = Menu.buildFromTemplate(template);
+      // popup's `callback` fires after the menu closes regardless of
+      // whether an item was clicked. Electron fires the item's `click`
+      // first, so a click resolves the promise before this no-op
+      // callback runs; the null path only takes effect when the user
+      // dismissed without picking anything.
+      menu.popup({
+        window: win,
+        callback: () => settle(null),
+      });
+    });
+  },
+);
+
 // Native file/folder open dialog. Parented to the sender's window so it
 // inherits modality. The future ingest UI is the planned consumer.
 ipcMain.handle('fs.showOpenDialog', async (event, options: Electron.OpenDialogOptions) => {

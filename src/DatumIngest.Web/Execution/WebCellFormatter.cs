@@ -184,46 +184,68 @@ internal static class WebCellFormatter
 
     /// <summary>
     /// Formats a fixed-width numeric array as a binary <c>numeric_array</c>
-    /// cell, or returns <c>null</c> when the array is below the size
-    /// threshold (caller falls back to the JSON-tree path). DataB64 carries
-    /// raw little-endian element bytes — both ends run on x64 so
-    /// <see cref="MemoryMarshal.AsBytes{T}"/> is a zero-copy reinterpret.
+    /// cell, or returns <c>null</c> when the array is flat (1-D) AND below
+    /// the size threshold (caller falls back to the JSON-tree path).
+    /// Multi-dimensional arrays always take the binary path regardless of
+    /// size so the front-end can render shape-aware (matrix grid, etc.).
+    /// DataB64 carries raw little-endian element bytes — both ends run on
+    /// x64 so <see cref="MemoryMarshal.AsBytes{T}"/> is a zero-copy
+    /// reinterpret. Shape (when present) is emitted as a sibling array;
+    /// the bytes themselves are flat row-major.
     /// </summary>
     private static JsonCell? TryFormatNumericArray(DataValue value, Arena arena, SidecarRegistry registry)
     {
+        int[]? shape = value.IsMultiDim ? value.GetShape(arena, registry).ToArray() : null;
         return value.Kind switch
         {
-            DataKind.Boolean => BuildBoolBinary(value.AsArraySpan<byte>(arena, registry)),
-            DataKind.Int8 => BuildSignedBinary<sbyte>(value.AsArraySpan<sbyte>(arena, registry), "i8", v => v),
-            DataKind.UInt16 => BuildUnsignedBinary<ushort>(value.AsArraySpan<ushort>(arena, registry), "u16", v => v),
-            DataKind.Int16 => BuildSignedBinary<short>(value.AsArraySpan<short>(arena, registry), "i16", v => v),
-            DataKind.UInt32 => BuildUnsignedBinary<uint>(value.AsArraySpan<uint>(arena, registry), "u32", v => v),
-            DataKind.Int32 => BuildSignedBinary<int>(value.AsArraySpan<int>(arena, registry), "i32", v => v),
-            DataKind.UInt64 => BuildUnsignedBinary<ulong>(value.AsArraySpan<ulong>(arena, registry), "u64", v => v),
-            DataKind.Int64 => BuildSignedBinary<long>(value.AsArraySpan<long>(arena, registry), "i64", v => v),
-            DataKind.Float32 => BuildFloat32Binary(value.AsArraySpan<float>(arena, registry)),
-            DataKind.Float64 => BuildFloat64Binary(value.AsArraySpan<double>(arena, registry)),
+            DataKind.Boolean => BuildBoolBinary(value.AsArraySpan<byte>(arena, registry), shape),
+            DataKind.Int8 => BuildSignedBinary<sbyte>(value.AsArraySpan<sbyte>(arena, registry), "i8", v => v, shape),
+            DataKind.UInt16 => BuildUnsignedBinary<ushort>(value.AsArraySpan<ushort>(arena, registry), "u16", v => v, shape),
+            DataKind.Int16 => BuildSignedBinary<short>(value.AsArraySpan<short>(arena, registry), "i16", v => v, shape),
+            DataKind.UInt32 => BuildUnsignedBinary<uint>(value.AsArraySpan<uint>(arena, registry), "u32", v => v, shape),
+            DataKind.Int32 => BuildSignedBinary<int>(value.AsArraySpan<int>(arena, registry), "i32", v => v, shape),
+            DataKind.UInt64 => BuildUnsignedBinary<ulong>(value.AsArraySpan<ulong>(arena, registry), "u64", v => v, shape),
+            DataKind.Int64 => BuildSignedBinary<long>(value.AsArraySpan<long>(arena, registry), "i64", v => v, shape),
+            DataKind.Float32 => BuildFloat32Binary(value.AsArraySpan<float>(arena, registry), shape),
+            DataKind.Float64 => BuildFloat64Binary(value.AsArraySpan<double>(arena, registry), shape),
             _ => null,
         };
     }
 
-    private static JsonCell? BuildBoolBinary(ReadOnlySpan<byte> span)
+    /// <summary>
+    /// Multi-dim arrays bypass the size threshold — shape-aware rendering
+    /// is the whole point of shipping them, even for tiny matrices.
+    /// </summary>
+    private static bool ShouldEmitBinary(int elementCount, int[]? shape) =>
+        shape is not null || elementCount > NumericArrayBinaryThreshold;
+
+    private static JsonCell? BuildBoolBinary(ReadOnlySpan<byte> span, int[]? shape)
     {
-        if (span.Length <= NumericArrayBinaryThreshold) return null;
+        if (!ShouldEmitBinary(span.Length, shape)) return null;
         string b64 = Convert.ToBase64String(MemoryMarshal.AsBytes(span));
         // Bools have no meaningful min/max/mean; surface count only.
         return new JsonCell(
             "numeric_array",
             DataB64: b64,
             ElementKind: "bool",
-            Count: span.Length);
+            Count: span.Length,
+            Shape: shape);
     }
 
-    private static JsonCell? BuildSignedBinary<T>(ReadOnlySpan<T> span, string elementKind, Func<T, long> toLong)
+    private static JsonCell? BuildSignedBinary<T>(ReadOnlySpan<T> span, string elementKind, Func<T, long> toLong, int[]? shape)
         where T : unmanaged
     {
-        if (span.Length <= NumericArrayBinaryThreshold) return null;
+        if (!ShouldEmitBinary(span.Length, shape)) return null;
         string b64 = Convert.ToBase64String(MemoryMarshal.AsBytes(span));
+        if (span.Length == 0)
+        {
+            return new JsonCell(
+                "numeric_array",
+                DataB64: b64,
+                ElementKind: elementKind,
+                Count: 0,
+                Shape: shape);
+        }
         long min = long.MaxValue, max = long.MinValue;
         double sum = 0;
         for (int i = 0; i < span.Length; i++)
@@ -238,16 +260,26 @@ internal static class WebCellFormatter
             DataB64: b64,
             ElementKind: elementKind,
             Count: span.Length,
+            Shape: shape,
             Min: min,
             Max: max,
             Mean: sum / span.Length);
     }
 
-    private static JsonCell? BuildUnsignedBinary<T>(ReadOnlySpan<T> span, string elementKind, Func<T, ulong> toULong)
+    private static JsonCell? BuildUnsignedBinary<T>(ReadOnlySpan<T> span, string elementKind, Func<T, ulong> toULong, int[]? shape)
         where T : unmanaged
     {
-        if (span.Length <= NumericArrayBinaryThreshold) return null;
+        if (!ShouldEmitBinary(span.Length, shape)) return null;
         string b64 = Convert.ToBase64String(MemoryMarshal.AsBytes(span));
+        if (span.Length == 0)
+        {
+            return new JsonCell(
+                "numeric_array",
+                DataB64: b64,
+                ElementKind: elementKind,
+                Count: 0,
+                Shape: shape);
+        }
         ulong min = ulong.MaxValue, max = ulong.MinValue;
         double sum = 0;
         for (int i = 0; i < span.Length; i++)
@@ -262,14 +294,15 @@ internal static class WebCellFormatter
             DataB64: b64,
             ElementKind: elementKind,
             Count: span.Length,
+            Shape: shape,
             Min: min,
             Max: max,
             Mean: sum / span.Length);
     }
 
-    private static JsonCell? BuildFloat32Binary(ReadOnlySpan<float> span)
+    private static JsonCell? BuildFloat32Binary(ReadOnlySpan<float> span, int[]? shape)
     {
-        if (span.Length <= NumericArrayBinaryThreshold) return null;
+        if (!ShouldEmitBinary(span.Length, shape)) return null;
         string b64 = Convert.ToBase64String(MemoryMarshal.AsBytes(span));
         double min = double.PositiveInfinity, max = double.NegativeInfinity, sum = 0;
         int finite = 0;
@@ -287,14 +320,15 @@ internal static class WebCellFormatter
             DataB64: b64,
             ElementKind: "f32",
             Count: span.Length,
+            Shape: shape,
             Min: finite > 0 ? min : null,
             Max: finite > 0 ? max : null,
             Mean: finite > 0 ? sum / finite : null);
     }
 
-    private static JsonCell? BuildFloat64Binary(ReadOnlySpan<double> span)
+    private static JsonCell? BuildFloat64Binary(ReadOnlySpan<double> span, int[]? shape)
     {
-        if (span.Length <= NumericArrayBinaryThreshold) return null;
+        if (!ShouldEmitBinary(span.Length, shape)) return null;
         string b64 = Convert.ToBase64String(MemoryMarshal.AsBytes(span));
         double min = double.PositiveInfinity, max = double.NegativeInfinity, sum = 0;
         int finite = 0;
@@ -312,6 +346,7 @@ internal static class WebCellFormatter
             DataB64: b64,
             ElementKind: "f64",
             Count: span.Length,
+            Shape: shape,
             Min: finite > 0 ? min : null,
             Max: finite > 0 ? max : null,
             Mean: finite > 0 ? sum / finite : null);

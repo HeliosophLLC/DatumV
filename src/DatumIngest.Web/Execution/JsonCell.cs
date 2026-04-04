@@ -29,6 +29,11 @@ internal sealed record JsonCell(
     // front-end can render a stats card without touching the bytes.
     string? ElementKind = null,
     int? Count = null,
+    // Logical shape for multi-dimensional arrays — e.g. [4, 4] for a 4×4
+    // matrix, [3, 480, 640] for a CHW tensor. Null/omitted for flat 1-D
+    // arrays. Element count equals Product(Shape) when set. The DataB64
+    // bytes are flat row-major (last dimension varies fastest).
+    IReadOnlyList<int>? Shape = null,
     double? Min = null,
     double? Max = null,
     double? Mean = null,

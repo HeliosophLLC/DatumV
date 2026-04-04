@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { AlertCircle, Ban, Braces, Check, Film, Loader2, Music, Sigma } from 'lucide-react';
@@ -598,10 +598,12 @@ function cellTextForMeasure(cell: JsonCell): string {
     return `[${cell.items.length} items]`;
   }
   if (cell.kind === 'numeric_array') {
-    // Measurement string mirrors the rendered chip — "f32[147456] · [0.00..9.99]".
-    // Just an upper-bound approximation; the chip is short enough that exact
+    // Measurement string mirrors the rendered chip — "f32[4×4] · [0.00..9.99]"
+    // for shaped arrays or "f32[147456] · [...]" for flat ones. Just an
+    // upper-bound approximation; the chip is short enough that exact
     // measurement isn't worth a per-cell render walk.
-    return `${cell.elementKind ?? '?'}[${cell.count ?? 0}] · [0.0000..9.9999]`;
+    const dim = cell.shape ? cell.shape.join('×') : (cell.count ?? 0).toString();
+    return `${cell.elementKind ?? '?'}[${dim}] · [0.0000..9.9999]`;
   }
   if (cell.kind === 'struct') {
     // The inline chip shows "{f1, f2, f3, …}" — measure against the joined
@@ -654,6 +656,162 @@ function cellTooltip(cell: JsonCell): string | undefined {
   return cell.text ?? undefined;
 }
 
+// ────────── Range selection ──────────
+//
+// Excel-style selection over the virtualised grid: drag for a rectangle
+// of cells, drag the row-number gutter for full rows, drag the column
+// header for full columns, click the top-left corner cell for select-
+// all. Shift+click extends the current selection from its anchor.
+// Selection lives per-CellTable — each result block has its own.
+
+type SelectionMode = 'cell' | 'row' | 'col' | 'all';
+
+type Selection = {
+  mode: SelectionMode;
+  anchorRow: number;
+  anchorCol: number;
+  focusRow: number;
+  focusCol: number;
+};
+
+type SelectionRange = {
+  rowMin: number;
+  rowMax: number;
+  colMin: number;
+  colMax: number;
+};
+
+function selectionRange(
+  sel: Selection,
+  numRows: number,
+  numCols: number,
+): SelectionRange {
+  const lastRow = Math.max(0, numRows - 1);
+  const lastCol = Math.max(0, numCols - 1);
+  if (sel.mode === 'all') {
+    return { rowMin: 0, rowMax: lastRow, colMin: 0, colMax: lastCol };
+  }
+  const rowMin = Math.min(sel.anchorRow, sel.focusRow);
+  const rowMax = Math.max(sel.anchorRow, sel.focusRow);
+  const colMin = Math.min(sel.anchorCol, sel.focusCol);
+  const colMax = Math.max(sel.anchorCol, sel.focusCol);
+  if (sel.mode === 'row') {
+    return { rowMin, rowMax, colMin: 0, colMax: lastCol };
+  }
+  if (sel.mode === 'col') {
+    return { rowMin: 0, rowMax: lastRow, colMin, colMax };
+  }
+  return { rowMin, rowMax, colMin, colMax };
+}
+
+// Auto-scroll kicks in when the mouse is within this many pixels of the
+// scroll-container edge during a drag. Speed ramps linearly with how
+// far the mouse has crossed the edge zone.
+const AUTOSCROLL_EDGE_PX = 28;
+const AUTOSCROLL_MAX_SPEED_PX = 18;
+
+// TSV payload for clipboard. Excel/Sheets parse tab-separated rows
+// joined by newlines; values containing tabs / newlines / quotes are
+// double-quoted with quote-doubling, matching the CSV/TSV escape used
+// by Excel's own clipboard format.
+function cellRawTextForCopy(cell: JsonCell): string {
+  if (cell.kind === 'null') return '';
+  if (
+    cell.kind === 'media'
+    || cell.kind === 'image'
+    || cell.kind === 'audio'
+    || cell.kind === 'video'
+  ) {
+    const bytes = bytesFromBase64(cell.dataB64);
+    return `[${cell.mime ?? 'binary'}, ${formatBytes(bytes)}]`;
+  }
+  if (cell.kind === 'media_array' && cell.items) {
+    return `[${cell.items.length} items]`;
+  }
+  if (cell.kind === 'numeric_array') {
+    return numericArrayTitle(cell);
+  }
+  if (cell.kind === 'struct') {
+    return structSummary(cell);
+  }
+  return cell.text ?? '';
+}
+
+function cellTextForCopy(cell: JsonCell): string {
+  const raw = cellRawTextForCopy(cell);
+  if (/[\t\n\r"]/.test(raw)) {
+    return `"${raw.replace(/"/g, '""')}"`;
+  }
+  return raw;
+}
+
+function buildSelectionTsv(
+  rows: readonly JsonCell[][],
+  range: SelectionRange,
+): string {
+  const lines: string[] = [];
+  for (let r = range.rowMin; r <= range.rowMax; r++) {
+    const row = rows[r];
+    if (!row) continue;
+    const parts: string[] = [];
+    for (let c = range.colMin; c <= range.colMax; c++) {
+      const v = row[c];
+      parts.push(v ? cellTextForCopy(v) : '');
+    }
+    lines.push(parts.join('\t'));
+  }
+  return lines.join('\n');
+}
+
+function tsvHeaderCell(name: string): string {
+  if (/[\t\n\r"]/.test(name)) {
+    return `"${name.replace(/"/g, '""')}"`;
+  }
+  return name;
+}
+
+function buildSelectionTsvWithHeaders(
+  schema: readonly { name: string }[],
+  rows: readonly JsonCell[][],
+  range: SelectionRange,
+): string {
+  const headerParts: string[] = [];
+  for (let c = range.colMin; c <= range.colMax; c++) {
+    headerParts.push(tsvHeaderCell(schema[c]?.name ?? ''));
+  }
+  const header = headerParts.join('\t');
+  const body = buildSelectionTsv(rows, range);
+  return body === '' ? header : `${header}\n${body}`;
+}
+
+// Right-click against the current selection: a target is "inside" the
+// selection iff right-clicking would leave the visible range unchanged.
+// For data-cell right-clicks the simple bounding-box test works across
+// all modes (row mode's range spans every column, col mode's range
+// spans every row). For row/col-header right-clicks we additionally
+// require the selection to already be in that same axis-mode — e.g.
+// right-clicking column header C while a *cell* range happens to
+// include C should still snap selection to that whole column.
+function isRightClickInSelection(
+  selection: Selection,
+  sourceMode: SelectionMode,
+  row: number,
+  col: number,
+  numRows: number,
+  numCols: number,
+): boolean {
+  if (selection.mode === 'all') return true;
+  const r = selectionRange(selection, numRows, numCols);
+  if (sourceMode === 'all') return false;
+  if (sourceMode === 'row') {
+    return selection.mode === 'row' && row >= r.rowMin && row <= r.rowMax;
+  }
+  if (sourceMode === 'col') {
+    return selection.mode === 'col' && col >= r.colMin && col <= r.colMax;
+  }
+  return row >= r.rowMin && row <= r.rowMax && col >= r.colMin && col <= r.colMax;
+}
+
 function CellTable({ cell }: { cell: CellResult }) {
   // Per-cell scroll container that also drives the virtualiser. Sticky
   // `<header>` and absolutely-positioned virtualised rows both live
@@ -698,6 +856,208 @@ function CellTable({ cell }: { cell: CellResult }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cell.schema, sampleSize]);
 
+  const [selection, setSelection] = useState<Selection | null>(null);
+  // Drag mode lives outside React state: mousemove during auto-scroll
+  // fires 60×/sec and we don't want a render per pixel. The per-cell
+  // mouseenter handler is what commits the new focus into `selection`,
+  // so the render rate is bounded by the grid's row/column granularity.
+  const dragModeRef = useRef<SelectionMode | null>(null);
+
+  const beginSelection = useCallback(
+    (mode: SelectionMode, row: number, col: number, shiftKey: boolean) => {
+      if (mode === 'all') {
+        setSelection({
+          mode: 'all',
+          anchorRow: 0,
+          anchorCol: 0,
+          focusRow: 0,
+          focusCol: 0,
+        });
+        dragModeRef.current = null;
+        return;
+      }
+      setSelection((prev) => {
+        if (shiftKey && prev !== null && prev.mode !== 'all') {
+          return { ...prev, focusRow: row, focusCol: col };
+        }
+        return {
+          mode,
+          anchorRow: row,
+          anchorCol: col,
+          focusRow: row,
+          focusCol: col,
+        };
+      });
+      dragModeRef.current = mode;
+    },
+    [],
+  );
+
+  const extendSelection = useCallback((row: number, col: number) => {
+    if (dragModeRef.current === null) return;
+    setSelection((prev) =>
+      prev === null ? prev : { ...prev, focusRow: row, focusCol: col },
+    );
+  }, []);
+
+  // Global mouseup ends any drag — capturing the release outside the
+  // grid (over the toolbar, the status bar, browser chrome) makes the
+  // next stray hover not extend a stale selection.
+  useEffect(() => {
+    const onUp = () => {
+      dragModeRef.current = null;
+    };
+    window.addEventListener('mouseup', onUp);
+    return () => window.removeEventListener('mouseup', onUp);
+  }, []);
+
+  // Auto-scroll the container while dragging near its edges. The raf
+  // tick reads the last-known mouse position and nudges scrollTop /
+  // scrollLeft; the per-cell mouseenter handlers commit the focus
+  // update as freshly-mounted rows / cols slide under the cursor.
+  useEffect(() => {
+    let rafId = 0;
+    let lastX = 0;
+    let lastY = 0;
+
+    const ramp = (overshoot: number) =>
+      Math.min(
+        AUTOSCROLL_MAX_SPEED_PX,
+        (overshoot / AUTOSCROLL_EDGE_PX) * AUTOSCROLL_MAX_SPEED_PX,
+      );
+
+    const tick = () => {
+      rafId = 0;
+      const el = scrollRef.current;
+      if (dragModeRef.current === null || el === null) return;
+      const rect = el.getBoundingClientRect();
+      let dy = 0;
+      let dx = 0;
+      if (lastY < rect.top + AUTOSCROLL_EDGE_PX) {
+        dy = -ramp(rect.top + AUTOSCROLL_EDGE_PX - lastY);
+      } else if (lastY > rect.bottom - AUTOSCROLL_EDGE_PX) {
+        dy = ramp(lastY - (rect.bottom - AUTOSCROLL_EDGE_PX));
+      }
+      if (lastX < rect.left + AUTOSCROLL_EDGE_PX) {
+        dx = -ramp(rect.left + AUTOSCROLL_EDGE_PX - lastX);
+      } else if (lastX > rect.right - AUTOSCROLL_EDGE_PX) {
+        dx = ramp(lastX - (rect.right - AUTOSCROLL_EDGE_PX));
+      }
+      if (dy === 0 && dx === 0) return;
+      el.scrollTop += dy;
+      el.scrollLeft += dx;
+      rafId = requestAnimationFrame(tick);
+    };
+
+    const onMove = (e: MouseEvent) => {
+      if (dragModeRef.current === null) return;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      if (rafId === 0) rafId = requestAnimationFrame(tick);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      if (rafId !== 0) cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  // Ctrl+C / Cmd+C while the table has focus copies the selection as
+  // TSV. We hook the `copy` event (not keydown) so the browser's
+  // focusable-element copy plumbing handles the activation — we just
+  // supply the payload.
+  const handleCopy = useCallback(
+    (e: React.ClipboardEvent<HTMLDivElement>) => {
+      if (selection === null) return;
+      const numCols = cell.schema?.length ?? 0;
+      const r = selectionRange(selection, cell.rows.length, numCols);
+      if (r.rowMax < r.rowMin || r.colMax < r.colMin) return;
+      const tsv = buildSelectionTsv(cell.rows, r);
+      e.clipboardData.setData('text/plain', tsv);
+      e.preventDefault();
+    },
+    [selection, cell.rows, cell.schema],
+  );
+
+  // Native OS context menu, dispatched through the Electron preload.
+  // Right-click on a target outside the current selection collapses
+  // selection to that target first (Excel UX). We pass `activeSelection`
+  // forward into the post-await branch because React state hasn't
+  // committed yet at await time and reading `selection` would still
+  // see the pre-collapse value.
+  const handleContextMenu = useCallback(
+    async (
+      e: React.MouseEvent<HTMLElement>,
+      sourceMode: SelectionMode,
+      row: number,
+      col: number,
+    ) => {
+      const eh = window.electronHost;
+      if (!eh?.isElectron) return; // browser fallback: let default menu show
+      if (cell.schema === null) return;
+      e.preventDefault();
+      scrollRef.current?.focus();
+
+      const numRowsLocal = cell.rows.length;
+      const numColsLocal = cell.schema.length;
+
+      const insideCurrent =
+        selection !== null
+        && isRightClickInSelection(
+          selection,
+          sourceMode,
+          row,
+          col,
+          numRowsLocal,
+          numColsLocal,
+        );
+
+      let activeSelection: Selection;
+      if (insideCurrent && selection !== null) {
+        activeSelection = selection;
+      } else {
+        activeSelection =
+          sourceMode === 'all'
+            ? { mode: 'all', anchorRow: 0, anchorCol: 0, focusRow: 0, focusCol: 0 }
+            : {
+                mode: sourceMode,
+                anchorRow: row,
+                anchorCol: col,
+                focusRow: row,
+                focusCol: col,
+              };
+        setSelection(activeSelection);
+      }
+      // A drag started earlier (left-mouse) shouldn't survive into the
+      // post-menu world. The OS menu eats the corresponding mouseup so
+      // our global listener never fires.
+      dragModeRef.current = null;
+
+      const result = await eh.showContextMenu({
+        items: [
+          { id: 'copy', label: 'Copy', accelerator: 'CmdOrCtrl+C' },
+          { id: 'copyWithHeaders', label: 'Copy with Headers' },
+        ],
+      });
+      if (result === null) return;
+
+      const r = selectionRange(activeSelection, numRowsLocal, numColsLocal);
+      if (r.rowMax < r.rowMin || r.colMax < r.colMin) return;
+      const tsv =
+        result === 'copyWithHeaders'
+          ? buildSelectionTsvWithHeaders(cell.schema, cell.rows, r)
+          : buildSelectionTsv(cell.rows, r);
+      try {
+        await navigator.clipboard.writeText(tsv);
+      } catch {
+        // Clipboard write can fail under unusual conditions (no doc
+        // focus, etc.); the menu UX still works for the next action.
+      }
+    },
+    [selection, cell.rows, cell.schema],
+  );
+
   if (cell.schema === null) return null;
 
   // Leading row-number gutter + data columns. Sticky-left only on the
@@ -709,10 +1069,24 @@ function CellTable({ cell }: { cell: CellResult }) {
   const totalWidth = ROW_NUMBER_WIDTH + colWidths.reduce((s, w) => s + w, 0);
   const virtualRows = rowVirtualizer.getVirtualItems();
 
+  const numRows = cell.rows.length;
+  const numCols = cell.schema.length;
+  const range = selection ? selectionRange(selection, numRows, numCols) : null;
+  const isInRange = (r: number, c: number): boolean =>
+    range !== null
+    && r >= range.rowMin && r <= range.rowMax
+    && c >= range.colMin && c <= range.colMax;
+  const isRowInRange = (r: number): boolean =>
+    range !== null && r >= range.rowMin && r <= range.rowMax;
+  const isColInRange = (c: number): boolean =>
+    range !== null && c >= range.colMin && c <= range.colMax;
+
   return (
     <div
       ref={scrollRef}
-      className="bg-table-pane min-h-0 flex-1 overflow-auto text-xs"
+      tabIndex={0}
+      onCopy={handleCopy}
+      className="bg-table-pane min-h-0 flex-1 overflow-auto text-xs select-none outline-none"
     >
       {/* Sticky header. Sits at top of scroll container; a real
           `border-b` draws the bottom rule (each header cell's bg-muted
@@ -723,15 +1097,40 @@ function CellTable({ cell }: { cell: CellResult }) {
         className="bg-muted border-border sticky top-0 z-20 grid border-b font-medium"
         style={{ gridTemplateColumns, minWidth: totalWidth }}
       >
-        {/* Corner cell over the row-number gutter — empty. */}
+        {/* Corner cell over the row-number gutter — click selects all. */}
         <div
-          className="border-border bg-muted sticky left-0 z-30 border-r"
-          aria-hidden="true"
+          onMouseDown={(e) => {
+            // Left button only. Right-click is reserved for the context
+            // menu handler — letting it start a selection here would
+            // collapse the current range before the menu sees it.
+            if (e.button !== 0) return;
+            scrollRef.current?.focus();
+            beginSelection('all', 0, 0, e.shiftKey);
+          }}
+          onContextMenu={(e) => handleContextMenu(e, 'all', 0, 0)}
+          className={cn(
+            'border-border sticky left-0 z-30 cursor-cell border-r',
+            selection?.mode === 'all' ? 'bg-primary/30' : 'bg-muted',
+          )}
+          role="button"
+          aria-label="Select all"
         />
-        {cell.schema.map((col) => (
+        {cell.schema.map((col, colIdx) => (
           <div
             key={col.name}
-            className="border-border bg-muted flex min-w-0 cursor-default items-center gap-1.5 border-r px-2 py-1 select-none last:border-r-0"
+            onMouseDown={(e) => {
+              if (e.button !== 0) return;
+              scrollRef.current?.focus();
+              beginSelection('col', 0, colIdx, e.shiftKey);
+            }}
+            onMouseEnter={() => {
+              if (dragModeRef.current === 'col') extendSelection(0, colIdx);
+            }}
+            onContextMenu={(e) => handleContextMenu(e, 'col', 0, colIdx)}
+            className={cn(
+              'border-border flex min-w-0 cursor-cell items-center gap-1.5 border-r px-2 py-1 select-none last:border-r-0',
+              isColInRange(colIdx) ? 'bg-primary/30' : 'bg-muted',
+            )}
             title={`${col.kind}${col.isArray ? '[]' : ''}`}
           >
             <span className="truncate">{col.name}</span>
@@ -769,9 +1168,28 @@ function CellTable({ cell }: { cell: CellResult }) {
             >
               {/* Row-number gutter. Styled like a header cell
                   (bg-muted + font-medium) and sticky-left so it acts as
-                  the row's identity column during horizontal scroll. */}
+                  the row's identity column during horizontal scroll.
+                  Click+drag here selects rows; mouseenter only extends
+                  during a row-mode drag (cell/col drags route their
+                  extension through the data cells the cursor crosses). */}
               <div
-                className="border-border bg-muted text-muted-foreground sticky left-0 z-10 flex min-w-0 items-center justify-end border-r px-1.5 font-medium tabular-nums select-none"
+                onMouseDown={(e) => {
+                  if (e.button !== 0) return;
+                  scrollRef.current?.focus();
+                  beginSelection('row', virtualRow.index, 0, e.shiftKey);
+                }}
+                onMouseEnter={() => {
+                  if (dragModeRef.current === 'row') {
+                    extendSelection(virtualRow.index, 0);
+                  }
+                }}
+                onContextMenu={(e) =>
+                  handleContextMenu(e, 'row', virtualRow.index, 0)
+                }
+                className={cn(
+                  'border-border text-muted-foreground sticky left-0 z-10 flex min-w-0 cursor-cell items-center justify-end border-r px-1.5 font-medium tabular-nums select-none',
+                  isRowInRange(virtualRow.index) ? 'bg-primary/30' : 'bg-muted',
+                )}
                 title={String(rowNumber)}
               >
                 <span className="truncate">{rowNumber}</span>
@@ -779,12 +1197,41 @@ function CellTable({ cell }: { cell: CellResult }) {
               {row.map((c, colIdx) => (
                 <div
                   key={colIdx}
+                  onMouseDown={(e) => {
+                    if (e.button !== 0) return;
+                    // Single-click on the chip/button inside a media or
+                    // struct cell is reserved for the preview-modal open
+                    // gesture — skip selection-start so we don't fight
+                    // it. Shift+click overrides: extending a range
+                    // through a media cell is standard spreadsheet UX.
+                    if (!e.shiftKey) {
+                      const target = e.target as HTMLElement;
+                      if (target.closest('button') !== null) return;
+                      if (
+                        target.tagName === 'IMG'
+                        && target.classList.contains('cursor-zoom-in')
+                      ) {
+                        return;
+                      }
+                    }
+                    scrollRef.current?.focus();
+                    beginSelection('cell', virtualRow.index, colIdx, e.shiftKey);
+                  }}
+                  onMouseEnter={() => {
+                    if (dragModeRef.current !== null) {
+                      extendSelection(virtualRow.index, colIdx);
+                    }
+                  }}
+                  onContextMenu={(e) =>
+                    handleContextMenu(e, 'cell', virtualRow.index, colIdx)
+                  }
                   title={cellTooltip(c)}
                   className={cn(
-                    'border-border min-w-0 border-r px-2 py-1 font-mono last:border-r-0',
+                    'border-border min-w-0 cursor-cell border-r px-2 py-1 font-mono last:border-r-0',
                     largeMedia
                       ? 'flex items-center overflow-hidden'
                       : 'truncate align-top',
+                    isInRange(virtualRow.index, colIdx) && 'bg-primary/20',
                   )}
                 >
                   <CellValue cell={c} largeMedia={largeMedia} />
@@ -991,10 +1438,14 @@ function formatStat(value: number): string {
   return value.toFixed(4).replace(/\.?0+$/, '');
 }
 
+function numericArrayShapeLabel(cell: JsonCell): string {
+  if (cell.shape && cell.shape.length > 0) return cell.shape.join('×');
+  return (cell.count ?? 0).toLocaleString();
+}
+
 function numericArrayTitle(cell: JsonCell): string {
   const k = cell.elementKind ?? '?';
-  const n = cell.count ?? 0;
-  const parts = [`${k}[${n.toLocaleString()}]`];
+  const parts = [`${k}[${numericArrayShapeLabel(cell)}]`];
   if (cell.min !== undefined && cell.max !== undefined) {
     parts.push(`min ${formatStat(cell.min)}`, `max ${formatStat(cell.max)}`);
   }
@@ -1082,7 +1533,6 @@ function NumericArrayCell({ cell }: { cell: JsonCell }) {
   const [open, setOpen] = useState(false);
   const title = numericArrayTitle(cell);
   const kind = cell.elementKind ?? '?';
-  const count = cell.count ?? 0;
   return (
     <>
       <button
@@ -1093,7 +1543,7 @@ function NumericArrayCell({ cell }: { cell: JsonCell }) {
       >
         <Sigma className="size-3.5" />
         <span className="font-mono">
-          {kind}[{count.toLocaleString()}]
+          {kind}[{numericArrayShapeLabel(cell)}]
         </span>
         {cell.min !== undefined && cell.max !== undefined && (
           <span className="text-foreground/60 font-mono">
@@ -1116,23 +1566,42 @@ function SingleValueNumericArray({ cell }: { cell: JsonCell }) {
   );
 }
 
+// Cap for how many elements the matrix renderer pulls out of the
+// base64 blob in one go. A 100×100 f32 matrix is 10k elements — well
+// inside this — and renders as a scrollable grid; bigger matrices fall
+// back to the flat preview path so we don't generate a million DOM
+// nodes for a 1000×1000 grid.
+const MATRIX_DECODE_CAP = 16384;
+
 /**
- * Stats grid + first-N values preview. Used by both the modal (opened
- * from the inline chip) and the single-value pane. The preview decode
- * is bounded — we never materialise the full array on first render.
+ * Stats grid + best-fit preview. The preview shape depends on the
+ * carried shape:
+ *  - 2-D with element count ≤ MATRIX_DECODE_CAP → matrix grid
+ *  - 1-D or no-shape → comma-separated head preview
+ *  - 3-D+ or oversize 2-D → flat head preview + shape note
+ * The decode is bounded — we never materialise the full array unless
+ * the matrix path explicitly needs it.
  */
 function NumericArrayInspector({ cell }: { cell: JsonCell }) {
   const PREVIEW_COUNT = 64;
   const kind = cell.elementKind ?? '?';
   const count = cell.count ?? 0;
-  const preview = useMemo(
-    () => decodeNumericArrayHead(cell, PREVIEW_COUNT),
-    [cell],
+  const shape = cell.shape;
+  const renderMatrix =
+    shape !== undefined
+    && shape.length === 2
+    && count > 0
+    && count <= MATRIX_DECODE_CAP;
+  const decodeCount = renderMatrix ? count : PREVIEW_COUNT;
+  const values = useMemo(
+    () => decodeNumericArrayHead(cell, decodeCount),
+    [cell, decodeCount],
   );
   const stats: { label: string; value: string }[] = [
     { label: 'kind', value: kind },
-    { label: 'count', value: count.toLocaleString() },
+    { label: 'shape', value: shape ? shape.join(' × ') : count.toLocaleString() },
   ];
+  if (shape) stats.push({ label: 'count', value: count.toLocaleString() });
   if (cell.min !== undefined) stats.push({ label: 'min', value: formatStat(cell.min) });
   if (cell.max !== undefined) stats.push({ label: 'max', value: formatStat(cell.max) });
   if (cell.mean !== undefined) stats.push({ label: 'mean', value: formatStat(cell.mean) });
@@ -1146,17 +1615,57 @@ function NumericArrayInspector({ cell }: { cell: JsonCell }) {
           </div>
         ))}
       </div>
-      {preview && preview.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <div className="text-muted-foreground text-xs">
-            first {preview.length.toLocaleString()} of {count.toLocaleString()}
+      {renderMatrix && values ? (
+        <MatrixView values={values} rows={shape![0]} cols={shape![1]} />
+      ) : (
+        values && values.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <div className="text-muted-foreground text-xs">
+              first {values.length.toLocaleString()} of {count.toLocaleString()}
+              {shape && shape.length > 2 ? ` · shape ${shape.join(' × ')}` : ''}
+            </div>
+            <pre className="bg-muted/40 border-border max-h-96 overflow-auto rounded-xs border p-2 font-mono text-xs whitespace-pre-wrap">
+              {values.map((v) => formatStat(v)).join(', ')}
+              {count > values.length ? ', …' : ''}
+            </pre>
           </div>
-          <pre className="bg-muted/40 border-border max-h-96 overflow-auto rounded-xs border p-2 font-mono text-xs whitespace-pre-wrap">
-            {preview.map((v) => formatStat(v)).join(', ')}
-            {count > preview.length ? ', …' : ''}
-          </pre>
-        </div>
+        )
       )}
+    </div>
+  );
+}
+
+/**
+ * Renders a 2-D matrix as a CSS grid — one cell per element, right-
+ * aligned tabular nums so column widths stay visually consistent.
+ * The container scrolls on both axes for matrices that don't fit
+ * in the available pane.
+ */
+function MatrixView({
+  values,
+  rows,
+  cols,
+}: {
+  values: number[];
+  rows: number;
+  cols: number;
+}) {
+  // Row-major decode — values[r * cols + c] addresses row r, col c.
+  return (
+    <div className="bg-muted/30 border-border max-h-[60vh] overflow-auto rounded-xs border p-2">
+      <div
+        className="grid gap-x-3 gap-y-1 font-mono text-xs"
+        style={{ gridTemplateColumns: `repeat(${cols}, auto)` }}
+      >
+        {values.slice(0, rows * cols).map((v, i) => (
+          <div
+            key={i}
+            className="text-foreground/90 text-right tabular-nums whitespace-nowrap"
+          >
+            {formatStat(v)}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -38,6 +38,12 @@ declare global {
       }): Promise<unknown>;
       resolveDialog(result: unknown): void;
       notify(opts: { title: string; body: string }): Promise<void>;
+      showContextMenu(spec: {
+        items: Array<
+          | { id: string; label: string; accelerator?: string; enabled?: boolean }
+          | { type: 'separator' }
+        >;
+      }): Promise<string | null>;
       showOpenDialog(options: {
         title?: string;
         defaultPath?: string;

@@ -64,6 +64,10 @@ export interface JsonCell {
   // single-value card can render without touching the bytes.
   elementKind?: string;
   count?: number;
+  // Logical shape — e.g. [4, 4] for a 4×4 matrix, [3, 480, 640] for a
+  // CHW tensor. Absent for flat 1-D arrays. `dataB64` is flat row-major
+  // (last dimension varies fastest).
+  shape?: number[];
   min?: number;
   max?: number;
   mean?: number;
