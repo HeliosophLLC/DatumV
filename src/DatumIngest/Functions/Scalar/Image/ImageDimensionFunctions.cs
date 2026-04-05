@@ -85,6 +85,68 @@ public sealed class ImageWidthFunction : IFunction, IScalarFunction, IInlineMeta
 }
 
 /// <summary>
+/// Returns the colour-channel count of an <see cref="DataKind.Image"/>
+/// value as <see cref="DataKind.Int32"/> (1=grayscale, 3=RGB, 4=RGBA).
+/// Third elidable accessor in the trio with
+/// <see cref="ImageWidthFunction"/> and <see cref="ImageHeightFunction"/>;
+/// reads the channels byte stamped on <c>_p5</c> by
+/// <c>ImageDataValueFactory</c>. Falls back to
+/// <c>SKBitmap.BytesPerPixel</c> after a SkiaSharp decode when the inline
+/// byte is the unstamped zero sentinel.
+/// </summary>
+public sealed class ImageChannelsFunction : IFunction, IScalarFunction, IInlineMetadataAccessor
+{
+    /// <inheritdoc />
+    public static string Name => "image_channels";
+
+    /// <inheritdoc />
+    public InlineAccessorField Field => InlineAccessorField.ImageChannels;
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Image;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Returns the colour-channel count of an Image (1=grayscale, 3=RGB, 4=RGBA) as Int32.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters: [new ParameterSpec("img", DataKindMatcher.Exact(DataKind.Image))],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Int32)),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<ImageChannelsFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ValueRef arg = arguments.Span[0];
+        if (arg.IsNull)
+        {
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
+        }
+        byte inline = arg.InlineDataValue.ImageChannels;
+        if (inline != 0)
+        {
+            return new ValueTask<ValueRef>(ValueRef.FromInt32(inline));
+        }
+        // Fallback: decode and read BytesPerPixel. Matches what
+        // ImageDataValueFactory.FromBitmap stamps, so the answer is the same
+        // as the inline path would have given on a properly-stamped value.
+        SKBitmap bmp = arg.AsImage();
+        return new ValueTask<ValueRef>(ValueRef.FromInt32(bmp.BytesPerPixel));
+    }
+}
+
+/// <summary>
 /// Returns the pixel height of an <see cref="DataKind.Image"/> value, as
 /// <see cref="DataKind.Int32"/>. Sibling to <see cref="ImageWidthFunction"/>.
 /// </summary>

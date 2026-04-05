@@ -25,6 +25,9 @@ public enum InlineAccessorField
     /// <summary><c>image_height</c> — high 16 bits of <c>_p4</c> on an <see cref="DataKind.Image"/> value.</summary>
     ImageHeight,
 
+    /// <summary><c>image_channels</c> — low byte of <c>_p5</c> on an <see cref="DataKind.Image"/> value (1=grayscale, 3=RGB, 4=RGBA).</summary>
+    ImageChannels,
+
     /// <summary><c>audio_sample_rate</c> — full <c>_p4</c> on an <see cref="DataKind.Audio"/> value.</summary>
     AudioSampleRate,
 
@@ -93,6 +96,7 @@ public static class InlineAccessorDescriptors
     [
         new(InlineAccessorField.ImageWidth, DataKind.Image, DataKind.Int32, "image_width"),
         new(InlineAccessorField.ImageHeight, DataKind.Image, DataKind.Int32, "image_height"),
+        new(InlineAccessorField.ImageChannels, DataKind.Image, DataKind.Int32, "image_channels"),
         new(InlineAccessorField.AudioSampleRate, DataKind.Audio, DataKind.Int32, "audio_sample_rate"),
         new(InlineAccessorField.VideoWidth, DataKind.Video, DataKind.Int32, "video_width"),
         new(InlineAccessorField.VideoHeight, DataKind.Video, DataKind.Int32, "video_height"),

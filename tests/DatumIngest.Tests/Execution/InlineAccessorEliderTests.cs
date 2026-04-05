@@ -93,16 +93,17 @@ public sealed class InlineAccessorEliderTests : ServiceTestBase
     [Fact]
     public void NonAccessorFunction_NotElided()
     {
-        // image_channels has no IInlineMetadataAccessor marker today, so it must
-        // pass through the elider unchanged. Guards against the elider over-firing
-        // on functions that merely share the image_* prefix.
+        // image_brightness_mean has no IInlineMetadataAccessor marker — its
+        // body requires a full pixel walk, not a struct-byte read — so it must
+        // pass through the elider unchanged. Guards against the elider over-
+        // firing on functions that merely share the image_* prefix.
         TableCatalog catalog = CreateImageCatalog(MakeTinyPng(width: 1920, height: 1080));
-        QueryOperator plan = PlanQuery("SELECT image_channels(img) FROM t", catalog);
+        QueryOperator plan = PlanQuery("SELECT image_brightness_mean(img) FROM t", catalog);
 
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
         FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(
             project.Columns[0].Expression);
-        Assert.Equal("image_channels", call.FunctionName);
+        Assert.Equal("image_brightness_mean", call.FunctionName);
     }
 
     [Fact]

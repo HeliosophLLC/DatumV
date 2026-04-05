@@ -1069,6 +1069,9 @@ public sealed class ExpressionEvaluator
             case InlineAccessorField.ImageHeight:
                 ushort ih = dv.ImageHeight;
                 return ih != 0 ? ValueRef.FromInt32(ih) : null;
+            case InlineAccessorField.ImageChannels:
+                byte ic = dv.ImageChannels;
+                return ic != 0 ? ValueRef.FromInt32(ic) : null;
             case InlineAccessorField.AudioSampleRate:
                 uint rate = dv.AudioSampleRate;
                 return rate != 0 ? ValueRef.FromInt32(checked((int)rate)) : null;

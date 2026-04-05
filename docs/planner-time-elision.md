@@ -4,7 +4,7 @@ title: Planner-Time Inline-Metadata Accessor Elision
 
 Inline-metadata accessor elision is a plan-time pass that recognises calls to scalar functions whose body is a direct payload-byte read on the argument's [`DataValue`](data-value-layout.md), and rewrites them into a dedicated AST node that the evaluator handles without going through `IScalarFunction.ExecuteAsync`. The rewrite eliminates per-call dispatch overhead — `ValueTask` allocation, the `ArrayPool` argument rent, function-by-name lookup, and the per-call activity span — on the common case where the metadata is cached as a struct field.
 
-The pass is implemented by [`InlineAccessorElider`](../src/DatumIngest/Execution/InlineAccessorElider.cs) and runs during [`QueryPlanner.Finalize`](../src/DatumIngest/Execution/QueryPlanner.cs), between [`ModelBodyLowerer`](../src/DatumIngest/Execution/ModelBodyLowerer.cs) and [`CommonSubexpressionEliminator`](common-subexpression-elimination.md).
+The pass is implemented by [`InlineAccessorElider`](../src/DatumIngest/Execution/InlineAccessorElider.cs) and runs during [`QueryPlanner.Finalize`](../src/DatumIngest/Execution/QueryPlanner.cs), between [`ImageMetadataLowerer`](../src/DatumIngest/Execution/ImageMetadataLowerer.cs) and [`CommonSubexpressionEliminator`](common-subexpression-elimination.md). The upstream lowerer rewrites composite image-metadata calls (`pixel_count`, `dimensions(img, literal)`) into compositions of the elidable accessors below, so a single planner pipeline turns both the primitive accessors and their composites into struct-byte reads.
 
 ## Why It's Worth Doing
 
@@ -31,6 +31,7 @@ The resolved instance's `Field` value identifies which inline-metadata field to 
 |---|---|---|---|
 | `image_width(img)` | Image | `_p4` low 16 bits | SkiaSharp decode |
 | `image_height(img)` | Image | `_p4` high 16 bits | SkiaSharp decode |
+| `image_channels(img)` | Image | `_p5` low byte | SkiaSharp decode (`BytesPerPixel`) |
 | `audio_sample_rate(a)` | Audio | `_p4` | NULL (no decode fallback today) |
 | `video_width(v)` | Video | `_p4` low 16 bits | NULL (no decode fallback today) |
 | `video_height(v)` | Video | `_p4` high 16 bits | NULL (no decode fallback today) |
@@ -53,6 +54,8 @@ The rewrite replaces a `FunctionCallExpression` with a sealed-record [`InlineAcc
 ModelInvocationHoister.Hoist(plan, modelCatalog)
   ↓
 ModelBodyLowerer.LowerSqlDefinedBodies(plan, declaredModels)
+  ↓
+ImageMetadataLowerer.Lower(plan, functionRegistry, searchPath)
   ↓
 InlineAccessorElider.Elide(plan, functionRegistry, searchPath)   ← here
   ↓

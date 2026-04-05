@@ -116,11 +116,16 @@ public sealed class PointCloudFromDepthOrthographicWithConfidenceFunction : IFun
                 Name, $"color image has non-positive dimensions ({width}×{height}).");
         }
 
-        // Both depth and confidence are shape-aware Float32 arrays at (h, w).
-        ReadOnlySpan<float> depthMeters = ReadShapedFloat2D(
-            depthArg, frame, "depth", height, width);
-        ReadOnlySpan<float> confidence = ReadShapedFloat2D(
-            confArg, frame, "confidence", height, width);
+        // Materialize both into managed arrays BEFORE any further arena work.
+        // Two ToDataValue calls can each trigger arena growth, which would
+        // invalidate any span obtained from the first call. ToArray copies into
+        // GC-managed memory, immune to arena mutation. See the pinhole
+        // confidence sibling for the discovery of this bug (AV on the second
+        // span access).
+        float[] depthMeters = ReadShapedFloat2D(
+            depthArg, frame, "depth", height, width).ToArray();
+        float[] confidence = ReadShapedFloat2D(
+            confArg, frame, "confidence", height, width).ToArray();
 
         // Stabilize color byte order — Windows BGRA vs RGBA elsewhere.
         SKImageInfo rgbaInfo = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);

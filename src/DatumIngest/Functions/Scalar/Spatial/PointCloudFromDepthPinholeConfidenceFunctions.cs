@@ -83,8 +83,15 @@ public sealed class PointCloudFromDepthPinholeWithConfidenceFunction : IFunction
                 Name, $"color image has non-positive dimensions ({width}×{height}).");
         }
 
-        ReadOnlySpan<float> depthMeters = ReadShapedFloat2D(args[1], frame, "depth", height, width);
-        ReadOnlySpan<float> confidence = ReadShapedFloat2D(args[2], frame, "confidence", height, width);
+        // Materialize both into managed arrays BEFORE any further arena work.
+        // Reading two shape-aware arrays involves two ToDataValue calls, each of
+        // which can trigger arena growth — and arena growth invalidates any
+        // previously-obtained spans (the backing mmap may be re-mapped at a
+        // different address). Holding raw spans across multiple ToDataValue
+        // calls = access violation. ToArray copies the bytes to GC-managed
+        // memory, immune to arena mutation. ~1-2MB per array at 720p, fine.
+        float[] depthMeters = ReadShapedFloat2D(args[1], frame, "depth", height, width).ToArray();
+        float[] confidence = ReadShapedFloat2D(args[2], frame, "confidence", height, width).ToArray();
 
         SKImageInfo rgbaInfo = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         using SKBitmap colorRgba = new(rgbaInfo);

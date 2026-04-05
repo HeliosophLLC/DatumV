@@ -7,41 +7,19 @@ category: image
 
 [← Back to Functions](string.md) · [SQL Reference](../sql/select.md) · [Compute Backend](../compute.md)
 
-> **Resolution-aware costs:** Image analysis (Tier 4) and transform (Tier 5) functions incur a supplemental cost proportional to input resolution: `⌊width × height / 100,000⌋` additional QU per invocation. A 224×224 image adds 0 QU; a 1920×1080 image adds 20 QU; a 4K image adds 82 QU.
-
 ## Metadata
 
-### width
+### image_channels
 
-`width(img)` → Float32 | QU: 1
+`image_channels(img)` → Int32
 
-Image width in pixels (header-only, no full decode).
-
-```sql
-SELECT width(file_bytes) AS w FROM images
-```
-
-### height
-
-`height(img)` → Float32 | QU: 1
-
-Image height in pixels (header-only).
-
-```sql
-SELECT height(file_bytes) AS h FROM images
-```
-
-### channels
-
-`channels(img)` → Float32 | QU: 1
-
-Number of color channels (header-only).
+Colour-channel count (1=grayscale, 3=RGB, 4=RGBA). [Elidable accessor](../planner-time-elision.md) — reads the inline channels byte stamped at ingest / bitmap construction; falls back to a SkiaSharp decode when the byte is unstamped.
 
 ### pixel_count
 
-`pixel_count(img)` → Float32 | QU: 1
+`pixel_count(img)` → Int32
 
-Total pixel count (width × height, header-only).
+Total pixel count, `width × height`. Lowered at plan time to `image_width(img) * image_height(img)` — both factors become struct reads via the inline-accessor elider, and CSE collapses any sibling width/height references in the same query.
 
 ```sql
 SELECT * FROM images WHERE pixel_count(file_bytes) > 1000000
@@ -49,73 +27,67 @@ SELECT * FROM images WHERE pixel_count(file_bytes) > 1000000
 
 ### dimensions
 
-`dimensions(img, format)` → Vector | QU: 1
+`dimensions(img, format)` → Int32[]
 
-Dimension vector in specified format: `'HWC'`, `'CHW'`, `'WH'`, or `'WHC'`.
+Dimensions in the requested axis order. Supported formats (case-insensitive): `'WH'` → `[w, h]`, `'WHC'` → `[w, h, c]`, `'HWC'` → `[h, w, c]`, `'CHW'` → `[c, h, w]`. When `format` is a string literal, the call lowers at plan time to `array(...)` of `image_width` / `image_height` / `image_channels` — each composing through the inline-accessor elider. Non-literal `format` (e.g. a column reference) takes the runtime path.
 
 ## Analysis
 
 ### image_brightness_mean
 
-`image_brightness_mean(img)` → Float32 | QU: 10 + ⌊px/100K⌋
+`image_brightness_mean(img)` → Float32
 
-Mean brightness (BT.601 luminance) across all pixels, in the range 0--255.
+Mean BT.601 luminance across all pixels, in the range 0–255. Alpha is ignored.
 
 ### image_brightness_std
 
-`image_brightness_std(img)` → Float32 | QU: 10 + ⌊px/100K⌋
+`image_brightness_std(img)` → Float32
 
-Standard deviation of brightness across all pixels.
+Population standard deviation of BT.601 luminance across all pixels. Alpha is ignored.
 
 ### image_brightness_histogram
 
-`image_brightness_histogram(img)` → Vector | QU: 10 + ⌊px/100K⌋
+`image_brightness_histogram(img)` → Float32[]
 
-256-bin brightness histogram. Each element is the pixel count for that luminance bin.
+256-bin BT.601 luminance histogram. Each element is the pixel count for that luminance bin.
 
 ### detect_blur
 
-`detect_blur(img)` → Float32 | QU: 10 + ⌊px/100K⌋
+`detect_blur(img)` → Float32
 
-Laplacian variance blur detector. Higher values indicate a sharper image.
+Laplacian variance blur detector over BT.601 grayscale. Higher values indicate a sharper image.
 
 ### compression_artifact_score
 
-`compression_artifact_score(img)` → Float32 | QU: 10 + ⌊px/100K⌋
+`compression_artifact_score(img)` → Float32
 
-JPEG blockiness score in the range 0--1. Measures 8×8 block boundary discontinuities.
+JPEG blockiness score in the range 0–1. Measures 8×8 block boundary discontinuities relative to interior gradients.
 
 ## Pixel Statistics
 
 ### image_pixel_mean
 
-`image_pixel_mean(img[, channels])` → Float32 or Vector | QU: 10 + ⌊px/100K⌋
+`image_pixel_mean(img[, channels])` → Float32 or Float32[]
 
-Mean pixel value. Without channels: overall mean as Float32. With channels vector (0=R, 1=G, 2=B, 3=A): per-channel means as Vector.
+Mean pixel value. Without `channels`: overall mean over R, G, B (alpha excluded) as Float32. With `channels` as an `Int32[]` of channel indices (0=R, 1=G, 2=B, 3=A): per-channel means as Float32[] in the requested order.
 
 ### image_pixel_std
 
-`image_pixel_std(img[, channels])` → Float32 or Vector | QU: 10 + ⌊px/100K⌋
+`image_pixel_std(img[, channels])` → Float32 or Float32[]
 
-Standard deviation of pixel values. Same signature as `image_pixel_mean`.
+Population standard deviation of pixel values. Same signature as `image_pixel_mean`.
 
 ## Loading & Decode
 
-### load_image
-
-`load_image(bytes)` → Image | QU: 1
-
-Load encoded bytes (UInt8Array from ZIP/binary column) as an Image for use with transform and analysis functions. No decode -- wraps the bytes as an opaque Image value for the fused pipeline.
-
 ### image_to_bytes
 
-`image_to_bytes(img)` → UInt8Array | QU: 50 + ⌊px/100K⌋
+`image_to_bytes(img)` → UInt8[]
 
-Extract raw RGBA pixel bytes as UInt8Array (length H×W×4).
+Extract raw RGBA pixel bytes as `UInt8[]` of length `H × W × 4` in row-major RGBA order. Decodes and color-converts to RGBA8888 when needed.
 
 ### video_frame_to_image
 
-`video_frame_to_image(frame [, target_width [, target_height]])` → Image | QU: 10 + ⌊px/100K⌋
+`video_frame_to_image(frame [, target_width [, target_height]])` → Image
 
 Materialises a `VideoFrame` handle into an `Image` by routing it through the per-query video registry. Single-argument form decodes at the source video's native resolution; with `target_width`, resizes while preserving the source aspect ratio (height auto-computed); with both `target_width` and `target_height`, resizes to those exact dimensions. The resize fuses with the YUV→BGRA pixel conversion inside swscale — no extra per-frame copy.
 
@@ -139,9 +111,9 @@ Sequential access (frame N → N+1 → N+2) is fast (~3–5 ms/frame at 384px, ~
 
 ### image_to_tensor_hwc
 
-`image_to_tensor_hwc(img)` → Tensor | QU: 50 + ⌊px/100K⌋
+`image_to_tensor_hwc(img)` → Tensor
 
-Decode to [H, W, 3] RGB float tensor (values 0--255). TensorFlow/NumPy layout.
+Decode to [H, W, 3] RGB float tensor (values 0–255). TensorFlow/NumPy layout.
 
 ```sql
 SELECT image_to_tensor_hwc(resize(file_bytes, 224, 224)) AS pixels FROM images
@@ -149,9 +121,9 @@ SELECT image_to_tensor_hwc(resize(file_bytes, 224, 224)) AS pixels FROM images
 
 ### image_to_tensor_chw
 
-`image_to_tensor_chw(img)` → Tensor | QU: 50 + ⌊px/100K⌋
+`image_to_tensor_chw(img)` → Tensor
 
-Decode to [3, H, W] RGB float tensor (values 0--255). PyTorch layout.
+Decode to [3, H, W] RGB float tensor (values 0–255). PyTorch layout.
 
 ```sql
 SELECT image_to_tensor_chw(resize(file_bytes, 224, 224)) AS pixels FROM images
@@ -159,41 +131,41 @@ SELECT image_to_tensor_chw(resize(file_bytes, 224, 224)) AS pixels FROM images
 
 ## Transforms
 
-All transform functions accept an optional trailing `fmt` argument (`'jpeg'`, `'png'`, `'webp'`) to control output encoding. Default preserves the original format.
-
 ### resize
 
-`resize(img, w, h[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`resize(img, w, h)` → Image
 
-Resize image to target width/height.
+Resize image to target width × height. Width and height must be positive; float arguments truncate to integers.
 
 ```sql
 SELECT resize(file_bytes, 224, 224) AS img, label FROM images
 ```
 
-### crop
+### image_crop
 
-`crop(img, x, y, w, h[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`image_crop(img, x, y, w, h)` → Image
+`image_crop(img, rect Struct{x, y, w, h})` → Image
+`image_crop(img, rects Array<Struct{x, y, w, h}>)` → Array<Image>
 
-Crop rectangular region.
+Crop rectangular region. Three call shapes: explicit pixel coordinates, a single rect struct (field names case-insensitive), or an array of rect structs (returns one cropped Image per rect in input order). All numeric kinds are accepted for the coordinate values; floats truncate to integer pixel offsets.
 
 ### grayscale
 
-`grayscale(img[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`grayscale(img)` → Image
 
-Convert to grayscale (BT.601 luminance).
+Convert to grayscale (BT.601 luminance). Alpha is preserved.
 
 ### rotate
 
-`rotate(img, degrees[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`rotate(img, degrees)` → Image
 
-Rotate by arbitrary angle. Canvas expands for non-90° rotations.
+Rotate clockwise by arbitrary angle. Canvas expands for non-90° rotations; new corners are transparent.
 
 ### noise
 
-`noise(img, type, val[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`noise(img, val)` or `noise(img, type, val)` → Image
 
-Add noise. Type: `'gaussian'` (val=stddev) or `'salt_pepper'` (val=ratio).
+Add noise. Two-arg form defaults to `'gaussian'`. Three-arg type values: `'gaussian'` (val = stddev in 0–255 byte units, added per pixel to R/G/B via Box–Muller, alpha untouched) or `'salt_pepper'` (val = fraction of pixels flipped to pure black or pure white). Non-pure (each call draws fresh randomness; CSE will not collapse repeated calls).
 
 ```sql
 SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_images
@@ -201,59 +173,73 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 
 ### blur
 
-`blur(img, radius[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`blur(img, radius)` → Image
 
-Gaussian blur with the given sigma radius.
+Gaussian blur with the given sigma radius (must be non-negative).
 
 ### brighten
 
-`brighten(img, intensity[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`brighten(img, intensity)` → Image
 
-Increase brightness by adding intensity to RGB channels.
+Increase brightness by adding intensity (0–255 byte units) to each RGB channel. Channel values clamp at 255. Alpha is preserved.
 
 ### darken
 
-`darken(img, intensity[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`darken(img, intensity)` → Image
 
-Decrease brightness by subtracting intensity from RGB channels.
+Decrease brightness by subtracting intensity (0–255 byte units) from each RGB channel. Channel values clamp at 0. Alpha is preserved.
 
 ### sobel
 
-`sobel(img[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`sobel(img)` → Image
 
-Sobel edge detection producing a grayscale edge magnitude image.
+Sobel edge detection producing a grayscale edge-magnitude image. The 1-pixel border is opaque black.
 
 ### resize_and_crop
 
-`resize_and_crop(img, w, h, gravity[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`resize_and_crop(img, w, h, gravity)` → Image
 
-Resize to fill then crop to exact dimensions. Gravity: `'center'`, `'top'`, `'bottom'`, `'left'`, `'right'`.
+Scale the image to fill the target rectangle (aspect preserved — the larger of the X/Y scale factors wins), then crop the excess from the gravity anchor. Gravity (case-insensitive): `'center'`, `'top'`, `'bottom'`, `'left'`, `'right'`.
 
 ### affine_transform
 
-`affine_transform(img, angle, sx, sy, shx, shy[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`affine_transform(img, angle, scale_x, scale_y, shear_x, shear_y)` → Image
 
-Affine transformation with rotation (degrees), scale, and shear parameters.
+Decomposed affine transform — rotation (degrees), per-axis scale, X/Y shear — anchored at the image centre. Output canvas matches the input; freed pixels are transparent. For directional shear (the MNIST augmentation), pass `angle=0`, `scale_x=scale_y=1`, and small `shear_x` or `shear_y` (e.g. ±0.2).
 
 ### elastic_deform
 
-`elastic_deform(img, alpha, sigma[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`elastic_deform(img, alpha, sigma)` → Image
 
-Elastic deformation (Simard et al.). Alpha = displacement intensity, sigma = smoothing.
+Simard, Steinkraus & Platt (2003) elastic deformation — the canonical MNIST augmentation. Generates a per-pixel random displacement field in `[-1, 1]`, smooths each axis with a separable Gaussian of width `sigma`, scales by `alpha`, then resamples via bilinear interpolation. `sigma` must be positive. Non-pure.
 
 ### perspective_warp
 
-`perspective_warp(img, intensity[, fmt])` or `perspective_warp(img, tl_x, tl_y, tr_x, tr_y, bl_x, bl_y, br_x, br_y[, fmt])` → Image | QU: 50 + ⌊px/100K⌋
+`perspective_warp(img, intensity)` or `perspective_warp(img, tl_x, tl_y, tr_x, tr_y, bl_x, bl_y, br_x, br_y)` → Image
 
-Perspective distortion. Intensity mode: random warp. Explicit mode: normalized corner coordinates.
+Perspective distortion. Intensity form: random per-corner displacement bounded by `intensity` (fraction of image dimensions). Explicit form: normalised 0–1 destination coordinates for each corner (tl/tr/bl/br). Solves the 8-equation projective system via Gaussian elimination with partial pivoting; degenerate corner configurations raise an error. Non-pure (covers the random variant).
+
+### directional_warp
+
+`directional_warp(img, dx, dy, intensity)` → Image
+
+Linear directional shear along the 2D vector `(dx, dy)`. The direction is normalised internally (its length is ignored — only its angle matters); `intensity` is the absolute pixel displacement applied at the perpendicularly-furthest edge of the image. Pixels on the centre line orthogonal to `(dx, dy)` don't move; opposite edges displace in opposite directions along the direction vector. Bilinear sampling, edge clamping. Pure.
+
+Designed for handwriting-style synthetic data augmentation — e.g. `directional_warp(img, 1, 0, 2)` on a 28×28 MNIST digit gives a 2-pixel horizontal lean (italic-like). Image y-axis is down (SkiaSharp convention).
+
+```sql
+-- Generate one shear-augmented variant of each MNIST digit per epoch:
+SELECT label, directional_warp(image, 1, 0, random(-3, 3)) AS augmented
+FROM mnist_train
+```
 
 ## Hashing
 
 ### perceptual_hash
 
-`perceptual_hash(img)` → Vector | QU: 10 + ⌊px/100K⌋
+`perceptual_hash(img)` → Float32[]
 
-Difference hash (dHash) producing a 64-element Vector of 0/1 bits. Use with `hamming_distance()` for similarity.
+Difference hash (dHash): resize the image to 9×8 BT.601 grayscale, then for each row compare horizontally adjacent pixel pairs (8 pairs × 8 rows = 64 bits) — emitting `1.0` when the left pixel is brighter than the right, `0.0` otherwise. Pair with `hamming_distance()` for similarity comparison.
 
 ## Fused Pipelines
 
@@ -269,5 +255,4 @@ This is implemented via `ImageHandle`, a smart wrapper that carries either encod
 ## See Also
 
 - [Vector & Tensor Functions](vector.md) -- operations on tensors produced by image_to_tensor_hwc/chw
-- [Compute Backend -- Resource Governance](../compute.md#resource-governance) -- QU cost tracking and resolution-aware budgets
 - [Functions Reference](string.md) -- complete function listing across all categories
