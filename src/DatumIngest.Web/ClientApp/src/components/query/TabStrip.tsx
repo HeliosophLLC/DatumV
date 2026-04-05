@@ -3,12 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { Menu } from '@base-ui/react/menu';
 import {
+  BookOpen,
   Boxes,
   ChevronLeft,
   ChevronRight,
   FunctionSquare,
   Play,
   Plus,
+  Settings as SettingsIcon,
   SquareCode,
   Square,
   X,
@@ -300,6 +302,8 @@ function TabChip({
   cancelLabel: string;
 }) {
   const { t: tModels } = useTranslation('models');
+  const { t: tSettingsNs } = useTranslation('settings');
+  const { t: tDocs } = useTranslation('docs');
   // 'before' = drop indicator on the left edge; 'after' = right edge.
   // null while no drag is over this chip.
   const [dropSide, setDropSide] = useState<'before' | 'after' | null>(null);
@@ -467,7 +471,14 @@ function TabChip({
     }
   }
 
-  const displayTitle = kind === 'models' ? tModels('title') : title;
+  const displayTitle =
+    kind === 'models'
+      ? tModels('title')
+      : kind === 'settings'
+        ? tSettingsNs('title')
+        : kind === 'docs'
+          ? tDocs('title')
+          : title;
 
   return (
     <div
@@ -513,6 +524,10 @@ function TabChip({
         // Pinned Models tab — no play button (nothing to run), distinct
         // icon, and no close button below.
         <Boxes className="text-primary size-3.5 shrink-0" />
+      ) : kind === 'settings' ? (
+        <SettingsIcon className="text-primary size-3.5 shrink-0" />
+      ) : kind === 'docs' ? (
+        <BookOpen className="text-primary size-3.5 shrink-0" />
       ) : (
         <button
           type="button"

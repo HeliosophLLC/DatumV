@@ -5,6 +5,7 @@ import enCatalog from './locales/en/catalog.json';
 import enChat from './locales/en/chat.json';
 import enCommon from './locales/en/common.json';
 import enDialogs from './locales/en/dialogs.json';
+import enDocs from './locales/en/docs.json';
 import enHome from './locales/en/home.json';
 import enModels from './locales/en/models.json';
 import enPanels from './locales/en/panels.json';
@@ -31,6 +32,7 @@ const resources = {
     panels: enPanels,
     catalog: enCatalog,
     procedures: enProcedures,
+    docs: enDocs,
   },
 } as const;
 
@@ -53,6 +55,7 @@ i18next
       'panels',
       'catalog',
       'procedures',
+      'docs',
     ],
     // React already escapes interpolated values.
     interpolation: { escapeValue: false },

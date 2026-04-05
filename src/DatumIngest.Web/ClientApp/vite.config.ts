@@ -28,6 +28,15 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true, // fail fast if 5173 is taken — Electron expects it
+    // The Documentation tab `import.meta.glob`s repo-root `docs/**/*.md`
+    // (eagerly, as ?raw strings). Vite's default fs allow-list is rooted
+    // at this workspace, which excludes the repo's `docs/` four levels
+    // up; widen it to the repo root so the dev server can serve those
+    // markdown sources to the module graph. Production builds bundle
+    // the content statically so the restriction doesn't apply there.
+    fs: {
+      allow: [path.resolve(__dirname, '../../..')],
+    },
     // Forward API + SignalR back to Kestrel (pinned to 5050 by
     // electron/main.ts's DATUM_WEB_URL env). Same-origin from the SPA's
     // POV so generated NSwag clients work with an empty baseUrl in both

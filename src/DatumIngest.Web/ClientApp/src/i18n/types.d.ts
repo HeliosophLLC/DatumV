@@ -2,6 +2,7 @@ import type enCatalog from './locales/en/catalog.json';
 import type enChat from './locales/en/chat.json';
 import type enCommon from './locales/en/common.json';
 import type enDialogs from './locales/en/dialogs.json';
+import type enDocs from './locales/en/docs.json';
 import type enHome from './locales/en/home.json';
 import type enModels from './locales/en/models.json';
 import type enPanels from './locales/en/panels.json';
@@ -27,6 +28,7 @@ declare module 'i18next' {
       panels: typeof enPanels;
       catalog: typeof enCatalog;
       procedures: typeof enProcedures;
+      docs: typeof enDocs;
     };
     returnNull: false;
   }

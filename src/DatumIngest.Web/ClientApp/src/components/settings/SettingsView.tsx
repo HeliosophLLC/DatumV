@@ -36,7 +36,7 @@ export function SettingsView() {
   }, []);
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto px-6 py-6">
+    <div className="bg-editor flex h-full flex-col overflow-y-auto px-6 py-6">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-8">
         <h1 className="text-lg font-medium">{t('title')}</h1>
 

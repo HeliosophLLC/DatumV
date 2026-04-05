@@ -29,16 +29,25 @@ import {
  *  - `models`: the model catalog browser. Always present as a pinned tab
  *    in the main window's first leaf — see `MODELS_TAB_ID` + the boot
  *    path's `ensureModelsTab` injection.
+ *  - `settings`: the app settings page. Pinned alongside Models in the
+ *    main window's first leaf — see `SETTINGS_TAB_ID`.
+ *  - `docs`: the bundled markdown documentation browser. Pinned
+ *    alongside Models / Settings — see `DOCS_TAB_ID`.
  */
-export type TabKind = 'sql' | 'function' | 'models';
+export type TabKind = 'sql' | 'function' | 'models' | 'settings' | 'docs';
 
 /**
- * Well-known id for the permanent Models tab. Stable across boots so the
- * persisted tree round-trips without duplication, and so guards
+ * Well-known ids for the permanent pinned tabs. Stable across boots so
+ * the persisted tree round-trips without duplication, and so guards
  * (`closeTab`, `moveTab`, `splitLeaf`) can short-circuit by id check as
  * well as by `pinned`.
  */
 export const MODELS_TAB_ID = 'pinned-models';
+export const SETTINGS_TAB_ID = 'pinned-settings';
+export const DOCS_TAB_ID = 'pinned-docs';
+
+/** Ordered list of all pinned tab kinds, in left-to-right strip order. */
+const PINNED_KINDS: readonly TabKind[] = ['models', 'settings', 'docs'];
 
 export interface Tab {
   /** Stable identifier; used as Monaco model key and execution-state key. */
@@ -271,7 +280,11 @@ function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
             ? 'function'
             : t.kind === 'models'
               ? 'models'
-              : 'sql';
+              : t.kind === 'settings'
+                ? 'settings'
+                : t.kind === 'docs'
+                  ? 'docs'
+                  : 'sql';
         tabs.push({
           id: t.id,
           title: t.title,
@@ -401,13 +414,14 @@ function createInitialState(): PanesState {
 
   const persisted = readPersisted();
   if (persisted) {
-    ensureModelsTab(persisted);
+    ensurePinnedTabs(persisted);
     return persisted;
   }
 
-  // First-ever boot: pinned Models tab + one Untitled-1 SQL tab.
-  // Models takes index 0 so it sits to the LEFT of user-created tabs on
-  // the strip, matching VS Code's "pinned tabs at the front" convention.
+  // First-ever boot: pinned Models / Settings / Docs tabs + one Untitled-1
+  // SQL tab. Pinned tabs take indices 0..N so they sit to the LEFT of
+  // user-created tabs on the strip, matching VS Code's "pinned tabs at
+  // the front" convention.
   const firstUntitled: Tab = {
     id: newTabId(),
     title: 'Untitled-1',
@@ -418,17 +432,51 @@ function createInitialState(): PanesState {
   const leaf: LeafPane = {
     kind: 'leaf',
     id: newLeafId(),
-    tabs: [createModelsTab(), firstUntitled],
+    tabs: [
+      createPinnedTab('models'),
+      createPinnedTab('settings'),
+      createPinnedTab('docs'),
+      firstUntitled,
+    ],
     activeTabId: firstUntitled.id,
   };
   return { root: leaf, focusedLeafId: leaf.id };
 }
 
-function createModelsTab(): Tab {
+function pinnedIdForKind(kind: TabKind): string {
+  switch (kind) {
+    case 'models':
+      return MODELS_TAB_ID;
+    case 'settings':
+      return SETTINGS_TAB_ID;
+    case 'docs':
+      return DOCS_TAB_ID;
+    default:
+      throw new Error(`No pinned id for kind ${kind}`);
+  }
+}
+
+function pinnedTitleForKind(kind: TabKind): string {
+  // Titles here are placeholders — pinned chips render icon-only and the
+  // visible label comes from i18n at render time. Stored so the localStorage
+  // shape stays self-describing for debugging.
+  switch (kind) {
+    case 'models':
+      return 'Models';
+    case 'settings':
+      return 'Settings';
+    case 'docs':
+      return 'Documentation';
+    default:
+      throw new Error(`No pinned title for kind ${kind}`);
+  }
+}
+
+function createPinnedTab(kind: TabKind): Tab {
   return {
-    id: MODELS_TAB_ID,
-    title: 'Models',
-    kind: 'models',
+    id: pinnedIdForKind(kind),
+    title: pinnedTitleForKind(kind),
+    kind,
     sql: '',
     dirty: false,
     pinned: true,
@@ -436,20 +484,27 @@ function createModelsTab(): Tab {
 }
 
 /**
- * Walk the tree; if no Models tab is present, prepend a fresh one to
- * the first leaf. Idempotent on already-Models-bearing trees. Called on
- * every boot from persisted state so the invariant "main window always
- * has Models in the first leaf, at index 0" holds even if the user's
- * persisted localStorage predates this feature.
+ * Walk the tree; for each pinned kind not yet present, prepend a fresh
+ * tab into the first leaf at its canonical position. Idempotent on
+ * already-pinned-bearing trees. Called on every boot from persisted
+ * state so the invariant "main window always has Models / Settings /
+ * Docs at the front of the first leaf" holds even when the persisted
+ * localStorage predates one of these tabs.
  */
-function ensureModelsTab(state: PanesState): void {
-  let found = false;
+function ensurePinnedTabs(state: PanesState): void {
+  const present = new Set<TabKind>();
   forEachTab(state.root, (t) => {
-    if (t.kind === 'models') found = true;
+    if (PINNED_KINDS.includes(t.kind)) present.add(t.kind);
   });
-  if (found) return;
   const first = firstLeaf(state.root);
-  first.tabs.unshift(createModelsTab());
+  // Insert any missing pinned kinds in canonical order at the very front,
+  // walking the canonical list in reverse so each unshift lands in the
+  // right slot relative to the others.
+  for (let i = PINNED_KINDS.length - 1; i >= 0; i--) {
+    const kind = PINNED_KINDS[i];
+    if (present.has(kind)) continue;
+    first.tabs.unshift(createPinnedTab(kind));
+  }
 }
 
 export const panesState = proxy<PanesState>(createInitialState());
@@ -860,9 +915,9 @@ export function importTabIntoLeaf(
 ): void {
   const leaf = findLeaf(panesState.root, targetLeafId);
   if (!leaf) return;
-  // Refuse incoming pinned-kind tabs — every window owns its own Models
-  // surface; importing one would create a duplicate.
-  if (tab.kind === 'models') return;
+  // Refuse incoming pinned-kind tabs — every window owns its own
+  // Models/Settings/Docs surface; importing one would create a duplicate.
+  if (tab.kind && PINNED_KINDS.includes(tab.kind)) return;
   const id = findTab(panesState.root, tab.id) ? newTabId() : tab.id;
   const kind: TabKind = tab.kind === 'function' ? 'function' : 'sql';
   const newTab: Tab = {
@@ -905,7 +960,7 @@ export function importTabAsSplit(
 ): void {
   const target = findLeaf(panesState.root, targetLeafId);
   if (!target) return;
-  if (tab.kind === 'models') return;
+  if (tab.kind && PINNED_KINDS.includes(tab.kind)) return;
   const id = findTab(panesState.root, tab.id) ? newTabId() : tab.id;
   const kind: TabKind = tab.kind === 'function' ? 'function' : 'sql';
   const newTab: Tab = {

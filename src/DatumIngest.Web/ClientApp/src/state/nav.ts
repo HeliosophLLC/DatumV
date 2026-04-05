@@ -2,17 +2,8 @@ import { proxy, subscribe } from 'valtio';
 import { api } from '@/api';
 import { settingsState } from './settings';
 
-// Workspace view: what fills the main editor area between the docks.
-// Settings is a workspace view, not a dock panel — it lives at the bottom
-// of the left dock as a pinned icon, and clicking it swaps the workspace
-// to SettingsView. The other docked icons open *side panels* alongside
-// the workspace without unmounting the query editor.
-export type WorkspaceView = 'query' | 'settings';
-
 // Every icon that can live on a dock. Order in DockState.left / .right
-// arrays is the user's visible ordering. Settings is intentionally not
-// listed — it's a workspace toggle pinned to the left dock by the
-// renderer rather than draggable inventory.
+// arrays is the user's visible ordering.
 export type PanelId = 'chat' | 'catalog' | 'procedures' | 'projects';
 export type DockSide = 'left' | 'right';
 
@@ -32,8 +23,6 @@ interface DockState {
   // icon on the same side replaces the open panel.
   openLeft: PanelId | null;
   openRight: PanelId | null;
-  // What's rendered in the workspace area between the two docks.
-  workspaceView: WorkspaceView;
   // Set once after the first settings refresh seeds the dock layout, so
   // subsequent persistence patches don't fight with the initial fetch.
   hydrated: boolean;
@@ -47,7 +36,6 @@ export const navState = proxy<DockState>({
   right: [],
   openLeft: null,
   openRight: null,
-  workspaceView: 'query',
   hydrated: false,
 });
 
@@ -94,10 +82,6 @@ function clampOpen(
 }
 
 // ──────────────────────── Actions ────────────────────────
-
-export function setWorkspaceView(view: WorkspaceView): void {
-  navState.workspaceView = view;
-}
 
 // Toggle the panel for `id` on its current side. If the panel isn't on
 // the requested side (`side` arg), this is a no-op — the caller should

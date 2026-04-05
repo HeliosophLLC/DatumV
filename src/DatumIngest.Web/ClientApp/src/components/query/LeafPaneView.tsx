@@ -20,6 +20,8 @@ import { disposeTabExecution } from '@/state/execution';
 import { disposeFunctionForm } from '@/state/functionForm';
 import { FunctionForm } from './FunctionForm';
 import { ModelsView } from '@/components/models/ModelsView';
+import { SettingsView } from '@/components/settings/SettingsView';
+import { DocsView } from '@/components/docs/DocsView';
 import {
   setActiveEditor,
   clearActiveEditorForLeaf,
@@ -327,6 +329,14 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
         // other tabs onto this leaf.
         <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">
           <ModelsView />
+        </div>
+      ) : activeTab !== null && activeTabKind === 'settings' ? (
+        <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">
+          <SettingsView />
+        </div>
+      ) : activeTab !== null && activeTabKind === 'docs' ? (
+        <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">
+          <DocsView />
         </div>
       ) : activeTab !== null && activeTabKind === 'function' ? (
         <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">

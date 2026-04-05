@@ -9,7 +9,6 @@ import { isTornOutWindow } from './state/tabs';
 import { WindowChrome } from '@/components/window/WindowChrome';
 import { AppDock } from '@/components/nav/AppDock';
 import { QueryEditorView } from '@/components/query/QueryEditorView';
-import { SettingsView } from '@/components/settings/SettingsView';
 import { SidePanelHost } from '@/components/panels/SidePanelHost';
 import {
   ResizableHandle,
@@ -26,8 +25,9 @@ import {
 //   │  │  ResizablePanelGroup w/ at most 3 panels             │  │
 //   └──┴──────────────────────────────────────────────────────┴──┘
 //
-// Settings replaces the workspace via the pinned Settings icon at the
-// bottom of the left dock — it isn't a side panel.
+// The workspace always renders the query editor; Settings, Models,
+// and Documentation are pinned tabs in the editor's tab strip rather
+// than alternative workspace views.
 //
 // The ResizablePanelGroup is keyed on the open-panel signature so
 // react-resizable-panels recomputes sizes cleanly when a panel opens
@@ -38,7 +38,7 @@ const WORKSPACE_MIN_SIZE = '30%';
 const SIDE_PANEL_MIN_SIZE = '15%';
 
 export default function App() {
-  const { openLeft, openRight, workspaceView } = useSnapshot(navState);
+  const { openLeft, openRight } = useSnapshot(navState);
 
   useEffect(() => {
     refreshHealth();
@@ -94,8 +94,7 @@ export default function App() {
           minSize={WORKSPACE_MIN_SIZE}
           className="flex flex-col overflow-hidden"
         >
-          {workspaceView === 'query' && <QueryEditorView />}
-          {workspaceView === 'settings' && <SettingsView />}
+          <QueryEditorView />
         </ResizablePanel>
         {openRight && (
           <>

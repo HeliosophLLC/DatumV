@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useSnapshot } from 'valtio';
 import { useTranslation } from 'react-i18next';
-import { Settings as SettingsIcon } from 'lucide-react';
 import {
   movePanel,
   navState,
-  setWorkspaceView,
   togglePanel,
   type DockSide,
   type PanelId,
@@ -17,18 +15,20 @@ import { cn } from '@/lib/utils';
 // VS Code-style activity bar — now in two flavours:
 //
 //   <AppDock side="left" />   always visible. Renders the panel icons
-//                              configured for the left dock plus a
-//                              pinned Settings icon at the bottom that
-//                              toggles the workspace view.
+//                              configured for the left dock.
 //   <AppDock side="right" />  hidden when no panel icons live on the
 //                              right dock; visible the moment the user
-//                              drags one over. No Settings on the right.
+//                              drags one over.
 //
 // Both docks are HTML5 drop targets so users can move icons between
 // them. The drag source is the dock button itself.
 //
 // Hidden entirely in torn-out windows (they host a single editor and
 // have no dock affordance).
+//
+// Settings used to live as a pinned icon at the bottom of the left dock
+// that swapped the workspace view to a settings page. It is now a pinned
+// tab in the query editor's strip alongside Models / Documentation.
 
 const DOCK_MIME = 'application/x-datum-panel-id';
 
@@ -76,7 +76,7 @@ function useDockDragInFlight(): boolean {
 }
 
 export function AppDock({ side }: { side: DockSide }) {
-  const { left, right, openLeft, openRight, workspaceView } = useSnapshot(navState);
+  const { left, right, openLeft, openRight } = useSnapshot(navState);
   const [isDragOver, setIsDragOver] = useState(false);
 
   if (isTornOutWindow) return null;
@@ -126,16 +126,6 @@ export function AppDock({ side }: { side: DockSide }) {
       {items.map((id) => (
         <PanelDockButton key={id} side={side} id={id} active={open === id} />
       ))}
-      {side === 'left' && (
-        <>
-          <div className="mt-auto" />
-          <WorkspaceDockButton
-            id="settings"
-            icon={SettingsIcon}
-            active={workspaceView === 'settings'}
-          />
-        </>
-      )}
     </nav>
   );
 }
@@ -245,36 +235,3 @@ function PanelDockButton({
   );
 }
 
-// Workspace-toggle button (Settings today, possibly more in the
-// future). Switches the workspace view rather than opening a side panel.
-// Not draggable — pinned to the left dock.
-function WorkspaceDockButton({
-  id,
-  icon: Icon,
-  active,
-}: {
-  id: 'settings';
-  icon: typeof SettingsIcon;
-  active: boolean;
-}) {
-  const { t } = useTranslation();
-  const label = t(`nav.${id}` as never) as string;
-  return (
-    <button
-      type="button"
-      onClick={() => setWorkspaceView(active ? 'query' : id)}
-      aria-current={active ? 'page' : undefined}
-      aria-label={label}
-      title={label}
-      className={cn(
-        'relative flex size-10 items-center justify-center rounded-xs transition-colors',
-        'before:absolute before:top-1.5 before:bottom-1.5 before:left-0 before:w-0.5 before:rounded-r-sm before:bg-primary before:transition-opacity',
-        active
-          ? 'cursor-default bg-primary/15 text-primary before:opacity-100'
-          : 'cursor-pointer text-muted-foreground hover:bg-primary/10 hover:text-primary before:opacity-0',
-      )}
-    >
-      <Icon className="size-5" />
-    </button>
-  );
-}

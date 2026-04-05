@@ -237,3 +237,67 @@
     @apply font-sans;
     }
 }
+
+/* Markdown rendering for the Documentation tab. Scoped under
+   `.markdown-body` so the rules don't leak into shadcn or the rest of the
+   app. Avoids pulling in @tailwindcss/typography for a single, app-local
+   surface; the rules here are deliberately minimal — readable headings,
+   inline / block code, lists, tables, links. */
+.markdown-body {
+  @apply text-sm leading-6;
+}
+.markdown-body h1 {
+  @apply mt-0 mb-4 text-2xl font-semibold;
+}
+.markdown-body h2 {
+  @apply mt-8 mb-3 border-b pb-1 text-xl font-semibold;
+}
+.markdown-body h3 {
+  @apply mt-6 mb-2 text-lg font-semibold;
+}
+.markdown-body h4 {
+  @apply mt-4 mb-2 text-base font-semibold;
+}
+.markdown-body p {
+  @apply my-3;
+}
+.markdown-body a {
+  @apply text-primary underline underline-offset-2 hover:opacity-80;
+}
+.markdown-body ul {
+  @apply my-3 list-disc pl-6;
+}
+.markdown-body ol {
+  @apply my-3 list-decimal pl-6;
+}
+.markdown-body li {
+  @apply my-1;
+}
+.markdown-body blockquote {
+  @apply text-muted-foreground my-3 border-l-2 pl-3 italic;
+}
+.markdown-body code {
+  @apply bg-muted rounded-xs px-1 py-0.5 font-mono text-xs;
+}
+.markdown-body pre {
+  @apply bg-muted my-3 overflow-x-auto rounded-xs p-3 text-xs;
+}
+.markdown-body pre code {
+  @apply bg-transparent p-0 text-xs;
+}
+.markdown-body table {
+  @apply my-3 w-full border-collapse text-xs;
+}
+.markdown-body th,
+.markdown-body td {
+  @apply border px-2 py-1 text-left;
+}
+.markdown-body th {
+  @apply bg-muted font-medium;
+}
+.markdown-body hr {
+  @apply border-border my-6;
+}
+.markdown-body img {
+  @apply max-w-full;
+}

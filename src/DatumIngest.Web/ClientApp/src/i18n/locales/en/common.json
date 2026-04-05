@@ -3,8 +3,7 @@
     "name": "DatumIngest"
   },
   "nav": {
-    "query": "Query editor",
-    "settings": "Settings"
+    "query": "Query editor"
   },
   "dock": {
     "left": "Left dock",
