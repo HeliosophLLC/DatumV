@@ -3,6 +3,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Inference;
 using DatumIngest.ModelLibrary;
 using DatumIngest.Models;
+using DatumIngest.Models.Calibration;
 using DatumIngest.Pooling;
 using DatumIngest.Web.Catalog;
 using DatumIngest.Web.Compute;
@@ -98,6 +99,18 @@ public static class WebHostExtensions
             // only as a hosted service (no consumer needs to inject it),
             // and runs once for the catalog's lifetime.
             services.AddHostedService<CatalogEventBroadcastService>();
+
+            // Model lifecycle + calibration observers. Both forward
+            // engine-side events to the CatalogHub so the status-bar
+            // chips (residency, calibration) can render live state
+            // without polling. Singleton because they hold an
+            // IHubContext (itself a singleton) and have no per-request
+            // state; the registration service is hosted-only and
+            // runs at startup to wire them into the catalog's
+            // observer fan-out.
+            services.AddSingleton<IModelLifecycleObserver, SignalRResidencyObserver>();
+            services.AddSingleton<ICalibrationObserver, SignalRCalibrationObserver>();
+            services.AddHostedService<ModelObserverRegistrationService>();
 
             // Streaming SQL execution. Scoped so each request gets its own
             // service instance — its only mutable state today is the

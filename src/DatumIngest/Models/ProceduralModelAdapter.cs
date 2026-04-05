@@ -28,12 +28,18 @@ namespace DatumIngest.Models;
 /// stored on the underlying <see cref="ModelDescriptor"/>'s
 /// <see cref="ModelCatalogEntry.Loader"/>. The descriptor's
 /// <c>BoundSessions</c> own the ONNX <see cref="DatumIngest.Inference.IInferenceSession"/>
-/// lifecycle; <c>DROP MODEL</c> disposes the sessions, and this adapter is
-/// just a thin wrapper that becomes orphaned when the descriptor is gone.
-/// Deliberately not <see cref="IDisposable"/>: an eviction from
-/// <see cref="ModelResidencyManager"/> must not dispose anything (the
-/// descriptor still references the same sessions via the scalar adapter
-/// fallback path).
+/// lifecycle. <c>DROP MODEL</c> tears the descriptor down explicitly via
+/// <c>LazyModelSessions.DisposeLoaded</c>; the adapter itself is now
+/// <see cref="IDisposable"/> so <see cref="ModelResidencyManager"/>'s
+/// eviction path can actually free VRAM by calling
+/// <see cref="DatumIngest.Catalog.Registries.LazyModelSessions.Reset"/> —
+/// dropping the cached sessions while leaving the descriptor + path map
+/// intact for a future re-acquire to reload from disk. Re-acquires
+/// always go through the loader, which pre-warms the sessions again, so
+/// MIO-mediated invocations are safe across eviction churn. The known
+/// gap is the scalar-fallback path (unhoisted <c>models.X(...)</c> calls
+/// inside UDF bodies): those don't hold a residency lease and could
+/// theoretically race a concurrent eviction. Tracked separately.
 /// </para>
 /// <para>
 /// <strong>VRAM accounting.</strong> <see cref="ModelCatalogEntry.EstimatedVramBytes"/>
@@ -54,7 +60,7 @@ namespace DatumIngest.Models;
 /// with equal arguments.
 /// </para>
 /// </remarks>
-public sealed class ProceduralModelAdapter : IModel
+public sealed class ProceduralModelAdapter : IModel, IDisposable
 {
     private readonly ModelDescriptor _descriptor;
     private readonly ProceduralModelFunction _function;
@@ -265,6 +271,20 @@ public sealed class ProceduralModelAdapter : IModel
         {
             arena.ReleaseReference();
         }
+    }
+
+    /// <summary>
+    /// Releases the descriptor's bound ONNX sessions, freeing whatever
+    /// VRAM they hold. The descriptor + path map stay intact so the next
+    /// <c>InferBatchAsync</c> call can reload from disk through the
+    /// adapter's loader path. Called by
+    /// <see cref="ModelResidencyManager.Evict"/> when this adapter is
+    /// the resident <see cref="IModel"/> being evicted to make room for
+    /// a sibling.
+    /// </summary>
+    public void Dispose()
+    {
+        _descriptor.BoundSessions.Reset();
     }
 
     /// <summary>

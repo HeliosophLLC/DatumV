@@ -12,42 +12,39 @@ namespace DatumIngest.Functions;
 internal static class ScalarFunctionBatchHelpers
 {
     /// <summary>
-    /// Below this row count the parallel-dispatch overhead exceeds the
-    /// savings, so DefaultLoop stays sequential. Empirically 4 is the
-    /// crossover for cheap scalar functions; expensive ones (image
-    /// preprocessing) benefit at any batch ≥ 2 but the constant chosen
-    /// here favours not regressing the cheap-and-tiny case.
-    /// </summary>
-    private const int ParallelThreshold = 4;
-
-    /// <summary>
-    /// Default columnar-batch loop. Dispatches <see cref="IScalarFunction.ExecuteAsync"/>
-    /// row-by-row, sequentially below <see cref="ParallelThreshold"/> and
-    /// in parallel above it. Per-row results land in the same order as
-    /// the input columns so overrides that opt out via <c>ExecuteBatchAsync</c>
-    /// remain byte-equivalent to the sequential reference behaviour.
+    /// Default columnar-batch loop. Dispatches
+    /// <see cref="IScalarFunction.ExecuteAsync"/> row-by-row in a single
+    /// sequential pass. Per-row results land in the same order as the
+    /// input columns so overrides that opt out via
+    /// <c>ExecuteBatchAsync</c> remain byte-equivalent.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <strong>Thread-safety contract.</strong> Scalar functions are expected
-    /// to be pure with respect to the <see cref="EvaluationFrame"/> passed in
-    /// — they read it, produce a <see cref="ValueRef"/>, and don't mutate
-    /// shared state. Every shipped scalar function meets this contract
-    /// (image preprocessing, math, string operations all return new managed
-    /// payloads). A function that DOES mutate shared state (caches a static
-    /// dictionary, accumulates a side effect) must override
-    /// <c>ExecuteBatchAsync</c> with its own sequential implementation —
-    /// the default's parallel path will race otherwise.
+    /// <strong>Why sequential.</strong> An earlier revision parallelised
+    /// this loop via <c>Parallel.ForAsync</c> for batches at or above 4,
+    /// on the theory that pure scalar functions can be
+    /// dispatched independently. The theory is correct for the function
+    /// surface but not for the shared <see cref="Arena"/> they read
+    /// through: when one parallel worker writes to the arena (managed
+    /// payload → arena copy inside <c>ValueRef.ToDataValue</c>) and the
+    /// arena grows, the old mmap region gets unmapped. Any other worker
+    /// holding a <see cref="System.Span{T}"/> into the old region now
+    /// dangles, and the next index triggers
+    /// <see cref="System.AccessViolationException"/>. The parallel path
+    /// was latent until the calibration auto-trigger started dispatching
+    /// at batch sizes ≥ 4 in production; the crashes appeared
+    /// immediately. Restoring parallelism requires either making arena
+    /// growth span-safe (keep old mmaps pinned until outstanding spans
+    /// drop) or removing the managed-payload-to-arena round-trip
+    /// entirely. Both are filed as follow-ups; until they land,
+    /// sequential is the safe default.
     /// </para>
     /// <para>
-    /// <strong>Why this matters.</strong> Image preprocessing (image_to_tensor,
-    /// image_height, image_width, depth_map_to_image) dominates the CPU
-    /// portion of model dispatch — measured at ~600 ms per 32-row chunk on a
-    /// recent depth-model trace. Parallel dispatch across CPU cores shrinks
-    /// that to ~80 ms on an 8-core box; the savings compound for any
-    /// multi-row model query. Sequential below the threshold keeps the
-    /// per-row scalar-call sites cheap (no thread-pool involvement for
-    /// batches that wouldn't benefit).
+    /// <strong>Thread-safety contract.</strong> Scalar functions are
+    /// still expected to be pure with respect to the
+    /// <see cref="EvaluationFrame"/> they receive — they read it, produce
+    /// a <see cref="ValueRef"/>, and don't mutate shared state. Future
+    /// re-parallelisation depends on that contract holding.
     /// </para>
     /// </remarks>
     public static async ValueTask<ValueRef[]> DefaultLoop(
@@ -60,46 +57,20 @@ internal static class ScalarFunctionBatchHelpers
         ValueRef[] results = new ValueRef[rowCount];
         int paramCount = argumentColumns.Length;
 
-        if (rowCount < ParallelThreshold)
+        // Reuses one rowArgs buffer for every row — safe because there's
+        // only ever one in-flight call.
+        ValueRef[] rowArgs = new ValueRef[paramCount];
+        for (int row = 0; row < rowCount; row++)
         {
-            // Sequential path. Reuses one rowArgs buffer for every row —
-            // safe because there's only ever one in-flight call.
-            ValueRef[] rowArgs = new ValueRef[paramCount];
-            for (int row = 0; row < rowCount; row++)
+            cancellationToken.ThrowIfCancellationRequested();
+            for (int col = 0; col < paramCount; col++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                for (int col = 0; col < paramCount; col++)
-                {
-                    rowArgs[col] = argumentColumns[col].Span[row];
-                }
-                results[row] = await function
-                    .ExecuteAsync(rowArgs.AsMemory(0, paramCount), frame, cancellationToken)
-                    .ConfigureAwait(false);
+                rowArgs[col] = argumentColumns[col].Span[row];
             }
-            return results;
+            results[row] = await function
+                .ExecuteAsync(rowArgs.AsMemory(0, paramCount), frame, cancellationToken)
+                .ConfigureAwait(false);
         }
-
-        // Parallel path. Each task owns its own rowArgs buffer (small
-        // alloc per row — a few ValueRefs); the shared `results` array
-        // is written at distinct indices so there's no contention.
-        await Parallel.ForAsync(0, rowCount,
-            new ParallelOptions
-            {
-                CancellationToken = cancellationToken,
-                MaxDegreeOfParallelism = Environment.ProcessorCount,
-            },
-            async (row, ct) =>
-            {
-                ValueRef[] rowArgs = new ValueRef[paramCount];
-                for (int col = 0; col < paramCount; col++)
-                {
-                    rowArgs[col] = argumentColumns[col].Span[row];
-                }
-                results[row] = await function
-                    .ExecuteAsync(rowArgs.AsMemory(0, paramCount), frame, ct)
-                    .ConfigureAwait(false);
-            }).ConfigureAwait(false);
-
         return results;
     }
 }

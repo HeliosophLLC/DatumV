@@ -801,6 +801,122 @@ export class ModelCatalogClient {
     }
 }
 
+export class ModelRuntimeClient {
+    private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
+    private baseUrl: string;
+    protected jsonParseReviver: ((key: string, value: any) => any) | undefined = undefined;
+
+    constructor(baseUrl?: string, http?: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> }) {
+        this.http = http ? http : window as any;
+        this.baseUrl = baseUrl ?? "";
+    }
+
+    getResidency(signal?: AbortSignal): Promise<ResidentModelDto[]> {
+        let url_ = this.baseUrl + "/api/model-runtime/residency";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processGetResidency(_response);
+        });
+    }
+
+    protected processGetResidency(response: Response): Promise<ResidentModelDto[]> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as ResidentModelDto[];
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<ResidentModelDto[]>(null as any);
+    }
+
+    getCalibration(signal?: AbortSignal): Promise<CalibrationCurveDto[]> {
+        let url_ = this.baseUrl + "/api/model-runtime/calibration";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processGetCalibration(_response);
+        });
+    }
+
+    protected processGetCalibration(response: Response): Promise<CalibrationCurveDto[]> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as CalibrationCurveDto[];
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<CalibrationCurveDto[]>(null as any);
+    }
+
+    evict(name: string, signal?: AbortSignal): Promise<EvictOutcomeDto> {
+        let url_ = this.baseUrl + "/api/model-runtime/{name}/evict";
+        if (name === undefined || name === null)
+            throw new Error("The parameter 'name' must be defined.");
+        url_ = url_.replace("{name}", encodeURIComponent("" + name));
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "POST",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processEvict(_response);
+        });
+    }
+
+    protected processEvict(response: Response): Promise<EvictOutcomeDto> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as EvictOutcomeDto;
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<EvictOutcomeDto>(null as any);
+    }
+}
+
 export class QueryStreamClient {
     private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
     private baseUrl: string;
@@ -1289,6 +1405,30 @@ export interface ProblemDetails {
 
     [key: string]: any;
 }
+
+export interface ResidentModelDto {
+    name?: string;
+    weightCostBytes?: number;
+    activeRefs?: number;
+}
+
+export interface CalibrationCurveDto {
+    modelName?: string;
+    weightCostBytes?: number;
+    status?: string;
+    entries?: CalibrationEntryDto[];
+}
+
+export interface CalibrationEntryDto {
+    batchSize?: number;
+    totalVramBytes?: number;
+}
+
+export interface EvictOutcomeDto {
+    status?: EvictStatus;
+}
+
+export type EvictStatus = "evicted" | "notResident" | "pinned";
 
 export interface SchemaCatalogDto {
     tables?: TableEntryDto[];

@@ -4071,6 +4071,43 @@ public static class SqlParser
             SchemaName: qualifiedName.SchemaName);
 
     /// <summary>
+    /// Parses <c>EVICT MODEL [IF EXISTS] name</c>. EVICT and MODEL are
+    /// both contextual identifiers — they're only meaningful in this
+    /// position, so we don't promote either to a reserved keyword and
+    /// break user scripts that bind <c>evict</c> as a column name.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> EvictModelParser =
+        from evictKw in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => GetTokenText(t).Equals("EVICT", StringComparison.OrdinalIgnoreCase), "EVICT")
+        from modelKw in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => GetTokenText(t).Equals("MODEL", StringComparison.OrdinalIgnoreCase), "MODEL")
+        from ifExists in IfExistsParser
+        from qualifiedName in QualifiedTableNameParser
+        select (Statement)new EvictModelStatement(
+            qualifiedName.TableName,
+            ifExists,
+            Span: null,
+            SchemaName: qualifiedName.SchemaName);
+
+    /// <summary>
+    /// Parses <c>RESET CALIBRATION [IF EXISTS] name</c>. RESET and
+    /// CALIBRATION are contextual identifiers — see <see cref="EvictModelParser"/>
+    /// for the rationale on not reserving them.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> ResetCalibrationParser =
+        from resetKw in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => GetTokenText(t).Equals("RESET", StringComparison.OrdinalIgnoreCase), "RESET")
+        from calibrationKw in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => GetTokenText(t).Equals("CALIBRATION", StringComparison.OrdinalIgnoreCase), "CALIBRATION")
+        from ifExists in IfExistsParser
+        from qualifiedName in QualifiedTableNameParser
+        select (Statement)new ResetCalibrationStatement(
+            qualifiedName.TableName,
+            ifExists,
+            Span: null,
+            SchemaName: qualifiedName.SchemaName);
+
+    /// <summary>
     /// Parses <c>CALL namespace.functionname(arg1, arg2, ...)</c>.
     /// The function call expression after CALL is parsed by the same
     /// <see cref="FunctionCall"/> combinator used for inline expressions,
@@ -4724,6 +4761,8 @@ public static class SqlParser
             .Or(DropProcedureParser.Try())
             .Or(CreateModelParser)
             .Or(DropModelParser.Try())
+            .Or(EvictModelParser.Try())
+            .Or(ResetCalibrationParser.Try())
             .Or(CallStatementParser.Try())
             // Procedural-flow statements: keyword-dispatched, all share the
             // SP.Ref() lazy-recursion pattern so bodies can themselves be any

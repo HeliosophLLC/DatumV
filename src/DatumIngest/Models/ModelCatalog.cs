@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
 
+using DatumIngest.Diagnostics;
+using DatumIngest.Models.Calibration;
+
 namespace DatumIngest.Models;
 
 /// <summary>
@@ -78,15 +81,39 @@ public sealed class ModelCatalog : IDisposable
     /// <summary>
     /// Engine-wide batch-size policy consulted by
     /// <see cref="DatumIngest.Execution.Operators.ModelInvocationOperator"/>
-    /// at each dispatch. Defaults to <see cref="BatchOnePolicy"/> — batched
-    /// cross-row dispatch is shelved pending the column-major + eviction
-    /// operator (see <see cref="BatchOnePolicy"/> remarks). Tests and
-    /// micro-benchmarks that want deterministic per-model dispatch counts
-    /// swap in <see cref="StaticBatchSizePolicy"/>; the doubling tuner
-    /// (<see cref="DoublingBatchSizePolicy"/>) remains in the codebase
-    /// ready to be reinstated once multi-model VRAM coordination exists.
+    /// at each dispatch. Defaults to <see cref="CurvePolicy"/>: uses
+    /// per-model calibration curves when available, falls back to
+    /// <c>batch=1</c> for uncalibrated models. When the operator
+    /// collapses an adjacent MIO chain into one multi-invocation node,
+    /// VRAM contention is coordinated at the plan layer (one model
+    /// dispatching at a time, lease released between invocations); the
+    /// policy only has to worry about single-model headroom checks.
+    /// Hosts that want deterministic dispatch counts swap in
+    /// <see cref="BatchOnePolicy"/> (tests) or
+    /// <see cref="StaticBatchSizePolicy"/> (benchmarks).
     /// </summary>
-    public IBatchSizePolicy BatchSizePolicy { get; set; } = BatchOnePolicy.Instance;
+    public IBatchSizePolicy BatchSizePolicy { get; set; }
+
+    /// <summary>
+    /// Per-model VRAM calibration data — populated by the calibration
+    /// coordinator on first acquire, consumed by the (future) curve-aware
+    /// batch-size policy to pick the largest batch that fits available
+    /// VRAM. Persisted across process restarts via the optional
+    /// <see cref="CalibrationStore"/> wired in by the host; in-memory only
+    /// when no store is configured.
+    /// </summary>
+    public CalibrationRegistry CalibrationRegistry { get; } = new();
+
+    /// <summary>
+    /// Orchestrates per-model calibration ramps. Lazily constructed on
+    /// first access; bound to this catalog so it can resolve entries and
+    /// compute file fingerprints. The (future) curve-aware policy and the
+    /// (future) column-major operator both reach in through here to
+    /// trigger or join calibration on demand.
+    /// </summary>
+    public CalibrationCoordinator CalibrationCoordinator => _calibrationCoordinator.Value;
+
+    private readonly Lazy<CalibrationCoordinator> _calibrationCoordinator;
 
     /// <summary>
     /// Resolves a user-supplied model path against the host's model directory,
@@ -126,6 +153,28 @@ public sealed class ModelCatalog : IDisposable
         return Path.GetFullPath(Path.Combine(models.ModelDirectory, path));
     }
 
+    /// <summary>
+    /// Cadence at which the calibration registry is flushed to disk when
+    /// a <see cref="CalibrationStore"/> is wired in. Per-tick writes are
+    /// cheap (small JSON file), so a one-minute interval keeps the on-disk
+    /// state recent without burning IO on no-op writes.
+    /// </summary>
+    private static readonly TimeSpan CalibrationSaveInterval = TimeSpan.FromMinutes(1);
+
+    private readonly CalibrationStore? _calibrationStore;
+    private readonly HostFingerprint? _hostFingerprint;
+    private readonly Timer? _calibrationSaveTimer;
+    private readonly Lock _calibrationSaveLock = new();
+
+    // Observer fan-out lists. Read-mostly: writes happen at host wiring
+    // time (web/CLI host registers a forwarder); reads happen on every
+    // residency / calibration event. A copy-on-write list would be
+    // marginally lower-allocation but unnecessary at the scale of "a
+    // handful of observers, fired at human-perceptible event rates."
+    private readonly List<IModelLifecycleObserver> _lifecycleObservers = [];
+    private readonly List<ICalibrationObserver> _calibrationObservers = [];
+    private readonly Lock _observerLock = new();
+
     /// <summary>Creates a catalog rooted at <paramref name="modelDirectory"/>.</summary>
     /// <param name="modelDirectory">
     /// Absolute path to the models directory. <see langword="null"/> uses
@@ -143,9 +192,233 @@ public sealed class ModelCatalog : IDisposable
     /// forever, the same shape as before residency was introduced).
     /// </summary>
     public ModelCatalog(string? modelDirectory, long vramBudgetBytes, TimeSpan? admissionTimeout)
+        : this(modelDirectory, vramBudgetBytes, admissionTimeout, calibrationStore: null, hostFingerprint: null)
+    {
+    }
+
+    /// <summary>
+    /// Full ctor with calibration persistence wired in. When both
+    /// <paramref name="calibrationStore"/> and <paramref name="hostFingerprint"/>
+    /// are non-null, persisted calibration is rehydrated into
+    /// <see cref="CalibrationRegistry"/> at construction and flushed back
+    /// on a background timer + on <see cref="Dispose"/>. Either argument
+    /// being null disables persistence — the in-memory registry still
+    /// works, calibrations just don't survive process restarts.
+    /// </summary>
+    public ModelCatalog(
+        string? modelDirectory,
+        long vramBudgetBytes,
+        TimeSpan? admissionTimeout,
+        CalibrationStore? calibrationStore,
+        HostFingerprint? hostFingerprint)
     {
         ModelDirectory = modelDirectory ?? DefaultModelDirectory;
-        ResidencyManager = new ModelResidencyManager(vramBudgetBytes, admissionTimeout);
+        ResidencyManager = new ModelResidencyManager(vramBudgetBytes, admissionTimeout, CalibrationRegistry);
+        ResidencyManager.Catalog = this;
+        _calibrationStore = calibrationStore;
+        _hostFingerprint = hostFingerprint;
+        // Default policy uses the calibration registry on this catalog.
+        // Hosts that need a different policy (tests, benchmarks) overwrite
+        // BatchSizePolicy after construction.
+        BatchSizePolicy = new CurvePolicy(CalibrationRegistry);
+        // Lazy so a catalog instance that never triggers calibration
+        // (e.g. a tightly-scoped test) doesn't pay for a coordinator's
+        // semaphore + dictionary allocation.
+        _calibrationCoordinator = new Lazy<CalibrationCoordinator>(
+            () => new CalibrationCoordinator(this),
+            LazyThreadSafetyMode.ExecutionAndPublication);
+
+        if (_calibrationStore is not null && _hostFingerprint is not null)
+        {
+            LoadResult result = _calibrationStore.Load(CalibrationRegistry, _hostFingerprint);
+            DatumActivity.Calibration.Trace(
+                $"load status={result.Status} loaded={result.LoadedCount} path={_calibrationStore.FilePath}");
+
+            // Background save. Period start = interval (not Zero) so we
+            // don't race the host's startup-time mutations with a no-op
+            // first tick.
+            _calibrationSaveTimer = new Timer(
+                callback: _ => TrySaveCalibration(),
+                state: null,
+                dueTime: CalibrationSaveInterval,
+                period: CalibrationSaveInterval);
+        }
+    }
+
+    /// <summary>
+    /// Flushes the in-memory calibration registry to <see cref="CalibrationStore"/>
+    /// immediately. No-op when persistence isn't wired (no fingerprintable
+    /// host or no store). Safe to call from any thread; serialised with
+    /// the background timer's writes.
+    /// </summary>
+    /// <remarks>
+    /// Callers: the calibration coordinator after a successful ramp (so a
+    /// freshly-measured curve survives an unclean shutdown that misses the
+    /// next timer tick), and host-level signal handlers that want a final
+    /// flush before exit.
+    /// </remarks>
+    public void SaveCalibrationNow() => TrySaveCalibration();
+
+    /// <summary>
+    /// Registers <paramref name="observer"/> to receive residency
+    /// lifecycle events. Observers are notified in registration order;
+    /// an observer that throws is swallowed so a misbehaving subscriber
+    /// can't take down the dispatch path.
+    /// </summary>
+    public void AddLifecycleObserver(IModelLifecycleObserver observer)
+    {
+        lock (_observerLock) _lifecycleObservers.Add(observer);
+    }
+
+    /// <summary>
+    /// Registers <paramref name="observer"/> to receive calibration ramp
+    /// lifecycle events. Same fan-out semantics as
+    /// <see cref="AddLifecycleObserver"/>.
+    /// </summary>
+    public void AddCalibrationObserver(ICalibrationObserver observer)
+    {
+        lock (_observerLock) _calibrationObservers.Add(observer);
+    }
+
+    // Fan-out helpers. Snapshot under the lock, fan out without it so a
+    // slow (or recursive) observer can't deadlock the dispatch path.
+    // Each call is try/catch-wrapped so a thrown observer doesn't
+    // skip later subscribers or propagate up into the engine.
+    internal void NotifyModelLoaded(string modelName, long weightCostBytes, long vramUsedBytes)
+    {
+        IModelLifecycleObserver[] snapshot;
+        lock (_observerLock) snapshot = _lifecycleObservers.ToArray();
+        foreach (IModelLifecycleObserver obs in snapshot)
+        {
+            try { obs.OnLoaded(modelName, weightCostBytes, vramUsedBytes); }
+            catch (Exception ex)
+            {
+                DatumActivity.Operators.Trace(
+                    $"lifecycle-observer-threw OnLoaded model='{modelName}' "
+                    + $"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+    }
+
+    internal void NotifyModelEvicted(string modelName, long bytes, EvictionReason reason)
+    {
+        IModelLifecycleObserver[] snapshot;
+        lock (_observerLock) snapshot = _lifecycleObservers.ToArray();
+        foreach (IModelLifecycleObserver obs in snapshot)
+        {
+            try { obs.OnEvicted(modelName, bytes, reason); }
+            catch (Exception ex)
+            {
+                DatumActivity.Operators.Trace(
+                    $"lifecycle-observer-threw OnEvicted model='{modelName}' "
+                    + $"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+    }
+
+    internal void NotifyModelActiveChanged(string modelName, int activeRefs)
+    {
+        IModelLifecycleObserver[] snapshot;
+        lock (_observerLock) snapshot = _lifecycleObservers.ToArray();
+        foreach (IModelLifecycleObserver obs in snapshot)
+        {
+            try { obs.OnActiveChanged(modelName, activeRefs); }
+            catch (Exception ex)
+            {
+                DatumActivity.Operators.Trace(
+                    $"lifecycle-observer-threw OnActiveChanged model='{modelName}' "
+                    + $"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+    }
+
+    internal void NotifyRampStarted(string modelName, string fingerprint)
+    {
+        ICalibrationObserver[] snapshot;
+        lock (_observerLock) snapshot = _calibrationObservers.ToArray();
+        foreach (ICalibrationObserver obs in snapshot)
+        {
+            try { obs.OnRampStarted(modelName, fingerprint); }
+            catch (Exception ex)
+            {
+                DatumActivity.Calibration.Trace(
+                    $"calibration-observer-threw OnRampStarted model='{modelName}' "
+                    + $"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+    }
+
+    internal void NotifyRampStep(string modelName, int batchSize, long totalVramBytes, double dispatchMs)
+    {
+        ICalibrationObserver[] snapshot;
+        lock (_observerLock) snapshot = _calibrationObservers.ToArray();
+        foreach (ICalibrationObserver obs in snapshot)
+        {
+            try { obs.OnRampStep(modelName, batchSize, totalVramBytes, dispatchMs); }
+            catch (Exception ex)
+            {
+                DatumActivity.Calibration.Trace(
+                    $"calibration-observer-threw OnRampStep model='{modelName}' "
+                    + $"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+    }
+
+    internal void NotifyRampHalted(string modelName, int lastBatchSize, HaltReason reason)
+    {
+        ICalibrationObserver[] snapshot;
+        lock (_observerLock) snapshot = _calibrationObservers.ToArray();
+        foreach (ICalibrationObserver obs in snapshot)
+        {
+            try { obs.OnRampHalted(modelName, lastBatchSize, reason); }
+            catch (Exception ex)
+            {
+                DatumActivity.Calibration.Trace(
+                    $"calibration-observer-threw OnRampHalted model='{modelName}' "
+                    + $"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+    }
+
+    internal void NotifyRampCompleted(string modelName, int entryCount)
+    {
+        ICalibrationObserver[] snapshot;
+        lock (_observerLock) snapshot = _calibrationObservers.ToArray();
+        foreach (ICalibrationObserver obs in snapshot)
+        {
+            try { obs.OnRampCompleted(modelName, entryCount); }
+            catch (Exception ex)
+            {
+                DatumActivity.Calibration.Trace(
+                    $"calibration-observer-threw OnRampCompleted model='{modelName}' "
+                    + $"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+    }
+
+    private void TrySaveCalibration()
+    {
+        if (_calibrationStore is null || _hostFingerprint is null) return;
+
+        // Serialise multiple savers (timer tick + Dispose) so we don't
+        // get interleaved JSON writes.
+        lock (_calibrationSaveLock)
+        {
+            try
+            {
+                int entryCount = CalibrationRegistry.Snapshot().Count;
+                _calibrationStore.Save(CalibrationRegistry, _hostFingerprint);
+                DatumActivity.Calibration.Trace(
+                    $"save ok entries={entryCount} path={_calibrationStore.FilePath}");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+            {
+                // Calibration is advisory; a failed save shouldn't take
+                // down the catalog. Trace and continue — the next tick
+                // (or shutdown flush) will try again.
+                DatumActivity.Calibration.Trace($"save failed: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
     }
 
     /// <summary>
@@ -218,5 +491,10 @@ public sealed class ModelCatalog : IDisposable
         => AcquireAsync(name, CancellationToken.None).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public void Dispose() => ResidencyManager.Dispose();
+    public void Dispose()
+    {
+        _calibrationSaveTimer?.Dispose();
+        TrySaveCalibration();
+        ResidencyManager.Dispose();
+    }
 }

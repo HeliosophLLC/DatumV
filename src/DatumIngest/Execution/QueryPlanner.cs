@@ -193,6 +193,12 @@ public sealed class QueryPlanner
     private QueryOperator Finalize(QueryOperator op)
     {
         QueryOperator afterModelHoist = ModelInvocationHoister.Hoist(op, _catalog.Models);
+        // Collapse adjacent single-invocation MIO stacks into one
+        // multi-invocation MIO so the column-major dispatch path (one
+        // model active at a time per upstream batch, lease released
+        // between invocations) replaces the stacked-MIO shape for
+        // multi-model queries. Single-MIO plans are left unchanged.
+        QueryOperator afterDagCollapse = BatchedModelDagCollapser.Collapse(afterModelHoist);
         // Post-pass entry point. Historically this lowered SQL-defined
         // straight-line bodies into a chain of ProjectOperator + InferOperator
         // nodes for cross-row batching; that path was removed because the
@@ -202,14 +208,20 @@ public sealed class QueryPlanner
         // as a call site so per-model rewrites that DO benefit from plan-
         // shape changes have a hook; currently it's a no-op walk.
         QueryOperator afterBodyLower = ModelBodyLowerer.LowerSqlDefinedBodies(
-            afterModelHoist, _catalog.DeclaredModels);
+            afterDagCollapse, _catalog.DeclaredModels);
+        // Decompose composite metadata functions (pixel_count, dimensions(literal))
+        // into compositions of image_width / image_height / image_channels so the
+        // elider below can fold each component into a struct read and CSE can
+        // collapse repeated accessor references across clauses.
+        QueryOperator afterMetadataLower = ImageMetadataLowerer.Lower(
+            afterBodyLower, _functionRegistry, _catalog.SearchPath);
         // Rewrite IInlineMetadataAccessor calls (image_width, video_height, ...)
         // into InlineAccessorExpression so the evaluator skips IScalarFunction
         // dispatch on the common stamped-metadata path. Must run BEFORE CSE so
         // repeated accessor calls in WHERE + SELECT + ORDER BY dedup on the
         // rewritten node's record equality.
         QueryOperator afterAccessorElide = InlineAccessorElider.Elide(
-            afterBodyLower, _functionRegistry, _catalog.SearchPath);
+            afterMetadataLower, _functionRegistry, _catalog.SearchPath);
         return CommonSubexpressionEliminator.Eliminate(afterAccessorElide, _functionRegistry);
     }
 

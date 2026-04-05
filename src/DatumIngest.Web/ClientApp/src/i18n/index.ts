@@ -12,6 +12,7 @@ import enPanels from './locales/en/panels.json';
 import enProcedures from './locales/en/procedures.json';
 import enQuery from './locales/en/query.json';
 import enSettings from './locales/en/settings.json';
+import enStatus from './locales/en/status.json';
 
 // Adding a locale = (1) ship a folder under locales/<tag>/, (2) add an entry
 // here, (3) extend `resources` below. The active locale is matched against
@@ -33,6 +34,7 @@ const resources = {
     catalog: enCatalog,
     procedures: enProcedures,
     docs: enDocs,
+    status: enStatus,
   },
 } as const;
 
@@ -56,6 +58,7 @@ i18next
       'catalog',
       'procedures',
       'docs',
+      'status',
     ],
     // React already escapes interpolated values.
     interpolation: { escapeValue: false },

@@ -3,7 +3,7 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { IStreamResult, Subject } from '@microsoft/signalr';
-import type { CatalogChangedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
+import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
 
 export type ICatalogHub = {
     /**
@@ -41,6 +41,41 @@ export type ICatalogHubClient = {
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onCatalogChanged(change: CatalogChangedEvent): Promise<void>;
+    /**
+    * @param ev Transpiled from DatumIngest.Web.Hubs.ModelLoadedEvent
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onModelLoaded(ev: ModelLoadedEvent): Promise<void>;
+    /**
+    * @param ev Transpiled from DatumIngest.Web.Hubs.ModelEvictedEvent
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onModelEvicted(ev: ModelEvictedEvent): Promise<void>;
+    /**
+    * @param ev Transpiled from DatumIngest.Web.Hubs.ModelActiveChangedEvent
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onModelActiveChanged(ev: ModelActiveChangedEvent): Promise<void>;
+    /**
+    * @param ev Transpiled from DatumIngest.Web.Hubs.CalibrationRampStartedEvent
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onCalibrationRampStarted(ev: CalibrationRampStartedEvent): Promise<void>;
+    /**
+    * @param ev Transpiled from DatumIngest.Web.Hubs.CalibrationRampStepEvent
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onCalibrationRampStep(ev: CalibrationRampStepEvent): Promise<void>;
+    /**
+    * @param ev Transpiled from DatumIngest.Web.Hubs.CalibrationRampHaltedEvent
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onCalibrationRampHalted(ev: CalibrationRampHaltedEvent): Promise<void>;
+    /**
+    * @param ev Transpiled from DatumIngest.Web.Hubs.CalibrationRampCompletedEvent
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onCalibrationRampCompleted(ev: CalibrationRampCompletedEvent): Promise<void>;
 }
 
 export type IStreamHubClient = {

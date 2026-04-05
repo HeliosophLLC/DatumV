@@ -40,6 +40,15 @@ public static class DatumActivity
     public static readonly ActivitySource Scalars = new("DatumIngest.Scalars");
 
     /// <summary>
+    /// Spans for model-calibration lifecycle work — store load/save,
+    /// weight-cost measurements, calibration ramp passes, validation
+    /// drift events. Distinct source from <see cref="Operators"/> so the
+    /// (relatively rare) calibration trail can be filtered to a dedicated
+    /// listener without pulling in operator-level chatter.
+    /// </summary>
+    public static readonly ActivitySource Calibration = new("DatumIngest.Calibration");
+
+    /// <summary>
     /// Formats a byte count as a human-readable string (B / KB / MB / GB).
     /// Convenience helper for trace messages that report memory budgets.
     /// </summary>

@@ -7,7 +7,16 @@ import type {
   ICatalogHub,
   ICatalogHubClient,
 } from './generated/hubs/TypedSignalR.Client/DatumIngest.Web.Hubs';
-import type { CatalogChangedEvent } from './generated/hubs/DatumIngest.Web.Hubs';
+import type {
+  CatalogChangedEvent,
+  ModelLoadedEvent,
+  ModelEvictedEvent,
+  ModelActiveChangedEvent,
+  CalibrationRampStartedEvent,
+  CalibrationRampStepEvent,
+  CalibrationRampHaltedEvent,
+  CalibrationRampCompletedEvent,
+} from './generated/hubs/DatumIngest.Web.Hubs';
 
 // Singleton HubConnection + proxy + fan-out dispatcher for the catalog-
 // change push channel. Mirrors the shape of `hub.ts` but on a separate
@@ -27,6 +36,19 @@ let proxy: ICatalogHub | null = null;
 type Handler<T> = (event: T) => void;
 
 const catalogChangedHandlers: Set<Handler<CatalogChangedEvent>> = new Set();
+
+// Residency lifecycle (IModelLifecycleObserver fan-out). State
+// subscribers register from `state/residency.ts`; views never touch
+// these directly.
+const modelLoadedHandlers: Set<Handler<ModelLoadedEvent>> = new Set();
+const modelEvictedHandlers: Set<Handler<ModelEvictedEvent>> = new Set();
+const modelActiveChangedHandlers: Set<Handler<ModelActiveChangedEvent>> = new Set();
+
+// Calibration ramp lifecycle (ICalibrationObserver fan-out).
+const rampStartedHandlers: Set<Handler<CalibrationRampStartedEvent>> = new Set();
+const rampStepHandlers: Set<Handler<CalibrationRampStepEvent>> = new Set();
+const rampHaltedHandlers: Set<Handler<CalibrationRampHaltedEvent>> = new Set();
+const rampCompletedHandlers: Set<Handler<CalibrationRampCompletedEvent>> = new Set();
 
 type CloseHandler = (err?: Error) => void;
 const closeHandlers: Set<CloseHandler> = new Set();
@@ -50,13 +72,71 @@ export function onCatalogChanged(
   return () => catalogChangedHandlers.delete(handler);
 }
 
+export function onModelLoaded(handler: Handler<ModelLoadedEvent>): () => void {
+  modelLoadedHandlers.add(handler);
+  return () => modelLoadedHandlers.delete(handler);
+}
+
+export function onModelEvicted(handler: Handler<ModelEvictedEvent>): () => void {
+  modelEvictedHandlers.add(handler);
+  return () => modelEvictedHandlers.delete(handler);
+}
+
+export function onModelActiveChanged(
+  handler: Handler<ModelActiveChangedEvent>,
+): () => void {
+  modelActiveChangedHandlers.add(handler);
+  return () => modelActiveChangedHandlers.delete(handler);
+}
+
+export function onCalibrationRampStarted(
+  handler: Handler<CalibrationRampStartedEvent>,
+): () => void {
+  rampStartedHandlers.add(handler);
+  return () => rampStartedHandlers.delete(handler);
+}
+
+export function onCalibrationRampStep(
+  handler: Handler<CalibrationRampStepEvent>,
+): () => void {
+  rampStepHandlers.add(handler);
+  return () => rampStepHandlers.delete(handler);
+}
+
+export function onCalibrationRampHalted(
+  handler: Handler<CalibrationRampHaltedEvent>,
+): () => void {
+  rampHaltedHandlers.add(handler);
+  return () => rampHaltedHandlers.delete(handler);
+}
+
+export function onCalibrationRampCompleted(
+  handler: Handler<CalibrationRampCompletedEvent>,
+): () => void {
+  rampCompletedHandlers.add(handler);
+  return () => rampCompletedHandlers.delete(handler);
+}
+
 export function onCatalogHubClosed(handler: CloseHandler): () => void {
   closeHandlers.add(handler);
   return () => closeHandlers.delete(handler);
 }
 
-export type { CatalogChangedEvent } from './generated/hubs/DatumIngest.Web.Hubs';
-export { CatalogChangeKind } from './generated/hubs/DatumIngest.Web.Hubs';
+export type {
+  CatalogChangedEvent,
+  ModelLoadedEvent,
+  ModelEvictedEvent,
+  ModelActiveChangedEvent,
+  CalibrationRampStartedEvent,
+  CalibrationRampStepEvent,
+  CalibrationRampHaltedEvent,
+  CalibrationRampCompletedEvent,
+} from './generated/hubs/DatumIngest.Web.Hubs';
+export {
+  CatalogChangeKind,
+  ModelEvictionReason,
+  CalibrationHaltReason,
+} from './generated/hubs/DatumIngest.Web.Hubs';
 
 // ───────────────────────── The dispatcher receiver ─────────────────────────
 
@@ -66,6 +146,27 @@ const dispatcher: ICatalogHubClient = {
   },
   async onCatalogChanged(event: CatalogChangedEvent): Promise<void> {
     fanOut(catalogChangedHandlers, event);
+  },
+  async onModelLoaded(event: ModelLoadedEvent): Promise<void> {
+    fanOut(modelLoadedHandlers, event);
+  },
+  async onModelEvicted(event: ModelEvictedEvent): Promise<void> {
+    fanOut(modelEvictedHandlers, event);
+  },
+  async onModelActiveChanged(event: ModelActiveChangedEvent): Promise<void> {
+    fanOut(modelActiveChangedHandlers, event);
+  },
+  async onCalibrationRampStarted(event: CalibrationRampStartedEvent): Promise<void> {
+    fanOut(rampStartedHandlers, event);
+  },
+  async onCalibrationRampStep(event: CalibrationRampStepEvent): Promise<void> {
+    fanOut(rampStepHandlers, event);
+  },
+  async onCalibrationRampHalted(event: CalibrationRampHaltedEvent): Promise<void> {
+    fanOut(rampHaltedHandlers, event);
+  },
+  async onCalibrationRampCompleted(event: CalibrationRampCompletedEvent): Promise<void> {
+    fanOut(rampCompletedHandlers, event);
   },
 };
 

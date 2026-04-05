@@ -583,13 +583,21 @@ public static class CommonSubexpressionEliminator
                 }
                 break;
             case ModelInvocationOperator mio:
-                foreach (Expression a in mio.InputExpressions)
+                // Walk every invocation's expression sites. Multi-
+                // invocation MIOs come out of the collapser; they share
+                // a single output schema and need every input/optional
+                // expression visited so cross-clause CSE can hoist
+                // duplicates that span invocations.
+                foreach (ModelInvocationOperator.Invocation inv in mio.Invocations)
                 {
-                    CollectCandidatesXC(a, operatorIndex, entries, letNames, functions);
-                }
-                foreach (Expression a in mio.OptionalExpressions)
-                {
-                    CollectCandidatesXC(a, operatorIndex, entries, letNames, functions);
+                    foreach (Expression a in inv.InputExpressions)
+                    {
+                        CollectCandidatesXC(a, operatorIndex, entries, letNames, functions);
+                    }
+                    foreach (Expression a in inv.OptionalExpressions)
+                    {
+                        CollectCandidatesXC(a, operatorIndex, entries, letNames, functions);
+                    }
                 }
                 break;
         }
@@ -668,14 +676,13 @@ public static class CommonSubexpressionEliminator
                     .ToList()),
             ModelInvocationOperator mio => new ModelInvocationOperator(
                 newSource,
-                mio.ModelName,
-                mio.InputExpressions
-                    .Select(a => RewriteWithHoists(a, hoists))
-                    .ToList(),
-                mio.OptionalExpressions
-                    .Select(a => RewriteWithHoists(a, hoists))
-                    .ToList(),
-                mio.OutputColumnName),
+                mio.Invocations
+                    .Select(inv => new ModelInvocationOperator.Invocation(
+                        inv.ModelName,
+                        inv.InputExpressions.Select(a => RewriteWithHoists(a, hoists)).ToList(),
+                        inv.OptionalExpressions.Select(a => RewriteWithHoists(a, hoists)).ToList(),
+                        inv.OutputColumnName))
+                    .ToList()),
             _ => throw new InvalidOperationException(
                 $"RebuildChainOperator called on non-chainable {op.GetType().Name}."),
         };
@@ -1131,7 +1138,7 @@ public static class CommonSubexpressionEliminator
             WindowOperator w => new WindowOperator(childRewriter(w.Source), w.WindowColumns),
             LimitOperator l => RewriteLimit(l, childRewriter),
             ModelInvocationOperator m => new ModelInvocationOperator(
-                childRewriter(m.Source), m.ModelName, m.InputExpressions, m.OptionalExpressions, m.OutputColumnName),
+                childRewriter(m.Source), m.Invocations),
             RowEnricherOperator r => new RowEnricherOperator(childRewriter(r.Source), r.Enrichments),
             _ => op,
         };

@@ -4,7 +4,7 @@
 // @ts-nocheck
 import type { HubConnection, IStreamResult, Subject } from '@microsoft/signalr';
 import type { ICatalogHub, IStreamHub, ICatalogHubClient, IStreamHubClient } from './DatumIngest.Web.Hubs';
-import type { CatalogChangedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
+import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
 
 
 // components
@@ -136,13 +136,34 @@ class ICatalogHubClient_Binder implements ReceiverRegister<ICatalogHubClient> {
 
         const __onPong = (...args: [string]) => receiver.onPong(...args);
         const __onCatalogChanged = (...args: [CatalogChangedEvent]) => receiver.onCatalogChanged(...args);
+        const __onModelLoaded = (...args: [ModelLoadedEvent]) => receiver.onModelLoaded(...args);
+        const __onModelEvicted = (...args: [ModelEvictedEvent]) => receiver.onModelEvicted(...args);
+        const __onModelActiveChanged = (...args: [ModelActiveChangedEvent]) => receiver.onModelActiveChanged(...args);
+        const __onCalibrationRampStarted = (...args: [CalibrationRampStartedEvent]) => receiver.onCalibrationRampStarted(...args);
+        const __onCalibrationRampStep = (...args: [CalibrationRampStepEvent]) => receiver.onCalibrationRampStep(...args);
+        const __onCalibrationRampHalted = (...args: [CalibrationRampHaltedEvent]) => receiver.onCalibrationRampHalted(...args);
+        const __onCalibrationRampCompleted = (...args: [CalibrationRampCompletedEvent]) => receiver.onCalibrationRampCompleted(...args);
 
         connection.on("OnPong", __onPong);
         connection.on("OnCatalogChanged", __onCatalogChanged);
+        connection.on("OnModelLoaded", __onModelLoaded);
+        connection.on("OnModelEvicted", __onModelEvicted);
+        connection.on("OnModelActiveChanged", __onModelActiveChanged);
+        connection.on("OnCalibrationRampStarted", __onCalibrationRampStarted);
+        connection.on("OnCalibrationRampStep", __onCalibrationRampStep);
+        connection.on("OnCalibrationRampHalted", __onCalibrationRampHalted);
+        connection.on("OnCalibrationRampCompleted", __onCalibrationRampCompleted);
 
         const methodList: ReceiverMethod[] = [
             { methodName: "OnPong", method: __onPong },
-            { methodName: "OnCatalogChanged", method: __onCatalogChanged }
+            { methodName: "OnCatalogChanged", method: __onCatalogChanged },
+            { methodName: "OnModelLoaded", method: __onModelLoaded },
+            { methodName: "OnModelEvicted", method: __onModelEvicted },
+            { methodName: "OnModelActiveChanged", method: __onModelActiveChanged },
+            { methodName: "OnCalibrationRampStarted", method: __onCalibrationRampStarted },
+            { methodName: "OnCalibrationRampStep", method: __onCalibrationRampStep },
+            { methodName: "OnCalibrationRampHalted", method: __onCalibrationRampHalted },
+            { methodName: "OnCalibrationRampCompleted", method: __onCalibrationRampCompleted }
         ]
 
         return new ReceiverMethodSubscription(connection, methodList);

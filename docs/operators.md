@@ -108,7 +108,11 @@ Evaluates a fixed set of pure scalar expressions per row and appends them as hid
 
 ### `ModelInvocationOperator`
 
-Hoisted target for every `models.<name>(...)` call, regardless of whether the model is a built-in `IModel` or a SQL-defined `CREATE MODEL` body. Evaluates the model's input expressions per row, dispatches the model one row at a time via `IModel.InferBatchAsync`, and scatters outputs back as a hidden column (named `__model_*`). One operator per distinct hoisted call site; nested model calls become a stack of operators with the inner one closer to the source. Carries the residency lease, tracer hook, and `RowLimit` short-circuit. See [common-subexpression elimination](common-subexpression-elimination.md) for the planner pass that inserts these operators.
+Hoisted target for every `models.<name>(...)` call, regardless of whether the model is a built-in `IModel` or a SQL-defined `CREATE MODEL` body. Stores a list of one or more invocations: the hoister produces single-invocation operators for individual call sites, and the planner's `BatchedModelDagCollapser` pass merges adjacent single-invocation operators (sibling calls `SELECT a(x), b(x)` or chained calls `a(b(x))`) into one multi-invocation operator.
+
+For each invocation the operator evaluates the model's input expressions per row, dispatches the model via `IModel.InferBatchAsync` in chunks sized by the catalog's `IBatchSizePolicy`, and scatters outputs back as a hidden column (named `__model_*`). Carries the residency lease (per invocation, released between them), tracer hook, `RowLimit` short-circuit, parallel PNG/JPEG pre-encode for SKBitmap outputs, and dynamic Array&lt;Struct&gt; TypeId stamping for SQL-defined bodies.
+
+Multi-invocation operators coordinate VRAM contention at the plan layer: at most one model resident-and-dispatching at a time, lease released between invocations so the residency manager can evict the prior model before the next acquires. Intermediate columns materialise into the output batch's arena so a later invocation's input expressions can reference an earlier invocation's output column by name.
 
 For SQL-defined models, the body runs once per row inside `InferBatchAsync` via a `ProceduralModelAdapter` wrapper. The older "lower SQL model bodies into a `Project → InferOperator → Project` chain" approach was removed because it paid for repeated arena retention + sidecar re-decode at every operator boundary (measured ~20× slower per row than the unified MIO path on image-heavy models).
 

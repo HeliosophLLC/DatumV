@@ -135,6 +135,16 @@ namespace DatumIngest.Models;
 /// their own <c>InferBatchAsync</c> and don't need the columnar-body path).
 /// Surfaces on <c>system.models.batchable</c> as a diagnostic.
 /// </param>
+/// <param name="FingerprintPath">
+/// Optional absolute path used to fingerprint this model's weights for
+/// calibration invalidation. When <see langword="null"/>, the calibration
+/// layer falls back to resolving <see cref="RelativePath"/> against the
+/// catalog's model directory. Set explicitly for SQL-defined models
+/// (where <see cref="RelativePath"/> is null but the descriptor's
+/// <c>ResolvedUsingPath</c> already points at the primary ONNX file),
+/// or any other entry whose canonical weights file isn't expressible
+/// as a path relative to the catalog's model directory.
+/// </param>
 public sealed record ModelCatalogEntry(
     string Name,
     string Backend,
@@ -154,7 +164,8 @@ public sealed record ModelCatalogEntry(
     IReadOnlyList<string>? Modalities = null,
     IReadOnlyList<string>? Files = null,
     string? ImplementsTaskName = null,
-    bool Batchable = false);
+    bool Batchable = false,
+    string? FingerprintPath = null);
 
 /// <summary>
 /// Context handed to a <see cref="ModelCatalogEntry.Loader"/> when first instantiating

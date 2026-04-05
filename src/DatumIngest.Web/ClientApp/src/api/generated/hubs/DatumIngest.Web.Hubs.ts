@@ -2,6 +2,50 @@
 /* eslint-disable */
 /* tslint:disable */
 
+/** Transpiled from DatumIngest.Web.Hubs.CalibrationRampStartedEvent */
+export type CalibrationRampStartedEvent = {
+    /** Transpiled from string */
+    modelName: string;
+    /** Transpiled from string */
+    fingerprint: string;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.CalibrationRampStepEvent */
+export type CalibrationRampStepEvent = {
+    /** Transpiled from string */
+    modelName: string;
+    /** Transpiled from int */
+    batchSize: number;
+    /** Transpiled from long */
+    totalVramBytes: number;
+    /** Transpiled from double */
+    dispatchMs: number;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.CalibrationHaltReason */
+export enum CalibrationHaltReason {
+    LookAheadProjection = 0,
+    DurationSpill = 1,
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.CalibrationRampHaltedEvent */
+export type CalibrationRampHaltedEvent = {
+    /** Transpiled from string */
+    modelName: string;
+    /** Transpiled from int */
+    lastBatchSize: number;
+    /** Transpiled from DatumIngest.Web.Hubs.CalibrationHaltReason */
+    reason: CalibrationHaltReason;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.CalibrationRampCompletedEvent */
+export type CalibrationRampCompletedEvent = {
+    /** Transpiled from string */
+    modelName: string;
+    /** Transpiled from int */
+    entryCount: number;
+}
+
 /** Transpiled from DatumIngest.Web.Hubs.CatalogChangeKind */
 export enum CatalogChangeKind {
     SchemaCreated = 0,
@@ -88,5 +132,41 @@ export type ModelDownloadFailedDto = {
     modelId: string;
     /** Transpiled from string */
     error: string;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.ModelLoadedEvent */
+export type ModelLoadedEvent = {
+    /** Transpiled from string */
+    modelName: string;
+    /** Transpiled from long */
+    weightCostBytes: number;
+    /** Transpiled from long */
+    vramUsedBytes: number;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.ModelEvictionReason */
+export enum ModelEvictionReason {
+    Explicit = 0,
+    UserRequested = 1,
+    Lru = 2,
+    Calibration = 3,
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.ModelEvictedEvent */
+export type ModelEvictedEvent = {
+    /** Transpiled from string */
+    modelName: string;
+    /** Transpiled from long */
+    bytes: number;
+    /** Transpiled from DatumIngest.Web.Hubs.ModelEvictionReason */
+    reason: ModelEvictionReason;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.ModelActiveChangedEvent */
+export type ModelActiveChangedEvent = {
+    /** Transpiled from string */
+    modelName: string;
+    /** Transpiled from int */
+    activeRefs: number;
 }
 

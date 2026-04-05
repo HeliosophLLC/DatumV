@@ -1014,6 +1014,74 @@ public static class CompletionContext
                         }
                     }
 
+                    // EVICT MODEL / RESET CALIBRATION / DROP MODEL — soft-
+                    // keyword DDL paths. The parser treats EVICT, MODEL,
+                    // RESET, and CALIBRATION as contextual identifiers, so
+                    // we recognise them by token text here. Cursor right
+                    // after the trailing keyword routes through the
+                    // corresponding zone; the model-name zones then surface
+                    // the registered-model list via the completion
+                    // provider's `AddModelNames` helper.
+                    if (kind == SqlToken.Identifier)
+                    {
+                        string text = tokens[index].Text;
+                        // After bare EVICT → offer MODEL.
+                        if (string.Equals(text, "EVICT", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return CompletionZoneKind.AfterEvict;
+                        }
+                        // After bare RESET → offer CALIBRATION.
+                        if (string.Equals(text, "RESET", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return CompletionZoneKind.AfterReset;
+                        }
+                        // After MODEL — disambiguate against the previous
+                        // soft keyword. Walk back through optional IF /
+                        // EXISTS too so `EVICT MODEL IF EXISTS |` still
+                        // surfaces the model list.
+                        if (string.Equals(text, "MODEL", StringComparison.OrdinalIgnoreCase))
+                        {
+                            int back = index - 1;
+                            while (back >= 0)
+                            {
+                                SqlToken bk = tokens[back].Kind;
+                                if (bk == SqlToken.Exists || bk == SqlToken.If) { back--; continue; }
+                                break;
+                            }
+                            if (back >= 0 && tokens[back].Kind == SqlToken.Identifier)
+                            {
+                                string prev = tokens[back].Text;
+                                if (string.Equals(prev, "EVICT", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    return CompletionZoneKind.AfterEvictModel;
+                                }
+                            }
+                            // DROP MODEL — DROP is a dedicated token kind.
+                            if (back >= 0 && tokens[back].Kind == SqlToken.Drop)
+                            {
+                                return CompletionZoneKind.AfterDropModel;
+                            }
+                        }
+                        // After CALIBRATION (preceded by RESET) → offer
+                        // model names. Also walks past optional IF EXISTS
+                        // so `RESET CALIBRATION IF EXISTS |` surfaces them.
+                        if (string.Equals(text, "CALIBRATION", StringComparison.OrdinalIgnoreCase))
+                        {
+                            int back = index - 1;
+                            while (back >= 0)
+                            {
+                                SqlToken bk = tokens[back].Kind;
+                                if (bk == SqlToken.Exists || bk == SqlToken.If) { back--; continue; }
+                                break;
+                            }
+                            if (back >= 0 && tokens[back].Kind == SqlToken.Identifier
+                                && string.Equals(tokens[back].Text, "RESET", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return CompletionZoneKind.AfterResetCalibration;
+                            }
+                        }
+                    }
+
                     // Identifiers, literals, etc. — mark as content and keep walking back.
                     passedContent = true;
                     continue;
@@ -1552,6 +1620,31 @@ public enum CompletionZoneKind
 
     /// <summary>After DROP — offer TABLE, INDEX, IF EXISTS.</summary>
     AfterDrop,
+
+    /// <summary>
+    /// After <c>DROP MODEL</c> — offer the names of registered models plus
+    /// <c>IF EXISTS</c>. EVICT and RESET CALIBRATION share the same
+    /// completion shape (existing model name list); separate zones keep the
+    /// label text accurate and let future surfaces diverge cleanly.
+    /// </summary>
+    AfterDropModel,
+
+    /// <summary>
+    /// After <c>EVICT</c> — offer <c>MODEL</c>. EVICT, MODEL, RESET, and
+    /// CALIBRATION are all contextual identifiers in the parser (soft
+    /// keywords); the completion engine recognises them by token text in
+    /// the default Identifier arm of the walk-back switch.
+    /// </summary>
+    AfterEvict,
+
+    /// <summary>After <c>EVICT MODEL</c> — offer model names + <c>IF EXISTS</c>.</summary>
+    AfterEvictModel,
+
+    /// <summary>After <c>RESET</c> — offer <c>CALIBRATION</c>.</summary>
+    AfterReset,
+
+    /// <summary>After <c>RESET CALIBRATION</c> — offer model names + <c>IF EXISTS</c>.</summary>
+    AfterResetCalibration,
 
     /// <summary>After CREATE [TEMP] TABLE name ( — offer column type names.</summary>
     AfterCreateTableColumns,

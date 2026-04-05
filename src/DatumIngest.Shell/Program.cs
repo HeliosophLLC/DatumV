@@ -82,6 +82,16 @@ TableCatalog catalog = new(pool);
 ModelCatalog modelCatalog = BuiltinModels.AttachStandardModels(
     catalog, modelsOverride, vramBudgetBytes: vramBudgetOverrideBytes);
 
+// Flush calibration on Ctrl+C and on normal process exit. InteractiveShell's
+// Ctrl+C handler only cancels an active query; with no query running, the
+// default behavior kills the process before `using (catalog)` would
+// otherwise call Dispose. A measured curve is ~tens of seconds of work
+// per model — losing it because Dispose didn't run is the durability gap
+// users actually hit. Both handlers route through SaveCalibrationNow,
+// which is idempotent (re-serialises the same in-memory registry).
+Console.CancelKeyPress += (_, _) => modelCatalog.SaveCalibrationNow();
+AppDomain.CurrentDomain.ProcessExit += (_, _) => modelCatalog.SaveCalibrationNow();
+
 // Show the resolved budget at startup so users can see what auto-detection
 // picked. The residency manager already logs per-load lines; this is the
 // "where did the budget come from" header.

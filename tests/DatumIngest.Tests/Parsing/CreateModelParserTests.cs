@@ -196,6 +196,68 @@ public sealed class CreateModelParserTests : ServiceTestBase
         Assert.Equal("classify", drop.Name);
     }
 
+    [Fact]
+    public void EvictModel_HappyPath_PopulatesName()
+    {
+        Statement stmt = SqlParser.ParseStatement("EVICT MODEL classify");
+
+        EvictModelStatement evict = Assert.IsType<EvictModelStatement>(stmt);
+        Assert.Equal("classify", evict.Name);
+        Assert.Null(evict.SchemaName);
+        Assert.False(evict.IfExists);
+    }
+
+    [Fact]
+    public void EvictModel_IfExists_SetsFlag()
+    {
+        Statement stmt = SqlParser.ParseStatement("EVICT MODEL IF EXISTS classify");
+
+        EvictModelStatement evict = Assert.IsType<EvictModelStatement>(stmt);
+        Assert.True(evict.IfExists);
+        Assert.Equal("classify", evict.Name);
+    }
+
+    [Fact]
+    public void EvictModel_SchemaQualified_PopulatesSchema()
+    {
+        Statement stmt = SqlParser.ParseStatement("EVICT MODEL models.classify");
+
+        EvictModelStatement evict = Assert.IsType<EvictModelStatement>(stmt);
+        Assert.Equal("models", evict.SchemaName);
+        Assert.Equal("classify", evict.Name);
+    }
+
+    [Fact]
+    public void ResetCalibration_HappyPath_PopulatesName()
+    {
+        Statement stmt = SqlParser.ParseStatement("RESET CALIBRATION classify");
+
+        ResetCalibrationStatement reset = Assert.IsType<ResetCalibrationStatement>(stmt);
+        Assert.Equal("classify", reset.Name);
+        Assert.Null(reset.SchemaName);
+        Assert.False(reset.IfExists);
+    }
+
+    [Fact]
+    public void ResetCalibration_IfExists_SetsFlag()
+    {
+        Statement stmt = SqlParser.ParseStatement("RESET CALIBRATION IF EXISTS classify");
+
+        ResetCalibrationStatement reset = Assert.IsType<ResetCalibrationStatement>(stmt);
+        Assert.True(reset.IfExists);
+        Assert.Equal("classify", reset.Name);
+    }
+
+    [Fact]
+    public void ResetCalibration_SchemaQualified_PopulatesSchema()
+    {
+        Statement stmt = SqlParser.ParseStatement("RESET CALIBRATION models.classify");
+
+        ResetCalibrationStatement reset = Assert.IsType<ResetCalibrationStatement>(stmt);
+        Assert.Equal("models", reset.SchemaName);
+        Assert.Equal("classify", reset.Name);
+    }
+
     // ───────────────────── `model` as identifier regression ─────────────────────
     //
     // MODEL must remain a *contextual* identifier — it's only consumed as

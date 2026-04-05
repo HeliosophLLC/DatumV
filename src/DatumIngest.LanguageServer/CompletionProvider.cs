@@ -187,6 +187,23 @@ public sealed class CompletionProvider
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
+            // Model-runtime DDL: AfterEvict / AfterReset narrow to the
+            // single follow-up keyword; the model-name zones surface
+            // the IF EXISTS modifier plus every registered model's bare
+            // name so the user can complete the target without typing
+            // it from memory.
+            case CompletionZoneKind.AfterEvict:
+            case CompletionZoneKind.AfterReset:
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
+                break;
+
+            case CompletionZoneKind.AfterDropModel:
+            case CompletionZoneKind.AfterEvictModel:
+            case CompletionZoneKind.AfterResetCalibration:
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
+                AddModelNames(items);
+                break;
+
             case CompletionZoneKind.AfterCreateTableColumns:
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
@@ -965,6 +982,41 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Function,
                 Detail = detail,
                 InsertText = $"{model.Name}(",
+                Documentation = doc,
+                SortOrder = 1,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Surfaces every registered model as a bare-identifier suggestion
+    /// (no <c>models.</c> prefix, no trailing paren). Used by the
+    /// model-runtime DDL zones (<c>DROP MODEL</c> / <c>EVICT MODEL</c> /
+    /// <c>RESET CALIBRATION</c>) where the model name is the literal
+    /// argument to the statement, not a call site. Distinct from
+    /// <see cref="AddModels"/> which generates <c>models.&lt;name&gt;(</c>
+    /// call-site insertions for SELECT/projection contexts.
+    /// </summary>
+    private void AddModelNames(List<CompletionItem> items)
+    {
+        if (_manifest.Models is null) return;
+
+        foreach (ModelEntry model in _manifest.Models)
+        {
+            string detail = model.Category is not null
+                ? $"[{model.Category}] models.{model.Name}"
+                : $"models.{model.Name}";
+
+            string? doc = model.DisplayName is not null && model.Backend is not null
+                ? $"{model.DisplayName} ({model.Backend})"
+                : model.DisplayName ?? (model.Backend is not null ? $"backend: {model.Backend}" : null);
+
+            items.Add(new CompletionItem
+            {
+                Label = model.Name,
+                Kind = CompletionItemKind.Variable,
+                Detail = detail,
+                InsertText = model.Name,
                 Documentation = doc,
                 SortOrder = 1,
             });

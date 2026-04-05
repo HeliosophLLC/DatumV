@@ -107,6 +107,96 @@ public static class VramProbe
         }
     }
 
+    /// <summary>
+    /// Attempts to read GPU 0's stable UUID — the same value
+    /// <c>nvidia-smi -L</c> prints (e.g. <c>"GPU-12345678-1234-..."</c>).
+    /// The UUID is hardware-bound and survives driver upgrades; calibration
+    /// data persisted across process restarts uses it as the primary
+    /// invalidation key (different GPU → discard everything).
+    /// </summary>
+    public static bool TryGetGpuUuid([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? uuid)
+    {
+        if (_state == 0)
+        {
+            lock (_initLock)
+            {
+                if (_state == 0) Initialize();
+            }
+        }
+
+        if (_state != 1)
+        {
+            uuid = null;
+            return false;
+        }
+
+        try
+        {
+            // 96 chars covers V2 UUIDs (80-char V1 fits inside). NVML
+            // writes a null-terminated ASCII string; we trim at the
+            // terminator rather than trusting the return length.
+            byte[] buf = new byte[96];
+            if (Nvml.nvmlDeviceGetUUID(_device, buf, (uint)buf.Length) != 0)
+            {
+                uuid = null;
+                return false;
+            }
+            int nullAt = Array.IndexOf(buf, (byte)0);
+            uuid = System.Text.Encoding.ASCII.GetString(buf, 0, nullAt < 0 ? buf.Length : nullAt);
+            return true;
+        }
+        catch (DllNotFoundException)
+        {
+            _state = 2;
+            uuid = null;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to read the installed NVIDIA driver version string (the
+    /// same value <c>nvidia-smi --query-gpu=driver_version</c> reports).
+    /// Driver upgrades can change ORT's allocator behaviour materially, so
+    /// it's part of the calibration-invalidation fingerprint.
+    /// </summary>
+    public static bool TryGetDriverVersion([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? version)
+    {
+        if (_state == 0)
+        {
+            lock (_initLock)
+            {
+                if (_state == 0) Initialize();
+            }
+        }
+
+        if (_state != 1)
+        {
+            version = null;
+            return false;
+        }
+
+        try
+        {
+            // NVML's NVML_SYSTEM_DRIVER_VERSION_BUFFER_SIZE is 80; we
+            // allocate a touch more for headroom against future bumps.
+            byte[] buf = new byte[96];
+            if (Nvml.nvmlSystemGetDriverVersion(buf, (uint)buf.Length) != 0)
+            {
+                version = null;
+                return false;
+            }
+            int nullAt = Array.IndexOf(buf, (byte)0);
+            version = System.Text.Encoding.ASCII.GetString(buf, 0, nullAt < 0 ? buf.Length : nullAt);
+            return true;
+        }
+        catch (DllNotFoundException)
+        {
+            _state = 2;
+            version = null;
+            return false;
+        }
+    }
+
     private static void Initialize()
     {
         // Windows-only for v1 — Linux needs an NativeLibrary resolver
@@ -168,5 +258,11 @@ public static class VramProbe
 
         [DllImport("nvml.dll")]
         public static extern int nvmlDeviceGetMemoryInfo(IntPtr device, out NvmlMemory memory);
+
+        [DllImport("nvml.dll")]
+        public static extern int nvmlDeviceGetUUID(IntPtr device, byte[] uuid, uint length);
+
+        [DllImport("nvml.dll")]
+        public static extern int nvmlSystemGetDriverVersion(byte[] version, uint length);
     }
 }

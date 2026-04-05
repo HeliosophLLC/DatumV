@@ -1,4 +1,5 @@
 using DatumIngest.Diagnostics;
+using DatumIngest.Models.Calibration;
 
 namespace DatumIngest.Models;
 
@@ -43,6 +44,19 @@ public sealed class ModelResidencyManager : IDisposable
 
     private readonly object _lock = new();
     private readonly Dictionary<string, Resident> _resident = new(StringComparer.OrdinalIgnoreCase);
+    private readonly CalibrationRegistry? _calibrationRegistry;
+
+    // Serialises concurrent loader invocations so two different models
+    // never initialise in parallel on the GPU. Two parallel loads
+    // contaminate the weight-cost measurement (each load sees the
+    // other's VRAM contribution in its post-load reading), and ORT/CUDA
+    // init under contention occasionally races on allocator state.
+    // Followers waiting on the same model don't enter this gate —
+    // they await the placeholder TCS instead, so per-model dedup
+    // still gives them the right value without contending with
+    // unrelated loads.
+    private readonly SemaphoreSlim _loadGate = new(1, 1);
+
     private long _vramUsedBytes;
     private bool _disposed;
 
@@ -58,10 +72,22 @@ public sealed class ModelResidencyManager : IDisposable
     private sealed class Resident
     {
         public required Task<IModel> ModelTask { get; init; }
-        public required long Bytes { get; init; }
+        // Mutable so post-load reconciliation can replace the heuristic
+        // admit-time estimate with the calibration-registry's measured
+        // weight cost. See RecordWeightCost.
+        public required long Bytes { get; set; }
         public DateTimeOffset LastUsed { get; set; }
         public int ActiveRefs { get; set; }
     }
+
+    /// <summary>
+    /// Back-reference to the owning catalog so the residency manager
+    /// can route lifecycle events through the catalog's observer
+    /// fan-out. Set immediately after construction by
+    /// <see cref="ModelCatalog"/>; <see langword="null"/> in tests that
+    /// instantiate the manager directly (observer calls become no-ops).
+    /// </summary>
+    internal ModelCatalog? Catalog { get; set; }
 
     /// <summary>
     /// Maximum VRAM the manager will hold at any one time, in bytes.
@@ -99,14 +125,20 @@ public sealed class ModelResidencyManager : IDisposable
     /// <summary>
     /// Creates a manager with the given budget and timeout. Default budget is
     /// <see cref="UnlimitedBudget"/> (preserves the pre-residency "load
-    /// once, hold forever" behaviour).
+    /// once, hold forever" behaviour). The optional
+    /// <paramref name="calibrationRegistry"/> opts the manager into
+    /// recording per-model weight cost (VRAM delta around the loader call)
+    /// — when null, calibration is in-memory-only or absent and the load
+    /// path skips measurement.
     /// </summary>
     public ModelResidencyManager(
         long vramBudgetBytes = UnlimitedBudget,
-        TimeSpan? admissionTimeout = null)
+        TimeSpan? admissionTimeout = null,
+        CalibrationRegistry? calibrationRegistry = null)
     {
         VramBudgetBytes = vramBudgetBytes;
         AdmissionTimeout = admissionTimeout ?? DefaultAdmissionTimeout;
+        _calibrationRegistry = calibrationRegistry;
     }
 
     /// <summary>
@@ -130,7 +162,16 @@ public sealed class ModelResidencyManager : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        long estimatedBytes = entry.EstimatedVramBytes
+        // Prefer the measured weight cost from a prior calibration over
+        // any heuristic. After the first successful load on this host,
+        // RecordWeightCost populates CalibrationRegistry with the real
+        // NVML-measured delta; that's a much better admission gate than
+        // the file-size heuristic (which is wildly off for SQL-defined
+        // models whose "primary" file is a tiny wrapper for multi-GB
+        // ONNX sessions). Falls back to the entry's explicit hint, then
+        // to the file-size × 1.2 default.
+        long estimatedBytes = TryGetCalibratedWeightCost(entry.Name)
+            ?? entry.EstimatedVramBytes
             ?? EstimateFromFile(entry, modelDirectory);
 
         DateTimeOffset deadline = DateTimeOffset.UtcNow + AdmissionTimeout;
@@ -150,10 +191,15 @@ public sealed class ModelResidencyManager : IDisposable
 
                 if (_resident.TryGetValue(entry.Name, out Resident? cached))
                 {
-                    cached.ActiveRefs++;
+                    int newRefs = ++cached.ActiveRefs;
                     cached.LastUsed = DateTimeOffset.UtcNow;
                     modelTask = cached.ModelTask;
-                    DatumActivity.Operators.Trace($"[residency] acquire-hit '{entry.Name}' refs={cached.ActiveRefs}");
+                    DatumActivity.Operators.Trace($"[residency] acquire-hit '{entry.Name}' refs={newRefs}");
+                    // Coalesce on the busy edge: only fan out the
+                    // 0→1 transition (idle → in-use). Mid-burst N→N+1
+                    // increments would flood observers without adding
+                    // signal — the UI already knows it's busy.
+                    if (newRefs == 1) Catalog?.NotifyModelActiveChanged(entry.Name, newRefs);
                 }
                 else if (TryFitNew(estimatedBytes))
                 {
@@ -182,23 +228,70 @@ public sealed class ModelResidencyManager : IDisposable
 
             if (loaderTcs is not null)
             {
-                // ---- I'm the loader. Load outside the lock — the loader may
-                // do I/O and CUDA init and must not stall other acquires. ----
+                // ---- I'm the loader. Take the load gate so no other
+                // model loads in parallel — keeps weight-cost measurement
+                // clean and avoids ORT/CUDA allocator races. The loader
+                // call itself runs outside the residency `_lock` so
+                // unrelated lookups stay responsive. ----
+                await _loadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 IModel loadedModel;
+                long vramBefore = 0;
+                bool vramAvailable = false;
                 try
                 {
-                    loadedModel = entry.Loader(new ModelLoadContext(entry, modelDirectory));
-                }
-                catch (Exception ex)
-                {
-                    lock (_lock)
+                    // Bracket the loader call with VRAM probe readings so
+                    // we can record the model's true weight cost on the
+                    // calibration registry. The delta becomes the
+                    // per-model baseline that the future curve-aware
+                    // policy uses to decide whether a batch fits
+                    // ("weight + curve[batch] <= free_vram"). Probe miss
+                    // → record 0, the calibration coordinator will fill
+                    // the value in later via a dedicated calibration
+                    // pass.
+                    vramAvailable = VramProbe.TryGetUsage(out vramBefore, out _);
+
+                    // Track PEAK VRAM during the loader. ORT session
+                    // construction often spikes transient allocations
+                    // (workspace probes, kernel JIT) that release before
+                    // a post-load snapshot — capturing the peak via
+                    // background polling produces a more accurate weight
+                    // cost than the persistent post-load delta.
+                    long peakVram = vramBefore;
+                    using CancellationTokenSource samplerCts = new();
+                    Task sampler = vramAvailable
+                        ? VramPeakSampler.StartAsync(
+                            samplerCts.Token,
+                            observed => peakVram = Math.Max(peakVram, observed))
+                        : Task.CompletedTask;
+
+                    try
                     {
-                        _resident.Remove(entry.Name);
-                        _vramUsedBytes -= estimatedBytes;
+                        loadedModel = entry.Loader(new ModelLoadContext(entry, modelDirectory));
                     }
-                    loaderTcs.SetException(ex);
-                    _ = loaderTcs.Task.Exception; // observe so it cannot surface as UnobservedTaskException when no follower is waiting
-                    throw;
+                    catch (Exception ex)
+                    {
+                        samplerCts.Cancel();
+                        try { await sampler.ConfigureAwait(false); }
+                        catch (OperationCanceledException) { }
+                        lock (_lock)
+                        {
+                            _resident.Remove(entry.Name);
+                            _vramUsedBytes -= estimatedBytes;
+                        }
+                        loaderTcs.SetException(ex);
+                        _ = loaderTcs.Task.Exception; // observe so it cannot surface as UnobservedTaskException when no follower is waiting
+                        throw;
+                    }
+
+                    samplerCts.Cancel();
+                    try { await sampler.ConfigureAwait(false); }
+                    catch (OperationCanceledException) { }
+
+                    RecordWeightCost(entry, modelDirectory, vramBefore, peakVram, vramAvailable);
+                }
+                finally
+                {
+                    _loadGate.Release();
                 }
 
                 // Re-check disposal under the lock before publishing the
@@ -221,6 +314,17 @@ public sealed class ModelResidencyManager : IDisposable
                         $"used {FormatBytes(_vramUsedBytes)}/{FormatBudget()}.");
                     DatumActivity.Operators.Trace(
                         $"[residency] loaded '{entry.Name}' bytes={estimatedBytes} used={_vramUsedBytes}");
+                    // RecordWeightCost above may have already reconciled
+                    // estimatedBytes with the measured value; read the
+                    // resident's current Bytes for the observer payload
+                    // so the UI sees the same number system.models does.
+                    long observedBytes = _resident.TryGetValue(entry.Name, out Resident? r)
+                        ? r.Bytes : estimatedBytes;
+                    long observedUsed = _vramUsedBytes;
+                    Catalog?.NotifyModelLoaded(entry.Name, observedBytes, observedUsed);
+                    // The loader's own bump is the 0→1 transition for
+                    // this model — fire the busy edge here too.
+                    Catalog?.NotifyModelActiveChanged(entry.Name, 1);
                 }
                 loaderTcs.SetResult(loadedModel);
                 return new ModelLease(this, entry.Name, loadedModel);
@@ -273,15 +377,22 @@ public sealed class ModelResidencyManager : IDisposable
     /// </summary>
     internal void Release(string modelName)
     {
+        int? newRefs = null;
         lock (_lock)
         {
             if (_resident.TryGetValue(modelName, out Resident? r))
             {
                 if (r.ActiveRefs > 0) r.ActiveRefs--;
                 r.LastUsed = DateTimeOffset.UtcNow;
+                newRefs = r.ActiveRefs;
                 DatumActivity.Operators.Trace($"[residency] release '{modelName}' refs={r.ActiveRefs}");
             }
         }
+        // Idle edge: fire only on N→0 transitions. Same coalescing
+        // rationale as the acquire-hit busy-edge above. Fan-out runs
+        // outside the lock so a slow observer can't block other
+        // dispatch threads waiting to acquire.
+        if (newRefs == 0) Catalog?.NotifyModelActiveChanged(modelName, 0);
     }
 
     /// <summary>
@@ -300,17 +411,78 @@ public sealed class ModelResidencyManager : IDisposable
     /// </returns>
     public bool Evict(string modelName)
     {
+        long evictedBytes;
         lock (_lock)
         {
             if (!_resident.TryGetValue(modelName, out Resident? r)) return false;
             _resident.Remove(modelName);
             _vramUsedBytes -= r.Bytes;
+            evictedBytes = r.Bytes;
             if (r.ModelTask.IsCompletedSuccessfully)
                 (r.ModelTask.Result as IDisposable)?.Dispose();
             DatumActivity.Operators.Trace(
                 $"[residency] evict-explicit '{modelName}' bytes={r.Bytes} used={_vramUsedBytes}");
-            return true;
         }
+        Catalog?.NotifyModelEvicted(modelName, evictedBytes, EvictionReason.Explicit);
+        return true;
+    }
+
+    /// <summary>
+    /// Outcome of <see cref="TryEvictUnpinned"/>. Distinguishes the three
+    /// reasons EVICT MODEL might decline to act so the user-facing error
+    /// (or success trace) can be specific.
+    /// </summary>
+    public enum EvictResult
+    {
+        /// <summary>Entry was resident and unpinned; it has been evicted.</summary>
+        Evicted,
+
+        /// <summary>No entry was resident under that name; nothing to do.</summary>
+        NotResident,
+
+        /// <summary>Entry is resident but has active leases; not evicted.</summary>
+        Pinned,
+    }
+
+    /// <summary>
+    /// Safe variant of <see cref="Evict"/> for the user-typed
+    /// <c>EVICT MODEL</c> surface: refuses to evict (and refuses to
+    /// dispose the underlying <see cref="IModel"/>) when any query holds
+    /// an active lease. Returns <see cref="EvictResult.Pinned"/> in that
+    /// case so the caller can surface a "model is in use" error rather
+    /// than crashing the active query mid-dispatch.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from the existing <see cref="Evict"/> which intentionally
+    /// disposes regardless of active refs — that's the synchronous
+    /// tear-down path used by <c>DROP MODEL</c> / <c>CREATE OR REPLACE
+    /// MODEL</c> at the registrar level, with the same race semantics as
+    /// UDF replacement. A future lease-draining + lazy-disposal variant
+    /// can subsume both call sites.
+    /// </remarks>
+    public EvictResult TryEvictUnpinned(
+        string modelName, EvictionReason reason = EvictionReason.UserRequested)
+    {
+        long evictedBytes;
+        lock (_lock)
+        {
+            if (!_resident.TryGetValue(modelName, out Resident? r)) return EvictResult.NotResident;
+            if (r.ActiveRefs > 0)
+            {
+                DatumActivity.Operators.Trace(
+                    $"[residency] evict-refused-pinned '{modelName}' refs={r.ActiveRefs}");
+                return EvictResult.Pinned;
+            }
+            _resident.Remove(modelName);
+            _vramUsedBytes -= r.Bytes;
+            evictedBytes = r.Bytes;
+            if (r.ModelTask.IsCompletedSuccessfully)
+                (r.ModelTask.Result as IDisposable)?.Dispose();
+            DatumActivity.Operators.Trace(
+                $"[residency] evict-unpinned '{modelName}' bytes={r.Bytes} used={_vramUsedBytes}");
+        }
+        Catalog?.NotifyModelEvicted(modelName, evictedBytes, reason);
+        return EvictResult.Evicted;
     }
 
     /// <summary>
@@ -320,14 +492,34 @@ public sealed class ModelResidencyManager : IDisposable
     /// unlimited); <see langword="false"/> if all unpinned entries were
     /// evicted and the load still wouldn't fit.
     /// </summary>
+    /// <remarks>
+    /// Two parallel checks gate admission: the engine's internal budget
+    /// (<c>_vramUsedBytes</c> vs <see cref="VramBudgetBytes"/>) and an
+    /// NVML safety check (current device-wide usage vs total). Either
+    /// triggering forces eviction. The NVML check catches two cases the
+    /// internal accounting can miss: (a) external processes (a browser,
+    /// another engine instance) consuming VRAM the residency manager
+    /// doesn't track, and (b) underestimated entries — anything whose
+    /// admit-time heuristic was lower than actual VRAM cost. Both lead to
+    /// real spill into shared GPU memory; eviction shouldn't wait for
+    /// our bookkeeping to catch up.
+    /// </remarks>
     private bool TryFitNew(long estimatedBytes)
     {
-        if (VramBudgetBytes < 0) return true; // unlimited
+        bool budgetCheck = VramBudgetBytes < 0 || (VramBudgetBytes - _vramUsedBytes) >= estimatedBytes;
+        bool nvmlCheck = !VramProbe.TryGetUsage(out long deviceUsed, out long deviceTotal)
+            || (deviceTotal - deviceUsed - NvmlSafetyMargin(deviceTotal)) >= estimatedBytes;
 
-        long free = VramBudgetBytes - _vramUsedBytes;
-        if (free >= estimatedBytes) return true;
+        if (budgetCheck && nvmlCheck) return true;
 
-        long needed = estimatedBytes - free;
+        // At least one gate refused. Compute the eviction target as the
+        // larger of the two shortfalls, so we free enough VRAM regardless
+        // of which check fired.
+        long budgetShortfall = budgetCheck ? 0
+            : estimatedBytes - Math.Max(0, VramBudgetBytes - _vramUsedBytes);
+        long nvmlShortfall = nvmlCheck ? 0
+            : estimatedBytes - Math.Max(0, deviceTotal - deviceUsed - NvmlSafetyMargin(deviceTotal));
+        long needed = Math.Max(budgetShortfall, nvmlShortfall);
         List<KeyValuePair<string, Resident>> evictionOrder = _resident
             .Where(kv => kv.Value.ActiveRefs == 0)
             .OrderBy(kv => kv.Value.LastUsed)
@@ -349,6 +541,12 @@ public sealed class ModelResidencyManager : IDisposable
                 $"used {FormatBytes(_vramUsedBytes)}/{FormatBudget()}.");
             DatumActivity.Operators.Trace(
                 $"[residency] evicted '{kv.Key}' bytes={kv.Value.Bytes} used={_vramUsedBytes}");
+            // Observer fan-out happens inside _lock here. Safe because
+            // Catalog.NotifyModelEvicted snapshots observers under its
+            // own lock and fans out without holding it; observers
+            // themselves are documented as non-reentrant w.r.t. the
+            // residency manager.
+            Catalog?.NotifyModelEvicted(kv.Key, kv.Value.Bytes, EvictionReason.Lru);
 
             if (needed <= 0) return true;
         }
@@ -403,6 +601,107 @@ public sealed class ModelResidencyManager : IDisposable
         return (long)(total * 1.2);
     }
 
+    /// <summary>
+    /// VRAM held back from the NVML-based admission gate as a safety
+    /// margin. Larger of 1 GiB or 10% of device VRAM — matches the
+    /// shape the curve-aware batch-size policy uses so the two layers
+    /// agree on what "available" means.
+    /// </summary>
+    private static long NvmlSafetyMargin(long totalVram)
+        => Math.Max(1L * 1024 * 1024 * 1024, totalVram / 10);
+
+    /// <summary>
+    /// Returns the calibration registry's <c>WeightCostBytes</c> for
+    /// <paramref name="modelName"/> when it's been measured (positive),
+    /// or <see langword="null"/> otherwise. Used as the highest-priority
+    /// input to admission control's <c>estimatedBytes</c>: measured
+    /// numbers beat heuristics every time.
+    /// </summary>
+    private long? TryGetCalibratedWeightCost(string modelName)
+    {
+        if (_calibrationRegistry is null) return null;
+        Calibration.ModelCalibration? cal = _calibrationRegistry.Get(modelName);
+        if (cal is null) return null;
+        long weight = cal.WeightCostBytes;
+        return weight > 0 ? weight : null;
+    }
+
+    /// <summary>
+    /// Computes the marginal VRAM delta of the just-completed load and
+    /// stores it on the calibration registry as the model's
+    /// <c>WeightCostBytes</c>. Called after every successful loader
+    /// invocation; safe to call regardless of whether calibration is
+    /// wired or the model has a backing file — the no-op cases short-
+    /// circuit early.
+    /// </summary>
+    private void RecordWeightCost(
+        ModelCatalogEntry entry,
+        string modelDirectory,
+        long vramBefore,
+        long peakVram,
+        bool vramAvailable)
+    {
+        if (_calibrationRegistry is null) return;
+
+        // Resolve the fingerprintable absolute path. Builtins set
+        // RelativePath (relative to modelDirectory); SQL-defined models
+        // set FingerprintPath to the descriptor's already-absolute
+        // ResolvedUsingPath. Synthetic backends (EchoModel) have
+        // neither and skip recording — no fingerprintable identity
+        // means no cross-restart calibration anyway.
+        string? absolutePath = entry.FingerprintPath
+            ?? (string.IsNullOrEmpty(entry.RelativePath)
+                ? null
+                : Path.GetFullPath(Path.Combine(modelDirectory, entry.RelativePath)));
+        if (absolutePath is null) return;
+
+        string? fingerprint = ModelFileFingerprint.TryCompute(absolutePath);
+        if (fingerprint is null)
+        {
+            DatumActivity.Calibration.Trace(
+                $"skip-weight-cost '{entry.Name}' reason=fingerprint-failed path={absolutePath}");
+            return;
+        }
+
+        long weightCost = 0;
+        if (vramAvailable)
+        {
+            // Use the background sampler's PEAK reading rather than a
+            // single post-load snapshot. ORT session init transiently
+            // spikes allocations (workspace probes, kernel JIT) that
+            // release before a naive post-load probe — the peak is the
+            // honest weight footprint for admission control.
+            long delta = peakVram - vramBefore;
+            weightCost = delta > 0 ? delta : 0;
+        }
+
+        ModelCalibration calibration = _calibrationRegistry.GetOrCreate(entry.Name, fingerprint);
+        calibration.SetWeightCost(weightCost);
+        DatumActivity.Calibration.Trace(
+            $"weight-cost '{entry.Name}' bytes={weightCost} fingerprint={fingerprint}");
+
+        // Reconcile the residency accounting: if the measured weight cost
+        // differs materially from the heuristic estimate we used at admit
+        // time, update Resident.Bytes + _vramUsedBytes to the real value
+        // so future admission decisions don't think we have phantom
+        // headroom (heuristic too low) or evict prematurely (too high).
+        if (weightCost > 0)
+        {
+            lock (_lock)
+            {
+                if (_resident.TryGetValue(entry.Name, out Resident? r) && r.Bytes != weightCost)
+                {
+                    long oldBytes = r.Bytes;
+                    long delta = weightCost - oldBytes;
+                    r.Bytes = weightCost;
+                    _vramUsedBytes += delta;
+                    DatumActivity.Calibration.Trace(
+                        $"reconciled-resident-bytes '{entry.Name}' old={oldBytes} new={weightCost}");
+                }
+            }
+        }
+    }
+
     private static string FormatBytes(long bytes)
     {
         if (bytes <= 0) return "0 B";
@@ -436,6 +735,13 @@ public sealed class ModelResidencyManager : IDisposable
             _resident.Clear();
             _vramUsedBytes = 0;
         }
+        // Intentionally not disposing _loadGate — SemaphoreSlim only
+        // allocates unmanaged resources if WaitHandle is accessed, which
+        // we never do. Disposing here would race the loader's
+        // `finally { _loadGate.Release(); }` and throw
+        // ObjectDisposedException out of the release, short-circuiting
+        // the post-load `if (_disposed) dispose-the-loaded-model` cleanup
+        // and leaking the freshly-loaded model.
     }
 }
 

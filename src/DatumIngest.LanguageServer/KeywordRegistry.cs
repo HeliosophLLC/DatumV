@@ -122,6 +122,9 @@ internal static class KeywordRegistry
         [
             // Query / DML / DDL statements
             "SELECT", "WITH", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "ANALYZE", "REINDEX", "CALL",
+            // Model-runtime DDL — soft keywords in the parser, surfaced
+            // here so the user can discover them by typing EV / RE.
+            "EVICT", "RESET",
             // Procedural-batch statements. Reachable both at the top of a
             // batch and after IF/WHILE/FOR/TRY/CATCH/ELSE/BEGIN — wherever
             // the parser expects a fresh statement.
@@ -215,6 +218,18 @@ internal static class KeywordRegistry
 
         [CompletionZoneKind.AfterDrop] =
             ["TABLE", "INDEX", "FUNCTION", "PROCEDURE", "MODEL", "IF EXISTS"],
+
+        // Model-runtime DDL completion. After `DROP MODEL` / `EVICT MODEL`
+        // / `RESET CALIBRATION`, the only fixed keyword left is the
+        // optional `IF EXISTS` modifier — the model name itself comes
+        // from the registered-model list (surfaced by the completion
+        // provider, not this table). After bare `EVICT` and bare
+        // `RESET` we only have the one-token continuation.
+        [CompletionZoneKind.AfterEvict] = ["MODEL"],
+        [CompletionZoneKind.AfterReset] = ["CALIBRATION"],
+        [CompletionZoneKind.AfterDropModel] = ["IF EXISTS"],
+        [CompletionZoneKind.AfterEvictModel] = ["IF EXISTS"],
+        [CompletionZoneKind.AfterResetCalibration] = ["IF EXISTS"],
 
         [CompletionZoneKind.AfterCreateTableColumns] =
             [.. ColumnTypeKeywords,

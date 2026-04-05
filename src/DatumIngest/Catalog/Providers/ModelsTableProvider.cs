@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Model;
 using DatumIngest.Models;
+using DatumIngest.Models.Calibration;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
 
@@ -61,6 +62,9 @@ internal static class ModelKind
 ///   <item><term>status</term><description><c>available</c> / <c>missing</c> / <c>bridge</c>. See class remarks for semantics.</description></item>
 ///   <item><term>kind</term><description><c>builtin</c> (engine-baked entry in <see cref="ModelCatalog"/>) or <c>declared</c> (user-written <c>CREATE MODEL</c> in <see cref="ModelRegistry"/>). The schema-stable origin discriminator.</description></item>
 ///   <item><term>batchable</term><description>Whether the engine can dispatch N rows in one cross-row batched call. For <c>declared</c> rows this is derived from a straight-line check on the body (DECLARE / SET / RETURN only). For <c>builtin</c> rows it's whatever the impl reports via <see cref="IModel.IsBatchable"/> (default <see langword="false"/>).</description></item>
+///   <item><term>calibration_state</term><description><c>uncalibrated</c> / <c>calibrated</c> / <c>stale</c>. Reflects whether the calibration coordinator has measured this model's VRAM curve and whether the measurements still match observed dispatch behaviour.</description></item>
+///   <item><term>max_calibrated_batch</term><description>Largest batch size present in the model's calibration curve, or NULL when uncalibrated.</description></item>
+///   <item><term>weight_cost_bytes</term><description>VRAM cost of holding the model's weights (measured at load time as <c>vramAfter - vramBefore</c>), or NULL when no measurement has been recorded yet.</description></item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -100,7 +104,20 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
 
     /// <inheritdoc/>
     public override long GetRowCount()
-        => _modelCatalog.Entries.Count + (_declaredModels?.Entries.Count ?? 0);
+    {
+        // Mirror ScanAsync's dedup: a builtin entry shadowed by a
+        // declared entry contributes one row, not two.
+        if (_declaredModels is null) return _modelCatalog.Entries.Count;
+        HashSet<string> declaredNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (ModelDescriptor d in _declaredModels.Entries)
+            declaredNames.Add(d.Name);
+        long builtinShown = 0;
+        foreach (ModelCatalogEntry e in _modelCatalog.Entries.Values)
+        {
+            if (!declaredNames.Contains(e.Name)) builtinShown++;
+        }
+        return builtinShown + _declaredModels.Entries.Count;
+    }
 
     /// <inheritdoc/>
     public override Schema GetSchema() => _schema;
@@ -118,14 +135,33 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         // Snapshot both registries at scan start so concurrent registrations
         // during a long iteration don't produce inconsistent rows. The
         // snapshot is cheap: a list of references, no value materialisation.
-        // Builtins and declared rows are merged into one name-sorted stream
-        // so `SELECT * FROM system.models` reads alphabetically regardless
-        // of which registry an entry came from — the user filters by `kind`
-        // when they want to scope to one.
+        //
+        // Every SQL-defined model registers in BOTH places: the
+        // ModelRegistry (kind="declared") so REPL / DDL / introspection
+        // see the user's CREATE MODEL definition, and the ModelCatalog
+        // (kind="builtin") so the planner's MIO hoister can resolve
+        // models.* call sites against a uniform IModel surface. Surfacing
+        // both rows in system.models is confusing — every SQL-defined
+        // model shows up twice. The declared row is the user-facing
+        // source of truth; the builtin shadow is an internal artifact of
+        // how dispatch wiring works. When a name appears in both,
+        // suppress the builtin row so each model contributes exactly one
+        // row. Engine-baked builtins (no declared counterpart) keep their
+        // single kind="builtin" row.
+        HashSet<string> declaredNames = new(StringComparer.OrdinalIgnoreCase);
+        if (_declaredModels is not null)
+        {
+            foreach (ModelDescriptor d in _declaredModels.Entries)
+                declaredNames.Add(d.Name);
+        }
+
         var rows = new List<(string Name, bool IsBuiltin, ModelCatalogEntry? Entry, ModelDescriptor? Descriptor)>(
             _modelCatalog.Entries.Count + (_declaredModels?.Entries.Count ?? 0));
         foreach (ModelCatalogEntry entry in _modelCatalog.Entries.Values)
         {
+            // Skip the shadow builtin row when a declared row exists
+            // for the same name — see comment above.
+            if (declaredNames.Contains(entry.Name)) continue;
             rows.Add((entry.Name, IsBuiltin: true, entry, null));
         }
         if (_declaredModels is not null)
@@ -138,6 +174,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         rows.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
 
         string modelDirectory = _modelCatalog.ModelDirectory;
+        CalibrationRegistry calibrationRegistry = _modelCatalog.CalibrationRegistry;
 
         // requiredColumns / filterHint are advisory; we materialise the full row
         // and let the caller's project / filter operators trim.
@@ -162,6 +199,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
             {
                 FillRowFromDescriptor(values, entry.Descriptor!, modelDirectory, batch.Arena);
             }
+            FillCalibrationCells(values, calibrationRegistry.Get(entry.Name), batch.Arena);
             batch.Add(values);
 
             if (batch.IsFull)
@@ -335,21 +373,72 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
 
     private static Schema BuildSchema() => new(
     [
-        new ColumnInfo("name",            DataKind.String, nullable: false),
-        new ColumnInfo("display_name",    DataKind.String, nullable: true),
-        new ColumnInfo("category",        DataKind.String, nullable: true),
-        new ColumnInfo("modalities",      DataKind.String, nullable: true) { IsArray = true },
-        new ColumnInfo("backend",         DataKind.String, nullable: false),
-        new ColumnInfo("parameters",      DataKind.String, nullable: true),
-        new ColumnInfo("file_name",       DataKind.String, nullable: true),
-        new ColumnInfo("file_names",      DataKind.String, nullable: true) { IsArray = true },
-        new ColumnInfo("file_size_bytes", DataKind.Int64,  nullable: true),
-        new ColumnInfo("license",         DataKind.String, nullable: true),
-        new ColumnInfo("license_holder",  DataKind.String, nullable: true),
-        new ColumnInfo("source_url",      DataKind.String, nullable: true),
-        new ColumnInfo("status",          DataKind.String, nullable: false),
-        new ColumnInfo("kind",            DataKind.String, nullable: false),
-        new ColumnInfo("task",            DataKind.String, nullable: true),
-        new ColumnInfo("batchable",       DataKind.Boolean, nullable: false),
+        new ColumnInfo("name",                 DataKind.String, nullable: false),
+        new ColumnInfo("display_name",         DataKind.String, nullable: true),
+        new ColumnInfo("category",             DataKind.String, nullable: true),
+        new ColumnInfo("modalities",           DataKind.String, nullable: true) { IsArray = true },
+        new ColumnInfo("backend",              DataKind.String, nullable: false),
+        new ColumnInfo("parameters",           DataKind.String, nullable: true),
+        new ColumnInfo("file_name",            DataKind.String, nullable: true),
+        new ColumnInfo("file_names",           DataKind.String, nullable: true) { IsArray = true },
+        new ColumnInfo("file_size_bytes",      DataKind.Int64,  nullable: true),
+        new ColumnInfo("license",              DataKind.String, nullable: true),
+        new ColumnInfo("license_holder",       DataKind.String, nullable: true),
+        new ColumnInfo("source_url",           DataKind.String, nullable: true),
+        new ColumnInfo("status",               DataKind.String, nullable: false),
+        new ColumnInfo("kind",                 DataKind.String, nullable: false),
+        new ColumnInfo("task",                 DataKind.String, nullable: true),
+        new ColumnInfo("batchable",            DataKind.Boolean, nullable: false),
+        // ─── Calibration columns (populated from ModelCatalog.CalibrationRegistry) ───
+        // Always reflect current registry state; uncalibrated models surface
+        // as "uncalibrated" with null max_batch and null/zero weight cost.
+        new ColumnInfo("calibration_state",    DataKind.String, nullable: false),
+        new ColumnInfo("max_calibrated_batch", DataKind.Int32,  nullable: true),
+        new ColumnInfo("weight_cost_bytes",    DataKind.Int64,  nullable: true),
     ]);
+
+    /// <summary>
+    /// String form of <see cref="ModelCalibration.State"/> for the
+    /// <c>calibration_state</c> column. Three values mirror the enum
+    /// surface; lowercased for SQL-ergonomic filtering
+    /// (<c>WHERE calibration_state = 'uncalibrated'</c>).
+    /// </summary>
+    private static string CalibrationStateName(ModelCalibration.State state) => state switch
+    {
+        ModelCalibration.State.Uncalibrated => "uncalibrated",
+        ModelCalibration.State.Calibrated => "calibrated",
+        ModelCalibration.State.Stale => "stale",
+        _ => "unknown",
+    };
+
+    /// <summary>
+    /// Writes the three calibration cells onto a row at a fixed index
+    /// offset. Used by both built-in and declared row fills so the column
+    /// layout stays in lockstep with <see cref="BuildSchema"/>.
+    /// </summary>
+    private static void FillCalibrationCells(DataValue[] cells, ModelCalibration? calibration, Arena arena)
+    {
+        if (calibration is null)
+        {
+            cells[16] = DataValue.FromString("uncalibrated", arena);
+            cells[17] = DataValue.Null(DataKind.Int32);
+            cells[18] = DataValue.Null(DataKind.Int64);
+            return;
+        }
+
+        cells[16] = DataValue.FromString(CalibrationStateName(calibration.Status), arena);
+
+        IReadOnlyDictionary<int, CalibrationEntry> curve = calibration.Curve;
+        cells[17] = curve.Count == 0
+            ? DataValue.Null(DataKind.Int32)
+            : DataValue.FromInt32(curve.Keys.Max());
+
+        // weight_cost_bytes is meaningful only when a measurement has been
+        // recorded (positive). Zero in the registry can mean "probe miss
+        // at load time" rather than "free model"; surface as NULL so SQL
+        // queries don't confuse the two.
+        cells[18] = calibration.WeightCostBytes > 0
+            ? DataValue.FromInt64(calibration.WeightCostBytes)
+            : DataValue.Null(DataKind.Int64);
+    }
 }

@@ -126,4 +126,35 @@ public sealed class LazyModelSessions
             }
         }
     }
+
+    /// <summary>
+    /// Disposes every loaded session AND clears the loader cache so the
+    /// next <see cref="ResolveAsync"/> on each alias reloads from disk.
+    /// Differs from <see cref="DisposeLoaded"/> in that this is intended
+    /// for residency-driven re-acquisition: the model gets unloaded from
+    /// VRAM, the descriptor and path map stay valid, and a future
+    /// invocation transparently reloads. Used by the residency manager
+    /// when evicting a SQL-defined model to make room for a sibling.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Race with in-flight scalar dispatch.</strong> The
+    /// non-MIO scalar fallback path
+    /// (<c>ProceduralModelFunction.ExecuteAsync</c>) calls
+    /// <see cref="ResolveAsync"/> without holding a residency lease, so
+    /// nothing in the residency layer can guarantee it isn't using a
+    /// session at the moment <see cref="Reset"/> runs. In practice this
+    /// is uncommon — the planner hoists every top-level <c>models.*</c>
+    /// call into MIO, which DOES hold a lease, so eviction is gated by
+    /// refcount=0. Calls from unhoisted contexts (UDF bodies, etc.) can
+    /// race; the failure mode is an <see cref="ObjectDisposedException"/>
+    /// from the disposed session. A proper fix needs refcounting on the
+    /// scalar path too; tracked separately.
+    /// </para>
+    /// </remarks>
+    public void Reset()
+    {
+        DisposeLoaded();
+        _loaders.Clear();
+    }
 }

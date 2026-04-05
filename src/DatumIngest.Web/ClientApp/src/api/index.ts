@@ -3,6 +3,7 @@ import {
   HealthClient,
   LanguageClient,
   ModelCatalogClient,
+  ModelRuntimeClient,
   SchemaCatalogClient,
   SettingsClient,
 } from './generated/openapi-client';
@@ -28,6 +29,7 @@ export function createApi(baseUrl = '') {
     health: new HealthClient(baseUrl, http),
     settings: new SettingsClient(baseUrl, http),
     modelCatalog: new ModelCatalogClient(baseUrl, http),
+    modelRuntime: new ModelRuntimeClient(baseUrl, http),
     language: new LanguageClient(baseUrl, http),
     functionCatalog: new FunctionCatalogClient(baseUrl, http),
     schemaCatalog: new SchemaCatalogClient(baseUrl, http),

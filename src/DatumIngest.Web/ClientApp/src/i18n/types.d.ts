@@ -9,6 +9,7 @@ import type enPanels from './locales/en/panels.json';
 import type enProcedures from './locales/en/procedures.json';
 import type enQuery from './locales/en/query.json';
 import type enSettings from './locales/en/settings.json';
+import type enStatus from './locales/en/status.json';
 
 // Module augmentation: makes `t('window.close')` etc. type-checked and
 // autocompletable. The English bundle is the canonical key set — other
@@ -29,6 +30,7 @@ declare module 'i18next' {
       catalog: typeof enCatalog;
       procedures: typeof enProcedures;
       docs: typeof enDocs;
+      status: typeof enStatus;
     };
     returnNull: false;
   }

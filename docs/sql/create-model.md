@@ -434,16 +434,21 @@ FROM (
 
 ## Performance
 
-SQL-defined models dispatch **one row per `Session.Run`**. Both built-in
-and SQL-defined models route through `ModelInvocationOperator`; SQL
-bodies execute inside a `ProceduralModelAdapter` that interprets the
-DECLARE/RETURN body once per row. For most workloads, per-row dispatch
-cost is dominated by inference itself, so the practical impact of
-single-row dispatch is small. Cross-row batched dispatch (packing N rows
-into one `Session.Run` for sessions with a dynamic leading dim) is
-implemented but not enabled by default — see
+Both built-in and SQL-defined models route through
+`ModelInvocationOperator`; SQL bodies execute inside a
+`ProceduralModelAdapter` that interprets the DECLARE/RETURN body once per
+row. Dispatch chunk size comes from the engine's `BatchSizePolicy`,
+which by default consults the model's per-host VRAM calibration curve to
+pick the largest batch that fits in current free VRAM. Models without a
+calibration curve dispatch at `batch=1` until one is recorded.
+
+Multi-model queries (`SELECT a(file), b(file)` or `a(b(file))`) collapse
+into a single multi-invocation `ModelInvocationOperator` so models run
+one-at-a-time with leases released between invocations — preventing the
+residency contention that otherwise lets ORT spill activations into
+shared GPU memory. See
 [`design-docs/onnx-inference.md`](../design-docs/onnx-inference.md#batch-sizing)
-for the rationale around multi-model VRAM contention.
+for the full calibration + dispatch model.
 
 ## Persistence
 
@@ -491,8 +496,10 @@ rows: `name`, `backend = "sql"`, `file_name` (the raw `USING` path),
   Float16, Bool, UInt8, and the rest are runtime errors today; each is
   one branch to add.
 - **No persistence.** Re-issue `CREATE MODEL` after process restart.
-- **Dispatch is one row per `Session.Run`** under the current engine
-  default. See [Performance](#performance).
+- **Calibration auto-triggering is not yet wired** — curves must be
+  populated by an explicit code-path caller of
+  `CalibrationCoordinator.EnsureCalibratedAsync`. Until that exists,
+  uncalibrated models dispatch at `batch=1`. See [Performance](#performance).
 - **Schema is fixed.** Models always live under `models.X` — no
   user-chosen schema.
 - **Body restrictions.** No `BREAK`/`CONTINUE`; no nested `SELECT`.

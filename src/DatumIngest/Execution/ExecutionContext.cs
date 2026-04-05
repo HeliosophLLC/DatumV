@@ -85,7 +85,7 @@ public sealed class ExecutionContext : IDisposable
   /// survive across statements). When <see langword="null"/>, the context constructs and
   /// owns its own; the owned registry is disposed when this context is disposed.
   /// </param>
-  public ExecutionContext(
+    public ExecutionContext(
         CancellationToken cancellationToken,
         FunctionRegistry functionRegistry,
         TableCatalog catalog,

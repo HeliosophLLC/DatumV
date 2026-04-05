@@ -568,6 +568,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 Routines.ApplyDropModel(dropModel, sourceText);
                 return EmptyQueryPlan.Instance;
 
+            case EvictModelStatement evictModel:
+                Routines.ApplyEvictModel(evictModel, sourceText);
+                return EmptyQueryPlan.Instance;
+
+            case ResetCalibrationStatement resetCalibration:
+                Routines.ApplyResetCalibration(resetCalibration, sourceText);
+                return EmptyQueryPlan.Instance;
+
             case CallStatement call:
                 return PlanCall(call);
 
@@ -954,6 +962,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <inheritdoc />
     public void Dispose()
     {
+        // Dispose Models first so its calibration save timer flushes
+        // before the providers that surface it (system.models et al)
+        // tear down. ModelCatalog.Dispose is the only path that writes
+        // a final calibration JSON on clean exit; skipping it loses
+        // every curve measured since the last 1-minute tick.
+        Models?.Dispose();
+
         // Disposes all locally-registered providers via each backend.
         // Parent-catalog providers remain owned by the parent.
         FlatFileCatalog.Dispose();

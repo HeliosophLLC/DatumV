@@ -1,0 +1,38 @@
+{
+  "residencyChip": {
+    "label": "Residency",
+    "empty": "No models loaded",
+    "modelCount": "{count, plural, one {# model} other {# models}}",
+    "popoverTitle": "Resident models",
+    "columnName": "Model",
+    "columnWeight": "Weight",
+    "columnRefs": "Refs",
+    "columnAction": "",
+    "evictButton": "Evict",
+    "evictPinnedToast": "Cannot evict — model is in use",
+    "evictNotResidentToast": "Model is no longer resident",
+    "idleBadge": "idle",
+    "busyBadge": "busy"
+  },
+  "calibrationChip": {
+    "label": "Calibration",
+    "ramping": "Calibrating {model}",
+    "rampingShort": "Calibrating",
+    "popoverTitle": "Calibration",
+    "popoverActiveRamp": "Active: {model}",
+    "popoverActiveSteps": "{count, plural, one {# step recorded} other {# steps recorded}}",
+    "popoverRecent": "Recent",
+    "popoverRecentEmpty": "No recent calibration activity",
+    "outcomeCompleted": "completed",
+    "outcomeHaltedProjection": "halted (projection)",
+    "outcomeHaltedSpill": "halted (spill)",
+    "curveTableTitle": "Curves",
+    "curveTableEmpty": "No curves yet",
+    "curveColumnBatch": "Batch",
+    "curveColumnTotal": "Total VRAM",
+    "curveColumnActivation": "Activation",
+    "curveStatusUncalibrated": "Uncalibrated",
+    "curveStatusCalibrated": "Calibrated",
+    "curveStatusStale": "Stale"
+  }
+}

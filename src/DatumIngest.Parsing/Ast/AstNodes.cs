@@ -1847,6 +1847,39 @@ public sealed record DropModelStatement(
     string? SchemaName = null) : Statement;
 
 /// <summary>
+/// <c>EVICT MODEL [IF EXISTS] name</c> — drops the model's currently
+/// resident instance from the residency manager, freeing its VRAM. The
+/// catalog registration is untouched; the next query that references
+/// the model triggers a fresh load through the normal acquire path.
+/// </summary>
+/// <param name="Name">The model name to evict.</param>
+/// <param name="IfExists">When <see langword="true"/>, suppresses errors if no resident entry exists.</param>
+/// <param name="Span">Source location for diagnostic reporting.</param>
+/// <param name="SchemaName">Optional schema qualifier; only <c>models</c> is accepted (same lockdown as CREATE/DROP MODEL).</param>
+public sealed record EvictModelStatement(
+    string Name,
+    bool IfExists = false,
+    SourceSpan? Span = null,
+    string? SchemaName = null) : Statement;
+
+/// <summary>
+/// <c>RESET CALIBRATION [IF EXISTS] name</c> — clears the per-model
+/// VRAM calibration curve in memory and triggers a fresh write of the
+/// persisted calibration file on the next save tick. The model itself
+/// is untouched; the next dispatch re-measures via the calibration
+/// coordinator.
+/// </summary>
+/// <param name="Name">The model name whose calibration to reset.</param>
+/// <param name="IfExists">When <see langword="true"/>, suppresses errors if no calibration entry exists.</param>
+/// <param name="Span">Source location for diagnostic reporting.</param>
+/// <param name="SchemaName">Optional schema qualifier; only <c>models</c> is accepted (same lockdown as CREATE/DROP MODEL).</param>
+public sealed record ResetCalibrationStatement(
+    string Name,
+    bool IfExists = false,
+    SourceSpan? Span = null,
+    string? SchemaName = null) : Statement;
+
+/// <summary>
 /// <c>DROP FUNCTION [IF EXISTS] name</c> — removes a previously registered UDF.
 /// </summary>
 /// <param name="Name">The UDF name to remove.</param>

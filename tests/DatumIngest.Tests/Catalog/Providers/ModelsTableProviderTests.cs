@@ -48,7 +48,7 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
 
         Schema schema = provider.GetSchema();
 
-        Assert.Equal(16, schema.Columns.Count);
+        Assert.Equal(19, schema.Columns.Count);
 
         Assert.Equal("name", schema.Columns[0].Name);
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
@@ -91,6 +91,22 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
         Assert.Equal("batchable", schema.Columns[15].Name);
         Assert.Equal(DataKind.Boolean, schema.Columns[15].Kind);
         Assert.False(schema.Columns[15].Nullable);
+
+        // Calibration columns — populated from ModelCatalog.CalibrationRegistry.
+        // `calibration_state` is always one of "uncalibrated" / "calibrated" / "stale"
+        // so it's non-nullable; the other two are nullable to distinguish "no
+        // measurement yet" from a real zero.
+        Assert.Equal("calibration_state", schema.Columns[16].Name);
+        Assert.Equal(DataKind.String, schema.Columns[16].Kind);
+        Assert.False(schema.Columns[16].Nullable);
+
+        Assert.Equal("max_calibrated_batch", schema.Columns[17].Name);
+        Assert.Equal(DataKind.Int32, schema.Columns[17].Kind);
+        Assert.True(schema.Columns[17].Nullable);
+
+        Assert.Equal("weight_cost_bytes", schema.Columns[18].Name);
+        Assert.Equal(DataKind.Int64, schema.Columns[18].Kind);
+        Assert.True(schema.Columns[18].Nullable);
     }
 
     /// <summary>
@@ -383,6 +399,53 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
         Assert.Equal(
             [("alpha", "builtin"), ("zeta", "declared")],
             rows);
+    }
+
+    /// <summary>
+    /// SQL-defined models register in BOTH the declared <see cref="ModelRegistry"/>
+    /// and (via <c>RegisterModelAdapter</c>) the <see cref="ModelCatalog"/>'s
+    /// builtin map so MIO's hoister can resolve them uniformly. The provider
+    /// must dedup such shadows: the declared row stays, the builtin shadow
+    /// is suppressed. Each registered model contributes exactly one row to
+    /// <c>system.models</c>, with <c>kind = "declared"</c> reflecting the
+    /// user's CREATE MODEL definition as the source of truth.
+    /// </summary>
+    [Fact]
+    public async Task ScanAsync_DeclaredModelWithBuiltinShadow_DedupsToDeclaredOnly()
+    {
+        // File present so the row would be available for either kind.
+        string sharedFile = Path.Combine(_tempModelDir, "shadowed.onnx");
+        await File.WriteAllBytesAsync(sharedFile, new byte[16]);
+
+        Pool pool = CreatePool();
+        ModelCatalog catalog = new(_tempModelDir);
+        // Mirror RegisterModelAdapter: a SQL-defined model registers the
+        // same name in both the catalog AND the declared registry.
+        catalog.Register(MakeEntry("shadowed"));
+        ModelRegistry declared = new();
+        declared.Register(MakeDescriptor("shadowed", $"file://{sharedFile}"));
+
+        using ModelsTableProvider provider = new(pool, catalog, declared);
+
+        List<(string Name, string Kind)> rows = new();
+        await foreach (RowBatch batch in provider.ScanAsync(
+            requiredColumns: null,
+            filterHint: null,
+            targetArena: null,
+            cancellationToken: CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add((
+                    batch[i][0].AsString(batch.Arena),
+                    batch[i][13].AsString(batch.Arena)));
+            }
+        }
+
+        // Exactly one row, with kind = declared (NOT two rows under
+        // separate kinds).
+        Assert.Equal([("shadowed", "declared")], rows);
+        Assert.Equal(1, provider.GetRowCount());
     }
 
     private static ModelDescriptor MakeDescriptor(

@@ -11,4 +11,15 @@ public interface ICatalogHubClient
     Task OnPong(string message);
 
     Task OnCatalogChanged(CatalogChangedEvent change);
+
+    // ─── Residency lifecycle (IModelLifecycleObserver fan-out) ───
+    Task OnModelLoaded(ModelLoadedEvent ev);
+    Task OnModelEvicted(ModelEvictedEvent ev);
+    Task OnModelActiveChanged(ModelActiveChangedEvent ev);
+
+    // ─── Calibration ramp lifecycle (ICalibrationObserver fan-out) ───
+    Task OnCalibrationRampStarted(CalibrationRampStartedEvent ev);
+    Task OnCalibrationRampStep(CalibrationRampStepEvent ev);
+    Task OnCalibrationRampHalted(CalibrationRampHaltedEvent ev);
+    Task OnCalibrationRampCompleted(CalibrationRampCompletedEvent ev);
 }

@@ -125,6 +125,163 @@ public sealed class BatchOnePolicy : IBatchSizePolicy
 }
 
 /// <summary>
+/// Default engine policy: looks up the model's persisted calibration
+/// curve and picks the largest batch size whose activation cost
+/// (<c>total_vram_bytes - weight_cost_bytes</c>) fits in the live free-
+/// VRAM budget. Falls back to <c>batch=1</c> when no calibration exists
+/// (yet) for the model. No online refinement — the curve stores
+/// absolute totals from fresh-load dispatches and a steady-state
+/// snapshot can't produce that number; only an explicit recalibration
+/// updates the curve. <see cref="RecordDispatch"/> still watches per-row
+/// duration for spill detection.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Two-state design.</strong> Either we have curve data and use
+/// it, or we don't and dispatch at 1. There's no "in between" ramp —
+/// the explicit <see cref="DatumIngest.Models.Calibration.CalibrationCoordinator"/>
+/// runs ramp passes in a controlled, single-model-at-a-time environment
+/// where measurements are trustworthy. Trying to ramp inside the
+/// dispatch policy (the old <see cref="DoublingBatchSizePolicy"/> shape)
+/// races with sibling-model dispatches and contaminates the curve;
+/// that's the failure mode that motivated the entire 2026-05-21 retreat
+/// to <see cref="BatchOnePolicy"/>.
+/// </para>
+/// <para>
+/// <strong>Probe required.</strong> When the VRAM probe is unavailable
+/// (non-NVIDIA host, CPU EP, init failed), the policy falls back to
+/// <c>batch=1</c> regardless of curve state — without a live VRAM
+/// reading we have no way to validate that the predicted batch fits.
+/// The future vendor-agnostic probe (see
+/// <c>project_vendor_agnostic_vram_probe.md</c>) lifts this restriction.
+/// </para>
+/// <para>
+/// <strong>Spill detection.</strong> Per-row duration jumping >2× the
+/// best observation triggers <see cref="DatumIngest.Models.Calibration.ModelCalibration.RecordSpill"/>,
+/// which drops the offending entry and everything larger and demotes the
+/// calibration to <c>Stale</c>. Next acquire forces recalibration via the
+/// coordinator.
+/// </para>
+/// </remarks>
+public sealed class CurvePolicy : IBatchSizePolicy
+{
+    /// <summary>
+    /// Multiplier above which a dispatch's per-row time is treated as a
+    /// VRAM-spill signal. Same threshold the doubling-tuner used and the
+    /// coordinator uses — keeps the three layers' semantics in lockstep.
+    /// </summary>
+    public const double SpillDetectionMultiplier = 2.0;
+
+    /// <summary>
+    /// Floor below which spill detection is skipped. Sub-millisecond
+    /// dispatches in tests / cheap operations have jitter that swamps
+    /// the 2× threshold; the floor stops false positives.
+    /// </summary>
+    public const double MinDispatchMsForSpillDetection = 5.0;
+
+    private readonly Calibration.CalibrationRegistry _registry;
+    private readonly IVramProbe _probe;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, double> _bestMsPerRow =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Constructs the policy bound to <paramref name="registry"/> for
+    /// per-model curve lookups and <paramref name="probe"/> for live
+    /// VRAM headroom (defaults to <see cref="NvmlVramProbe.Instance"/>).
+    /// </summary>
+    public CurvePolicy(Calibration.CalibrationRegistry registry, IVramProbe? probe = null)
+    {
+        _registry = registry;
+        _probe = probe ?? NvmlVramProbe.Instance;
+    }
+
+    /// <inheritdoc />
+    public int ChooseBatchSize(IModel model, int rowsRemaining)
+    {
+        if (rowsRemaining <= 0) return 0;
+
+        // No probe → no headroom check → safe default of 1.
+        if (!_probe.TryGetUsage(out long used, out long total))
+        {
+            return Math.Min(1, rowsRemaining);
+        }
+
+        Calibration.ModelCalibration? cal = _registry.Get(model.Name);
+        if (cal is null || cal.Status != Calibration.ModelCalibration.State.Calibrated)
+        {
+            // Either uncalibrated or stale → batch=1 until the
+            // coordinator (future PR) re-runs a ramp.
+            return Math.Min(1, rowsRemaining);
+        }
+
+        long free = total - used;
+        long safety = SafetyMargin(total);
+        long availableActivation = free - safety;
+        if (availableActivation <= 0) return Math.Min(1, rowsRemaining);
+
+        int? picked = cal.PickLargestFitting(availableActivation);
+        int batch = picked ?? 1;
+        return Math.Min(batch, rowsRemaining);
+    }
+
+    /// <inheritdoc />
+    public void RecordDispatch(IModel model, int batchSize, long vramBefore, long vramAfter, double dispatchMs)
+    {
+        if (batchSize <= 0) return;
+
+        Calibration.ModelCalibration? cal = _registry.Get(model.Name);
+        if (cal is null) return;
+
+        // No online curve refinement. The calibration curve now stores
+        // absolute totals (peak VRAM during a fresh-load dispatch); a
+        // single online dispatch can't produce that number — the model
+        // is already loaded, ORT's arena is pre-sized, and the
+        // before/after snapshot only sees marginal growth (often 0 due
+        // to allocator reuse). Any attempt to refine here would just
+        // corrupt the calibrated totals. Curves change only via an
+        // explicit recalibration pass.
+        //
+        // Spill detection by duration jump remains useful: a sudden
+        // per-row time inflation is independent of how we record VRAM
+        // and signals the model has degraded (kernel cache miss, GPU
+        // throttle, memory pressure flushing pages). Compared per
+        // model name so two parallel queries on the same model don't
+        // poison each other's best-seen reading.
+        _ = vramBefore;
+        _ = vramAfter;
+
+        if (dispatchMs >= MinDispatchMsForSpillDetection)
+        {
+            double currentMsPerRow = dispatchMs / batchSize;
+            double bestMsPerRow = _bestMsPerRow.GetOrAdd(model.Name, _ => currentMsPerRow);
+            if (currentMsPerRow > bestMsPerRow * SpillDetectionMultiplier && batchSize > 1)
+            {
+                DatumActivity.Operators.Trace(
+                    $"curve-policy: model={model.Name} spill-detected batch={batchSize} " +
+                    $"msPerRow={currentMsPerRow:F1} best={bestMsPerRow:F1} -> drop curve entry");
+                cal.RecordSpill(batchSize);
+                return;
+            }
+            if (currentMsPerRow < bestMsPerRow)
+            {
+                _bestMsPerRow[model.Name] = currentMsPerRow;
+            }
+        }
+    }
+
+    /// <summary>
+    /// VRAM the policy refuses to spend on a dispatch — leaves room for
+    /// allocator fragmentation, ORT kernel scratch, and concurrent
+    /// queries on the same engine. Larger of 512 MB or 10% of device
+    /// VRAM. Same formula the doubling tuner used; keeping it identical
+    /// means the calibration coordinator's ramp measurements stay
+    /// directly comparable.
+    /// </summary>
+    private static long SafetyMargin(long totalVram)
+        => Math.Max(512L * 1024 * 1024, totalVram / 10);
+}
+
+/// <summary>
 /// No-op policy that mirrors the pre-policy behaviour:
 /// <c>model.PreferredBatchSize ?? rowsRemaining</c>, no per-dispatch
 /// tuning. Useful for tests that need predictable dispatch counts and

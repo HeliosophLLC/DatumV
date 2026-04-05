@@ -236,6 +236,49 @@ public sealed class ModelResidencyManagerTests
     }
 
     [Fact]
+    public async Task TryEvictUnpinned_UnpinnedModel_EvictsAndDisposes()
+    {
+        using ModelResidencyManager mgr = new(vramBudgetBytes: ModelResidencyManager.UnlimitedBudget);
+        ModelCatalogEntry entry = MakeEntry("a", 100);
+        FakeModel loaded;
+        using (ModelLease lease = await mgr.AcquireAsync(entry, "", CancellationToken.None))
+        {
+            loaded = (FakeModel)lease.Model;
+        }
+        // lease disposed → refs == 0; eviction must succeed and dispose.
+        ModelResidencyManager.EvictResult result = mgr.TryEvictUnpinned("a");
+
+        Assert.Equal(ModelResidencyManager.EvictResult.Evicted, result);
+        Assert.True(loaded.Disposed);
+        Assert.Empty(mgr.Snapshot());
+        Assert.Equal(0, mgr.VramUsedBytes);
+    }
+
+    [Fact]
+    public async Task TryEvictUnpinned_PinnedModel_RefusesAndPreservesModel()
+    {
+        using ModelResidencyManager mgr = new(vramBudgetBytes: ModelResidencyManager.UnlimitedBudget);
+        using ModelLease lease = await mgr.AcquireAsync(MakeEntry("a", 100), "", CancellationToken.None);
+
+        ModelResidencyManager.EvictResult result = mgr.TryEvictUnpinned("a");
+
+        Assert.Equal(ModelResidencyManager.EvictResult.Pinned, result);
+        Assert.False(((FakeModel)lease.Model).Disposed,
+            "TryEvictUnpinned must not dispose a model whose lease is still active");
+        Assert.Contains(mgr.Snapshot(), s => s.Name == "a");
+        Assert.Equal(100, mgr.VramUsedBytes);
+    }
+
+    [Fact]
+    public void TryEvictUnpinned_UnknownModel_ReturnsNotResident()
+    {
+        using ModelResidencyManager mgr = new(vramBudgetBytes: ModelResidencyManager.UnlimitedBudget);
+        ModelResidencyManager.EvictResult result = mgr.TryEvictUnpinned("does-not-exist");
+
+        Assert.Equal(ModelResidencyManager.EvictResult.NotResident, result);
+    }
+
+    [Fact]
     public async Task Acquire_AllPinned_TimesOutWithDiagnostic()
     {
         using ModelResidencyManager mgr = new(

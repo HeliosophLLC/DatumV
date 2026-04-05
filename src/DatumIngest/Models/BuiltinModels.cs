@@ -2,6 +2,7 @@ using System.Text.Json;
 
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Diagnostics;
 using DatumIngest.Model;
 using DatumIngest.Models.Llama;
 using DatumIngest.Models.Onnx;
@@ -69,7 +70,46 @@ public static class BuiltinModels
         long? vramBudgetBytes = null)
     {
         long resolvedBudget = vramBudgetBytes ?? VramBudgetResolver.Resolve();
-        ModelCatalog modelCatalog = new(modelDirectory, resolvedBudget, admissionTimeout: null);
+
+        // Wire calibration persistence when we can detect a stable host
+        // fingerprint. On NVIDIA hosts this lets `system.models.weight_cost_bytes`
+        // and the full `system.model_calibration` curve survive across
+        // process restarts via `%LOCALAPPDATA%/DatumIngest/calibration.json`.
+        // On hosts without NVML (CPU-only, AMD/Intel GPU, init failed)
+        // `HostFingerprint.Detect` returns null and we fall through to
+        // in-memory-only calibration — engine still runs, just doesn't
+        // persist across restarts.
+        //
+        // ORT version comes from `OnnxRuntimeVersion.Value` — a static
+        // `typeof(InferenceSession).Assembly` lookup in the inference
+        // layer that's both trim-safe (no IL2026 warning) and
+        // NativeAOT-compatible (no `Assembly.Load(name)` call). The
+        // diagnostics layer stays leaf and just receives the string.
+        Diagnostics.HostFingerprint? fingerprint = Diagnostics.HostFingerprint.Detect(
+            Inference.OnnxRuntime.OnnxRuntimeVersion.Value);
+        Calibration.CalibrationStore? calibrationStore =
+            fingerprint is not null ? new Calibration.CalibrationStore() : null;
+
+        // Loud trace when persistence is disabled. Silent failure here
+        // was the cause of "calibration runs but nothing survives a
+        // restart" — calibration data accumulated in the in-memory
+        // registry while every save call was a no-op. Surface the
+        // reason at startup so future regressions are immediately
+        // visible in `--activity-log`.
+        if (fingerprint is null)
+        {
+            DatumActivity.Calibration.Trace(
+                "persistence disabled: HostFingerprint.Detect returned null "
+                + "(no NVIDIA GPU / NVML / ORT assembly resolvable). "
+                + "Calibration will work in-memory but won't survive restarts.");
+        }
+
+        ModelCatalog modelCatalog = new(
+            modelDirectory,
+            resolvedBudget,
+            admissionTimeout: null,
+            calibrationStore: calibrationStore,
+            hostFingerprint: fingerprint);
 
         // Vision models
         // PP-OCR-det, MobileNetV2, and YOLOX-{nano,tiny,s,m,l,x,darknet}
@@ -163,6 +203,12 @@ public static class BuiltinModels
         tableCatalog.Models = modelCatalog;
         tableCatalog.Add(new ModelsTableProvider(
             tableCatalog.Pool, modelCatalog, tableCatalog.DeclaredModels));
+        tableCatalog.Add(new ModelCalibrationTableProvider(
+            tableCatalog.Pool, modelCatalog));
+        tableCatalog.Add(new ResidencySnapshotTableProvider(
+            tableCatalog.Pool, modelCatalog));
+        tableCatalog.Add(new VramSnapshotTableProvider(
+            tableCatalog.Pool, modelCatalog));
         tableCatalog.Add(new DatumIngest.Catalog.Providers.TypesTableProvider(
             tableCatalog.Pool));
         return modelCatalog;

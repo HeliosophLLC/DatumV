@@ -579,10 +579,14 @@ public sealed class ModelInvocationTests : ServiceTestBase
 
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
 
-        // Two MIOs stacked above the scan — outermost first, then inner.
-        ModelInvocationOperator outer = Assert.IsType<ModelInvocationOperator>(project.Source);
-        ModelInvocationOperator inner = Assert.IsType<ModelInvocationOperator>(outer.Source);
-        Assert.NotEqual(outer.OutputColumnName, inner.OutputColumnName);
+        // The planner's BatchedModelDagCollapser pass folds the two
+        // hoisted single-invocation MIOs into one multi-invocation MIO.
+        // The invocation list preserves their separate output column
+        // names so the projection's two ColumnReferences still resolve
+        // to distinct cells.
+        ModelInvocationOperator dag = Assert.IsType<ModelInvocationOperator>(project.Source);
+        Assert.Equal(2, dag.Invocations.Count);
+        Assert.NotEqual(dag.Invocations[0].OutputColumnName, dag.Invocations[1].OutputColumnName);
 
         // Each projection column references one of the two distinct outputs.
         ColumnReference c0 = Assert.IsType<ColumnReference>(project.Columns[0].Expression);

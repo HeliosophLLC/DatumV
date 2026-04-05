@@ -848,6 +848,97 @@ internal sealed class RoutineRegistrar
     }
 
     /// <summary>
+    /// Applies an <c>EVICT MODEL</c> statement: drops the model's
+    /// currently resident <see cref="IModel"/> instance from the residency
+    /// manager so its VRAM is freed. The catalog registration is left in
+    /// place — the next query that references the model will trigger a
+    /// fresh load through <see cref="ModelCatalog.AcquireAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// Manual EVICT is the user-side companion to the residency manager's
+    /// automatic LRU eviction. Useful when the user knows they're done
+    /// with a big model (Llama, SDXL) and wants to free VRAM
+    /// proactively without waiting for pressure to force eviction.
+    /// </remarks>
+    public void ApplyEvictModel(EvictModelStatement evict, string? sourceText = null)
+    {
+        // Schema lockdown mirrors DROP MODEL — models live exclusively
+        // in the `models` schema, so any other explicit qualifier is a
+        // user mistake we surface with a pointed error rather than a
+        // silent no-op.
+        if (evict.SchemaName is not null &&
+            !string.Equals(evict.SchemaName, ModelsSchema, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"EVICT MODEL {evict.SchemaName}.{evict.Name}: models live exclusively in the " +
+                $"'{ModelsSchema}' schema. Use 'EVICT MODEL {evict.Name}' or " +
+                $"'EVICT MODEL {ModelsSchema}.{evict.Name}'.");
+        }
+
+        ModelResidencyManager? residency = _catalog.Models?.ResidencyManager;
+        ModelResidencyManager.EvictResult result =
+            residency?.TryEvictUnpinned(evict.Name) ?? ModelResidencyManager.EvictResult.NotResident;
+
+        switch (result)
+        {
+            case ModelResidencyManager.EvictResult.Evicted:
+                break;
+
+            case ModelResidencyManager.EvictResult.NotResident:
+                if (!evict.IfExists)
+                {
+                    throw new InvalidOperationException(
+                        $"Model '{evict.Name}' is not currently resident. Use EVICT MODEL IF EXISTS " +
+                        "to make this a no-op.");
+                }
+                break;
+
+            case ModelResidencyManager.EvictResult.Pinned:
+                // Always an error — IF EXISTS doesn't suppress this. The
+                // user asked to evict a model that's actively dispatching;
+                // they need to know it wasn't done so they can retry.
+                throw new InvalidOperationException(
+                    $"Model '{evict.Name}' is currently in use by one or more active queries " +
+                    "and cannot be evicted. Wait for those queries to complete, then retry.");
+        }
+
+        _ = sourceText;
+    }
+
+    /// <summary>
+    /// Applies a <c>RESET CALIBRATION</c> statement: removes the per-model
+    /// VRAM calibration curve from <see cref="ModelCatalog.CalibrationRegistry"/>
+    /// and triggers a fresh on-disk write on the next save tick. The
+    /// model itself stays resident (if loaded) and registered; the next
+    /// dispatch falls through to the calibration coordinator for
+    /// re-measurement.
+    /// </summary>
+    public void ApplyResetCalibration(ResetCalibrationStatement reset, string? sourceText = null)
+    {
+        if (reset.SchemaName is not null &&
+            !string.Equals(reset.SchemaName, ModelsSchema, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"RESET CALIBRATION {reset.SchemaName}.{reset.Name}: models live exclusively in the " +
+                $"'{ModelsSchema}' schema. Use 'RESET CALIBRATION {reset.Name}' or " +
+                $"'RESET CALIBRATION {ModelsSchema}.{reset.Name}'.");
+        }
+
+        DatumIngest.Models.Calibration.CalibrationRegistry? registry =
+            _catalog.Models?.CalibrationRegistry;
+        bool removed = registry?.Remove(reset.Name) ?? false;
+
+        if (!removed && !reset.IfExists)
+        {
+            throw new InvalidOperationException(
+                $"Model '{reset.Name}' has no calibration entry. Use RESET CALIBRATION IF EXISTS " +
+                "to make this a no-op.");
+        }
+
+        _ = sourceText;
+    }
+
+    /// <summary>
     /// Applies a <c>DROP MODEL</c> statement: removes the descriptor from
     /// the registry and disposes its bound inference sessions.
     /// </summary>
@@ -1494,11 +1585,46 @@ internal sealed class RoutineRegistrar
             InputKinds: iModelAdapter.InputKinds,
             OutputKind: iModelAdapter.OutputKind,
             IsDeterministic: iModelAdapter.IsDeterministic,
-            Loader: _ => iModelAdapter,
+            // Pre-warm every bound session synchronously before returning
+            // the adapter. ProceduralModelAdapter's constructor records
+            // metadata only — the actual ONNX session loads lazily on
+            // first infer() call inside the body. Without this warm-up
+            // the residency manager's RecordWeightCost would measure
+            // VRAM before/after an effectively-empty loader call and
+            // report weight_cost = 0 → NULL in system.models. Shifting
+            // the load cost forward to the loader call (a) makes the
+            // weight-cost measurement see real VRAM growth, and (b)
+            // doesn't add any net work — the first inference would have
+            // paid the same cost. Multi-session bundles load every
+            // alias up-front; for typical SQL-defined models every
+            // alias is referenced per-inference anyway.
+            Loader: _ =>
+            {
+                foreach (string alias in descriptor.BoundSessions.Keys)
+                {
+                    descriptor.BoundSessions
+                        .ResolveAsync(alias, CancellationToken.None)
+                        .AsTask()
+                        .GetAwaiter()
+                        .GetResult();
+                }
+                return iModelAdapter;
+            },
             OptionalArgKinds: iModelAdapter.OptionalKinds.Count > 0 ? iModelAdapter.OptionalKinds : null,
             EstimatedVramBytes: estimatedVram,
             DisplayName: descriptor.QualifiedName.ToString(),
-            Batchable: iModelAdapter.IsBatchable);
+            Batchable: iModelAdapter.IsBatchable,
+            // Threads the resolved ONNX path through to the calibration
+            // layer so RecordWeightCost can fingerprint SQL-defined
+            // models the same way it fingerprints builtins. Without
+            // this, every SQL-defined model's system.models row would
+            // surface weight_cost_bytes = NULL because the residency
+            // manager's RecordWeightCost short-circuits on a null
+            // RelativePath. Use the same fingerprint regardless of
+            // multi-file bundles — the primary ResolvedUsingPath is
+            // the anchor weights file the planner already treats as
+            // the model's canonical identity.
+            FingerprintPath: descriptor.ResolvedUsingPath);
 
         if (replace)
         {
