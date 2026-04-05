@@ -1,6 +1,4 @@
----
-title: Common Subexpression Elimination
----
+# Common Subexpression Elimination
 
 Common subexpression elimination (CSE) is a plan-time pass that detects when the same expression appears at multiple sites in a query and rewrites it to evaluate only once per row. The result is materialised as a hidden column that every reference site reads from, replacing the duplicate AST occurrences with `ColumnReference`s.
 
