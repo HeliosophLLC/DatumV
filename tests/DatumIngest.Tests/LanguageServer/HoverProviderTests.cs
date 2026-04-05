@@ -286,6 +286,44 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.Contains("VideoFrame", result.Contents);
     }
 
+    // ───────────────────── Markdown-safe kind rendering ─────────────────────
+
+    [Fact]
+    public void GetHover_FunctionWithArrayReturn_WrapsKindInBackticks()
+    {
+        // Hover content is markdown, so a bare `Array<Float32>` would be
+        // mistaken for an HTML tag and stripped by editor sanitisers. The
+        // renderer wraps kinds in backticks so the angle brackets survive
+        // as inline code.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "make_floats",
+                    Parameters = [new ParameterSignature { Name = "n", Kind = "Int32" }],
+                    ReturnType = "Array<Float32>",
+                    Description = "Returns N floats.",
+                },
+            ],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql = "SELECT make_floats(3)";
+        HoverResult? result = provider.GetHover(sql, sql.IndexOf("make_floats", StringComparison.Ordinal) + 1);
+
+        Assert.NotNull(result);
+        // The Array<Float32> return type renders inside backticks so the
+        // IDE's markdown sanitiser keeps the angle-bracket content visible.
+        Assert.Contains("`Array<Float32>`", result.Contents);
+        // The parameter kind likewise wraps in backticks.
+        Assert.Contains("`Int32`", result.Contents);
+    }
+
     // ───────────────────── Hover span ─────────────────────
 
     [Fact]

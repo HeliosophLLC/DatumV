@@ -36,6 +36,21 @@ namespace DatumIngest.Models;
 /// supply at least this many positional arguments matching these kinds.
 /// </param>
 /// <param name="OutputKind">The kind this model produces per row.</param>
+/// <param name="OutputIsArray">
+/// True when the model's per-row output is a typed array of
+/// <paramref name="OutputKind"/> (set by SQL-defined models declaring
+/// <c>RETURNS Array&lt;...&gt;</c> / <c>X[]</c>). Drives hover / signature-
+/// help / completion rendering downstream; without it those surfaces would
+/// silently drop the array marker.
+/// </param>
+/// <param name="ParameterInfos">
+/// Optional per-parameter metadata (name + kind + array-ness + optionality)
+/// used by the language server to render the actual declared parameter
+/// names and shapes. SQL-defined models populate this; built-ins leave it
+/// <see langword="null"/> and the manifest builder falls back to the
+/// generic <c>input</c>/<c>inputN</c> labels derived from
+/// <paramref name="InputKinds"/>.
+/// </param>
 /// <param name="IsDeterministic">
 /// <see langword="true"/> when the same input always yields the same output.
 /// Drives CSE folding across call sites and cache validity in future demos.
@@ -165,7 +180,23 @@ public sealed record ModelCatalogEntry(
     IReadOnlyList<string>? Files = null,
     string? ImplementsTaskName = null,
     bool Batchable = false,
-    string? FingerprintPath = null);
+    string? FingerprintPath = null,
+    bool OutputIsArray = false,
+    IReadOnlyList<ModelParameterInfo>? ParameterInfos = null);
+
+/// <summary>
+/// Per-parameter metadata for a registered model — used by the language
+/// server to render the actual declared name + shape in hover / signature
+/// help / completion. SQL-defined models populate this from their
+/// <c>UdfParameter</c> list; built-ins leave it <see langword="null"/>
+/// and the manifest builder falls back to the generic
+/// <c>input</c>/<c>input1</c>/… labels derived from <c>InputKinds</c>.
+/// </summary>
+/// <param name="Name">Declared parameter name (<c>img</c>, <c>prompt</c>, …).</param>
+/// <param name="Kind">Element data kind. Combine with <paramref name="IsArray"/> for the full shape.</param>
+/// <param name="IsArray">True when the parameter was declared as a typed array.</param>
+/// <param name="IsOptional">True when the parameter has a default (call site may omit).</param>
+public sealed record ModelParameterInfo(string Name, DataKind Kind, bool IsArray, bool IsOptional);
 
 /// <summary>
 /// Context handed to a <see cref="ModelCatalogEntry.Loader"/> when first instantiating

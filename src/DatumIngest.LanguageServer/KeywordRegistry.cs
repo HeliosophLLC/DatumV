@@ -195,6 +195,13 @@ internal static class KeywordRegistry
         [CompletionZoneKind.AfterAssert] =
             [.. ExpressionKeywords, "MESSAGE", "ON FAIL"],
 
+        // `WITH foo AS |` — surface the materialization hint and the
+        // opening paren of the CTE body. The literal `(` lands as a snippet
+        // through the same completion path, mirroring how the AfterFrom
+        // zone surfaces the bare keyword without grammar context.
+        [CompletionZoneKind.AfterCteAs] =
+            ["MATERIALIZED", "NOT MATERIALIZED"],
+
         [CompletionZoneKind.InsideDefineBlock] =
             ["LET", "ASSERT", "}"],
 
@@ -417,7 +424,7 @@ internal static class KeywordRegistry
         [SqlToken.Nulls] = [],          // Component: part of IGNORE NULLS / RESPECT NULLS
         [SqlToken.With] = ["WITH"],
         [SqlToken.Recursive] = [],      // Component: follows WITH in CTE preamble (WITH RECURSIVE)
-        [SqlToken.Materialized] = [],   // Component: follows AS in CTE (AS MATERIALIZED / AS NOT MATERIALIZED)
+        [SqlToken.Materialized] = ["MATERIALIZED"],   // Component: standalone surface; "NOT MATERIALIZED" comes from the Not token's zone entries.
         [SqlToken.Union] = ["UNION"],
         [SqlToken.All] = ["ALL"],
         [SqlToken.Intersect] = ["INTERSECT"],

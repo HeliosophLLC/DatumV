@@ -150,7 +150,7 @@ internal static class CteSchemaResolver
 
                 default:
                     string name = DeriveOutputName(col);
-                    string kind = ResolveExpressionKind(col.Expression, scope) ?? "?";
+                    string kind = ResolveExpressionKind(col.Expression, scope, manifest) ?? "?";
                     projected.Add(new TableColumnEntry { Name = name, Kind = kind, Nullable = true });
                     break;
             }
@@ -201,32 +201,107 @@ internal static class CteSchemaResolver
     /// <summary>
     /// Resolves the kind of a SELECT-list expression to a manifest-friendly
     /// string (<c>"Int32"</c>, <c>"VideoFrame"</c>, etc.). Returns
-    /// <see langword="null"/> when the expression isn't a simple column
-    /// reference — the caller substitutes <c>"?"</c>. Casts surface their
-    /// declared target type directly; everything else (binary ops, function
-    /// calls, struct/index access) would require the engine's type resolver
-    /// to handle accurately, which this assembly doesn't link.
+    /// <see langword="null"/> when the kind can't be determined cheaply —
+    /// the caller substitutes <c>"?"</c>. Handles: simple column references
+    /// (incl. LET-bound names resolved via <see cref="InnerScope.LetBindings"/>),
+    /// casts (return the declared target type), literals (numeric / string /
+    /// boolean), and function calls (return type read from the manifest).
+    /// Compound expressions (arithmetic, struct field access, index access)
+    /// would require the engine's full type resolver and stay as <c>"?"</c>.
     /// </summary>
-    private static string? ResolveExpressionKind(Expression expression, InnerScope scope)
+    private static string? ResolveExpressionKind(Expression expression, InnerScope scope, LanguageServerManifest manifest)
     {
         switch (expression)
         {
             case ColumnReference colRef:
-                return ResolveColumnRefKind(colRef, scope);
+                return ResolveColumnRefKind(colRef, scope, manifest);
             case CastExpression cast:
                 return cast.TargetType;
+            case LiteralExpression literal:
+                return ResolveLiteralKind(literal);
+            case FunctionCallExpression functionCall:
+                return ResolveFunctionCallKind(functionCall, manifest);
             default:
                 return null;
         }
     }
 
     /// <summary>
+    /// Maps a literal's runtime <see cref="System.Type"/> to the
+    /// corresponding DataKind name. Null literals come back as
+    /// <see langword="null"/> — the kind depends on context the language
+    /// server doesn't track.
+    /// </summary>
+    private static string? ResolveLiteralKind(LiteralExpression literal)
+    {
+        return literal.Value switch
+        {
+            null => null,
+            string => "String",
+            bool => "Boolean",
+            sbyte => "Int8",
+            short => "Int16",
+            int => "Int32",
+            long => "Int64",
+            float => "Float32",
+            double => "Float64",
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Resolves a function call's return type by looking up the call name in
+    /// the manifest's function and model lists. Schema-qualified calls match
+    /// by both name and schema; unqualified calls walk the manifest's
+    /// search_path. Returns <see langword="null"/> when no match is found —
+    /// the LET / SELECT-column path that called us substitutes <c>"?"</c>.
+    /// </summary>
+    private static string? ResolveFunctionCallKind(FunctionCallExpression call, LanguageServerManifest manifest)
+    {
+        // Schema-qualified call (e.g. `models.X(...)`, `inference.devices(...)`).
+        if (call.SchemaName is not null)
+        {
+            foreach (FunctionSignature f in manifest.Functions)
+            {
+                if (string.Equals(f.SchemaName, call.SchemaName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(f.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return f.ReturnType;
+                }
+            }
+            return null;
+        }
+
+        // Unqualified — walk search_path, then any registered function.
+        foreach (string schema in manifest.SearchPath)
+        {
+            foreach (FunctionSignature f in manifest.Functions)
+            {
+                if (string.Equals(f.SchemaName, schema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(f.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return f.ReturnType;
+                }
+            }
+        }
+        foreach (FunctionSignature f in manifest.Functions)
+        {
+            if (string.Equals(f.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
+            {
+                return f.ReturnType;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Walks <paramref name="scope"/>'s sources looking for a column that
     /// matches <paramref name="colRef"/>. Qualified references narrow by
-    /// alias first; unqualified references walk every source in declaration
-    /// order and pick the first match.
+    /// alias first; unqualified references check LET bindings (so a SELECT
+    /// list that refers to a sibling <c>LET name = expr</c> resolves through
+    /// the binding's expression) before walking the FROM scope.
     /// </summary>
-    private static string? ResolveColumnRefKind(ColumnReference colRef, InnerScope scope)
+    private static string? ResolveColumnRefKind(ColumnReference colRef, InnerScope scope, LanguageServerManifest manifest)
     {
         if (colRef.TableName is not null)
         {
@@ -241,6 +316,15 @@ internal static class CteSchemaResolver
                 }
             }
             return null;
+        }
+
+        // Unqualified — LET bindings shadow FROM-source columns, matching
+        // the engine's row-augmentation order (LET names land on the
+        // augmented row before projection sees the source columns).
+        if (scope.LetBindings is { } letBindings
+            && letBindings.TryGetValue(colRef.ColumnName, out Expression? letExpr))
+        {
+            return ResolveExpressionKind(letExpr, scope, manifest);
         }
 
         foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> entry in scope.AliasToColumns)
@@ -299,7 +383,23 @@ internal static class CteSchemaResolver
             }
         }
 
-        return new InnerScope(aliasToColumns);
+        // LET bindings — capture name → expression so SELECT-list refs to
+        // LET-bound names resolve through the binding's RHS. Skip
+        // destructured bindings (their per-name kinds depend on shape
+        // inference we don't do here) and any binding with a duplicate
+        // name (defensive — the engine rejects duplicates at planning).
+        Dictionary<string, Expression>? letBindings = null;
+        if (statement.LetBindings is { Count: > 0 } lets)
+        {
+            letBindings = new Dictionary<string, Expression>(lets.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (LetBinding b in lets)
+            {
+                if (b.Destructure is not null) continue;
+                letBindings.TryAdd(b.Name, b.Expression);
+            }
+        }
+
+        return new InnerScope(aliasToColumns, letBindings);
     }
 
     private static void BindSource(
@@ -445,7 +545,12 @@ internal sealed record CteSchemaResult(
 /// <summary>
 /// Per-CTE inner-FROM scope used by <see cref="CteSchemaResolver"/>: maps
 /// each source alias (or unaliased name) to the column list that alias
-/// resolves to. Built fresh for every CTE because the FROM sources differ
-/// CTE-to-CTE.
+/// resolves to, plus the CTE's LET bindings (name → expression) so the
+/// SELECT-list resolver can chase a reference like <c>prev_image</c>
+/// through to its <c>LET prev_image = video_frame_to_image(...)</c>
+/// definition. Built fresh for every CTE because the FROM sources and
+/// LET set differ CTE-to-CTE.
 /// </summary>
-internal sealed record InnerScope(IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> AliasToColumns);
+internal sealed record InnerScope(
+    IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> AliasToColumns,
+    IReadOnlyDictionary<string, Expression>? LetBindings = null);

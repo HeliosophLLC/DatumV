@@ -1624,7 +1624,14 @@ internal sealed class RoutineRegistrar
             // multi-file bundles — the primary ResolvedUsingPath is
             // the anchor weights file the planner already treats as
             // the model's canonical identity.
-            FingerprintPath: descriptor.ResolvedUsingPath);
+            FingerprintPath: descriptor.ResolvedUsingPath,
+            // Preserve the RETURNS-clause array bit and the user-declared
+            // parameter shapes so the LanguageServer manifest can render
+            // `img: Image` / `→ Array<Float32>` instead of the lossy
+            // `input: <kind>` / `→ <element kind>` defaults that
+            // ModelCatalogEntry's name/kind-only fields would produce.
+            OutputIsArray: iModelAdapter.OutputIsArray,
+            ParameterInfos: BuildModelParameterInfos(descriptor));
 
         if (replace)
         {
@@ -1668,10 +1675,25 @@ internal sealed class RoutineRegistrar
         for (int i = 0; i < model.Parameters.Count; i++)
         {
             UdfParameter p = model.Parameters[i];
+            // Resolve the declared type into a kind + array-ness so hover /
+            // signature help / completion show the actual annotation
+            // (<c>img: Image</c>) instead of the wildcard <c>img: Any</c>
+            // we used to emit. Unrecognised type names fall back to
+            // <c>Any</c> rather than throwing — CREATE MODEL already
+            // validates the annotation at registration time, so the
+            // fallback is purely defensive.
+            DataKindMatcher matcher = DataKindMatcher.Any;
+            ArrayMatch arrayMatch = ArrayMatch.Either;
+            if (TypeAnnotationResolver.TryParse(p.TypeName, out DataKind kind, out bool isArray))
+            {
+                matcher = DataKindMatcher.Exact(kind);
+                arrayMatch = isArray ? ArrayMatch.Array : ArrayMatch.Scalar;
+            }
             parameters[i] = new ParameterSpec(
                 p.Name,
-                DataKindMatcher.Any,
+                matcher,
                 IsOptional: p.Default is not null,
+                IsArray: arrayMatch,
                 Metadata: BuildParameterMetadata(p));
         }
 
@@ -1684,6 +1706,38 @@ internal sealed class RoutineRegistrar
             [
                 new FunctionSignatureVariant(parameters, VariadicTrailing: null, ReturnType: returnRule),
             ]);
+    }
+
+    /// <summary>
+    /// Builds the per-parameter metadata snapshot attached to a SQL-defined
+    /// model's <see cref="ModelCatalogEntry"/>. Unlike the function-descriptor
+    /// path (which expresses kinds as matcher / arity), this is a plain
+    /// name + kind + shape list — what the language server needs to render
+    /// hover / signature / completion popups. Returns <see langword="null"/>
+    /// when the descriptor has no parameters so the manifest builder can
+    /// fall back to its generic <c>input</c>/<c>inputN</c> labels.
+    /// </summary>
+    private static IReadOnlyList<ModelParameterInfo>? BuildModelParameterInfos(ModelDescriptor model)
+    {
+        if (model.Parameters.Count == 0) return null;
+        ModelParameterInfo[] infos = new ModelParameterInfo[model.Parameters.Count];
+        for (int i = 0; i < model.Parameters.Count; i++)
+        {
+            UdfParameter p = model.Parameters[i];
+            // CREATE MODEL validated the annotation at registration, but we
+            // defensively fall back to a non-array Unknown kind on parse
+            // failure rather than throwing — manifest rendering should
+            // never break model registration.
+            DataKind kind = DataKind.Unknown;
+            bool isArray = false;
+            if (TypeAnnotationResolver.TryParse(p.TypeName, out DataKind parsedKind, out bool parsedIsArray))
+            {
+                kind = parsedKind;
+                isArray = parsedIsArray;
+            }
+            infos[i] = new ModelParameterInfo(p.Name, kind, isArray, IsOptional: p.Default is not null);
+        }
+        return infos;
     }
 
     // ───────────────────── Procedures ─────────────────────

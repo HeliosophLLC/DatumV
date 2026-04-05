@@ -302,7 +302,7 @@ public sealed class HoverProvider
         string source = string.Equals(qualifier, cteName, StringComparison.OrdinalIgnoreCase)
             ? cteName
             : $"{cteName} (via `{qualifier}`)";
-        return $"**{qualifier}.{column.Name}**: {column.Kind}{nullable}\n\nSource: CTE `{source}`";
+        return $"**{qualifier}.{column.Name}**: `{column.Kind}`{nullable}\n\nSource: CTE `{source}`";
     }
 
     /// <summary>
@@ -353,7 +353,7 @@ public sealed class HoverProvider
             || string.Equals(signature.SchemaName, "system", StringComparison.OrdinalIgnoreCase)
             ? signature.Name
             : $"{signature.SchemaName}.{signature.Name}";
-        return $"**{alias}.{column.Name}**: {column.Kind}{nullable}\n\nSource: `{qualifiedFn}(...)` *(table-valued)*";
+        return $"**{alias}.{column.Name}**: `{column.Kind}`{nullable}\n\nSource: `{qualifiedFn}(...)` *(table-valued)*";
     }
 
     /// <summary>
@@ -499,9 +499,9 @@ public sealed class HoverProvider
             : string.Join(", ", entry.Parameters.Select(p =>
             {
                 string optional = p.IsOptional ? "?" : "";
-                return $"{p.Name}: {p.Kind}{optional}";
+                return $"{p.Name}: `{p.Kind}`{optional}";
             }));
-        string returnInfo = entry.ReturnType is not null ? $" → {entry.ReturnType}" : "";
+        string returnInfo = entry.ReturnType is not null ? $" → `{entry.ReturnType}`" : "";
         string signature = $"**{entry.SchemaName}.{entry.Name}**({parameters}){returnInfo}";
 
         List<string> tags = new(2);
@@ -527,7 +527,7 @@ public sealed class HoverProvider
             : string.Join(", ", entry.Parameters.Select(p =>
             {
                 string optional = p.IsOptional ? "?" : "";
-                return $"{p.Name}: {p.Kind}{optional}";
+                return $"{p.Name}: `{p.Kind}`{optional}";
             }));
         return $"**{entry.SchemaName}.{entry.Name}**({parameters})\n\n" +
             $"*procedure · invoke via* `CALL {entry.SchemaName}.{entry.Name}(...)`";
@@ -611,10 +611,10 @@ public sealed class HoverProvider
         string parameters = string.Join(", ", function.Parameters.Select(parameter =>
         {
             string optional = parameter.IsOptional ? "?" : "";
-            return $"{parameter.Name}: {parameter.Kind}{optional}";
+            return $"{parameter.Name}: `{parameter.Kind}`{optional}";
         }));
 
-        string returnInfo = !string.IsNullOrEmpty(function.ReturnType) ? $" → {function.ReturnType}" : "";
+        string returnInfo = !string.IsNullOrEmpty(function.ReturnType) ? $" → `{function.ReturnType}`" : "";
         string qualifiedName = string.IsNullOrEmpty(function.SchemaName)
             || string.Equals(function.SchemaName, "system", StringComparison.OrdinalIgnoreCase)
             ? function.Name
@@ -704,7 +704,7 @@ public sealed class HoverProvider
         string columns = string.Join("\n", table.Columns.Select(column =>
         {
             string nullable = column.Nullable ? " *(nullable)*" : "";
-            return $"- `{column.Name}`: {column.Kind}{nullable}";
+            return $"- `{column.Name}`: `{column.Kind}`{nullable}";
         }));
 
         return header + columns;
@@ -720,7 +720,7 @@ public sealed class HoverProvider
             if (column is not null)
             {
                 string nullable = column.Nullable ? " *(nullable)*" : "";
-                return $"**{column.Name}**: {column.Kind}{nullable}\n\nSource: {table.Name}";
+                return $"**{column.Name}**: `{column.Kind}`{nullable}\n\nSource: {table.Name}";
             }
         }
 
@@ -761,7 +761,7 @@ public sealed class HoverProvider
         }
 
         string nullable = column.Nullable ? " *(nullable)*" : "";
-        return $"**{tableQualifier}.{column.Name}**: {column.Kind}{nullable}";
+        return $"**{tableQualifier}.{column.Name}**: `{column.Kind}`{nullable}";
     }
 
     private static string? GetKeywordHover(SqlToken kind, string text, out string? docKey)

@@ -573,8 +573,9 @@ internal sealed class SemanticAnalyzer
 
     /// <summary>
     /// Checks whether a function call resolves to a registered function:
-    /// either a built-in (in <c>system</c>) or a UDF on the session
-    /// search_path. Explicit qualification narrows the lookup to the
+    /// either a built-in (in <c>system</c>), a UDF on the session
+    /// search_path, or a registered model under the <c>models.</c>
+    /// namespace. Explicit qualification narrows the lookup to the
     /// named schema. Unqualified names walk the search_path.
     /// </summary>
     private bool ResolvesToFunction(FunctionCallExpression call)
@@ -586,6 +587,24 @@ internal sealed class SemanticAnalyzer
         {
             if (_functionNames.Contains(call.FunctionName)) return true;
         }
+
+        // `models.X(...)` — registered models live in their own catalog,
+        // not the UDF or function registry. Without this check, every
+        // `models.foo(...)` call would surface as `Unknown function`
+        // even though the engine resolves it fine at runtime.
+        if (call.SchemaName is not null
+            && string.Equals(call.SchemaName, "models", StringComparison.OrdinalIgnoreCase)
+            && _manifest.Models is { } models)
+        {
+            foreach (ModelEntry model in models)
+            {
+                if (string.Equals(model.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
         if (_manifest.Udfs is null) return false;
         if (call.SchemaName is not null)
         {
@@ -664,25 +683,60 @@ internal sealed class SemanticAnalyzer
             return;
         }
 
-        for (int argumentIndex = 0; argumentIndex < functionCall.Arguments.Count; argumentIndex++)
+        // Inferred argument types — computed once, reused across every
+        // overload shape. Null entries mean "can't infer" and skip the
+        // per-shape match without prejudice.
+        string?[] actualKinds = new string?[functionCall.Arguments.Count];
+        for (int i = 0; i < functionCall.Arguments.Count; i++)
+        {
+            actualKinds[i] = TryInferType(functionCall.Arguments[i], aliasToTable, opaqueAliases);
+        }
+
+        // Try the primary shape first, then each registered overload. The
+        // call validates if any shape's per-arg types all match (or are
+        // unresolvable, in which case we conservatively pass). Without
+        // this fallback the analyzer warned on every legitimate use of an
+        // overload past the first variant (e.g. `point_cloud_from_depth_pinhole`
+        // taking `Array<Float32>` depth instead of `Image`).
+        Diagnostic? primaryFailure = TryMatchShape(functionCall, signature.Parameters, actualKinds);
+        if (primaryFailure is null) return;
+
+        if (signature.AdditionalParameterShapes is { } alternatives)
+        {
+            foreach (IReadOnlyList<ParameterSignature> shape in alternatives)
+            {
+                if (TryMatchShape(functionCall, shape, actualKinds) is null) return;
+            }
+        }
+
+        diagnostics.Add(primaryFailure);
+    }
+
+    /// <summary>
+    /// Validates <paramref name="actualKinds"/> against one parameter shape.
+    /// Returns <see langword="null"/> when every resolvable arg is type-compatible
+    /// with its slot; returns a populated <see cref="Diagnostic"/> (positioned at
+    /// the call site) describing the first mismatch otherwise. The caller emits
+    /// the diagnostic only after every overload has been tried.
+    /// </summary>
+    private static Diagnostic? TryMatchShape(
+        FunctionCallExpression functionCall,
+        IReadOnlyList<ParameterSignature> shape,
+        string?[] actualKinds)
+    {
+        for (int argumentIndex = 0; argumentIndex < actualKinds.Length; argumentIndex++)
         {
             // If the function has fewer parameters than arguments (variadic), apply
             // the last parameter's constraint to all extra arguments.
-            int parameterIndex = System.Math.Min(argumentIndex, signature.Parameters.Count - 1);
-            if (parameterIndex < 0)
-            {
-                break;
-            }
+            int parameterIndex = System.Math.Min(argumentIndex, shape.Count - 1);
+            if (parameterIndex < 0) break;
 
-            ParameterSignature parameter = signature.Parameters[parameterIndex];
+            ParameterSignature parameter = shape[parameterIndex];
 
             // "Any" means no type restriction — skip.
-            if (parameter.Kind.Equals("Any", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+            if (parameter.Kind.Equals("Any", StringComparison.OrdinalIgnoreCase)) continue;
 
-            string? actualKind = TryInferType(functionCall.Arguments[argumentIndex], aliasToTable, opaqueAliases);
+            string? actualKind = actualKinds[argumentIndex];
             if (actualKind is null)
             {
                 // Cannot determine type — skip rather than risk a false positive.
@@ -691,10 +745,20 @@ internal sealed class SemanticAnalyzer
 
             if (!IsTypeCompatible(actualKind, parameter.Kind))
             {
-                EmitWarning(diagnostics, functionCall.Span,
-                    $"Argument {argumentIndex + 1} of {functionCall.FunctionName}() expects {parameter.Kind}, got {actualKind}.");
+                return new Diagnostic
+                {
+                    Message = $"Argument {argumentIndex + 1} of {functionCall.FunctionName}() expects {parameter.Kind}, got {actualKind}.",
+                    Severity = DiagnosticSeverity.Warning,
+                    StartLine = functionCall.Span?.Line is { } line ? System.Math.Max(0, line - 1) : 0,
+                    StartColumn = functionCall.Span?.Column is { } col ? System.Math.Max(0, col - 1) : 0,
+                    EndLine = functionCall.Span?.Line is { } line2 ? System.Math.Max(0, line2 - 1) : 0,
+                    EndColumn = functionCall.Span?.Column is { } col2
+                        ? System.Math.Max(0, col2 - 1) + (functionCall.Span?.Length ?? 0)
+                        : 0,
+                };
             }
         }
+        return null;
     }
 
     /// <summary>
@@ -771,12 +835,30 @@ internal sealed class SemanticAnalyzer
     /// Returns true when <paramref name="actualKind"/> is compatible with
     /// <paramref name="expectedKind"/>. Uses category-based matching so that,
     /// for example, an Int32 column is accepted where Float32 is expected.
+    /// Array-aware: <c>Array&lt;X&gt;</c> matches <c>Array&lt;Y&gt;</c> when
+    /// <c>X</c> is compatible with <c>Y</c>; scalar-vs-array mismatches are
+    /// rejected so a model returning <c>Array&lt;Float32&gt;</c> can flow
+    /// into a <c>Float32[]</c> parameter without warning, but a bare
+    /// <c>Float32</c> into the same parameter still surfaces a diagnostic.
     /// </summary>
     private static bool IsTypeCompatible(string actualKind, string expectedKind)
     {
         if (actualKind.Equals(expectedKind, StringComparison.OrdinalIgnoreCase))
         {
             return true;
+        }
+
+        // Array-wrapped kinds: recurse on the element if both sides are
+        // arrays; reject if exactly one side is. Without this branch a
+        // legitimate `Array<Int32>` flowing into `Array<Float32>` would
+        // miss the numeric-family compatibility check below — the string
+        // tests look at the wrapped names, not the elements.
+        bool actualIsArray = TryUnwrapArray(actualKind, out string actualElement);
+        bool expectedIsArray = TryUnwrapArray(expectedKind, out string expectedElement);
+        if (actualIsArray != expectedIsArray) return false;
+        if (actualIsArray && expectedIsArray)
+        {
+            return IsTypeCompatible(actualElement, expectedElement);
         }
 
         // Both numeric → compatible (e.g. Int32 column into Float32 parameter).
@@ -803,6 +885,26 @@ internal sealed class SemanticAnalyzer
             return true;
         }
 
+        return false;
+    }
+
+    /// <summary>
+    /// Unwraps an <c>Array&lt;...&gt;</c> kind string to its element kind.
+    /// Returns <see langword="false"/> for non-array kinds. Tolerates the
+    /// case-insensitive <c>"array"</c> prefix and a single matching pair of
+    /// angle brackets — manifest writers always produce the canonical form,
+    /// but compatibility checks pass through whatever the user typed.
+    /// </summary>
+    private static bool TryUnwrapArray(string kind, out string element)
+    {
+        const string prefix = "Array<";
+        if (kind.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            && kind.EndsWith(">", StringComparison.Ordinal))
+        {
+            element = kind[prefix.Length..^1];
+            return true;
+        }
+        element = kind;
         return false;
     }
 

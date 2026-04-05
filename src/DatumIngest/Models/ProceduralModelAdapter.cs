@@ -65,6 +65,7 @@ public sealed class ProceduralModelAdapter : IModel, IDisposable
     private readonly ModelDescriptor _descriptor;
     private readonly ProceduralModelFunction _function;
     private readonly DataKind _outputKind;
+    private readonly bool _outputIsArray;
     private readonly IReadOnlyList<DataKind> _inputKinds;
     private readonly IReadOnlyList<DataKind> _optionalKinds;
     private readonly bool _isBatchable;
@@ -104,14 +105,18 @@ public sealed class ProceduralModelAdapter : IModel, IDisposable
 
         // Output kind from the descriptor's RETURNS annotation. The parser
         // already validated this string at CREATE MODEL time; the
-        // TryParse here is just a kind read.
-        if (!TypeAnnotationResolver.TryParse(descriptor.ReturnTypeName, out DataKind returnKind, out _))
+        // TryParse here is just a kind read. Capture the array bit too so
+        // downstream consumers (catalog entry, manifest, hover / signature
+        // help) can render <c>Array&lt;Float32&gt;</c> instead of the
+        // stripped element kind.
+        if (!TypeAnnotationResolver.TryParse(descriptor.ReturnTypeName, out DataKind returnKind, out bool returnIsArray))
         {
             throw new ArgumentException(
                 $"Model '{descriptor.QualifiedName}': cannot resolve return type '{descriptor.ReturnTypeName}'.",
                 nameof(descriptor));
         }
         _outputKind = returnKind;
+        _outputIsArray = returnIsArray;
 
         // Split parameters into required (no default) + optional (has
         // default). MIO's hoister routes the first segment as
@@ -160,6 +165,15 @@ public sealed class ProceduralModelAdapter : IModel, IDisposable
 
     /// <inheritdoc />
     public DataKind OutputKind => _outputKind;
+
+    /// <summary>
+    /// True when the descriptor's <c>RETURNS</c> annotation declared an
+    /// array type (<c>Array&lt;Float32&gt;</c>, <c>Float32[]</c>, …). Not part
+    /// of <see cref="IModel"/> — exposed for the catalog-entry path so
+    /// <see cref="ModelCatalogEntry.OutputIsArray"/> can be populated from
+    /// the same parse as <see cref="OutputKind"/>.
+    /// </summary>
+    public bool OutputIsArray => _outputIsArray;
 
     /// <summary>
     /// Per-call hyperparameter kinds (parameters with defaults). Surfaces

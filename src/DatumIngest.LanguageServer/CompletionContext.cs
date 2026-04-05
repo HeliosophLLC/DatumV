@@ -751,6 +751,14 @@ public static class CompletionContext
                     {
                         return CompletionZoneKind.AfterDeclareType;
                     }
+                    // `WITH foo AS |` or `WITH foo (a, b) AS |` is the CTE-body
+                    // position — surface MATERIALIZED / NOT MATERIALIZED before
+                    // the inner SELECT's opening paren. Distinct from the
+                    // plain alias-typing AfterAs zone below.
+                    if (IsCteAsPosition(tokens, index))
+                    {
+                        return CompletionZoneKind.AfterCteAs;
+                    }
                     // No alias typed yet — user is typing an alias name, no completions.
                     return CompletionZoneKind.AfterAs;
 
@@ -1090,6 +1098,66 @@ public static class CompletionContext
 
         // No governing keyword found — we're at the start of a statement.
         return CompletionZoneKind.StatementStart;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the AS at <paramref name="asIndex"/>
+    /// sits in a CTE binding position — i.e. the user has written
+    /// <c>WITH foo AS |</c> or <c>WITH foo (a, b, …) AS |</c>. Pattern:
+    /// the AS is preceded by an identifier (the CTE name), with an optional
+    /// balanced <c>(…)</c> column list between them, and that identifier is
+    /// preceded by either <c>WITH</c> directly or by a comma that itself
+    /// sits in a CTE chain (a top-level <c>WITH</c> precedes it).
+    /// </summary>
+    /// <remarks>
+    /// Heuristic only — there's no full AST here. A user who literally
+    /// aliases a column to the identifier <c>MATERIALIZED</c> in the same
+    /// shape will see an extra completion suggestion, which is the same
+    /// "PG soft keyword" trade-off the engine itself makes.
+    /// </remarks>
+    private static bool IsCteAsPosition(List<TokenInfo> tokens, int asIndex)
+    {
+        int cursor = asIndex - 1;
+        // Optional column list `(name, name, ...)` between the CTE name and AS.
+        if (cursor >= 0 && tokens[cursor].Kind == SqlToken.RightParen)
+        {
+            int depth = 1;
+            cursor--;
+            while (cursor >= 0 && depth > 0)
+            {
+                if (tokens[cursor].Kind == SqlToken.RightParen) depth++;
+                else if (tokens[cursor].Kind == SqlToken.LeftParen) depth--;
+                cursor--;
+            }
+            if (depth != 0) return false;
+        }
+
+        if (cursor < 0 || tokens[cursor].Kind != SqlToken.Identifier) return false;
+
+        int beforeName = cursor - 1;
+        if (beforeName < 0) return false;
+
+        if (tokens[beforeName].Kind == SqlToken.With) return true;
+
+        // CTE chain: `WITH a AS (...), b AS |`. The comma must itself live
+        // inside a top-level CTE context — verified by finding WITH before
+        // any unbalanced left paren further back.
+        if (tokens[beforeName].Kind == SqlToken.Comma)
+        {
+            int parenDepth = 0;
+            for (int i = beforeName - 1; i >= 0; i--)
+            {
+                SqlToken k = tokens[i].Kind;
+                if (k == SqlToken.RightParen) parenDepth++;
+                else if (k == SqlToken.LeftParen)
+                {
+                    if (parenDepth == 0) return false; // walked out of the WITH scope
+                    parenDepth--;
+                }
+                else if (parenDepth == 0 && k == SqlToken.With) return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
@@ -1583,6 +1651,16 @@ public enum CompletionZoneKind
 
     /// <summary>After AS — user is typing an alias (no schema completions).</summary>
     AfterAs,
+
+    /// <summary>
+    /// After AS in a CTE binding (<c>WITH foo AS |</c> or
+    /// <c>WITH foo (a, b) AS |</c>). The user expects a materialization
+    /// hint (<c>MATERIALIZED</c> / <c>NOT MATERIALIZED</c>) or the opening
+    /// paren of the CTE body — distinct from the plain <c>AfterAs</c>
+    /// (alias-typing) position so the popup doesn't dump every alias-zone
+    /// surface here.
+    /// </summary>
+    AfterCteAs,
 
     /// <summary>Inside function call parentheses — offer columns, functions, literals.</summary>
     InFunctionArguments,

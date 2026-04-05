@@ -1015,4 +1015,274 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
             d.Severity == DiagnosticSeverity.Warning &&
             d.Message.Contains("Unknown function"));
     }
+
+    [Fact]
+    public void ModelCall_DoesNotEmitUnknownFunctionWarning()
+    {
+        // Models register through their own catalog (ModelEntry) rather
+        // than the UDF or function registry. Without the dedicated
+        // `models.` lookup in ResolvesToFunction, every `models.X(...)`
+        // call surfaced as a spurious yellow squiggle in the editor.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [Table("t", "img")],
+            Functions = [],
+            Keywords = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "depth_anything_v3_large_meters",
+                    OutputKind = "Array<Float32>",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "img", Kind = "Image" },
+                    ],
+                },
+            ],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT models.depth_anything_v3_large_meters(img) FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("Unknown function"));
+    }
+
+    [Fact]
+    public void ArrayReturn_FlowingIntoArrayParameter_DoesNotWarn()
+    {
+        // `models.M(img) → Array<Float32>` feeding into a consumer that
+        // declares `Array<Float32>` must not surface a type mismatch.
+        // Regression for the issue where the consumer's parameter Kind
+        // dropped the `Array<...>` wrapper, so strict-equality and the
+        // numeric-family check both rejected the legitimate flow.
+        // Models are dual-registered as scalar functions in the catalog;
+        // mirror that here so TryInferType can resolve the inner call's
+        // return type through the Functions list.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "img", Kind = "Image", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "consume_floats",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "data", Kind = "Array<Float32>" },
+                    ],
+                    ReturnType = "Float32",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "depth_anything_v3_large_meters",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Array<Float32>",
+                },
+            ],
+            Keywords = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "depth_anything_v3_large_meters",
+                    OutputKind = "Array<Float32>",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                },
+            ],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT consume_floats(models.depth_anything_v3_large_meters(img)) FROM t",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void OverloadedFunction_AlternativeShapeMatch_DoesNotWarn()
+    {
+        // `point_cloud_from_depth_pinhole` has two signature variants —
+        // (Image, Image, Float32) and (Image, Array<Float32>, Float32).
+        // A call passing an Array<Float32> as the second arg matches the
+        // second variant and must not warn. The manifest now carries the
+        // alternative shape via AdditionalParameterShapes so the analyzer
+        // can try every variant before flagging a mismatch.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "color", Kind = "Image", Nullable = false },
+                    new TableColumnEntry { Name = "fov", Kind = "Float32", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "point_cloud_from_depth_pinhole",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "color", Kind = "Image" },
+                        new ParameterSignature { Name = "depth", Kind = "Image" },
+                        new ParameterSignature { Name = "fov_deg", Kind = "Float32" },
+                    ],
+                    ReturnType = "PointCloud",
+                    AdditionalParameterShapes =
+                    [
+                        [
+                            new ParameterSignature { Name = "color", Kind = "Image" },
+                            new ParameterSignature { Name = "depth", Kind = "Array<Float32>" },
+                            new ParameterSignature { Name = "fov_deg", Kind = "Float32" },
+                        ],
+                    ],
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "depth_model",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Array<Float32>",
+                },
+            ],
+            Keywords = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "depth_model",
+                    OutputKind = "Array<Float32>",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                },
+            ],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT point_cloud_from_depth_pinhole(color, models.depth_model(color), fov) FROM t",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void OverloadedFunction_NoShapeMatches_StillWarns()
+    {
+        // Negative test for the overload-tryout loop: a call that matches
+        // neither variant must still surface a type warning rather than
+        // be silently accepted.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "color", Kind = "Image", Nullable = false },
+                    new TableColumnEntry { Name = "name", Kind = "String", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "point_cloud_from_depth_pinhole",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "color", Kind = "Image" },
+                        new ParameterSignature { Name = "depth", Kind = "Image" },
+                        new ParameterSignature { Name = "fov_deg", Kind = "Float32" },
+                    ],
+                    ReturnType = "PointCloud",
+                    AdditionalParameterShapes =
+                    [
+                        [
+                            new ParameterSignature { Name = "color", Kind = "Image" },
+                            new ParameterSignature { Name = "depth", Kind = "Array<Float32>" },
+                            new ParameterSignature { Name = "fov_deg", Kind = "Float32" },
+                        ],
+                    ],
+                },
+            ],
+            Keywords = [],
+        };
+
+        // `name` is String — matches neither Image nor Array<Float32>.
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT point_cloud_from_depth_pinhole(color, name, 1.0) FROM t",
+            manifest);
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("expects"));
+    }
+
+    [Fact]
+    public void ScalarFlowingIntoArrayParameter_StillWarns()
+    {
+        // Negative test: the array-aware compatibility check must not let
+        // a bare scalar flow into an array parameter unchecked.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [Table("t", "score")],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "consume_floats",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "data", Kind = "Array<Float32>" },
+                    ],
+                    ReturnType = "Float32",
+                },
+            ],
+            Keywords = [],
+        };
+
+        // `score` is a Float32 column being passed into an Array<Float32> param.
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT consume_floats(score) FROM t", manifest);
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("Array<Float32>"));
+    }
+
+    [Fact]
+    public void UnregisteredModelCall_StillEmitsUnknownFunctionWarning()
+    {
+        // Negative test: a `models.X(...)` call with no matching ModelEntry
+        // must still fire the unknown-function diagnostic. Guards against
+        // the model lookup accidentally swallowing every `models.`-qualified
+        // call regardless of whether the model is actually registered.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [Table("t", "img")],
+            Functions = [],
+            Keywords = [],
+            Models =
+            [
+                new ModelEntry { Name = "registered_model", OutputKind = "Float32" },
+            ],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT models.never_registered(img) FROM t", manifest);
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("Unknown function"));
+    }
 }

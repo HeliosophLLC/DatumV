@@ -134,10 +134,17 @@ public static class CatalogManifestBuilder
             List<ModelEntry> modelEntries = new(catalog.Models.Entries.Count);
             foreach (KeyValuePair<string, Models.ModelCatalogEntry> entry in catalog.Models.Entries)
             {
+                // Output shape: preserve the array marker the catalog
+                // entry already captured. Without this, `RETURNS Array<Float32>`
+                // would surface as just `Float32` in the model-completion
+                // popup and the model-call signature help.
+                string outputKindLabel = entry.Value.OutputIsArray
+                    ? $"Array<{entry.Value.OutputKind}>"
+                    : entry.Value.OutputKind.ToString();
                 modelEntries.Add(new ModelEntry
                 {
                     Name = entry.Value.Name,
-                    OutputKind = entry.Value.OutputKind.ToString(),
+                    OutputKind = outputKindLabel,
                     Category = entry.Value.Category,
                     Backend = entry.Value.Backend,
                     DisplayName = entry.Value.DisplayName,
@@ -263,7 +270,7 @@ public static class CatalogManifestBuilder
                 parameters.Add(new ParameterSignature
                 {
                     Name = spec.Name,
-                    Kind = spec.Kind.Describe(),
+                    Kind = DescribeParameterShape(spec.Kind, spec.IsArray),
                     IsOptional = spec.IsOptional,
                 });
             }
@@ -275,7 +282,7 @@ public static class CatalogManifestBuilder
                 parameters.Add(new ParameterSignature
                 {
                     Name = $"...{first.VariadicTrailing.Name}",
-                    Kind = first.VariadicTrailing.Kind.Describe(),
+                    Kind = DescribeParameterShape(first.VariadicTrailing.Kind, first.VariadicTrailing.IsArray),
                     IsOptional = first.VariadicTrailing.MinOccurrences == 0,
                 });
             }
@@ -290,6 +297,21 @@ public static class CatalogManifestBuilder
                 : baseReturn;
         }
 
+        // Multi-variant functions (e.g. point_cloud_from_depth_pinhole's
+        // Image-depth + Float32[]-depth overloads) carry every variant past
+        // the primary so the semantic analyzer's argument-type validation
+        // can try each shape before warning. Without this it sees only the
+        // first variant and flags every call site that matches a later one.
+        List<IReadOnlyList<ParameterSignature>>? additional = null;
+        if (descriptor.Signatures.Count > 1)
+        {
+            additional = new List<IReadOnlyList<ParameterSignature>>(descriptor.Signatures.Count - 1);
+            for (int i = 1; i < descriptor.Signatures.Count; i++)
+            {
+                additional.Add(BuildVariantParameters(descriptor.Signatures[i]));
+            }
+        }
+
         return new FunctionSignature
         {
             SchemaName = descriptor.SchemaName,
@@ -298,8 +320,58 @@ public static class CatalogManifestBuilder
             ReturnType = returnType,
             Description = descriptor.Description,
             Category = descriptor.Category,
+            AdditionalParameterShapes = additional,
         };
     }
+
+    /// <summary>
+    /// Renders a single signature variant's parameters as a
+    /// <see cref="ParameterSignature"/> list — the same shape the primary
+    /// variant produces inline, factored out so additional overloads can
+    /// reuse the rendering logic (kind + array marker + variadic suffix).
+    /// </summary>
+    private static IReadOnlyList<ParameterSignature> BuildVariantParameters(FunctionSignatureVariant variant)
+    {
+        List<ParameterSignature> result = new(variant.Parameters.Count + (variant.VariadicTrailing is not null ? 1 : 0));
+        foreach (ParameterSpec spec in variant.Parameters)
+        {
+            result.Add(new ParameterSignature
+            {
+                Name = spec.Name,
+                Kind = DescribeParameterShape(spec.Kind, spec.IsArray),
+                IsOptional = spec.IsOptional,
+            });
+        }
+        if (variant.VariadicTrailing is not null)
+        {
+            result.Add(new ParameterSignature
+            {
+                Name = $"...{variant.VariadicTrailing.Name}",
+                Kind = DescribeParameterShape(variant.VariadicTrailing.Kind, variant.VariadicTrailing.IsArray),
+                IsOptional = variant.VariadicTrailing.MinOccurrences == 0,
+            });
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Renders a parameter shape as a single string for the manifest's
+    /// <see cref="ParameterSignature.Kind"/> field. Wraps the kind matcher's
+    /// describe output in <c>Array&lt;...&gt;</c> when the slot requires an
+    /// array. Without this, an <c>Array&lt;Float32&gt;</c> parameter slot
+    /// surfaced as the bare element kind (<c>Float32</c>), so the semantic
+    /// analyzer's type-compatibility check rejected legitimate
+    /// <c>Array&lt;Float32&gt;</c> arguments (e.g. <c>models.X(img)</c>
+    /// returning <c>Array&lt;Float32&gt;</c> flowing into <c>pose_from_rgbd</c>'s
+    /// array-typed slot).
+    /// </summary>
+    private static string DescribeParameterShape(DataKindMatcher kind, ArrayMatch arrayMatch) => arrayMatch switch
+    {
+        ArrayMatch.Array
+            or ArrayMatch.FlatArray
+            or ArrayMatch.MultiDimArray => $"Array<{kind.Describe()}>",
+        _ => kind.Describe(),
+    };
 
     /// <summary>
     /// Builds a <see cref="FunctionSignature"/> for one table-valued function.
@@ -389,6 +461,31 @@ public static class CatalogManifestBuilder
     private static IReadOnlyList<ParameterSignature> BuildModelParameters(
         Models.ModelCatalogEntry entry)
     {
+        // SQL-defined models attach a rich per-parameter snapshot at
+        // registration (name, kind, array-ness). Prefer that when present
+        // so hover / signature help can show `img: Image` instead of the
+        // generic positional `input: <kind>` we synthesize from
+        // <see cref="Models.ModelCatalogEntry.InputKinds"/> for built-ins
+        // that lack the snapshot.
+        if (entry.ParameterInfos is { Count: > 0 } infos)
+        {
+            ParameterSignature[] result = new ParameterSignature[infos.Count];
+            for (int i = 0; i < infos.Count; i++)
+            {
+                Models.ModelParameterInfo info = infos[i];
+                string kindLabel = info.IsArray
+                    ? $"Array<{info.Kind}>"
+                    : info.Kind.ToString();
+                result[i] = new ParameterSignature
+                {
+                    Name = info.Name,
+                    Kind = kindLabel,
+                    IsOptional = info.IsOptional,
+                };
+            }
+            return result;
+        }
+
         int requiredCount = entry.InputKinds.Count;
         int optionalCount = entry.OptionalArgKinds?.Count ?? 0;
         if (requiredCount == 0 && optionalCount == 0)

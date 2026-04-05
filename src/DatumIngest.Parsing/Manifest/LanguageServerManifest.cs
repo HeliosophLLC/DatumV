@@ -203,6 +203,19 @@ public sealed class FunctionSignature
     /// </summary>
     public IReadOnlyList<TableColumnEntry>? OutputColumns { get; init; }
 
+    /// <summary>
+    /// Alternative parameter shapes for overloaded functions — the second,
+    /// third, … signature variants beyond the primary <see cref="Parameters"/>
+    /// list. Used by the semantic analyzer's argument-type validation: if
+    /// any shape (primary or any alternative) matches the call's actual
+    /// argument kinds, no diagnostic is emitted. Without this the analyzer
+    /// would warn on every legitimate use of an overload that wasn't the
+    /// first variant declared (e.g. <c>point_cloud_from_depth_pinhole</c>'s
+    /// <c>Float32[]</c> depth overload). <see langword="null"/> when the
+    /// function has a single variant (the common case).
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<ParameterSignature>>? AdditionalParameterShapes { get; init; }
+
     /// <summary>Whether this is an aggregate function (used in SELECT with GROUP BY).</summary>
     public bool IsAggregate { get; init; }
 

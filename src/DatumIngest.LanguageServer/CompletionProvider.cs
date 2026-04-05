@@ -179,6 +179,14 @@ public sealed class CompletionProvider
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
+            case CompletionZoneKind.AfterCteAs:
+                // `WITH foo AS |` — keyword-only zone offering the
+                // materialization hint. The opening paren of the CTE body
+                // is typed directly; we don't synthesize a "(" item because
+                // bare punctuation isn't a useful completion offer.
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
+                break;
+
             case CompletionZoneKind.AfterCreate:
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;

@@ -239,6 +239,67 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.DoesNotContain(items, item => item.Label == "frame");
     }
 
+    // ───────────────────── CTE AS-position keywords ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterCteAs_OffersMaterializationHints()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        const string sql = "WITH foo AS  (SELECT 1)";
+        // Cursor in the gap after `AS `.
+        int offset = sql.IndexOf("AS ", StringComparison.Ordinal) + "AS ".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "MATERIALIZED" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "NOT MATERIALIZED" && item.Kind == CompletionItemKind.Keyword);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterCteAs_WithColumnList_StillOffersHints()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        // `WITH foo (a, b) AS |` — the column-list parens between the CTE
+        // name and AS must not throw off the classifier.
+        const string sql = "WITH foo (a, b) AS  (SELECT 1, 2)";
+        int offset = sql.IndexOf("AS ", StringComparison.Ordinal) + "AS ".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "MATERIALIZED");
+        Assert.Contains(items, item => item.Label == "NOT MATERIALIZED");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterChainedCteAs_OffersMaterializationHints()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        // Second CTE in a chain — `WITH a AS (...), b AS |`. Detection
+        // must walk back past the comma and confirm WITH precedes it.
+        const string sql = "WITH a AS (SELECT 1), b AS  (SELECT 2)";
+        // Use LastIndexOf to land on the second AS, not the first.
+        int offset = sql.LastIndexOf("AS ", StringComparison.Ordinal) + "AS ".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "MATERIALIZED");
+    }
+
+    [Fact]
+    public void GetCompletions_AliasingAs_OutsideCte_DoesNotOfferMaterializationHints()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        // Regular `SELECT col AS alias` position — must NOT offer
+        // MATERIALIZED. The plain alias-typing AfterAs zone returns no
+        // keywords; this guards against an overzealous CTE detection.
+        const string sql = "SELECT name AS  FROM users";
+        int offset = sql.IndexOf("AS ", StringComparison.Ordinal) + "AS ".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.DoesNotContain(items, item => item.Label == "MATERIALIZED");
+    }
+
     // ───────────────────── After FROM ─────────────────────
 
     [Fact]
