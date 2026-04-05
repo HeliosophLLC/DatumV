@@ -40,6 +40,19 @@ public static class ImageHeaderParser
             return TryParseWebPHeader(data);
         }
 
+        // GIF: starts with "GIF87a" or "GIF89a" — logical screen W/H follow at bytes 6..9 (LE u16 each).
+        if (data.Length >= 10 &&
+            data[0] == (byte)'G' && data[1] == (byte)'I' && data[2] == (byte)'F' && data[3] == (byte)'8' &&
+            (data[4] == (byte)'7' || data[4] == (byte)'9') && data[5] == (byte)'a')
+        {
+            int width = data[6] | (data[7] << 8);
+            int height = data[8] | (data[9] << 8);
+            // Index-colour streams are conceptually 1 channel; we report 4 because
+            // GIF supports transparency via the GCE block. Accessors that care about
+            // exact channel counts can fall back to SKBitmap.Decode.
+            return new ImageDimensions(width, height, 4);
+        }
+
         return null;
     }
 
@@ -72,6 +85,13 @@ public static class ImageHeaderParser
             data[8] == (byte)'W' && data[9] == (byte)'E' && data[10] == (byte)'B' && data[11] == (byte)'P')
         {
             return ImageFormat.WebP;
+        }
+
+        if (data.Length >= 6 &&
+            data[0] == (byte)'G' && data[1] == (byte)'I' && data[2] == (byte)'F' && data[3] == (byte)'8' &&
+            (data[4] == (byte)'7' || data[4] == (byte)'9') && data[5] == (byte)'a')
+        {
+            return ImageFormat.Gif;
         }
 
         return ImageFormat.Unknown;
@@ -267,5 +287,8 @@ public enum ImageFormat
     Png,
 
     /// <summary>WebP (lossy or lossless).</summary>
-    WebP
+    WebP,
+
+    /// <summary>Graphics Interchange Format (GIF87a or GIF89a, animated or static).</summary>
+    Gif,
 }

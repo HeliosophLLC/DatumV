@@ -55,12 +55,16 @@ public sealed class HoverProvider
         // TVF alias map. A bare CTE name or a FROM alias bound to a CTE
         // resolves to the CTE's derived output columns.
         CteSchemaResult cteSchemas = CteSchemaResolver.Resolve(sql, _manifest);
+        // Active lambda parameter scopes at the cursor — innermost last.
+        // Used by ResolveIdentifierHover to recognise `t` / `x` / etc. as
+        // lambda parameters before falling through to column lookup.
+        IReadOnlyList<LambdaScope> lambdaScopes = LambdaScopeWalker.FindActiveScopes(tokens, cursorOffset);
 
         string? docKey = null;
 
         string? markdown = hit.Kind switch
         {
-            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, tvfAliases, cteSchemas, out docKey),
+            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, tvfAliases, cteSchemas, lambdaScopes, out docKey),
             SqlToken.TypeKeyword => TypeDescriptions.TryGetValue(hit.Text, out string? typeDesc) ? typeDesc : null,
             SqlToken.Arrow => "**`->`** Lambda arrow — separates parameter(s) from the body expression.\n\n" +
                 "Usage: `x -> expr` or `(a, b) -> expr` inside higher-order functions " +
@@ -111,9 +115,62 @@ public sealed class HoverProvider
         TokenHit currentToken,
         Dictionary<string, FunctionSignature> tvfAliases,
         CteSchemaResult cteSchemas,
+        IReadOnlyList<LambdaScope> lambdaScopes,
         out string? docKey)
     {
         docKey = null;
+
+        // Lambda-parameter resolution. Innermost lambda wins on shadowing
+        // (e.g. `(t) -> (t) -> t` resolves the inner `t`). Skip the function-
+        // call check at this point on purpose — a lambda parameter `t`
+        // followed by `(` would be a call invocation, not a parameter ref,
+        // but lambda parameters in scope today are always scalar values, so
+        // such a sequence is malformed user input rather than a real call.
+        for (int i = lambdaScopes.Count - 1; i >= 0; i--)
+        {
+            LambdaScope scope = lambdaScopes[i];
+            int paramIndex = -1;
+            for (int p = 0; p < scope.Parameters.Count; p++)
+            {
+                if (string.Equals(scope.Parameters[p], name, StringComparison.Ordinal))
+                {
+                    paramIndex = p;
+                    break;
+                }
+            }
+            if (paramIndex < 0) continue;
+            string? lambdaHover = FormatLambdaParameterHover(name, paramIndex, scope);
+            if (lambdaHover is not null) return lambdaHover;
+        }
+
+        // Hover on the parameter DECLARATION (e.g. the `t` in `(t) -> body`
+        // when the cursor is on the parameter name BEFORE the arrow).
+        // FindActiveScopes only pushes a scope once it's processed `->`,
+        // so the loop above misses this case. Synthesise the scope by
+        // looking forward for the matching arrow.
+        int idx = tokens.IndexOf(currentToken);
+        if (idx >= 0)
+        {
+            LambdaScope? declScope =
+                LambdaScopeWalker.TryFindLambdaScopeForParameterDeclaration(tokens, idx);
+            if (declScope is not null)
+            {
+                int paramIndex = -1;
+                for (int p = 0; p < declScope.Parameters.Count; p++)
+                {
+                    if (string.Equals(declScope.Parameters[p], name, StringComparison.Ordinal))
+                    {
+                        paramIndex = p;
+                        break;
+                    }
+                }
+                if (paramIndex >= 0)
+                {
+                    string? declHover = FormatLambdaParameterHover(name, paramIndex, declScope);
+                    if (declHover is not null) return declHover;
+                }
+            }
+        }
 
         // If followed by '(' it's a function call.
         int currentIndex = tokens.IndexOf(currentToken);
@@ -228,6 +285,168 @@ public sealed class HoverProvider
 
         return GetColumnHover(name);
     }
+
+    /// <summary>
+    /// Renders the hover for a lambda parameter. Walks the manifest to find
+    /// the outer function call's signature, locates the parameter slot the
+    /// lambda fills, reads its
+    /// <see cref="ParameterSignature.LambdaContextName"/>, and looks the
+    /// context up in <see cref="LanguageServerManifest.FunctionContexts"/>
+    /// for the canonical kind + a parent-chain breadcrumb. Falls back to a
+    /// minimal "Lambda parameter — `name`" when the manifest doesn't carry
+    /// enough metadata to pin down a context.
+    /// </summary>
+    private string? FormatLambdaParameterHover(string name, int paramIndex, LambdaScope scope)
+    {
+        string? contextName = null;
+        string? declaredKind = null;
+        string? outerCallSummary = null;
+
+        if (scope.OuterCallName is not null && scope.OuterArgIndex >= 0)
+        {
+            FunctionSignature? outer = ResolveFunctionEntry(null, scope.OuterCallName);
+            if (outer is not null)
+            {
+                ParameterSignature? slot = TryGetParameterSlot(outer, scope.OuterArgIndex);
+                if (slot is not null)
+                {
+                    contextName = slot.LambdaContextName;
+                    declaredKind = slot.Kind;
+                    string qualifiedFn = string.IsNullOrEmpty(outer.SchemaName)
+                        || string.Equals(outer.SchemaName, "system", StringComparison.OrdinalIgnoreCase)
+                        ? outer.Name
+                        : $"{outer.SchemaName}.{outer.Name}";
+                    outerCallSummary = $"`{qualifiedFn}(...)`, argument #{scope.OuterArgIndex + 1}";
+                }
+            }
+        }
+
+        // Canonical parameter info from the matched context. Prefer the
+        // canonical name+kind, but stay anchored on the parameter's actual
+        // declared name (user may have renamed e.g. `t -> ` to `u -> `).
+        LambdaParameterEntry? canonical = null;
+        FunctionContextEntry? contextEntry = null;
+        if (contextName is not null)
+        {
+            contextEntry = FindContextEntry(contextName);
+            if (contextEntry is not null
+                && paramIndex >= 0
+                && paramIndex < contextEntry.Parameters.Count)
+            {
+                canonical = contextEntry.Parameters[paramIndex];
+            }
+        }
+
+        string headerKind = canonical?.Kind ?? "Lambda parameter";
+        string header = $"**{name}**: `{headerKind}`";
+
+        List<string> body = new();
+        if (contextEntry is not null)
+        {
+            string contextLabel = $"`{contextEntry.Name}` lambda";
+            if (contextEntry.ParentName is not null)
+            {
+                contextLabel += $" (extends `{contextEntry.ParentName}`)";
+            }
+            body.Add($"*Context:* {contextLabel}");
+        }
+        else if (declaredKind is not null)
+        {
+            // No context entry in the manifest — surface the declared shape
+            // verbatim so the user still sees the slot's expected type.
+            body.Add($"*Slot type:* `{declaredKind}`");
+        }
+
+        if (outerCallSummary is not null)
+        {
+            body.Add($"*Bound by:* {outerCallSummary}");
+        }
+        else
+        {
+            body.Add("*Bound by:* lambda expression in this scope");
+        }
+
+        if (contextEntry is not null)
+        {
+            string? description = LambdaContextDescriptions.TryGetValue(contextEntry.Name, out string? d)
+                ? d : null;
+            if (description is not null)
+            {
+                body.Add(description);
+            }
+        }
+
+        return body.Count == 0 ? header : header + "\n\n" + string.Join("\n\n", body);
+    }
+
+    /// <summary>
+    /// Resolves a parameter slot from a function's signature by index,
+    /// preferring the primary <see cref="FunctionSignature.Parameters"/>
+    /// list but falling back to any <see cref="FunctionSignature.AdditionalParameterShapes"/>
+    /// variant that happens to have a parameter at the requested position.
+    /// This second pass matters for multi-variant signatures like
+    /// <c>draw_particles</c> where the lambda slot only appears in some
+    /// variants — without it, the LS would silently drop hover info for
+    /// the lambda variant the user actually typed.
+    /// </summary>
+    private static ParameterSignature? TryGetParameterSlot(FunctionSignature outer, int argIndex)
+    {
+        if (argIndex >= 0 && argIndex < outer.Parameters.Count)
+        {
+            ParameterSignature primarySlot = outer.Parameters[argIndex];
+            if (primarySlot.LambdaContextName is not null) return primarySlot;
+            // Look for a variant whose slot at this index IS a lambda — gives
+            // us the context info even when the primary variant uses a static
+            // type at the same position.
+            if (outer.AdditionalParameterShapes is not null)
+            {
+                foreach (IReadOnlyList<ParameterSignature> variant in outer.AdditionalParameterShapes)
+                {
+                    if (argIndex < variant.Count && variant[argIndex].LambdaContextName is not null)
+                    {
+                        return variant[argIndex];
+                    }
+                }
+            }
+            return primarySlot;
+        }
+        if (outer.AdditionalParameterShapes is not null)
+        {
+            foreach (IReadOnlyList<ParameterSignature> variant in outer.AdditionalParameterShapes)
+            {
+                if (argIndex >= 0 && argIndex < variant.Count) return variant[argIndex];
+            }
+        }
+        return null;
+    }
+
+    private FunctionContextEntry? FindContextEntry(string contextName)
+    {
+        if (_manifest.FunctionContexts is null) return null;
+        foreach (FunctionContextEntry entry in _manifest.FunctionContexts)
+        {
+            if (string.Equals(entry.Name, contextName, StringComparison.Ordinal)) return entry;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Human-readable descriptions for the well-known lambda contexts.
+    /// Centralised here rather than in each context's docstring because
+    /// the runtime side already covers the developer audience; this is
+    /// the editor-facing copy.
+    /// </summary>
+    // Note: deliberately avoid `[…)` half-open-interval notation in these
+    // descriptions. Some Monaco markdown renderers in our embedded version
+    // interpret a `[` (even inside backticks) as the start of a link and
+    // silently drop the surrounding paragraph when the matching `](url)`
+    // never arrives. Use word-form ranges instead.
+    private static readonly Dictionary<string, string> LambdaContextDescriptions =
+        new(StringComparer.Ordinal)
+        {
+            ["animation"] = "Animation lambda. Receives the current frame's normalised time `t` between 0 (start) and 1 (end of last frame) across the animation's duration.",
+            ["particle"] = "Per-particle sprite lambda. Receives the particle's normalised age `x` between 0 (birth) and 1 (death).",
+        };
 
     /// <summary>
     /// Renders a CTE-column hover for <c>qualifier.columnName</c>. Resolves

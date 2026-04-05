@@ -63,7 +63,13 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
     /// a procedural batch (every existing query path); a name that doesn't
     /// match a column then falls through to the column-not-found error.
     /// </summary>
-    private readonly VariableScope? _variableScope;
+    // Not readonly: lazily initialised by InvokeLambdaAsync when the
+    // evaluator was constructed without an explicit scope. Lambda parameter
+    // bindings need somewhere to land, and the operator pipeline doesn't
+    // pass a scope today (procedural UDFs / DECLARE do). The lazy backing
+    // here means lambda invocation works in any evaluator-bearing context;
+    // procedural callers that pass a scope keep using their own.
+    private VariableScope? _variableScope;
 
     /// <summary>
     /// Borrowed reference to the procedure-lifetime arena holding bound
@@ -328,7 +334,7 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
         IValueStore store = _store ?? ThrowStoreRequired();
         return EvaluateAsync(
             expression,
-            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry, videoRegistry: _videoRegistry),
+            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry, videoRegistry: _videoRegistry, lambdaInvoker: this),
             cancellationToken);
     }
 
@@ -342,7 +348,7 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
         IValueStore store = _store ?? ThrowStoreRequired();
         return EvaluateAsBooleanAsync(
             expression,
-            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry, videoRegistry: _videoRegistry),
+            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry, videoRegistry: _videoRegistry, lambdaInvoker: this),
             cancellationToken);
     }
 
@@ -360,6 +366,17 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
     public async ValueTask<DataValue> EvaluateAsync(
         Expression expression, EvaluationFrame frame, CancellationToken cancellationToken = default)
     {
+        // Auto-attach this evaluator as the frame's LambdaInvoker if a caller
+        // constructed the frame without one. Operators across the engine build
+        // EvaluationFrames in many places (~27 sites); rather than threading
+        // `lambdaInvoker:` through every constructor call, we centralise the
+        // wiring here so the frame entering evaluation always has a usable
+        // invoker. The auto-attach is a no-op when the caller already set one.
+        if (frame.LambdaInvoker is null)
+        {
+            frame = frame.WithLambdaInvoker(this);
+        }
+
         try
         {
             return expression switch
@@ -1139,6 +1156,14 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
     public async ValueTask<ValueRef> EvaluateAsValueRefAsync(
         Expression expression, EvaluationFrame frame, CancellationToken cancellationToken = default)
     {
+        // Auto-attach this evaluator as the frame's LambdaInvoker if a caller
+        // constructed the frame without one. See the matching comment on
+        // EvaluateAsync — same rationale, applied to the ValueRef-path entry.
+        if (frame.LambdaInvoker is null)
+        {
+            frame = frame.WithLambdaInvoker(this);
+        }
+
         // Predicate-relevant expression types route through ValueRef-native
         // handlers so no intermediate result writes to the arena. Anything else
         // falls back to the DataValue path and lifts via ToValueRef — those
@@ -1217,13 +1242,14 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
                 + $"({string.Join(", ", value.Parameters)}); got {args.Length}.",
                 nameof(arguments));
         }
-        if (_variableScope is null)
-        {
-            throw new InvalidOperationException(
-                "InvokeLambdaAsync requires the evaluator to be constructed with a VariableScope. "
-                + "Lambda parameters bind into the scope at invocation time and the scope's absence "
-                + "leaves no room for them. Construct ExpressionEvaluator with a non-null variableScope.");
-        }
+        // Lazily initialise the variable scope. Procedural callers
+        // (DECLARE / FOR / SET) pass an explicit scope at construction, so
+        // they hit the same instance every time. Operator-pipeline callers
+        // (ProjectOperator, FilterOperator, …) don't pass a scope; the
+        // first lambda invocation in that evaluator creates one bound to
+        // the evaluator's accountant. The scope persists for the
+        // evaluator's lifetime — typically per-query.
+        _variableScope ??= new VariableScope(_accountant);
 
         _variableScope.PushFrame();
         try

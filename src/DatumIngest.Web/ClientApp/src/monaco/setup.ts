@@ -8,12 +8,15 @@ import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import { loader } from '@monaco-editor/react';
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import { initLsp } from './lsp';
-// Register the generic SQL Monarch contribution. This is the only
-// language we ship today; PR 3 will swap our DatumIngest grammar in via
-// `monaco.languages.setMonarchTokensProvider('sql', …)` and replace the
-// contribution's tokenizer with our own. The contribution still adds
-// the brackets / comments / autoclosing-pairs configuration, which we
-// want to keep.
+// Re-imported deliberately: the contribution registers the `sql` language
+// with Monaco's language registry and provides the bracket / autoclose /
+// comment configuration that other parts of the editor stack (and
+// `@monaco-editor/react`) expect to find. WITHOUT it, completion + hover
+// providers stop firing reliably. The contribution's tokenizer (which
+// includes T-SQL's `bracketedIdentifier` state that breaks array literal
+// highlighting) is overridden by the placeholder grammar registered via
+// the `onLanguage` callback below — that callback runs immediately after
+// the contribution's lazy loader fires, ensuring our placeholder wins.
 import 'monaco-editor/esm/vs/basic-languages/sql/sql.contribution.js';
 
 // Monaco bootstrap. `@monaco-editor/react` defaults to loading Monaco from a
@@ -72,11 +75,25 @@ export function initMonaco(): void {
     { keybinding: monaco.KeyCode.F5, command: null },
   ]);
 
-  // Fire-and-forget LSP wiring: fetches the Monarch grammar and
-  // registers completion / hover / signature / diagnostics providers
-  // against the SQL language. Async because the initial grammar fetch
-  // is over HTTP, but we don't block app boot — providers register
-  // synchronously and the editor uses the built-in tokenizer until
-  // the fetched grammar lands a moment later.
+  // Register a dummy "no-op" language whose only purpose is to be the
+  // intermediate target of the retokenization flip in initLsp. Monaco's
+  // `setModelLanguage(model, sameId)` is a no-op (short-circuits when the
+  // language id matches), and `'plaintext'` isn't registered in our
+  // stripped Monaco bundle. Without a known-good fallback language to
+  // flip through, the retokenization trick that swaps the model from sql
+  // → fallback → sql to force re-running the (now-current) tokenizer
+  // does nothing.
+  monaco.languages.register({ id: RETOKENIZE_DUMMY_LANGUAGE_ID });
+
+  // Fire-and-forget LSP wiring: fetches the full Monarch grammar +
+  // registers completion / hover / signature / diagnostics providers.
+  // The fetched grammar replaces Monaco's built-in T-SQL tokenizer
+  // (loaded lazily by sql.contribution) once it lands.
   void initLsp();
 }
+
+/**
+ * Dummy language id used by `initLsp` to force model retokenization.
+ * Exported so `lsp.ts` references the same constant.
+ */
+export const RETOKENIZE_DUMMY_LANGUAGE_ID = '__datum_retokenize_fallback__';

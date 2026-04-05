@@ -615,6 +615,13 @@ public static class CommonSubexpressionEliminator
         HashSet<string> letNames,
         FunctionRegistry functions)
     {
+        if (expression is LambdaExpression)
+        {
+            // Same reason as CollectCandidates: lambda bodies have their own
+            // parameter scope that doesn't exist at the hoist's eventual
+            // placement point.
+            return;
+        }
         VisitChildren(
             expression,
             child => CollectCandidatesXC(child, operatorIndex, entries, letNames, functions));
@@ -860,12 +867,26 @@ public static class CommonSubexpressionEliminator
     /// even if they appear). The traversal still descends into them — child
     /// subtrees may be CSE-eligible even when their parent isn't.
     /// </summary>
+    /// <remarks>
+    /// <strong>Lambda bodies are NOT descended into.</strong> Their internals
+    /// can reference lambda parameters that don't exist at the
+    /// <see cref="RowEnricherOperator"/> placement point. Hoisting such a
+    /// subexpression produces a runtime "name X is not a declared variable in
+    /// scope" error when the row enricher tries to evaluate it. Refining this
+    /// to allow CSE of lambda-internal subexpressions that don't reference
+    /// the lambda's parameters needs proper scope tracking + per-lambda
+    /// placement of the hoist; out of scope for this slice.
+    /// </remarks>
     private static void CollectCandidates(
         Expression expression,
         Dictionary<string, FingerprintEntry> entries,
         HashSet<string> letNames,
         FunctionRegistry functions)
     {
+        if (expression is LambdaExpression)
+        {
+            return; // see remarks — don't peek inside lambda bodies.
+        }
         // Always recurse into children so deeper candidates are still tracked.
         VisitChildren(expression, child => CollectCandidates(child, entries, letNames, functions));
 

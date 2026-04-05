@@ -445,4 +445,255 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.Contains("String", result.Contents);
         Assert.Contains("UTF-8", result.Contents);
     }
+
+    // ───────────────────── Lambda parameter hover ─────────────────────
+
+    /// <summary>
+    /// Manifest with a context-aware higher-order function plus the
+    /// AnimationContext + ParticleContext descriptors — enough to render
+    /// the kind + parent-chain info the lambda-parameter hover surfaces.
+    /// </summary>
+    private static LanguageServerManifest CreateLambdaTestManifest()
+    {
+        return new LanguageServerManifest
+        {
+            Tables = [],
+            Keywords = ["SELECT", "FROM"],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    Name = "animate_frames",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "duration", Kind = "Float32" },
+                        new ParameterSignature { Name = "fps", Kind = "Int32" },
+                        new ParameterSignature { Name = "size", Kind = "Point2D" },
+                        new ParameterSignature { Name = "render_frame", Kind = "Lambda<animation, returns: Drawing>", LambdaContextName = "animation" },
+                    ],
+                    ReturnType = "Array<Image>",
+                    Description = "Drives an animation lambda over duration*fps frames.",
+                },
+                new FunctionSignature
+                {
+                    Name = "draw_particles",
+                    // Primary variant uses a static Drawing sprite; the lambda
+                    // sprite_fn is in an additional shape — same as the runtime.
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "t", Kind = "Float32" },
+                        new ParameterSignature { Name = "emit_at", Kind = "Point2D" },
+                        new ParameterSignature { Name = "rate", Kind = "Float32" },
+                        new ParameterSignature { Name = "lifetime", Kind = "Float32" },
+                        new ParameterSignature { Name = "velocity", Kind = "Point2D" },
+                        new ParameterSignature { Name = "jitter", Kind = "Float32" },
+                        new ParameterSignature { Name = "sprite", Kind = "Drawing" },
+                    ],
+                    AdditionalParameterShapes =
+                    [
+                        [
+                            new ParameterSignature { Name = "t", Kind = "Float32" },
+                            new ParameterSignature { Name = "emit_at", Kind = "Point2D" },
+                            new ParameterSignature { Name = "rate", Kind = "Float32" },
+                            new ParameterSignature { Name = "lifetime", Kind = "Float32" },
+                            new ParameterSignature { Name = "velocity", Kind = "Point2D" },
+                            new ParameterSignature { Name = "jitter", Kind = "Float32" },
+                            new ParameterSignature { Name = "sprite_fn", Kind = "Lambda<particle, returns: Drawing>", LambdaContextName = "particle" },
+                        ],
+                    ],
+                    ReturnType = "Drawing",
+                    Description = "Deterministic particle emitter.",
+                },
+            ],
+            FunctionContexts =
+            [
+                new FunctionContextEntry
+                {
+                    Name = "animation",
+                    Parameters = [new LambdaParameterEntry { Name = "t", Kind = "Float32" }],
+                    ParentName = "pure",
+                    Borrows = [],
+                },
+                new FunctionContextEntry
+                {
+                    Name = "particle",
+                    Parameters = [new LambdaParameterEntry { Name = "x", Kind = "Float32" }],
+                    ParentName = "animation",
+                    Borrows = [],
+                },
+                new FunctionContextEntry
+                {
+                    Name = "pure",
+                    Parameters = [],
+                    ParentName = null,
+                    Borrows = [],
+                },
+            ],
+        };
+    }
+
+    [Fact]
+    public void GetHover_LambdaParam_T_InsideAnimateFrames_ReportsAnimationContext()
+    {
+        HoverProvider provider = new(CreateLambdaTestManifest());
+
+        // `t` appears at offset 56 (inside the lambda body).
+        const string sql = "SELECT animate_frames(1.0, 8, point2d(64,64), (t) -> t)";
+        int cursor = sql.LastIndexOf('t');
+        HoverResult? result = provider.GetHover(sql, cursor);
+
+        Assert.NotNull(result);
+        // Header shows kind + name.
+        Assert.Contains("**t**", result.Contents);
+        Assert.Contains("Float32", result.Contents);
+        // Context label + parent chain breadcrumb.
+        Assert.Contains("animation", result.Contents);
+        Assert.Contains("pure", result.Contents);
+        // Bound-by line mentions the outer call.
+        Assert.Contains("animate_frames", result.Contents);
+        // Human-readable description.
+        Assert.Contains("normalised time", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_LambdaParam_X_InsideDrawParticles_ResolvesViaAdditionalShape()
+    {
+        // draw_particles' primary signature has a static `sprite Drawing`
+        // at position 6. The lambda variant uses Lambda<particle> at the
+        // same position; the hover should reach into AdditionalParameterShapes
+        // to find the lambda slot rather than reporting the static Drawing.
+        HoverProvider provider = new(CreateLambdaTestManifest());
+
+        const string sql =
+            "SELECT draw_particles(t, point2d(32,56), 20, 0.4, point2d(0,-80), 0, x -> x)";
+        int cursor = sql.LastIndexOf('x');
+        HoverResult? result = provider.GetHover(sql, cursor);
+
+        Assert.NotNull(result);
+        Assert.Contains("**x**", result.Contents);
+        Assert.Contains("Float32", result.Contents);
+        Assert.Contains("particle", result.Contents);
+        // Parent chain follows particle → animation → pure.
+        Assert.Contains("animation", result.Contents);
+        Assert.Contains("normalised age", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_OnLambdaParameterDeclaration_ShowsLambdaCard()
+    {
+        // Regression for: hover on the parameter `t` in `(t) -> body`
+        // (cursor on the declaration, BEFORE the arrow) returned nothing
+        // because the active-scope walker only pushes scopes once it
+        // processes `->`. The forward-looking declaration detection in
+        // TryFindLambdaScopeForParameterDeclaration synthesises the
+        // scope so hover renders the same card you'd get inside the body.
+        HoverProvider provider = new(CreateLambdaTestManifest());
+
+        const string sql = "SELECT animate_frames(1.0, 8, point2d(64, 64), (t) -> t)";
+        // Cursor on the `t` inside (t), not the `t` in the body.
+        int cursor = sql.IndexOf("(t)") + 1;
+        HoverResult? result = provider.GetHover(sql, cursor);
+
+        Assert.NotNull(result);
+        Assert.Contains("**t**", result.Contents);
+        Assert.Contains("animation", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_OnSingleParamLambdaDeclaration_ShowsLambdaCard()
+    {
+        // Single-parameter form: `x -> body`. Cursor on the `x`. Same
+        // detection but via the form-1 branch (no enclosing parens).
+        HoverProvider provider = new(CreateLambdaTestManifest());
+
+        const string sql =
+            "SELECT draw_particles(t, point2d(32,56), 20, 0.4, point2d(0,-80), 0, x -> x)";
+        int cursor = sql.IndexOf("x ->");
+        HoverResult? result = provider.GetHover(sql, cursor);
+
+        Assert.NotNull(result);
+        Assert.Contains("**x**", result.Contents);
+        Assert.Contains("particle", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_RenamedLambdaParam_StillResolves()
+    {
+        // The user may rename the canonical `t` to `u`. The lambda scope
+        // walker tracks the actual parameter name; the manifest's canonical
+        // info comes from the context, but the hover header should keep the
+        // user's name verbatim.
+        HoverProvider provider = new(CreateLambdaTestManifest());
+
+        const string sql = "SELECT animate_frames(1.0, 8, point2d(64,64), u -> u)";
+        int cursor = sql.LastIndexOf('u');
+        HoverResult? result = provider.GetHover(sql, cursor);
+
+        Assert.NotNull(result);
+        Assert.Contains("**u**", result.Contents);
+        Assert.Contains("Float32", result.Contents);
+        Assert.Contains("animation", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_TwoParameterLambda_BothResolveByName()
+    {
+        // (a, b) -> a + b — both names should resolve to lambda parameters.
+        HoverProvider provider = new(CreateLambdaTestManifest());
+
+        // Use a hypothetical 2-arg lambda construct via array_transform.
+        // We don't have that in the test manifest, but we don't need an
+        // outer-call match for the walker to recognise the parameters —
+        // the hover degrades gracefully to "Lambda parameter".
+        const string sql = "SELECT (a, b) -> a + b";
+        int cursorA = sql.IndexOf("-> a") + 3;  // first `a` after the arrow
+        HoverResult? resultA = provider.GetHover(sql, cursorA);
+        Assert.NotNull(resultA);
+        Assert.Contains("**a**", resultA.Contents);
+
+        int cursorB = sql.LastIndexOf('b');
+        HoverResult? resultB = provider.GetHover(sql, cursorB);
+        Assert.NotNull(resultB);
+        Assert.Contains("**b**", resultB.Contents);
+    }
+
+    [Fact]
+    public void GetHover_IdentifierOutsideLambda_FallsThroughToColumn()
+    {
+        // An identifier that's genuinely outside any lambda — neither in a
+        // lambda body nor a parameter-declaration position — should NOT
+        // pick up a lambda card. Use a column-ish bare identifier outside
+        // every lambda's reach.
+        HoverProvider provider = new(CreateLambdaTestManifest());
+
+        // `xyz` is a column-style identifier in a plain SELECT — no lambda
+        // anywhere in this SQL, so the provider must not synthesise a
+        // lambda card. (Returns null since the test manifest has no `xyz`
+        // column; the assertion is that no lambda info leaks in.)
+        const string sql = "SELECT xyz FROM t";
+        int cursor = sql.IndexOf("xyz");
+        HoverResult? result = provider.GetHover(sql, cursor);
+        if (result is not null)
+        {
+            Assert.DoesNotContain("Bound by", result.Contents);
+            Assert.DoesNotContain("lambda", result.Contents);
+        }
+    }
+
+    [Fact]
+    public void GetHover_NestedLambdaShadowing_InnerWins()
+    {
+        // Outer lambda's `t` is shadowed by inner lambda's `t`. The
+        // innermost matching scope should win; since the inner lambda's
+        // outer call isn't recognised (no manifest entry), we still get
+        // a lambda-parameter hover (with degraded context info).
+        HoverProvider provider = new(CreateLambdaTestManifest());
+
+        const string sql =
+            "SELECT animate_frames(1.0, 8, point2d(64,64), (t) -> array_transform([t], (t) -> t * 2))";
+        int cursor = sql.LastIndexOf("t * 2");
+        HoverResult? result = provider.GetHover(sql, cursor);
+        Assert.NotNull(result);
+        Assert.Contains("**t**", result.Contents);
+    }
 }

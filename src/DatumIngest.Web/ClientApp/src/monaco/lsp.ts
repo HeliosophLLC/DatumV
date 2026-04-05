@@ -4,6 +4,7 @@ import type {
   CompletionItemKind as ServerCompletionItemKind,
   DiagnosticSeverity as ServerDiagnosticSeverity,
 } from '@/api/generated/openapi-client';
+import { RETOKENIZE_DUMMY_LANGUAGE_ID } from './setup';
 
 // SQL language wiring against the DatumIngest LSP REST endpoints. Each
 // Monaco provider translates a (model, position) call into a server
@@ -39,6 +40,43 @@ export async function initLsp(): Promise<void> {
     if (res.ok) {
       const grammar = (await res.json()) as monaco.languages.IMonarchLanguage;
       monaco.languages.setMonarchTokensProvider('sql', grammar);
+      // Force-retokenise every existing SQL model AND any model created
+      // during the brief window where the contribution's lazy loader
+      // might still resolve and re-override our provider. Two complementary
+      // techniques:
+      //
+      //   1. A double `setMonarchTokensProvider` with a delay — re-registers
+      //      our grammar on the next macrotask so it runs AFTER any
+      //      in-flight async override from sql.contribution's lazy loader
+      //      (which is a local dynamic import and resolves in <10ms; 50ms
+      //      is a safe upper bound).
+      //   2. Per-model retokenisation via the dummy-language flip + a
+      //      private `resetTokenization()` call (when available). The flip
+      //      alone has been observed to not retokenise in some Monaco
+      //      versions; `resetTokenization` is private but stable.
+      const grammarSnapshot = grammar;
+      const forceRetokenize = (): void => {
+        monaco.languages.setMonarchTokensProvider('sql', grammarSnapshot);
+        for (const model of monaco.editor.getModels()) {
+          if (model.getLanguageId() === 'sql') {
+            // Private API path: directly invalidate cached tokens.
+            const m = model as unknown as { resetTokenization?: () => void };
+            if (typeof m.resetTokenization === 'function') {
+              m.resetTokenization();
+              continue;
+            }
+            // Fallback: language flip through the registered dummy.
+            monaco.editor.setModelLanguage(model, RETOKENIZE_DUMMY_LANGUAGE_ID);
+            monaco.editor.setModelLanguage(model, 'sql');
+          }
+        }
+      };
+      forceRetokenize();
+      // Second pass past any pending sql.contribution async load.
+      setTimeout(forceRetokenize, 50);
+      // Forensic log so we can tell at a glance whether the custom grammar
+      // landed.
+      console.info('[lsp] custom SQL grammar registered');
     } else {
       console.warn(`[lsp] grammar fetch failed: ${res.status} ${res.statusText}`);
     }

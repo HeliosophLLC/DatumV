@@ -33,6 +33,25 @@ public sealed class CompletionProvider
         // is empty when there are no CTEs or when parsing failed, so the
         // existing zones keep working unchanged for CTE-less queries.
         CteSchemaResult cteSchemas = CteSchemaResolver.Resolve(sql, _manifest);
+        // Lambda-context-aware scalar function filtering. When the cursor
+        // sits inside a lambda body whose outer call's parameter slot
+        // declared a `LambdaContextName`, the function whitelist switches
+        // to the effective set for that context (globally-visible +
+        // context-tagged + borrowed). Outside a lambda, only globally-
+        // visible functions surface — context-restricted ones like the
+        // animation curves shouldn't pollute the popup in plain SQL.
+        string? currentLambdaContext = LambdaScopeWalker.TryFindCurrentLambdaContextName(
+            sql, cursorOffset, _manifest);
+        HashSet<string>? effectiveScalarWhitelist = currentLambdaContext is null
+            ? null
+            : FunctionContextResolver.EffectiveWhitelist(currentLambdaContext, _manifest);
+        // Lambda parameter names in scope at the cursor — surfaced as
+        // completion items so a user inside `(t) -> ...` or
+        // `x -> blend(...)` actually sees `t` / `x` in the suggestion list,
+        // not just the context-restricted functions that the parameter
+        // brought into scope.
+        IReadOnlyList<string> activeLambdaParams =
+            LambdaScopeWalker.GetActiveLambdaParameterNames(sql, cursorOffset);
         List<CompletionItem> items = new();
 
         // Variables declared earlier in the fragment (DECLARE @x, FOR @i,
@@ -42,6 +61,7 @@ public sealed class CompletionProvider
         if (ZoneAcceptsVariableReferences(zone.Kind))
         {
             AddVariablesInScope(items, zone.VariablesInScope);
+            AddLambdaParameters(items, activeLambdaParams);
         }
 
         switch (zone.Kind)
@@ -52,7 +72,7 @@ public sealed class CompletionProvider
 
             case CompletionZoneKind.AfterSelect:
                 AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
-                AddScalarFunctions(items);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
@@ -74,21 +94,21 @@ public sealed class CompletionProvider
 
             case CompletionZoneKind.AfterWhere:
                 AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
-                AddScalarFunctions(items);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterOn:
                 AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
-                AddScalarFunctions(items);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.Expression:
                 AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
-                AddScalarFunctions(items);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
@@ -99,7 +119,7 @@ public sealed class CompletionProvider
                 // functions, and literals/keywords. Without this branch the
                 // user typing `IF b…` would see column names like `backend`
                 // from `system_models` even though there's no FROM in scope.
-                AddScalarFunctions(items);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
@@ -129,7 +149,7 @@ public sealed class CompletionProvider
 
             case CompletionZoneKind.AfterAssert:
                 AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
-                AddScalarFunctions(items);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
@@ -142,7 +162,7 @@ public sealed class CompletionProvider
 
             case CompletionZoneKind.InFunctionArguments:
                 AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
-                AddScalarFunctions(items);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddAggregateFunctions(items);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 break;
@@ -244,7 +264,7 @@ public sealed class CompletionProvider
                 // Same caveat as AfterInsertTable: target table comes from
                 // UPDATE rather than FROM, so leave columns un-scoped here.
                 AddColumns(items, tablesInScope: null);
-                AddScalarFunctions(items);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
@@ -259,7 +279,7 @@ public sealed class CompletionProvider
                 // tablesInScope walk (picks up UPDATE x / INSERT INTO x /
                 // DELETE FROM x).
                 AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
-                AddScalarFunctions(items);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
@@ -313,7 +333,7 @@ public sealed class CompletionProvider
                 // out — nothing scalar-CALLable lives there.
                 AddProcedures(items);
                 AddUdfs(items);
-                AddScalarFunctions(items);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Call);
                 break;
         }
@@ -884,7 +904,8 @@ public sealed class CompletionProvider
         }
     }
 
-    private void AddScalarFunctions(List<CompletionItem> items)
+    private void AddScalarFunctions(
+        List<CompletionItem> items, HashSet<string>? lambdaContextWhitelist)
     {
         foreach (FunctionSignature function in _manifest.Functions)
         {
@@ -907,6 +928,25 @@ public sealed class CompletionProvider
             // templates require the user to qualify; surfacing them bare
             // would suggest a name that doesn't actually resolve.
             if (!ContainsIgnoreCase(_manifest.SearchPath, function.SchemaName))
+            {
+                continue;
+            }
+            // Lambda-context filtering. Two cases:
+            //   - cursor INSIDE a lambda body with a known context:
+            //     `lambdaContextWhitelist` is the effective whitelist for
+            //     that context (globally-visible ∪ context-tagged ∪ borrowed);
+            //     only members survive.
+            //   - cursor OUTSIDE a lambda body: `lambdaContextWhitelist`
+            //     is null. Functions with a non-empty `Contexts` list are
+            //     context-restricted (animation curves, particle helpers,
+            //     ...) and would resolve to "name not in scope" at execute
+            //     time. Drop them from the popup so they don't pollute
+            //     plain SQL completions.
+            if (lambdaContextWhitelist is not null)
+            {
+                if (!lambdaContextWhitelist.Contains(function.Name)) continue;
+            }
+            else if (function.Contexts is { Count: > 0 })
             {
                 continue;
             }
@@ -1238,6 +1278,28 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Variable,
                 InsertText = name,
                 Detail = "procedural variable",
+                SortOrder = 0,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Surfaces lambda parameter names visible at the cursor as completion
+    /// items. Innermost-lambda parameters are added first; outer parameters
+    /// that aren't shadowed follow. Sort-rank 0 (alongside procedural
+    /// variables) so they appear near the top of the popup.
+    /// </summary>
+    private static void AddLambdaParameters(
+        List<CompletionItem> items, IReadOnlyList<string> lambdaParams)
+    {
+        foreach (string name in lambdaParams)
+        {
+            items.Add(new CompletionItem
+            {
+                Label = name,
+                Kind = CompletionItemKind.Variable,
+                InsertText = name,
+                Detail = "lambda parameter",
                 SortOrder = 0,
             });
         }

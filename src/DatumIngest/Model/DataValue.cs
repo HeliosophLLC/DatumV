@@ -705,6 +705,34 @@ public readonly struct DataValue : IEquatable<DataValue>
         FromPoint3D(value.X, value.Y, value.Z);
 
     /// <summary>
+    /// Creates a 32-bit RGBA colour value. Bytes pack into <c>_p0</c> as
+    /// <c>r | (g &lt;&lt; 8) | (b &lt;&lt; 16) | (a &lt;&lt; 24)</c>. Entirely
+    /// inline — no arena or sidecar backing.
+    /// </summary>
+    public static DataValue FromColor(byte r, byte g, byte b, byte a = 255) =>
+        new(DataKind.Color, flags: 0,
+            p0: unchecked((int)((uint)r | ((uint)g << 8) | ((uint)b << 16) | ((uint)a << 24))));
+
+    /// <summary>
+    /// Reads an RGBA colour value as <c>(r, g, b, a)</c> bytes. Asserts
+    /// <see cref="Kind"/> is <see cref="DataKind.Color"/>.
+    /// </summary>
+    public (byte R, byte G, byte B, byte A) AsColor()
+    {
+        if (_kind != DataKind.Color)
+        {
+            throw new InvalidOperationException(
+                $"AsColor called on a {_kind} value (expected Color).");
+        }
+        uint packed = unchecked((uint)_p0);
+        return (
+            (byte)(packed & 0xFF),
+            (byte)((packed >> 8) & 0xFF),
+            (byte)((packed >> 16) & 0xFF),
+            (byte)((packed >> 24) & 0xFF));
+    }
+
+    /// <summary>
     /// Creates a runtime-only <see cref="DataKind.VideoFrame"/> handle pointing at frame
     /// <paramref name="frameIndex"/> of the video registered under
     /// <paramref name="videoId"/> in the per-query video registry. The inline payload is

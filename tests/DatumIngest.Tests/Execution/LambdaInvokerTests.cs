@@ -103,20 +103,25 @@ public sealed class LambdaInvokerTests : ServiceTestBase
     }
 
     [Fact]
-    public async Task InvokeLambdaAsync_NoVariableScope_Throws()
+    public async Task InvokeLambdaAsync_NoVariableScope_LazilyCreatesOne()
     {
+        // The evaluator's variable scope is lazily initialised on first
+        // lambda invocation when not explicitly supplied. This lets the
+        // operator pipeline (ProjectOperator, etc.) — which constructs
+        // evaluators without an explicit scope — invoke lambdas without
+        // requiring every operator to know about scope management.
         LambdaExpression ast = ParseLambda("x -> x + 1");
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
-        // Evaluator constructed WITHOUT a VariableScope — should refuse invocation.
+        // Evaluator constructed WITHOUT a VariableScope — should now succeed
+        // because the scope is created on demand.
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
         EvaluationFrame frame = new(Row.Empty, arena, arena, new MemoryAccountant());
         ValueRef lambda = ValueRef.FromLambda(LambdaValue.Capture(ast, Row.Empty));
 
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await evaluator.InvokeLambdaAsync(
-                lambda, new[] { ValueRef.FromInt32(1) }, frame, default));
-        Assert.Contains("VariableScope", ex.Message);
+        ValueRef result = await evaluator.InvokeLambdaAsync(
+            lambda, new[] { ValueRef.FromInt32(41) }, frame, default);
+        Assert.Equal(42, result.AsInt32());
     }
 
     [Fact]

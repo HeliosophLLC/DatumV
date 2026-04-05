@@ -58,6 +58,28 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
     }
 
     [Fact]
+    public void DuplicateInsideLambdaBody_NotHoisted()
+    {
+        // Regression: CSE used to descend into lambda bodies, hoisting
+        // subexpressions that reference the lambda's parameters out into a
+        // RowEnricherOperator running outside the lambda. At execute time
+        // the parameter ('x' below) isn't in scope at the enricher's row,
+        // throwing "Name 'x' is not a declared variable in scope".
+        // After the fix, lambda bodies are opaque to the CSE walker.
+        TableCatalog catalog = Catalog2Cols();
+        // array_transform takes (Array<T>, Lambda); the lambda body has
+        // length(a) twice — a candidate that would historically have been
+        // hoisted. With the fix, the lambda body is opaque, no hoist,
+        // source isn't a RowEnricher.
+        QueryOperator plan = PlanQuery(
+            "SELECT array_transform([a, b], x -> length(x) + length(x)) FROM t",
+            catalog);
+
+        ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+        Assert.IsNotType<RowEnricherOperator>(project.Source);
+    }
+
+    [Fact]
     public void SingleOccurrence_NotHoisted()
     {
         // concat(a, b) appears exactly once — no CSE benefit, no rewrite.

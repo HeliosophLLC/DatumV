@@ -95,15 +95,17 @@ public sealed class FunctionContextRegistry
 
     /// <summary>
     /// Creates a registry populated with the engine's built-in contexts:
-    /// <see cref="PureContext"/> (root). Specialised contexts
-    /// (animation, drawing, etc.) are registered by the consumer modules
-    /// that introduce them — same lazy-bootstrap shape as
-    /// <see cref="DatumIngest.Functions.FunctionRegistry.CreateDefault"/>.
+    /// <see cref="PureContext"/> (root) and
+    /// <see cref="AnimationContext"/> (for animation drivers like
+    /// <c>animate_frames</c>). Additional consumer-introduced contexts
+    /// can register themselves via <see cref="Register{T}"/> at startup.
     /// </summary>
     public static FunctionContextRegistry CreateDefault()
     {
         FunctionContextRegistry registry = new();
         registry.Register<PureContext>();
+        registry.Register<AnimationContext>();
+        registry.Register<ParticleContext>();
         return registry;
     }
 }

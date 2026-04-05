@@ -194,8 +194,6 @@ public enum DataKind : byte
     /// </summary>
     VideoSlice = 62,
 
-    // 63 = free
-
     // ───────────────────────── Collections &amp; composite (64–71) ─────────────────────────
 
     /// <summary>
@@ -248,4 +246,51 @@ public enum DataKind : byte
     /// storage shape; accessed via <c>AsMesh</c> / <c>AsByteSpan</c>.
     /// </summary>
     Mesh = 75,
+
+    // ───────────────────────── Visual values (80–87) ─────────────────────────
+
+    /// <summary>
+    /// A 32-bit RGBA color: four byte components packed into <c>_p0</c>
+    /// (R in the low byte, G next, B next, A in the high byte). Constructed
+    /// via <c>color(r, g, b)</c> / <c>color(r, g, b, a)</c> /
+    /// <c>color_hex('#rrggbb')</c>; consumed by draw primitives
+    /// (<c>draw_rect</c>, <c>draw_ellipse</c>, etc.) as the fill/stroke
+    /// argument kind. Inline and self-contained — no arena or sidecar
+    /// backing.
+    /// </summary>
+    Color = 80,
+
+    /// <summary>
+    /// A procedural-visual recipe: a tree of shape / text / image-stamp /
+    /// group / transformed nodes that together describe what to draw,
+    /// without committing to a specific output resolution or encoding. The
+    /// universal rasterizer <c>render(drawing, size)</c> walks the tree
+    /// onto an <see cref="Image"/> at the requested size; an animation
+    /// driver like <c>animate_gif</c> calls render once per frame against
+    /// a lambda that produces a fresh Drawing per time-step.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Sits next to <see cref="Color"/> in the visual-values block because
+    /// both are procedurally-constructed value types (not encoded-media
+    /// bytes like Image/Audio/Video). Carrier is a managed
+    /// <c>DrawingPayload</c> object held in the
+    /// <see cref="DatumIngest.Functions.ValueRef"/>'s materialised slot;
+    /// the <see cref="DataValue"/> form is a null carrier of kind
+    /// <c>Drawing</c> with no inline metadata. The payload is a small
+    /// algebraic record tree (Group / Transformed / Shape / Text /
+    /// ImageStamp), constructed cheaply by the draw primitives and
+    /// composed via <c>draw_group([...])</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Row-scoped</strong> in the current implementation:
+    /// <see cref="DatumIngest.Functions.ValueRef.ToDataValue"/> throws when
+    /// the payload is a Drawing — same posture as <see cref="Lambda"/>.
+    /// Persisting a Drawing to disk is plausible (the payload is a tree
+    /// of small records with embeddable Image leaves) but isn't needed
+    /// for animation / static-render workflows; can be relaxed later if
+    /// a real use case demands it.
+    /// </para>
+    /// </remarks>
+    Drawing = 81,
 }

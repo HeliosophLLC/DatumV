@@ -1,93 +1,101 @@
 ---
-title: Trigonometric & Hyperbolic Functions
-category: numeric
+title: Trigonometric Functions
+category: trigonometry
 ---
 
-# Trigonometric & Hyperbolic Functions
+# Trigonometric Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md) · [Compute Backend](../compute.md)
+[← Back to Functions](string.md) · [SQL Reference](../sql/select.md)
+
+All functions accept any numeric kind and return `Float64`. Angles are in radians.
 
 ### sin
 
-`sin(x)` → Float32 | QU: 1
+`sin(x)` → Float64
 
-Sine (radians).
+Sine of `x` (radians).
 
 ### cos
 
-`cos(x)` → Float32 | QU: 1
+`cos(x)` → Float64
 
-Cosine (radians).
+Cosine of `x` (radians).
 
 ### tan
 
-`tan(x)` → Float32 | QU: 1
+`tan(x)` → Float64
 
-Tangent (radians).
+Tangent of `x` (radians).
+
+### cot
+
+`cot(x)` → Float64
+
+Cotangent of `x` (radians); equivalent to `1 / tan(x)`. At integer multiples of π the result surfaces as ±∞ from floating-point division.
 
 ### asin
 
-`asin(x)` → Float32 | QU: 1
+`asin(x)` → Float64
 
-Arc sine returning radians.
+Arc sine returning radians. Inputs outside [-1, 1] surface as `NaN`.
 
 ### acos
 
-`acos(x)` → Float32 | QU: 1
+`acos(x)` → Float64
 
-Arc cosine returning radians.
+Arc cosine returning radians. Inputs outside [-1, 1] surface as `NaN`.
 
 ### atan
 
-`atan(x)` → Float32 | QU: 1
+`atan(x)` → Float64
 
-Arc tangent returning radians.
+Arc tangent returning radians in (-π/2, π/2).
 
 ### atan2
 
-`atan2(y, x)` → Float32 | QU: 1
+`atan2(y, x)` → Float64
 
-Two-argument arc tangent.
+Two-argument arc tangent: the angle in radians between the positive x-axis and the ray to the point `(x, y)`. Result range [-π, π]. A null in either argument yields null.
 
 ### sinh
 
-`sinh(x)` → Float32 | QU: 1
+`sinh(x)` → Float64
 
 Hyperbolic sine.
 
 ### cosh
 
-`cosh(x)` → Float32 | QU: 1
+`cosh(x)` → Float64
 
 Hyperbolic cosine.
 
 ### tanh
 
-`tanh(x)` → Float32 | QU: 1
+`tanh(x)` → Float64
 
 Hyperbolic tangent.
 
-### degrees
-
-`degrees(x)` → Float32 | QU: 1
-
-Radians to degrees.
-
 ### radians
 
-`radians(x)` → Float32 | QU: 1
+`radians(x)` → Float64
 
-Degrees to radians.
+Converts `x` from degrees to radians.
+
+### degrees
+
+`degrees(x)` → Float64
+
+Converts `x` from radians to degrees.
 
 ### pi
 
-`pi()` → Float32 | QU: 1
+`pi()` → Float64
 
 Returns the constant π.
 
 ### euler
 
-`euler()` → Float32 | QU: 1
+`euler()` → Float64
 
 Returns Euler's number e.
 

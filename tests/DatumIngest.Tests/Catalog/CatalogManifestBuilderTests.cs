@@ -2,6 +2,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar;
 using DatumIngest.Functions.Scalar.Arrays;
+using DatumIngest.Functions.Scalar.Drawing;
 using DatumIngest.Functions.Scalar.Strings;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -168,5 +169,60 @@ public sealed class CatalogManifestBuilderTests : ServiceTestBase
         Assert.Equal("option2", model.Parameters[2].Name);
         Assert.Equal("Int32", model.Parameters[2].Kind);
         Assert.True(model.Parameters[2].IsOptional);
+    }
+
+    [Fact]
+    public void Build_LambdaParameterSlot_PopulatesLambdaContextName()
+    {
+        // Critical end-to-end check that the runtime manifest carries the
+        // lambda context name through to consumers (hover provider's lambda-
+        // param card, completion provider's context-aware whitelist). If
+        // this slot is null, both features silently degrade.
+        TableCatalog catalog = CreateCatalog();
+        FunctionRegistry functions = new();
+        functions.RegisterScalar<AnimateFramesFunction>();
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, functions);
+
+        FunctionSignature af = Assert.Single(
+            manifest.Functions, f => f.Name.Equals("animate_frames", StringComparison.OrdinalIgnoreCase));
+        // The render_frame parameter must carry LambdaContextName = "animation".
+        ParameterSignature renderFrame = af.Parameters[^1];
+        Assert.Equal("render_frame", renderFrame.Name);
+        Assert.Equal("animation", renderFrame.LambdaContextName);
+    }
+
+    [Fact]
+    public void Build_FunctionContexts_Populated()
+    {
+        // The manifest's FunctionContexts list must include the engine's
+        // built-in contexts so the LS resolver can walk parent chains.
+        TableCatalog catalog = CreateCatalog();
+        FunctionRegistry functions = new();
+        functions.RegisterScalar<AnimateFramesFunction>();
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, functions);
+
+        Assert.NotNull(manifest.FunctionContexts);
+        Assert.Contains(manifest.FunctionContexts, c => c.Name == "animation");
+        Assert.Contains(manifest.FunctionContexts, c => c.Name == "pure");
+    }
+
+    [Fact]
+    public void Build_ContextRestrictedFunction_PopulatesContexts()
+    {
+        // Animation curves should carry Contexts = ["animation"] in the
+        // manifest so the completion provider's filter knows to hide them
+        // from non-animation expression positions.
+        TableCatalog catalog = CreateCatalog();
+        FunctionRegistry functions = new();
+        functions.RegisterScalar<OscillateFunction>();
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, functions);
+
+        FunctionSignature osc = Assert.Single(
+            manifest.Functions, f => f.Name.Equals("oscillate", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(osc.Contexts);
+        Assert.Contains("animation", osc.Contexts);
     }
 }

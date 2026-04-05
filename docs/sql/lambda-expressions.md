@@ -10,28 +10,28 @@ In this engine, lambdas are **first-class values** ([`DataKind.Lambda`](../data-
 
 ## Common Patterns
 
-### Animate a Drawing over time (Phase B+)
+### Animate a Drawing over time
 
 ```sql
-SELECT animate_gif(2.0, 12, point2d(32, 48),
+SELECT animate_frames(2.0, 12, point2d(32, 48),
     (t) -> draw_circle(
         point2d(16, 24),
-        4 + oscillate(t, 0, 2, 1.0),
+        4 + sin(t * 6.28) * 2,
         color(255, 200, 50))
 ) AS pulsing_dot
 ```
 
-The lambda receives `t` (current frame time in `[0, 1)`) and returns a `Drawing`. `animate_gif` invokes it once per frame and stitches the results.
+The lambda receives `t` (current frame time in `[0, 1)`) and returns a `Drawing`. `animate_frames` invokes it once per frame and returns the rendered Images as an `Array<Image>` — every image function operates on individual frames naturally via `array_transform`. A single-Image animated-GIF output is planned for a future phase as `animate_gif(...)`.
 
 ### Compose visual layers
 
 ```sql
-SELECT animate_gif(1.5, 12, point2d(32, 48),
-    (t) -> group([
+SELECT animate_frames(1.5, 12, point2d(32, 48),
+    (t) -> draw_group([
         draw_rect(point2d(13, 24), point2d(6, 24), color(101, 67, 33)),
         draw_ellipse(
             point2d(16, 14),
-            point2d(5, 10) * oscillate(t, 1.0, 0.15, 0.25),
+            point2d(5, 10),
             color(255, 200, 50))
     ])
 ) AS torch
@@ -59,18 +59,18 @@ The arrow operator is `->` (thin arrow). The body is any scalar expression.
 Lambda bodies can reference columns from the enclosing row:
 
 ```sql
-SELECT animate_gif(1.0, 12, point2d(32, 32),
-    (t) -> rotate(my_image, t * 360 * spin_direction)) AS spinning
-FROM clips
+SELECT animate_frames(1.0, 12, point2d(32, 32),
+    (t) -> draw_rect(point2d(0, 0), point2d(32, 32), color(fill_red, fill_green, 0))) AS frames
+FROM color_choices
 ```
 
-Here `my_image` and `spin_direction` are columns on `clips`, captured at the moment each row's lambda is created. The capture is snapshotted once per row — the lambda body can be invoked many times (e.g. 12 times for a 1-second 12-fps animation), and every invocation sees the same captured values.
+Here `fill_red` and `fill_green` are columns on `color_choices`, captured at the moment each row's lambda is created. The capture is snapshotted once per row — the lambda body can be invoked many times (e.g. 12 times for a 1-second 12-fps animation), and every invocation sees the same captured values.
 
 ## Function contexts
 
 Some functions only make sense inside a specific kind of lambda body. A consumer function declares a **function context** that its lambda parameter operates in; that context determines which functions are callable inside the body.
 
-For example, `animate_gif`'s `render_frame` parameter expects a lambda in the **animation context**, which exposes:
+For example, `animate_frames`'s `render_frame` parameter expects a lambda in the **animation context**, which exposes:
 
 - The canonical parameter `t Float32` (the LS pre-fills `t -> ` on completion; you can rename to `(u) -> ...` if you prefer).
 - Animation primitives: `oscillate`, `wobble`, `lerp`, `bounce`, `fade_in`, `fade_out`, `random_walk`, `draw_particles`.

@@ -709,6 +709,23 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.RandomFunction>();
         registry.RegisterScalar<Scalar.HashSplitFunction>();
 
+        // Trigonometry
+        registry.RegisterScalar<Scalar.Trigonometry.SinFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.CosFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.TanFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.CotFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.AsinFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.AcosFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.AtanFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.Atan2Function>();
+        registry.RegisterScalar<Scalar.Trigonometry.SinhFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.CoshFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.TanhFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.PiFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.EulerFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.RadiansFunction>();
+        registry.RegisterScalar<Scalar.Trigonometry.DegreesFunction>();
+
         // File
         registry.RegisterScalar<Scalar.File.GetFilenameFunction>();
         registry.RegisterScalar<Scalar.File.GetFilenameExtFunction>();
@@ -798,6 +815,39 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ImagenetStdFunction>();
         registry.RegisterScalar<Scalar.Image.ClipMeanFunction>();
         registry.RegisterScalar<Scalar.Image.ClipStdFunction>();
+
+        // Drawing
+        registry.RegisterScalar<Scalar.Drawing.RenderFunction>();
+        registry.RegisterScalar<Scalar.Drawing.ColorFunction>();
+        registry.RegisterScalar<Scalar.Drawing.ColorHexFunction>();
+        registry.RegisterScalar<Scalar.Drawing.DrawRectFunction>();
+        registry.RegisterScalar<Scalar.Drawing.DrawEllipseFunction>();
+        registry.RegisterScalar<Scalar.Drawing.DrawCircleFunction>();
+        registry.RegisterScalar<Scalar.Drawing.DrawLineFunction>();
+        registry.RegisterScalar<Scalar.Drawing.DrawPolygonFunction>();
+        registry.RegisterScalar<Scalar.Drawing.GroupFunction>();
+        registry.RegisterScalar<Scalar.Drawing.TransformedFunction>();
+        registry.RegisterScalar<Scalar.Drawing.AnimateFramesFunction>();
+        registry.RegisterScalar<Scalar.Image.FramesToGifFunction>();
+        registry.RegisterScalar<Scalar.Drawing.LerpFunction>();
+        registry.RegisterScalar<Scalar.Drawing.OscillateFunction>();
+        registry.RegisterScalar<Scalar.Drawing.FadeInFunction>();
+        registry.RegisterScalar<Scalar.Drawing.FadeOutFunction>();
+        registry.RegisterScalar<Scalar.Drawing.BounceFunction>();
+        registry.RegisterScalar<Scalar.Drawing.WobbleFunction>();
+        registry.RegisterScalar<Scalar.Drawing.RandomWalkFunction>();
+        registry.RegisterScalar<Scalar.Drawing.DrawTextFunction>();
+        registry.RegisterScalar<Scalar.Drawing.DrawImageFunction>();
+        registry.RegisterScalar<Scalar.Drawing.DrawPathFunction>();
+        registry.RegisterScalar<Scalar.Drawing.FillPathFunction>();
+        // `stroke_path` reads as the natural pair-name for `fill_path`; we keep
+        // `draw_path` registered for back-compat (people already use it in
+        // ~5 places in docs) but the alias is the recommended spelling.
+        registry.RegisterScalarAlias<Scalar.Drawing.DrawPathFunction>("stroke_path");
+        registry.RegisterScalar<Scalar.Drawing.DrawParticlesFunction>();
+        registry.RegisterScalar<Scalar.Drawing.BlendFunction>();
+        registry.RegisterScalar<Scalar.Drawing.SpinXFunction>();
+        registry.RegisterScalar<Scalar.Drawing.SpinYFunction>();
 
         // Spatial — PointCloud construction + accessors. Constructors consume an
         // Image-typed depth map (output of depth_map_to_image on MiDaS/DPT-family
@@ -938,6 +988,7 @@ public sealed class FunctionRegistry
         // rebuilt on the new typed-array surface when a demand actually requires it.
         registry.RegisterTableValued<TableValued.RangeFunction>();
         registry.RegisterTableValued<TableValued.VideoUnnestFramesFunction>();
+        registry.RegisterTableValued<TableValued.UnnestFunction>();
 
         // Inference toolkit. Lives in its own `inference` schema so the
         // introspection surface (onnx_inspect, devices, ...) doesn't

@@ -1584,4 +1584,174 @@ public sealed class CompletionProviderTests : ServiceTestBase
 
         Assert.Contains("...elements: Any?", item.Detail);
     }
+
+    // ───────────────────── Lambda-context filtering ─────────────────────
+
+    /// <summary>
+    /// Manifest that mixes a globally-visible scalar (`color`) with a
+    /// context-restricted curve (`oscillate`, tagged `animation`) and a
+    /// higher-order function (`animate_frames`) whose last parameter is
+    /// a `Lambda<animation, Drawing>`. Mirrors the runtime shape just
+    /// closely enough to exercise the context filter.
+    /// </summary>
+    private static LanguageServerManifest CreateLambdaContextManifest()
+    {
+        return new LanguageServerManifest
+        {
+            Tables = [],
+            Keywords = ["SELECT"],
+            SearchPath = ["public", "system"],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "color",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "r", Kind = "Int32" },
+                        new ParameterSignature { Name = "g", Kind = "Int32" },
+                        new ParameterSignature { Name = "b", Kind = "Int32" },
+                    ],
+                    ReturnType = "Color",
+                    Category = FunctionCategory.Drawing,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "oscillate",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "t", Kind = "Float32" },
+                        new ParameterSignature { Name = "low", Kind = "Float32" },
+                        new ParameterSignature { Name = "high", Kind = "Float32" },
+                    ],
+                    ReturnType = "Float32",
+                    Category = FunctionCategory.Drawing,
+                    Contexts = ["animation"],
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "animate_frames",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "duration", Kind = "Float32" },
+                        new ParameterSignature { Name = "fps", Kind = "Int32" },
+                        new ParameterSignature { Name = "size", Kind = "Point2D" },
+                        new ParameterSignature { Name = "render_frame", Kind = "Lambda<animation, returns: Drawing>", LambdaContextName = "animation" },
+                    ],
+                    ReturnType = "Array<Image>",
+                    Category = FunctionCategory.Drawing,
+                },
+            ],
+            FunctionContexts =
+            [
+                new FunctionContextEntry { Name = "pure", Parameters = [], ParentName = null, Borrows = [] },
+                new FunctionContextEntry
+                {
+                    Name = "animation",
+                    Parameters = [new LambdaParameterEntry { Name = "t", Kind = "Float32" }],
+                    ParentName = "pure",
+                    Borrows = [],
+                },
+            ],
+        };
+    }
+
+    [Fact]
+    public void OutsideLambda_ContextRestrictedFunctions_NotSuggested()
+    {
+        CompletionProvider provider = new(CreateLambdaContextManifest());
+
+        // Cursor in a plain SELECT expression — `oscillate` is animation-context-
+        // restricted and would never resolve here. Should NOT appear.
+        CompletionItem[] items = provider.GetCompletions("SELECT ", 7);
+
+        Assert.Contains(items, i => i.Label == "color");          // globally visible
+        Assert.Contains(items, i => i.Label == "animate_frames"); // globally visible
+        Assert.DoesNotContain(items, i => i.Label == "oscillate"); // context-restricted
+    }
+
+    [Fact]
+    public void InsideAnimationLambda_AnimationFunctions_AreSuggested()
+    {
+        CompletionProvider provider = new(CreateLambdaContextManifest());
+
+        // Cursor right after the arrow, inside the animate_frames lambda body.
+        // `oscillate` (tagged `animation`) should now be in scope; `color`
+        // (global) also stays.
+        const string sql = "SELECT animate_frames(1.0, 24, point2d(64, 64), (t) -> )";
+        int cursor = sql.IndexOf("-> ") + 3;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "oscillate"); // now visible
+        Assert.Contains(items, i => i.Label == "color");     // globally visible
+    }
+
+    [Fact]
+    public void InsideLambda_NestedInsideArrayLiteral_StillResolvesContext()
+    {
+        // The lambda body extends through nested `(...)` AND `[...]`. Cursor
+        // inside `draw_group([...])` should still see the animation-context
+        // whitelist — `oscillate` must show up.
+        CompletionProvider provider = new(CreateLambdaContextManifest());
+
+        const string sql = "SELECT animate_frames(1.0, 24, point2d(64, 64), (t) -> draw_group([]))";
+        int cursor = sql.IndexOf("[]") + 1; // between [ and ]
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "oscillate");
+    }
+
+    [Fact]
+    public void InsideLambda_AfterCommaInsideArrayLiteral_StillResolvesContext()
+    {
+        // Cursor placed after a comma inside the array literal — matching
+        // the user's flame example where they'd type a new entry mid-array.
+        // The lambda scope must persist past the comma.
+        CompletionProvider provider = new(CreateLambdaContextManifest());
+
+        const string sql =
+            "SELECT animate_frames(1.0, 24, point2d(64, 64), (t) -> draw_group([color(1, 2, 3), ]))";
+        // Cursor between `, ` and `]` — right where a new element would be typed.
+        int cursor = sql.IndexOf(", ]") + 2;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "oscillate");
+    }
+
+    [Fact]
+    public void InsideLambda_LambdaParameter_IsSuggestedInBody()
+    {
+        // The lambda parameter `t` should be suggested by name inside the
+        // lambda body — without this, the user can't tell which name was
+        // assigned (they might have renamed `t -> u -> v`) and the
+        // completion popup is missing a key piece of context.
+        CompletionProvider provider = new(CreateLambdaContextManifest());
+
+        const string sql = "SELECT animate_frames(1.0, 24, point2d(64, 64), (t) -> )";
+        int cursor = sql.IndexOf("-> ") + 3;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "t");
+    }
+
+    [Fact]
+    public void InsideStringLiteral_NoFunctionSuggestions()
+    {
+        // Cursor inside a string literal — providers shouldn't surface
+        // functions / keywords. SQL parsers don't tokenize identifiers
+        // inside strings; the completion popup shouldn't either.
+        CompletionProvider provider = new(CreateLambdaContextManifest());
+
+        // Cursor placed at the middle of 'abc' string.
+        const string sql = "SELECT 'abc'";
+        int cursor = sql.IndexOf('a') + 1; // between a and b
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        // Functions like `color` should NOT appear when typing inside a string.
+        Assert.DoesNotContain(items, i => i.Label == "color");
+        Assert.DoesNotContain(items, i => i.Label == "animate_frames");
+    }
 }

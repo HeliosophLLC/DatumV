@@ -292,6 +292,20 @@ public readonly struct ValueRef
         new(DataValue.FromPoint3D(x, y, z), null);
 
     /// <summary>
+    /// 32-bit RGBA colour inline value. Components are individual bytes
+    /// in <c>[0, 255]</c>; alpha defaults to 255 (fully opaque) when not
+    /// supplied.
+    /// </summary>
+    public static ValueRef FromColor(byte r, byte g, byte b, byte a = 255) =>
+        new(DataValue.FromColor(r, g, b, a), null);
+
+    /// <summary>
+    /// Reads an RGBA colour value as <c>(r, g, b, a)</c> bytes. Throws when
+    /// <see cref="Kind"/> is not <see cref="DataKind.Color"/>.
+    /// </summary>
+    public (byte R, byte G, byte B, byte A) AsColor() => _inline.AsColor();
+
+    /// <summary>
     /// DataKind tag (the value of <c>typeof(x)</c>). When <paramref name="typeId"/>
     /// is non-zero, the tag carries a <see cref="TypeRegistry"/> id describing the
     /// rich shape (struct field names, nested array element types). For primitive
@@ -382,6 +396,20 @@ public readonly struct ValueRef
     public static ValueRef FromLambda(LambdaValue lambda) =>
         new(DataValue.Null(DataKind.Lambda), lambda
             ?? throw new ArgumentNullException(nameof(lambda)));
+
+    /// <summary>
+    /// First-class procedural-drawing value: a tree of geometric / text /
+    /// image / group / transformed nodes consumed by the universal
+    /// rasterizer (<c>render(drawing, size)</c>). Drawings are
+    /// <em>row-scoped</em> in the current implementation —
+    /// <see cref="ToDataValue"/> throws when the payload is a
+    /// <c>DrawingPayload</c>. Persistence support is plausible (the
+    /// payload tree is small + embeddable) but isn't needed for the
+    /// animation / static-render workflows that motivate the kind.
+    /// </summary>
+    public static ValueRef FromDrawing(Scalar.Drawing.DrawingPayload drawing) =>
+        new(DataValue.Null(DataKind.Drawing), drawing
+            ?? throw new ArgumentNullException(nameof(drawing)));
 
     /// <summary>
     /// JSON payload as a byte slice over canonical CBOR bytes — used by
@@ -640,6 +668,27 @@ public readonly struct ValueRef
         }
         throw new InvalidOperationException(
             $"ValueRef of kind Lambda does not carry a LambdaValue payload "
+            + $"(Materialized: {_materialized?.GetType().Name ?? "<none>"}).");
+    }
+
+    /// <summary>
+    /// Returns the <c>DrawingPayload</c> backing a
+    /// <see cref="DataKind.Drawing"/> <see cref="ValueRef"/>. Throws when
+    /// the kind is wrong or the value carries no managed payload.
+    /// </summary>
+    public Scalar.Drawing.DrawingPayload AsDrawing()
+    {
+        if (_inline.Kind != DataKind.Drawing)
+        {
+            throw new InvalidOperationException(
+                $"AsDrawing called on a {_inline.Kind} value (expected Drawing).");
+        }
+        if (_materialized is Scalar.Drawing.DrawingPayload drawing)
+        {
+            return drawing;
+        }
+        throw new InvalidOperationException(
+            $"ValueRef of kind Drawing does not carry a DrawingPayload "
             + $"(Materialized: {_materialized?.GetType().Name ?? "<none>"}).");
     }
 
@@ -1017,6 +1066,12 @@ public readonly struct ValueRef
                     + "or any other arena-write boundary. They exist only as "
                     + "intra-query intermediate values flowing between higher-order "
                     + "functions and their consumers."),
+            Scalar.Drawing.DrawingPayload when _inline.Kind == DataKind.Drawing =>
+                throw new InvalidOperationException(
+                    "Drawing values cannot be persisted to a column, output row, "
+                    + "or any other arena-write boundary today. They exist only as "
+                    + "intra-query intermediate values; render(drawing, size) "
+                    + "rasterises a Drawing into a persistable Image."),
             string s when _inline.Kind == DataKind.String && !_inline.IsArray =>
                 DataValue.FromString(s, targetStore),
             byte[] bytes when IsByteArrayKind => DataValue.FromByteArray(bytes, targetStore),

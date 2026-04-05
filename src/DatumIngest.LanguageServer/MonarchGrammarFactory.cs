@@ -36,7 +36,12 @@ public static class MonarchGrammarFactory
     /// </remarks>
     public static object Build() => new
     {
-        defaultToken = "identifier",
+        // "" rather than "identifier" — unmatched characters get the
+        // editor's default text colour instead of being classed as an
+        // identifier. Matches Monaco's basic-languages convention and
+        // keeps tokens that DON'T match a rule from accidentally picking
+        // up identifier styling.
+        defaultToken = "",
         ignoreCase = true,
         keywords = SqlKeywordRegistry.ClauseKeywords,
         boolNullKeywords = SqlKeywordRegistry.BoolNullKeywords,

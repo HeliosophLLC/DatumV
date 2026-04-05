@@ -1,4 +1,5 @@
 using DatumIngest.Catalog.Registries;
+using DatumIngest.Execution.Contexts;
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -199,7 +200,47 @@ public static class CatalogManifestBuilder
             // `SET search_path` calls won't bleed into this manifest;
             // re-build for an updated view.
             SearchPath = catalog.SearchPath,
+            // Snapshot the built-in function-context registry so the LS
+            // can resolve lambda parameter scopes (animation, particle, ...)
+            // for hover + completion. The runtime registry isn't accessible
+            // through TableCatalog today; using CreateDefault matches the
+            // engine's startup wiring and covers every shipped context.
+            FunctionContexts = BuildFunctionContextEntries(),
         };
+    }
+
+    /// <summary>
+    /// Snapshots the engine's built-in <see cref="FunctionContextRegistry"/>
+    /// into <see cref="FunctionContextEntry"/> records for the manifest.
+    /// Mirrors the runtime registry's defaults so the LS sees the same
+    /// scope graph the executor uses.
+    /// </summary>
+    private static IReadOnlyList<FunctionContextEntry> BuildFunctionContextEntries()
+    {
+        FunctionContextRegistry registry = FunctionContextRegistry.CreateDefault();
+        List<FunctionContextEntry> entries = new(registry.Names.Count);
+        foreach (string name in registry.Names)
+        {
+            FunctionContextDescriptor? descriptor = registry.TryGet(name);
+            if (descriptor is null) continue;
+            List<LambdaParameterEntry> parameters = new(descriptor.Parameters.Count);
+            foreach (LambdaParameterSpec spec in descriptor.Parameters)
+            {
+                parameters.Add(new LambdaParameterEntry
+                {
+                    Name = spec.Name,
+                    Kind = spec.Kind.ToString(),
+                });
+            }
+            entries.Add(new FunctionContextEntry
+            {
+                Name = descriptor.Name,
+                Parameters = parameters,
+                ParentName = descriptor.ParentName,
+                Borrows = new List<string>(descriptor.Borrows),
+            });
+        }
+        return entries;
     }
 
     /// <summary>
@@ -272,6 +313,7 @@ public static class CatalogManifestBuilder
                     Name = spec.Name,
                     Kind = DescribeParameterShape(spec.Kind, spec.IsArray),
                     IsOptional = spec.IsOptional,
+                    LambdaContextName = (spec.Kind as LambdaMatcher)?.ContextName,
                 });
             }
             if (first.VariadicTrailing is not null)
@@ -284,6 +326,7 @@ public static class CatalogManifestBuilder
                     Name = $"...{first.VariadicTrailing.Name}",
                     Kind = DescribeParameterShape(first.VariadicTrailing.Kind, first.VariadicTrailing.IsArray),
                     IsOptional = first.VariadicTrailing.MinOccurrences == 0,
+                    LambdaContextName = (first.VariadicTrailing.Kind as LambdaMatcher)?.ContextName,
                 });
             }
 
@@ -321,6 +364,11 @@ public static class CatalogManifestBuilder
             Description = descriptor.Description,
             Category = descriptor.Category,
             AdditionalParameterShapes = additional,
+            // Per-function context membership. Empty list collapses to null
+            // (globally visible) — the consumer convention everywhere else.
+            Contexts = descriptor.Contexts is { Count: > 0 } ctxList
+                ? new List<string>(ctxList)
+                : null,
         };
     }
 
@@ -340,6 +388,7 @@ public static class CatalogManifestBuilder
                 Name = spec.Name,
                 Kind = DescribeParameterShape(spec.Kind, spec.IsArray),
                 IsOptional = spec.IsOptional,
+                LambdaContextName = (spec.Kind as LambdaMatcher)?.ContextName,
             });
         }
         if (variant.VariadicTrailing is not null)
@@ -349,6 +398,7 @@ public static class CatalogManifestBuilder
                 Name = $"...{variant.VariadicTrailing.Name}",
                 Kind = DescribeParameterShape(variant.VariadicTrailing.Kind, variant.VariadicTrailing.IsArray),
                 IsOptional = variant.VariadicTrailing.MinOccurrences == 0,
+                LambdaContextName = (variant.VariadicTrailing.Kind as LambdaMatcher)?.ContextName,
             });
         }
         return result;
