@@ -1,5 +1,22 @@
 {
   "title": "Query editor",
+  "columnModes": {
+    "chipTooltip": "Display: {mode}",
+    "numeric_array": {
+      "stats": {
+        "label": "Stats",
+        "description": "σ chip with min..max"
+      },
+      "histogram": {
+        "label": "Histogram",
+        "description": "16-bin distribution"
+      },
+      "preview": {
+        "label": "First values",
+        "description": "first elements as text"
+      }
+    }
+  },
   "newTab": "New tab",
   "newTabSql": "SQL Query",
   "newTabFunction": "Execute Function",

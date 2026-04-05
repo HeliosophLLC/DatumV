@@ -21,7 +21,13 @@ public sealed record SettingsDto(
     IReadOnlyList<string> DockLeftItems,
     IReadOnlyList<string> DockRightItems,
     string? OpenLeftPanel,
-    string? OpenRightPanel);
+    string? OpenRightPanel,
+    // Per-cell-kind default display mode for the results-pane data grid
+    // (e.g. {"numeric_array": "histogram"}). Keys are the column-mode-
+    // registry's `kindKey`; values are mode ids registered for that kind.
+    // Missing keys fall back to the registry's `defaultMode`. The client
+    // owns the registry — server is just persistence.
+    IReadOnlyDictionary<string, string> ColumnDisplayModeDefaults);
 
 // Partial document for PATCH /api/settings. All fields nullable; null means
 // "don't change this field." Server merges with the current document and
@@ -39,4 +45,9 @@ public sealed record SettingsPatchDto(
     string? OpenLeftPanel = null,
     string? OpenRightPanel = null,
     bool ClearOpenLeftPanel = false,
-    bool ClearOpenRightPanel = false);
+    bool ClearOpenRightPanel = false,
+    // Patched as a full-dict replace (no per-key merging). Sending {} clears
+    // every persisted mode; null leaves the existing dict alone. Per-kind
+    // upserts are done client-side by reading the current dict, mutating,
+    // and re-sending — keeps the server's merge logic uniform.
+    IReadOnlyDictionary<string, string>? ColumnDisplayModeDefaults = null);

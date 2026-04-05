@@ -1328,6 +1328,7 @@ export interface SettingsDto {
     dockRightItems?: string[];
     openLeftPanel?: string | undefined;
     openRightPanel?: string | undefined;
+    columnDisplayModeDefaults?: { [key: string]: string; };
 }
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -1346,6 +1347,7 @@ export interface SettingsPatchDto {
     openRightPanel?: string | undefined;
     clearOpenLeftPanel?: boolean;
     clearOpenRightPanel?: boolean;
+    columnDisplayModeDefaults?: { [key: string]: string; } | undefined;
 }
 
 export interface FileResponse {

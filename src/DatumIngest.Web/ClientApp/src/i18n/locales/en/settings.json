@@ -35,5 +35,12 @@
     "version": "Version",
     "catalogPath": "Catalog path",
     "node": "Compute node"
+  },
+  "columnModes": {
+    "title": "Results display",
+    "description": "Default display mode for each cell kind in the results pane. The column header chip overrides these per-column.",
+    "kinds": {
+      "numericArray": "Numeric arrays"
+    }
   }
 }

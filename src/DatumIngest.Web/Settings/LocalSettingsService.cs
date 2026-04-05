@@ -28,6 +28,9 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
     private static readonly IReadOnlyList<string> DefaultDockRightItems =
         Array.Empty<string>();
 
+    private static readonly IReadOnlyDictionary<string, string> DefaultColumnDisplayModeDefaults =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     private static readonly SettingsDto Defaults = new(
         Theme: ThemePreference.System,
         ChromeStyle: ChromeStyle.Auto,
@@ -37,7 +40,8 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
         DockLeftItems: DefaultDockLeftItems,
         DockRightItems: DefaultDockRightItems,
         OpenLeftPanel: null,
-        OpenRightPanel: null);
+        OpenRightPanel: null,
+        ColumnDisplayModeDefaults: DefaultColumnDisplayModeDefaults);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -67,7 +71,9 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
 
     private static SettingsDto FillCollectionDefaults(SettingsDto dto)
     {
-        if (dto.DockLeftItems is not null && dto.DockRightItems is not null)
+        if (dto.DockLeftItems is not null
+            && dto.DockRightItems is not null
+            && dto.ColumnDisplayModeDefaults is not null)
         {
             return dto;
         }
@@ -75,6 +81,7 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
         {
             DockLeftItems = dto.DockLeftItems ?? DefaultDockLeftItems,
             DockRightItems = dto.DockRightItems ?? DefaultDockRightItems,
+            ColumnDisplayModeDefaults = dto.ColumnDisplayModeDefaults ?? DefaultColumnDisplayModeDefaults,
         };
     }
 
@@ -96,7 +103,8 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
                 : patch.OpenLeftPanel ?? current.OpenLeftPanel,
             OpenRightPanel: patch.ClearOpenRightPanel
                 ? null
-                : patch.OpenRightPanel ?? current.OpenRightPanel);
+                : patch.OpenRightPanel ?? current.OpenRightPanel,
+            ColumnDisplayModeDefaults: patch.ColumnDisplayModeDefaults ?? current.ColumnDisplayModeDefaults);
 
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
 

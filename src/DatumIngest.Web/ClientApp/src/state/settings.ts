@@ -33,6 +33,12 @@ interface SettingsState {
   dockRightItems: string[];
   openLeftPanel: string | null;
   openRightPanel: string | null;
+  // Per-cell-kind default display mode for the results-pane grid (see
+  // state/columnDisplayModes.ts). Keys are registry `kindKey` values;
+  // values are mode ids registered for that kind. Missing keys fall
+  // back to the registry baseline. Per-column chip overrides happen
+  // client-side in CellTable and don't persist.
+  columnDisplayModeDefaults: Record<string, string>;
 }
 
 export const settingsState = proxy<SettingsState>({
@@ -45,6 +51,7 @@ export const settingsState = proxy<SettingsState>({
   dockRightItems: [],
   openLeftPanel: null,
   openRightPanel: null,
+  columnDisplayModeDefaults: {},
 });
 
 function applyDto(dto: SettingsDto): void {
@@ -61,6 +68,9 @@ function applyDto(dto: SettingsDto): void {
   settingsState.dockRightItems = dto.dockRightItems ?? [];
   settingsState.openLeftPanel = dto.openLeftPanel ?? null;
   settingsState.openRightPanel = dto.openRightPanel ?? null;
+  // NSwag may type the dict as `{ [key: string]: string } | undefined`;
+  // empty-object fallback keeps every read site safe to index.
+  settingsState.columnDisplayModeDefaults = (dto.columnDisplayModeDefaults ?? {}) as Record<string, string>;
 }
 
 export async function refreshSettings(): Promise<void> {
@@ -91,6 +101,27 @@ export function setAnimations(animations: boolean): Promise<void> {
 
 export function setModelsDirectory(modelsDirectory: string): Promise<void> {
   return updateSettings({ modelsDirectory });
+}
+
+/**
+ * Upserts the default display mode for a single cell-kind. The server
+ * patches as a full-dict replace, so we merge the existing dict with
+ * the new entry client-side and ship the merged result. Passing the
+ * registry's baseline mode removes the entry rather than persisting an
+ * override that just matches the default (keeps the dict minimal).
+ */
+export function setColumnDisplayModeDefault(
+  kindKey: string,
+  modeId: string,
+  registryBaseline: string,
+): Promise<void> {
+  const next: Record<string, string> = { ...settingsState.columnDisplayModeDefaults };
+  if (modeId === registryBaseline) {
+    delete next[kindKey];
+  } else {
+    next[kindKey] = modeId;
+  }
+  return updateSettings({ columnDisplayModeDefaults: next });
 }
 
 export type { SettingsDto, ThemePreference, ChromeStyle };

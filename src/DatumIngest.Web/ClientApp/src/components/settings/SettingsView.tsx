@@ -5,12 +5,17 @@ import {
   settingsState,
   setAnimations,
   setChromeStyle,
+  setColumnDisplayModeDefault,
   setModelsDirectory,
   type ChromeStyle,
   type ThemePreference,
 } from '@/state/settings';
 import { setTheme } from '@/state/theme';
 import { healthState, refreshHealth } from '@/state/health';
+import {
+  COLUMN_MODE_REGISTRY,
+  type ColumnDisplayModeDef,
+} from '@/state/columnDisplayModes';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -91,6 +96,21 @@ export function SettingsView() {
             persistedValue={settings.modelsDirectory}
             effectivePath={health?.modelsDirectory ?? null}
           />
+        </Section>
+
+        <Section title={t('columnModes.title')}>
+          <p className="text-muted-foreground text-xs">
+            {t('columnModes.description')}
+          </p>
+          {COLUMN_MODE_REGISTRY.map((def) => (
+            <ColumnModeDefaultField
+              key={def.kindKey}
+              def={def}
+              currentMode={
+                settings.columnDisplayModeDefaults[def.kindKey] ?? def.defaultMode
+              }
+            />
+          ))}
         </Section>
 
         <Section title={t('about.title')}>
@@ -220,6 +240,38 @@ function ModelsDirectoryField({
         {saved ? t('models.directorySaved') : t('models.directoryHint')}
       </span>
     </div>
+  );
+}
+
+// Per-kind default-mode row. The chip group reads option labels out of
+// the `query` namespace (where the per-column chip in ResultsPane also
+// reads them) so the two surfaces stay phrase-consistent without
+// duplicating strings across locale bundles.
+function ColumnModeDefaultField({
+  def,
+  currentMode,
+}: {
+  def: ColumnDisplayModeDef;
+  currentMode: string;
+}) {
+  const { t } = useTranslation(['settings', 'query']);
+  return (
+    <Field label={t(def.settingsLabelKey as 'columnModes.kinds.numericArray')}>
+      <ChipGroup
+        options={def.options.map((o) => o.id)}
+        value={currentMode}
+        onChange={(modeId) =>
+          void setColumnDisplayModeDefault(def.kindKey, modeId, def.defaultMode)
+        }
+        labelFor={(modeId) => {
+          const opt = def.options.find((o) => o.id === modeId);
+          if (!opt) return modeId;
+          return t(opt.labelKey as 'columnModes.numeric_array.stats.label', {
+            ns: 'query',
+          });
+        }}
+      />
+    </Field>
   );
 }
 

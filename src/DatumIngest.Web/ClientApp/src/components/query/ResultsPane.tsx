@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { AlertCircle, Ban, Braces, Check, Film, Loader2, Music, Sigma } from 'lucide-react';
+import { AlertCircle, Ban, Braces, Check, ChevronDown, Film, Loader2, Music, Sigma } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { MediaPreview } from './MediaPreview';
 import { MemoryChip } from './MemoryChip';
@@ -17,6 +17,12 @@ import {
   type TraceState,
 } from '@/state/execution';
 import { panesState, findLeaf } from '@/state/tabs';
+import { settingsState } from '@/state/settings';
+import {
+  findColumnModeDef,
+  resolveColumnMode,
+  type ColumnDisplayModeDef,
+} from '@/state/columnDisplayModes';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
@@ -812,6 +818,111 @@ function isRightClickInSelection(
   return row >= r.rowMin && row <= r.rowMax && col >= r.colMin && col <= r.colMax;
 }
 
+// ────────── Per-column display modes ──────────
+//
+// The registry of "ways to render this kind of cell" lives in
+// `state/columnDisplayModes.ts` so the results-pane chip and the
+// settings page share one definition. `ColumnModeChip` below is the
+// per-column override surface; `CellTable` reads the persisted per-
+// kind default out of `settingsState` and applies it as the baseline.
+
+/**
+ * Always-visible chevron chip anchored at the bottom-right of a column
+ * header, overlapping into the first row by ~half its height. Click to
+ * open a small popover listing the modes available for the column's
+ * kind. Opacity rises on hover so the chip stays unobtrusive but never
+ * disappears — discoverability without visual noise.
+ *
+ * Both `onMouseDown` and `onContextMenu` stopPropagation so clicking
+ * the chip doesn't also trigger the header's column-select gesture.
+ */
+function ColumnModeChip({
+  def,
+  currentMode,
+  onSelect,
+}: {
+  def: ColumnDisplayModeDef;
+  currentMode: string;
+  onSelect: (modeId: string) => void;
+}) {
+  const { t } = useTranslation('query');
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const currentLabel = def.options.find((o) => o.id === currentMode)?.labelKey;
+
+  return (
+    <div ref={rootRef} className="absolute -bottom-2 right-1 z-30">
+      <button
+        type="button"
+        onClick={(e) => {
+          stop(e);
+          setOpen((o) => !o);
+        }}
+        onMouseDown={stop}
+        onContextMenu={stop}
+        className={cn(
+          'border-border bg-background text-muted-foreground flex h-4 cursor-pointer items-center rounded-sm border px-0.5 leading-none',
+          'opacity-50 transition-opacity hover:opacity-100',
+          open && 'opacity-100',
+        )}
+        title={t('columnModes.chipTooltip', {
+          mode: currentLabel
+            ? t(currentLabel as 'columnModes.numeric_array.stats.label')
+            : currentMode,
+        })}
+      >
+        <ChevronDown className="size-3" />
+      </button>
+      {open && (
+        <div
+          onMouseDown={stop}
+          onContextMenu={stop}
+          className="bg-popover border-border absolute right-0 top-full z-40 mt-1 flex min-w-[180px] flex-col rounded-sm border p-1 shadow-md"
+        >
+          {def.options.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={(e) => {
+                stop(e);
+                onSelect(opt.id);
+                setOpen(false);
+              }}
+              onMouseDown={stop}
+              className={cn(
+                'hover:bg-accent flex cursor-pointer flex-col items-start gap-0.5 rounded-sm px-2 py-1 text-left text-xs',
+                currentMode === opt.id && 'bg-accent',
+              )}
+            >
+              <span className="flex w-full items-center justify-between font-medium">
+                <span>{t(opt.labelKey as 'columnModes.numeric_array.stats.label')}</span>
+                {currentMode === opt.id && <Check className="size-3" />}
+              </span>
+              {opt.descriptionKey !== undefined && (
+                <span className="text-muted-foreground text-[10px]">
+                  {t(opt.descriptionKey as 'columnModes.numeric_array.stats.description')}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CellTable({ cell }: { cell: CellResult }) {
   // Per-cell scroll container that also drives the virtualiser. Sticky
   // `<header>` and absolutely-positioned virtualised rows both live
@@ -862,6 +973,29 @@ function CellTable({ cell }: { cell: CellResult }) {
   // mouseenter handler is what commits the new focus into `selection`,
   // so the render rate is bounded by the grid's row/column granularity.
   const dragModeRef = useRef<SelectionMode | null>(null);
+
+  // Per-column display-mode state. Map keyed by column index; values are
+  // mode ids from the matching `ColumnDisplayModeDef`. Missing entries
+  // fall back to the user's per-kind default in settings, then to the
+  // registry baseline (resolveColumnMode handles the priority order).
+  // Sample-bounded mode-def detection (same dep as the column-width
+  // and largeMedia memos above) keeps the def table stable once the
+  // stream has produced SAMPLE_ROWS rows.
+  const columnModeDefs = useMemo<(ColumnDisplayModeDef | null)[]>(
+    () => cell.schema?.map((_, idx) => findColumnModeDef(cell.rows, idx, SAMPLE_ROWS)) ?? [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cell.schema, sampleSize],
+  );
+  const settings = useSnapshot(settingsState);
+  const [columnModes, setColumnModes] = useState<Record<number, string>>({});
+  const resolveModeForColumn = (colIdx: number): string | undefined => {
+    const def = columnModeDefs[colIdx];
+    if (!def) return undefined;
+    return resolveColumnMode(def, columnModes[colIdx], settings.columnDisplayModeDefaults);
+  };
+  const setColumnMode = (colIdx: number, modeId: string) => {
+    setColumnModes((prev) => ({ ...prev, [colIdx]: modeId }));
+  };
 
   const beginSelection = useCallback(
     (mode: SelectionMode, row: number, col: number, shiftKey: boolean) => {
@@ -1127,33 +1261,44 @@ function CellTable({ cell }: { cell: CellResult }) {
           role="button"
           aria-label="Select all"
         />
-        {cell.schema.map((col, colIdx) => (
-          <div
-            key={col.name}
-            onMouseDown={(e) => {
-              if (e.button !== 0) return;
-              scrollRef.current?.focus();
-              beginSelection('col', 0, colIdx, e.shiftKey);
-            }}
-            onMouseEnter={() => {
-              if (dragModeRef.current === 'col') extendSelection(0, colIdx);
-            }}
-            onContextMenu={(e) => handleContextMenu(e, 'col', 0, colIdx)}
-            className={cn(
-              'border-border flex min-w-0 cursor-cell items-center gap-1.5 border-r px-2 py-1 select-none last:border-r-0',
-              isColInRange(colIdx)
-                ? 'bg-foreground/15 group-focus-within:bg-primary/40'
-                : 'bg-muted',
-            )}
-            title={`${col.kind}${col.isArray ? '[]' : ''}`}
-          >
-            <span className="truncate">{col.name}</span>
-            <Badge variant="muted" className="shrink-0 font-mono text-[10px] leading-none">
-              {col.kind}
-              {col.isArray ? '[]' : ''}
-            </Badge>
-          </div>
-        ))}
+        {cell.schema.map((col, colIdx) => {
+          const modeDef = columnModeDefs[colIdx];
+          const currentMode = modeDef ? resolveModeForColumn(colIdx) ?? modeDef.defaultMode : null;
+          return (
+            <div
+              key={col.name}
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
+                scrollRef.current?.focus();
+                beginSelection('col', 0, colIdx, e.shiftKey);
+              }}
+              onMouseEnter={() => {
+                if (dragModeRef.current === 'col') extendSelection(0, colIdx);
+              }}
+              onContextMenu={(e) => handleContextMenu(e, 'col', 0, colIdx)}
+              className={cn(
+                'border-border relative flex min-w-0 cursor-cell items-center gap-1.5 border-r px-2 py-1 select-none last:border-r-0',
+                isColInRange(colIdx)
+                  ? 'bg-foreground/15 group-focus-within:bg-primary/40'
+                  : 'bg-muted',
+              )}
+              title={`${col.kind}${col.isArray ? '[]' : ''}`}
+            >
+              <span className="truncate">{col.name}</span>
+              <Badge variant="muted" className="shrink-0 font-mono text-[10px] leading-none">
+                {col.kind}
+                {col.isArray ? '[]' : ''}
+              </Badge>
+              {modeDef && currentMode && (
+                <ColumnModeChip
+                  def={modeDef}
+                  currentMode={currentMode}
+                  onSelect={(id) => setColumnMode(colIdx, id)}
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Virtual rows container — total scroll height comes from the
@@ -1251,7 +1396,11 @@ function CellTable({ cell }: { cell: CellResult }) {
                       && 'bg-foreground/10 group-focus-within:bg-primary/25',
                   )}
                 >
-                  <CellValue cell={c} largeMedia={largeMedia} />
+                  <CellValue
+                    cell={c}
+                    largeMedia={largeMedia}
+                    mode={resolveModeForColumn(colIdx)}
+                  />
                 </div>
               ))}
             </div>
@@ -1265,9 +1414,17 @@ function CellTable({ cell }: { cell: CellResult }) {
 function CellValue({
   cell,
   largeMedia = false,
+  mode,
 }: {
   cell: JsonCell;
   largeMedia?: boolean;
+  /**
+   * Resolved per-column display mode (see ColumnDisplayModeDef). Currently
+   * consulted only for `numeric_array` cells; recursive callers (e.g.,
+   * struct field rendering) leave it undefined so nested numeric arrays
+   * keep the default stats chip.
+   */
+  mode?: string;
 }) {
   if (cell.kind === 'null') {
     return <span className="text-muted-foreground italic">null</span>;
@@ -1289,7 +1446,11 @@ function CellValue({
   if (cell.kind === 'media_array' && cell.items) return <MediaArrayCell cell={cell} largeMedia={largeMedia} />;
   if (cell.kind === 'pointcloud') return <PointCloudCell cell={cell} largeMedia={largeMedia} />;
   if (cell.kind === 'mesh') return <MeshCell cell={cell} largeMedia={largeMedia} />;
-  if (cell.kind === 'numeric_array') return <NumericArrayCell cell={cell} />;
+  if (cell.kind === 'numeric_array') {
+    if (mode === 'histogram') return <NumericArrayHistogramCell cell={cell} />;
+    if (mode === 'preview') return <NumericArrayPreviewCell cell={cell} />;
+    return <NumericArrayCell cell={cell} />;
+  }
   if (cell.kind === 'struct') return <StructCell cell={cell} />;
   return <span>{cell.text ?? ''}</span>;
 }
@@ -1572,6 +1733,88 @@ function NumericArrayCell({ cell }: { cell: JsonCell }) {
         <NumericArrayInspector cell={cell} />
       </MediaPreview>
     </>
+  );
+}
+
+// Inline histogram chip for `numeric_array` columns. 16 bins over the
+// server-supplied [min, max] range; bin counts come from a head-decode
+// of the first 4096 elements — plenty to give a representative shape,
+// bounded so a 4 MB tensor doesn't decode in full per visible cell.
+// Server min/max are exact (computed over every value), so the
+// histogram's x-axis reflects the true range even when our sample
+// missed the extremes.
+function NumericArrayHistogramCell({ cell }: { cell: JsonCell }) {
+  const HISTOGRAM_SAMPLE = 4096;
+  const BIN_COUNT = 16;
+  const values = useMemo(
+    () => decodeNumericArrayHead(cell, HISTOGRAM_SAMPLE),
+    [cell],
+  );
+  if (values === null || values.length === 0) {
+    return <span className="text-muted-foreground italic">empty</span>;
+  }
+  const min = cell.min ?? Math.min(...values);
+  const max = cell.max ?? Math.max(...values);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+    return (
+      <span className="text-muted-foreground font-mono text-xs">
+        {formatStat(min)} (constant)
+      </span>
+    );
+  }
+  const span = max - min;
+  const bins = new Array<number>(BIN_COUNT).fill(0);
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (!Number.isFinite(v)) continue;
+    let idx = Math.floor(((v - min) / span) * BIN_COUNT);
+    if (idx >= BIN_COUNT) idx = BIN_COUNT - 1;
+    if (idx < 0) idx = 0;
+    bins[idx]++;
+  }
+  let peak = 1;
+  for (let i = 0; i < bins.length; i++) if (bins[i] > peak) peak = bins[i];
+  const total = cell.count ?? values.length;
+  const sampled = total > values.length;
+  const title =
+    `${formatStat(min)} .. ${formatStat(max)}`
+    + (sampled
+      ? ` · sampled ${values.length.toLocaleString()} of ${total.toLocaleString()}`
+      : '');
+  return (
+    <div
+      className="flex h-5 w-full max-w-[160px] items-end gap-px"
+      title={title}
+    >
+      {bins.map((c, i) => (
+        <div
+          key={i}
+          className="bg-primary/70 min-h-px flex-1 rounded-t-[1px]"
+          style={{ height: `${(c / peak) * 100}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// Inline "first N values" preview. Reads enough elements to fill a
+// short comma-separated list; trailing ellipsis when the array carries
+// more than we showed. Useful when the user wants to glance at the
+// actual numbers without opening the inspector modal.
+function NumericArrayPreviewCell({ cell }: { cell: JsonCell }) {
+  const PREVIEW_COUNT = 8;
+  const values = useMemo(
+    () => decodeNumericArrayHead(cell, PREVIEW_COUNT),
+    [cell],
+  );
+  if (values === null || values.length === 0) {
+    return <span className="text-muted-foreground italic">empty</span>;
+  }
+  const trailing = (cell.count ?? 0) > values.length ? ', …' : '';
+  return (
+    <span className="text-foreground/80 font-mono">
+      [{values.map(formatStat).join(', ')}{trailing}]
+    </span>
   );
 }
 
