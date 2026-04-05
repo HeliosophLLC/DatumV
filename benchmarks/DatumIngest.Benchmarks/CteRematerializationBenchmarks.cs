@@ -1,5 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
@@ -45,11 +46,25 @@ public class CteRematerializationBenchmarks
     public int Iterations;
 
     private Pool _pool = null!;
+    private TableCatalog _heavyCatalog = null!;
 
     [GlobalSetup]
     public void Setup()
     {
         _pool = new Pool(new PoolBacking());
+
+        // Source table for the materialization-gating benchmarks: 5K rows of
+        // (id, name). The heavy CTE chains md5 calls per row, so its cost is
+        // proportional to N rows × M re-evaluations. With the recursive walker
+        // forcing 21 references (1 seed + 20 recursive joins), the bug case
+        // does ~21× more md5 work than the materialized case.
+        object?[][] rows = new object?[5000][];
+        for (int i = 0; i < rows.Length; i++)
+        {
+            rows[i] = [i + 1, "row-" + (i + 1).ToString("D6")];
+        }
+        _heavyCatalog = new TableCatalog(_pool);
+        _heavyCatalog.Add(new InMemoryTableProvider(_pool, "source", ["id", "name"], rows));
     }
 
     [IterationSetup]
@@ -81,11 +96,80 @@ public class CteRematerializationBenchmarks
                 SELECT n + 1 FROM counter WHERE n < {{Iterations}}
             )
             SELECT n FROM counter
-            """);
+            """,
+            new TableCatalog(_pool));
 
-    private async Task RunAsync(string sql)
+    // ─── CTE materialization-gating benchmarks ───────────────────────────────
+    //
+    // Each pair runs the SAME query twice, only differing on whether the
+    // sibling `heavy` CTE carries an explicit MATERIALIZED hint. The hint
+    // bypasses CountCommonTableExpressionReferences (which only walks the
+    // outer SELECT's FROM/JOINs, missing references inside other CTE bodies
+    // and recursive parts), so the gap measures the cost of the
+    // reference-counting bug: every recursive iteration re-runs the inlined
+    // `heavy` plan in full.
+    //
+    // Expected today: ~20× gap (1 source pass vs 21 source passes).
+    // Expected after fix: gap collapses to noise.
+
+    private const int RecursiveCteIterations = 20;
+
+    // 10 chained md5 calls per row — each one hashes the previous result,
+    // making the per-row cost large enough that 21× re-evaluation is clearly
+    // visible against the timer.
+    private const string HeavyPayloadExpr =
+        "md5(md5(md5(md5(md5(md5(md5(md5(md5(md5(name))))))))))";
+
+    private static readonly string MaterializedSql = $$"""
+        WITH RECURSIVE
+        heavy AS MATERIALIZED (
+            SELECT id, {{HeavyPayloadExpr}} AS payload FROM source
+        ),
+        walker AS (
+            SELECT id, payload FROM heavy WHERE id = 1
+            UNION ALL
+            SELECT s.id, s.payload
+            FROM walker w
+            JOIN heavy s ON s.id = w.id + 1
+            WHERE s.id <= {{RecursiveCteIterations}}
+        )
+        SELECT id FROM walker
+        """;
+
+    private static readonly string DefaultSql = $$"""
+        WITH RECURSIVE
+        heavy AS (
+            SELECT id, {{HeavyPayloadExpr}} AS payload FROM source
+        ),
+        walker AS (
+            SELECT id, payload FROM heavy WHERE id = 1
+            UNION ALL
+            SELECT s.id, s.payload
+            FROM walker w
+            JOIN heavy s ON s.id = w.id + 1
+            WHERE s.id <= {{RecursiveCteIterations}}
+        )
+        SELECT id FROM walker
+        """;
+
+    [Benchmark(Description = "Recursive CTE w/ explicit MATERIALIZED on sibling")]
+    public Task RecursiveCte_MaterializedHint() => RunAsync(MaterializedSql, _heavyCatalog);
+
+    [Benchmark(Description = "Recursive CTE w/ default materialization gating")]
+    public Task RecursiveCte_DefaultGating() => RunAsync(DefaultSql, _heavyCatalog);
+
+    // Expression-subquery CTE references (IN / EXISTS / scalar subquery)
+    // are currently rejected outright by the engine:
+    //   - IN  + CTE  → "IN (SELECT ...) was not rewritten by the query planner into a semi-join"
+    //   - EXISTS + CTE → same rewriter error
+    //   - scalar + CTE → SchemaResolutionException: CTE name not in scope
+    // Once those three paths are unblocked, the walker in
+    // QueryPlanner.CountReferences* will need an Expression-walking arm
+    // (currently it only walks FROM + JOIN sources). Filing a benchmark
+    // here is premature — there's no working query to measure.
+
+    private async Task RunAsync(string sql, TableCatalog catalog)
     {
-        TableCatalog catalog = new(_pool);
         FunctionRegistry functions = FunctionRegistry.CreateDefault();
         QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, functions);

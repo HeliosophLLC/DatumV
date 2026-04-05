@@ -5165,8 +5165,14 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
-    /// Counts how many times each CTE name appears as a table reference in the
-    /// FROM clause and JOIN sources of the statement.
+    /// Counts how many times each CTE name appears as a table reference anywhere
+    /// the CTE name is in scope: the outer SELECT's FROM/JOIN sources, every
+    /// sibling CTE's body (anchor + recursive parts), and any subquery sources
+    /// nested at arbitrary depth inside those bodies. The default
+    /// auto-materialisation rule (count &gt; 1) depends on this being accurate —
+    /// undercounting causes heavy CTEs to be inlined and re-evaluated per
+    /// reference (catastrophic when one of those references is inside a
+    /// recursive CTE's iterating member).
     /// </summary>
     private static Dictionary<string, int> CountCommonTableExpressionReferences(
         SelectStatement statement)
@@ -5186,22 +5192,86 @@ public sealed class QueryPlanner
             counts[commonTableExpression.Name] = 0;
         }
 
-        // Count references in FROM source.
-        if (statement.From is not null)
-        {
-            CountCommonTableExpressionReferencesInSource(statement.From.Source, cteNames, counts);
-        }
+        // 1. Outer SELECT's own FROM + JOINs.
+        CountReferencesInSelectStatement(statement, cteNames, counts, includeNestedCommonTableExpressions: false);
 
-        // Count references in JOIN sources.
-        if (statement.Joins is not null)
+        // 2. Every sibling CTE's body — references between CTEs and self-references
+        // inside the recursive member are otherwise invisible to the counter.
+        foreach (CommonTableExpression commonTableExpression in statement.CommonTableExpressions)
         {
-            foreach (JoinClause join in statement.Joins)
+            CountReferencesInQueryExpression(commonTableExpression.Body, cteNames, counts);
+
+            if (commonTableExpression.RecursiveQuery is not null)
             {
-                CountCommonTableExpressionReferencesInSource(join.Source, cteNames, counts);
+                CountReferencesInSelectStatement(commonTableExpression.RecursiveQuery, cteNames, counts, includeNestedCommonTableExpressions: true);
             }
         }
 
         return counts;
+    }
+
+    /// <summary>
+    /// Counts CTE-name references reachable through a <see cref="QueryExpression"/>
+    /// (the body type used for CTEs). Handles plain <see cref="SelectQueryExpression"/>
+    /// wrappers and compound <see cref="CompoundQueryExpression"/> trees
+    /// (UNION / INTERSECT / EXCEPT). DML query expressions are out of scope —
+    /// CTE bodies are read-only.
+    /// </summary>
+    private static void CountReferencesInQueryExpression(
+        QueryExpression query,
+        IReadOnlySet<string> commonTableExpressionNames,
+        Dictionary<string, int> counts)
+    {
+        switch (query)
+        {
+            case SelectQueryExpression { Statement: SelectStatement select }:
+                CountReferencesInSelectStatement(select, commonTableExpressionNames, counts, includeNestedCommonTableExpressions: true);
+                break;
+
+            case CompoundQueryExpression compound:
+                CountReferencesInQueryExpression(compound.Left, commonTableExpressionNames, counts);
+                CountReferencesInQueryExpression(compound.Right, commonTableExpressionNames, counts);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Counts CTE-name references in a single <see cref="SelectStatement"/> — its
+    /// FROM source, every JOIN source, and (transitively) any subquery sources
+    /// nested inside. When <paramref name="includeNestedCommonTableExpressions"/>
+    /// is true, also recurses into a nested WITH block so subqueries that re-bind
+    /// a name locally still get walked for outer-name references.
+    /// </summary>
+    private static void CountReferencesInSelectStatement(
+        SelectStatement statement,
+        IReadOnlySet<string> commonTableExpressionNames,
+        Dictionary<string, int> counts,
+        bool includeNestedCommonTableExpressions)
+    {
+        if (statement.From is not null)
+        {
+            CountCommonTableExpressionReferencesInSource(statement.From.Source, commonTableExpressionNames, counts);
+        }
+
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                CountCommonTableExpressionReferencesInSource(join.Source, commonTableExpressionNames, counts);
+            }
+        }
+
+        if (includeNestedCommonTableExpressions && statement.CommonTableExpressions is { Count: > 0 })
+        {
+            foreach (CommonTableExpression nested in statement.CommonTableExpressions)
+            {
+                CountReferencesInQueryExpression(nested.Body, commonTableExpressionNames, counts);
+                if (nested.RecursiveQuery is not null)
+                {
+                    CountReferencesInSelectStatement(nested.RecursiveQuery, commonTableExpressionNames, counts, includeNestedCommonTableExpressions: true);
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -5222,9 +5292,16 @@ public sealed class QueryPlanner
 
                 break;
 
-            case SubquerySource:
+            case SubquerySource subquery:
+                // Subqueries CAN reference outer CTEs — the CTE name is in scope
+                // for any subquery within the same SELECT statement.
+                CountReferencesInSelectStatement(subquery.Query, commonTableExpressionNames, counts, includeNestedCommonTableExpressions: true);
+                break;
+
             case FunctionSource:
-                // Subqueries and functions do not reference outer CTEs.
+                // Table-valued functions don't reference CTEs through their name;
+                // their argument expressions could in principle (e.g. a scalar
+                // subquery) but we leave that for the broader expression walker.
                 break;
         }
     }

@@ -415,3 +415,110 @@ public sealed class PoseComposeFunction : IFunction, IScalarFunction
         return new ValueTask<ValueRef>(ValueRef.FromPrimitiveArray(r, DataKind.Float32));
     }
 }
+
+/// <summary>
+/// <c>pose_inverse(pose Float32[]) → Float32[]</c>. Computes the inverse of
+/// a 4×4 affine pose matrix using the rigid-inverse formula
+/// <c>M⁻¹ = [Rᵀ | −Rᵀ·t]</c>. Cheap (no general matrix inversion) and
+/// numerically stable, but assumes the rotation block is orthogonal.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Primary use case</strong>: convention diagnosis. When
+/// <c>pc_transform(cloud, cumulative_pose)</c> produces an unexpected
+/// result, swap in <c>pc_transform(cloud, pose_inverse(cumulative_pose))</c>
+/// — whichever direction lands the per-frame clouds in a coherent world
+/// frame tells you which convention your pose-estimation pipeline emits.
+/// </para>
+/// <para>
+/// <strong>Rigid-inverse assumption.</strong> For a rotation+translation
+/// matrix <c>M = [R | t; 0 | 1]</c> with orthogonal <c>R</c> (<c>RᵀR = I</c>),
+/// the inverse simplifies to <c>M⁻¹ = [Rᵀ | −Rᵀ·t; 0 | 1]</c>. Pose
+/// matrices from RGBD pose estimation typically satisfy this with small
+/// numerical drift — the rigid formula is correct to within rounding.
+/// For poses with non-orthogonal rotation (anisotropic scale, shear,
+/// projective components), use a general 4×4 matrix inverse instead;
+/// this primitive will return a "close but not exact" result.
+/// </para>
+/// <para>
+/// <strong>Bottom row.</strong> Output's bottom row is set to
+/// <c>[0, 0, 0, 1]</c>, matching <see cref="PcTransformFunction"/>'s
+/// affine-only convention. The input's bottom row is ignored.
+/// </para>
+/// </remarks>
+public sealed class PoseInverseFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "pose_inverse";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Spatial;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Inverts a 4x4 affine pose matrix using the rigid-inverse formula "
+        + "M^-1 = [R^T | -R^T·t]. Assumes orthogonal rotation; correct to "
+        + "within numerical drift for typical pose-estimation output. Use to "
+        + "swap pose convention (camera-to-world ↔ world-to-camera) when "
+        + "diagnosing whether your pose pipeline emits the direction "
+        + "pc_transform expects.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("pose", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<PoseInverseFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ValueRef arg = arguments.Span[0];
+        if (arg.IsNull)
+        {
+            return new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.Float32));
+        }
+
+        ReadOnlySpan<float> pose =
+            arg.ToDataValue(frame.Source).AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
+        if (pose.Length != 16)
+        {
+            throw new FunctionArgumentException(
+                Name,
+                $"pose must be exactly 16 Float32 values (a 4x4 row-major matrix); got {pose.Length}.");
+        }
+
+        // Row-major layout. pose[0..4] = [r00 r01 r02 tx], etc.
+        float r00 = pose[0],  r01 = pose[1],  r02 = pose[2],  tx = pose[3];
+        float r10 = pose[4],  r11 = pose[5],  r12 = pose[6],  ty = pose[7];
+        float r20 = pose[8],  r21 = pose[9],  r22 = pose[10], tz = pose[11];
+
+        // Inverse translation: -R^T · t. R^T has rows (r00, r10, r20),
+        // (r01, r11, r21), (r02, r12, r22). The dot product of each row with
+        // (tx, ty, tz) gives the corresponding translation component.
+        float itx = -(r00 * tx + r10 * ty + r20 * tz);
+        float ity = -(r01 * tx + r11 * ty + r21 * tz);
+        float itz = -(r02 * tx + r12 * ty + r22 * tz);
+
+        float[] inv =
+        [
+            r00, r10, r20, itx,
+            r01, r11, r21, ity,
+            r02, r12, r22, itz,
+            0,   0,   0,   1,
+        ];
+        return new ValueTask<ValueRef>(ValueRef.FromPrimitiveArray(inv, DataKind.Float32));
+    }
+}
