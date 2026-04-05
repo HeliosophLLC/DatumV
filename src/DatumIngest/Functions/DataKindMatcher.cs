@@ -39,6 +39,31 @@ public abstract class DataKindMatcher
     /// <summary>Sentinel matcher accepting every kind.</summary>
     public static DataKindMatcher Any { get; } = new FamilyMatcher(DataKindFamily.AnyKind);
 
+    /// <summary>
+    /// Matcher accepting a <see cref="DataKind.Lambda"/> value with a
+    /// specific function-context scope and declared return-kind. The
+    /// matcher's <see cref="Matches"/> only checks kind equality at the
+    /// plan-time type-resolution layer; structural signature validation
+    /// (parameter count, parameter kinds, return-kind compatibility)
+    /// happens through <see cref="LambdaSignatureValidator"/> against the
+    /// lambda's AST.
+    /// </summary>
+    /// <param name="contextName">
+    /// Name of the <see cref="DatumIngest.Execution.Contexts.IFunctionContext"/>
+    /// the lambda body is scoped to. Used by the function resolver and the
+    /// language server to determine which functions are callable inside
+    /// the body. Pass <see langword="null"/> for an unscoped lambda (the
+    /// body inherits the surrounding scope's resolution — useful for
+    /// engine-internal callbacks that don't need DSL scoping).
+    /// </param>
+    /// <param name="returns">
+    /// Return-kind matcher: what the lambda body's evaluation must produce.
+    /// Typically <see cref="Exact(DataKind)"/> when the consumer needs a
+    /// specific kind (e.g. <c>Image</c> for an animation frame).
+    /// </param>
+    public static LambdaMatcher Lambda(string? contextName, DataKindMatcher returns) =>
+        new(contextName, returns ?? throw new ArgumentNullException(nameof(returns)));
+
     private sealed class ExactMatcher(DataKind kind) : DataKindMatcher
     {
         public override bool Matches(DataKind k) => k == kind;

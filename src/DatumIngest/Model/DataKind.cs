@@ -24,6 +24,35 @@ public enum DataKind : byte
     /// </summary>
     Type = 1,
 
+    /// <summary>
+    /// A first-class lambda value: an AST body plus a snapshot of the row
+    /// context it was constructed in. Lambdas are <em>row-scoped</em> — they
+    /// can be passed to functions, returned from functions, stored in struct
+    /// fields, and composed via array / CASE expressions within a query, but
+    /// they cannot be persisted to disk. Materialising a Lambda
+    /// <see cref="DataValue"/> at the arena boundary throws.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Sits alongside <see cref="Type"/> in the meta/sentinel block because
+    /// Lambda is a structural kind (executable computation) rather than a
+    /// domain value — the carrier is a managed <c>LambdaValue</c> object
+    /// held in the <see cref="DatumIngest.Functions.ValueRef"/>'s
+    /// materialised slot; the <see cref="DataValue"/> form is a null
+    /// carrier of kind <c>Lambda</c> with no inline metadata. Functions
+    /// that consume lambdas declare
+    /// <c>DataKindMatcher.Lambda(context, returns)</c> on the parameter
+    /// and invoke via <c>EvaluationFrame.InvokeLambdaAsync</c>.
+    /// </para>
+    /// <para>
+    /// The substrate for higher-order functions: animation drivers
+    /// (<c>animate_gif</c>), array transformations, and any future
+    /// consumer that needs to evaluate a user-supplied recipe per
+    /// element / frame / iteration.
+    /// </para>
+    /// </remarks>
+    Lambda = 2,
+
     // ───────────────────────── Boolean (8–15) ─────────────────────────
 
     /// <summary>A boolean value (true or false).</summary>

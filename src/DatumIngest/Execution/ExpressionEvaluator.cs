@@ -19,7 +19,7 @@ namespace DatumIngest.Execution;
 /// row) is passed through an <see cref="EvaluationFrame"/>. A backward-compatible
 /// <c>Row</c> overload reuses the store supplied at construction for both arenas.
 /// </summary>
-public sealed class ExpressionEvaluator
+public sealed class ExpressionEvaluator : ILambdaInvoker
 {
     private readonly FunctionRegistry _functions;
     private readonly QueryMeter? _meter;
@@ -397,8 +397,10 @@ public sealed class ExpressionEvaluator
                 ParameterExpression parameter => throw new InvalidOperationException(
                     $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation."),
                 LambdaExpression => throw new InvalidOperationException(
-                    "Lambda expressions cannot be evaluated as standalone values. " +
-                    "They must appear as arguments to higher-order functions such as array_transform or array_filter."),
+                    "Lambda expressions cannot be lowered to a DataValue (lambdas carry a "
+                    + "managed-payload closure that only fits ValueRef). Call sites that "
+                    + "consume lambdas must evaluate via EvaluateAsValueRefAsync; this "
+                    + "indicates a code path that expected a non-lambda expression."),
                 StructLiteralExpression structLiteral => await EvaluateStructLiteralAsync(structLiteral, frame, cancellationToken).ConfigureAwait(false),
                 IndexAccessExpression indexAccess => await EvaluateIndexAccessAsync(indexAccess, frame, cancellationToken).ConfigureAwait(false),
                 TypeLiteralExpression typeLiteral => EvaluateTypeLiteral(typeLiteral),
@@ -1164,10 +1166,84 @@ public sealed class ExpressionEvaluator
                 // managed payloads (Float32 tensors, SKBitmaps, etc.) stay on
                 // the GC heap end-to-end through DECLARE → read → consume.
                 return variableValue;
+            case LambdaExpression lambda:
+                // Promote the AST node to a first-class Lambda value. The current
+                // frame's Row is snapshotted as the lambda's closure environment so
+                // free-variable references inside the body resolve consistently
+                // when the lambda is later invoked (possibly multiple times by a
+                // higher-order consumer). The materialised payload is the
+                // LambdaValue itself, which only survives in the ValueRef-path —
+                // the DataValue path throws on LambdaExpression for that reason.
+                return ValueRef.FromLambda(LambdaValue.Capture(lambda, frame.Row));
         }
 
         DataValue raw = await EvaluateAsync(expression, frame, cancellationToken).ConfigureAwait(false);
         return ToValueRef(raw, frame);
+    }
+
+    /// <inheritdoc cref="ILambdaInvoker.InvokeLambdaAsync"/>
+    /// <remarks>
+    /// <para>
+    /// The invocation strategy threads through existing infrastructure:
+    /// the lambda's captured <see cref="Row"/> replaces the frame's
+    /// <see cref="EvaluationFrame.Row"/> (so the body's free-variable
+    /// references resolve against the row in scope when the lambda was
+    /// constructed), and the parameter bindings are pushed onto the
+    /// evaluator's <see cref="VariableScope"/> for the duration of the
+    /// body evaluation. The variable-scope lookup precedes the row lookup
+    /// in <see cref="EvaluateAsValueRefAsync"/>, so parameter names shadow
+    /// captured-row columns naturally.
+    /// </para>
+    /// <para>
+    /// The <see cref="VariableScope"/> is required: a frame without one
+    /// has no place to bind parameters. Hosts that want lambda support
+    /// must construct the evaluator with a non-null <c>variableScope</c>
+    /// (the procedural-body executor already does this; ad-hoc frames
+    /// need to opt in).
+    /// </para>
+    /// </remarks>
+    public async ValueTask<ValueRef> InvokeLambdaAsync(
+        ValueRef lambda,
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        LambdaValue value = lambda.AsLambda();
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args.Length != value.Parameters.Count)
+        {
+            throw new ArgumentException(
+                $"Lambda expects {value.Parameters.Count} argument(s) "
+                + $"({string.Join(", ", value.Parameters)}); got {args.Length}.",
+                nameof(arguments));
+        }
+        if (_variableScope is null)
+        {
+            throw new InvalidOperationException(
+                "InvokeLambdaAsync requires the evaluator to be constructed with a VariableScope. "
+                + "Lambda parameters bind into the scope at invocation time and the scope's absence "
+                + "leaves no room for them. Construct ExpressionEvaluator with a non-null variableScope.");
+        }
+
+        _variableScope.PushFrame();
+        try
+        {
+            for (int i = 0; i < args.Length; i++)
+            {
+                _variableScope.Declare(value.Parameters[i], args[i]);
+            }
+            // Captures become the row in scope for the lambda body. Column
+            // references in the body resolve against captures unless they're
+            // shadowed by a parameter binding (which the variable-scope
+            // lookup handles first inside EvaluateAsValueRefAsync).
+            EvaluationFrame inner = frame.WithRow(value.Captures);
+            return await EvaluateAsValueRefAsync(value.Body.Body, inner, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _variableScope.PopFrame();
+        }
     }
 
     /// <summary>

@@ -56,6 +56,49 @@ public sealed class LanguageServerManifest
     /// without a live catalog.
     /// </summary>
     public IReadOnlyList<ProcedureEntry>? Procedures { get; init; }
+
+    /// <summary>
+    /// Function contexts registered in the engine's
+    /// <c>FunctionContextRegistry</c>. Each entry carries the context's
+    /// name, the canonical lambda parameter list, the optional parent
+    /// context, and the list of globally-visible functions the context
+    /// "borrows" into its lambda-body scope. Read by the completion
+    /// provider when the cursor sits inside a lambda parameter slot whose
+    /// declared context is non-null: completion is filtered to the
+    /// effective whitelist of that context. <see langword="null"/> when
+    /// the manifest is built without context support.
+    /// </summary>
+    public IReadOnlyList<FunctionContextEntry>? FunctionContexts { get; init; }
+}
+
+/// <summary>
+/// Manifest-side description of an <c>IFunctionContext</c>. Mirrors the
+/// runtime <c>FunctionContextDescriptor</c> at edit time so the LS can
+/// reason about lambda scoping without instantiating the engine.
+/// </summary>
+public sealed class FunctionContextEntry
+{
+    /// <summary>Context identifier (referenced by per-function <c>Contexts</c> lists and by <c>ParameterSignature.LambdaContextName</c>).</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Canonical lambda parameter list — name + kind, in declaration order.</summary>
+    public required IReadOnlyList<LambdaParameterEntry> Parameters { get; init; }
+
+    /// <summary>Parent context name for whitelist inheritance, or <see langword="null"/> for a root context.</summary>
+    public string? ParentName { get; init; }
+
+    /// <summary>Globally-visible function names this context borrows into its lambda-body scope.</summary>
+    public required IReadOnlyList<string> Borrows { get; init; }
+}
+
+/// <summary>Single entry in a <see cref="FunctionContextEntry.Parameters"/> list.</summary>
+public sealed class LambdaParameterEntry
+{
+    /// <summary>Canonical parameter name (suggestion used by LS pre-fill).</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Parameter kind as a string (e.g. <c>"Float32"</c>).</summary>
+    public required string Kind { get; init; }
 }
 
 /// <summary>
@@ -224,6 +267,17 @@ public sealed class FunctionSignature
 
     /// <summary>The base query-unit cost per invocation, as reported by the function implementation.</summary>
     public int QueryUnitCost { get; init; }
+
+    /// <summary>
+    /// Names of the lambda-body <see cref="FunctionContextEntry"/>s this
+    /// function is visible inside. Empty (or <see langword="null"/>) means
+    /// "globally visible" — the function resolves in every scope, the
+    /// default for every built-in. A non-empty list scopes the function to
+    /// lambda bodies whose parameter slot named one of those contexts (or
+    /// any descendant context). The completion provider consults this when
+    /// filtering by enclosing lambda context.
+    /// </summary>
+    public IReadOnlyList<string>? Contexts { get; init; }
 }
 
 /// <summary>
@@ -260,4 +314,15 @@ public sealed class ParameterSignature
 
     /// <summary>Whether this parameter is optional.</summary>
     public bool IsOptional { get; init; }
+
+    /// <summary>
+    /// When this parameter's kind is <c>"Lambda"</c>, the name of the
+    /// <see cref="FunctionContextEntry"/> the lambda body operates inside.
+    /// <see langword="null"/> means either the parameter isn't a lambda or
+    /// the lambda is unscoped (callable but inherits surrounding
+    /// resolution rules). Drives context-aware completion: when the
+    /// cursor sits inside this parameter slot, the LS switches the
+    /// completion whitelist to the named context's effective set.
+    /// </summary>
+    public string? LambdaContextName { get; init; }
 }

@@ -62,7 +62,8 @@ public sealed class FunctionRegistry
             Description: T.Description,
             Signatures: T.Signatures,
             BodyScope: T.BodyScope,
-            SchemaName: schema);
+            SchemaName: schema,
+            Contexts: T.Contexts);
 
         if (!_scalarFunctions.TryAdd(key, instance))
         {
@@ -332,6 +333,95 @@ public sealed class FunctionRegistry
             return TryGetScalar(new QualifiedName(name[..dot], name[(dot + 1)..]));
         }
         return TryGetScalar(explicitSchema: null, name, DefaultSearchPath);
+    }
+
+    /// <summary>
+    /// Determines whether the function with the given qualified name is
+    /// resolvable in the supplied <paramref name="currentContextName"/>.
+    /// Encapsulates the visibility rule documented on
+    /// <see cref="IFunction.Contexts"/>:
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item>
+    ///     A function whose <see cref="FunctionDescriptor.Contexts"/> list
+    ///     is empty (or unspecified) is <strong>globally visible</strong> —
+    ///     visible inside every context and at the top-level scope.
+    ///   </item>
+    ///   <item>
+    ///     A function with a non-empty <c>Contexts</c> list is visible
+    ///     <em>only</em> inside lambda bodies whose declared context name
+    ///     matches one of the list entries, or matches any ancestor of one
+    ///     of those entries via
+    ///     <see cref="DatumIngest.Execution.Contexts.FunctionContextRegistry.WalkAncestors"/>.
+    ///     Calling such a function from the top-level scope (or from a
+    ///     differently-contexted lambda) returns <see langword="false"/>.
+    ///   </item>
+    ///   <item>
+    ///     A context's <see cref="DatumIngest.Execution.Contexts.FunctionContextDescriptor.Borrows"/>
+    ///     list provides the complementary opt-in: a globally-visible
+    ///     function listed in a context's borrows is still visible there
+    ///     (no change). A context-restricted function listed in a different
+    ///     context's borrows is also made visible there.
+    ///   </item>
+    /// </list>
+    /// <para>
+    /// <paramref name="currentContextName"/> being <see langword="null"/>
+    /// means the call site is outside any lambda body (top-level SQL); only
+    /// globally-visible functions resolve there. Pass the declared context
+    /// name when resolving inside a lambda whose parameter slot named one.
+    /// </para>
+    /// </remarks>
+    public bool IsVisibleInContext(
+        QualifiedName name,
+        string? currentContextName,
+        Execution.Contexts.FunctionContextRegistry? contexts)
+    {
+        if (!_scalarDescriptorsByName.TryGetValue(name, out FunctionDescriptor? descriptor))
+        {
+            // The function isn't registered at all; visibility is moot but
+            // returning false matches the "can't resolve it" intuition.
+            return false;
+        }
+
+        IReadOnlyList<string>? functionContexts = descriptor.Contexts;
+        bool isGloballyVisible = functionContexts is null || functionContexts.Count == 0;
+
+        if (currentContextName is null)
+        {
+            // Top-level scope: only globally-visible functions resolve.
+            return isGloballyVisible;
+        }
+
+        if (isGloballyVisible)
+        {
+            // Globally-visible functions are always available inside any
+            // lambda body — no need to walk the context chain.
+            return true;
+        }
+
+        // Function is context-restricted. Visible if its Contexts list
+        // includes the current context or any of its ancestors, OR if any
+        // context in the current chain borrows the function name.
+        if (contexts is null)
+        {
+            // No context registry available — can't walk the ancestor chain
+            // or check borrows. Conservatively allow only exact name match.
+            return functionContexts!.Contains(currentContextName, StringComparer.Ordinal);
+        }
+
+        foreach (Execution.Contexts.FunctionContextDescriptor ctx in contexts.WalkAncestors(currentContextName))
+        {
+            if (functionContexts!.Contains(ctx.Name, StringComparer.Ordinal))
+            {
+                return true;
+            }
+            if (ctx.Borrows.Contains(name.Name, StringComparer.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private bool TryResolveModelFunction(QualifiedName name, out ModelScalarFunction resolved)

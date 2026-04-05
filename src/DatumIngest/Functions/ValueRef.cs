@@ -373,6 +373,17 @@ public readonly struct ValueRef
         new(DataValue.Null(DataKind.Mesh), blob);
 
     /// <summary>
+    /// First-class lambda value: the AST body plus a snapshot of the row
+    /// context at construction time. Lambdas are <em>row-scoped</em> — they
+    /// flow as <see cref="ValueRef"/>s through function arguments, struct
+    /// fields, and array elements but cannot be persisted; <see cref="ToDataValue"/>
+    /// throws when the payload is a <see cref="LambdaValue"/>.
+    /// </summary>
+    public static ValueRef FromLambda(LambdaValue lambda) =>
+        new(DataValue.Null(DataKind.Lambda), lambda
+            ?? throw new ArgumentNullException(nameof(lambda)));
+
+    /// <summary>
     /// JSON payload as a byte slice over canonical CBOR bytes — used by
     /// <c>json_query</c> to return a subdocument view without copying. The
     /// segment's <c>(Array, Offset, Count)</c> identifies a window into a
@@ -606,6 +617,29 @@ public readonly struct ValueRef
         }
         throw new InvalidOperationException(
             $"ValueRef of kind {Kind} does not carry an Image payload "
+            + $"(Materialized: {_materialized?.GetType().Name ?? "<none>"}).");
+    }
+
+    /// <summary>
+    /// Returns the <see cref="LambdaValue"/> backing a
+    /// <see cref="DataKind.Lambda"/> <see cref="ValueRef"/>. Throws when the
+    /// kind is wrong or the value carries no managed payload (which would
+    /// indicate a misuse — Lambda values must be constructed with
+    /// <see cref="FromLambda"/>).
+    /// </summary>
+    public LambdaValue AsLambda()
+    {
+        if (_inline.Kind != DataKind.Lambda)
+        {
+            throw new InvalidOperationException(
+                $"AsLambda called on a {_inline.Kind} value (expected Lambda).");
+        }
+        if (_materialized is LambdaValue lambda)
+        {
+            return lambda;
+        }
+        throw new InvalidOperationException(
+            $"ValueRef of kind Lambda does not carry a LambdaValue payload "
             + $"(Materialized: {_materialized?.GetType().Name ?? "<none>"}).");
     }
 
@@ -972,6 +1006,17 @@ public readonly struct ValueRef
 
         return _materialized switch
         {
+            // Lambdas are row-scoped — they exist only as intra-query intermediate
+            // values. Hitting this branch means a caller tried to materialise a
+            // Lambda into an arena-backed DataValue (e.g. as a SELECT-output column,
+            // an INSERT row, or any other arena-write path). Refusal is correct:
+            // a serialised lambda would have a dangling closure capture.
+            LambdaValue when _inline.Kind == DataKind.Lambda =>
+                throw new InvalidOperationException(
+                    "Lambda values cannot be persisted to a column, output row, "
+                    + "or any other arena-write boundary. They exist only as "
+                    + "intra-query intermediate values flowing between higher-order "
+                    + "functions and their consumers."),
             string s when _inline.Kind == DataKind.String && !_inline.IsArray =>
                 DataValue.FromString(s, targetStore),
             byte[] bytes when IsByteArrayKind => DataValue.FromByteArray(bytes, targetStore),

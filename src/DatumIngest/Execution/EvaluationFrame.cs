@@ -114,6 +114,17 @@ public readonly struct EvaluationFrame
     public VideoRegistry? VideoRegistry { get; }
 
     /// <summary>
+    /// Optional handle to the evaluator-as-lambda-invoker. Set by the
+    /// pipeline when the active query supports first-class lambdas;
+    /// consumer functions (animation drivers, array transformations, etc.)
+    /// call <see cref="ILambdaInvoker.InvokeLambdaAsync"/> through this
+    /// slot. <see langword="null"/> for frames constructed outside the
+    /// query pipeline — consumer functions that require lambda invocation
+    /// should surface a clear error in that case rather than null-erroring.
+    /// </summary>
+    public ILambdaInvoker? LambdaInvoker { get; }
+
+    /// <summary>
     /// Creates an evaluation frame. Pass the same store for <paramref name="source"/>
     /// and <paramref name="target"/> when the distinction doesn't matter (e.g. predicates
     /// that produce only inline boolean results and don't allocate strings). Pass
@@ -136,7 +147,8 @@ public readonly struct EvaluationFrame
         TypeRegistry? types = null,
         TypeIdTranslationTable? typeIdTranslations = null,
         ModelDescriptor? currentModel = null,
-        VideoRegistry? videoRegistry = null)
+        VideoRegistry? videoRegistry = null,
+        ILambdaInvoker? lambdaInvoker = null)
     {
         Row = row;
         Source = source;
@@ -148,6 +160,7 @@ public readonly struct EvaluationFrame
         TypeIdTranslations = typeIdTranslations;
         CurrentModel = currentModel;
         VideoRegistry = videoRegistry;
+        LambdaInvoker = lambdaInvoker;
     }
 
     /// <summary>
@@ -157,7 +170,7 @@ public readonly struct EvaluationFrame
     /// a derived row (e.g. a lambda body's augmented row).
     /// </summary>
     public EvaluationFrame WithRow(Row row) =>
-        new(row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, CurrentModel, VideoRegistry);
+        new(row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, CurrentModel, VideoRegistry, LambdaInvoker);
 
     /// <summary>
     /// Returns a new frame with a <see cref="CurrentModel"/> binding,
@@ -166,5 +179,14 @@ public readonly struct EvaluationFrame
     /// when leaving it.
     /// </summary>
     public EvaluationFrame WithCurrentModel(ModelDescriptor? currentModel) =>
-        new(Row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, currentModel, VideoRegistry);
+        new(Row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, currentModel, VideoRegistry, LambdaInvoker);
+
+    /// <summary>
+    /// Returns a new frame with a <see cref="LambdaInvoker"/> attached.
+    /// Used by the pipeline when the query enters a lambda-supporting
+    /// context (e.g. the evaluator wires itself as the invoker into every
+    /// frame it dispatches through).
+    /// </summary>
+    public EvaluationFrame WithLambdaInvoker(ILambdaInvoker? lambdaInvoker) =>
+        new(Row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, CurrentModel, VideoRegistry, lambdaInvoker);
 }

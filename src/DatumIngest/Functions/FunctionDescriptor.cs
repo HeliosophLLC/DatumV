@@ -29,6 +29,15 @@ namespace DatumIngest.Functions;
 /// built-ins on <c>schema.</c>-qualified popups. Defaults to
 /// <c>system</c> for legacy / unspecified registrations.
 /// </param>
+/// <param name="Contexts">
+/// Names of the lambda-body
+/// <see cref="DatumIngest.Execution.Contexts.IFunctionContext"/>s this
+/// function is visible inside. Empty (default) means globally visible —
+/// the function resolves in every scope, matching the legacy behaviour.
+/// A non-empty list scopes the function to lambdas whose parameter slot
+/// declared one of those contexts (or any descendant context, via
+/// <see cref="DatumIngest.Execution.Contexts.FunctionContextRegistry.WalkAncestors"/>).
+/// </param>
 public sealed record FunctionDescriptor(
     string PrimaryName,
     IReadOnlyList<string> Aliases,
@@ -36,4 +45,5 @@ public sealed record FunctionDescriptor(
     string Description,
     IReadOnlyList<FunctionSignatureVariant> Signatures,
     BodyScopeRequirement BodyScope = BodyScopeRequirement.None,
-    string SchemaName = "system");
+    string SchemaName = "system",
+    IReadOnlyList<string>? Contexts = null);
