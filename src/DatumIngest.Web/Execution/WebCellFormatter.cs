@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO.Compression;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using DatumIngest.DatumFile.Sidecar;
@@ -588,7 +589,30 @@ internal static class WebCellFormatter
             DataKind.VideoFrame => FormatVideoFrameInline(value),
             DataKind.Json => DecodeJsonNodeOrFallback(value, arena, registry),
             DataKind.Type => value.FormatType(types),
+            DataKind.Point2D => Point2DToJson(value),
+            DataKind.Point3D => Point3DToJson(value),
             _ => value.ToString() ?? string.Empty,
+        };
+    }
+
+    private static Dictionary<string, object?> Point2DToJson(DataValue value)
+    {
+        Vector2 v = value.AsPoint2D();
+        return new Dictionary<string, object?>(2, StringComparer.Ordinal)
+        {
+            ["x"] = Float32ToJson(v.X),
+            ["y"] = Float32ToJson(v.Y),
+        };
+    }
+
+    private static Dictionary<string, object?> Point3DToJson(DataValue value)
+    {
+        Vector3 v = value.AsPoint3D();
+        return new Dictionary<string, object?>(3, StringComparer.Ordinal)
+        {
+            ["x"] = Float32ToJson(v.X),
+            ["y"] = Float32ToJson(v.Y),
+            ["z"] = Float32ToJson(v.Z),
         };
     }
 
@@ -634,10 +658,50 @@ internal static class WebCellFormatter
             DataKind.Int64 => CollectPrimitiveArray<long>(value, arena, registry, v => (object)v),
             DataKind.Float32 => CollectPrimitiveArray<float>(value, arena, registry, v => Float32ToJson(v)),
             DataKind.Float64 => CollectPrimitiveArray<double>(value, arena, registry, v => Float64ToJson(v)),
+            // Point2D / Point3D arrays. Stored 8 / 12 bytes per element matching
+            // the unmanaged layout of System.Numerics.Vector2 / Vector3 — no
+            // shape-prefix work needed because the array is always flat. Each
+            // element renders as a {x, y[, z]} object so the JSON tree shows
+            // structured points instead of stringified tuples.
+            DataKind.Point2D => CollectPoint2DArray(value, arena, registry),
+            DataKind.Point3D => CollectPoint3DArray(value, arena, registry),
             // Image / Audio / Video arrays not handled here — ShouldRouteToJson
             // skips binary-element arrays, so we should never reach them.
             _ => new List<object?> { $"<Array<{value.Kind}> not yet renderable as JSON>" },
         };
+    }
+
+    private static List<object?> CollectPoint2DArray(DataValue value, Arena arena, SidecarRegistry registry)
+    {
+        ReadOnlySpan<Vector2> span = value.AsArraySpan<Vector2>(arena, registry);
+        List<object?> arr = new(span.Length);
+        for (int i = 0; i < span.Length; i++)
+        {
+            Vector2 v = span[i];
+            arr.Add(new Dictionary<string, object?>(2, StringComparer.Ordinal)
+            {
+                ["x"] = Float32ToJson(v.X),
+                ["y"] = Float32ToJson(v.Y),
+            });
+        }
+        return arr;
+    }
+
+    private static List<object?> CollectPoint3DArray(DataValue value, Arena arena, SidecarRegistry registry)
+    {
+        ReadOnlySpan<Vector3> span = value.AsArraySpan<Vector3>(arena, registry);
+        List<object?> arr = new(span.Length);
+        for (int i = 0; i < span.Length; i++)
+        {
+            Vector3 v = span[i];
+            arr.Add(new Dictionary<string, object?>(3, StringComparer.Ordinal)
+            {
+                ["x"] = Float32ToJson(v.X),
+                ["y"] = Float32ToJson(v.Y),
+                ["z"] = Float32ToJson(v.Z),
+            });
+        }
+        return arr;
     }
 
     private static List<object?> CollectPrimitiveArray<T>(
@@ -746,8 +810,22 @@ internal static class WebCellFormatter
             // registry can't resolve the carried TypeId.
             DataKind.Type => value.FormatType(types),
             DataKind.VideoFrame => FormatVideoFrameInline(value),
+            DataKind.Point2D => FormatPoint2DText(value),
+            DataKind.Point3D => FormatPoint3DText(value),
             _ => value.ToString(),
         };
+    }
+
+    private static string FormatPoint2DText(DataValue value)
+    {
+        Vector2 v = value.AsPoint2D();
+        return string.Create(CultureInfo.InvariantCulture, $"({v.X:G}, {v.Y:G})");
+    }
+
+    private static string FormatPoint3DText(DataValue value)
+    {
+        Vector3 v = value.AsPoint3D();
+        return string.Create(CultureInfo.InvariantCulture, $"({v.X:G}, {v.Y:G}, {v.Z:G})");
     }
 
     /// <summary>

@@ -964,18 +964,22 @@ function CellTable({ cell }: { cell: CellResult }) {
   }, []);
 
   // Ctrl+C / Cmd+C while the table has focus copies the selection as
-  // TSV. We hook the `copy` event (not keydown) so the browser's
-  // focusable-element copy plumbing handles the activation — we just
-  // supply the payload.
-  const handleCopy = useCallback(
-    (e: React.ClipboardEvent<HTMLDivElement>) => {
+  // TSV. We hook keydown (not the `copy` event) because `select-none`
+  // suppresses the browser's native text selection, and without one
+  // most browsers don't dispatch `copy` on a non-editable focused
+  // element. Writing through `navigator.clipboard` is the direct
+  // path that doesn't depend on a synthetic selection.
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key !== 'c' && e.key !== 'C') return;
       if (selection === null) return;
-      const numCols = cell.schema?.length ?? 0;
-      const r = selectionRange(selection, cell.rows.length, numCols);
+      if (cell.schema === null) return;
+      const r = selectionRange(selection, cell.rows.length, cell.schema.length);
       if (r.rowMax < r.rowMin || r.colMax < r.colMin) return;
       const tsv = buildSelectionTsv(cell.rows, r);
-      e.clipboardData.setData('text/plain', tsv);
       e.preventDefault();
+      void navigator.clipboard.writeText(tsv);
     },
     [selection, cell.rows, cell.schema],
   );
@@ -1085,8 +1089,14 @@ function CellTable({ cell }: { cell: CellResult }) {
     <div
       ref={scrollRef}
       tabIndex={0}
-      onCopy={handleCopy}
-      className="bg-table-pane min-h-0 flex-1 overflow-auto text-xs select-none outline-none"
+      onKeyDown={handleKeyDown}
+      // `group` is the trigger for the descendant `group-focus-within:`
+      // variants below: selected cells / headers / gutters / corner all
+      // deepen their highlight when the scroll container (or anything
+      // inside it) has focus. Mimics Excel's focused-vs-blurred range
+      // states — blue tint when active, neutral gray when the user has
+      // tabbed away.
+      className="group bg-table-pane min-h-0 flex-1 overflow-auto text-xs select-none outline-none"
     >
       {/* Sticky header. Sits at top of scroll container; a real
           `border-b` draws the bottom rule (each header cell's bg-muted
@@ -1110,7 +1120,9 @@ function CellTable({ cell }: { cell: CellResult }) {
           onContextMenu={(e) => handleContextMenu(e, 'all', 0, 0)}
           className={cn(
             'border-border sticky left-0 z-30 cursor-cell border-r',
-            selection?.mode === 'all' ? 'bg-primary/30' : 'bg-muted',
+            selection?.mode === 'all'
+              ? 'bg-foreground/15 group-focus-within:bg-primary/40'
+              : 'bg-muted',
           )}
           role="button"
           aria-label="Select all"
@@ -1129,7 +1141,9 @@ function CellTable({ cell }: { cell: CellResult }) {
             onContextMenu={(e) => handleContextMenu(e, 'col', 0, colIdx)}
             className={cn(
               'border-border flex min-w-0 cursor-cell items-center gap-1.5 border-r px-2 py-1 select-none last:border-r-0',
-              isColInRange(colIdx) ? 'bg-primary/30' : 'bg-muted',
+              isColInRange(colIdx)
+                ? 'bg-foreground/15 group-focus-within:bg-primary/40'
+                : 'bg-muted',
             )}
             title={`${col.kind}${col.isArray ? '[]' : ''}`}
           >
@@ -1188,7 +1202,9 @@ function CellTable({ cell }: { cell: CellResult }) {
                 }
                 className={cn(
                   'border-border text-muted-foreground sticky left-0 z-10 flex min-w-0 cursor-cell items-center justify-end border-r px-1.5 font-medium tabular-nums select-none',
-                  isRowInRange(virtualRow.index) ? 'bg-primary/30' : 'bg-muted',
+                  isRowInRange(virtualRow.index)
+                    ? 'bg-foreground/15 group-focus-within:bg-primary/40'
+                    : 'bg-muted',
                 )}
                 title={String(rowNumber)}
               >
@@ -1231,7 +1247,8 @@ function CellTable({ cell }: { cell: CellResult }) {
                     largeMedia
                       ? 'flex items-center overflow-hidden'
                       : 'truncate align-top',
-                    isInRange(virtualRow.index, colIdx) && 'bg-primary/20',
+                    isInRange(virtualRow.index, colIdx)
+                      && 'bg-foreground/10 group-focus-within:bg-primary/25',
                   )}
                 >
                   <CellValue cell={c} largeMedia={largeMedia} />

@@ -4805,6 +4805,8 @@ public readonly struct DataValue : IEquatable<DataValue>
                 ? $"Json[offset={SidecarOffset}, len={SidecarLength}]"
                 : $"Json[offset={_p0}, len={_p1}]",
             DataKind.Struct => $"Struct({_meta} fields)",
+            DataKind.Point2D => FormatPoint2D(),
+            DataKind.Point3D => FormatPoint3D(),
             _ => _kind.ToString(),
         };
     }
