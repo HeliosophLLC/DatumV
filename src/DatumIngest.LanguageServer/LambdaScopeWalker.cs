@@ -174,6 +174,74 @@ internal static class LambdaScopeWalker
     }
 
     /// <summary>
+    /// Returns the name and argument index of the function call that
+    /// immediately encloses <paramref name="cursorOffset"/>, or
+    /// <c>(null, -1)</c> when the cursor isn't inside a call's argument
+    /// list. Used by the completion provider to surface enumerated-string
+    /// values (see <see cref="ParameterSignature.EnumValues"/>) when the
+    /// cursor sits inside a string literal in a known argument slot —
+    /// <c>blend(content, 'a|dd')</c> resolves to <c>("blend", 1)</c>.
+    /// </summary>
+    /// <remarks>
+    /// Re-walks the token stream up to <paramref name="cursorOffset"/>
+    /// tracking the same paren-depth + per-depth argument index state
+    /// <see cref="FindActiveScopes"/> uses. On return, the top of the
+    /// arg-index stack is the current call's arg index, and a quick
+    /// look-back from the most recent unclosed <c>(</c> recovers the
+    /// call name.
+    /// </remarks>
+    public static (string? CallName, int ArgIndex) FindEnclosingCallAndArgIndex(
+        IReadOnlyList<TokenHit> tokens, int cursorOffset)
+    {
+        // We need to track WHICH `(` opened the current call AND its arg
+        // index. Stack stores (callNameTokenIndex, argIndex) pairs — the
+        // top is always the innermost call we're inside.
+        // The call name is the token at index (openParenIndex - 1) when
+        // that token is an Identifier or keyword-as-function; otherwise
+        // the bracket isn't a call (e.g. array literal `[...]`).
+        Stack<(int OpenParenIndex, int ArgIndex)> stack = new();
+
+        for (int i = 0; i < tokens.Count; i++)
+        {
+            TokenHit token = tokens[i];
+            if (token.AbsoluteOffset >= cursorOffset) break;
+
+            switch (token.Kind)
+            {
+                case SqlToken.LeftParen:
+                case SqlToken.LeftBracket:
+                    stack.Push((i, 0));
+                    break;
+                case SqlToken.RightParen:
+                case SqlToken.RightBracket:
+                    if (stack.Count > 0) stack.Pop();
+                    break;
+                case SqlToken.Comma:
+                    if (stack.Count > 0)
+                    {
+                        (int openIdx, int argIdx) = stack.Pop();
+                        stack.Push((openIdx, argIdx + 1));
+                    }
+                    break;
+            }
+        }
+
+        if (stack.Count == 0) return (null, -1);
+        (int openParenIndex, int currentArgIndex) = stack.Peek();
+        // Only treat as a call when the bracket has a function-name token
+        // directly preceding it. Array literals (`[1, 2, 3]`) and
+        // grouping parens (`(a + b)`) are NOT calls.
+        if (openParenIndex == 0) return (null, currentArgIndex);
+        if (tokens[openParenIndex].Kind == SqlToken.LeftBracket) return (null, currentArgIndex);
+        SqlToken prevKind = tokens[openParenIndex - 1].Kind;
+        if (prevKind != SqlToken.Identifier && !IsKeywordToken(prevKind))
+        {
+            return (null, currentArgIndex);
+        }
+        return (tokens[openParenIndex - 1].Text, currentArgIndex);
+    }
+
+    /// <summary>
     /// Returns the deduplicated set of lambda parameter names visible at
     /// <paramref name="cursorOffset"/>, walking every enclosing lambda body
     /// (innermost first; outer scopes still contribute names that aren't

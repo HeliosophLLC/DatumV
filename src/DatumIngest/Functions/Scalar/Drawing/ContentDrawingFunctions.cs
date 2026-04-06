@@ -491,6 +491,34 @@ public sealed class BlendFunction : IFunction, IScalarFunction
         + "add, difference, …). The inner drawing renders into a fresh layer; the layer "
         + "composites onto the parent canvas using the supplied mode.";
 
+    /// <summary>
+    /// Canonical blend-mode names surfaced as LS completions when the
+    /// cursor sits inside the <c>mode</c> string literal. Aliases
+    /// (<c>plus</c>, <c>additive</c>, <c>source-over</c>, <c>src-over</c>)
+    /// still parse at runtime but aren't suggested — the canonical form
+    /// is what the popup should nudge users toward.
+    /// </summary>
+    private static readonly IReadOnlyList<string> BlendModeNames =
+    [
+        "normal",
+        "multiply",
+        "screen",
+        "overlay",
+        "darken",
+        "lighten",
+        "add",
+        "difference",
+        "exclusion",
+        "soft-light",
+        "hard-light",
+        "color-dodge",
+        "color-burn",
+        "hue",
+        "saturation",
+        "color",
+        "luminosity",
+    ];
+
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
     [
@@ -498,7 +526,7 @@ public sealed class BlendFunction : IFunction, IScalarFunction
             Parameters:
             [
                 new ParameterSpec("content", DataKindMatcher.Exact(DataKind.Drawing)),
-                new ParameterSpec("mode",    DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("mode",    DataKindMatcher.StringEnum(BlendModeNames)),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Drawing)),

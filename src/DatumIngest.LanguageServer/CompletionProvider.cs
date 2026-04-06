@@ -317,7 +317,12 @@ public sealed class CompletionProvider
 
             case CompletionZoneKind.InsideStringOrComment:
                 // Cursor is inside a string or comment — suppress all completions
-                // so e.g. ALTER doesn't get inserted while the user types a literal.
+                // so e.g. ALTER doesn't get inserted while the user types a
+                // literal. One exception: when the string sits in a parameter
+                // slot whose matcher carries a `StringEnumMatcher` (e.g.
+                // `blend(content, 'add')`'s `mode`), surface those values so
+                // users see the legal vocabulary.
+                AddEnumValuesForStringParameter(items, sql, cursorOffset);
                 break;
 
             case CompletionZoneKind.AfterCall:
@@ -1340,6 +1345,77 @@ public sealed class CompletionProvider
                 SortOrder = 0,
             });
         }
+    }
+
+    /// <summary>
+    /// When the cursor sits inside a string literal whose enclosing
+    /// function-call argument slot has an <see cref="ParameterSignature.EnumValues"/>
+    /// list (set when the parameter's runtime matcher is a
+    /// <c>StringEnumMatcher</c>), surface those values as completion
+    /// items. Resolves the enclosing call via
+    /// <see cref="LambdaScopeWalker.FindEnclosingCallAndArgIndex"/> and
+    /// looks the parameter up in the manifest, preferring the first
+    /// variant that declares an enum at that position (so multi-variant
+    /// signatures don't lose their enum hint when an overload at the
+    /// same arg index uses a plain String matcher).
+    /// </summary>
+    private void AddEnumValuesForStringParameter(
+        List<CompletionItem> items, string sql, int cursorOffset)
+    {
+        List<TokenHit> tokens = LambdaScopeWalker.Tokenize(sql);
+        (string? callName, int argIndex) = LambdaScopeWalker.FindEnclosingCallAndArgIndex(tokens, cursorOffset);
+        if (callName is null || argIndex < 0) return;
+
+        IReadOnlyList<string>? values = FindEnumValuesForArgSlot(callName, argIndex);
+        if (values is null) return;
+
+        foreach (string value in values)
+        {
+            items.Add(new CompletionItem
+            {
+                Label = value,
+                Kind = CompletionItemKind.EnumMember,
+                // Inside a string literal the user already typed the
+                // opening quote; insert the bare value (Monaco's word
+                // completion will replace the existing prefix between the
+                // quotes).
+                InsertText = value,
+                Detail = $"{callName} argument",
+                SortOrder = 0,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Walks the manifest to find a parameter at <paramref name="argIndex"/>
+    /// of the function named <paramref name="callName"/> that has an
+    /// enumerated value set. Searches the primary parameter list first,
+    /// then every <see cref="FunctionSignature.AdditionalParameterShapes"/>
+    /// variant — same posture as the hover provider's lambda-slot lookup.
+    /// </summary>
+    private IReadOnlyList<string>? FindEnumValuesForArgSlot(string callName, int argIndex)
+    {
+        foreach (FunctionSignature fn in _manifest.Functions)
+        {
+            if (!string.Equals(fn.Name, callName, StringComparison.OrdinalIgnoreCase)) continue;
+            if (argIndex < fn.Parameters.Count
+                && fn.Parameters[argIndex].EnumValues is { Count: > 0 } primary)
+            {
+                return primary;
+            }
+            if (fn.AdditionalParameterShapes is not null)
+            {
+                foreach (IReadOnlyList<ParameterSignature> variant in fn.AdditionalParameterShapes)
+                {
+                    if (argIndex < variant.Count
+                        && variant[argIndex].EnumValues is { Count: > 0 } alt)
+                    {
+                        return alt;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     /// <summary>

@@ -1738,6 +1738,89 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     [Fact]
+    public void InsideStringLiteral_OfEnumParameter_SuggestsEnumValues()
+    {
+        // Manifest with a `blend(content, mode)` function whose `mode`
+        // parameter carries an EnumValues list. Cursor placed inside the
+        // string literal should surface the enum values, not the usual
+        // function/keyword set.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Keywords = ["SELECT"],
+            SearchPath = ["public", "system"],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "blend",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "content", Kind = "Drawing" },
+                        new ParameterSignature
+                        {
+                            Name = "mode",
+                            Kind = "String (add | multiply | screen)",
+                            EnumValues = ["add", "multiply", "screen"],
+                        },
+                    ],
+                    ReturnType = "Drawing",
+                    Category = FunctionCategory.Drawing,
+                },
+            ],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql = "SELECT blend(my_drawing, '')";
+        int cursor = sql.IndexOf("''") + 1; // between the two quotes
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "add" && i.Kind == CompletionItemKind.EnumMember);
+        Assert.Contains(items, i => i.Label == "multiply" && i.Kind == CompletionItemKind.EnumMember);
+        Assert.Contains(items, i => i.Label == "screen" && i.Kind == CompletionItemKind.EnumMember);
+        // Plain-function items (e.g. animate_frames from the lambda manifest)
+        // shouldn't leak into the string-position popup.
+        Assert.DoesNotContain(items, i => i.Kind == CompletionItemKind.Function);
+    }
+
+    [Fact]
+    public void InsideStringLiteral_OfNonEnumParameter_StaysEmpty()
+    {
+        // Manifest's blend function exists but the `mode` param has no
+        // EnumValues; cursor inside the string should produce NO completions
+        // (current behaviour for any string position without an enum hint).
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Keywords = ["SELECT"],
+            SearchPath = ["public", "system"],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "blend",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "content", Kind = "Drawing" },
+                        new ParameterSignature { Name = "mode", Kind = "String" }, // no EnumValues
+                    ],
+                    ReturnType = "Drawing",
+                    Category = FunctionCategory.Drawing,
+                },
+            ],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql = "SELECT blend(my_drawing, '')";
+        int cursor = sql.IndexOf("''") + 1;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Empty(items);
+    }
+
+    [Fact]
     public void InsideStringLiteral_NoFunctionSuggestions()
     {
         // Cursor inside a string literal — providers shouldn't surface

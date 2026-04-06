@@ -345,6 +345,17 @@ public sealed class ParameterSignature
     /// completion whitelist to the named context's effective set.
     /// </summary>
     public string? LambdaContextName { get; init; }
+
+    /// <summary>
+    /// When this parameter accepts a string drawn from an enumerated set
+    /// of values (e.g. <c>blend(content, mode)</c>'s <c>mode</c> takes
+    /// <c>'add'</c> / <c>'multiply'</c> / …), the canonical list. The
+    /// completion provider surfaces these as suggestions when the cursor
+    /// sits inside the string literal at this parameter position.
+    /// <see langword="null"/> when the parameter has no enumerated value
+    /// set (the default for plain String / numeric / other parameters).
+    /// </summary>
+    public IReadOnlyList<string>? EnumValues { get; init; }
 }
 
 /// <summary>

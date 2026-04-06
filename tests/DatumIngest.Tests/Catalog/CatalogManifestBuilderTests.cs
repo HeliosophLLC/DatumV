@@ -209,6 +209,30 @@ public sealed class CatalogManifestBuilderTests : ServiceTestBase
     }
 
     [Fact]
+    public void Build_StringEnumParameter_PopulatesEnumValues()
+    {
+        // BlendFunction's `mode` parameter uses a StringEnumMatcher. The
+        // manifest builder must surface its values via
+        // ParameterSignature.EnumValues so the LS completion provider can
+        // suggest 'add' / 'multiply' / … inside the string literal.
+        TableCatalog catalog = CreateCatalog();
+        FunctionRegistry functions = new();
+        functions.RegisterScalar<BlendFunction>();
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, functions);
+
+        FunctionSignature blend = Assert.Single(
+            manifest.Functions, f => f.Name.Equals("blend", StringComparison.OrdinalIgnoreCase));
+        // The `mode` parameter is at index 1.
+        ParameterSignature mode = blend.Parameters[1];
+        Assert.Equal("mode", mode.Name);
+        Assert.NotNull(mode.EnumValues);
+        Assert.Contains("add", mode.EnumValues);
+        Assert.Contains("multiply", mode.EnumValues);
+        Assert.Contains("screen", mode.EnumValues);
+    }
+
+    [Fact]
     public void Build_ContextRestrictedFunction_PopulatesContexts()
     {
         // Animation curves should carry Contexts = ["animation"] in the

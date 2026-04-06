@@ -150,6 +150,8 @@ function completionKindToMonaco(
       return monaco.languages.CompletionItemKind.Class;
     case 'typeParameter':
       return monaco.languages.CompletionItemKind.TypeParameter;
+    case 'enumMember':
+      return monaco.languages.CompletionItemKind.EnumMember;
     case 'keyword':
     default:
       return monaco.languages.CompletionItemKind.Keyword;

@@ -326,6 +326,7 @@ public static class CatalogManifestBuilder
                     Kind = DescribeParameterShape(spec.Kind, spec.IsArray),
                     IsOptional = spec.IsOptional,
                     LambdaContextName = (spec.Kind as LambdaMatcher)?.ContextName,
+                    EnumValues = (spec.Kind as StringEnumMatcher)?.Values,
                 });
             }
             if (first.VariadicTrailing is not null)
@@ -339,6 +340,7 @@ public static class CatalogManifestBuilder
                     Kind = DescribeParameterShape(first.VariadicTrailing.Kind, first.VariadicTrailing.IsArray),
                     IsOptional = first.VariadicTrailing.MinOccurrences == 0,
                     LambdaContextName = (first.VariadicTrailing.Kind as LambdaMatcher)?.ContextName,
+                    EnumValues = (first.VariadicTrailing.Kind as StringEnumMatcher)?.Values,
                 });
             }
 
@@ -421,6 +423,7 @@ public static class CatalogManifestBuilder
                 Kind = DescribeParameterShape(spec.Kind, spec.IsArray),
                 IsOptional = spec.IsOptional,
                 LambdaContextName = (spec.Kind as LambdaMatcher)?.ContextName,
+                EnumValues = (spec.Kind as StringEnumMatcher)?.Values,
             });
         }
         if (variant.VariadicTrailing is not null)
@@ -431,6 +434,7 @@ public static class CatalogManifestBuilder
                 Kind = DescribeParameterShape(variant.VariadicTrailing.Kind, variant.VariadicTrailing.IsArray),
                 IsOptional = variant.VariadicTrailing.MinOccurrences == 0,
                 LambdaContextName = (variant.VariadicTrailing.Kind as LambdaMatcher)?.ContextName,
+                EnumValues = (variant.VariadicTrailing.Kind as StringEnumMatcher)?.Values,
             });
         }
         return result;

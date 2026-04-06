@@ -55,4 +55,13 @@ public enum CompletionItemKind
     /// Maps to LSP <c>CompletionItemKind.Module = 9</c>.
     /// </summary>
     Schema = 9,
+
+    /// <summary>
+    /// One value drawn from an enumerated string-parameter vocabulary
+    /// (e.g. a <c>blend</c> mode name). Surfaced when the cursor sits
+    /// inside the string literal at a parameter slot whose matcher
+    /// carries a <c>StringEnumMatcher</c>.
+    /// Maps to LSP <c>CompletionItemKind.EnumMember = 20</c>.
+    /// </summary>
+    EnumMember = 20,
 }
