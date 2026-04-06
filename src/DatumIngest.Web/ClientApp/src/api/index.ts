@@ -4,6 +4,7 @@ import {
   LanguageClient,
   ModelCatalogClient,
   ModelRuntimeClient,
+  QueryExplainClient,
   SchemaCatalogClient,
   SettingsClient,
 } from './generated/openapi-client';
@@ -33,6 +34,7 @@ export function createApi(baseUrl = '') {
     language: new LanguageClient(baseUrl, http),
     functionCatalog: new FunctionCatalogClient(baseUrl, http),
     schemaCatalog: new SchemaCatalogClient(baseUrl, http),
+    queryExplain: new QueryExplainClient(baseUrl, http),
   };
 }
 

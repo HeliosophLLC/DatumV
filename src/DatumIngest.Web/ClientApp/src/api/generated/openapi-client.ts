@@ -917,6 +917,55 @@ export class ModelRuntimeClient {
     }
 }
 
+export class QueryExplainClient {
+    private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
+    private baseUrl: string;
+    protected jsonParseReviver: ((key: string, value: any) => any) | undefined = undefined;
+
+    constructor(baseUrl?: string, http?: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> }) {
+        this.http = http ? http : window as any;
+        this.baseUrl = baseUrl ?? "";
+    }
+
+    explain(request: QueryExplainRequest, signal?: AbortSignal): Promise<QueryExplainResponse> {
+        let url_ = this.baseUrl + "/api/query/explain";
+        url_ = url_.replace(/[?&]$/, "");
+
+        const content_ = JSON.stringify(request);
+
+        let options_: RequestInit = {
+            body: content_,
+            method: "POST",
+            signal,
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processExplain(_response);
+        });
+    }
+
+    protected processExplain(response: Response): Promise<QueryExplainResponse> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as QueryExplainResponse;
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<QueryExplainResponse>(null as any);
+    }
+}
+
 export class QueryStreamClient {
     private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
     private baseUrl: string;
@@ -1244,7 +1293,7 @@ export interface CompletionItem {
 }
 
 /** Classification of a completion item, aligned with LSP CompletionItemKind values. */
-export type CompletionItemKind = "function" | "column" | "variable" | "schema" | "keyword" | "table" | "typeParameter";
+export type CompletionItemKind = "function" | "column" | "variable" | "schema" | "keyword" | "enumMember" | "table" | "typeParameter";
 
 export interface LangPositionRequest {
     sql?: string;
@@ -1429,6 +1478,15 @@ export interface EvictOutcomeDto {
 }
 
 export type EvictStatus = "evicted" | "notResident" | "pinned";
+
+export interface QueryExplainResponse {
+    plan?: string | undefined;
+    error?: string | undefined;
+}
+
+export interface QueryExplainRequest {
+    sql?: string;
+}
 
 export interface SchemaCatalogDto {
     tables?: TableEntryDto[];

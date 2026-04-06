@@ -1224,6 +1224,59 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     }
 
     [Fact]
+    public void StringEnumLabelled_StringArgument_DoesNotWarn()
+    {
+        // `StringEnumMatcher` (used by e.g. `blend(content, mode)`) renders
+        // its Kind in the manifest as `"String (one of 17 values)"` — the
+        // parenthesised tail is an LS hint, not a separate type. A plain
+        // String argument must still be accepted; previously the
+        // string-equality check rejected it with
+        // `expects String (one of 17 values), got String`.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "s", Kind = "String", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "blend",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "content", Kind = "Drawing" },
+                        new ParameterSignature
+                        {
+                            Name = "mode",
+                            Kind = "String (one of 17 values)",
+                            EnumValues = ["add", "multiply", "screen"],
+                        },
+                    ],
+                    ReturnType = "Drawing",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "draw_rect",
+                    Parameters = [],
+                    ReturnType = "Drawing",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT blend(draw_rect(), s) FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void FamilyLabelled_NonMemberKind_StillWarns()
     {
         // Negative test: `String` should not slip through a

@@ -8,11 +8,9 @@ import {
   ChevronLeft,
   ChevronRight,
   FunctionSquare,
-  Play,
   Plus,
   Settings as SettingsIcon,
   SquareCode,
-  Square,
   X,
 } from 'lucide-react';
 import {
@@ -26,9 +24,8 @@ import {
   importTabIntoLeaf,
   type TabKind,
 } from '@/state/tabs';
-import { cancelTab, executionsState, runTab } from '@/state/execution';
-import { runFunctionTab, serializeFunctionForm } from '@/state/functionForm';
-import { resolveRunSql } from '@/state/activeEditor';
+import { executionsState } from '@/state/execution';
+import { serializeFunctionForm } from '@/state/functionForm';
 import {
   TAB_DRAG_MIME,
   parseTabDragData,
@@ -164,8 +161,6 @@ export function TabStrip({ leafId }: { leafId: string }) {
         renameLabel={t('renameTab')}
         renamePromptLabel={t('renamePrompt')}
         closeLabel={t('closeTab')}
-        runLabel={t('run')}
-        cancelLabel={t('cancel')}
       />
     );
   };
@@ -281,8 +276,6 @@ function TabChip({
   renameLabel,
   renamePromptLabel,
   closeLabel,
-  runLabel,
-  cancelLabel,
 }: {
   leafId: string;
   id: string;
@@ -298,8 +291,6 @@ function TabChip({
   renameLabel: string;
   renamePromptLabel: string;
   closeLabel: string;
-  runLabel: string;
-  cancelLabel: string;
 }) {
   const { t: tModels } = useTranslation('models');
   const { t: tSettingsNs } = useTranslation('settings');
@@ -333,33 +324,6 @@ function TabChip({
       e.stopPropagation();
       if (!pinned) closeTab(id);
     }
-  }
-
-  function onPlayOrStop(e: React.MouseEvent) {
-    // Don't switch tabs when clicking the play button — the user might
-    // be kicking off a long-running query from a tab they don't want
-    // to leave the current one for. The click does NOT propagate to
-    // the tab's onSelect.
-    e.stopPropagation();
-    if (isStreaming) {
-      cancelTab(id);
-      return;
-    }
-    if (kind === 'function') {
-      // Function tabs synthesise their request from the form state on
-      // the tab; the Play button on the strip is a parity entry point
-      // with the form's own Run button + Ctrl+Enter. Form-level field
-      // errors get raised inside runFunctionTab.
-      void runFunctionTab(id);
-      return;
-    }
-    // resolveRunSql honours the focused editor's current selection only
-    // when that editor belongs to THIS tab's leaf. So clicking the
-    // Play button on a tab in leaf B while you've been editing leaf B
-    // runs your selection; clicking it on leaf A's tab from leaf B's
-    // editor falls back to the whole tab text. Matches Ctrl+Enter's
-    // selection-aware behaviour.
-    void runTab(id, resolveRunSql(sql, leafId));
   }
 
   // dragstart-time payload. Captured here so `onDragEnd` below has the
@@ -521,32 +485,28 @@ function TabChip({
         <div className="bg-primary pointer-events-none absolute inset-y-0 right-0 w-0.5" />
       )}
       {kind === 'models' ? (
-        // Pinned Models tab — no play button (nothing to run), distinct
-        // icon, and no close button below.
+        // Pinned tabs (Models / Settings / Docs) carry their own
+        // distinctive icon — clicking the chip just selects the tab.
+        // Run-style affordances now live in the leaf's vertical toolbar.
         <Boxes className="text-primary size-3.5 shrink-0" />
       ) : kind === 'settings' ? (
         <SettingsIcon className="text-primary size-3.5 shrink-0" />
       ) : kind === 'docs' ? (
         <BookOpen className="text-primary size-3.5 shrink-0" />
-      ) : (
-        <button
-          type="button"
-          onClick={onPlayOrStop}
-          aria-label={isStreaming ? cancelLabel : runLabel}
-          title={isStreaming ? cancelLabel : runLabel}
+      ) : kind === 'function' ? (
+        <FunctionSquare
           className={cn(
-            'flex shrink-0 cursor-pointer items-center justify-center rounded-xs p-0.5 transition-colors',
-            isStreaming
-              ? 'text-destructive hover:bg-destructive/15'
-              : 'text-primary hover:bg-primary/15',
+            'size-3.5 shrink-0',
+            isStreaming ? 'text-primary animate-pulse' : 'text-muted-foreground',
           )}
-        >
-          {isStreaming ? (
-            <Square className="size-3" />
-          ) : (
-            <Play className="size-3" />
+        />
+      ) : (
+        <SquareCode
+          className={cn(
+            'size-3.5 shrink-0',
+            isStreaming ? 'text-primary animate-pulse' : 'text-muted-foreground',
           )}
-        </button>
+        />
       )}
       {!pinned && (
         // Pinned chips (Models) are icon-only — title shows via the

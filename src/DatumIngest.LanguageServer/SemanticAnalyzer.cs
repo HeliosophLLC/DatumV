@@ -950,6 +950,17 @@ internal sealed class SemanticAnalyzer
     /// </summary>
     private static bool IsTypeCompatible(string actualKind, string expectedKind)
     {
+        // StringEnumMatcher (and any future descriptive-matcher) renders its
+        // Kind as `"<BaseKind> (...)"` — the parenthesised tail is an LS /
+        // hover hint, not part of the type. Strip it before comparison so a
+        // `'add'` argument (actualKind = "String") matches a parameter slot
+        // whose expectedKind is "String (one of 17 values)".
+        int parenIndex = expectedKind.IndexOf(" (", StringComparison.Ordinal);
+        if (parenIndex > 0)
+        {
+            expectedKind = expectedKind[..parenIndex];
+        }
+
         if (actualKind.Equals(expectedKind, StringComparison.OrdinalIgnoreCase))
         {
             return true;

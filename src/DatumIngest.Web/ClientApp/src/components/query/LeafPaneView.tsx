@@ -17,6 +17,7 @@ import {
 import { isCrossWindowDrop, notifySourceToRemove } from './tearOut';
 import { settingsState } from '@/state/settings';
 import { disposeTabExecution } from '@/state/execution';
+import { disposeTabExplain } from '@/state/explain';
 import { disposeFunctionForm } from '@/state/functionForm';
 import { FunctionForm } from './FunctionForm';
 import { ModelsView } from '@/components/models/ModelsView';
@@ -33,6 +34,7 @@ import {
   ResizablePanelGroup,
 } from '@/components/ui/resizable';
 import { TabStrip } from './TabStrip';
+import { LeafToolbar } from './LeafToolbar';
 import { ResultsPane } from './ResultsPane';
 import {
   PaneSplitOverlay,
@@ -106,6 +108,7 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
       if (!liveHere.has(id) && !findTabAnywhere(id)) {
         releaseModel(id);
         disposeTabExecution(id);
+        disposeTabExplain(id);
         disposeFunctionForm(id);
       }
     }
@@ -196,6 +199,7 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
         if (!findTabAnywhere(id)) {
           releaseModel(id);
           disposeTabExecution(id);
+          disposeTabExplain(id);
         }
       }
     };
@@ -326,7 +330,8 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
         // Pinned Models tab — no editor + results split, no Monaco. The
         // wrapping body div keeps the drag-and-drop overlay region the
         // same size as the editor branch so the user can still drop
-        // other tabs onto this leaf.
+        // other tabs onto this leaf. Pinned tabs intentionally skip
+        // the LeafToolbar — nothing to run.
         <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">
           <ModelsView />
         </div>
@@ -350,9 +355,15 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
               id={`form-${leafId}`}
               defaultSize={`${activeTab.editorSize ?? 65}%`}
               minSize="20%"
-              className="flex flex-col overflow-hidden"
+              // Horizontal flex inside the upper panel so the toolbar
+              // only flanks the form, not the results pane below. The
+              // form fills the remaining width via `min-w-0 flex-1`.
+              className="flex overflow-hidden"
             >
-              <FunctionForm tabId={activeTab.id} />
+              <LeafToolbar leafId={leafId} />
+              <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                <FunctionForm tabId={activeTab.id} />
+              </div>
             </ResizablePanel>
             <ResizableHandle />
             <ResizablePanel
@@ -379,8 +390,16 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
             // tab switches; this only matters for the very first render.
             defaultSize={`${tabs.find((t) => t.id === activeTabId)?.editorSize ?? 65}%`}
             minSize="20%"
-            className="flex flex-col overflow-hidden"
+            // Horizontal flex inside the upper panel so the toolbar
+            // only flanks Monaco — the results pane below stays
+            // full-width. The Monaco wrapper gets `min-w-0 flex-1` so
+            // `automaticLayout` measures the actual available width
+            // (without min-w-0 a wide editor would push the toolbar
+            // off-screen on a narrow leaf).
+            className="flex overflow-hidden"
           >
+            <LeafToolbar leafId={leafId} />
+            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             {/* Extra `overflow-hidden` shell around Monaco. During a
                 resize Monaco's `automaticLayout` lags one frame behind
                 the panel's new size — without this clip, that mid-
@@ -423,6 +442,7 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
                 }
               }}
             />
+            </div>
             </div>
           </ResizablePanel>
           <ResizableHandle />

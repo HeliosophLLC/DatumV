@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { AlertCircle, Ban, Braces, Check, ChevronDown, Film, Loader2, Music, Sigma } from 'lucide-react';
+import { AlertCircle, Ban, Braces, Check, ChevronDown, Download, Film, Loader2, Music, Sigma } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { MediaPreview } from './MediaPreview';
 import { MemoryChip } from './MemoryChip';
@@ -16,6 +16,7 @@ import {
   type TabExecution,
   type TraceState,
 } from '@/state/execution';
+import { explainState, type TabExplain } from '@/state/explain';
 import { panesState, findLeaf } from '@/state/tabs';
 import { settingsState } from '@/state/settings';
 import {
@@ -39,11 +40,29 @@ export function ResultsPane({ leafId }: { leafId: string }) {
   const { t } = useTranslation('query');
   useSnapshot(panesState);
   const { byTabId } = useSnapshot(executionsState);
+  useSnapshot(explainState);
 
   const leaf = findLeaf(panesState.root, leafId);
   const activeTabId = leaf?.activeTabId ?? null;
   if (activeTabId === null) return null;
   const exec = byTabId[activeTabId];
+  const explain = explainState.byTabId[activeTabId];
+
+  // Whichever action the user kicked off most recently wins the pane.
+  // While EXPLAIN is running, show it immediately even before its
+  // response lands (so the user gets visible feedback). After it
+  // completes, compare timestamps against the last run; the higher wins.
+  // The run's start moment is used as its "happened at" — that's what
+  // the user actually clicked.
+  if (explain && shouldShowExplain(explain, exec)) {
+    return (
+      <ExplainView
+        leafId={leafId}
+        tabId={activeTabId}
+        explain={explain as TabExplain}
+      />
+    );
+  }
 
   // Hide `exec` cells that produced nothing interesting — DECLARE, SET,
   // most DDL/DML. We still show them when they errored, streamed model
@@ -125,6 +144,84 @@ export function ResultsPane({ leafId }: { leafId: string }) {
 }
 
 type TableMode = 'fill' | 'capped';
+
+// EXPLAIN wins the pane when (a) it's still running — show the spinner
+// state right away — or (b) it has a terminal timestamp later than the
+// most recent run's start.
+function shouldShowExplain(
+  explain: { status: string; completedAt: number | null },
+  exec: { startedAt: number | null } | undefined,
+): boolean {
+  if (explain.status === 'running') return true;
+  if (explain.completedAt === null) return false;
+  const runStartedAt = exec?.startedAt ?? null;
+  if (runStartedAt === null) return true;
+  return explain.completedAt > runStartedAt;
+}
+
+// Plain-text plan view. ExplainPlanNode.Render() already produces a
+// nicely indented tree with └─ / ├─ connectors, warnings (⚠) and
+// annotations (→), so we just present it in a monospace pre-block with
+// horizontal scroll. A richer collapsible tree component is a planned
+// follow-up; this first cut keeps the implementation surface small and
+// faithful to the shell's EXPLAIN output.
+function ExplainView({
+  leafId,
+  tabId,
+  explain,
+}: {
+  leafId: string;
+  tabId: string;
+  explain: TabExplain;
+}) {
+  const { t } = useTranslation('query');
+  void leafId; // reserved — leaf-scoped styling / toolbar hooks may consume it later
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="bg-table-pane flex min-h-0 flex-1 flex-col overflow-auto">
+        {explain.error !== null && (
+          <div className="text-destructive border-destructive/40 bg-destructive/10 shrink-0 border-b px-3 py-2 font-mono text-xs whitespace-pre-wrap">
+            {explain.error}
+          </div>
+        )}
+        {explain.status === 'running' && explain.plan === null && (
+          <div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
+            <Loader2 className="size-3 animate-spin" />
+            {t('explainRunning')}
+          </div>
+        )}
+        {explain.plan !== null && (
+          <pre className="font-mono text-xs leading-relaxed whitespace-pre p-3">
+            {explain.plan}
+          </pre>
+        )}
+      </div>
+      <ExplainStatusBar tabId={tabId} explain={explain} />
+    </div>
+  );
+}
+
+function ExplainStatusBar({
+  tabId,
+  explain,
+}: {
+  tabId: string;
+  explain: TabExplain;
+}) {
+  const { t } = useTranslation('query');
+  void tabId; // reserved for future per-tab actions
+  const label =
+    explain.status === 'running'
+      ? t('explainRunning')
+      : explain.status === 'error'
+        ? t('explainFailed')
+        : t('explainReady');
+  return (
+    <div className="bg-status-bar text-status-bar-foreground border-border flex h-6 shrink-0 items-center justify-between border-t px-2 text-xs">
+      <span className="font-medium">{label}</span>
+    </div>
+  );
+}
 
 function isVisibleCell(cell: {
   cellKind: string;
@@ -1488,10 +1585,23 @@ function dataUriOf(cell: JsonCell): string {
   return `data:${cell.mime ?? 'application/octet-stream'};base64,${cell.dataB64 ?? ''}`;
 }
 
+// File extension to suggest for a `download` attribute. Browsers ignore
+// the data-URI's mime when picking a filename, so we derive an extension
+// from the cell's mime ourselves. Falls back to `bin` so the file always
+// lands with an extension rather than as the bare base name.
+function extensionForMime(mime: string | undefined): string {
+  if (!mime) return 'bin';
+  if (mime === 'image/svg+xml') return 'svg';
+  if (mime === 'image/jpeg') return 'jpg';
+  const subtype = mime.split('/')[1] ?? '';
+  return subtype.split('+')[0] || 'bin';
+}
+
 function ImageCell({ cell, largeMedia = false }: { cell: JsonCell; largeMedia?: boolean }) {
   const [open, setOpen] = useState(false);
   const src = dataUriOf(cell);
   const bytes = bytesFromBase64(cell.dataB64);
+  const downloadName = `image.${extensionForMime(cell.mime)}`;
   return (
     <>
       <img
@@ -1509,8 +1619,27 @@ function ImageCell({ cell, largeMedia = false }: { cell: JsonCell; largeMedia?: 
         open={open}
         onClose={() => setOpen(false)}
         title={`image · ${cell.mime ?? 'unknown'} · ${formatBytes(bytes)}`}
+        actions={
+          // `<a download>` triggers the browser's Save dialog with the
+          // suggested filename. Data URIs work for all current browsers;
+          // future-proof against very large blobs by switching to an
+          // object URL if we ever cross the ~512 KB data-URI sweet spot.
+          <a
+            href={src}
+            download={downloadName}
+            aria-label="Download"
+            title="Download"
+            className="text-muted-foreground hover:bg-background hover:text-foreground -my-1 inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-xs p-1 transition-colors"
+          >
+            <Download className="size-4" />
+          </a>
+        }
       >
-        <img src={src} alt="" className="max-h-[80vh] max-w-[80vw] object-contain" />
+        {/* `block mx-auto` so an image narrower than the modal's min
+            width (320px) sits centered in the content area rather than
+            hugging the left edge. Block display is needed because `img`
+            is inline by default and `mx-auto` is a no-op on inline. */}
+        <img src={src} alt="" className="mx-auto block max-h-[80vh] max-w-[80vw] object-contain" />
       </MediaPreview>
     </>
   );

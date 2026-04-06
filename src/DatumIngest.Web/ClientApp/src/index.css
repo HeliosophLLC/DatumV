@@ -14,6 +14,16 @@
   app-region: no-drag;
 }
 
+/* Height of the custom window title bar. Read by overlays / modals that
+   render via React Portal at the document root so they can avoid
+   covering the OS drag region (which would block minimize / maximize /
+   close and prevent grabbing the title bar to drag the window). The
+   value is overwritten at runtime by TitleBar.tsx to match whichever
+   platform-flavored bar is active (Windows = 32px, Mac/Linux = 36px). */
+:root {
+  --app-titlebar-h: 32px;
+}
+
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 

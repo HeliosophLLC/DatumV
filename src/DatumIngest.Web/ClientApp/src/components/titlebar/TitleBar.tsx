@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useSnapshot } from 'valtio';
 import { settingsState } from '@/state/settings';
 import { hostState, type HostOs } from '@/state/host';
@@ -15,6 +16,16 @@ function resolve(chromeStyle: ChromeStyle | undefined, os: HostOs): ResolvedChro
   return 'windows'; // also catches 'unknown'
 }
 
+// Title-bar pixel heights per platform variant. Must stay in sync with
+// the `h-*` class on each variant's <header>. Surfaced via the
+// `--app-titlebar-h` CSS variable so portal-rendered modals can leave
+// the drag region uncovered without re-detecting host OS themselves.
+const TITLEBAR_HEIGHT_PX: Record<ResolvedChrome, number> = {
+  windows: 32,
+  macos: 36,
+  linux: 36,
+};
+
 export function TitleBar({ dialog = false }: { dialog?: boolean } = {}) {
   const { chromeStyle } = useSnapshot(settingsState);
   const { os } = useSnapshot(hostState);
@@ -26,6 +37,12 @@ export function TitleBar({ dialog = false }: { dialog?: boolean } = {}) {
   // Mac look on a Windows host) without affecting drag/resize, which is
   // handled by CSS and Chromium.
   const resolved = resolve(chromeStyle, os);
+
+  useEffect(() => {
+    const px = TITLEBAR_HEIGHT_PX[resolved];
+    document.documentElement.style.setProperty('--app-titlebar-h', `${px}px`);
+  }, [resolved]);
+
   if (resolved === 'macos') return <MacTitleBar dialog={dialog} />;
   if (resolved === 'linux') return <LinuxTitleBar dialog={dialog} />;
   return <WindowsTitleBar dialog={dialog} />;
