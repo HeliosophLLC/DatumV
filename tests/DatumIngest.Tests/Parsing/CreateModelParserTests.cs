@@ -110,6 +110,56 @@ public sealed class CreateModelParserTests : ServiceTestBase
     }
 
     [Fact]
+    public void CreateModel_StructReturnWithFields_ParsesCanonicalAnnotation()
+    {
+        // `RETURNS Struct<depth Array<Float32>, intrinsics Array<Float32>>`
+        // — the SQL surface uses bare `name Type` pairs; the canonical
+        // form the parser emits inserts `: ` so the LS can re-parse it
+        // unambiguously without re-running the full SQL grammar.
+        Statement stmt = SqlParser.ParseStatement(
+            "CREATE MODEL depth_full(img IMAGE) " +
+            "RETURNS Struct<depth Array<Float32>, intrinsics Array<Float32>> " +
+            "USING 'depth.onnx' AS BEGIN RETURN { depth: 1, intrinsics: 1 } END");
+
+        CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
+        Assert.Equal(
+            "Struct<depth: Array<Float32>, intrinsics: Array<Float32>>",
+            create.ReturnTypeName);
+    }
+
+    [Fact]
+    public void CreateModel_StructReturnWithColonSyntax_NormalisesToCanonical()
+    {
+        // The canonical rendered form (`Struct<name: Kind, ...>`) uses
+        // colons, so a user reading hover output and pasting it back into
+        // SQL hits the colon form. Accept it; canonicalise to match the
+        // non-colon source form.
+        Statement stmt = SqlParser.ParseStatement(
+            "CREATE MODEL depth_full(img IMAGE) " +
+            "RETURNS Struct<depth: Array<Float32>, intrinsics: Array<Float32>> " +
+            "USING 'depth.onnx' AS BEGIN RETURN { depth: 1, intrinsics: 1 } END");
+
+        CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
+        Assert.Equal(
+            "Struct<depth: Array<Float32>, intrinsics: Array<Float32>>",
+            create.ReturnTypeName);
+    }
+
+    [Fact]
+    public void CreateModel_BareStructReturn_StillParses()
+    {
+        // The opaque `RETURNS Struct` form (no field list) must keep
+        // working — every existing SQL-defined struct-returning model uses
+        // it today, and the LS treats it as opaque.
+        Statement stmt = SqlParser.ParseStatement(
+            "CREATE MODEL opaque_struct(img IMAGE) RETURNS Struct " +
+            "USING 'x.onnx' AS BEGIN RETURN { a: 1 } END");
+
+        CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
+        Assert.Equal("Struct", create.ReturnTypeName);
+    }
+
+    [Fact]
     public void CreateModel_UsingLowercase_AcceptedContextually()
     {
         // USING is a contextual identifier (Identifier+Where), so case

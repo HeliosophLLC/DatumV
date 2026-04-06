@@ -144,6 +144,23 @@ public static class TypeAnnotationResolver
             args = parsedArgs;
         }
 
+        // `Struct<...>` — surface the runtime kind as the opaque
+        // `DataKind.Struct`. The field-shape detail inside the wrapper is
+        // a design-time annotation consumed by the LanguageServer (see
+        // <c>StructTypeAnnotation</c>); the runtime never registers a
+        // per-call TypeId from this annotation, matching the
+        // metadata-only contract from `project_ls_struct_field_surface`.
+        // Without this branch, every SQL-defined model declaring its
+        // struct shape (`RETURNS Struct<a Type, b Type>`) would fail at
+        // CREATE-MODEL time because `ProceduralModelAdapter` couldn't
+        // resolve the return annotation.
+        if (TryStripStructWrapper(stripped))
+        {
+            if (args is not null) return false; // struct annotations don't take outer paren suffixes
+            kind = DataKind.Struct;
+            return true;
+        }
+
         if (TryStripArrayWrapper(stripped, out string inner))
         {
             // Nested arrays — Array<Array<T>>, Array<T[]>, T[][] — are
@@ -232,6 +249,22 @@ public static class TypeAnnotationResolver
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="annotation"/>
+    /// is a canonical <c>Struct&lt;...&gt;</c> wrapper. Doesn't surface
+    /// the inner body — the runtime treats every <c>Struct&lt;...&gt;</c>
+    /// annotation as the opaque <see cref="DataKind.Struct"/>; the field
+    /// shape itself is design-time metadata that flows separately
+    /// through the catalog's <c>OutputStructFields</c> path.
+    /// </summary>
+    private static bool TryStripStructWrapper(string annotation)
+    {
+        const string Prefix = "Struct<";
+        return annotation.Length > Prefix.Length + 1
+            && annotation.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)
+            && annotation[^1] == '>';
     }
 
     /// <summary>

@@ -47,10 +47,10 @@ AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,
     [ih, iw],
-    [CAST(0.0 AS Float32), CAST(0.0 AS Float32), CAST(0.0 AS Float32)],
-    [CAST(1.0 AS Float32), CAST(1.0 AS Float32), CAST(1.0 AS Float32)]);
+    [0.0::Float32, 0.0::Float32, 0.0::Float32],
+    [1.0::Float32, 1.0::Float32, 1.0::Float32]);
   DECLARE upscaled Float32[] = infer(
     tensor,
-    [CAST(1 AS Int32), CAST(3 AS Int32), ih, iw]);
+    [1::Int32, 3::Int32, ih, iw]);
   RETURN tensor_to_image_chw(upscaled, ih * 4, iw * 4)
 END

@@ -164,6 +164,139 @@ public sealed class CteSchemaResolverTests : ServiceTestBase
     }
 
     [Fact]
+    public void Resolve_LetBoundStructFieldAccess_ResolvesToFieldKind()
+    {
+        // `LET curr_depth = models.depth_full(img)` returning
+        // `Struct<depth: Array<Float32>, intrinsics: Array<Float32>>`,
+        // then `curr_depth.depth` in the SELECT list. The resolver chases
+        // the LET binding's struct kind and parses out the requested
+        // field's `Array<Float32>` shape.
+        LanguageServerManifest enriched = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "video_unnest_frames",
+                    Parameters = [new ParameterSignature { Name = "source", Kind = "String" }],
+                    ReturnType = "table(frame_index Int32, frame VideoFrame)",
+                    IsTableValued = true,
+                    OutputColumns =
+                    [
+                        new TableColumnEntry { Name = "frame_index", Kind = "Int32", Nullable = false },
+                        new TableColumnEntry { Name = "frame", Kind = "VideoFrame", Nullable = false },
+                    ],
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "depth_full",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Struct<depth: Array<Float32>, intrinsics: Array<Float32>>",
+                    OutputStructFields =
+                    [
+                        new StructFieldSignature { Name = "depth", Kind = "Array<Float32>" },
+                        new StructFieldSignature { Name = "intrinsics", Kind = "Array<Float32>" },
+                    ],
+                },
+            ],
+            Keywords = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "depth_full",
+                    OutputKind = "Struct<depth: Array<Float32>, intrinsics: Array<Float32>>",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    OutputStructFields =
+                    [
+                        new StructFieldSignature { Name = "depth", Kind = "Array<Float32>" },
+                        new StructFieldSignature { Name = "intrinsics", Kind = "Array<Float32>" },
+                    ],
+                },
+            ],
+        };
+
+        const string sql =
+            "WITH thumb AS (SELECT " +
+            "  LET curr_depth = models.depth_full(frame), " +
+            "  curr_depth.depth AS depth_only " +
+            "FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT depth_only FROM thumb";
+
+        CteSchemaResult result = CteSchemaResolver.Resolve(sql, enriched);
+
+        Assert.True(result.Schemas.ContainsKey("thumb"));
+        TableColumnEntry? depthOnly = result.Schemas["thumb"].FirstOrDefault(c => c.Name == "depth_only");
+        Assert.NotNull(depthOnly);
+        Assert.Equal("Array<Float32>", depthOnly.Kind);
+    }
+
+    [Fact]
+    public void Resolve_LetOfBracketStructFieldAccess_ResolvesThroughIndexAccess()
+    {
+        // `LET curr_depth = models.depth_full(img),` then
+        // `LET curr_depth_intr = curr_depth['intrinsics']` — the second
+        // LET chains through an IndexAccessExpression on a struct-typed
+        // source. The resolver must propagate the field's kind so a
+        // SELECT projection of `curr_depth_intr` surfaces the right
+        // shape (Array<Float32>).
+        LanguageServerManifest enriched = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "video_unnest_frames",
+                    Parameters = [new ParameterSignature { Name = "source", Kind = "String" }],
+                    ReturnType = "table(frame_index Int32, frame VideoFrame)",
+                    IsTableValued = true,
+                    OutputColumns =
+                    [
+                        new TableColumnEntry { Name = "frame", Kind = "VideoFrame", Nullable = false },
+                    ],
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "depth_full",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Struct<depth: Array<Float32>, intrinsics: Array<Float32>>",
+                    OutputStructFields =
+                    [
+                        new StructFieldSignature { Name = "depth", Kind = "Array<Float32>" },
+                        new StructFieldSignature { Name = "intrinsics", Kind = "Array<Float32>" },
+                    ],
+                },
+            ],
+            Keywords = [],
+        };
+
+        const string sql =
+            "WITH thumb AS (SELECT " +
+            "  LET curr_depth = models.depth_full(frame), " +
+            "  LET curr_depth_intr = curr_depth['intrinsics'], " +
+            "  curr_depth_intr AS chosen " +
+            "FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT chosen FROM thumb";
+
+        CteSchemaResult result = CteSchemaResolver.Resolve(sql, enriched);
+
+        Assert.True(result.Schemas.ContainsKey("thumb"));
+        TableColumnEntry? chosen = result.Schemas["thumb"].FirstOrDefault(c => c.Name == "chosen");
+        Assert.NotNull(chosen);
+        Assert.Equal("Array<Float32>", chosen.Kind);
+
+        // The LET-binding map also surfaces the intermediate kind.
+        Assert.True(result.LetBindingKinds.TryGetValue("curr_depth_intr", out string? intrKind));
+        Assert.Equal("Array<Float32>", intrKind);
+    }
+
+    [Fact]
     public void Resolve_FromAliasOfCte_RecordedInAliasMap()
     {
         const string sql =

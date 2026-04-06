@@ -31,6 +31,6 @@ AS BEGIN
     imagenet_std());
   DECLARE depth Float32[] = infer(
     tensor,
-    [CAST(1 AS Int32), CAST(3 AS Int32), CAST(518 AS Int32), CAST(518 AS Int32)]);
+    [1::Int32, 3::Int32, 518::Int32, 518::Int32]);
   RETURN depth_map_to_image(depth, 518, 518, image_height(img), image_width(img))
 END

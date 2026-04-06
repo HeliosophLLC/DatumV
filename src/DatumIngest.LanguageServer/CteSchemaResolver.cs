@@ -43,6 +43,7 @@ internal static class CteSchemaResolver
     /// </summary>
     public static readonly CteSchemaResult Empty = new(
         new Dictionary<string, IReadOnlyList<TableColumnEntry>>(StringComparer.OrdinalIgnoreCase),
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
@@ -74,12 +75,14 @@ internal static class CteSchemaResolver
             new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, string> fromAliasToCte =
             new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> letKinds =
+            new(StringComparer.OrdinalIgnoreCase);
 
         if (root.CommonTableExpressions is not null)
         {
             foreach (CommonTableExpression cte in root.CommonTableExpressions)
             {
-                IReadOnlyList<TableColumnEntry>? columns = ResolveCteColumns(cte, manifest, schemas);
+                IReadOnlyList<TableColumnEntry>? columns = ResolveCteColumns(cte, manifest, schemas, letKinds);
                 if (columns is not null)
                 {
                     schemas[cte.Name] = columns;
@@ -87,13 +90,18 @@ internal static class CteSchemaResolver
             }
         }
 
+        // Capture LET bindings on the outer (top-level) SELECT too —
+        // queries without CTEs still use LET, and the hover path needs to
+        // resolve them by name.
+        CollectLetKinds(root, manifest, schemas, letKinds);
+
         // Record `FROM <cte_name> [AS] <alias>` aliases so qualified column
         // lookups like `f1.frame_index` can route to the CTE's schema.
         // Walked from the root and from every CTE body — an inner CTE may
         // alias an earlier CTE source too.
         CollectCteFromAliases(root, schemas, fromAliasToCte);
 
-        return new CteSchemaResult(schemas, fromAliasToCte);
+        return new CteSchemaResult(schemas, fromAliasToCte, letKinds);
     }
 
     private static SelectStatement? ExtractRootStatement(QueryExpression query) => query switch
@@ -117,12 +125,28 @@ internal static class CteSchemaResolver
     private static IReadOnlyList<TableColumnEntry>? ResolveCteColumns(
         CommonTableExpression cte,
         LanguageServerManifest manifest,
-        IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> earlierCtes)
+        IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> earlierCtes,
+        Dictionary<string, string> letKinds)
     {
         SelectStatement? inner = ExtractRootStatement(cte.Body);
         if (inner is null) return null;
 
         InnerScope scope = BuildInnerScope(inner, manifest, earlierCtes);
+
+        // Snapshot every LET binding's resolved kind into the global
+        // `letKinds` map so the hover provider can surface kinds for
+        // LET names that are never projected into the CTE's output.
+        // First-wins across CTEs — collisions are rare and the user can
+        // qualify when they happen.
+        if (scope.LetBindings is not null)
+        {
+            foreach (KeyValuePair<string, Expression> binding in scope.LetBindings)
+            {
+                if (letKinds.ContainsKey(binding.Key)) continue;
+                string? kind = ResolveExpressionKind(binding.Value, scope, manifest);
+                if (kind is not null) letKinds[binding.Key] = kind;
+            }
+        }
         List<TableColumnEntry> projected = new();
 
         foreach (SelectColumn col in inner.Columns)
@@ -221,8 +245,69 @@ internal static class CteSchemaResolver
                 return ResolveLiteralKind(literal);
             case FunctionCallExpression functionCall:
                 return ResolveFunctionCallKind(functionCall, manifest);
+            case IndexAccessExpression indexAccess:
+                return ResolveIndexAccessKind(indexAccess, scope, manifest);
             default:
                 return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves <c>source[index]</c> when the source's kind is a canonical
+    /// <c>Struct&lt;...&gt;</c> annotation — looks up the named field
+    /// (string index) or the 1-based positional field (integer index).
+    /// Lets LET-of-bracket-access chains like
+    /// <c>LET intr = curr_depth['intrinsics']</c> propagate the field's
+    /// kind upward so hover and downstream LET kinds resolve correctly.
+    /// Array indexing isn't yet handled — that'd need shape-aware element
+    /// extraction the LS doesn't track today.
+    /// </summary>
+    private static string? ResolveIndexAccessKind(
+        IndexAccessExpression indexAccess, InnerScope scope, LanguageServerManifest manifest)
+    {
+        if (indexAccess.Indices.Count != 1) return null;
+        string? sourceKind = ResolveExpressionKind(indexAccess.Source, scope, manifest);
+        if (!StructTypeAnnotation.TryParse(sourceKind, out IReadOnlyList<StructFieldShape> fields))
+        {
+            return null;
+        }
+
+        Expression index = indexAccess.Indices[0];
+        if (index is LiteralExpression { Value: string fieldName })
+        {
+            foreach (StructFieldShape f in fields)
+            {
+                if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return f.Kind;
+                }
+            }
+            return null;
+        }
+        // 1-based positional access — `struct[1]` reads the first field.
+        // Match the runtime's PG-style ordinal indexing in
+        // ExpressionEvaluator.EvaluateIndexAccessAsync's struct branch.
+        if (index is LiteralExpression intLit && TryAsInt(intLit.Value, out int ordinal))
+        {
+            int zeroBased = ordinal - 1;
+            if (zeroBased < 0 || zeroBased >= fields.Count) return null;
+            return fields[zeroBased].Kind;
+        }
+        return null;
+    }
+
+    private static bool TryAsInt(object? value, out int result)
+    {
+        switch (value)
+        {
+            case int i: result = i; return true;
+            case long l when l >= int.MinValue && l <= int.MaxValue: result = (int)l; return true;
+            case short s: result = s; return true;
+            case sbyte sb: result = sb; return true;
+            case byte b: result = b; return true;
+            case ushort us: result = us; return true;
+            case uint u when u <= int.MaxValue: result = (int)u; return true;
+            default: result = 0; return false;
         }
     }
 
@@ -315,6 +400,16 @@ internal static class CteSchemaResolver
                     }
                 }
             }
+            // Qualifier didn't match a FROM-source alias — try resolving it
+            // as a LET-bound struct: `LET curr_depth = models.X(...)` then
+            // `curr_depth.depth`. Pull the LET's expression kind; if it's
+            // a `Struct<...>` annotation, look up the field by name.
+            if (scope.LetBindings is { } letBindingsForStruct
+                && letBindingsForStruct.TryGetValue(colRef.TableName, out Expression? letExprForStruct))
+            {
+                string? structKind = ResolveExpressionKind(letExprForStruct, scope, manifest);
+                return ResolveStructFieldKind(structKind, colRef.ColumnName);
+            }
             return null;
         }
 
@@ -335,6 +430,32 @@ internal static class CteSchemaResolver
                 {
                     return c.Kind;
                 }
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves a field-access kind through a struct annotation. When
+    /// <paramref name="structKindLabel"/> is a canonical
+    /// <c>"Struct&lt;name: Kind, …&gt;"</c> string and a field matching
+    /// <paramref name="fieldName"/> exists, returns that field's kind
+    /// label. Returns <see langword="null"/> for opaque <c>Struct</c>, for
+    /// non-struct kinds, and for missing field names — every fallback
+    /// keeps the SELECT-list path emitting <c>"?"</c> rather than a wrong
+    /// concrete kind.
+    /// </summary>
+    internal static string? ResolveStructFieldKind(string? structKindLabel, string fieldName)
+    {
+        if (!StructTypeAnnotation.TryParse(structKindLabel, out IReadOnlyList<StructFieldShape> fields))
+        {
+            return null;
+        }
+        foreach (StructFieldShape f in fields)
+        {
+            if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                return f.Kind;
             }
         }
         return null;
@@ -530,6 +651,30 @@ internal static class CteSchemaResolver
             }
         }
     }
+
+    /// <summary>
+    /// Captures LET bindings on the outer (top-level) <paramref name="statement"/>
+    /// — every CTE's LETs have already been recorded by
+    /// <see cref="ResolveCteColumns"/>. Without this top-level pass, a
+    /// SELECT-with-LET that doesn't use CTEs would surface no LET kinds
+    /// for hover.
+    /// </summary>
+    private static void CollectLetKinds(
+        SelectStatement statement,
+        LanguageServerManifest manifest,
+        IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> earlierCtes,
+        Dictionary<string, string> letKinds)
+    {
+        if (statement.LetBindings is not { Count: > 0 }) return;
+        InnerScope scope = BuildInnerScope(statement, manifest, earlierCtes);
+        if (scope.LetBindings is null) return;
+        foreach (KeyValuePair<string, Expression> binding in scope.LetBindings)
+        {
+            if (letKinds.ContainsKey(binding.Key)) continue;
+            string? kind = ResolveExpressionKind(binding.Value, scope, manifest);
+            if (kind is not null) letKinds[binding.Key] = kind;
+        }
+    }
 }
 
 /// <summary>
@@ -537,10 +682,14 @@ internal static class CteSchemaResolver
 /// maps each CTE's name to its projected column list; <see cref="FromAliasToCteName"/>
 /// maps every <c>FROM &lt;cte&gt; [AS] alias</c> alias (including the bare
 /// CTE name when no alias was given) to the CTE name for qualified lookups.
+/// <see cref="LetBindingKinds"/> maps every LET binding's name (across the
+/// outermost SELECT and every CTE body) to its resolved kind label so the
+/// hover path can surface a type for LET names that aren't projected.
 /// </summary>
 internal sealed record CteSchemaResult(
     IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> Schemas,
-    IReadOnlyDictionary<string, string> FromAliasToCteName);
+    IReadOnlyDictionary<string, string> FromAliasToCteName,
+    IReadOnlyDictionary<string, string> LetBindingKinds);
 
 /// <summary>
 /// Per-CTE inner-FROM scope used by <see cref="CteSchemaResolver"/>: maps

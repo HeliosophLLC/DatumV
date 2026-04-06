@@ -171,6 +171,16 @@ public sealed class ModelEntry
     /// signature info.
     /// </summary>
     public IReadOnlyList<ParameterSignature>? Parameters { get; init; }
+
+    /// <summary>
+    /// For struct-returning models, the ordered field shape of the output
+    /// (parsed from <c>RETURNS Struct&lt;…&gt;</c> for SQL-defined models,
+    /// or from <c>IModel.OutputFields</c> for built-ins). Lets the language
+    /// server resolve <c>model_call().field</c> hovers to the field's
+    /// declared kind. <see langword="null"/> for non-struct returns and for
+    /// opaque bare <c>RETURNS Struct</c> models.
+    /// </summary>
+    public IReadOnlyList<StructFieldSignature>? OutputStructFields { get; init; }
 }
 
 /// <summary>
@@ -259,6 +269,16 @@ public sealed class FunctionSignature
     /// </summary>
     public IReadOnlyList<IReadOnlyList<ParameterSignature>>? AdditionalParameterShapes { get; init; }
 
+    /// <summary>
+    /// For struct-returning scalar functions, the ordered field shape of
+    /// the output. Same purpose as <see cref="ModelEntry.OutputStructFields"/>
+    /// but for any scalar function (most commonly SQL-defined models,
+    /// which register as scalar functions). Lets the language server
+    /// resolve <c>fn(...).field</c> hovers to the field's declared kind.
+    /// <see langword="null"/> for non-struct returns.
+    /// </summary>
+    public IReadOnlyList<StructFieldSignature>? OutputStructFields { get; init; }
+
     /// <summary>Whether this is an aggregate function (used in SELECT with GROUP BY).</summary>
     public bool IsAggregate { get; init; }
 
@@ -325,4 +345,20 @@ public sealed class ParameterSignature
     /// completion whitelist to the named context's effective set.
     /// </summary>
     public string? LambdaContextName { get; init; }
+}
+
+/// <summary>
+/// One field in a struct-returning function or model's output shape.
+/// <see cref="Kind"/> is the canonical kind string for the field's value —
+/// scalar (<c>"Int32"</c>), array (<c>"Array&lt;Float32&gt;"</c>), or
+/// nested struct (<c>"Struct&lt;…&gt;"</c>). Drives the LanguageServer's
+/// <c>fn(...).field</c> hover / completion resolution.
+/// </summary>
+public sealed class StructFieldSignature
+{
+    /// <summary>The field name as declared in the <c>RETURNS Struct&lt;…&gt;</c> annotation or <c>IModel.OutputFields</c>.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Canonical kind string for the field's value (e.g. <c>"Int32"</c>, <c>"Array&lt;Float32&gt;"</c>).</summary>
+    public required string Kind { get; init; }
 }

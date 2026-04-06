@@ -56,15 +56,15 @@ AS BEGIN
   -- ViT family (NOT ImageNet stats).
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,
-    [CAST(378 AS Int32), CAST(378 AS Int32)],
-    [CAST(0.5 AS Float32), CAST(0.5 AS Float32), CAST(0.5 AS Float32)],
-    [CAST(0.5 AS Float32), CAST(0.5 AS Float32), CAST(0.5 AS Float32)]);
+    [378::Int32, 378::Int32],
+    [0.5::Float32, 0.5::Float32, 0.5::Float32],
+    [0.5::Float32, 0.5::Float32, 0.5::Float32]);
 
   -- Step 2: vision encoder → [1, 729, 2048] image features.
   DECLARE visual_features Float32[] = infer(
     'vision_encoder',
     tensor,
-    [CAST(1 AS Int32), CAST(3 AS Int32), CAST(378 AS Int32), CAST(378 AS Int32)]);
+    [1::Int32, 3::Int32, 378::Int32, 378::Int32]);
 
   -- Step 3: tokenize the text portion of Moondream's prompt template.
   -- The literal newlines below are part of the training format.
@@ -84,7 +84,7 @@ Answer:';
   DECLARE text_embeds Float32[] = infer(
     'embed_tokens',
     text_ids,
-    [CAST(1 AS Int32), text_seq]);
+    [1::Int32, text_seq]);
 
   -- Step 5: prefix = visual_features || text_embeds, fed to the decoder
   -- as inputs_embeds for step 0 (prefill). decode_decoder_only consumes
@@ -97,8 +97,8 @@ Answer:';
     'decoder',
     'embed_tokens',
     prefix_embeds,
-    CAST(50256 AS Int64),
-    CAST(256 AS Int32));
+    50256::Int64,
+    256::Int32);
 
   -- Step 7: Phi-2 uses GPT-2-style byte-level BPE. decode_bpe returns the
   -- raw byte-level-BPE mojibake; byte_level_decode inverts it and trims

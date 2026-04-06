@@ -73,7 +73,7 @@ AS BEGIN
     imagenet_std());
   DECLARE depth Float32[] = infer(
     tensor,
-    [CAST(1 AS Int32), CAST(1 AS Int32), CAST(3 AS Int32), CAST(518 AS Int32), CAST(518 AS Int32)]);
+    [1::Int32, 1::Int32, 3::Int32, 518::Int32, 518::Int32]);
   RETURN depth_map_to_image(depth, 518, 518, image_height(img), image_width(img), true)
 END;
 
@@ -97,7 +97,7 @@ AS BEGIN
     imagenet_std());
   DECLARE depth_native Array<Float32> = infer(
     tensor,
-    [CAST(1 AS Int32), CAST(1 AS Int32), CAST(3 AS Int32), CAST(518 AS Int32), CAST(518 AS Int32)]);
+    [1::Int32, 1::Int32, 3::Int32, 518::Int32, 518::Int32]);
   RETURN array_resize_2d(depth_native, image_height(img), image_width(img))
 END;
 
@@ -137,7 +137,12 @@ END;
 -- + the type registry — small one-time C# addition.
 
 CREATE OR REPLACE MODEL depth_anything_v3_large_full(img Image)
-  RETURNS Struct
+  RETURNS Struct<
+    depth Array<Float32>(518, 518),
+    confidence Array<Float32>(518, 518),
+    extrinsics Array<Float32>(1, 1, 3, 4),
+    intrinsics Array<Float32>(1, 1, 3, 3)
+  >
 USING 'depth-anything-v3-large/onnx/model.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
@@ -147,7 +152,7 @@ AS BEGIN
     imagenet_std());
   DECLARE outputs Struct = infer_outputs(
     tensor,
-    [CAST(1 AS Int32), CAST(1 AS Int32), CAST(3 AS Int32), CAST(518 AS Int32), CAST(518 AS Int32)]);
+    [1::Int32, 1::Int32, 3::Int32, 518::Int32, 518::Int32]);
   RETURN {
     depth:      outputs['predicted_depth'],
     confidence: outputs['confidence'],

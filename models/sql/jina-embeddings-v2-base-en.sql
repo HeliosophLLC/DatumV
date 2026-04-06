@@ -27,13 +27,13 @@ AS BEGIN
   DECLARE last_hidden_state Float32[] = infer(
     encoded,
     {
-      input_ids:      [CAST(1 AS Int32), n],
-      attention_mask: [CAST(1 AS Int32), n],
-      token_type_ids: [CAST(1 AS Int32), n]
+      input_ids:      [1::Int32, n],
+      attention_mask: [1::Int32, n],
+      token_type_ids: [1::Int32, n]
     });
   DECLARE pooled Float32[] = mean_pool_masked(
     last_hidden_state,
     encoded['attention_mask'],
-    CAST(768 AS Int32));
+    768::Int32);
   RETURN l2_normalize(pooled)
 END

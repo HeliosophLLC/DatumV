@@ -30,16 +30,16 @@
 
 CREATE OR REPLACE MODEL paddleocr_v4_det(
   img                 Image,
-  pixel_threshold     Float32 = CAST(0.3 AS Float32)
+  pixel_threshold     Float32 = 0.3::Float32
     CHECK (pixel_threshold BETWEEN 0.0 AND 1.0) STEP 0.05
     COMMENT 'Per-pixel probability cutoff for the binary mask.',
-  box_score_threshold Float32 = CAST(0.6 AS Float32)
+  box_score_threshold Float32 = 0.6::Float32
     CHECK (box_score_threshold BETWEEN 0.0 AND 1.0) STEP 0.05
     COMMENT 'Mean-probability score floor for keeping a detected region.',
   min_size            Int32   = 3
     CHECK (min_size >= 1) UNIT 'pixels'
     COMMENT 'Smallest accepted side length of a detected box (in resized space).',
-  unclip_ratio        Float32 = CAST(1.5 AS Float32)
+  unclip_ratio        Float32 = 1.5::Float32
     CHECK (unclip_ratio > 0.0) STEP 0.1
     COMMENT 'DBNet polygon-expansion factor; higher values keep more margin.'
 ) RETURNS Array<RegionScore>
@@ -55,11 +55,11 @@ AS BEGIN
   -- flat tensor length alone. The 2-arg form passes the explicit
   -- [batch=1, channels=3, H, W] shape so each per-image resize routes
   -- through cleanly.
-  DECLARE prob    Float32[] = infer(tensor, [CAST(1 AS Int32), CAST(3 AS Int32), rh, rw]);
+  DECLARE prob    Float32[] = infer(tensor, [1::Int32, 3::Int32, rh, rw]);
   RETURN dbnet_postprocess(
     prob, rh, rw,
-    CAST(image_width(img)  AS Float32) / CAST(rw AS Float32),
-    CAST(image_height(img) AS Float32) / CAST(rh AS Float32),
+    image_width(img) ::Float32 / rw::Float32,
+    image_height(img)::Float32 / rh::Float32,
     pixel_threshold,
     box_score_threshold,
     min_size,

@@ -16,7 +16,7 @@
 
 CREATE OR REPLACE MODEL rtdetr_r18_int8(
   img Image,
-  conf_thresh Float32 = CAST(0.5 AS Float32)
+  conf_thresh Float32 = 0.5::Float32
     CHECK (conf_thresh BETWEEN 0.0 AND 1.0) STEP 0.05
     COMMENT 'Per-query max-class-probability floor for emitting a detection.'
 ) RETURNS Array<LabeledDetection>
@@ -26,7 +26,7 @@ AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(img, [640, 640]);
   DECLARE outputs Struct = infer_outputs(
     tensor,
-    [CAST(1 AS Int32), CAST(3 AS Int32), CAST(640 AS Int32), CAST(640 AS Int32)]);
+    [1::Int32, 3::Int32, 640::Int32, 640::Int32]);
   DECLARE logits Float32[] = outputs['logits'];
   DECLARE boxes  Float32[] = outputs['pred_boxes'];
   DECLARE labels Array<String> = [

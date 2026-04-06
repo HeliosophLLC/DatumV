@@ -556,6 +556,46 @@ public sealed class CompletionProvider
     }
 
     /// <summary>
+    /// Resolves a dot qualifier as a column-on-a-CTE whose kind is a
+    /// canonical <c>Struct&lt;…&gt;</c> annotation. Walks every CTE's
+    /// projected columns looking for one named <paramref name="qualifier"/>;
+    /// on match, parses the column's struct annotation and returns the
+    /// field list. Falls back through every CTE because the qualifier
+    /// might come from any of them (LET-bound names project into the
+    /// containing CTE's output).
+    /// </summary>
+    private static bool TryGetStructFieldsForColumn(
+        string qualifier,
+        CteSchemaResult cteSchemas,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IReadOnlyList<StructFieldShape>? structFields)
+    {
+        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in cteSchemas.Schemas)
+        {
+            foreach (TableColumnEntry column in cte.Value)
+            {
+                if (!string.Equals(column.Name, qualifier, StringComparison.OrdinalIgnoreCase)) continue;
+                if (StructTypeAnnotation.TryParse(column.Kind, out IReadOnlyList<StructFieldShape> parsed))
+                {
+                    structFields = parsed;
+                    return true;
+                }
+            }
+        }
+        // LET-bound struct that isn't projected into the CTE's output.
+        // The LET map carries every binding's resolved kind across the
+        // statement, so `curr_depth.` still suggests fields even when the
+        // LET name doesn't surface as a CTE column.
+        if (cteSchemas.LetBindingKinds.TryGetValue(qualifier, out string? letKind)
+            && StructTypeAnnotation.TryParse(letKind, out IReadOnlyList<StructFieldShape> letFields))
+        {
+            structFields = letFields;
+            return true;
+        }
+        structFields = null;
+        return false;
+    }
+
+    /// <summary>
     /// Resolves a dot qualifier (the <c>X</c> in <c>X.col</c>) against the
     /// CTE schema map. Matches a direct CTE name first, then a FROM alias
     /// bound to a CTE. <paramref name="cteName"/> receives the resolved CTE
@@ -686,6 +726,25 @@ public sealed class CompletionProvider
                     Label = column.Name,
                     Kind = CompletionItemKind.Column,
                     Detail = $"{column.Kind}{nullable} — {cteName}",
+                    SortOrder = 0,
+                });
+            }
+            return;
+        }
+
+        // Struct field access on a CTE-projected column. When `curr_depth`
+        // is a column whose kind is a canonical `Struct<…>` annotation
+        // (typically the output of a struct-returning model call), suggest
+        // the struct's field names alongside their declared kinds.
+        if (TryGetStructFieldsForColumn(tableQualifier, cteSchemas, out IReadOnlyList<StructFieldShape>? structFields))
+        {
+            foreach (StructFieldShape field in structFields)
+            {
+                items.Add(new CompletionItem
+                {
+                    Label = field.Name,
+                    Kind = CompletionItemKind.Column,
+                    Detail = $"{field.Kind} — field of {tableQualifier}",
                     SortOrder = 0,
                 });
             }

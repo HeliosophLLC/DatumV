@@ -1631,7 +1631,14 @@ internal sealed class RoutineRegistrar
             // `input: <kind>` / `→ <element kind>` defaults that
             // ModelCatalogEntry's name/kind-only fields would produce.
             OutputIsArray: iModelAdapter.OutputIsArray,
-            ParameterInfos: BuildModelParameterInfos(descriptor));
+            ParameterInfos: BuildModelParameterInfos(descriptor),
+            // Struct-output models can declare their field shapes via
+            // `RETURNS Struct<depth Array<Float32>, intrinsics Array<Float32>>`.
+            // Extract the field list here so the LanguageServer can resolve
+            // `model_call().depth` to its actual `Array<Float32>` kind
+            // instead of the opaque `Struct` placeholder. Bare
+            // `RETURNS Struct` returns null and the LS treats it as opaque.
+            OutputStructFields: BuildModelOutputStructFields(descriptor));
 
         if (replace)
         {
@@ -1736,6 +1743,44 @@ internal sealed class RoutineRegistrar
                 isArray = parsedIsArray;
             }
             infos[i] = new ModelParameterInfo(p.Name, kind, isArray, IsOptional: p.Default is not null);
+        }
+        return infos;
+    }
+
+    /// <summary>
+    /// Parses a SQL-defined model's <c>RETURNS Struct&lt;…&gt;</c> annotation
+    /// into ordered <see cref="ModelStructFieldInfo"/> entries the
+    /// LanguageServer can use to resolve <c>model_call().field</c> hovers.
+    /// Returns <see langword="null"/> when the annotation is the opaque
+    /// bare <c>Struct</c>, when it's a non-Struct return, or when parsing
+    /// fails — every fallback keeps the caller from emitting bogus field
+    /// metadata.
+    /// </summary>
+    private static IReadOnlyList<ModelStructFieldInfo>? BuildModelOutputStructFields(ModelDescriptor model)
+    {
+        if (model.ReturnTypeName is null) return null;
+        if (!StructTypeAnnotation.TryParse(model.ReturnTypeName, out IReadOnlyList<StructFieldShape> fields))
+        {
+            return null;
+        }
+
+        ModelStructFieldInfo[] infos = new ModelStructFieldInfo[fields.Count];
+        for (int i = 0; i < fields.Count; i++)
+        {
+            StructFieldShape f = fields[i];
+            DataKind kind = DataKind.Unknown;
+            bool isArray = false;
+            if (TypeAnnotationResolver.TryParse(f.Kind, out DataKind parsedKind, out bool parsedIsArray))
+            {
+                kind = parsedKind;
+                isArray = parsedIsArray;
+            }
+            // Preserve the raw kind label from the struct annotation so
+            // dim suffixes (`Array<Float32>(518, 518)`) survive into the
+            // manifest. The structured DataKind/IsArray path drops them
+            // because TypeAnnotationResolver returns the shape via a
+            // separate out-param the LS doesn't read today.
+            infos[i] = new ModelStructFieldInfo(f.Name, kind, isArray, KindLabel: f.Kind);
         }
         return infos;
     }

@@ -722,6 +722,55 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
             }
         }
 
+        // Struct-field access via dot-notation: `curr_depth.intrinsics`
+        // where `curr_depth` is a LET-bound or DECLARE'd struct. PG-style
+        // bracket access (`curr_depth['intrinsics']`) already works via the
+        // IndexAccessExpression path; this branch makes the more natural
+        // dot syntax work too. Two sources to check, in priority order:
+        //   1. The augmented row — SELECT LETs land here.
+        //   2. The procedural variable scope — DECLARE / FOR / lambda
+        //      parameter bindings land here.
+        // Row lookups above had a chance to claim `curr_depth.intrinsics`
+        // as a literal column name (the QualifiedName path); only fall
+        // through to struct-field access when no row column matched.
+        if (column.TableName is not null)
+        {
+            DataValue maybeStruct = default;
+            bool foundStruct = false;
+            if (row.TryGetValue(column.TableName, out DataValue rowValue)
+                && rowValue.Kind == DataKind.Struct
+                && !rowValue.IsNull)
+            {
+                maybeStruct = rowValue;
+                foundStruct = true;
+            }
+            else if (_variableScope is not null
+                && _variableScope.TryGet(column.TableName, out ValueRef varValue)
+                && varValue.Kind == DataKind.Struct
+                && !varValue.IsNull)
+            {
+                maybeStruct = varValue.ToDataValue(frame.Source, varValue.TypeId, frame.Types);
+                foundStruct = true;
+            }
+
+            if (foundStruct)
+            {
+                DataValue[] fields = maybeStruct.AsStruct(frame.Source);
+                int fieldIndex = ResolveStructFieldIndexByName(
+                    maybeStruct.TypeId, column.ColumnName, frame);
+                if (fieldIndex >= 0 && fieldIndex < fields.Length)
+                {
+                    return fields[fieldIndex];
+                }
+                // Variable / row column exists and is a struct but the
+                // field name didn't match. Surface a precise error rather
+                // than the generic "not found in row" — the user clearly
+                // meant a struct field lookup, just typed a wrong name.
+                throw new InvalidOperationException(
+                    $"Struct '{column.TableName}' has no field named '{column.ColumnName}'.");
+            }
+        }
+
         if (column.TableName is not null)
         {
             throw new InvalidOperationException(
@@ -734,6 +783,23 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
             _variableScope is not null
                 ? $"Name '{column.ColumnName}' is not a declared variable in scope and is not a column in the current row."
                 : $"Column '{column.ColumnName}' not found in row.");
+    }
+
+    /// <summary>
+    /// Returns the positional index of a struct field by name, or <c>-1</c>
+    /// when not found. Walks the per-query <see cref="TypeRegistry"/> when
+    /// available; the registry's <see cref="TypeDescriptor.FindFieldIndex"/>
+    /// does the case-insensitive lookup. Returns <c>-1</c> when no registry
+    /// is reachable or when the value's <see cref="DataValue.TypeId"/> is
+    /// unregistered — callers fall back to a clear "field not found"
+    /// error rather than a position-mismatch hazard.
+    /// </summary>
+    private int ResolveStructFieldIndexByName(ushort typeId, string fieldName, EvaluationFrame frame)
+    {
+        TypeRegistry? registry = _typeRegistry ?? frame.Types;
+        if (registry is null || typeId == 0) return -1;
+        TypeDescriptor? desc = registry.GetDescriptor(typeId);
+        return desc is null ? -1 : desc.FindFieldIndex(fieldName);
     }
 
     private async ValueTask<DataValue> EvaluateBinaryAsync(

@@ -37,6 +37,24 @@ public class TypeAnnotationResolverTests
     }
 
     [Theory]
+    [InlineData("Struct<depth: Array<Float32>>")]
+    [InlineData("Struct<depth: Array<Float32>, intrinsics: Array<Float32>>")]
+    [InlineData("Struct<depth: Array<Float32>(518,518), intrinsics: Array<Float32>(1,1,3,4)>")]
+    [InlineData("struct<a: Int32>")] // case-insensitive prefix
+    public void TryParse_StructWithFieldList_ResolvesToOpaqueStructKind(string annotation)
+    {
+        // The runtime treats every `Struct<…>` annotation as the opaque
+        // DataKind.Struct — the field-shape detail is design-time
+        // metadata consumed by the LanguageServer's struct surface,
+        // not by the runtime type system. Without recognising the
+        // annotation at all, SQL-defined models with declared struct
+        // shapes would fail at CREATE-MODEL time.
+        Assert.True(TypeAnnotationResolver.TryParse(annotation, out DataKind kind, out bool isArray));
+        Assert.Equal(DataKind.Struct, kind);
+        Assert.False(isArray);
+    }
+
+    [Theory]
     [InlineData("Array<Array<Int32>>")]
     [InlineData("Array<Array<String>>")]
     public void TryParse_NestedArray_IsRejected(string annotation)

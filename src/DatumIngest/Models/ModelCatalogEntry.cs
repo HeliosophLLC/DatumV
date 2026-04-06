@@ -51,6 +51,15 @@ namespace DatumIngest.Models;
 /// generic <c>input</c>/<c>inputN</c> labels derived from
 /// <paramref name="InputKinds"/>.
 /// </param>
+/// <param name="OutputStructFields">
+/// For struct-returning models: ordered <c>(name, kind, isArray)</c>
+/// descriptors for each output field, used by the language server to
+/// resolve <c>model_call().field</c> access at hover / completion time.
+/// SQL-defined models populate this when their <c>RETURNS Struct&lt;…&gt;</c>
+/// annotation carries an explicit field list; built-ins populate it from
+/// <c>IModel.OutputFields</c>. <see langword="null"/> for non-struct
+/// returns and for opaque <c>RETURNS Struct</c> models.
+/// </param>
 /// <param name="IsDeterministic">
 /// <see langword="true"/> when the same input always yields the same output.
 /// Drives CSE folding across call sites and cache validity in future demos.
@@ -182,7 +191,8 @@ public sealed record ModelCatalogEntry(
     bool Batchable = false,
     string? FingerprintPath = null,
     bool OutputIsArray = false,
-    IReadOnlyList<ModelParameterInfo>? ParameterInfos = null);
+    IReadOnlyList<ModelParameterInfo>? ParameterInfos = null,
+    IReadOnlyList<ModelStructFieldInfo>? OutputStructFields = null);
 
 /// <summary>
 /// Per-parameter metadata for a registered model — used by the language
@@ -197,6 +207,25 @@ public sealed record ModelCatalogEntry(
 /// <param name="IsArray">True when the parameter was declared as a typed array.</param>
 /// <param name="IsOptional">True when the parameter has a default (call site may omit).</param>
 public sealed record ModelParameterInfo(string Name, DataKind Kind, bool IsArray, bool IsOptional);
+
+/// <summary>
+/// Per-field metadata for a struct-returning model's output. Drives the
+/// language server's <c>model_call().field</c> resolution. Mirrors the
+/// shape of <see cref="ModelParameterInfo"/> for inputs.
+/// </summary>
+/// <param name="Name">Declared field name (<c>depth</c>, <c>intrinsics</c>, …).</param>
+/// <param name="Kind">Element data kind for the field's value.</param>
+/// <param name="IsArray">True when the field's value is a typed array of <paramref name="Kind"/>.</param>
+/// <param name="KindLabel">
+/// Canonical kind label including any dim / width suffix the user
+/// declared in their <c>RETURNS Struct&lt;…&gt;</c> annotation —
+/// <c>"Array&lt;Float32&gt;(518, 518)"</c>, <c>"VARCHAR(64)"</c>, etc.
+/// The structured <see cref="Kind"/> / <see cref="IsArray"/> fields lose
+/// that suffix during their TryParse round-trip; the label preserves it
+/// so hover popups can show the full declared shape. Falls back to the
+/// kind name when no richer label is available.
+/// </param>
+public sealed record ModelStructFieldInfo(string Name, DataKind Kind, bool IsArray, string KindLabel);
 
 /// <summary>
 /// Context handed to a <see cref="ModelCatalogEntry.Loader"/> when first instantiating

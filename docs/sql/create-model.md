@@ -150,6 +150,80 @@ Built-in models also live in `models.X`. The lockdown means every model
 in your system is reachable as `models.<name>(...)` regardless of where
 it came from.
 
+## Struct return types
+
+Models that emit multiple values can declare a structural return type
+inline in `RETURNS`. The most common case is a model that surfaces depth
+plus camera intrinsics plus a confidence map from a single inference
+dispatch — historically that meant `RETURNS Struct` (opaque) and the
+caller had to remember every field name. The structural form names
+every field up front:
+
+```sql
+CREATE OR REPLACE MODEL depth_full(img Image)
+  RETURNS Struct<
+    depth      Array<Float32>(518, 518),
+    confidence Array<Float32>(518, 518),
+    intrinsics Array<Float32>(1, 1, 3, 3),
+    extrinsics Array<Float32>(1, 1, 3, 4)
+  >
+USING 'depth-full.onnx'
+AS BEGIN
+    DECLARE outputs Struct = infer_outputs(/* ... */);
+    RETURN {
+        depth:      outputs['predicted_depth'],
+        confidence: outputs['confidence'],
+        intrinsics: outputs['intrinsics'],
+        extrinsics: outputs['extrinsics']
+    }
+END;
+```
+
+### Annotation syntax
+
+The body inside the angle brackets is a comma-separated list of
+`name Type` pairs (PG-style) or `name: Type` pairs (curly-brace-style).
+Both forms parse identically and canonicalise to the colon form for
+display:
+
+```sql
+-- Either is accepted; the manifest stores the colon form.
+RETURNS Struct<depth Array<Float32>>
+RETURNS Struct<depth: Array<Float32>>
+```
+
+Field types are recursive — any annotation the type system understands
+works as a field type, including array wrappers with explicit dim
+suffixes (`Array<Float32>(518, 518)`) and nested struct shapes
+(`Struct<inner: Struct<x: Int32, y: Int32>>`).
+
+The bare `RETURNS Struct` form (no field list) keeps working for any
+model where the field shape isn't worth committing to — runtime
+semantics are identical.
+
+### Runtime vs design-time
+
+The annotation is **design-time metadata only**. At runtime, every
+`Struct<…>` annotation collapses to the opaque `DataKind.Struct` —
+the field shape itself isn't registered as a long-lived `TypeId` tied
+to the model's catalog lifetime (see [Limitations](#limitations)).
+What the structural form *does* unlock:
+
+- **Language server hover** on the call site reads back the struct
+  shape: `models.depth_full(img: Image) → Struct<depth: Array<Float32>(518, 518), …>`.
+- **Field-access hovers** resolve to the declared field's kind —
+  `LET d = models.depth_full(img); d.intrinsics` hovers as
+  `Array<Float32>(1, 1, 3, 3)`.
+- **Completion** after `d.` suggests `depth`, `confidence`,
+  `intrinsics`, `extrinsics`.
+
+The body's `RETURN { depth: …, intrinsics: … }` literal continues to
+define the actual struct shape at execution; the annotation and the
+return literal should agree, but the engine doesn't strictly enforce
+it (a field declared in `RETURNS` but missing from the return literal
+won't be reachable at runtime). Treat the annotation as the user-
+facing contract; treat the return literal as the implementation.
+
 ## `infer()`
 
 `infer(arg)` dispatches the model's bound inference session and returns
@@ -243,14 +317,14 @@ Sessions with **more than one output** are accepted; `infer()` returns
 the **first** output. The convention HuggingFace optimum and most
 transformer-to-ONNX exporters follow is to list the primary output
 first (e.g. `last_hidden_state` ahead of `pooler_output` for BERT-family
-encoders). A struct-of-tensors return shape for multi-output sessions
-is a follow-up.
+encoders). To surface every output of a multi-output session, use
+`infer_outputs(...)` (returns a struct of tensors keyed by ONNX output
+name) and assemble the model's declared return shape with a struct
+literal — see [Struct return types](#struct-return-types) for the
+declared-shape contract and the `depth_full` example.
 
 ### What's deferred
 
-- **Multi-output** models. v1 returns the first output; the
-  struct-of-tensors return shape lands when the first multi-output
-  model wants both.
 - **Multi-session bundles** (Florence-2, SD). The v1 surface assumes a
   single ONNX file; multi-session will likely take a session-name
   argument (`infer('decoder', struct{...})`).
@@ -260,6 +334,9 @@ is a follow-up.
 
 If you hit one of these limits, the runtime error names the limit
 explicitly so you know what's missing.
+
+(Multi-output sessions are *not* on this list — use `infer_outputs(...)`
+plus a struct return shape; see [Struct return types](#struct-return-types).)
 
 ## Body statements
 
@@ -489,9 +566,10 @@ rows: `name`, `backend = "sql"`, `file_name` (the raw `USING` path),
   vision-language pipelines) are not yet supported through `CREATE
   MODEL`. Built-ins handle multi-session today; the SQL surface inherits
   it when there's a first multi-session user.
-- **Single output tensor.** Multi-output sessions are accepted but
-  `infer()` returns only the first output. Struct-of-tensors return
-  shape is a follow-up.
+- **Single output from `infer()`.** A multi-output session can still
+  be surfaced via `infer_outputs(...)` (returns a struct of tensors) +
+  a [structural return shape](#struct-return-types); the limitation
+  here is only that the 1-arg `infer()` form picks the first output.
 - **Element kinds Float32 / Int32 / Int64 only** at the `infer()` boundary.
   Float16, Bool, UInt8, and the rest are runtime errors today; each is
   one branch to add.

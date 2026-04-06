@@ -286,6 +286,116 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.Contains("VideoFrame", result.Contents);
     }
 
+    // ───────────────────── LET binding hover ─────────────────────
+
+    [Fact]
+    public void GetHover_UnprojectedLetBinding_ResolvesThroughExpressionKind()
+    {
+        // `LET curr_depth = models.X(...)` declared inside a CTE but never
+        // surfaced through the CTE's SELECT list. The LET map carries
+        // every binding's resolved kind separately so hover still finds it.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "video_unnest_frames",
+                    Parameters = [new ParameterSignature { Name = "source", Kind = "String" }],
+                    ReturnType = "table(frame_index Int32, frame VideoFrame)",
+                    IsTableValued = true,
+                    OutputColumns =
+                    [
+                        new TableColumnEntry { Name = "frame_index", Kind = "Int32", Nullable = false },
+                        new TableColumnEntry { Name = "frame", Kind = "VideoFrame", Nullable = false },
+                    ],
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "depth_full",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Struct<depth: Array<Float32>, intrinsics: Array<Float32>>",
+                },
+            ],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql =
+            "WITH thumb AS (SELECT " +
+            "  LET curr_depth = models.depth_full(frame), " +
+            "  frame_index " +
+            "FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT frame_index FROM thumb";
+
+        // Hover on `curr_depth` inside the LET binding.
+        int offset = sql.IndexOf("curr_depth", StringComparison.Ordinal);
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("curr_depth", result.Contents);
+        Assert.Contains("Struct<depth: Array<Float32>, intrinsics: Array<Float32>>", result.Contents);
+        Assert.Contains("LET binding", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_UnprojectedLetStructFieldAccess_ResolvesField()
+    {
+        // `LET curr_depth = ...` then `curr_depth.depth` — the LET isn't
+        // in the CTE output, but the field-access path consults the LET
+        // map to surface the field's kind.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "video_unnest_frames",
+                    Parameters = [new ParameterSignature { Name = "source", Kind = "String" }],
+                    ReturnType = "table(frame_index Int32, frame VideoFrame)",
+                    IsTableValued = true,
+                    OutputColumns =
+                    [
+                        new TableColumnEntry { Name = "frame", Kind = "VideoFrame", Nullable = false },
+                    ],
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "depth_full",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Struct<depth: Array<Float32>, intrinsics: Array<Float32>>",
+                },
+            ],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        // `curr_depth.depth AS chosen` in the SELECT list so the
+        // recovering parser sees a complete expression. Cursor lands on
+        // `depth` after the dot.
+        const string sql =
+            "WITH thumb AS (SELECT " +
+            "  LET curr_depth = models.depth_full(frame), " +
+            "  curr_depth.depth AS chosen " +
+            "FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT chosen FROM thumb";
+
+        int offset = sql.LastIndexOf("curr_depth.depth", StringComparison.Ordinal)
+            + "curr_depth.".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("depth", result.Contents);
+        Assert.Contains("Array<Float32>", result.Contents);
+        Assert.Contains("LET", result.Contents);
+    }
+
     // ───────────────────── Markdown-safe kind rendering ─────────────────────
 
     [Fact]

@@ -249,6 +249,13 @@ public sealed class HoverProvider
             string? cteQualifiedHover = GetCteColumnHover(qualifier, name, cteSchemas);
             if (cteQualifiedHover is not null) return cteQualifiedHover;
 
+            // Struct field access: `curr_depth.depth` where `curr_depth` is a
+            // CTE-projected column carrying a `Struct<…>` annotation (typically
+            // the output of a struct-returning model call). Parse the column's
+            // kind back into fields and look up the requested field by name.
+            string? structFieldHover = GetStructFieldHover(qualifier, name, cteSchemas);
+            if (structFieldHover is not null) return structFieldHover;
+
             return GetQualifiedColumnHover(qualifier, name);
         }
 
@@ -282,6 +289,14 @@ public sealed class HoverProvider
         // every CTE projection in the statement.
         string? cteUnqualifiedHover = GetCteColumnHoverUnqualified(name, cteSchemas);
         if (cteUnqualifiedHover is not null) return cteUnqualifiedHover;
+
+        // LET-bound name. LETs aren't part of the CTE's output schema
+        // unless explicitly aliased, but the user still references them
+        // by name throughout the body — surface their resolved kind here.
+        if (cteSchemas.LetBindingKinds.TryGetValue(name, out string? letKind))
+        {
+            return $"**{name}**: `{letKind}`\n\n*LET binding*";
+        }
 
         return GetColumnHover(name);
     }
@@ -486,6 +501,49 @@ public sealed class HoverProvider
                 {
                     return FormatCteColumnHover(entry.Key, entry.Key, column);
                 }
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves <c>qualifier.fieldName</c> as a struct field access when
+    /// <paramref name="qualifier"/> is a CTE-projected column whose kind
+    /// is a canonical <c>Struct&lt;…&gt;</c> annotation. Walks every CTE's
+    /// columns looking for one named <paramref name="qualifier"/>; on
+    /// match, parses the column's kind and surfaces the field by name.
+    /// Returns <see langword="null"/> for non-struct columns and unknown
+    /// fields.
+    /// </summary>
+    private static string? GetStructFieldHover(string qualifier, string fieldName, CteSchemaResult cteSchemas)
+    {
+        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in cteSchemas.Schemas)
+        {
+            foreach (TableColumnEntry column in cte.Value)
+            {
+                if (!string.Equals(column.Name, qualifier, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!StructTypeAnnotation.TryParse(column.Kind, out IReadOnlyList<StructFieldShape> fields))
+                {
+                    continue;
+                }
+                foreach (StructFieldShape field in fields)
+                {
+                    if (!string.Equals(field.Name, fieldName, StringComparison.OrdinalIgnoreCase)) continue;
+                    return $"**{qualifier}.{field.Name}**: `{field.Kind}`\n\nSource: CTE `{cte.Key}` field `{qualifier}`";
+                }
+            }
+        }
+
+        // LET-bound struct: `LET curr_depth = models.X(...)` then
+        // `curr_depth.depth`. LETs without an OutputAlias don't appear in
+        // the CTE schema above; consult the dedicated LET map.
+        if (cteSchemas.LetBindingKinds.TryGetValue(qualifier, out string? letKind)
+            && StructTypeAnnotation.TryParse(letKind, out IReadOnlyList<StructFieldShape> letFields))
+        {
+            foreach (StructFieldShape field in letFields)
+            {
+                if (!string.Equals(field.Name, fieldName, StringComparison.OrdinalIgnoreCase)) continue;
+                return $"**{qualifier}.{field.Name}**: `{field.Kind}`\n\nSource: LET `{qualifier}`";
             }
         }
         return null;

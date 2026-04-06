@@ -46,7 +46,7 @@ AS BEGIN
     imagenet_std());
   DECLARE depth Float32[] = infer(
     tensor,
-    [CAST(1 AS Int32), CAST(3 AS Int32), CAST(480 AS Int32), CAST(480 AS Int32)]);
+    [1::Int32, 3::Int32, 480::Int32, 480::Int32]);
   RETURN depth_map_to_image(depth, 480, 480, image_height(img), image_width(img), true)
 END;
 
@@ -71,6 +71,6 @@ AS BEGIN
     imagenet_std());
   DECLARE depth_native Array<Float32> = infer(
     tensor,
-    [CAST(1 AS Int32), CAST(3 AS Int32), CAST(480 AS Int32), CAST(480 AS Int32)]);
+    [1::Int32, 3::Int32, 480::Int32, 480::Int32]);
   RETURN array_resize_2d(depth_native, image_height(img), image_width(img))
 END

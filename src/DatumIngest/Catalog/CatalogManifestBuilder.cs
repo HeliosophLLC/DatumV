@@ -138,10 +138,13 @@ public static class CatalogManifestBuilder
                 // Output shape: preserve the array marker the catalog
                 // entry already captured. Without this, `RETURNS Array<Float32>`
                 // would surface as just `Float32` in the model-completion
-                // popup and the model-call signature help.
-                string outputKindLabel = entry.Value.OutputIsArray
-                    ? $"Array<{entry.Value.OutputKind}>"
-                    : entry.Value.OutputKind.ToString();
+                // popup and the model-call signature help. Struct returns
+                // with declared field shapes (`RETURNS Struct<depth ...,
+                // intrinsics ...>`) render with the full field list so the
+                // hover popup names every projected output.
+                string outputKindLabel = BuildModelOutputKindLabel(entry.Value);
+                IReadOnlyList<StructFieldSignature>? structFields =
+                    BuildModelOutputStructFieldSignatures(entry.Value);
                 modelEntries.Add(new ModelEntry
                 {
                     Name = entry.Value.Name,
@@ -150,9 +153,18 @@ public static class CatalogManifestBuilder
                     Backend = entry.Value.Backend,
                     DisplayName = entry.Value.DisplayName,
                     Parameters = BuildModelParameters(entry.Value),
+                    OutputStructFields = structFields,
                 });
             }
             models = modelEntries;
+
+            // Back-fill OutputStructFields onto the model's scalar-function
+            // FunctionSignature too — SQL-defined models are dual-registered
+            // (FunctionRegistry + ModelCatalog), and HoverProvider's
+            // `models.X(...)` lookup goes through Functions, not Models.
+            // Without this pass, hover would still see opaque `Struct`
+            // through that path even though ModelEntry has full detail.
+            BackfillModelStructFieldsOntoFunctionSignatures(functionSigs, modelEntries);
         }
 
         // UDFs and procedures registered in the catalog flow into the
@@ -422,6 +434,119 @@ public static class CatalogManifestBuilder
             or ArrayMatch.MultiDimArray => $"Array<{kind.Describe()}>",
         _ => kind.Describe(),
     };
+
+    /// <summary>
+    /// Renders a model's output kind label, surfacing struct field shapes
+    /// when the catalog entry's <see cref="Models.ModelCatalogEntry.OutputStructFields"/>
+    /// is populated. Falls back to the scalar <c>Array&lt;Kind&gt;</c> /
+    /// <c>Kind</c> rendering for non-struct outputs and for opaque
+    /// <c>RETURNS Struct</c> models.
+    /// </summary>
+    private static string BuildModelOutputKindLabel(Models.ModelCatalogEntry entry)
+    {
+        if (entry.OutputStructFields is { Count: > 0 } structFields)
+        {
+            System.Text.StringBuilder sb = new();
+            sb.Append("Struct<");
+            for (int i = 0; i < structFields.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                Models.ModelStructFieldInfo f = structFields[i];
+                // Prefer the raw KindLabel (preserves dim suffixes the
+                // user declared); fall back to the re-rendered form only
+                // when the catalog entry was built from a path that
+                // didn't capture the original annotation.
+                string fieldKind = !string.IsNullOrEmpty(f.KindLabel)
+                    ? f.KindLabel
+                    : (f.IsArray ? $"Array<{f.Kind}>" : f.Kind.ToString());
+                sb.Append(f.Name).Append(": ").Append(fieldKind);
+            }
+            sb.Append('>');
+            return sb.ToString();
+        }
+
+        return entry.OutputIsArray
+            ? $"Array<{entry.OutputKind}>"
+            : entry.OutputKind.ToString();
+    }
+
+    /// <summary>
+    /// Translates a model's catalog-side <see cref="Models.ModelStructFieldInfo"/>
+    /// list into the manifest's <see cref="StructFieldSignature"/> shape.
+    /// Returns <see langword="null"/> for non-struct outputs so the LS can
+    /// short-circuit field resolution. Same shape lives on both
+    /// <see cref="ModelEntry.OutputStructFields"/> and (for the model's
+    /// scalar-function descriptor)
+    /// <see cref="FunctionSignature.OutputStructFields"/>.
+    /// </summary>
+    private static IReadOnlyList<StructFieldSignature>? BuildModelOutputStructFieldSignatures(
+        Models.ModelCatalogEntry entry)
+    {
+        if (entry.OutputStructFields is not { Count: > 0 } structFields) return null;
+        StructFieldSignature[] result = new StructFieldSignature[structFields.Count];
+        for (int i = 0; i < structFields.Count; i++)
+        {
+            Models.ModelStructFieldInfo f = structFields[i];
+            string fieldKind = !string.IsNullOrEmpty(f.KindLabel)
+                ? f.KindLabel
+                : (f.IsArray ? $"Array<{f.Kind}>" : f.Kind.ToString());
+            result[i] = new StructFieldSignature { Name = f.Name, Kind = fieldKind };
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Replaces each <c>models.X</c> entry in <paramref name="functionSigs"/>
+    /// with a copy carrying its model's <see cref="StructFieldSignature"/>
+    /// list when available. The hover provider's primary lookup path goes
+    /// through Functions (not Models), so without this pass the scalar-
+    /// function view of a struct-returning model would surface as opaque
+    /// <c>Struct</c> even when <see cref="ModelEntry.OutputStructFields"/>
+    /// has the full shape. Matches by (schema=<c>models</c>, name); entries
+    /// without a matching model are left untouched.
+    /// </summary>
+    private static void BackfillModelStructFieldsOntoFunctionSignatures(
+        List<FunctionSignature> functionSigs, List<ModelEntry> modelEntries)
+    {
+        Dictionary<string, IReadOnlyList<StructFieldSignature>> byName =
+            new(StringComparer.OrdinalIgnoreCase);
+        foreach (ModelEntry m in modelEntries)
+        {
+            if (m.OutputStructFields is not null) byName[m.Name] = m.OutputStructFields;
+        }
+        if (byName.Count == 0) return;
+
+        for (int i = 0; i < functionSigs.Count; i++)
+        {
+            FunctionSignature sig = functionSigs[i];
+            if (!string.Equals(sig.SchemaName, "models", StringComparison.OrdinalIgnoreCase)) continue;
+            if (sig.OutputStructFields is not null) continue;
+            if (!byName.TryGetValue(sig.Name, out IReadOnlyList<StructFieldSignature>? fields)) continue;
+
+            // FunctionSignature is init-only, so emit a replacement carrying
+            // every existing field plus OutputStructFields. ReturnType also
+            // gets refreshed so the hover popup shows the full struct shape
+            // instead of bare `Struct`.
+            string refreshedReturnType = StructTypeAnnotation.Format(
+                fields.Select(f => new StructFieldShape(f.Name, f.Kind)).ToArray());
+            functionSigs[i] = new FunctionSignature
+            {
+                SchemaName = sig.SchemaName,
+                Name = sig.Name,
+                Parameters = sig.Parameters,
+                ReturnType = refreshedReturnType,
+                Description = sig.Description,
+                Category = sig.Category,
+                IsTableValued = sig.IsTableValued,
+                OutputColumns = sig.OutputColumns,
+                AdditionalParameterShapes = sig.AdditionalParameterShapes,
+                OutputStructFields = fields,
+                IsAggregate = sig.IsAggregate,
+                IsWindowFunction = sig.IsWindowFunction,
+                QueryUnitCost = sig.QueryUnitCost,
+            };
+        }
+    }
 
     /// <summary>
     /// Builds a <see cref="FunctionSignature"/> for one table-valued function.

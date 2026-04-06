@@ -53,14 +53,14 @@ AS BEGIN
   -- DaViT uses ImageNet normalization.
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,
-    [CAST(768 AS Int32), CAST(768 AS Int32)],
+    [768::Int32, 768::Int32],
     imagenet_mean(),
     imagenet_std());
 
   DECLARE visual_features Float32[] = infer(
     'vision_encoder',
     tensor,
-    [CAST(1 AS Int32), CAST(3 AS Int32), CAST(768 AS Int32), CAST(768 AS Int32)]);
+    [1::Int32, 3::Int32, 768::Int32, 768::Int32]);
 
   -- Instruction text → BPE → [BOS, ...ids, EOS]. Default is the literal
   -- Florence-2 used during fine-tuning for this task (Microsoft's
@@ -76,21 +76,21 @@ AS BEGIN
   DECLARE prompt_embeds Float32[] = infer(
     'embed_tokens',
     prompt_ids,
-    [CAST(1 AS Int32), prompt_seq]);
+    [1::Int32, prompt_seq]);
 
   -- Florence-2 base hidden_dim is 768; derive visual_seq from the
   -- visual_features length. The combined sequence (visual || prompt)
   -- is what the BART encoder consumes as inputs_embeds.
-  DECLARE visual_seq Int32 = cardinality(visual_features) / CAST(768 AS Int32);
+  DECLARE visual_seq Int32 = cardinality(visual_features) / 768::Int32;
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
   DECLARE combined_embeds Float32[] = array_concat(visual_features, prompt_embeds);
-  DECLARE attention_mask Int64[] = array_repeat(CAST(1 AS Int64), total_seq);
+  DECLARE attention_mask Int64[] = array_repeat(1::Int64, total_seq);
 
   DECLARE encoder_features Float32[] = infer(
     'encoder',
     {inputs_embeds: combined_embeds, attention_mask: attention_mask},
-    {inputs_embeds: [CAST(1 AS Int32), total_seq, CAST(768 AS Int32)],
-     attention_mask: [CAST(1 AS Int32), total_seq]});
+    {inputs_embeds: [1::Int32, total_seq, 768::Int32],
+     attention_mask: [1::Int32, total_seq]});
 
   DECLARE token_ids Int64[] = decode_seq2seq(
     'decoder',
@@ -121,13 +121,13 @@ USING 'florence-2-base-ft-fp16/vision_encoder_fp16.onnx' AS vision_encoder,
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,
-    [CAST(768 AS Int32), CAST(768 AS Int32)],
+    [768::Int32, 768::Int32],
     imagenet_mean(),
     imagenet_std());
 
   DECLARE visual_features Float32[] = infer(
     'vision_encoder', tensor,
-    [CAST(1 AS Int32), CAST(3 AS Int32), CAST(768 AS Int32), CAST(768 AS Int32)]);
+    [1::Int32, 3::Int32, 768::Int32, 768::Int32]);
 
   DECLARE instruction_ids Int64[] = tokenizer.encode_bpe(
     prompt,
@@ -140,21 +140,21 @@ AS BEGIN
     'embed_tokens', prompt_ids,
     [CAST(1 AS Int32), prompt_seq]);
 
-  DECLARE visual_seq Int32 = cardinality(visual_features) / CAST(768 AS Int32);
+  DECLARE visual_seq Int32 = cardinality(visual_features) / 768::Int32;
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
   DECLARE combined_embeds Float32[] = array_concat(visual_features, prompt_embeds);
-  DECLARE attention_mask Int64[] = array_repeat(CAST(1 AS Int64), total_seq);
+  DECLARE attention_mask Int64[] = array_repeat(1::Int64, total_seq);
 
   DECLARE encoder_features Float32[] = infer(
     'encoder',
     {inputs_embeds: combined_embeds, attention_mask: attention_mask},
-    {inputs_embeds: [CAST(1 AS Int32), total_seq, CAST(768 AS Int32)],
-     attention_mask: [CAST(1 AS Int32), total_seq]});
+    {inputs_embeds: [1::Int32, total_seq, 768::Int32],
+     attention_mask: [1::Int32, total_seq]});
 
   DECLARE token_ids Int64[] = decode_seq2seq(
     'decoder', encoder_features, attention_mask,
-    [CAST(0 AS Int64)], CAST(2 AS Int64),
-    CAST(150 AS Int32),                          -- longer than short caption
+    [0::Int64], 2::Int64),
+    150::Int32,                          -- longer than short caption
     false, 'embed_tokens');
 
   DECLARE raw String = tokenizer.decode_bpe(token_ids, 'vocab.json', 'merges.txt');
@@ -175,37 +175,37 @@ USING 'florence-2-base-ft-fp16/vision_encoder_fp16.onnx' AS vision_encoder,
       'florence-2-base-ft-fp16/decoder_model_fp16.onnx'  AS decoder
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
-    img, [CAST(768 AS Int32), CAST(768 AS Int32)],
+    img, [768::Int32, 768::Int32],
     imagenet_mean(), imagenet_std());
 
   DECLARE visual_features Float32[] = infer(
     'vision_encoder', tensor,
-    [CAST(1 AS Int32), CAST(3 AS Int32), CAST(768 AS Int32), CAST(768 AS Int32)]);
+    [1::Int32, 3::Int32, 768::Int32, 768::Int32]);
 
   DECLARE instruction_ids Int64[] = tokenizer.encode_bpe(
     prompt,
     'vocab.json', 'merges.txt');
   DECLARE prompt_ids Int64[] = array_concat(
-    array_concat([CAST(0 AS Int64)], instruction_ids), [CAST(2 AS Int64)]);
+    array_concat([0::Int64], instruction_ids), [2::Int64]);
   DECLARE prompt_seq Int32 = cardinality(prompt_ids);
   DECLARE prompt_embeds Float32[] = infer(
-    'embed_tokens', prompt_ids, [CAST(1 AS Int32), prompt_seq]);
+    'embed_tokens', prompt_ids, [1::Int32], prompt_seq]);
 
-  DECLARE visual_seq Int32 = cardinality(visual_features) / CAST(768 AS Int32);
+  DECLARE visual_seq Int32 = cardinality(visual_features) / 768::Int32;
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
   DECLARE combined_embeds Float32[] = array_concat(visual_features, prompt_embeds);
-  DECLARE attention_mask Int64[] = array_repeat(CAST(1 AS Int64), total_seq);
+  DECLARE attention_mask Int64[] = array_repeat(1::Int64, total_seq);
 
   DECLARE encoder_features Float32[] = infer(
     'encoder',
     {inputs_embeds: combined_embeds, attention_mask: attention_mask},
-    {inputs_embeds: [CAST(1 AS Int32), total_seq, CAST(768 AS Int32)],
-     attention_mask: [CAST(1 AS Int32), total_seq]});
+    {inputs_embeds: [1::Int32, total_seq, 768::Int32],
+     attention_mask: [1::Int32, total_seq]});
 
   DECLARE token_ids Int64[] = decode_seq2seq(
     'decoder', encoder_features, attention_mask,
-    [CAST(0 AS Int64)], CAST(2 AS Int64),
-    CAST(300 AS Int32),                          -- multi-sentence paragraph
+    [0::Int64], 2::Int64),
+    300::Int32,                          -- multi-sentence paragraph
     false, 'embed_tokens');
 
   DECLARE raw String = tokenizer.decode_bpe(token_ids, 'vocab.json', 'merges.txt');
@@ -232,37 +232,37 @@ USING 'florence-2-base-ft-fp16/vision_encoder_fp16.onnx' AS vision_encoder,
       'florence-2-base-ft-fp16/decoder_model_fp16.onnx'  AS decoder
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
-    img, [CAST(768 AS Int32), CAST(768 AS Int32)],
+    img, [768::Int32, 768::Int32],
     imagenet_mean(), imagenet_std());
 
   DECLARE visual_features Float32[] = infer(
     'vision_encoder', tensor,
-    [CAST(1 AS Int32), CAST(3 AS Int32), CAST(768 AS Int32), CAST(768 AS Int32)]);
+    [1::Int32, 3::Int32, 768::Int32, 768::Int32]);
 
   DECLARE instruction_ids Int64[] = tokenizer.encode_bpe(
     prompt,
     'vocab.json', 'merges.txt');
   DECLARE prompt_ids Int64[] = array_concat(
-    array_concat([CAST(0 AS Int64)], instruction_ids), [CAST(2 AS Int64)]);
+    array_concat([0::Int64], instruction_ids), [2::Int64]);
   DECLARE prompt_seq Int32 = cardinality(prompt_ids);
   DECLARE prompt_embeds Float32[] = infer(
-    'embed_tokens', prompt_ids, [CAST(1 AS Int32), prompt_seq]);
+    'embed_tokens', prompt_ids, [1::Int32], prompt_seq]);
 
-  DECLARE visual_seq Int32 = cardinality(visual_features) / CAST(768 AS Int32);
+  DECLARE visual_seq Int32 = cardinality(visual_features) / 768::Int32;
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
   DECLARE combined_embeds Float32[] = array_concat(visual_features, prompt_embeds);
-  DECLARE attention_mask Int64[] = array_repeat(CAST(1 AS Int64), total_seq);
+  DECLARE attention_mask Int64[] = array_repeat(1::Int64, total_seq);
 
   DECLARE encoder_features Float32[] = infer(
     'encoder',
     {inputs_embeds: combined_embeds, attention_mask: attention_mask},
-    {inputs_embeds: [CAST(1 AS Int32), total_seq, CAST(768 AS Int32)],
-     attention_mask: [CAST(1 AS Int32), total_seq]});
+    {inputs_embeds: [1::Int32, total_seq, 768::Int32],
+     attention_mask: [1::Int32, total_seq]});
 
   DECLARE token_ids Int64[] = decode_seq2seq(
     'decoder', encoder_features, attention_mask,
-    [CAST(0 AS Int64)], CAST(2 AS Int64),
-    CAST(500 AS Int32),                          -- OCR streams can be long
+    [0::Int64], 2::Int64),
+    500::Int32,                          -- OCR streams can be long
     false, 'embed_tokens');
 
   DECLARE raw String = tokenizer.decode_bpe(token_ids, 'vocab.json', 'merges.txt');

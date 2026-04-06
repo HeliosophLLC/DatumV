@@ -2604,18 +2604,52 @@ public static class SqlParser
     /// </list>
     /// Returns the canonical string for downstream resolution.
     /// </summary>
+    /// <summary>
+    /// One field entry inside a <c>Struct&lt;...&gt;</c> annotation:
+    /// <c>name TypeName</c> or <c>name: TypeName</c> in source form, both
+    /// canonicalised to <c>"name: TypeName"</c> for the manifest string.
+    /// Accepting the colon form mirrors the rendered output (so a user
+    /// can read a hover string and paste it back into SQL) and matches
+    /// most languages where field-type annotations use a colon. The type
+    /// half is recursive (via <see cref="TypeNameParser"/>) so fields
+    /// can be any shape — scalar, array, or nested struct.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string> StructFieldEntryParser =
+        from fieldName in Token.EqualTo(SqlToken.Identifier)
+        from _ in Token.EqualTo(SqlToken.Colon).Optional()
+        from fieldType in SP.Ref(() => TypeNameParser!)
+        select $"{GetTokenText(fieldName)}: {fieldType}";
+
     private static readonly TokenListParser<SqlToken, string> TypeNameParser =
         from baseOrWrapper in
-            // Wrapper form first; backtrack to bare scalar when the
+            // Struct field-list form first: `Struct<name Type, name Type, ...>`.
+            // Distinct from the generic `Name<inner>` wrapper because the
+            // inner is a comma-separated list of named fields, not a single
+            // type expression. Canonical output uses `name: Type` (colon-
+            // separated) to mirror the hover popup's display and to make
+            // re-parsing trivial for downstream consumers (LanguageServer).
+            // Try() so a bare `Struct` (no field list) still falls through
+            // to the plain identifier path below.
+            (
+                from structKw in
+                    Token.EqualTo(SqlToken.TypeKeyword)
+                        .Or(Token.EqualTo(SqlToken.Identifier))
+                        .Where(t => GetTokenText(t).Equals("Struct", StringComparison.OrdinalIgnoreCase), "Struct")
+                from open in Token.EqualTo(SqlToken.LessThan)
+                from fields in StructFieldEntryParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+                from close in Token.EqualTo(SqlToken.GreaterThan)
+                select $"Struct<{string.Join(", ", fields)}>"
+            ).Try()
+            // Wrapper form next; backtrack to bare scalar when the
             // identifier isn't followed by '<' — the bare scalar grammar is
             // a strict prefix of the wrapper grammar.
-            (
+            .Or((
                 from name in Token.EqualTo(SqlToken.Identifier)
                 from open in Token.EqualTo(SqlToken.LessThan)
                 from inner in SP.Ref(() => TypeNameParser!)
                 from close in Token.EqualTo(SqlToken.GreaterThan)
                 select $"{GetTokenText(name)}<{inner}>"
-            ).Try()
+            ).Try())
             // PG multi-word temporal forms:
             //   `TIMESTAMP WITH TIME ZONE`     → canonical "TimestampTz"
             //   `TIMESTAMP WITHOUT TIME ZONE`  → canonical "Timestamp"

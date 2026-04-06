@@ -307,6 +307,55 @@ public sealed class LetBindingTests : ServiceTestBase
     }
 
     /// <summary>
+    /// `LET x = {a: 1, b: 2}, x.a AS av` — dot-notation field access on a
+    /// LET-bound struct. Bracket access (`x['a']`) routes through
+    /// IndexAccessExpression which already worked; dot-notation hit the
+    /// ColumnReference path that previously had no variable-as-qualifier
+    /// fallback and threw "Column 'x.a' not found in row."
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_DotAccess_OnLetBoundStruct_ResolvesField()
+    {
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["dummy"],
+            [0f]);
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT LET x = {a: 'hello', b: 42.0}, x.a AS av, x.b AS bv FROM t",
+            catalog);
+
+        Assert.Single(results);
+        Assert.Equal("hello", results[0]["av"].AsString());
+        Assert.Equal(42.0, results[0]["bv"].ToDouble(), precision: 4);
+    }
+
+    [Fact]
+    public async Task EndToEnd_DotAccess_OnLetBoundStruct_UnknownField_ThrowsClearError()
+    {
+        // Negative case: when the variable IS a struct but the requested
+        // field doesn't exist, surface a precise error rather than the
+        // generic "column not found". The engine wraps the inner
+        // diagnostic so we walk the inner-exception chain to find it.
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["dummy"],
+            [0f]);
+
+        Exception ex = await Assert.ThrowsAnyAsync<Exception>(
+            () => ExecuteQueryAsync(
+                "SELECT LET x = {a: 1.0, b: 2.0}, x.never_declared AS bad FROM t",
+                catalog));
+
+        // Walk inner exceptions — the operator pipeline wraps the
+        // EvaluateColumn throw in higher-level error envelopes.
+        string allMessages = "";
+        for (Exception? cur = ex; cur is not null; cur = cur.InnerException)
+        {
+            allMessages += " | " + cur.Message;
+        }
+        Assert.Contains("never_declared", allMessages);
+    }
+
+    /// <summary>
     /// Destructured names can be consumed by subsequent LET bindings (chaining).
     /// </summary>
     [Fact]

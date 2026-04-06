@@ -56,8 +56,8 @@ AS BEGIN
   RETURN infer(
     encoded,
     {
-      input_ids:      [CAST(1 AS Int32), n],
-      attention_mask: [CAST(1 AS Int32), n],
-      token_type_ids: [CAST(1 AS Int32), n]
+      input_ids:      [1::Int32, n],
+      attention_mask: [1::Int32, n],
+      token_type_ids: [1::Int32, n]
     })
 END
