@@ -36,6 +36,15 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Image,
         DataKind.PointCloud,
         DataKind.Mesh,
+        // Row-scoped runtime-only kinds — `Drawing` and `Lambda` carry
+        // managed payloads (DrawingPayload tree, LambdaValue closure) that
+        // intentionally refuse persistence at the arena boundary, so
+        // they're never indexable. `Color` is a 32-bit inline value but
+        // only ever appears as a transient ingredient to a Drawing,
+        // never as a stored column.
+        DataKind.Color,
+        DataKind.Drawing,
+        DataKind.Lambda,
     ];
 
     /// <summary>
@@ -182,6 +191,14 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Type     => DataValue.FromType(DataKind.Int32),
         DataKind.Point2D  => DataValue.FromPoint2D(4, 5),
         DataKind.Point3D  => DataValue.FromPoint3D(1, 2, 3),
+        // Drawing / Lambda / Color are runtime-only or transient and don't
+        // persist (Drawing + Lambda refuse arena writes; Color appears only
+        // as a Drawing-tree ingredient). The unsupported-kind path just
+        // needs a DataValue with the right Kind to check WriteDataValue
+        // throws — a null-with-kind suffices.
+        DataKind.Drawing  => DataValue.Null(DataKind.Drawing),
+        DataKind.Lambda   => DataValue.Null(DataKind.Lambda),
+        DataKind.Color    => DataValue.Null(DataKind.Color),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,
             $"No sample value defined for DataKind.{kind}. Update CreateSampleValue."),
     };

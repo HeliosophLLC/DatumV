@@ -41,7 +41,7 @@ AS BEGIN
     array_concat([0::Int64], instruction_ids), [2::Int64]);
   DECLARE prompt_seq Int32 = cardinality(prompt_ids);
   DECLARE prompt_embeds Float32[] = infer(
-    'embed_tokens', prompt_ids, [1::Int32], prompt_seq]);
+    'embed_tokens', prompt_ids, [1::Int32, prompt_seq]);
 
   DECLARE visual_seq Int32 = cardinality(visual_features) / 768::Int32;
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
@@ -56,7 +56,7 @@ AS BEGIN
 
   DECLARE token_ids Int64[] = decode_seq2seq(
     'decoder', encoder_features, attention_mask,
-    [0::Int64], 2::Int64),
+    [0::Int64], 2::Int64,
     50::Int32,                            -- short caption — small budget
     false, 'embed_tokens');
 
@@ -92,7 +92,7 @@ AS BEGIN
     array_concat([0::Int64], instruction_ids), [2::Int64]);
   DECLARE prompt_seq Int32 = cardinality(prompt_ids);
   DECLARE prompt_embeds Float32[] = infer(
-    'embed_tokens', prompt_ids, [1::Int32], prompt_seq]);
+    'embed_tokens', prompt_ids, [1::Int32, prompt_seq]);
 
   DECLARE visual_seq Int32 = cardinality(visual_features) / 768::Int32;
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
@@ -107,7 +107,7 @@ AS BEGIN
 
   DECLARE token_ids Int64[] = decode_seq2seq(
     'decoder', encoder_features, attention_mask,
-    [0::Int64], 2::Int64),
+    [0::Int64], 2::Int64,
     150::Int32,                          -- longer than short caption
     false, 'embed_tokens');
 
@@ -143,7 +143,7 @@ AS BEGIN
     array_concat([0::Int64], instruction_ids), [2::Int64]);
   DECLARE prompt_seq Int32 = cardinality(prompt_ids);
   DECLARE prompt_embeds Float32[] = infer(
-    'embed_tokens', prompt_ids, [1::Int32], prompt_seq]);
+    'embed_tokens', prompt_ids, [1::Int32, prompt_seq]);
 
   DECLARE visual_seq Int32 = cardinality(visual_features) / 768::Int32;
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
@@ -158,7 +158,7 @@ AS BEGIN
 
   DECLARE token_ids Int64[] = decode_seq2seq(
     'decoder', encoder_features, attention_mask,
-    [0::Int64], 2::Int64),
+    [0::Int64], 2::Int64,
     300::Int32,                          -- multi-sentence paragraph
     false, 'embed_tokens');
 
@@ -200,7 +200,7 @@ AS BEGIN
     array_concat([0::Int64], instruction_ids), [2::Int64]);
   DECLARE prompt_seq Int32 = cardinality(prompt_ids);
   DECLARE prompt_embeds Float32[] = infer(
-    'embed_tokens', prompt_ids, [1::Int32], prompt_seq]);
+    'embed_tokens', prompt_ids, [1::Int32, prompt_seq]);
 
   DECLARE visual_seq Int32 = cardinality(visual_features) / 768::Int32;
   DECLARE total_seq Int32 = visual_seq + prompt_seq;
@@ -215,7 +215,7 @@ AS BEGIN
 
   DECLARE token_ids Int64[] = decode_seq2seq(
     'decoder', encoder_features, attention_mask,
-    [0::Int64], 2::Int64),
+    [0::Int64], 2::Int64,
     500::Int32,                          -- OCR streams can be long
     false, 'embed_tokens');
 

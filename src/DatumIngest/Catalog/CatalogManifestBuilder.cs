@@ -345,11 +345,31 @@ public static class CatalogManifestBuilder
             // Static return kind when the rule reports one; otherwise fall
             // back to the rule's textual description ("same as argument 0",
             // a custom blurb, …) so users still see *something*.
-            string baseReturn = first.ReturnType.StaticHint?.ToString()
-                ?? first.ReturnType.Describe();
-            returnType = first.ReturnType.ProducesArray
-                ? $"Array<{baseReturn}>"
-                : baseReturn;
+            // Two render paths depending on whether a StaticHint is
+            // available:
+            //
+            //   StaticHint set → the hint is the bare element kind
+            //   (e.g. `Float32`). Wrap in `Array<…>` ourselves when
+            //   ProducesArray is true.
+            //
+            //   StaticHint null → fall back to `Describe()`, which is a
+            //   self-describing string that ALREADY includes the
+            //   `Array<…>` wrapper for ArrayOf-typed rules. Don't wrap
+            //   again — wrapping a `Describe()` whose text was
+            //   `Array<custom-blurb>` produced
+            //   `Array<Array<custom-blurb>>` and caused every `array()`
+            //   call site (the `[…]` desugar target) to mis-report.
+            if (first.ReturnType.StaticHint is DataKind staticHint)
+            {
+                string elementName = staticHint.ToString();
+                returnType = first.ReturnType.ProducesArray
+                    ? $"Array<{elementName}>"
+                    : elementName;
+            }
+            else
+            {
+                returnType = first.ReturnType.Describe();
+            }
         }
 
         // Multi-variant functions (e.g. point_cloud_from_depth_pinhole's

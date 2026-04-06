@@ -65,7 +65,7 @@ public class DataKindTests : ServiceTestBase
         // Struct (1),
         // Point2D, Point3D, PointCloud, Mesh (4 spatial) → 36 total.
         DataKind[] allValues = Enum.GetValues<DataKind>();
-        Assert.Equal(36, allValues.Length);
+        Assert.Equal(39, allValues.Length);
     }
 
     [Fact]

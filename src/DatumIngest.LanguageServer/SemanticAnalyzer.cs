@@ -48,6 +48,35 @@ internal sealed class SemanticAnalyzer
         "Date", "Timestamp", "TimestampTz", "Time", "Duration",
     };
 
+    private static readonly HashSet<string> IntegerKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64",
+    };
+
+    private static readonly HashSet<string> FloatKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Float32", "Float64",
+    };
+
+    /// <summary>
+    /// Maps DataKindFamily labels (the strings produced by
+    /// <c>FamilyMatcher.Describe()</c>) to the concrete-kind sets they
+    /// accept. Without this, a parameter declared with
+    /// <c>DataKindMatcher.Family(DataKindFamily.NumericScalar)</c> surfaces
+    /// in the manifest with <c>Kind = "NumericScalar"</c> and the strict
+    /// string-equality check in <see cref="IsTypeCompatible"/> rejects
+    /// every concrete numeric kind. Keep keys synchronised with
+    /// the <c>DataKindFamily</c> enum names.
+    /// </summary>
+    private static readonly Dictionary<string, HashSet<string>> KindFamilies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["NumericScalar"] = NumericKinds,
+        ["IntegerFamily"] = IntegerKinds,
+        ["FloatFamily"] = FloatKinds,
+        ["Temporal"] = TemporalKinds,
+        ["TextLike"] = new(StringComparer.OrdinalIgnoreCase) { "String" },
+    };
+
     /// <summary>Creates a new analyzer bound to the given manifest.</summary>
     public SemanticAnalyzer(LanguageServerManifest manifest)
     {
@@ -724,6 +753,24 @@ internal sealed class SemanticAnalyzer
         IReadOnlyList<ParameterSignature> shape,
         string?[] actualKinds)
     {
+        // Argument-count gate. Required count = non-optional fixed
+        // parameters; max count = unbounded when a variadic is present,
+        // otherwise the total parameter count. Catch arity mismatches up
+        // front so the editor squiggles immediately rather than waiting
+        // until runtime's `Validate<T>` throws mid-execution.
+        (int requiredCount, int maxCount) = ComputeArityBounds(shape);
+        if (actualKinds.Length < requiredCount || actualKinds.Length > maxCount)
+        {
+            string expectedDesc = maxCount == int.MaxValue
+                ? $"at least {requiredCount}"
+                : requiredCount == maxCount
+                    ? requiredCount.ToString()
+                    : $"{requiredCount}–{maxCount}";
+            return BuildDiagnostic(
+                functionCall,
+                $"{functionCall.FunctionName}() expects {expectedDesc} argument(s); got {actualKinds.Length}.");
+        }
+
         for (int argumentIndex = 0; argumentIndex < actualKinds.Length; argumentIndex++)
         {
             // If the function has fewer parameters than arguments (variadic), apply
@@ -745,21 +792,54 @@ internal sealed class SemanticAnalyzer
 
             if (!IsTypeCompatible(actualKind, parameter.Kind))
             {
-                return new Diagnostic
-                {
-                    Message = $"Argument {argumentIndex + 1} of {functionCall.FunctionName}() expects {parameter.Kind}, got {actualKind}.",
-                    Severity = DiagnosticSeverity.Warning,
-                    StartLine = functionCall.Span?.Line is { } line ? System.Math.Max(0, line - 1) : 0,
-                    StartColumn = functionCall.Span?.Column is { } col ? System.Math.Max(0, col - 1) : 0,
-                    EndLine = functionCall.Span?.Line is { } line2 ? System.Math.Max(0, line2 - 1) : 0,
-                    EndColumn = functionCall.Span?.Column is { } col2
-                        ? System.Math.Max(0, col2 - 1) + (functionCall.Span?.Length ?? 0)
-                        : 0,
-                };
+                return BuildDiagnostic(
+                    functionCall,
+                    $"Argument {argumentIndex + 1} of {functionCall.FunctionName}() expects {parameter.Kind}, got {actualKind}.");
             }
         }
         return null;
     }
+
+    /// <summary>
+    /// Computes <c>(required, max)</c> argument-count bounds for a
+    /// parameter shape. Non-optional fixed parameters set the required
+    /// minimum; a trailing variadic slot (identified by the leading
+    /// <c>"..."</c> prefix on its name — the convention the manifest
+    /// builder renders for variadic specs) makes the max unbounded.
+    /// </summary>
+    private static (int Required, int Max) ComputeArityBounds(IReadOnlyList<ParameterSignature> shape)
+    {
+        int required = 0;
+        bool hasVariadic = false;
+        foreach (ParameterSignature p in shape)
+        {
+            if (p.Name.StartsWith("...", StringComparison.Ordinal))
+            {
+                hasVariadic = true;
+                continue;
+            }
+            if (!p.IsOptional) required++;
+        }
+        int max = hasVariadic
+            ? int.MaxValue
+            // Total fixed-parameter count: every entry that isn't the
+            // variadic placeholder.
+            : shape.Count(p => !p.Name.StartsWith("...", StringComparison.Ordinal));
+        return (required, max);
+    }
+
+    private static Diagnostic BuildDiagnostic(FunctionCallExpression functionCall, string message) =>
+        new()
+        {
+            Message = message,
+            Severity = DiagnosticSeverity.Warning,
+            StartLine = functionCall.Span?.Line is { } line ? System.Math.Max(0, line - 1) : 0,
+            StartColumn = functionCall.Span?.Column is { } col ? System.Math.Max(0, col - 1) : 0,
+            EndLine = functionCall.Span?.Line is { } line2 ? System.Math.Max(0, line2 - 1) : 0,
+            EndColumn = functionCall.Span?.Column is { } col2
+                ? System.Math.Max(0, col2 - 1) + (functionCall.Span?.Length ?? 0)
+                : 0,
+        };
 
     /// <summary>
     /// Attempts to infer the data kind of an expression from manifest information.
@@ -777,14 +857,41 @@ internal sealed class SemanticAnalyzer
             LiteralExpression { Value: double } => "Float32",
             LiteralExpression { Value: bool } => "Boolean",
             CastExpression cast => cast.TargetType,
-            FunctionCallExpression functionCall =>
-                _functionSignatures.TryGetValue(functionCall.FunctionName, out FunctionSignature? sig)
-                    ? sig.ReturnType
-                    : null,
+            FunctionCallExpression functionCall => TryInferFunctionCallType(functionCall, aliasToTable, opaqueAliases),
             UnaryExpression { Operator: UnaryOperator.Negate } unary =>
                 TryInferType(unary.Operand, aliasToTable, opaqueAliases),
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Infers a function call's return type. Most functions return the
+    /// manifest's static <see cref="FunctionSignature.ReturnType"/>
+    /// directly. <c>array(…)</c> is the one structurally-polymorphic case
+    /// we resolve here: the parser desugars every <c>[a, b, c]</c> literal
+    /// into <c>array(a, b, c)</c>, so a malformed return type for it
+    /// would warn on every legitimate array literal flowing into a typed
+    /// slot. Infer the element kind from the first argument and wrap it
+    /// in <c>Array&lt;…&gt;</c> — falls back to the manifest string when
+    /// the args can't be resolved.
+    /// </summary>
+    private string? TryInferFunctionCallType(
+        FunctionCallExpression call,
+        Dictionary<string, string> aliasToTable,
+        HashSet<string> opaqueAliases)
+    {
+        if (string.Equals(call.FunctionName, "array", StringComparison.OrdinalIgnoreCase)
+            && call.Arguments.Count > 0)
+        {
+            string? element = TryInferType(call.Arguments[0], aliasToTable, opaqueAliases);
+            if (element is not null) return $"Array<{element}>";
+            // Fall through to the manifest string when the first arg
+            // can't be resolved — better to skip the check than warn.
+        }
+
+        return _functionSignatures.TryGetValue(call.FunctionName, out FunctionSignature? sig)
+            ? sig.ReturnType
+            : null;
     }
 
     /// <summary>
@@ -859,6 +966,18 @@ internal sealed class SemanticAnalyzer
         if (actualIsArray && expectedIsArray)
         {
             return IsTypeCompatible(actualElement, expectedElement);
+        }
+
+        // Family-labelled expected kind (e.g. `NumericScalar`,
+        // `IntegerFamily`). The function-signature path uses
+        // `DataKindMatcher.Family(...)` and the matcher's Describe()
+        // surfaces the family enum name as the parameter's Kind string.
+        // Without this branch every concrete numeric / temporal kind
+        // gets rejected against a family-typed parameter.
+        if (KindFamilies.TryGetValue(expectedKind, out HashSet<string>? expectedFamilyMembers)
+            && expectedFamilyMembers.Contains(actualKind))
+        {
+            return true;
         }
 
         // Both numeric → compatible (e.g. Int32 column into Float32 parameter).

@@ -1177,6 +1177,287 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
             d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Theory]
+    [InlineData("NumericScalar", "Float32")]
+    [InlineData("NumericScalar", "Int32")]
+    [InlineData("NumericScalar", "UInt64")]
+    [InlineData("IntegerFamily", "Int32")]
+    [InlineData("FloatFamily", "Float64")]
+    [InlineData("Temporal", "Date")]
+    [InlineData("TextLike", "String")]
+    public void FamilyLabelled_ConcreteKind_DoesNotWarn(string familyLabel, string actualKind)
+    {
+        // Parameters declared via DataKindMatcher.Family(...) surface in
+        // the manifest as the family enum name (`NumericScalar`,
+        // `IntegerFamily`, etc.). The compatibility check now recognises
+        // those labels and accepts any kind in the family — previously
+        // every concrete-kind argument was wrongly flagged.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "v", Kind = actualKind, Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "draw_particles",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "p", Kind = familyLabel },
+                    ],
+                    ReturnType = "Drawing",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT draw_particles(v) FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void FamilyLabelled_NonMemberKind_StillWarns()
+    {
+        // Negative test: `String` should not slip through a
+        // `NumericScalar` slot just because the family branch was added.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "name", Kind = "String", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "draw_particles",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "p", Kind = "NumericScalar" },
+                    ],
+                    ReturnType = "Drawing",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT draw_particles(name) FROM t", manifest);
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("NumericScalar"));
+    }
+
+    [Fact]
+    public void FunctionCall_TooFewArguments_WarnsAtEditTime()
+    {
+        // `brighten(image, intensity)` requires two args; passing one
+        // should surface a squiggle instead of waiting until the engine
+        // throws at runtime. Without an arg-count gate, the per-arg type
+        // loop iterates the args we have, finds them compatible, and
+        // returns no diagnostic.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "img", Kind = "Image", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "brighten",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "image", Kind = "Image" },
+                        new ParameterSignature { Name = "intensity", Kind = "NumericScalar" },
+                    ],
+                    ReturnType = "Image",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT brighten(img) FROM t", manifest);
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("brighten()") &&
+            d.Message.Contains("expects 2"));
+    }
+
+    [Fact]
+    public void FunctionCall_TooManyArguments_WarnsAtEditTime()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "img", Kind = "Image", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "to_string",
+                    Parameters = [new ParameterSignature { Name = "value", Kind = "Any" }],
+                    ReturnType = "String",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT to_string(img, img) FROM t", manifest);
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("to_string()") &&
+            d.Message.Contains("got 2"));
+    }
+
+    [Fact]
+    public void FunctionCall_OptionalParameter_OmittedCallDoesNotWarn()
+    {
+        // Optional trailing parameter — call site may omit it, and the
+        // arg-count gate must not false-positive in that case.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "img", Kind = "Image", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "brighten",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "image", Kind = "Image" },
+                        new ParameterSignature { Name = "intensity", Kind = "NumericScalar", IsOptional = true },
+                    ],
+                    ReturnType = "Image",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT brighten(img) FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("brighten()"));
+    }
+
+    [Fact]
+    public void FunctionCall_Variadic_AcceptsAnyExtraCount()
+    {
+        // Variadic functions (e.g. `concat(...)`) — the manifest renders
+        // the variadic slot with a leading `...` name. The arity gate
+        // must treat that as unbounded.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "concat",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "...parts", Kind = "String", IsOptional = true },
+                    ],
+                    ReturnType = "String",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT concat('a', 'b', 'c', 'd')", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("concat()"));
+    }
+
+    [Fact]
+    public void ArrayLiteral_FlowingIntoArrayParameter_DoesNotWarn()
+    {
+        // `[draw_particles(...)]` desugars to `array(draw_particles(...))`.
+        // The analyzer's `array`-aware element inference plus the
+        // manifest's non-double-wrapped return type combine so the call
+        // resolves to `Array<Drawing>` and matches `draw_group`'s
+        // `Array<Drawing>` parameter cleanly.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "array",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "...elements", Kind = "Any", IsOptional = true },
+                    ],
+                    // Mirrors the post-fix manifest rendering for
+                    // `ArrayOf(Custom(...))` rules — the placeholder text
+                    // surfaces only when the analyzer can't infer the
+                    // element kind from the args.
+                    ReturnType = "Array<same as element kind (String when empty)>",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "draw_particles",
+                    Parameters = [new ParameterSignature { Name = "count", Kind = "Int32" }],
+                    ReturnType = "Drawing",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "draw_group",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "drawings", Kind = "Array<Drawing>" },
+                    ],
+                    ReturnType = "Drawing",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT draw_group([draw_particles(100)])", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
+    }
+
     [Fact]
     public void OverloadedFunction_NoShapeMatches_StillWarns()
     {

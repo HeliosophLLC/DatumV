@@ -126,15 +126,17 @@ END;
 -- model lands, register a `DepthEstimatorWithPose` contract returning
 -- `Struct` and add the IMPLEMENTS here.
 --
--- The declared return type is the bare `Struct` kind — the parser
--- doesn't accept inline `Struct<a: T, b: T>` field-list types in
--- RETURNS today (only named structs from NamedTypeRegistry). The body's
--- `RETURN { depth, confidence, extrinsics, intrinsics }` literal
--- defines the struct shape at runtime; the engine interns a TypeId for
--- it and downstream `r.depth` / `r['depth']` field access resolves
--- against that runtime descriptor. A future named-struct registration
--- (`DepthPoseBundle`) would make the contract visible in `system.tasks`
--- + the type registry — small one-time C# addition.
+-- The declared return type uses the inline `Struct<name Type, …>` form
+-- (see docs/sql/create-model.md#struct-return-types). The annotation is
+-- design-time metadata only — the LanguageServer reads it to surface
+-- hover / completion on field access (`r.intrinsics` resolves to its
+-- declared `Array<Float32>(1,1,3,3)` shape), while the runtime treats
+-- the value as the opaque `DataKind.Struct`. The body's
+-- `RETURN { depth: …, intrinsics: … }` literal still defines the actual
+-- per-row struct shape; the engine interns a per-query TypeId from that
+-- literal. A future named-struct registration (`DepthPoseBundle`) would
+-- also make the contract visible in `system.tasks` and the cross-query
+-- type registry — small one-time C# addition.
 
 CREATE OR REPLACE MODEL depth_anything_v3_large_full(img Image)
   RETURNS Struct<
