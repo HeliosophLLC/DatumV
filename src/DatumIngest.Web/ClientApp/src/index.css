@@ -287,14 +287,63 @@
   @apply text-muted-foreground my-3 border-l-2 pl-3 italic;
 }
 .markdown-body code {
-  @apply bg-muted rounded-xs px-1 py-0.5 font-mono text-xs;
+  @apply bg-zinc-100 dark:bg-zinc-800 rounded-xs px-1 py-0.5 font-mono text-xs;
 }
 .markdown-body pre {
-  @apply bg-muted my-3 overflow-x-auto rounded-xs p-3 text-xs;
+  @apply bg-zinc-100 dark:bg-zinc-800 my-3 overflow-x-auto rounded-xs p-3 text-xs;
 }
 .markdown-body pre code {
   @apply bg-transparent p-0 text-xs;
 }
+
+/* Syntax highlighting palette for code blocks. rehype-highlight emits
+   `<code class="hljs language-sql">` with `<span class="hljs-…">` tokens
+   for each lexeme. Rather than importing a stock highlight.js theme
+   (whose hardcoded background would fight the gray above and whose
+   colours aren't theme-aware), we write a minimal palette here so light
+   and dark mode both work and the surrounding `<pre>` controls the bg. */
+.markdown-body .hljs {
+  @apply bg-transparent text-zinc-800 dark:text-zinc-100;
+}
+.markdown-body .hljs-comment,
+.markdown-body .hljs-quote {
+  @apply text-zinc-500 dark:text-zinc-400 italic;
+}
+.markdown-body .hljs-keyword,
+.markdown-body .hljs-selector-tag,
+.markdown-body .hljs-built_in,
+.markdown-body .hljs-name,
+.markdown-body .hljs-tag {
+  @apply text-sky-700 dark:text-sky-300 font-medium;
+}
+.markdown-body .hljs-string,
+.markdown-body .hljs-title,
+.markdown-body .hljs-section,
+.markdown-body .hljs-attribute,
+.markdown-body .hljs-literal,
+.markdown-body .hljs-template-tag,
+.markdown-body .hljs-template-variable,
+.markdown-body .hljs-type,
+.markdown-body .hljs-addition {
+  @apply text-emerald-700 dark:text-emerald-300;
+}
+.markdown-body .hljs-number,
+.markdown-body .hljs-symbol,
+.markdown-body .hljs-bullet,
+.markdown-body .hljs-meta,
+.markdown-body .hljs-link {
+  @apply text-amber-700 dark:text-amber-300;
+}
+.markdown-body .hljs-variable,
+.markdown-body .hljs-params,
+.markdown-body .hljs-class .hljs-title {
+  @apply text-fuchsia-700 dark:text-fuchsia-300;
+}
+.markdown-body .hljs-deletion {
+  @apply text-rose-700 dark:text-rose-300;
+}
+.markdown-body .hljs-emphasis { @apply italic; }
+.markdown-body .hljs-strong { @apply font-semibold; }
 .markdown-body table {
   @apply my-3 w-full border-collapse text-xs;
 }

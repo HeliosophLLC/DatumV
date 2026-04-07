@@ -1,6 +1,12 @@
 - name: Getting Started
   href: getting-started.md
 
+- name: Examples
+  href: examples.md
+  items:
+    - name: Animated torch
+      href: examples.md#animated-torch
+
 - name: SQL Reference
   items:
     - name: Comments

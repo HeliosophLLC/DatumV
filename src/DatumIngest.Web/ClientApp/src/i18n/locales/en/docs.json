@@ -4,5 +4,9 @@
     "placeholder": "Search documentation"
   },
   "empty": "No documents match your search.",
-  "selectPrompt": "Select a document on the left to read it."
+  "selectPrompt": "Select a document on the left to read it.",
+  "copy": {
+    "button": "Copy",
+    "copied": "Copied"
+  }
 }

@@ -14,6 +14,15 @@ const RAW_MODULES = import.meta.glob<string>(
   { query: '?raw', import: 'default', eager: true },
 );
 
+// Binary assets referenced by the markdown (figures, screenshots). Vite
+// returns each as a hashed URL (e.g. `/assets/torch-abc123.gif`), emitted
+// as separate files alongside the JS bundle so they're fetched lazily
+// only when a doc that references them renders.
+const ASSET_MODULES = import.meta.glob<string>(
+  '../../../../../docs/**/*.{gif,png,jpg,jpeg,svg,webp}',
+  { import: 'default', eager: true },
+);
+
 /** Normalised path of one doc, e.g. `sql/select.md` or `getting-started.md`. */
 export type DocPath = string;
 
@@ -65,6 +74,20 @@ function buildEntries(): DocEntry[] {
 }
 
 export const DOC_ENTRIES: readonly DocEntry[] = buildEntries();
+
+// Map of `docs-relative` path → hashed asset URL emitted by Vite.
+// e.g. `figures/torch.gif` → `/assets/torch-abc123.gif`.
+const DOC_ASSETS: ReadonlyMap<string, string> = (() => {
+  const out = new Map<string, string>();
+  for (const [rawKey, url] of Object.entries(ASSET_MODULES)) {
+    const marker = '/docs/';
+    const idx = rawKey.indexOf(marker);
+    if (idx < 0) continue;
+    const path = rawKey.slice(idx + marker.length).replace(/\\/g, '/');
+    out.set(path, url);
+  }
+  return out;
+})();
 
 // ──────────────────────── Search index ────────────────────────
 
@@ -253,23 +276,47 @@ export function resolveDocLink(
   const relPath = hashIdx < 0 ? href : href.slice(0, hashIdx);
   const anchor = hashIdx < 0 ? null : href.slice(hashIdx + 1) || null;
 
-  const fromSegments = fromPath.split('/').slice(0, -1);
-  const stack = [...fromSegments];
-  for (const seg of relPath.split('/')) {
-    if (seg === '' || seg === '.') continue;
-    if (seg === '..') {
-      if (stack.length === 0) return null; // escapes the corpus
-      stack.pop();
-      continue;
-    }
-    stack.push(seg);
-  }
-  const resolved = stack.join('/');
+  const resolved = walkRelative(fromPath, relPath);
+  if (resolved === null) return null;
   // Only resolve to .md files we actually have bundled.
   if (!resolved.toLowerCase().endsWith('.md')) return null;
   const match = DOC_ENTRIES.find((e) => e.path === resolved);
   if (!match) return null;
   return { kind: 'doc', path: match.path, anchor };
+}
+
+/** Walk a `relPath` from the directory of `fromPath`, honouring `.` and
+ *  `..` segments. Returns the resolved `docs-relative` path, or null if
+ *  the walk escapes the docs root. Doesn't check whether the resolved
+ *  path corresponds to a bundled file — callers do that against their
+ *  own corpus (markdown entries, asset map, …). */
+function walkRelative(fromPath: DocPath, relPath: string): string | null {
+  const fromSegments = fromPath.split('/').slice(0, -1);
+  const stack = [...fromSegments];
+  for (const seg of relPath.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (stack.length === 0) return null;
+      stack.pop();
+      continue;
+    }
+    stack.push(seg);
+  }
+  return stack.join('/');
+}
+
+/** Resolve an `<img src="…">` in the doc at `fromPath` against the
+ *  bundled asset map. Returns the hashed URL Vite emitted for the asset,
+ *  or null when the src is external (has a protocol), absolute, or
+ *  points at a file that isn't part of the bundled corpus. */
+export function resolveDocAsset(fromPath: DocPath, src: string): string | null {
+  if (src.length === 0) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(src)) return null; // http(s), data:, …
+  if (src.startsWith('/')) return null;
+  // No anchor handling — images don't take fragments.
+  const resolved = walkRelative(fromPath, src);
+  if (resolved === null) return null;
+  return DOC_ASSETS.get(resolved) ?? null;
 }
 
 // ──────────────────────── Tree shape ────────────────────────
