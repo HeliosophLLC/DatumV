@@ -176,7 +176,6 @@ FROM frames
 | `pc_fuse(a, b)` | `PointCloud` | Concatenates two PointClouds (a.points ++ b.points), unioning bounding boxes. Output is always unorganized. Output carries color iff both inputs do; mixed (one with, one without) drops color rather than inventing it. Coordinate frames must agree, or one side must be `Unspecified`. No deduplication, no voxel-grid downsample. |
 | `pc_fuse_agg(pc)` | `PointCloud` *(aggregate)* | Aggregate-shape variant of `pc_fuse` — folds every non-null PointCloud in a group into one concatenated cloud. Same color / coord-frame / bbox semantics as `pc_fuse`. **Critical for video-fusion queries**: keeps running state in managed memory rather than materializing every intermediate fold output in the value arena. Use instead of `SCAN pc_fuse(world, pc)` when only the final fused cloud is needed (i.e. static reconstruction); use SCAN when intermediate per-tick clouds matter (i.e. progressive-build playback). |
 | `pc_voxel_consensus_agg(pc, cell_size, min_votes)` | `PointCloud` *(aggregate)* | **Fused alternative** to `pc_voxel_consensus(pc_fuse_agg(_), …)` — voxel-hashes points DURING accumulation rather than materializing every raw point first. State is bounded by **voxel count** (scene volume) instead of **point count** (frame count × per-frame points): ~10× less memory and no separate end-of-query finalize pass over millions of points. Drop-in replacement when the equivalent scalar pipeline is too slow or too memory-hungry. |
-| `pc_fuse_tsdf(depth, pose, intrinsics, cell_size, truncation)` | `Mesh` *(aggregate)* | **TSDF (Truncated Signed-Distance-Function) fusion** — the Tier-2 multi-view algorithm. Per-frame depth + pose contributions are integrated into a sparse 3D voxel grid storing signed-distance values; final surface extracted at SDF=0 via Marching Cubes. Drops the duplication problem that `pc_voxel_consensus` has near the camera, and the angular-coverage issue that hurts far surfaces. Bounded state (scene volume, not frame count). Output is a position-only `Mesh`. See [Multi-View Fusion](#multi-view-fusion--from-video-to-a-3d-reconstruction) for the full pipeline. Tuning: `cell_size` 1-3cm indoor, `truncation` 3-5× cell_size. |
 | `pc_transform(pc, pose)` | `PointCloud` | Applies a 4×4 affine transformation matrix (`pose` is a 16-element row-major `Float32[]`) to every position; rows 0–2 hold rotation+translation, row 3 is ignored (no projective division). Translation lives in the 4th column of each row. Color/normals preserved verbatim; coordinate frame tag preserved; bbox recomputed exactly. |
 | `pose_translate(dx, dy, dz)` | `Float32[]` | Builds a 4×4 affine translation matrix as a 16-element row-major `Float32[]`. Equivalent to the literal `[1,0,0,dx, 0,1,0,dy, 0,0,1,dz, 0,0,0,1]::Float32[]`. |
 | `pose_inverse(pose)` | `Float32[]` | Inverts a 4×4 affine pose matrix via the rigid-inverse formula `M⁻¹ = [Rᵀ \| −Rᵀ·t]`. Assumes orthogonal rotation; numerically stable for typical pose-estimation output. Primary use: diagnosing pose convention (camera-to-world vs world-to-camera) — swap the input to `pc_transform` and see which direction lands the per-frame clouds correctly in a shared world frame. |
@@ -340,24 +339,28 @@ the output renders correctly in any consumer.
 ## Multi-View Fusion — From Video to a 3D Reconstruction
 
 Fusing many video frames into one coherent 3D reconstruction is the canonical
-spatial workload. The right pipeline depends on what you want and what
-input you have. Each tier below builds on the one before.
+spatial workload. The shipped path is **voxel-consensus fusion**: lean into
+its honest noise floor rather than fighting it. Higher-quality reconstruction
+exists, but the SOTA approaches that materially exceed consensus are mostly
+non-commercial-licensed (DUSt3R, MASt3R, VGGT, the Inria reference 3DGS
+implementation, etc.). The permissive-license path past consensus is the
+classical photogrammetry stack — see "Beyond consensus" below.
 
-### Tier 0 — Per-frame, no fusion
+### Per-frame, no fusion
 
 ```sql
 SELECT mesh_from_depth_pinhole(frame, models.depth_anything_v3_large_meters(frame), 80)
-FROM unnest_frames(video) v
+FROM video_unnest_frames(video) v
 ```
 
 One 2.5-D mesh per frame, independent. No pose, no accumulation. Useful
 for inspecting individual frames or building a "movie with depth"
 playback. Falls down the moment you want a cross-frame reconstruction.
 
-### Tier 1 — Voxel-consensus fusion
+### Voxel-consensus fusion
 
 ```sql
-SELECT pc_voxel_consensus(pc_fuse_agg(world_cloud), 0.02, 5)
+SELECT pc_voxel_consensus_agg(world_cloud, 0.02, 5)
 FROM (
     SELECT pc_transform(
         point_cloud_from_depth_pinhole_with_confidence(
@@ -367,101 +370,33 @@ FROM (
 )
 ```
 
-Fuse per-frame depth-derived point clouds into a single accumulator
-(`pc_fuse_agg`), then voxel-downsample with a minimum-vote threshold to
-suppress single-frame noise (`pc_voxel_consensus`). Outputs a
-`PointCloud`. The right answer for short demos with modest motion.
+Each per-frame depth-derived cloud is voxel-hashed into the running
+accumulator; voxels with at least `min_votes` contributing points
+survive to the output. The aggregate's state is bounded by *voxel
+count* (scene volume), not point count (frame count × pixels) —
+critical for video-length inputs.
 
-**Known limit**: works by counting votes per voxel. Near-camera surfaces
-get many observations spread across multiple cells due to pose+depth
-noise (each cell only gets a fraction of the available votes, requiring
-`min_votes` to be tuned downward). Far surfaces have intrinsically fewer
-votes due to angular coverage and depth-model uncertainty (requiring
-`min_votes` to be tuned upward). **You cannot satisfy both simultaneously**
-— that's the structural tension that motivates moving to Tier 2.
+**Strengths**:
+- Honest noise floor. Voxels you see surviving are the ones genuinely
+  observed by multiple frames; everything else gets dropped. The output
+  is a faithful "what the camera could agree on" representation.
+- Discrete points, easy to interpret. Each surviving voxel is one point
+  in the output cloud; you can render them as points or cubes (see the
+  viewer's mode toggle) and see the structure directly.
+- Permissively licensed end-to-end — all primitives are yours, the
+  depth model (Depth-Anything-v2/v3 family) is Apache 2.0.
 
-Also: state grows linearly with frame count (`pc_fuse_agg` holds all
-points until finalize), so 100+ frame videos run into multi-GB managed
-memory and minutes-long finalize passes.
+**Known limit**: vote counts don't account for *visibility* — far
+surfaces seen by fewer frames get fewer votes intrinsically. With one
+global `min_votes` threshold, you trade between losing far detail
+(threshold too high) and keeping near-surface noise (threshold too low).
+There is no universally-correct `min_votes`; pick to match your scene.
 
-### Tier 2 — TSDF fusion
+### Diagnostics
 
-```sql
-SELECT pc_fuse_tsdf(
-    resized_curr_depth, cumulative_pose, k_scaled,
-    0.015,    -- cell_size (meters)
-    0.05      -- truncation distance (meters)
-)
-FROM accumulated
-```
-
-Truncated Signed-Distance-Function fusion — the principled multi-view
-algorithm pioneered by KinectFusion (2011) and the foundation of every
-modern RGB-D reconstruction pipeline (Open3D, Habitat, ARCore's mesh
-output).
-
-Per voxel, store a *continuous* signed distance to the nearest surface
-plus an accumulated weight. Each frame's depth observations contribute
-to multiple voxels along the camera ray (positive SDF in free space,
-negative behind surface) — voxel SDFs average across frames, and the
-final surface is extracted at `SDF = 0` via Marching Cubes. Output is a
-`Mesh`, not a `PointCloud`.
-
-**Why this kills the duplication problem**: noisy observations average
-toward the true surface position rather than splitting votes across
-cells. Free-space carving (the strongly-negative SDF values from frames
-whose rays passed through "empty" voxels in front of real surfaces)
-automatically suppresses ghost surfaces — *no min_votes threshold to
-tune*. Near and far surfaces are treated uniformly because the same
-averaging math applies regardless of angular coverage.
-
-**State bounded by scene volume, not frame count**: the sparse voxel
-grid only holds cells touched by depth observations, capped at the
-truncation thickness around real surfaces. 100K-1M voxels for typical
-rooms — tiny vs. the multi-GB managed point cloud Tier 1 accumulates.
-
-**Cost model**: per-frame ~`pixels × (truncation / cell_size)` voxel
-updates. For 230K-pixel depth at 1.5cm cells, 5cm truncation: ~3M
-updates per frame, all Dictionary inserts / averaging. Finalize runs
-Marching Cubes over a dense `resolution³` grid (≤ 512 cap to bound
-memory). Cubed grid memory at the cap: 512³ × 4 bytes = 512MB — drop
-`cell_size` or constrain bounds if you hit this.
-
-**Tuning**:
-- `cell_size` = 1-3 cm typical for indoor handheld. Smaller = finer
-  detail, but multiplies cell count and final grid size.
-- `truncation` = 3-5× `cell_size`. Sets how far around each surface to
-  update SDF. Too small = surfaces have gaps; too large = SDF averaging
-  smooths out fine detail.
-
-### Tier 3 — Architectural alternatives (not built)
-
-When TSDF's geometric averaging isn't enough — typically when pose drift
-is large or you want photo-realistic appearance — three further
-escalations exist:
-
-| | What it adds | Cost |
-|---|---|---|
-| **3D Gaussian Splatting** | Photometric consistency optimization; view-dependent shading; soft surfaces | Weeks. New DataKind, new viewer, training pipeline |
-| **DUSt3R / MASt3R / VGGT** | One feedforward model replaces pose-estimation + depth + fusion. Globally consistent multi-view 3D in one pass | 1-2 days if a clean ONNX export exists; weeks otherwise |
-| **Bundle adjustment + NeRF** | Globally refines poses to minimize reprojection error; NeRF gives photo-realistic novel-view rendering | 1-2 weeks. External COLMAP integration, NeRF training |
-
-See [`project_multiview_fusion_quality.md`](../../memory/project_multiview_fusion_quality.md)
-in the project memory for the full decision matrix.
-
-### When to pick which tier
-
-| Workload | Tier |
-|---|---|
-| Inspect a single frame's depth | 0 |
-| Short demo, ≤30 frames, fixed-position pan | 1 (consensus) |
-| Indoor reconstruction, 50-500 frames, want crisp surfaces | **2 (TSDF)** |
-| Photo-realistic novel views | 3 (3DGS or NeRF) |
-| Best-in-class scientific quality | 3 (COLMAP + NeRF) |
-
-Most users go Tier 0 → Tier 1 → Tier 2 as they understand the workload's
-demands. Don't jump to Tier 3 until you've actually felt the limits of
-Tier 2; the engineering scope is much larger.
+For diagnosing where your reconstruction loses fidelity:
+- `pose_to_world_position(pose) → Point3D` — extracts camera-position trajectory; aggregate into a small PointCloud to overlay on the scene.
+- `pose_to_euler_degrees(pose) → Float32[3]` — yaw/pitch/roll of the pose. Confirms pose-from-rgbd is tracking actual motion.
 
 ## Coordinate Frames
 

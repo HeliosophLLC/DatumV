@@ -1026,7 +1026,6 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate(new Aggregates.ArrayAggregateFunction());
         registry.RegisterAggregate(new Aggregates.PcFuseAggregateFunction());
         registry.RegisterAggregate(new Aggregates.PcVoxelConsensusAggregateFunction());
-        registry.RegisterAggregate(new Aggregates.PcFuseTsdfFunction());
         registry.RegisterAggregate(new Aggregates.ArgMaxFunction(findMaximum: true, "ARG_MAX"));
         registry.RegisterAggregate(new Aggregates.ArgMaxFunction(findMaximum: false, "ARG_MIN"));
 
