@@ -868,6 +868,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Spatial.PoseIdentityFunction>();
         registry.RegisterScalar<Scalar.Spatial.PoseComposeFunction>();
         registry.RegisterScalar<Scalar.Spatial.PoseInverseFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PoseToWorldPositionFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PoseToEulerDegreesFunction>();
         registry.RegisterScalar<Scalar.Spatial.PoseFromRgbdFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcFilterDepthFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcFilterDepthPercentileFunction>();
@@ -1023,6 +1025,8 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate(new Aggregates.StringAggregateFunction());
         registry.RegisterAggregate(new Aggregates.ArrayAggregateFunction());
         registry.RegisterAggregate(new Aggregates.PcFuseAggregateFunction());
+        registry.RegisterAggregate(new Aggregates.PcVoxelConsensusAggregateFunction());
+        registry.RegisterAggregate(new Aggregates.PcFuseTsdfFunction());
         registry.RegisterAggregate(new Aggregates.ArgMaxFunction(findMaximum: true, "ARG_MAX"));
         registry.RegisterAggregate(new Aggregates.ArgMaxFunction(findMaximum: false, "ARG_MIN"));
 

@@ -71,6 +71,11 @@ export function PointCloudViewerBody({
   const [error, setError] = useState<DecodeError | null>(null);
   const [mode, setMode] = useState<'points' | 'voxels' | 'mesh'>('points');
   const [voxelSize, setVoxelSize] = useState<number | null>(null);
+  // Tracks whether the viewer container has keyboard focus. The keyboard
+  // handler inside <OrbitControlsWithKeyboard> reads this ref to decide
+  // whether to consume WASD/QE keystrokes. Refs (not state) so the
+  // handler always sees the latest value without re-binding listeners.
+  const isViewerFocusedRef = useRef(false);
 
   // Decode once when the viewer becomes active. The work is async
   // (DecompressionStream is stream-based) so we hold a cancellation
@@ -216,7 +221,22 @@ export function PointCloudViewerBody({
           </button>
         </div>
       </div>
-      <div className="bg-[#1a1a1a] relative flex-1 overflow-hidden rounded-md">
+      <div
+        // tabIndex makes the container focusable so we can gate keyboard
+        // input on its focus state — without this, WASD steals keys even
+        // when the user is typing in a SQL editor or another panel. The
+        // focus ring confirms "the viewer has keyboard input" visually.
+        tabIndex={0}
+        onMouseDown={(e) => {
+          // Click anywhere in the viewer to capture keyboard input.
+          // Stops the focus from being lost to <body> when clicking the
+          // canvas itself (which isn't focusable).
+          e.currentTarget.focus();
+        }}
+        onFocus={() => { isViewerFocusedRef.current = true; }}
+        onBlur={() => { isViewerFocusedRef.current = false; }}
+        className="bg-[#1a1a1a] relative flex-1 overflow-hidden rounded-md outline-none focus:ring-2 focus:ring-primary/60"
+      >
         {error && (
           <div className="text-destructive absolute inset-0 flex items-center justify-center text-sm">
             {error.message}
@@ -241,7 +261,11 @@ export function PointCloudViewerBody({
             )}
             {mode === 'mesh' && <MeshRenderer decoded={decoded} />}
             <axesHelper args={[Math.max(...decoded.bbox.max.map(Math.abs), ...decoded.bbox.min.map(Math.abs)) * 0.5]} />
-            <OrbitControlsWithKeyboard target={camera.center} sceneExtent={cameraExtent(decoded)} />
+            <OrbitControlsWithKeyboard
+              target={camera.center}
+              sceneExtent={cameraExtent(decoded)}
+              isFocusedRef={isViewerFocusedRef}
+            />
           </Canvas>
         )}
         <div className="text-muted-foreground pointer-events-none absolute bottom-2 right-2 text-[10px] opacity-70">
@@ -275,9 +299,11 @@ export function PointCloudViewerBody({
 function OrbitControlsWithKeyboard({
   target,
   sceneExtent,
+  isFocusedRef,
 }: {
   target: [number, number, number];
   sceneExtent: number;
+  isFocusedRef: React.MutableRefObject<boolean>;
 }) {
   const controlsRef = useRef<OrbitControlsImpl>(null!);
   const { camera } = useThree();
@@ -292,6 +318,27 @@ function OrbitControlsWithKeyboard({
     controlsRef.current.update();
   }, [target]);
 
+  // Snap orbit target to a point just in front of the camera whenever a
+  // mouse drag starts. Without this, mouse drag orbits around the
+  // original scene center — which becomes off-screen and disorienting
+  // after WASD-moving + rotating. By snapping to `camera + forward × 5%
+  // of scene extent` at the start of every drag, rotation always pivots
+  // around what the user is currently looking at — effectively converts
+  // orbit-around-scene into look-around-in-place.
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    const handleStart = () => {
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      const pivotDistance = sceneExtent * 0.05;
+      controls.target.copy(camera.position).addScaledVector(forward, pivotDistance);
+      controls.update();
+    };
+    controls.addEventListener('start', handleStart);
+    return () => { controls.removeEventListener('start', handleStart); };
+  }, [camera, sceneExtent]);
+
   useEffect(() => {
     const isTypingTarget = (el: Element | null): boolean => {
       if (!el) return false;
@@ -302,6 +349,11 @@ function OrbitControlsWithKeyboard({
     };
 
     const down = (e: KeyboardEvent) => {
+      // Only consume keys when the viewer container has focus. The user
+      // clicks the canvas to opt in (`onMouseDown` focuses it); clicking
+      // away (SQL editor, panels, etc.) blurs and lets normal typing
+      // through.
+      if (!isFocusedRef.current) return;
       if (isTypingTarget(document.activeElement)) return;
       const k = e.key.toLowerCase();
       if ('wasdqe'.includes(k) || k === 'shift') {

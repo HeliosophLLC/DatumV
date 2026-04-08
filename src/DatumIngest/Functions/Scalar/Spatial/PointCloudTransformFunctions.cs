@@ -522,3 +522,213 @@ public sealed class PoseInverseFunction : IFunction, IScalarFunction
         return new ValueTask<ValueRef>(ValueRef.FromPrimitiveArray(inv, DataKind.Float32));
     }
 }
+
+/// <summary>
+/// <c>pose_to_world_position(pose Float32[]) → Point3D</c>. Extracts the
+/// camera's world-space position from a camera-to-world pose matrix —
+/// i.e. the translation component of the 4×4 row-major matrix. Useful for
+/// visualizing camera trajectories (aggregate per-frame positions into a
+/// PointCloud and overlay on the scene to see where the camera moved).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Convention assumption.</strong> Assumes <paramref>pose</paramref>
+/// is a <em>camera-to-world</em> transform — i.e. applying it to the camera-
+/// local origin <c>(0, 0, 0)</c> yields the camera's position in the world
+/// frame. That's just the translation triplet at indices [3], [7], [11] of
+/// the row-major matrix. If your pose convention is world-to-camera, run
+/// it through <see cref="PoseInverseFunction"/> first.
+/// </para>
+/// <para>
+/// <strong>Diagnostic value.</strong> Aggregating <c>pose_to_world_position</c>
+/// across all frames produces a sparse "trajectory" point set. For a phone
+/// pan from a fixed standing position, this should be a tight cluster
+/// (~10cm of wrist sway). For a video walking through a scene, it should
+/// be a continuous line of points. Visually disambiguates rotation-only vs
+/// translation-bearing motion in your pose pipeline.
+/// </para>
+/// </remarks>
+public sealed class PoseToWorldPositionFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "pose_to_world_position";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Spatial;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Extracts the camera's world-space position from a camera-to-world "
+        + "4x4 pose matrix — just the translation triplet at indices [3], [7], "
+        + "[11]. Aggregate across frames to visualize a camera trajectory.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("pose", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Point3D)),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<PoseToWorldPositionFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ValueRef arg = arguments.Span[0];
+        if (arg.IsNull)
+        {
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Point3D));
+        }
+
+        ReadOnlySpan<float> pose =
+            arg.ToDataValue(frame.Source).AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
+        if (pose.Length != 16)
+        {
+            throw new FunctionArgumentException(
+                Name,
+                $"pose must be exactly 16 Float32 values (a 4x4 row-major matrix); got {pose.Length}.");
+        }
+
+        // Row-major translation triplet: m03, m13, m23.
+        return new ValueTask<ValueRef>(
+            ValueRef.FromPoint3D(new Vector3(pose[3], pose[7], pose[11])));
+    }
+}
+
+/// <summary>
+/// <c>pose_to_euler_degrees(pose Float32[]) → Float32[3]</c>. Extracts the
+/// rotation portion of a 4×4 pose matrix as <c>(yaw, pitch, roll)</c>
+/// Tait-Bryan angles in <strong>degrees</strong>. Companion to
+/// <see cref="PoseToWorldPositionFunction"/> for understanding what a pose
+/// pipeline is producing — for a phone pan, you'd expect yaw to drift
+/// smoothly while pitch and roll stay near zero.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Convention.</strong> Tait-Bryan with intrinsic Y-X-Z ordering —
+/// rotate around the world's Y axis first (yaw), then the rotated X axis
+/// (pitch), then the rotated Z axis (roll). Matches OpenGL / Three.js
+/// where +Y is up, so yaw is "turning around the vertical axis" — the
+/// dominant component of a phone pan.
+/// </para>
+/// <para>
+/// <strong>Output layout.</strong> <c>[yaw, pitch, roll]</c> in degrees,
+/// accessed via <c>array_get(result, 1)</c>, <c>array_get(result, 2)</c>,
+/// <c>array_get(result, 3)</c>. Each is in <c>[-180, 180]</c> for yaw and
+/// roll, <c>[-90, 90]</c> for pitch.
+/// </para>
+/// <para>
+/// <strong>Gimbal lock.</strong> When pitch approaches ±90° (camera
+/// pointing nearly straight up or down), yaw and roll become degenerate
+/// (multiple valid decompositions). This implementation attributes the
+/// combined rotation to yaw and zeroes out roll in that case — keeps
+/// trajectory analysis stable.
+/// </para>
+/// </remarks>
+public sealed class PoseToEulerDegreesFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "pose_to_euler_degrees";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Spatial;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Extracts (yaw, pitch, roll) Tait-Bryan angles in degrees from a 4x4 "
+        + "pose matrix. Returns a 3-element Float32 array. Y-X-Z intrinsic "
+        + "ordering — yaw is around the vertical (Y) axis, the dominant "
+        + "component of a phone pan.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("pose", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<PoseToEulerDegreesFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ValueRef arg = arguments.Span[0];
+        if (arg.IsNull)
+        {
+            return new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.Float32));
+        }
+
+        ReadOnlySpan<float> pose =
+            arg.ToDataValue(frame.Source).AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
+        if (pose.Length != 16)
+        {
+            throw new FunctionArgumentException(
+                Name,
+                $"pose must be exactly 16 Float32 values (a 4x4 row-major matrix); got {pose.Length}.");
+        }
+
+        // Row-major rotation block. Y-X-Z intrinsic extraction:
+        //   yaw   = atan2(r02, r22)
+        //   pitch = asin(-r12)
+        //   roll  = atan2(r10, r11)
+        float r00 = pose[0];
+        float r02 = pose[2];
+        float r10 = pose[4];
+        float r11 = pose[5];
+        float r12 = pose[6];
+        float r20 = pose[8];
+        float r22 = pose[10];
+
+        // Clamp the pitch input — float drift can push it slightly outside
+        // [-1, 1] and Asin would return NaN at the boundary.
+        float pitchSin = -r12;
+        if (pitchSin > 1f) pitchSin = 1f;
+        if (pitchSin < -1f) pitchSin = -1f;
+        float pitch = MathF.Asin(pitchSin);
+
+        float yaw, roll;
+        // Near gimbal lock the standard formula goes degenerate (both r02 and
+        // r22 → 0, atan2 unstable). Use the alternate decomposition that
+        // routes everything through yaw.
+        const float GimbalThreshold = 0.99999f;
+        if (MathF.Abs(pitchSin) > GimbalThreshold)
+        {
+            yaw = MathF.Atan2(-r20, r00);
+            roll = 0f;
+        }
+        else
+        {
+            yaw = MathF.Atan2(r02, r22);
+            roll = MathF.Atan2(r10, r11);
+        }
+
+        const float RadToDeg = 180f / MathF.PI;
+        float[] result =
+        [
+            yaw * RadToDeg,
+            pitch * RadToDeg,
+            roll * RadToDeg,
+        ];
+        return new ValueTask<ValueRef>(ValueRef.FromPrimitiveArray(result, DataKind.Float32));
+    }
+}
