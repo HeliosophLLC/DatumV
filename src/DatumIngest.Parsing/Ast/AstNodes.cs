@@ -649,6 +649,14 @@ public enum UnaryOperator
 /// session search_path when null. See <see cref="CallName"/> for the flat
 /// string form used by back-compat lookups.
 /// </param>
+/// <param name="ArgumentNames">
+/// Parallel list of PG-style named-argument names. Non-null entry at index
+/// <c>i</c> means argument <c>i</c> was supplied as <c>name := expr</c> /
+/// <c>name =&gt; expr</c>; null means positional. The whole list is
+/// <see langword="null"/> when every argument is positional (the common
+/// case). Consumed and zeroed by the <c>NamedArgPermuter</c> planner pass
+/// before type resolution.
+/// </param>
 public sealed record FunctionCallExpression(
     string FunctionName,
     IReadOnlyList<Expression> Arguments,
@@ -656,7 +664,8 @@ public sealed record FunctionCallExpression(
     bool Distinct = false,
     SourceSpan? Span = null,
     IReadOnlyList<OrderByItem>? WithinGroupOrderBy = null,
-    string? SchemaName = null) : Expression
+    string? SchemaName = null,
+    IReadOnlyList<string?>? ArgumentNames = null) : Expression
 {
     /// <summary>
     /// Flat-string form of the call name, <c>"schema.fn"</c> when
@@ -665,6 +674,29 @@ public sealed record FunctionCallExpression(
     /// dispatch.
     /// </summary>
     public string CallName => SchemaName is null ? FunctionName : $"{SchemaName}.{FunctionName}";
+
+    /// <summary>
+    /// True when any argument was supplied as a PG-style named argument
+    /// (<c>name := expr</c> or <c>name =&gt; expr</c>). Index-aligned with
+    /// <see cref="Arguments"/>: a non-null entry at index <c>i</c> means
+    /// argument <c>i</c> was named; null means positional. The
+    /// <c>NamedArgPermuter</c> planner pass consumes these names and
+    /// rewrites the call into a fully-positional shape before type
+    /// resolution / evaluation; downstream code should always see
+    /// <see cref="ArgumentNames"/> as <see langword="null"/>.
+    /// </summary>
+    public bool HasNamedArguments
+    {
+        get
+        {
+            if (ArgumentNames is null) return false;
+            for (int i = 0; i < ArgumentNames.Count; i++)
+            {
+                if (ArgumentNames[i] is not null) return true;
+            }
+            return false;
+        }
+    }
 }
 
 /// <summary>

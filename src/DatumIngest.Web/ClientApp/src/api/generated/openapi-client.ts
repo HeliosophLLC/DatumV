@@ -1293,7 +1293,7 @@ export interface CompletionItem {
 }
 
 /** Classification of a completion item, aligned with LSP CompletionItemKind values. */
-export type CompletionItemKind = "function" | "column" | "variable" | "schema" | "keyword" | "enumMember" | "table" | "typeParameter";
+export type CompletionItemKind = "function" | "column" | "variable" | "schema" | "property" | "keyword" | "enumMember" | "table" | "typeParameter";
 
 export interface LangPositionRequest {
     sql?: string;

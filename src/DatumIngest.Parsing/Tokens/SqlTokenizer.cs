@@ -218,6 +218,7 @@ public static class SqlTokenizer
             .Match(Span.EqualTo("@@"), SqlToken.AtAt)
             .Match(Span.EqualTo("::"), SqlToken.DoubleColon)
             .Match(Span.EqualTo(":="), SqlToken.ColonEquals)
+            .Match(Span.EqualTo("=>"), SqlToken.FatArrow)
 
             // Single-character symbols
             .Match(Character.EqualTo('*'), SqlToken.Star)

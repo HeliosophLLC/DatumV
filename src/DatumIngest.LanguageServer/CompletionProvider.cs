@@ -165,6 +165,11 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddAggregateFunctions(items);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
+                // PG-style named-argument completions for the enclosing
+                // call's remaining parameters. Surfaced alongside the
+                // other expression-context items so the user can switch
+                // to `name := value` mid-call without leaving the popup.
+                AddNamedArgumentNames(items, sql, cursorOffset);
                 break;
 
             case CompletionZoneKind.InsideOver:
@@ -1384,6 +1389,119 @@ public sealed class CompletionProvider
                 SortOrder = 0,
             });
         }
+    }
+
+    /// <summary>
+    /// Surfaces the enclosing call's remaining parameter names as PG-style
+    /// named-argument completions (<c>name := </c>). Skips parameters
+    /// already consumed by positional arguments earlier in the call or
+    /// supplied by name in a previous slot. Resolves the function through
+    /// the same registries the <see cref="SignatureHelpProvider"/> uses —
+    /// UDFs, procedures, then built-in scalar / TVF entries — so user-
+    /// defined functions surface their parameter names too.
+    /// </summary>
+    private void AddNamedArgumentNames(List<CompletionItem> items, string sql, int cursorOffset)
+    {
+        if (!EnclosingCallResolver.TryResolve(sql, cursorOffset, out EnclosingCallResolver.Result call))
+        {
+            return;
+        }
+
+        // All parameter-name shapes the call could resolve to (union of
+        // every overload variant). null signals "no manifest entry" —
+        // we don't synthesise names for unknown functions.
+        List<IReadOnlyList<ParameterSignature>>? variants = ResolveParameterVariants(call.FunctionName);
+        if (variants is null || variants.Count == 0) return;
+
+        HashSet<string> alreadyNamed = new(call.ArgumentNamesSoFar, StringComparer.OrdinalIgnoreCase);
+        // Positional argument count = total slots completed minus the
+        // slots that were named. Under the "no positional after named"
+        // rule, those positional slots consume the first N parameters
+        // by index. The current (uncompleted) slot is `call.ActiveParameter`
+        // and doesn't consume anything yet.
+        int positionalCount = call.ActiveParameter - alreadyNamed.Count;
+        if (positionalCount < 0) positionalCount = 0;
+
+        // Walk the union across all variants. Same parameter name across
+        // variants dedup'd by case-insensitive lookup so overloaded
+        // functions like `image_crop` (rect / rect-array) don't show
+        // duplicates.
+        HashSet<string> emitted = new(StringComparer.OrdinalIgnoreCase);
+        foreach (IReadOnlyList<ParameterSignature> variant in variants)
+        {
+            for (int i = 0; i < variant.Count; i++)
+            {
+                ParameterSignature param = variant[i];
+                if (i < positionalCount) continue;            // consumed positionally
+                if (alreadyNamed.Contains(param.Name)) continue; // consumed by name
+                if (!emitted.Add(param.Name)) continue;       // dedup across overloads
+
+                string optionalHint = param.IsOptional ? " (optional)" : "";
+                items.Add(new CompletionItem
+                {
+                    Label = $"{param.Name} := ",
+                    Kind = CompletionItemKind.Property,
+                    InsertText = $"{param.Name} := ",
+                    Detail = $"{param.Kind}{optionalHint} — parameter of {call.FunctionName}",
+                    SortOrder = 0,
+                });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns every known parameter-shape variant for a callable name —
+    /// UDF, procedure, or built-in scalar / TVF. Returns
+    /// <see langword="null"/> when the manifest has no matching entry so
+    /// the caller can skip suggestions for unknown names.
+    /// </summary>
+    private List<IReadOnlyList<ParameterSignature>>? ResolveParameterVariants(string functionName)
+    {
+        List<IReadOnlyList<ParameterSignature>>? variants = null;
+
+        // Split dotted form into (schema, name); bare name walks search_path.
+        int dot = functionName.IndexOf('.');
+        string? explicitSchema = dot > 0 ? functionName[..dot] : null;
+        string bareName = dot > 0 ? functionName[(dot + 1)..] : functionName;
+
+        if (_manifest.Udfs is not null)
+        {
+            foreach (UdfEntry udf in _manifest.Udfs)
+            {
+                if (!string.Equals(udf.Name, bareName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (explicitSchema is not null
+                    && !string.Equals(udf.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)) continue;
+                if (udf.Parameters is not null) (variants ??= new()).Add(udf.Parameters);
+            }
+        }
+
+        if (_manifest.Procedures is not null)
+        {
+            foreach (ProcedureEntry proc in _manifest.Procedures)
+            {
+                if (!string.Equals(proc.Name, bareName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (explicitSchema is not null
+                    && !string.Equals(proc.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)) continue;
+                if (proc.Parameters is not null) (variants ??= new()).Add(proc.Parameters);
+            }
+        }
+
+        foreach (FunctionSignature fn in _manifest.Functions)
+        {
+            if (!string.Equals(fn.Name, bareName, StringComparison.OrdinalIgnoreCase)) continue;
+            if (explicitSchema is not null
+                && !string.Equals(fn.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)) continue;
+            (variants ??= new()).Add(fn.Parameters);
+            if (fn.AdditionalParameterShapes is not null)
+            {
+                foreach (IReadOnlyList<ParameterSignature> extra in fn.AdditionalParameterShapes)
+                {
+                    variants.Add(extra);
+                }
+            }
+        }
+
+        return variants;
     }
 
     /// <summary>

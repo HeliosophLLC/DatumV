@@ -656,7 +656,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
     internal IQueryPlan PlanQuery(QueryExpression query)
     {
-        QueryExpression inlined = UdfInliner.Inline(query, Udfs, SearchPath, Procedures);
+        // PG-style named arguments — rewrite fn(a := 1, b => 2) into the
+        // canonical positional shape before UdfInliner / planner passes,
+        // which all assume positional argument lists.
+        QueryExpression permuted = NamedArgPermuter.Permute(query, Functions, Udfs, SearchPath);
+        QueryExpression inlined = UdfInliner.Inline(permuted, Udfs, SearchPath, Procedures);
         QueryPlanner planner = new(this, Functions);
         QueryOperator op = planner.Plan(inlined);
         return new QueryPlan(op, this, Functions);

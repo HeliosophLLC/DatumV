@@ -44,6 +44,14 @@ public sealed class QueryPlanner
     /// <returns>The root operator of the execution plan.</returns>
     public QueryOperator Plan(QueryExpression query)
     {
+        // PG-style named arguments — rewrite fn(a := 1, b => 2) into the
+        // canonical positional shape. TableCatalog.PlanQuery runs this
+        // pass before UdfInliner so macro-UDF substitution sees aligned
+        // arguments; the re-application here is idempotent (no-op when
+        // every call has already been permuted) and covers test-harness
+        // paths that call the planner directly.
+        query = NamedArgPermuter.Permute(query, _functionRegistry, _catalog.Udfs, _catalog.SearchPath);
+
         // Body-scope gate. The planner is only entered for top-level queries —
         // procedural UDF / model bodies are interpreted by their respective
         // adapters (`ProceduralUdfFunction`, `ProceduralModelFunction`) and
@@ -163,6 +171,14 @@ public sealed class QueryPlanner
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
+        // Mirrors the sync Plan() entry point: PG-style named arguments
+        // are rewritten into positional form before any operator-building
+        // pass. Idempotent — TableCatalog.PlanQuery already permuted user-
+        // facing paths; this call covers direct planner invocations from
+        // test fixtures and from PlanCompoundWithSubqueriesAsync's
+        // recursion.
+        query = NamedArgPermuter.Permute(query, _functionRegistry, _catalog.Udfs, _catalog.SearchPath);
+
         QueryOperator op = query switch
         {
             SelectQueryExpression select =>

@@ -654,13 +654,44 @@ public static class SqlParser
     /// Function names may be namespaced (<c>models.mobilenetv2</c>); the namespace is
     /// folded into the function name with a dot for registry lookup.
     /// </summary>
+    /// <summary>
+    /// One slot in a function call's argument list. <c>Name</c> is non-null
+    /// when the argument was supplied as <c>name := expr</c> or
+    /// <c>name =&gt; expr</c> (PG-style named argument); null for the
+    /// classic positional form. The <c>NamedArgPermuter</c> planner pass
+    /// resolves names against the function's signature and rewrites the
+    /// call into a fully-positional shape before type resolution.
+    /// </summary>
+    /// <summary>
+    /// Atomic lookahead for the named-argument prefix
+    /// <c>identifier (:= | =&gt;)</c>. Wrapping just the prefix in
+    /// <c>.Try()</c> commits the parser to the named form as soon as the
+    /// operator is seen — failures while parsing the right-hand
+    /// expression aren't backtracked (which would otherwise re-attempt
+    /// the bare-expression fallback and surface a misleading error
+    /// pointing at the outer call rather than the actual failure site).
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string> NamedArgumentPrefix =
+        (from name in SP.Ref(() => IdentifierOrKeywordAsName!)
+         from op in Token.EqualTo(SqlToken.ColonEquals)
+             .Or(Token.EqualTo(SqlToken.FatArrow))
+         select name).Try();
+
+    private static readonly TokenListParser<SqlToken, (string? Name, Expression Expr)> NamedOrPositionalArgument =
+        // Try the named form first: identifier followed by := or =>.
+        // The lookahead .Try() sits on the prefix so the expression
+        // value is parsed without further backtracking.
+        (from name in NamedArgumentPrefix
+         from expr in SP.Ref(() => ExpressionParser!)
+         select ((string?)name, expr))
+        .Or(Token.EqualTo(SqlToken.Star).Select(_ => ((string?)null, (Expression)new LiteralExpression("*"))))
+        .Or(SP.Ref(() => ExpressionParser!).Select(e => ((string?)null, e)));
+
     private static readonly TokenListParser<SqlToken, Expression> FunctionCall =
         from nameTuple in NamespacedFunctionName
         from open in Token.EqualTo(SqlToken.LeftParen)
         from distinct in Token.EqualTo(SqlToken.Distinct).OptionalOrDefault()
-        from args in Token.EqualTo(SqlToken.Star)
-                .Select(_ => (Expression)new LiteralExpression("*"))
-                .Or(SP.Ref(() => ExpressionParser!))
+        from rawArgs in NamedOrPositionalArgument
             .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from orderBy in WindowOrderByParser.OptionalOrDefault()
         from close in Token.EqualTo(SqlToken.RightParen)
@@ -693,6 +724,8 @@ public static class SqlParser
         let name = nameTuple.Name
         let bareName = GetTokenText(nameTuple.Name)
         let schemaName = nameTuple.Namespace
+        let args = ExtractArgumentExpressions(rawArgs)
+        let argNames = ExtractArgumentNames(rawArgs)
         select withinGroup is not null
             ? (Expression)new FunctionCallExpression(
                 bareName,
@@ -701,10 +734,73 @@ public static class SqlParser
                 Distinct: distinct.HasValue,
                 Span: ToSpan(name),
                 WithinGroupOrderBy: withinGroup,
-                SchemaName: schemaName)
+                SchemaName: schemaName,
+                ArgumentNames: argNames)
             : windowSpec is not null
-                ? (Expression)new WindowFunctionCallExpression(bareName, args, windowSpec, Distinct: distinct.HasValue, NullHandling: nullHandling, FromLast: fromLast, Span: ToSpan(name), SchemaName: schemaName)
-                : (Expression)new FunctionCallExpression(bareName, args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name), SchemaName: schemaName);
+                ? BuildWindowCall(bareName, args, argNames, windowSpec, distinct.HasValue, nullHandling, fromLast, ToSpan(name), schemaName)
+                : (Expression)new FunctionCallExpression(bareName, args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name), SchemaName: schemaName, ArgumentNames: argNames);
+
+    /// <summary>
+    /// Builds a <see cref="WindowFunctionCallExpression"/>, rejecting
+    /// PG-style named arguments — window functions don't carry parameter-
+    /// name metadata through to the planner today, so silently dropping
+    /// the supplied names would cause a confusing arity-mismatch error
+    /// later. Surface the limitation here with a precise message.
+    /// </summary>
+    private static Expression BuildWindowCall(
+        string bareName,
+        IReadOnlyList<Expression> args,
+        IReadOnlyList<string?>? argNames,
+        WindowSpecification windowSpec,
+        bool distinct,
+        NullHandling nullHandling,
+        bool fromLast,
+        SourceSpan? span,
+        string? schemaName)
+    {
+        if (argNames is not null)
+        {
+            throw new InvalidOperationException(
+                $"Named arguments (name := value / name => value) are not supported on " +
+                $"window function calls. Use positional arguments for '{bareName}(...) OVER (...)'.");
+        }
+        return new WindowFunctionCallExpression(
+            bareName, args, windowSpec,
+            Distinct: distinct, NullHandling: nullHandling, FromLast: fromLast,
+            Span: span, SchemaName: schemaName);
+    }
+
+    /// <summary>
+    /// Extracts the expression payload from each parsed argument slot.
+    /// Returns a fresh array suitable for storage on
+    /// <see cref="FunctionCallExpression.Arguments"/>.
+    /// </summary>
+    private static Expression[] ExtractArgumentExpressions((string? Name, Expression Expr)[] args)
+    {
+        Expression[] result = new Expression[args.Length];
+        for (int i = 0; i < args.Length; i++) result[i] = args[i].Expr;
+        return result;
+    }
+
+    /// <summary>
+    /// Extracts the parallel parameter-name list from each parsed argument
+    /// slot. Returns <see langword="null"/> when every argument is positional
+    /// so the common case stores no extra state and downstream visitors keep
+    /// the existing fast paths.
+    /// </summary>
+    private static IReadOnlyList<string?>? ExtractArgumentNames((string? Name, Expression Expr)[] args)
+    {
+        bool anyNamed = false;
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i].Name is not null) { anyNamed = true; break; }
+        }
+        if (!anyNamed) return null;
+
+        string?[] names = new string?[args.Length];
+        for (int i = 0; i < args.Length; i++) names[i] = args[i].Name;
+        return names;
+    }
 
     /// <summary>CAST( expression AS type ) — accepts scalar names, the
     /// <c>Array&lt;T&gt;</c> wrapper, and the <c>T[]</c> sugar via the shared
@@ -2584,6 +2680,24 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Unit).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.Comment).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.Check).Select(t => t.ToStringValue()))
+            // MESSAGE is reserved only for the ASSERT / ASSERT_TRUE message
+            // sub-clause; it shows up as a parameter name on many built-in
+            // assertion functions (assert_true(condition, message),
+            // assert_equal(actual, expected, message), …) so callers using
+            // PG-style named arguments expect `message := '…'` to parse.
+            .Or(Token.EqualTo(SqlToken.Message).Select(t => t.ToStringValue()))
+            // AT and END collide with built-in scalar / TVF parameter names
+            // (Drawing functions' `at` slot for placement Point2D, line/range
+            // functions' `end`). Reserved only for AT TIME ZONE / END of
+            // CASE / END of BEGIN…END — none of which can appear inside a
+            // function-call argument list — so accepting them as bare names
+            // here is unambiguous and lets `draw_circle(at := …)` /
+            // `range(start := 0, end := 10)` parse via the PG-style named-arg
+            // syntax. (Audit 2026-05-26 against
+            // ParameterSpec / VariadicSpec collisions; TypeKeyword catches
+            // duration/image/date/time/etc. via its own catch-all branch.)
+            .Or(Token.EqualTo(SqlToken.At).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.End).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.TypeKeyword).Select(t => t.ToStringValue()));
 
     /// <summary>

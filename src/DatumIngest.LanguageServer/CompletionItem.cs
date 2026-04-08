@@ -64,4 +64,13 @@ public enum CompletionItemKind
     /// Maps to LSP <c>CompletionItemKind.EnumMember = 20</c>.
     /// </summary>
     EnumMember = 20,
+
+    /// <summary>
+    /// A named parameter of the enclosing function call (surfaced as
+    /// <c>name := </c>) so the user can switch from positional to
+    /// named-argument form mid-call. Only emitted while the cursor sits
+    /// at the start of an argument slot inside a call's argument list.
+    /// Maps to LSP <c>CompletionItemKind.Property = 10</c>.
+    /// </summary>
+    Property = 10,
 }

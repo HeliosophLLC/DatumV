@@ -126,6 +126,17 @@ public class SqlTokenizerTests : ServiceTestBase
         Assert.Equal(SqlToken.DoubleColon, tokens[0].Kind);
     }
 
+    [Fact]
+    public void FatArrow_TokenizesAsNamedArgumentOperator()
+    {
+        // `=>` is the PG 11+ canonical named-argument operator
+        // (`fn(arg => value)`). Must tokenize as a single FatArrow
+        // and not split into `=` + `>`.
+        Token<SqlToken>[] tokens = Tokenize("=>");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.FatArrow, tokens[0].Kind);
+    }
+
     // ───────────────────── Identifiers ─────────────────────
 
     [Fact]

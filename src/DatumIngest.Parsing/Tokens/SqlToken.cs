@@ -489,11 +489,20 @@ public enum SqlToken
 
     /// <summary>
     /// The <c>:=</c> assignment operator. Used in <c>SELECT name := expr</c>
-    /// to designate a procedural-variable assignment column. PG-native
+    /// to designate a procedural-variable assignment column, and inside a
+    /// function call's argument list to designate a named argument
+    /// (PG-alias form, alongside <see cref="FatArrow"/>). PG-native
     /// PL/pgSQL assignment operator; unambiguous against the comparison
     /// <c>=</c>.
     /// </summary>
     ColonEquals,
+
+    /// <summary>
+    /// The <c>=&gt;</c> fat-arrow operator. Used inside a function call's
+    /// argument list to designate a named argument (canonical PG form,
+    /// PG 11+). Equivalent to <see cref="ColonEquals"/> in that context.
+    /// </summary>
+    FatArrow,
 
     /// <summary>
     /// The <c>::</c> postfix cast operator. PG-native sugar for
