@@ -5,6 +5,8 @@
 using System.Collections.Concurrent;
 using System.Text;
 
+using DatumIngest.Models.Python;
+
 using Microsoft.Extensions.Logging;
 
 namespace DatumIngest.ModelLibrary;
@@ -16,6 +18,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
     private readonly ILicenseAcceptanceService _licenses;
     private readonly IDownloadProgressReporter _reporter;
     private readonly IModelInstaller _installer;
+    private readonly IPythonEnvironmentManager _python;
     private readonly ILogger<ModelDownloadService> _logger;
     private readonly string _modelsDirectory;
 
@@ -30,6 +33,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
         ILicenseAcceptanceService licenses,
         IDownloadProgressReporter reporter,
         IModelInstaller installer,
+        IPythonEnvironmentManager python,
         ModelLibraryOptions options,
         ILogger<ModelDownloadService> logger)
     {
@@ -37,6 +41,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
         _licenses = licenses;
         _reporter = reporter;
         _installer = installer;
+        _python = python;
         _logger = logger;
         _modelsDirectory = options.ModelsDirectory;
 
@@ -266,7 +271,27 @@ internal sealed class ModelDownloadService : IModelDownloadService
         Directory.CreateDirectory(modelDir);
 
         StringBuilder failureLog = new();
-        bool anySourceSucceeded = false;
+        // Models with no file sources are valid for kind="python" entries
+        // whose weights live in an external cache (HF cache for
+        // transformers / diffusers pipelines) rather than under
+        // $DATUM_MODELS. The download phase is then a no-op success;
+        // the venv-install phase below does the real work. Seed
+        // `anySourceSucceeded` true when there are no sources so the
+        // post-loop "no sources, treat as failure" branch doesn't fire
+        // for these intentionally file-less entries.
+        bool anySourceSucceeded = model.Sources.Count == 0;
+
+        // Always emit OnStarted so the UI's install dialog opens, even
+        // when there's nothing to download (kind="python" with no
+        // files). FileCount + TotalBytes are zero in that case; the
+        // install dialog renders a determinate-but-instantly-complete
+        // download bar and proceeds to the venv-install phase.
+        if (model.Sources.Count == 0)
+        {
+            await _reporter.OnStartedAsync(
+                new ModelDownloadStarted(model.Id, FileCount: 0, TotalBytes: 0),
+                ct).ConfigureAwait(false);
+        }
 
         try
         {
@@ -319,6 +344,32 @@ internal sealed class ModelDownloadService : IModelDownloadService
             await _reporter.OnCompleteAsync(
                 new ModelDownloadComplete(model.Id), CancellationToken.None)
                 .ConfigureAwait(false);
+
+            // Python venv install step. Runs for kind="python" entries
+            // after the file download completes — sets up the engine-
+            // managed Python interpreter + per-model venv + declared
+            // requirements. Wrapped in OnInstalling/OnInstalled events
+            // so the UI's install dialog shows "installing Python
+            // environment" alongside the download. Granular per-stage
+            // progress (uv download, python install, deps) flows
+            // separately through IPythonEnvironmentReporter to the
+            // status-bar chip surface when that lands.
+            if (model.Python is { } pythonSpec)
+            {
+                await _reporter.OnInstallingAsync(
+                    new ModelInstalling(model.Id), CancellationToken.None)
+                    .ConfigureAwait(false);
+
+                await _python.EnsureVenvAsync(
+                    venvName: model.Id,
+                    pythonVersion: pythonSpec.PythonVersion,
+                    requirements: pythonSpec.Requirements,
+                    cancellationToken: ct).ConfigureAwait(false);
+
+                await _reporter.OnInstalledAsync(
+                    new ModelInstalled(model.Id), CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
 
             // Run the SQL install glue, if any. Failures here surface as
             // ModelDownloadFailed so the UI shows a single "this didn't

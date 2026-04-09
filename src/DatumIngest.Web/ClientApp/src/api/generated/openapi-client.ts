@@ -1410,6 +1410,8 @@ export interface CatalogModel {
     placeholder?: boolean;
     requiresHfLogin?: boolean;
     installSql?: string | undefined;
+    kind?: string;
+    python?: CatalogPythonSpec | undefined;
 }
 
 export interface CatalogHardware {
@@ -1441,6 +1443,21 @@ export interface HttpsSource extends CatalogSource {
 export interface HttpsFile {
     url?: string;
     destFile?: string;
+}
+
+export interface CatalogPythonSpec {
+    workerScript?: string;
+    pythonVersion?: string;
+    requirements?: string[];
+    signature?: CatalogModelSignature;
+    scaffoldArgs?: string[] | undefined;
+}
+
+export interface CatalogModelSignature {
+    inputKinds?: string[];
+    outputKind?: string;
+    isDeterministic?: boolean;
+    optionalArgKinds?: string[] | undefined;
 }
 
 export type ModelInstallState = "notDownloaded" | "partial" | "downloaded" | "installed";

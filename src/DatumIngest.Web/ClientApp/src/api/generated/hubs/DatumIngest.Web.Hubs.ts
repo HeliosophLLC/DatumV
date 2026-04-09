@@ -134,6 +134,82 @@ export type ModelDownloadFailedDto = {
     error: string;
 }
 
+/** Transpiled from DatumIngest.Web.Hubs.UvDownloadStartedDto */
+export type UvDownloadStartedDto = {
+    /** Transpiled from string */
+    version: string;
+    /** Transpiled from long */
+    totalBytes: number;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.UvDownloadProgressDto */
+export type UvDownloadProgressDto = {
+    /** Transpiled from long */
+    bytesDownloaded: number;
+    /** Transpiled from long */
+    totalBytes: number;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.UvDownloadCompleteDto */
+export type UvDownloadCompleteDto = {
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.PythonInstallStartedDto */
+export type PythonInstallStartedDto = {
+    /** Transpiled from string */
+    version: string;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.PythonInstallProgressDto */
+export type PythonInstallProgressDto = {
+    /** Transpiled from string */
+    stage: string;
+    /** Transpiled from long */
+    bytesProcessed: number;
+    /** Transpiled from long */
+    totalBytes: number;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.PythonInstallCompleteDto */
+export type PythonInstallCompleteDto = {
+    /** Transpiled from string */
+    version: string;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.VenvInstallStartedDto */
+export type VenvInstallStartedDto = {
+    /** Transpiled from string */
+    venvName: string;
+    /** Transpiled from System.Collections.Generic.IReadOnlyList<string> */
+    requirements: string[];
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.VenvInstallProgressDto */
+export type VenvInstallProgressDto = {
+    /** Transpiled from string */
+    venvName: string;
+    /** Transpiled from string */
+    stage: string;
+    /** Transpiled from string */
+    detail: string;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.VenvInstallCompleteDto */
+export type VenvInstallCompleteDto = {
+    /** Transpiled from string */
+    venvName: string;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.PythonEnvironmentFailedDto */
+export type PythonEnvironmentFailedDto = {
+    /** Transpiled from string */
+    stage: string;
+    /** Transpiled from string */
+    venvNameOrEmpty: string;
+    /** Transpiled from string */
+    error: string;
+}
+
 /** Transpiled from DatumIngest.Web.Hubs.ModelLoadedEvent */
 export type ModelLoadedEvent = {
     /** Transpiled from string */

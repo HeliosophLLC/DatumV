@@ -196,9 +196,30 @@ public static class BuiltinModels
         // can't verify pip state without spawning the worker. Conventional
         // venv layout is {ModelDirectory}/.venv-<name>/ which the loaders
         // auto-detect.
-        RegisterBarkSmall(modelCatalog);
-        RegisterBark(modelCatalog);
-        RegisterKokoro82M(modelCatalog);
+        // Engine-managed Python toolchain. Single instance shared
+        // across all Python-backed registrations (Bark, Kokoro, future
+        // models) and the two `system.python_*` providers — so the
+        // venvs created by model loaders are the same venvs the
+        // system tables show.
+        DatumIngest.Models.Python.PythonEnvironmentManager pythonEnvironments = new();
+
+        // Catalog-driven Python model registration. Reads kind="python"
+        // entries from models/catalog.json (today: bark-small + bark)
+        // and registers them as ModelCatalogEntry instances with lazy
+        // PythonBackedModel loaders. Kokoro stays hardcoded for now
+        // because its scaffold args reference runtime-resolved model-
+        // directory paths (--model-path / --voices-path); migrating it
+        // to the catalog needs either scaffold-arg path templating or a
+        // worker refactor, neither of which belongs in this PR.
+        DatumIngest.ModelLibrary.CatalogManifest? catalogManifest = TryLoadCatalogManifest();
+        if (catalogManifest is not null)
+        {
+            string scriptsDirectory = System.IO.Path.Combine(AppContext.BaseDirectory, "python");
+            DatumIngest.Models.Python.CatalogDrivenPythonRegistrar.RegisterAll(
+                modelCatalog, pythonEnvironments, catalogManifest, scriptsDirectory);
+        }
+
+        RegisterKokoro82M(modelCatalog, pythonEnvironments);
 
         tableCatalog.Models = modelCatalog;
         tableCatalog.Add(new ModelsTableProvider(
@@ -209,6 +230,15 @@ public static class BuiltinModels
             tableCatalog.Pool, modelCatalog));
         tableCatalog.Add(new VramSnapshotTableProvider(
             tableCatalog.Pool, modelCatalog));
+
+        // Python toolchain visibility — surfaces what's been installed
+        // under the engine's managed directory and how much disk it
+        // costs.
+        tableCatalog.Add(new DatumIngest.Catalog.Providers.PythonPathsTableProvider(
+            tableCatalog.Pool, pythonEnvironments));
+        tableCatalog.Add(new DatumIngest.Catalog.Providers.PythonEnvironmentsTableProvider(
+            tableCatalog.Pool, pythonEnvironments));
+
         tableCatalog.Add(new DatumIngest.Catalog.Providers.TypesTableProvider(
             tableCatalog.Pool));
         return modelCatalog;
@@ -1796,18 +1826,6 @@ public static class BuiltinModels
     // status=bridge ("set up; runnable as long as pip packages are intact");
     // otherwise status=missing ("run scripts/setup-{name}-venv.ps1").
 
-    /// <summary>Default filename for the Bark Small Python worker script,
-    /// shipped in the engine's <c>python/</c> output folder.</summary>
-    public const string BarkSmallWorkerFilename = "bark_worker.py";
-
-    /// <summary>
-    /// Catalog anchor file for the Bark venv — written by <c>python -m venv</c>
-    /// and present whenever the venv exists. We use this as <c>RelativePath</c>
-    /// rather than a model file because Bark's weights live in the HF cache,
-    /// not in <c>$DATUM_MODELS</c>; the venv is the closest proxy for "set up".
-    /// </summary>
-    public const string BarkSmallVenvAnchor = ".venv-bark/pyvenv.cfg";
-
     /// <summary>Default filename for the Kokoro-82M ONNX model file.</summary>
     public const string Kokoro82MOnnxDefaultFilename = "kokoro-v1.0.onnx";
 
@@ -1828,162 +1846,12 @@ public static class BuiltinModels
     /// </summary>
     public const string Kokoro82MWorkerFilename = "kokoro_worker.py";
 
-    /// <summary>
-    /// Registers Suno's Bark Small TTS model under the catalog name
-    /// <paramref name="modelName"/> (defaults to <c>"bark_small"</c>) via a
-    /// Python subprocess. Bark generates speech with embedded sound effects
-    /// and music notes — write <c>[laughs]</c> or <c>[sighs]</c> in the prompt
-    /// and Bark renders them inline. The worker emits 24kHz WAV bytes; the
-    /// engine carries them as <see cref="DataKind.Image"/> until a proper
-    /// <c>DataKind.Audio</c> lands.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <strong>Setup.</strong> Run <c>scripts/setup-bark-venv.ps1</c> from
-    /// the repo root — it creates the venv at <c>$DATUM_MODELS/.venv-bark</c>,
-    /// installs <c>transformers</c> + <c>torch</c> (CUDA wheel by default) +
-    /// <c>scipy</c>, and is idempotent (rerun-safe). The Bark model weights
-    /// download from HuggingFace on the first inference call.
-    /// </para>
-    /// <para>
-    /// <strong>Worker script.</strong> Ships with the engine at
-    /// <c>{AppContext.BaseDirectory}/python/bark_worker.py</c>. The
-    /// <paramref name="scriptPath"/> parameter overrides this for users who
-    /// want a customised pipeline (different sampling, voice presets, etc.).
-    /// </para>
-    /// <para>
-    /// <strong>Determinism.</strong> Bark samples internally and is therefore
-    /// nondeterministic — repeated identical prompts produce different audio
-    /// each time, which is part of the appeal for narrative work.
-    /// </para>
-    /// </remarks>
-    /// <param name="catalog">Catalog to register against.</param>
-    /// <param name="modelName">SQL-visible name (the <c>X</c> in <c>models.X(text)</c>).</param>
-    /// <param name="scriptPath">
-    /// Absolute path to the Bark Python worker. <see langword="null"/>
-    /// resolves to the engine-bundled script at
-    /// <c>{AppContext.BaseDirectory}/python/{BarkSmallWorkerFilename}</c>.
-    /// </param>
-    /// <param name="pythonExecutable">
-    /// Absolute path to the Python interpreter to spawn (typically a venv-
-    /// scoped <c>python.exe</c>). <see langword="null"/> auto-detects the
-    /// conventional <c>{ModelDirectory}/.venv-bark/</c> venv, falling back
-    /// to the <c>DATUM_PYTHON</c> env var or <c>python</c> on PATH.
-    /// </param>
-    /// <param name="readyTimeoutSeconds">
-    /// How long to wait for the worker to print the ready handshake. Bark
-    /// loads in ~10-30s warm-cache, longer on first run when the model
-    /// downloads from HuggingFace.
-    /// </param>
-    public static void RegisterBarkSmall(
-        ModelCatalog catalog,
-        string modelName = "bark_small",
-        string? scriptPath = null,
-        string? pythonExecutable = null,
-        int readyTimeoutSeconds = 180)
-        => RegisterBarkVariant(
-            catalog, modelName, scriptPath, pythonExecutable, readyTimeoutSeconds,
-            huggingFaceModelId: "suno/bark-small",
-            displayName: "Bark Small (TTS, Python-backed)",
-            parameters: "~100M",
-            sourceUrl: "https://huggingface.co/suno/bark-small");
-
-    /// <summary>
-    /// Registers Suno's full Bark TTS model (~3.5 GB weights, higher
-    /// quality than Bark Small). Same Python venv (<c>.venv-bark</c>),
-    /// same worker script, same per-call overrides — only the
-    /// HuggingFace model ID differs. Inference is ~3-4× slower than
-    /// Bark Small but the speech quality is noticeably more natural.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <strong>Setup.</strong> Same as Bark Small — run
-    /// <c>scripts/setup-bark-venv.ps1</c> once. The full Bark model
-    /// downloads from HuggingFace into <c>~/.cache/huggingface/</c>
-    /// on the first inference call (~3.5 GB, one-time).
-    /// </para>
-    /// </remarks>
-    public static void RegisterBark(
-        ModelCatalog catalog,
-        string modelName = "bark",
-        string? scriptPath = null,
-        string? pythonExecutable = null,
-        int readyTimeoutSeconds = 240)
-        => RegisterBarkVariant(
-            catalog, modelName, scriptPath, pythonExecutable, readyTimeoutSeconds,
-            huggingFaceModelId: "suno/bark",
-            displayName: "Bark (TTS, Python-backed)",
-            parameters: "~700M",
-            sourceUrl: "https://huggingface.co/suno/bark");
-
-    /// <summary>
-    /// Common backbone for the Bark size variants. Both registrations
-    /// share the same venv (<c>.venv-bark</c>) and the same worker
-    /// script (<c>bark_worker.py</c>); only the HuggingFace model ID
-    /// changes. Both report status against the same <c>pyvenv.cfg</c>
-    /// anchor — if the venv is set up, both variants are runnable.
-    /// </summary>
-    private static void RegisterBarkVariant(
-        ModelCatalog catalog,
-        string modelName,
-        string? scriptPath,
-        string? pythonExecutable,
-        int readyTimeoutSeconds,
-        string huggingFaceModelId,
-        string displayName,
-        string parameters,
-        string sourceUrl)
-    {
-        string resolvedScriptPath = scriptPath
-            ?? Path.Combine(AppContext.BaseDirectory, "python", BarkSmallWorkerFilename);
-
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "python",
-            // Anchor on the venv marker rather than a model file: Bark's
-            // weights live in the HF cache (not $DATUM_MODELS), so the venv
-            // is the best proxy the catalog can stat for "set up".
-            RelativePath: BarkSmallVenvAnchor,
-            InputKinds: [DataKind.String],
-            // PCM_16 mono WAV bytes at the model's configured sample rate
-            // (24kHz for both bark and bark-small).
-            OutputKind: DataKind.Audio,
-            IsDeterministic: false,
-            Loader: ctx =>
-            {
-                string? py = pythonExecutable
-                    ?? ResolveVenvPython(ctx.ModelDirectory, ".venv-bark");
-                return new PythonBackedModel(
-                    name: modelName,
-                    inputKinds: [DataKind.String],
-                    outputKind: DataKind.Audio,
-                    isDeterministic: false,
-                    scriptPath: resolvedScriptPath,
-                    pythonExecutable: py,
-                    scriptArgs: ["--model-id", huggingFaceModelId],
-                    readyTimeout: TimeSpan.FromSeconds(readyTimeoutSeconds),
-                    // PreferredBatchSize=1 streams each clip as soon as it
-                    // finishes, matching SDXL-Turbo's interactive cadence.
-                    preferredBatchSize: 1);
-            },
-            // Per-call optional positional args:
-            //   [0] voice_preset (String)  - e.g. 'v2/en_speaker_9'
-            // Worker pins v2/en_speaker_6 by default; without a preset
-            // Bark picks randomly per call, sometimes producing unhinged
-            // speakers. See the Bark speaker library for the full list.
-            OptionalArgKinds: [DataKind.String],
-            DisplayName: displayName,
-            Parameters: parameters,
-            License: "MIT",
-            LicenseHolder: "Suno",
-            SourceUrl: sourceUrl,
-            Category: "tts",
-            Modalities: ["text", "audio"],
-            // The venv anchor is what we track for status. The HF model
-            // cache is out of band — catalog can't see it, but its absence
-            // surfaces as a clear PythonProcessException on first invocation.
-            Files: [BarkSmallVenvAnchor]));
-    }
+    // Bark Small + Bark (Suno) are now catalog-driven via
+    // models/catalog.json's `bark-small` and `bark` entries. The
+    // hardcoded `RegisterBarkSmall` / `RegisterBark` / `RegisterBarkVariant`
+    // helpers were removed once `CatalogDrivenPythonRegistrar` proved
+    // out: every kind="python" row in the manifest auto-registers at
+    // `AttachStandardModels` time.
 
     // ─────────────────────────── Whisper STT ──────────────────────────────
     //
@@ -2221,11 +2089,9 @@ public static class BuiltinModels
     /// resolves to the engine-bundled script at
     /// <c>{AppContext.BaseDirectory}/python/{Kokoro82MWorkerFilename}</c>.
     /// </param>
-    /// <param name="pythonExecutable">
-    /// Absolute path to the Python interpreter to spawn (typically a
-    /// venv-scoped <c>python.exe</c>). <see langword="null"/> falls back
-    /// to the <c>DATUM_PYTHON</c> environment variable, then <c>python</c>
-    /// on PATH.
+    /// <param name="pythonEnvironments">
+    /// Engine-managed Python toolchain. First call triggers uv +
+    /// Python 3.11 + kokoro-onnx install; subsequent calls fast-path.
     /// </param>
     /// <param name="defaultVoice">Voice used when the per-call override is empty. Defaults to <c>"af_heart"</c>.</param>
     /// <param name="defaultSpeed">Speed used when the per-call override is omitted. Defaults to 1.0 (unchanged tempo).</param>
@@ -2233,11 +2099,11 @@ public static class BuiltinModels
     /// <param name="readyTimeoutSeconds">Worker startup timeout. Kokoro loads in well under 30s warm-cache.</param>
     public static void RegisterKokoro82M(
         ModelCatalog catalog,
+        DatumIngest.Models.Python.PythonEnvironmentManager pythonEnvironments,
         string modelName = "kokoro_82m",
         string onnxFilename = Kokoro82MOnnxDefaultFilename,
         string voicesPath = Kokoro82MVoicesDefaultFilename,
         string? scriptPath = null,
-        string? pythonExecutable = null,
         string defaultVoice = "af_heart",
         double defaultSpeed = 1.0,
         string lang = "en-us",
@@ -2261,19 +2127,20 @@ public static class BuiltinModels
             {
                 string onnxPath = Path.Combine(ctx.ModelDirectory, onnxFilename);
                 string resolvedVoicesPath = Path.Combine(ctx.ModelDirectory, voicesPath);
-                // Auto-detect a per-model venv at the conventional
-                // {ModelDirectory}/.venv-kokoro/ location when no explicit
-                // executable was passed; falls back to DATUM_PYTHON / PATH
-                // if the venv isn't present.
-                string? py = pythonExecutable
-                    ?? ResolveVenvPython(ctx.ModelDirectory, ".venv-kokoro");
                 return new PythonBackedModel(
                     name: modelName,
                     inputKinds: [DataKind.String],
                     outputKind: DataKind.Audio,
                     isDeterministic: true,
+                    environments: pythonEnvironments,
+                    venvName: modelName,
+                    pythonVersion: "3.11",
+                    // kokoro-onnx pulls in numpy + onnxruntime
+                    // transitively; listed explicitly so
+                    // `system.python_environments` shows the full
+                    // declared set.
+                    requirements: ["kokoro-onnx", "numpy", "onnxruntime"],
                     scriptPath: resolvedScriptPath,
-                    pythonExecutable: py,
                     scriptArgs:
                     [
                         "--model-path", onnxPath,
@@ -2305,23 +2172,27 @@ public static class BuiltinModels
     }
 
     /// <summary>
-    /// Resolves a per-model venv's Python executable, if a venv exists at
-    /// <c>{modelDirectory}/{venvFolder}/</c>. Returns <see langword="null"/>
-    /// when no venv is present so <see cref="PythonBackedModel"/> falls back
-    /// to <c>DATUM_PYTHON</c> env var or <c>python</c> on PATH. The venv
-    /// layout is the standard <c>python -m venv</c> convention: <c>Scripts/</c>
-    /// on Windows, <c>bin/</c> elsewhere.
+    /// Loads the engine-bundled models/catalog.json manifest via a
+    /// transient <see cref="DatumIngest.ModelLibrary.ManifestStore"/>.
+    /// Returns <see langword="null"/> when the manifest can't be
+    /// located (test runs, custom layouts) — callers treat that as
+    /// "no catalog-driven Python registrations" and fall back to
+    /// hardcoded paths. Wraps any deserialize / validation throw so
+    /// a malformed catalog doesn't break engine startup; the error
+    /// surfaces in stderr instead.
     /// </summary>
-    private static string? ResolveVenvPython(string modelDirectory, string venvFolder)
+    private static DatumIngest.ModelLibrary.CatalogManifest? TryLoadCatalogManifest()
     {
-        string venvRoot = Path.Combine(modelDirectory, venvFolder);
-        if (!Directory.Exists(venvRoot)) return null;
-
-        string candidate = OperatingSystem.IsWindows()
-            ? Path.Combine(venvRoot, "Scripts", "python.exe")
-            : Path.Combine(venvRoot, "bin", "python");
-
-        return File.Exists(candidate) ? candidate : null;
+        try
+        {
+            DatumIngest.ModelLibrary.ManifestStore store = new(
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<DatumIngest.ModelLibrary.ManifestStore>.Instance);
+            return store.Manifest;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[builtin-models] failed to load catalog manifest: {ex.Message}");
+            return null;
+        }
     }
-
 }

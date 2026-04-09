@@ -18,6 +18,16 @@ import type {
   ModelInstallingDto as ModelInstalling,
   ModelInstalledDto as ModelInstalled,
   ModelDownloadFailedDto as ModelDownloadFailed,
+  UvDownloadStartedDto as UvDownloadStarted,
+  UvDownloadProgressDto as UvDownloadProgress,
+  UvDownloadCompleteDto as UvDownloadComplete,
+  PythonInstallStartedDto as PythonInstallStarted,
+  PythonInstallProgressDto as PythonInstallProgress,
+  PythonInstallCompleteDto as PythonInstallComplete,
+  VenvInstallStartedDto as VenvInstallStarted,
+  VenvInstallProgressDto as VenvInstallProgress,
+  VenvInstallCompleteDto as VenvInstallComplete,
+  PythonEnvironmentFailedDto as PythonEnvironmentFailed,
 } from './generated/hubs/DatumIngest.Web.Hubs';
 export type {
   ModelDownloadStarted,
@@ -26,6 +36,16 @@ export type {
   ModelInstalling,
   ModelInstalled,
   ModelDownloadFailed,
+  UvDownloadStarted,
+  UvDownloadProgress,
+  UvDownloadComplete,
+  PythonInstallStarted,
+  PythonInstallProgress,
+  PythonInstallComplete,
+  VenvInstallStarted,
+  VenvInstallProgress,
+  VenvInstallComplete,
+  PythonEnvironmentFailed,
 };
 
 // Singleton HubConnection + proxy + a fan-out dispatcher.
@@ -67,6 +87,17 @@ const dlInstallingHandlers: Set<Handler<ModelInstalling>> = new Set();
 const dlInstalledHandlers: Set<Handler<ModelInstalled>> = new Set();
 const dlFailedHandlers: Set<Handler<ModelDownloadFailed>> = new Set();
 
+const uvStartedHandlers: Set<Handler<UvDownloadStarted>> = new Set();
+const uvProgressHandlers: Set<Handler<UvDownloadProgress>> = new Set();
+const uvCompleteHandlers: Set<Handler<UvDownloadComplete>> = new Set();
+const pyStartedHandlers: Set<Handler<PythonInstallStarted>> = new Set();
+const pyProgressHandlers: Set<Handler<PythonInstallProgress>> = new Set();
+const pyCompleteHandlers: Set<Handler<PythonInstallComplete>> = new Set();
+const venvStartedHandlers: Set<Handler<VenvInstallStarted>> = new Set();
+const venvProgressHandlers: Set<Handler<VenvInstallProgress>> = new Set();
+const venvCompleteHandlers: Set<Handler<VenvInstallComplete>> = new Set();
+const pythonFailedHandlers: Set<Handler<PythonEnvironmentFailed>> = new Set();
+
 type CloseHandler = (err?: Error) => void;
 const closeHandlers: Set<CloseHandler> = new Set();
 
@@ -103,6 +134,27 @@ export const onModelInstalled = (handler: Handler<ModelInstalled>) =>
   subscribe(dlInstalledHandlers, handler);
 export const onModelDownloadFailed = (handler: Handler<ModelDownloadFailed>) =>
   subscribe(dlFailedHandlers, handler);
+
+export const onUvDownloadStarted = (handler: Handler<UvDownloadStarted>) =>
+  subscribe(uvStartedHandlers, handler);
+export const onUvDownloadProgress = (handler: Handler<UvDownloadProgress>) =>
+  subscribe(uvProgressHandlers, handler);
+export const onUvDownloadComplete = (handler: Handler<UvDownloadComplete>) =>
+  subscribe(uvCompleteHandlers, handler);
+export const onPythonInstallStarted = (handler: Handler<PythonInstallStarted>) =>
+  subscribe(pyStartedHandlers, handler);
+export const onPythonInstallProgress = (handler: Handler<PythonInstallProgress>) =>
+  subscribe(pyProgressHandlers, handler);
+export const onPythonInstallComplete = (handler: Handler<PythonInstallComplete>) =>
+  subscribe(pyCompleteHandlers, handler);
+export const onVenvInstallStarted = (handler: Handler<VenvInstallStarted>) =>
+  subscribe(venvStartedHandlers, handler);
+export const onVenvInstallProgress = (handler: Handler<VenvInstallProgress>) =>
+  subscribe(venvProgressHandlers, handler);
+export const onVenvInstallComplete = (handler: Handler<VenvInstallComplete>) =>
+  subscribe(venvCompleteHandlers, handler);
+export const onPythonEnvironmentFailed = (handler: Handler<PythonEnvironmentFailed>) =>
+  subscribe(pythonFailedHandlers, handler);
 
 export function onConnectionClosed(handler: CloseHandler): () => void {
   closeHandlers.add(handler);
@@ -141,6 +193,36 @@ const dispatcher: IStreamHubClient = {
   },
   async onModelDownloadFailed(event: ModelDownloadFailed): Promise<void> {
     fanOut(dlFailedHandlers, event);
+  },
+  async onUvDownloadStarted(event: UvDownloadStarted): Promise<void> {
+    fanOut(uvStartedHandlers, event);
+  },
+  async onUvDownloadProgress(event: UvDownloadProgress): Promise<void> {
+    fanOut(uvProgressHandlers, event);
+  },
+  async onUvDownloadComplete(event: UvDownloadComplete): Promise<void> {
+    fanOut(uvCompleteHandlers, event);
+  },
+  async onPythonInstallStarted(event: PythonInstallStarted): Promise<void> {
+    fanOut(pyStartedHandlers, event);
+  },
+  async onPythonInstallProgress(event: PythonInstallProgress): Promise<void> {
+    fanOut(pyProgressHandlers, event);
+  },
+  async onPythonInstallComplete(event: PythonInstallComplete): Promise<void> {
+    fanOut(pyCompleteHandlers, event);
+  },
+  async onVenvInstallStarted(event: VenvInstallStarted): Promise<void> {
+    fanOut(venvStartedHandlers, event);
+  },
+  async onVenvInstallProgress(event: VenvInstallProgress): Promise<void> {
+    fanOut(venvProgressHandlers, event);
+  },
+  async onVenvInstallComplete(event: VenvInstallComplete): Promise<void> {
+    fanOut(venvCompleteHandlers, event);
+  },
+  async onPythonEnvironmentFailed(event: PythonEnvironmentFailed): Promise<void> {
+    fanOut(pythonFailedHandlers, event);
   },
 };
 

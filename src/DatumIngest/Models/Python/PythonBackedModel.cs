@@ -52,7 +52,11 @@ public sealed class PythonBackedModel : IModel, IDisposable
     public static readonly TimeSpan DefaultReadyTimeout = TimeSpan.FromSeconds(120);
 
     private readonly string _scriptPath;
-    private readonly string _pythonExecutable;
+    private readonly IPythonEnvironmentManager _environments;
+    private readonly string _venvName;
+    private readonly string _pythonVersion;
+    private readonly IReadOnlyList<string> _requirements;
+    private readonly string? _modelDirectory;
     private readonly IReadOnlyList<string>? _scriptArgs;
     private readonly TimeSpan _readyTimeout;
     private readonly SemaphoreSlim _startLock = new(1, 1);
@@ -60,46 +64,72 @@ public sealed class PythonBackedModel : IModel, IDisposable
     private bool _disposed;
 
     /// <summary>
-    /// Creates a Python-backed model. The subprocess is not spawned until
-    /// the first <see cref="InferBatchAsync"/> call.
+    /// Creates a Python-backed model. The subprocess is not spawned —
+    /// and the venv is not materialised — until the first
+    /// <see cref="InferBatchAsync"/> call. The venv lifecycle (Python
+    /// bootstrap, dep install) is owned by the supplied
+    /// <see cref="PythonEnvironmentManager"/>; this class only knows
+    /// "give me the python.exe and I'll spawn the worker."
     /// </summary>
     /// <param name="name">Catalog-visible name (the <c>X</c> in <c>models.X(...)</c>).</param>
     /// <param name="inputKinds">Per-column input kinds. The model invocation operator validates argument types against this list at plan time.</param>
     /// <param name="outputKind">The single per-row output kind.</param>
     /// <param name="isDeterministic">Whether identical inputs always produce identical outputs (drives planner CSE).</param>
+    /// <param name="environments">Engine-managed Python toolchain. Supplies the venv-scoped interpreter.</param>
+    /// <param name="venvName">Stable venv identifier — typically the model name. Maps to a directory under <see cref="PythonEnvironmentManager.VenvsDirectory"/>.</param>
+    /// <param name="pythonVersion">Python major.minor (e.g. "3.11") to base the venv on.</param>
+    /// <param name="requirements">PEP 508 requirement strings the venv must have installed before the worker can start.</param>
     /// <param name="scriptPath">Absolute path to the Python worker script.</param>
-    /// <param name="pythonExecutable">
-    /// Python executable to spawn. <see langword="null"/> resolves to the
-    /// <c>DATUM_PYTHON</c> environment variable, falling back to
-    /// <c>python</c> on PATH.
-    /// </param>
     /// <param name="scriptArgs">Extra CLI args appended after the script path.</param>
     /// <param name="readyTimeout">How long to wait for the worker to print the ready handshake; defaults to <see cref="DefaultReadyTimeout"/>.</param>
     /// <param name="preferredBatchSize">See <see cref="IModel.PreferredBatchSize"/>.</param>
+    /// <param name="modelDirectory">
+    /// Absolute path to the per-model directory under
+    /// <c>DATUM_MODELS</c> that <see cref="DatumIngest.ModelLibrary.ModelDownloadService"/>
+    /// populated with weight files. Forwarded to the worker as the
+    /// <c>DATUM_MODEL_DIR</c> environment variable so it can load
+    /// weights via <c>from_pretrained(os.environ['DATUM_MODEL_DIR'])</c>
+    /// — keeping the model's on-disk footprint under the user-
+    /// configured models directory rather than HuggingFace's default
+    /// <c>~/.cache/huggingface/</c>. Optional: pass
+    /// <see langword="null"/> for workers that don't load HF-shaped
+    /// model directories (e.g. workers that take an explicit
+    /// <c>--model-path</c> CLI arg).
+    /// </param>
     public PythonBackedModel(
         string name,
         IReadOnlyList<DataKind> inputKinds,
         DataKind outputKind,
         bool isDeterministic,
+        IPythonEnvironmentManager environments,
+        string venvName,
+        string pythonVersion,
+        IReadOnlyList<string> requirements,
         string scriptPath,
-        string? pythonExecutable = null,
         IReadOnlyList<string>? scriptArgs = null,
         TimeSpan? readyTimeout = null,
-        int? preferredBatchSize = null)
+        int? preferredBatchSize = null,
+        string? modelDirectory = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
         ArgumentException.ThrowIfNullOrEmpty(scriptPath);
+        ArgumentException.ThrowIfNullOrEmpty(venvName);
+        ArgumentException.ThrowIfNullOrEmpty(pythonVersion);
+        ArgumentNullException.ThrowIfNull(environments);
+        ArgumentNullException.ThrowIfNull(requirements);
 
         Name = name;
         InputKinds = inputKinds;
         OutputKind = outputKind;
         IsDeterministic = isDeterministic;
+        _environments = environments;
+        _venvName = venvName;
+        _pythonVersion = pythonVersion;
+        _requirements = requirements;
         _scriptPath = scriptPath;
-        _pythonExecutable = pythonExecutable
-            ?? Environment.GetEnvironmentVariable("DATUM_PYTHON")
-            ?? "python";
         _scriptArgs = scriptArgs;
         _readyTimeout = readyTimeout ?? DefaultReadyTimeout;
+        _modelDirectory = modelDirectory;
         PreferredBatchSize = preferredBatchSize;
     }
 
@@ -146,9 +176,21 @@ public sealed class PythonBackedModel : IModel, IDisposable
         try
         {
             if (_host is not null) return _host;
+
+            // Materialise the venv if needed. The manager fast-paths
+            // when the venv already exists with matching requirements;
+            // first-ever-use downloads uv, installs Python, and
+            // pip-installs the dep set (with progress streaming to the
+            // wired IPythonEnvironmentReporter). Returns the absolute
+            // path to the venv-scoped python.
+            string pythonExecutable = await _environments
+                .EnsureVenvAsync(_venvName, _pythonVersion, _requirements, cancellationToken)
+                .ConfigureAwait(false);
+
             _host = await PythonProcessHost.StartAsync(
-                _pythonExecutable, _scriptPath, _scriptArgs, _readyTimeout, cancellationToken,
-                extraPythonPath: ResolveBundledPythonPath())
+                pythonExecutable, _scriptPath, _scriptArgs, _readyTimeout, cancellationToken,
+                extraPythonPath: ResolveBundledPythonPath(),
+                modelDirectory: _modelDirectory)
                 .ConfigureAwait(false);
             return _host;
         }

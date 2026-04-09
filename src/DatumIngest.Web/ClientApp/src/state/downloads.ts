@@ -8,6 +8,16 @@ import {
   onModelDownloadStarted,
   onModelInstalled,
   onModelInstalling,
+  onUvDownloadStarted,
+  onUvDownloadProgress,
+  onUvDownloadComplete,
+  onPythonInstallStarted,
+  onPythonInstallProgress,
+  onPythonInstallComplete,
+  onVenvInstallStarted,
+  onVenvInstallProgress,
+  onVenvInstallComplete,
+  onPythonEnvironmentFailed,
 } from '@/api/hub';
 import { openDialog } from '@/state/dialogs';
 import type { ModelInstallState } from '@/api/generated/openapi-client';
@@ -72,6 +82,24 @@ function pushSample(prev: readonly ProgressSample[] | undefined, bytes: number):
   return fresh;
 }
 
+// Sub-step status shown inline on the model card during the post-download
+// install phase, for kind:"python" catalog entries. `kind` discriminates
+// the stage and drives the label; `detail` carries free-form text from
+// the install backend (uv wheel name, pip cache hit count, etc.). When
+// `bytesProcessed` is present the UI renders a percentage bar; otherwise
+// it shows an indeterminate spinner.
+export type PythonInstallStepKind = 'uv-download' | 'python-install' | 'venv-install';
+
+export interface PythonInstallStep {
+  kind: PythonInstallStepKind;
+  // Stage label from the backend ("downloading", "extracting", "linking from cache").
+  stage: string;
+  // Free-form per-stage detail (wheel name, version, etc).
+  detail?: string;
+  bytesProcessed?: number;
+  totalBytes?: number;
+}
+
 interface DownloadsState {
   // Lazily loaded; null until refreshDownloads completes.
   state: Record<string, ModelInstallState> | null;
@@ -88,6 +116,15 @@ interface DownloadsState {
   // directory). Populated by refreshDownloads. Used by the Models view to
   // surface Resume/Restart affordances; absence means zero.
   partials: Record<string, number>;
+  // Machine-scoped uv + python install steps. One-time per host; populated
+  // by hub events independent of any specific model. The model card
+  // surfaces these on whichever entry is currently installing, since
+  // that's what triggered them.
+  pythonHostStep: PythonInstallStep | null;
+  // Per-model venv install step, keyed by catalog id (== VenvName).
+  // Appears on OnVenvInstallStarted, refines on OnVenvInstallProgress,
+  // disappears on OnVenvInstallComplete / OnPythonEnvironmentFailed.
+  venvSteps: Record<string, PythonInstallStep>;
   loading: boolean;
 }
 
@@ -97,6 +134,8 @@ export const downloadsState = proxy<DownloadsState>({
   installing: {},
   errors: {},
   partials: {},
+  pythonHostStep: null,
+  venvSteps: {},
   loading: false,
 });
 
@@ -391,12 +430,105 @@ onModelInstalled((event) => {
 onModelDownloadFailed((event) => {
   delete downloadsState.active[event.modelId];
   delete downloadsState.installing[event.modelId];
+  delete downloadsState.venvSteps[event.modelId];
   downloadsState.errors[event.modelId] = event.error ?? 'Download failed';
   // The .part is still on disk and probably bigger than what we last
   // recorded. Refresh the partials map so the Resume button shows the
   // current size; fire-and-forget — failures during the refresh are
   // already logged inside.
   void refreshPartials();
+});
+
+// ─── Python environment install events ─────────────────────────
+//
+// uv + python install events are machine-scoped (no modelId). They land
+// during the venv install for whichever python-kind model the user just
+// clicked. The model card cross-references `pythonHostStep` whenever it
+// renders the "Installing…" indicator, so the active uv/python phase
+// shows up under the right card without us threading a fake key.
+
+onUvDownloadStarted((event) => {
+  downloadsState.pythonHostStep = {
+    kind: 'uv-download',
+    stage: 'downloading',
+    detail: `uv ${event.version}`,
+    bytesProcessed: 0,
+    totalBytes: event.totalBytes,
+  };
+});
+
+onUvDownloadProgress((event) => {
+  if (downloadsState.pythonHostStep?.kind !== 'uv-download') return;
+  downloadsState.pythonHostStep = {
+    ...downloadsState.pythonHostStep,
+    bytesProcessed: event.bytesDownloaded,
+    totalBytes: event.totalBytes,
+  };
+});
+
+onUvDownloadComplete(() => {
+  if (downloadsState.pythonHostStep?.kind === 'uv-download') {
+    downloadsState.pythonHostStep = null;
+  }
+});
+
+onPythonInstallStarted((event) => {
+  downloadsState.pythonHostStep = {
+    kind: 'python-install',
+    stage: 'starting',
+    detail: `Python ${event.version}`,
+  };
+});
+
+onPythonInstallProgress((event) => {
+  if (downloadsState.pythonHostStep?.kind !== 'python-install') return;
+  downloadsState.pythonHostStep = {
+    ...downloadsState.pythonHostStep,
+    stage: event.stage,
+    bytesProcessed: event.bytesProcessed,
+    totalBytes: event.totalBytes,
+  };
+});
+
+onPythonInstallComplete(() => {
+  if (downloadsState.pythonHostStep?.kind === 'python-install') {
+    downloadsState.pythonHostStep = null;
+  }
+});
+
+onVenvInstallStarted((event) => {
+  downloadsState.venvSteps[event.venvName] = {
+    kind: 'venv-install',
+    stage: 'starting',
+    detail: `${event.requirements.length} requirement${event.requirements.length === 1 ? '' : 's'}`,
+  };
+});
+
+onVenvInstallProgress((event) => {
+  const existing = downloadsState.venvSteps[event.venvName];
+  downloadsState.venvSteps[event.venvName] = {
+    kind: 'venv-install',
+    stage: event.stage || existing?.stage || 'installing',
+    detail: event.detail || existing?.detail,
+  };
+});
+
+onVenvInstallComplete((event) => {
+  delete downloadsState.venvSteps[event.venvName];
+});
+
+onPythonEnvironmentFailed((event) => {
+  // Surface to the per-model error slot when we know which venv failed;
+  // host-scoped failures (uv-download, python-install) land on whichever
+  // model triggered the install — the next OnModelDownloadFailed will
+  // overwrite this with the more model-specific message, so leaving the
+  // host step cleared is enough.
+  downloadsState.pythonHostStep = null;
+  if (event.venvNameOrEmpty) {
+    delete downloadsState.venvSteps[event.venvNameOrEmpty];
+    downloadsState.errors[event.venvNameOrEmpty] =
+      event.error || `${event.stage} failed`;
+  }
 });
 
 // ───────────────────────── Derived stats helpers ─────────────────────────

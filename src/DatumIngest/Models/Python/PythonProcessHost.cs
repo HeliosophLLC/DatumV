@@ -84,7 +84,8 @@ internal sealed class PythonProcessHost : IDisposable
         IReadOnlyList<string>? scriptArgs,
         TimeSpan readyTimeout,
         CancellationToken cancellationToken,
-        IReadOnlyList<string>? extraPythonPath = null)
+        IReadOnlyList<string>? extraPythonPath = null,
+        string? modelDirectory = null)
     {
         ProcessStartInfo psi = new()
         {
@@ -120,6 +121,18 @@ internal sealed class PythonProcessHost : IDisposable
             }
             if (!string.IsNullOrEmpty(existing)) parts.Add(existing);
             psi.Environment["PYTHONPATH"] = string.Join(Path.PathSeparator, parts);
+        }
+
+        // DATUM_MODEL_DIR points the worker at the per-model directory
+        // that ModelDownloadService populated. Workers use this to load
+        // weights via `from_pretrained(os.environ['DATUM_MODEL_DIR'])`
+        // — so the model files live where the user expects (under their
+        // configured DATUM_MODELS), not in HuggingFace's default cache
+        // under ~/.cache/huggingface/. Mirrors how ONNX workers resolve
+        // their .onnx paths relative to the model directory.
+        if (!string.IsNullOrEmpty(modelDirectory))
+        {
+            psi.Environment["DATUM_MODEL_DIR"] = modelDirectory;
         }
 
         Process process;

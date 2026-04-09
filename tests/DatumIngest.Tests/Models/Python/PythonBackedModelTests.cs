@@ -11,7 +11,6 @@ using DatumIngest.Models.Python;
 /// PATH so CI without Python doesn't fail the suite — the framework is
 /// experimentation infrastructure, not a load-bearing engine feature.
 /// </summary>
-[Trait("Category", "Gpu")]
 public sealed class PythonBackedModelTests : ServiceTestBase
 {
     private static readonly string ScriptsDirectory =
@@ -75,6 +74,10 @@ public sealed class PythonBackedModelTests : ServiceTestBase
             inputKinds: [DataKind.String],
             outputKind: DataKind.String,
             isDeterministic: true,
+            environments: new SystemPythonEnvironmentManager(),
+            venvName: "echo_test",
+            pythonVersion: "3.11",
+            requirements: [],
             scriptPath: scriptPath);
 
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs =
@@ -112,6 +115,10 @@ public sealed class PythonBackedModelTests : ServiceTestBase
             inputKinds: [DataKind.String],
             outputKind: DataKind.String,
             isDeterministic: true,
+            environments: new SystemPythonEnvironmentManager(),
+            venvName: "echo_test",
+            pythonVersion: "3.11",
+            requirements: [],
             scriptPath: scriptPath);
 
         for (int i = 0; i < 3; i++)
@@ -149,6 +156,10 @@ public sealed class PythonBackedModelTests : ServiceTestBase
             inputKinds: [DataKind.Image],
             outputKind: DataKind.Image,
             isDeterministic: true,
+            environments: new SystemPythonEnvironmentManager(),
+            venvName: "echo_test",
+            pythonVersion: "3.11",
+            requirements: [],
             scriptPath: scriptPath);
 
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs =
@@ -176,6 +187,10 @@ public sealed class PythonBackedModelTests : ServiceTestBase
             inputKinds: [DataKind.String],
             outputKind: DataKind.String,
             isDeterministic: true,
+            environments: new SystemPythonEnvironmentManager(),
+            venvName: "missing_test",
+            pythonVersion: "3.11",
+            requirements: [],
             scriptPath: Path.Combine(ScriptsDirectory, "this_script_does_not_exist.py"),
             readyTimeout: TimeSpan.FromSeconds(5));
 

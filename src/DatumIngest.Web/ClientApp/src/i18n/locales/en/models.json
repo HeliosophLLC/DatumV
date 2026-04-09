@@ -35,6 +35,13 @@
     "downloadingStarting": "Starting download…",
     "downloadingHint": "Downloading… you can leave this view; it will keep running.",
     "installingHint": "Registering the model in the catalog…",
+    "pythonStep": {
+      "uvDownload": "Downloading uv",
+      "pythonInstall": "Installing Python",
+      "venvInstall": "Creating Python environment"
+    },
+    "pythonStepWithDetail": "{step} · {detail}",
+    "pythonStepWithStage": "{step} · {stage}",
     "elapsed": "{duration} elapsed",
     "remaining": "~{duration} remaining",
     "licenseRequired": "Requires accepting the {license} license.",

@@ -31,4 +31,22 @@ public interface IStreamHubClient
     Task OnModelInstalling(ModelInstallingDto installing);
     Task OnModelInstalled(ModelInstalledDto installed);
     Task OnModelDownloadFailed(ModelDownloadFailedDto failed);
+
+    // Python-environment install events. Fired during venv provisioning
+    // for kind:"python" catalog entries, after OnModelInstalling. The
+    // uv + python install events are machine-scoped (one-time setup per
+    // host); venv events carry VenvName == catalog id so the client can
+    // surface sub-steps on the specific model card that's installing.
+    // Populated by SignalRPythonEnvironmentReporter from the core
+    // DatumIngest.Models.Python event records.
+    Task OnUvDownloadStarted(UvDownloadStartedDto started);
+    Task OnUvDownloadProgress(UvDownloadProgressDto progress);
+    Task OnUvDownloadComplete(UvDownloadCompleteDto complete);
+    Task OnPythonInstallStarted(PythonInstallStartedDto started);
+    Task OnPythonInstallProgress(PythonInstallProgressDto progress);
+    Task OnPythonInstallComplete(PythonInstallCompleteDto complete);
+    Task OnVenvInstallStarted(VenvInstallStartedDto started);
+    Task OnVenvInstallProgress(VenvInstallProgressDto progress);
+    Task OnVenvInstallComplete(VenvInstallCompleteDto complete);
+    Task OnPythonEnvironmentFailed(PythonEnvironmentFailedDto failed);
 }

@@ -8,17 +8,7 @@ Wraps HuggingFace `transformers`' BarkModel — a 4-stage TTS pipeline
 
 Auto-detects CUDA vs CPU at startup and falls back to CPU when torch
 wasn't built with CUDA — so the worker doesn't crash on a fresh venv
-that pip-installed the default (CPU-only) torch wheel. Re-run
-``scripts/setup-bark-venv.ps1`` to rebuild the venv with the CUDA
-wheel for the speed boost.
-
-Setup
------
-Run from the repo root:
-    .\\scripts\\setup-bark-venv.ps1
-
-That creates ``$env:DATUM_MODELS\\.venv-bark`` with `transformers`,
-`torch` (CUDA if available), and `scipy` installed.
+that pip-installed the default (CPU-only) torch wheel. 
 
 Voice presets
 -------------
@@ -78,12 +68,6 @@ from python_worker_host import run  # noqa: E402
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--model-id",
-    default="suno/bark-small",
-    help="HuggingFace model ID. 'suno/bark-small' (~1 GB) or "
-         "'suno/bark' (~3.5 GB, higher quality, slower).",
-)
-parser.add_argument(
     "--default-voice-preset",
     default="v2/en_speaker_6",
     help="Speaker preset used when the per-call override is empty.",
@@ -91,12 +75,25 @@ parser.add_argument(
 ARGS = parser.parse_args()
 
 
+# Weights live in the per-model directory under DATUM_MODELS — set by
+# the engine via DATUM_MODEL_DIR when it spawns this worker. Loading
+# from the local path avoids HuggingFace's default ~/.cache/huggingface
+# location, so the user sees the model under the disk location they
+# actually configured. The engine downloaded these files at install
+# time via ModelDownloadService (HuggingFaceSource in the catalog
+# entry) — first invocation reads from disk, no network calls.
+MODEL_DIR = os.environ.get("DATUM_MODEL_DIR")
+if not MODEL_DIR:
+    print("[bark] DATUM_MODEL_DIR not set; the engine should always "
+          "set this for catalog-driven Python models.", file=sys.stderr, flush=True)
+    sys.exit(1)
+
 # Pick the best device the venv's torch was actually compiled with.
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"[bark] device={DEVICE} model={ARGS.model_id}", file=sys.stderr, flush=True)
+print(f"[bark] device={DEVICE} model_dir={MODEL_DIR}", file=sys.stderr, flush=True)
 
-processor = AutoProcessor.from_pretrained(ARGS.model_id)
-model = BarkModel.from_pretrained(ARGS.model_id).to(DEVICE)
+processor = AutoProcessor.from_pretrained(MODEL_DIR)
+model = BarkModel.from_pretrained(MODEL_DIR).to(DEVICE)
 
 # Read the model's actual sample rate rather than hardcoding 24000 --
 # robust across Bark variants and any future re-tuned models.

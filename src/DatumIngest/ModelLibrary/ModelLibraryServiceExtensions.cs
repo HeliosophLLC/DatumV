@@ -3,6 +3,7 @@
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
 using DatumIngest.ModelLibrary;
+using DatumIngest.Models.Python;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -59,6 +60,15 @@ public static class ModelLibraryServiceExtensions
         // run before AddModelLibrary (e.g. via Replace), or when the host
         // registers after AddModelLibrary using AddSingleton (last-wins).
         services.TryAddSingleton<IModelInstaller>(NullModelInstaller.Instance);
+
+        // Engine-managed Python toolchain. Singleton because uv + Python
+        // + venvs are process-wide on-disk state; ModelDownloadService
+        // calls into this whenever a kind="python" catalog entry
+        // installs. TryAddSingleton so a host that's already registered
+        // a configured manager (with a SignalR-backed reporter,
+        // typically) keeps its own.
+        services.TryAddSingleton<IPythonEnvironmentManager, PythonEnvironmentManager>();
+
         services.AddSingleton<IModelDownloadService, ModelDownloadService>();
         return services;
     }

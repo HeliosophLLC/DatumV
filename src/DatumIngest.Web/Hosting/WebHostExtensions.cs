@@ -4,6 +4,7 @@ using DatumIngest.Inference;
 using DatumIngest.ModelLibrary;
 using DatumIngest.Models;
 using DatumIngest.Models.Calibration;
+using DatumIngest.Models.Python;
 using DatumIngest.Pooling;
 using DatumIngest.Web.Catalog;
 using DatumIngest.Web.Compute;
@@ -176,6 +177,10 @@ public static class WebHostExtensions
                     "DatumIngest", "models"));
         services.AddModelLibrary(modelLibraryOptions);
         services.AddSingleton<IDownloadProgressReporter, SignalRDownloadProgressReporter>();
+        // Python-env install events fan out to clients via the same hub
+        // pattern. PythonEnvironmentManager picks this up through its
+        // optional IPythonEnvironmentReporter ctor param.
+        services.AddSingleton<IPythonEnvironmentReporter, SignalRPythonEnvironmentReporter>();
         // Replace the default NullModelInstaller (registered by
         // AddModelLibrary) with the catalog-backed one. CREATE MODEL only
         // makes sense when ManageLocalCatalog is true — without a

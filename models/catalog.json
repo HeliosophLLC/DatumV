@@ -833,6 +833,55 @@
     },
 
     {
+      "id": "bark-small",
+      "displayName": "Bark Small (Text-to-Speech, Python-backed)",
+      "description": "Suno's compact Bark TTS variant (~100M params). Generates expressive speech with embedded sound effects via a Python worker; weights download into the configured models directory like every other model.",
+      "task": "text-to-speech",
+      "tags": ["tts", "speech", "python", "expressive"],
+      "licenseIds": ["mit"],
+      "attributions": ["Suno — Bark authors"],
+      "hardware": { "minRamMb": 4096, "minVramMb": 2048, "preferred": "gpu" },
+      "sources": [{ "type": "huggingface", "repo": "suno/bark-small", "revision": "main", "include": ["**/*"] }],
+      "approxSizeMb": 1100,
+      "kind": "python",
+      "python": {
+        "workerScript": "bark_worker.py",
+        "pythonVersion": "3.11",
+        "requirements": ["torch", "transformers", "scipy", "numpy"],
+        "signature": {
+          "inputKinds": ["String"],
+          "outputKind": "Audio",
+          "isDeterministic": false,
+          "optionalArgKinds": ["String"]
+        }
+      }
+    },
+    {
+      "id": "bark",
+      "displayName": "Bark (Text-to-Speech, Python-backed)",
+      "description": "Full Suno Bark TTS (~700M params). More natural speech than Bark Small at ~3-4× the inference cost; same Python worker, same dependency set.",
+      "task": "text-to-speech",
+      "tags": ["tts", "speech", "python", "expressive"],
+      "licenseIds": ["mit"],
+      "attributions": ["Suno — Bark authors"],
+      "hardware": { "minRamMb": 4096, "minVramMb": 4096, "preferred": "gpu" },
+      "sources": [{ "type": "huggingface", "repo": "suno/bark", "revision": "main", "include": ["**/*"] }],
+      "approxSizeMb": 3500,
+      "kind": "python",
+      "python": {
+        "workerScript": "bark_worker.py",
+        "pythonVersion": "3.11",
+        "requirements": ["torch", "transformers", "scipy", "numpy"],
+        "signature": {
+          "inputKinds": ["String"],
+          "outputKind": "Audio",
+          "isDeterministic": false,
+          "optionalArgKinds": ["String"]
+        }
+      }
+    },
+
+    {
       "id": "absolute-reality-hyper",
       "displayName": "AbsoluteReality + Hyper-SD (4-step)",
       "description": "SFW general-purpose SD 1.5 fine-tune + 4-step distillation. Photorealistic-ish workhorse.",

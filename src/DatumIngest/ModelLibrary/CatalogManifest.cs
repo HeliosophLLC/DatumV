@@ -70,7 +70,62 @@ public sealed record CatalogModel(
     // independently by the catalog. Null for models that need no SQL
     // glue (today: most models are still consumed via the built-in IModel
     // path and don't need an installSql entry).
-    string? InstallSql = null);
+    string? InstallSql = null,
+    // Discriminator over what the engine does after files are downloaded.
+    // Default "onnx" means "files-only install + optional installSql
+    // registration" — the v1 behaviour every existing entry expects.
+    // "python" means the entry also requires a managed Python venv + a
+    // worker script; the engine sets up the venv via
+    // PythonEnvironmentManager and registers a PythonBackedModel rather
+    // than running installSql. Other values may be added later (e.g.
+    // "gguf") if their install behaviour ever diverges from the onnx
+    // default; today GGUF entries are still "onnx" because they install
+    // identically.
+    string Kind = "onnx",
+    // Python-specific install + dispatch config. Required when Kind ==
+    // "python"; must be null otherwise. Carries the venv requirements,
+    // worker script path, and the model's IModel-shaped signature so
+    // catalog-driven registration can construct a PythonBackedModel
+    // without needing an installSql sidecar.
+    CatalogPythonSpec? Python = null);
+
+// ───────────────────────── Python-backed model config ─────────────────────────
+
+// Install + dispatch config for a kind="python" model. Authored in
+// catalog.json under the `python` key; loaded by the registrar at
+// install time to materialise a venv + spawn the worker.
+//
+// Today WorkerScript is always a filename relative to the engine's
+// bundled `python/` directory (the same place bark_worker.py etc.
+// ship from). A future schema rev can extend the resolver to also
+// accept HF URLs / model-relative paths once the user-defined Python
+// model story lands.
+public sealed record CatalogPythonSpec(
+    string WorkerScript,
+    string PythonVersion,
+    IReadOnlyList<string> Requirements,
+    CatalogModelSignature Signature,
+    // CLI args appended after the worker script when the engine spawns
+    // the subprocess (e.g. ["--model-id", "suno/bark-small"]). Same
+    // shape as PythonBackedModel.scriptArgs. Empty when the worker
+    // needs no scaffold args.
+    IReadOnlyList<string>? ScaffoldArgs = null);
+
+// Model signature mirroring the IModel-shaped fields that hardcoded
+// registrations supply (InputKinds, OutputKind, IsDeterministic,
+// OptionalArgKinds). Carried in catalog.json for kind="python"
+// entries so the registrar can construct a ModelCatalogEntry without
+// re-hardcoding these values.
+//
+// DataKind name strings are case-insensitive matches against the
+// runtime enum — e.g. "String", "Image", "Audio", "Float64". The
+// registrar throws ArgumentException at load time if any name is
+// unrecognised so the manifest never silently mis-types a model.
+public sealed record CatalogModelSignature(
+    IReadOnlyList<string> InputKinds,
+    string OutputKind,
+    bool IsDeterministic,
+    IReadOnlyList<string>? OptionalArgKinds = null);
 
 public sealed record CatalogHardware(
     int MinRamMb,

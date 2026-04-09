@@ -3,7 +3,7 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { IStreamResult, Subject } from '@microsoft/signalr';
-import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
+import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto } from '../DatumIngest.Web.Hubs';
 
 export type ICatalogHub = {
     /**
@@ -128,5 +128,55 @@ export type IStreamHubClient = {
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onModelDownloadFailed(failed: ModelDownloadFailedDto): Promise<void>;
+    /**
+    * @param started Transpiled from DatumIngest.Web.Hubs.UvDownloadStartedDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onUvDownloadStarted(started: UvDownloadStartedDto): Promise<void>;
+    /**
+    * @param progress Transpiled from DatumIngest.Web.Hubs.UvDownloadProgressDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onUvDownloadProgress(progress: UvDownloadProgressDto): Promise<void>;
+    /**
+    * @param complete Transpiled from DatumIngest.Web.Hubs.UvDownloadCompleteDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onUvDownloadComplete(complete: UvDownloadCompleteDto): Promise<void>;
+    /**
+    * @param started Transpiled from DatumIngest.Web.Hubs.PythonInstallStartedDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onPythonInstallStarted(started: PythonInstallStartedDto): Promise<void>;
+    /**
+    * @param progress Transpiled from DatumIngest.Web.Hubs.PythonInstallProgressDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onPythonInstallProgress(progress: PythonInstallProgressDto): Promise<void>;
+    /**
+    * @param complete Transpiled from DatumIngest.Web.Hubs.PythonInstallCompleteDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onPythonInstallComplete(complete: PythonInstallCompleteDto): Promise<void>;
+    /**
+    * @param started Transpiled from DatumIngest.Web.Hubs.VenvInstallStartedDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onVenvInstallStarted(started: VenvInstallStartedDto): Promise<void>;
+    /**
+    * @param progress Transpiled from DatumIngest.Web.Hubs.VenvInstallProgressDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onVenvInstallProgress(progress: VenvInstallProgressDto): Promise<void>;
+    /**
+    * @param complete Transpiled from DatumIngest.Web.Hubs.VenvInstallCompleteDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onVenvInstallComplete(complete: VenvInstallCompleteDto): Promise<void>;
+    /**
+    * @param failed Transpiled from DatumIngest.Web.Hubs.PythonEnvironmentFailedDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onPythonEnvironmentFailed(failed: PythonEnvironmentFailedDto): Promise<void>;
 }
 

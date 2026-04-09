@@ -4,7 +4,7 @@
 // @ts-nocheck
 import type { HubConnection, IStreamResult, Subject } from '@microsoft/signalr';
 import type { ICatalogHub, IStreamHub, ICatalogHubClient, IStreamHubClient } from './DatumIngest.Web.Hubs';
-import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto } from '../DatumIngest.Web.Hubs';
+import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto } from '../DatumIngest.Web.Hubs';
 
 
 // components
@@ -189,6 +189,16 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
         const __onModelInstalling = (...args: [ModelInstallingDto]) => receiver.onModelInstalling(...args);
         const __onModelInstalled = (...args: [ModelInstalledDto]) => receiver.onModelInstalled(...args);
         const __onModelDownloadFailed = (...args: [ModelDownloadFailedDto]) => receiver.onModelDownloadFailed(...args);
+        const __onUvDownloadStarted = (...args: [UvDownloadStartedDto]) => receiver.onUvDownloadStarted(...args);
+        const __onUvDownloadProgress = (...args: [UvDownloadProgressDto]) => receiver.onUvDownloadProgress(...args);
+        const __onUvDownloadComplete = (...args: [UvDownloadCompleteDto]) => receiver.onUvDownloadComplete(...args);
+        const __onPythonInstallStarted = (...args: [PythonInstallStartedDto]) => receiver.onPythonInstallStarted(...args);
+        const __onPythonInstallProgress = (...args: [PythonInstallProgressDto]) => receiver.onPythonInstallProgress(...args);
+        const __onPythonInstallComplete = (...args: [PythonInstallCompleteDto]) => receiver.onPythonInstallComplete(...args);
+        const __onVenvInstallStarted = (...args: [VenvInstallStartedDto]) => receiver.onVenvInstallStarted(...args);
+        const __onVenvInstallProgress = (...args: [VenvInstallProgressDto]) => receiver.onVenvInstallProgress(...args);
+        const __onVenvInstallComplete = (...args: [VenvInstallCompleteDto]) => receiver.onVenvInstallComplete(...args);
+        const __onPythonEnvironmentFailed = (...args: [PythonEnvironmentFailedDto]) => receiver.onPythonEnvironmentFailed(...args);
 
         connection.on("OnPong", __onPong);
         connection.on("OnToken", __onToken);
@@ -200,6 +210,16 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
         connection.on("OnModelInstalling", __onModelInstalling);
         connection.on("OnModelInstalled", __onModelInstalled);
         connection.on("OnModelDownloadFailed", __onModelDownloadFailed);
+        connection.on("OnUvDownloadStarted", __onUvDownloadStarted);
+        connection.on("OnUvDownloadProgress", __onUvDownloadProgress);
+        connection.on("OnUvDownloadComplete", __onUvDownloadComplete);
+        connection.on("OnPythonInstallStarted", __onPythonInstallStarted);
+        connection.on("OnPythonInstallProgress", __onPythonInstallProgress);
+        connection.on("OnPythonInstallComplete", __onPythonInstallComplete);
+        connection.on("OnVenvInstallStarted", __onVenvInstallStarted);
+        connection.on("OnVenvInstallProgress", __onVenvInstallProgress);
+        connection.on("OnVenvInstallComplete", __onVenvInstallComplete);
+        connection.on("OnPythonEnvironmentFailed", __onPythonEnvironmentFailed);
 
         const methodList: ReceiverMethod[] = [
             { methodName: "OnPong", method: __onPong },
@@ -211,7 +231,17 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
             { methodName: "OnModelDownloadComplete", method: __onModelDownloadComplete },
             { methodName: "OnModelInstalling", method: __onModelInstalling },
             { methodName: "OnModelInstalled", method: __onModelInstalled },
-            { methodName: "OnModelDownloadFailed", method: __onModelDownloadFailed }
+            { methodName: "OnModelDownloadFailed", method: __onModelDownloadFailed },
+            { methodName: "OnUvDownloadStarted", method: __onUvDownloadStarted },
+            { methodName: "OnUvDownloadProgress", method: __onUvDownloadProgress },
+            { methodName: "OnUvDownloadComplete", method: __onUvDownloadComplete },
+            { methodName: "OnPythonInstallStarted", method: __onPythonInstallStarted },
+            { methodName: "OnPythonInstallProgress", method: __onPythonInstallProgress },
+            { methodName: "OnPythonInstallComplete", method: __onPythonInstallComplete },
+            { methodName: "OnVenvInstallStarted", method: __onVenvInstallStarted },
+            { methodName: "OnVenvInstallProgress", method: __onVenvInstallProgress },
+            { methodName: "OnVenvInstallComplete", method: __onVenvInstallComplete },
+            { methodName: "OnPythonEnvironmentFailed", method: __onPythonEnvironmentFailed }
         ]
 
         return new ReceiverMethodSubscription(connection, methodList);

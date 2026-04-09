@@ -68,6 +68,12 @@ $DATUM_MODELS\
   ...
 ```
 
+Catalog-driven Python models follow the same per-id subfolder
+convention (`bark-small/`, `bark/`, ...); the engine downloads the
+HuggingFace repo's files directly into that folder and points the
+worker at it via the `DATUM_MODEL_DIR` env var, so there's no
+`~/.cache/huggingface/` indirection.
+
 Multi-file models live in a subfolder (the catalog entry's
 `RelativePath` points at one anchor file inside the folder; the model
 loader derives the rest from the parent directory):
@@ -86,6 +92,42 @@ $DATUM_MODELS\
     decoder_model_fp16.onnx
     tokenizer.json
     ...
+```
+
+### Python toolchain (auto-managed)
+
+Python-backed models (`bark_small`, `bark`, and anything else with
+`kind: "python"` in the catalog) don't require any manual Python
+install. The first time you Install one through the WebUI Models
+panel — or through the REST endpoint, see below — the engine does
+the following, in order, surfacing each step inline on the model
+card:
+
+1. **Download `uv`** from `github.com/astral-sh/uv/releases` into
+   `%LOCALAPPDATA%\DatumIngest\uv\`. One-time, ~15 MB.
+2. **Install the requested CPython** (e.g. 3.11) via
+   `uv python install` into `%LOCALAPPDATA%\DatumIngest\python\`.
+   One-time per major.minor version, ~30-60 MB.
+3. **Create a per-model venv** at
+   `%LOCALAPPDATA%\DatumIngest\venvs\<catalog-id>\` and `uv pip install`
+   the model's declared requirements (`torch`, `transformers`, etc.).
+   uv hardlinks wheels from its global cache across venvs, so the
+   second Python model installs in seconds.
+4. **Download weights** through the same `HuggingFaceSource` pipeline
+   ONNX models use, into `$DATUM_MODELS\<catalog-id>\`. The worker
+   reads `os.environ["DATUM_MODEL_DIR"]` at startup and loads via
+   `from_pretrained(MODEL_DIR)` — no `~/.cache/huggingface/`
+   indirection.
+
+The engine never modifies your `PATH`, never touches your system
+Python, and writes only to `%LOCALAPPDATA%\DatumIngest\` and
+`$DATUM_MODELS\`. Uninstall is a directory delete.
+
+To see current state from SQL:
+
+```sql
+SELECT * FROM system.python_paths;          -- uv binary, python install root, venvs root
+SELECT * FROM system.python_environments;   -- one row per provisioned venv
 ```
 
 ## Model catalog
@@ -1376,11 +1418,12 @@ Python subprocess: the C# side hands inputs over via NDJSON on
 stdio, the Python worker uses the upstream library directly, and the
 results come back as bytes.
 
-The bridge has its own status indicator in `system_models`:
-**`bridge`** — backend is `python`, the venv exists, and the model is
-*probably* runnable. Catalog can't fully verify pip packages without
-spawning the worker, so a clean `status=bridge` doesn't guarantee
-runnability — but a missing venv reliably reports `status=missing`.
+Install is the same Models-panel click as ONNX models — the engine
+provisions the venv on demand (see the
+[Python toolchain](#python-toolchain-auto-managed) subsection
+above). Workers receive their model directory through the
+`DATUM_MODEL_DIR` env var and load weights from there directly, so
+there's no separate cache to manage.
 
 #### `bark_small` — TTS with embedded sound effects
 
@@ -1392,22 +1435,14 @@ runnability — but a missing venv reliably reports `status=missing`.
 - **Source**: [huggingface.co/suno/bark-small](https://huggingface.co/suno/bark-small)
 - **Backend**: Python bridge — wraps HuggingFace `transformers`'
   `BarkModel`.
-- **Files (catalog tracks)**: `.venv-bark/pyvenv.cfg` — the venv
-  marker. Bark's actual weights live in `~/.cache/huggingface/`, not
-  in `$DATUM_MODELS`.
-- **Setup**:
-  ```powershell
-  ./scripts/setup-bark-venv.ps1
-  ```
-  Creates `$DATUM_MODELS/.venv-bark`, pip-installs `transformers`,
-  `torch` (CUDA wheel), and `scipy`. The Bark weights download from
-  HuggingFace on the first inference call (~1 GB, one-time).
-  - Use `-Cpu` to install CPU-only torch (much slower; no NVIDIA
-    needed).
-  - Use `-CudaWheel cu126` (or `cu124` / `cu121`) to pin a different
-    PyTorch CUDA wheel — defaults to `cu128`, which works against
-    CUDA Toolkit 12.x system installs.
-  - Use `-Force` to nuke and recreate.
+- **Files (catalog tracks)**: HuggingFace repo `suno/bark-small`
+  downloaded into `$DATUM_MODELS\bark-small\`. Venv lives separately
+  at `%LOCALAPPDATA%\DatumIngest\venvs\bark-small\`.
+- **Setup**: click Install on the model card. The engine auto-provisions
+  the venv (`torch`, `transformers`, `scipy`, `numpy`) and downloads
+  weights (~1.1 GB) the same way it does for ONNX models. CUDA torch
+  is picked up automatically when available; CPU-only is the fallback
+  and works without an NVIDIA GPU.
 - **Per-call overrides**:
   - `[0] voice_preset` (string) — e.g. `'v2/en_speaker_9'`. Worker
     pins `v2/en_speaker_6` by default (neutral male, well-tested).
@@ -1439,16 +1474,16 @@ Same architecture, voices, and worker as `bark_small` — bigger weights
 
 - **License / Source**: same as `bark_small` —
   [huggingface.co/suno/bark](https://huggingface.co/suno/bark)
-- **Backend**: Python bridge — same `.venv-bark` and worker script
-  (`bark_worker.py`) as `bark_small`, only the HuggingFace model ID
-  differs (`suno/bark` vs `suno/bark-small`).
-- **First-call download**: ~3.5 GB into `~/.cache/huggingface/`.
+- **Backend**: Python bridge — same `bark_worker.py` as `bark_small`,
+  only the catalog id differs. Each variant gets its own venv
+  (`venvs\bark-small\` and `venvs\bark\`); uv's wheel cache hardlinks
+  the shared dependencies so the second install is fast.
+- **Files (catalog tracks)**: `$DATUM_MODELS\bark\` (~3.5 GB).
 - **VRAM**: ~3-4 GB during inference (3-4× `bark_small`'s footprint).
 - **Latency**: ~15-30s per clip on a consumer GPU vs `bark_small`'s
   ~5-10s. Use `bark` for hero outputs, `bark_small` for fast iteration.
-- **Setup**: nothing extra beyond `setup-bark-venv.ps1` — both
-  variants share the venv. The full model auto-downloads on first
-  inference call.
+- **Setup**: click Install on the model card — same auto-managed
+  flow as `bark_small`.
 - **Per-call overrides**: same as `bark_small` —
   `models.bark(text, 'v2/en_speaker_9')`.
 - **Demo**:

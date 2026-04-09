@@ -11,6 +11,7 @@ import {
   restartDownload,
   uninstallModel,
   type ActiveDownload,
+  type PythonInstallStep,
 } from '@/state/downloads';
 import { localeState } from '@/state/locale';
 import { Button } from '@/components/ui/button';
@@ -33,6 +34,15 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
   const installing = downloads.installing[modelId] === true;
   const error = downloads.errors[modelId];
   const hasInstallSql = typeof model.installSql === 'string' && model.installSql.length > 0;
+
+  // Python install sub-step. The venv-install step is model-scoped (keyed
+  // by catalog id), so it appears only on the card that triggered it. The
+  // uv-download + python-install steps are machine-scoped — surface them
+  // alongside whichever model is currently installing, since that's what
+  // triggered the host-level work.
+  const venvStep = downloads.venvSteps[modelId];
+  const hostStep = downloads.pythonHostStep;
+  const activeStep: PythonInstallStep | null = venvStep ?? (installing ? hostStep : null) ?? null;
 
   return (
     <article className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 py-5">
@@ -105,6 +115,7 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
         installing={installing}
         hasInstallSql={hasInstallSql}
         partialBytes={downloads.partials[modelId] ?? 0}
+        installStep={activeStep}
       />
     </article>
   );
@@ -178,6 +189,59 @@ function DownloadProgress({ download }: { download: ActiveDownload }) {
   );
 }
 
+function InstallingIndicator({ step }: { step: PythonInstallStep | null }) {
+  const { t } = useTranslation('models');
+
+  // No Python sub-step: just the generic SQL-install spinner. Either
+  // we're past the venv stage (catalog INSTALL SQL is running) or the
+  // catalog entry is an ONNX model that has no venv work at all.
+  if (!step) {
+    return (
+      <p className="text-muted-foreground flex items-center gap-2 text-xs">
+        <Loader2 className="size-3 animate-spin" />
+        {t('card.installingHint')}
+      </p>
+    );
+  }
+
+  const stepLabel =
+    step.kind === 'uv-download'
+      ? t('card.pythonStep.uvDownload')
+      : step.kind === 'python-install'
+      ? t('card.pythonStep.pythonInstall')
+      : t('card.pythonStep.venvInstall');
+
+  // Prefer the most specific text we have: detail (wheel name, version)
+  // over stage label ("downloading", "extracting"). Both are free-form
+  // from the install backend.
+  const subline = step.detail
+    ? t('card.pythonStepWithDetail', { step: stepLabel, detail: step.detail })
+    : step.stage
+    ? t('card.pythonStepWithStage', { step: stepLabel, stage: step.stage })
+    : stepLabel;
+
+  // Determinate progress when the backend reports totals (uv download),
+  // indeterminate otherwise (venv install — uv pip doesn't expose
+  // per-package byte totals).
+  const showBar =
+    typeof step.bytesProcessed === 'number'
+    && typeof step.totalBytes === 'number'
+    && step.totalBytes > 0;
+  const percent = showBar
+    ? Math.min(100, ((step.bytesProcessed ?? 0) / (step.totalBytes ?? 1)) * 100)
+    : 0;
+
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-muted-foreground flex items-center gap-2 text-xs">
+        <Loader2 className="size-3 animate-spin" />
+        <span className="truncate">{subline}</span>
+      </p>
+      {showBar && <Progress value={percent} />}
+    </div>
+  );
+}
+
 function DetailActions({
   modelId,
   modelDisplayName,
@@ -188,6 +252,7 @@ function DetailActions({
   installing,
   hasInstallSql,
   partialBytes,
+  installStep,
 }: {
   modelId: string;
   modelDisplayName: string;
@@ -198,6 +263,7 @@ function DetailActions({
   installing: boolean;
   hasInstallSql: boolean;
   partialBytes: number;
+  installStep: PythonInstallStep | null;
 }) {
   const { t } = useTranslation('models');
 
@@ -210,12 +276,7 @@ function DetailActions({
     );
   }
   if (installing) {
-    return (
-      <p className="text-muted-foreground flex items-center gap-2 text-xs">
-        <Loader2 className="size-3 animate-spin" />
-        {t('card.installingHint')}
-      </p>
-    );
+    return <InstallingIndicator step={installStep} />;
   }
 
   if (installed) {

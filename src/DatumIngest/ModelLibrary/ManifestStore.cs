@@ -44,6 +44,7 @@ internal sealed class ManifestStore : IManifestStore
             throw new InvalidOperationException($"Failed to deserialize {manifestPath}.");
         }
 
+        ValidateModels(manifest, manifestPath);
         Manifest = manifest;
 
         _licenseTextPaths = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -71,6 +72,56 @@ internal sealed class ManifestStore : IManifestStore
         return _licenseTextPaths.TryGetValue(licenseId, out string? path)
             ? File.ReadAllText(path)
             : null;
+    }
+
+    /// <summary>
+    /// Sanity-checks every entry's Kind / Python invariant at load time
+    /// so a manifest typo surfaces as one clear startup error instead of
+    /// a confusing failure mid-install. Today's rules:
+    /// <list type="bullet">
+    /// <item><c>Kind == "python"</c> requires a non-null <see cref="CatalogPythonSpec"/>;
+    /// every other kind requires it to be null.</item>
+    /// <item>Python entries must declare a non-empty WorkerScript and PythonVersion.</item>
+    /// </list>
+    /// Loose validation on purpose — the registrar layer will type-check
+    /// the signature kinds against the runtime <c>DataKind</c> enum
+    /// later. This pass only catches the cross-field invariants.
+    /// </summary>
+    private static void ValidateModels(CatalogManifest manifest, string manifestPath)
+    {
+        foreach (CatalogModel m in manifest.Models)
+        {
+            bool isPython = string.Equals(m.Kind, "python", StringComparison.OrdinalIgnoreCase);
+            if (isPython && m.Python is null)
+            {
+                throw new InvalidOperationException(
+                    $"Catalog entry '{m.Id}' in {manifestPath} declares kind=\"python\" but has no `python` block.");
+            }
+            if (!isPython && m.Python is not null)
+            {
+                throw new InvalidOperationException(
+                    $"Catalog entry '{m.Id}' in {manifestPath} has a `python` block but kind=\"{m.Kind}\". "
+                    + "Set kind to \"python\" or remove the python section.");
+            }
+            if (m.Python is { } py)
+            {
+                if (string.IsNullOrWhiteSpace(py.WorkerScript))
+                {
+                    throw new InvalidOperationException(
+                        $"Catalog entry '{m.Id}' in {manifestPath} has python.workerScript missing or blank.");
+                }
+                if (string.IsNullOrWhiteSpace(py.PythonVersion))
+                {
+                    throw new InvalidOperationException(
+                        $"Catalog entry '{m.Id}' in {manifestPath} has python.pythonVersion missing or blank.");
+                }
+                if (string.IsNullOrWhiteSpace(py.Signature.OutputKind))
+                {
+                    throw new InvalidOperationException(
+                        $"Catalog entry '{m.Id}' in {manifestPath} has python.signature.outputKind missing or blank.");
+                }
+            }
+        }
     }
 
     // Resolution order:
