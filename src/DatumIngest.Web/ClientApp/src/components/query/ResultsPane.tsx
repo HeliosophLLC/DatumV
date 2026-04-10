@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { AlertCircle, Ban, Braces, Check, ChevronDown, Download, Film, Loader2, Music, Sigma } from 'lucide-react';
+import { AlertCircle, Ban, Braces, Brackets, Check, ChevronDown, Download, Film, Loader2, Music, Sigma } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import JsonView from '@uiw/react-json-view';
+import { darkTheme } from '@uiw/react-json-view/dark';
+import { lightTheme } from '@uiw/react-json-view/light';
 import { MediaPreview } from './MediaPreview';
 import { MemoryChip } from './MemoryChip';
 import { TraceChip } from './TraceChip';
@@ -840,6 +843,15 @@ function cellRawTextForCopy(cell: JsonCell): string {
   return cell.text ?? '';
 }
 
+// Single-cell Copy uses the rich form (pretty JSON for struct + json
+// cells); the TSV path keeps the one-line summary so row alignment isn't
+// broken by embedded newlines.
+function cellSingleCellCopyText(cell: JsonCell): string {
+  if (cell.kind === 'struct') return cellToJsonString(cell);
+  if (cell.kind === 'json') return prettifyJson(cell.text ?? '');
+  return cellRawTextForCopy(cell);
+}
+
 function cellTextForCopy(cell: JsonCell): string {
   const raw = cellRawTextForCopy(cell);
   if (/[\t\n\r"]/.test(raw)) {
@@ -1208,9 +1220,12 @@ function CellTable({ cell }: { cell: CellResult }) {
       if (cell.schema === null) return;
       const r = selectionRange(selection, cell.rows.length, cell.schema.length);
       if (r.rowMax < r.rowMin || r.colMax < r.colMin) return;
-      const tsv = buildSelectionTsv(cell.rows, r);
+      const payload =
+        r.rowMin === r.rowMax && r.colMin === r.colMax
+          ? cellSingleCellCopyText(cell.rows[r.rowMin]?.[r.colMin] ?? { kind: 'null' })
+          : buildSelectionTsv(cell.rows, r);
       e.preventDefault();
-      void navigator.clipboard.writeText(tsv);
+      void navigator.clipboard.writeText(payload);
     },
     [selection, cell.rows, cell.schema],
   );
@@ -1279,12 +1294,15 @@ function CellTable({ cell }: { cell: CellResult }) {
 
       const r = selectionRange(activeSelection, numRowsLocal, numColsLocal);
       if (r.rowMax < r.rowMin || r.colMax < r.colMin) return;
-      const tsv =
-        result === 'copyWithHeaders'
+      const singleCell =
+        result === 'copy' && r.rowMin === r.rowMax && r.colMin === r.colMax;
+      const payload = singleCell
+        ? cellSingleCellCopyText(cell.rows[r.rowMin]?.[r.colMin] ?? { kind: 'null' })
+        : result === 'copyWithHeaders'
           ? buildSelectionTsvWithHeaders(cell.schema, cell.rows, r)
           : buildSelectionTsv(cell.rows, r);
       try {
-        await navigator.clipboard.writeText(tsv);
+        await navigator.clipboard.writeText(payload);
       } catch {
         // Clipboard write can fail under unusual conditions (no doc
         // focus, etc.); the menu UX still works for the next action.
@@ -1350,10 +1368,9 @@ function CellTable({ cell }: { cell: CellResult }) {
           }}
           onContextMenu={(e) => handleContextMenu(e, 'all', 0, 0)}
           className={cn(
-            'border-border sticky left-0 z-30 cursor-cell border-r',
+            'bg-muted border-border sticky left-0 z-30 cursor-cell border-r',
             selection?.mode === 'all'
-              ? 'bg-foreground/15 group-focus-within:bg-primary/40'
-              : 'bg-muted',
+              && 'before:absolute before:inset-0 before:bg-foreground/15 group-focus-within:before:bg-primary/40',
           )}
           role="button"
           aria-label="Select all"
@@ -1443,14 +1460,13 @@ function CellTable({ cell }: { cell: CellResult }) {
                   handleContextMenu(e, 'row', virtualRow.index, 0)
                 }
                 className={cn(
-                  'border-border text-muted-foreground sticky left-0 z-10 flex min-w-0 cursor-cell items-center justify-end border-r px-1.5 font-medium tabular-nums select-none',
+                  'bg-muted border-border text-muted-foreground sticky left-0 z-10 flex min-w-0 cursor-cell items-start justify-end border-r px-1.5 py-1 font-medium tabular-nums select-none',
                   isRowInRange(virtualRow.index)
-                    ? 'bg-foreground/15 group-focus-within:bg-primary/40'
-                    : 'bg-muted',
+                    && 'before:absolute before:inset-0 before:bg-foreground/15 group-focus-within:before:bg-primary/40',
                 )}
                 title={String(rowNumber)}
               >
-                <span className="truncate">{rowNumber}</span>
+                <span className="relative truncate">{rowNumber}</span>
               </div>
               {row.map((c, colIdx) => (
                 <div
@@ -1487,7 +1503,7 @@ function CellTable({ cell }: { cell: CellResult }) {
                   className={cn(
                     'border-border min-w-0 cursor-cell border-r px-2 py-1 font-mono last:border-r-0',
                     largeMedia
-                      ? 'flex items-center overflow-hidden'
+                      ? 'flex items-start overflow-hidden'
                       : 'truncate align-top',
                     isInRange(virtualRow.index, colIdx)
                       && 'bg-foreground/10 group-focus-within:bg-primary/25',
@@ -1549,6 +1565,7 @@ function CellValue({
     return <NumericArrayCell cell={cell} />;
   }
   if (cell.kind === 'struct') return <StructCell cell={cell} />;
+  if (cell.kind === 'json') return <JsonTextCell cell={cell} />;
   return <span>{cell.text ?? ''}</span>;
 }
 
@@ -2079,25 +2096,150 @@ function StructCell({ cell }: { cell: JsonCell }) {
   const [open, setOpen] = useState(false);
   const fields = cell.fields ?? [];
   const summary = structSummary(cell);
+  const treeValue = useMemo(() => cellToJsonValue(cell), [cell]);
+  const title = `struct · ${fields.length} field${fields.length === 1 ? '' : 's'}`;
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title={`struct · ${fields.length} field${fields.length === 1 ? '' : 's'}`}
+        title={title}
         className="text-muted-foreground hover:text-foreground inline-flex max-w-full cursor-pointer items-center gap-1"
       >
         <Braces className="size-3.5 shrink-0" />
         <span className="truncate font-mono">{summary}</span>
       </button>
-      <MediaPreview
-        open={open}
-        onClose={() => setOpen(false)}
-        title={`struct · ${fields.length} field${fields.length === 1 ? '' : 's'}`}
-      >
-        <StructFieldTable fields={fields} />
+      <MediaPreview open={open} onClose={() => setOpen(false)} title={title}>
+        <JsonTreeView value={treeValue} />
       </MediaPreview>
     </>
+  );
+}
+
+// ────────── JSON cell ──────────
+//
+// Server emits kind="json" for Array<Struct>, Array<scalar>, Array<String>,
+// and standalone Json values — see WebCellFormatter.cs. The grid chip
+// shows the leading bracket character so the user can tell array-vs-object
+// at a glance; clicking opens the Monaco-backed JSON viewer used by
+// StructCell, so single-line JSON gets pretty-printed inside the modal.
+
+function JsonTextCell({ cell }: { cell: JsonCell }) {
+  const [open, setOpen] = useState(false);
+  const text = cell.text ?? '';
+  const isArray = text.trimStart().startsWith('[');
+  const treeValue = useMemo(() => cellToJsonValue(cell), [cell]);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title="json"
+        className="text-muted-foreground hover:text-foreground inline-flex max-w-full cursor-pointer items-center gap-1"
+      >
+        {isArray ? (
+          <Brackets className="size-3.5 shrink-0" />
+        ) : (
+          <Braces className="size-3.5 shrink-0" />
+        )}
+        <span className="truncate font-mono">{text}</span>
+      </button>
+      <MediaPreview open={open} onClose={() => setOpen(false)} title="json">
+        <JsonTreeView value={treeValue} />
+      </MediaPreview>
+    </>
+  );
+}
+
+// Recursively converts a JsonCell into a plain JS value suitable for
+// JSON.stringify. Rich payloads (media, point clouds, numeric arrays,
+// meshes) collapse to a short descriptor string — the JSON modal is a
+// formatting view, not a media renderer.
+function cellToJsonValue(cell: JsonCell): unknown {
+  if (cell.kind === 'null') return null;
+  if (cell.kind === 'struct') {
+    const obj: Record<string, unknown> = {};
+    for (const f of cell.fields ?? []) {
+      obj[f.name] = cellToJsonValue(f.cell);
+    }
+    return obj;
+  }
+  if (cell.kind === 'json' && cell.text !== undefined) {
+    try {
+      return JSON.parse(cell.text);
+    } catch {
+      return cell.text;
+    }
+  }
+  if (cell.kind === 'numeric_array') {
+    const dim = cell.shape ? cell.shape.join('×') : (cell.count ?? 0).toString();
+    return `<${cell.elementKind ?? '?'}[${dim}]>`;
+  }
+  if (
+    cell.kind === 'media'
+    || cell.kind === 'image'
+    || cell.kind === 'audio'
+    || cell.kind === 'video'
+  ) {
+    return `<${cell.mime ?? 'binary'}, ${formatBytes(bytesFromBase64(cell.dataB64))}>`;
+  }
+  if (cell.kind === 'media_array') {
+    return `<${cell.items?.length ?? 0} items>`;
+  }
+  if (cell.kind === 'pointcloud') {
+    return `<pointcloud ${cell.pointCloud?.pointCount ?? 0} pts>`;
+  }
+  if (cell.kind === 'mesh') {
+    return `<mesh ${cell.mesh?.vertexCount ?? 0}v/${cell.mesh?.triangleCount ?? 0}t>`;
+  }
+  const text = cell.text ?? '';
+  // Bare scalars (numbers, booleans, null literal) round-trip through
+  // JSON.parse; anything else stays as a string so the modal still shows
+  // it verbatim.
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function cellToJsonString(cell: JsonCell): string {
+  return JSON.stringify(cellToJsonValue(cell), null, 2);
+}
+
+function prettifyJson(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+function JsonTreeView({ value }: { value: unknown }) {
+  const { theme } = useSnapshot(settingsState);
+  const isDark =
+    theme === 'dark'
+    || (theme === 'system'
+      && typeof document !== 'undefined'
+      && document.documentElement.classList.contains('dark'));
+  // `react-json-view` only renders a tree for object/array roots; wrap a
+  // scalar so the user still sees a typed value (instead of an empty
+  // panel) when the cell collapsed to a single string/number/null.
+  const rootValue =
+    value !== null && typeof value === 'object'
+      ? (value as object)
+      : { value };
+  return (
+    <div className="h-[60vh] min-h-[300px] w-[80vw] max-w-[1100px] min-w-[480px] overflow-auto">
+      <JsonView
+        value={rootValue}
+        style={isDark ? darkTheme : lightTheme}
+        collapsed={3}
+        displayDataTypes={false}
+        enableClipboard={true}
+        shortenTextAfterLength={120}
+      />
+    </div>
   );
 }
 
