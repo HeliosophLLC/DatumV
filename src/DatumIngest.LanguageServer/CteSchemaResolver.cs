@@ -66,9 +66,13 @@ internal static class CteSchemaResolver
             return Empty;
         }
 
-        if (parseResult.Query is null) return Empty;
+        // EffectiveQuery (vs Query) so a DECLARE preceding the WITH/SELECT
+        // doesn't strand the CTE walker — ParseResult.Query is intentionally
+        // null for multi-statement batches.
+        QueryExpression? query = parseResult.EffectiveQuery;
+        if (query is null) return Empty;
 
-        SelectStatement? root = ExtractRootStatement(parseResult.Query);
+        SelectStatement? root = ExtractRootStatement(query);
         if (root is null) return Empty;
 
         Dictionary<string, IReadOnlyList<TableColumnEntry>> schemas =

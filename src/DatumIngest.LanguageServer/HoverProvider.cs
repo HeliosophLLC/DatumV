@@ -658,9 +658,13 @@ public sealed class HoverProvider
             return result;
         }
 
-        if (parseResult.Query is null) return result;
+        // EffectiveQuery so TVF-alias enumeration survives a leading DECLARE
+        // (Query is null for multi-statement batches; the WITH/SELECT lives
+        // inside Statements as a QueryStatement).
+        QueryExpression? query = parseResult.EffectiveQuery;
+        if (query is null) return result;
 
-        foreach (FunctionSource source in EnumerateFunctionSources(parseResult.Query))
+        foreach (FunctionSource source in EnumerateFunctionSources(query))
         {
             FunctionSignature? signature = LookupTvfSignature(source);
             if (signature is null) continue;

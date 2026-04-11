@@ -342,6 +342,63 @@ public sealed class HoverProviderTests : ServiceTestBase
     }
 
     [Fact]
+    public void GetHover_LetBindingInCte_AfterLeadingDeclare_StillResolves()
+    {
+        // Regression: when a DECLARE statement precedes the WITH clause,
+        // ParseResult.Query is null (Query is reserved for single-query
+        // inputs; multi-statement batches use Statements). CteSchemaResolver
+        // and HoverProvider's TVF-alias map used to guard on
+        // parseResult.Query and bail, leaving the LET map empty so hover on
+        // a LET name returned nothing. EffectiveQuery falls through into
+        // Statements[N] for the QueryStatement, restoring hover info.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "video_unnest_frames",
+                    Parameters = [new ParameterSignature { Name = "source", Kind = "String" }],
+                    ReturnType = "table(frame_index Int32, frame VideoFrame)",
+                    IsTableValued = true,
+                    OutputColumns =
+                    [
+                        new TableColumnEntry { Name = "frame_index", Kind = "Int32", Nullable = false },
+                        new TableColumnEntry { Name = "frame", Kind = "VideoFrame", Nullable = false },
+                    ],
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "depth_full",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Struct<depth: Array<Float32>, intrinsics: Array<Float32>>",
+                },
+            ],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql =
+            "DECLARE model_in_w Float32 = 518.0::Float32;\n" +
+            "WITH thumb AS (SELECT " +
+            "  LET curr_depth = models.depth_full(frame), " +
+            "  frame_index " +
+            "FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT frame_index FROM thumb";
+
+        int offset = sql.IndexOf("curr_depth", StringComparison.Ordinal);
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("curr_depth", result.Contents);
+        Assert.Contains("Struct<depth: Array<Float32>, intrinsics: Array<Float32>>", result.Contents);
+        Assert.Contains("LET binding", result.Contents);
+    }
+
+    [Fact]
     public void GetHover_UnprojectedLetStructFieldAccess_ResolvesField()
     {
         // `LET curr_depth = ...` then `curr_depth.depth` — the LET isn't

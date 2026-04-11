@@ -31,6 +31,31 @@ public sealed class ParseResult
     public SelectStatement? Statement => Query is SelectQueryExpression select ? select.Statement : null;
 
     /// <summary>
+    /// The first <see cref="QueryExpression"/> reachable from this parse — either
+    /// <see cref="Query"/> when the input was a bare query, or the first
+    /// <see cref="QueryStatement"/>'s <see cref="QueryStatement.Query"/> when
+    /// the batch mixes procedural statements (e.g. <c>DECLARE</c>) with a
+    /// query. Tooling that needs the query for analysis regardless of
+    /// surrounding procedural scaffolding (LSP hover, CTE-schema resolution,
+    /// TVF-alias enumeration) should prefer this over <see cref="Query"/>,
+    /// which is intentionally <see langword="null"/> for multi-statement
+    /// batches.
+    /// </summary>
+    public QueryExpression? EffectiveQuery
+    {
+        get
+        {
+            if (Query is not null) return Query;
+            if (Statements is null) return null;
+            foreach (Statement statement in Statements)
+            {
+                if (statement is QueryStatement qs) return qs.Query;
+            }
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Parse errors encountered during analysis. Empty for valid SQL.
     /// Errors are ordered by position in the source text.
     /// </summary>
