@@ -270,63 +270,29 @@ public sealed class ModelInvocationOperator : QueryOperator
                 if (remaining < rowsThisBatch) rowsThisBatch = remaining;
             }
 
-            // First-batch lazy initialisation. Output schema = source
+            // First-batch lazy initialization. Output schema = source
             // columns followed by one column per invocation; slot tables
             // let the per-batch loop copy/write at known indices without
             // name lookups.
-            if (outputLookup is null)
+            if (outputLookup is null || sourceCopySlots is null || invocationOutputSlots is null ||
+                elementStructTypeIds is null || arrayOfStructTypeIds is null)
             {
-                ColumnLookup sourceLookup = sourceBatch.ColumnLookup;
-                int sourceCount = sourceLookup.Count;
-                string[] outputNames = new string[sourceCount + _invocations.Count];
-                for (int i = 0; i < sourceCount; i++)
-                    outputNames[i] = sourceLookup.ColumnNames[i];
-                for (int i = 0; i < _invocations.Count; i++)
-                    outputNames[sourceCount + i] = _invocations[i].OutputColumnName;
-                outputLookup = new ColumnLookup(outputNames);
-
-                sourceCopySlots = new int[sourceCount];
-                for (int i = 0; i < sourceCount; i++) sourceCopySlots[i] = i;
-
-                invocationOutputSlots = new int[_invocations.Count];
-                for (int i = 0; i < _invocations.Count; i++)
-                    invocationOutputSlots[i] = sourceCount + i;
-
-                elementStructTypeIds = new ushort[_invocations.Count];
-                arrayOfStructTypeIds = new ushort[_invocations.Count];
+                BuildColumnLookup(
+                    sourceBatch.ColumnLookup,
+                    out outputLookup,
+                    out sourceCopySlots,
+                    out invocationOutputSlots,
+                    out elementStructTypeIds,
+                    out arrayOfStructTypeIds);
             }
 
-            RowBatch outputBatch = context.RentRowBatch(outputLookup, rowsThisBatch);
-
-            // Stage 1: stabilise source columns into the output batch and
-            // initialise invocation columns to UnknownNull placeholders.
-            // Doing this up front means every Row in outputBatch has its
-            // full DataValue[] populated before any invocation runs, so
-            // invocation N's input expressions can reference earlier
-            // invocations' output columns by name.
-            //
-            // UnknownNull (rather than a kind-specific null) is the
-            // honest placeholder: we don't know the eventual cell kind
-            // until the invocation's scatter overwrites it, and any
-            // downstream reader that sees the placeholder mid-dispatch
-            // (which shouldn't happen but isn't actively prevented)
-            // benefits from typeless-null SQL semantics rather than a
-            // wrongly-stamped Int32/String null.
-            for (int rowIdx = 0; rowIdx < rowsThisBatch; rowIdx++)
-            {
-                Row sourceRow = sourceBatch[rowIdx];
-                DataValue[] outValues = pool.RentDataValues(outputLookup.Count);
-                for (int slot = 0; slot < sourceCopySlots!.Length; slot++)
-                {
-                    outValues[slot] = DataValueRetention.Stabilize(
-                        sourceRow[sourceCopySlots[slot]], sourceBatch.Arena, outputBatch.Arena);
-                }
-                for (int slot = 0; slot < invocationOutputSlots!.Length; slot++)
-                {
-                    outValues[invocationOutputSlots[slot]] = DataValue.UnknownNull();
-                }
-                outputBatch.Add(outValues);
-            }
+            RowBatch outputBatch = InitializeOutputBatch(
+                context,
+                outputLookup,
+                sourceBatch,
+                rowsThisBatch,
+                sourceCopySlots,
+                invocationOutputSlots);
 
             // Stage 2: run each invocation in order, releasing the lease
             // between invocations so the residency manager can evict the
@@ -562,6 +528,98 @@ public sealed class ModelInvocationOperator : QueryOperator
                 yield break;
             }
         }
+    }
+
+    private void BuildColumnLookup(
+        ColumnLookup sourceLookup,
+        out ColumnLookup outputLookup,
+        out int[] sourceCopySlots,
+        out int[] invocationOutputSlots,
+        out ushort[] elementStructTypeIds,
+        out ushort[] arrayOfStructTypeIds)
+    {
+        int sourceCount = sourceLookup.Count;
+        string[] outputNames = new string[sourceCount + _invocations.Count];
+        for (int i = 0; i < sourceCount; i++)
+            outputNames[i] = sourceLookup.ColumnNames[i];
+        for (int i = 0; i < _invocations.Count; i++)
+            outputNames[sourceCount + i] = _invocations[i].OutputColumnName;
+
+        // Carry the source's NameIndex forward so alias-doubled
+        // unqualified entries (added by AliasOperator alongside the
+        // physical `alias.col` names) survive into MIO output. Without
+        // this, downstream Project / chained MIO input evaluation can't
+        // resolve unqualified column refs against a row whose physical
+        // names are qualified.
+        Dictionary<string, int> nameIndex = new(
+            sourceLookup.NameIndex.Count + _invocations.Count,
+            StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, int> entry in sourceLookup.NameIndex)
+            nameIndex[entry.Key] = entry.Value;
+        for (int i = 0; i < _invocations.Count; i++)
+            nameIndex[_invocations[i].OutputColumnName] = sourceCount + i;
+        outputLookup = new ColumnLookup(outputNames, nameIndex);
+
+        sourceCopySlots = new int[sourceCount];
+        for (int i = 0; i < sourceCount; i++) sourceCopySlots[i] = i;
+
+        invocationOutputSlots = new int[_invocations.Count];
+        for (int i = 0; i < _invocations.Count; i++)
+            invocationOutputSlots[i] = sourceCount + i;
+
+        elementStructTypeIds = new ushort[_invocations.Count];
+        arrayOfStructTypeIds = new ushort[_invocations.Count];
+    }
+
+    private RowBatch InitializeOutputBatch(
+        ExecutionContext context,
+        ColumnLookup outputLookup,
+        RowBatch sourceBatch,
+        int rowsThisBatch,
+        int[] sourceCopySlots,
+        int[] invocationOutputSlots)
+    {
+        // Stabilise source columns into the output batch and
+        // initialise invocation columns to UnknownNull placeholders.
+        // Doing this up front means every Row in outputBatch has its
+        // full DataValue[] populated before any invocation runs, so
+        // invocation N's input expressions can reference earlier
+        // invocations' output columns by name.
+        //
+        // UnknownNull (rather than a kind-specific null) is the
+        // honest placeholder: we don't know the eventual cell kind
+        // until the invocation's scatter overwrites it, and any
+        // downstream reader that sees the placeholder mid-dispatch
+        // (which shouldn't happen but isn't actively prevented)
+        // benefits from typeless-null SQL semantics rather than a
+        // wrongly-stamped Int32/String null.
+
+        RowBatch outputBatch = context.RentRowBatch(outputLookup, rowsThisBatch);
+
+        for (int rowIdx = 0; rowIdx < rowsThisBatch; rowIdx++)
+        {
+            Row sourceRow = sourceBatch[rowIdx];
+            DataValue[] outValues = context.Pool.RentDataValues(outputLookup.Count);
+
+            for (int slot = 0; slot < sourceCopySlots.Length; slot++)
+            {
+                int sourceSlot = sourceCopySlots[slot];
+
+                outValues[slot] = DataValueRetention.Stabilize(
+                    sourceRow[sourceSlot],
+                    sourceBatch.Arena,
+                    outputBatch.Arena);
+            }
+
+            for (int slot = 0; slot < invocationOutputSlots.Length; slot++)
+            {
+                outValues[invocationOutputSlots[slot]] = DataValue.UnknownNull();
+            }
+            
+            outputBatch.Add(outValues);
+        }
+
+        return outputBatch;
     }
 
     /// <summary>

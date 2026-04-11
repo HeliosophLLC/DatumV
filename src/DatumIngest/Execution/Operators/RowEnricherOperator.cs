@@ -120,26 +120,9 @@ public sealed class RowEnricherOperator : QueryOperator
             // First batch: build the augmented column lookup once. Hidden columns
             // append after the source columns; planner-generated names are
             // collision-free (`__cse_N` prefix) so they don't shadow user columns.
-            if (outputLookup is null)
+            if (outputLookup is null || sourceCopySlots is null)
             {
-                ColumnLookup sourceLookup = sourceBatch.ColumnLookup;
-                int sourceCount = sourceLookup.Count;
-                string[] outputNames = new string[sourceCount + _enrichments.Count];
-                for (int i = 0; i < sourceCount; i++)
-                {
-                    outputNames[i] = sourceLookup.ColumnNames[i];
-                }
-                for (int i = 0; i < _enrichments.Count; i++)
-                {
-                    outputNames[sourceCount + i] = _enrichments[i].ColumnName;
-                }
-                outputLookup = new ColumnLookup(outputNames);
-
-                sourceCopySlots = new int[sourceCount];
-                for (int i = 0; i < sourceCopySlots.Length; i++)
-                {
-                    sourceCopySlots[i] = i;
-                }
+                BuildColumnLookup(sourceBatch.ColumnLookup, out outputLookup, out sourceCopySlots);
             }
 
             int rowsThisBatch = sourceBatch.Count;
@@ -166,7 +149,7 @@ public sealed class RowEnricherOperator : QueryOperator
                     // Copy source columns, stabilising arena-backed payloads
                     // into the output batch's arena so they survive the source
                     // batch returning to the pool.
-                    for (int slot = 0; slot < sourceCopySlots!.Length; slot++)
+                    for (int slot = 0; slot < sourceCopySlots.Length; slot++)
                     {
                         outValues[slot] = DataValueRetention.Stabilize(
                             sourceRow[sourceCopySlots[slot]],
@@ -196,6 +179,47 @@ public sealed class RowEnricherOperator : QueryOperator
 
             context.ReturnRowBatch(sourceBatch);
             yield return outputBatch;
+        }
+    }
+
+    private void BuildColumnLookup(ColumnLookup sourceLookup, out ColumnLookup outputLookup, out int[] sourceCopySlots)
+    {
+        int sourceCount = sourceLookup.Count;
+        string[] outputNames = new string[sourceCount + _enrichments.Count];
+        for (int i = 0; i < sourceCount; i++)
+        {
+            outputNames[i] = sourceLookup.ColumnNames[i];
+        }
+        for (int i = 0; i < _enrichments.Count; i++)
+        {
+            outputNames[sourceCount + i] = _enrichments[i].ColumnName;
+        }
+
+        // Preserve alias-doubled unqualified entries from the source
+        // NameIndex. AliasOperator emits qualified physical names
+        // (`t.col`) plus unqualified-name entries pointing at the same
+        // slot; rebuilding from names alone would drop the latter and
+        // break downstream unqualified column refs.
+        Dictionary<string, int> nameIndex = new(
+            sourceLookup.NameIndex.Count + _enrichments.Count,
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (KeyValuePair<string, int> entry in sourceLookup.NameIndex)
+        {
+            nameIndex[entry.Key] = entry.Value;
+        }
+
+        for (int i = 0; i < _enrichments.Count; i++)
+        {
+            nameIndex[_enrichments[i].ColumnName] = sourceCount + i;
+        }
+
+        outputLookup = new ColumnLookup(outputNames, nameIndex);
+
+        sourceCopySlots = new int[sourceCount];
+        for (int i = 0; i < sourceCopySlots.Length; i++)
+        {
+            sourceCopySlots[i] = i;
         }
     }
 }

@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Globalization;
+using System.Numerics;
 using System.Text.RegularExpressions;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Diagnostics;
@@ -1471,6 +1472,12 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
             DataKind.Float16 => PrimitiveArrayToValueRef<Half>(value, frame),
             DataKind.Float32 => PrimitiveArrayToValueRef<float>(value, frame),
             DataKind.Float64 => PrimitiveArrayToValueRef<double>(value, frame),
+
+            // Spatial: Point2D packs as an 8-byte (Vector2) inline scalar,
+            // so array storage memcpys directly through Vector2[]. Used by
+            // FaceDetection.landmarks and any other model that emits a list
+            // of 2D points (keypoint detectors, pose estimators).
+            DataKind.Point2D => PrimitiveArrayToValueRef<Vector2>(value, frame),
 
             _ => throw new InvalidOperationException(
                 $"Cannot convert non-inline Array<{value.Kind}> into a ValueRef. "

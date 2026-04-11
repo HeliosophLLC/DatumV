@@ -121,6 +121,62 @@ public sealed class ModelInvocationTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Regression: when the source table has an alias, AliasOperator emits
+    /// rows whose ColumnLookup carries both qualified (<c>t.name</c>) and
+    /// unqualified (<c>name</c>) entries pointing at the same slot. MIO must
+    /// carry the alias-doubled entries forward into its output lookup —
+    /// otherwise an unqualified column in another SELECT-list item (or as a
+    /// later MIO's input) can't resolve against the MIO output row.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_TableAlias_UnqualifiedColumnsResolveAlongsideModelCall()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" },
+            new object?[] { "bob" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        // Pre-fix: this query threw "Column 'name' not found in row." when the
+        // outer Project tried to resolve unqualified `name` against MIO's
+        // output, because MIO rebuilt its ColumnLookup from physical (aliased)
+        // names alone, dropping the unqualified alias-doubled entries.
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT name, models.echo(name) FROM t a", catalog);
+
+        Assert.Equal(2, rows.Count);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        Assert.Equal("alice", rows[0][0].AsString(scratch));
+        Assert.Equal("alice", rows[0][1].AsString(scratch));
+        Assert.Equal("bob", rows[1][0].AsString(scratch));
+        Assert.Equal("bob", rows[1][1].AsString(scratch));
+    }
+
+    /// <summary>
+    /// Companion regression: qualifying the model-call argument with the
+    /// table alias (<c>a.name</c>) must still allow the outer SELECT's
+    /// unqualified column refs to resolve through MIO's output row.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_TableAlias_QualifiedModelArg_OuterUnqualifiedResolves()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT name, models.echo(a.name) FROM t a", catalog);
+
+        Assert.Single(rows);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        Assert.Equal("alice", rows[0][0].AsString(scratch));
+        Assert.Equal("alice", rows[0][1].AsString(scratch));
+    }
+
+    /// <summary>
     /// Hoister accepts a trailing positional override when the catalog entry
     /// declares an <c>OptionalArgKinds</c> slot for it. The first <em>required</em>
     /// arg ends up in <see cref="ModelInvocationOperator.InputExpressions"/>;
