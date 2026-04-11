@@ -77,6 +77,4 @@ public sealed class TypeofFunction : IFunction, IScalarFunction
         return new ValueTask<ValueRef>(ValueRef.FromType(kind, typeId, describesArray, describesMultiDim));
     }
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 0;
 }

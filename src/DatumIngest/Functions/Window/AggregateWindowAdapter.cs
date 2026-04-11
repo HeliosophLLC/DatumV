@@ -30,9 +30,6 @@ public sealed class AggregateWindowAdapter : IWindowFunction
     public string Name => _aggregate.Name;
 
     /// <inheritdoc/>
-    public int QueryUnitCost => _aggregate.QueryUnitCost;
-
-    /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         return _aggregate.ValidateArguments(argumentKinds);

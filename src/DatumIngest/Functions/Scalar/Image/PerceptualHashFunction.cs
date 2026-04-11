@@ -39,9 +39,6 @@ public sealed class PerceptualHashFunction : IFunction, IScalarFunction
     ];
 
     /// <inheritdoc />
-    public int QueryUnitCost => 10;
-
-    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<PerceptualHashFunction>(argumentKinds);
 

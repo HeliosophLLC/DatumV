@@ -733,58 +733,6 @@ public class OperatorTests : ServiceTestBase
         Assert.Equal(2f, rows[1]["val"].AsFloat32());
     }
 
-    // ─────────────── OrderByOperator governor enforcement ───────────────
-
-    /// <summary>
-    /// When the Query Unit budget is already exceeded, the ORDER BY operator
-    /// throws <see cref="QueryBudgetExceededException"/> during unbounded
-    /// sort materialization instead of consuming the entire input.
-    /// </summary>
-    [Fact]
-    public async Task OrderBy_BudgetExceeded_ThrowsDuringMaterialization()
-    {
-        MockOperator source = CreateMockOperator(ValColumns, [3f], [1f], [2f]);
-
-        OrderByOperator orderBy = new(source,
-        [
-            new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)
-        ]);
-
-        // Pre-exceed the budget so the check fires on the first materialized row.
-        QueryMeter meter = new(budget: 5);
-        meter.Add(6);
-
-        ExecutionContext context = CreateExecutionContext(meter: meter);
-
-        await Assert.ThrowsAsync<QueryBudgetExceededException>(
-            () => CollectAsync(orderBy, context));
-    }
-
-    /// <summary>
-    /// When the Query Unit budget is already exceeded, the ORDER BY operator
-    /// throws <see cref="QueryBudgetExceededException"/> during top-N collection
-    /// instead of consuming the entire input.
-    /// </summary>
-    [Fact]
-    public async Task OrderBy_BoundedTopN_BudgetExceeded_ThrowsDuringMaterialization()
-    {
-        MockOperator source = CreateMockOperator(ValColumns, [3f], [1f], [2f]);
-
-        OrderByOperator orderBy = new(source,
-        [
-            new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)
-        ], topNRows: 2);
-
-        // Pre-exceed the budget so the check fires on the first materialized row.
-        QueryMeter meter = new(budget: 5);
-        meter.Add(6);
-
-        ExecutionContext context = CreateExecutionContext(meter: meter);
-
-        await Assert.ThrowsAsync<QueryBudgetExceededException>(
-            () => CollectAsync(orderBy, context));
-    }
-
     /// <summary>
     /// When the cancellation token is cancelled, the ORDER BY operator
     /// throws <see cref="OperationCanceledException"/> during materialization.

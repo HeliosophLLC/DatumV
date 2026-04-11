@@ -85,6 +85,4 @@ public sealed class AssertLengthFunction : IFunction, IScalarFunction
             $"assert_length: expected length is not an integer kind ({value.Kind})."),
     };
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 0;
 }

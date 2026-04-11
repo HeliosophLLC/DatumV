@@ -38,9 +38,6 @@ public sealed class CompressionArtifactScoreFunction : IFunction, IScalarFunctio
     ];
 
     /// <inheritdoc />
-    public int QueryUnitCost => 10;
-
-    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<CompressionArtifactScoreFunction>(argumentKinds);
 

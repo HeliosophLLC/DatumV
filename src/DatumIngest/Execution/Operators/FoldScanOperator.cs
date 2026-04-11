@@ -185,7 +185,7 @@ public sealed class FoldScanOperator : QueryOperator
             {
                 WindowSpecification spec = _scanColumns[specGroup.Value[0]].WindowSpecification;
                 await ComputeForSpecificationAsync(
-                    spec, specGroup.Value, allRows, evaluator, scanResults, context.QueryMeter,
+                    spec, specGroup.Value, allRows, evaluator, scanResults,
                     context.Store, context.SidecarRegistry, context.CancellationToken).ConfigureAwait(false);
             }
 
@@ -271,7 +271,6 @@ public sealed class FoldScanOperator : QueryOperator
         List<Row> allRows,
         ExpressionEvaluator evaluator,
         DataValue[][] scanResults,
-        QueryMeter? meter,
         IValueStore store,
         SidecarRegistry? sidecarRegistry,
         CancellationToken cancellationToken)
@@ -313,7 +312,7 @@ public sealed class FoldScanOperator : QueryOperator
 
                 await FoldPartitionAsync(
                     column, allRows, originalIndices, startIndex, count,
-                    outputOffset, evaluator, scanResults, meter, cancellationToken).ConfigureAwait(false);
+                    outputOffset, evaluator, scanResults, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -330,7 +329,6 @@ public sealed class FoldScanOperator : QueryOperator
         int outputOffset,
         ExpressionEvaluator evaluator,
         DataValue[][] scanResults,
-        QueryMeter? meter,
         CancellationToken cancellationToken)
     {
         int accCount = column.AccumulatorNames.Count;
@@ -422,8 +420,6 @@ public sealed class FoldScanOperator : QueryOperator
 
             previousSourceRow = sourceRow;
         }
-
-        meter?.Add((long)count * accCount);
     }
 
     /// <summary>

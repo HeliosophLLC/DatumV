@@ -194,7 +194,6 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
                     {
                         Row row = inputBatch[i];
                         context.CancellationToken.ThrowIfCancellationRequested();
-                        context.QueryMeter?.ThrowIfExceeded();
 
                         await keys.EvaluateAsync(evaluator, row, context.CancellationToken).ConfigureAwait(false);
 
@@ -402,7 +401,6 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
                         {
                             for (int i = 0; i < inputBatch.Count; i++)
                             {
-                                context.QueryMeter?.ThrowIfExceeded();
                                 await globalChannel.Writer.WriteAsync(inputBatch[i], cancellationToken)
                                     .ConfigureAwait(false);
                             }
@@ -553,7 +551,6 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
                     {
                         Row row = inputBatch[i];
                         context.CancellationToken.ThrowIfCancellationRequested();
-                        context.QueryMeter?.ThrowIfExceeded();
 
                         if (isGlobalAggregation)
                         {
@@ -732,7 +729,6 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
             for (int row = 0; row < rowCount; row++)
             {
                 groupState.Accumulators[aggregateIndex].Accumulate(buffer.GetArguments(row), in frame);
-                context.QueryMeter?.Add(aggregateColumn.Function.QueryUnitCost);
             }
 
             buffer.Clear();

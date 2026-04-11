@@ -98,7 +98,7 @@ internal sealed class AggregateArgumentBinder
     /// <summary>
     /// Accumulates the currently-buffered arguments and sort keys into a group.
     /// Ordered aggregates append into the group's deferred buffer (sorted later
-    /// at flush time); the rest accumulate directly and charge query units.
+    /// at flush time); the rest accumulate directly.
     /// </summary>
     public void AccumulateInto(GroupState group, ExecutionContext context, in InvocationFrame frame)
     {
@@ -113,7 +113,6 @@ internal sealed class AggregateArgumentBinder
             else
             {
                 group.Accumulators[aggregateIndex].Accumulate(_arguments[aggregateIndex], in frame);
-                context.QueryMeter?.Add(aggregateColumn.Function.QueryUnitCost);
             }
         }
     }

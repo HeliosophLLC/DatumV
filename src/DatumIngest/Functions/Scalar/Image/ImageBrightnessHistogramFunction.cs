@@ -34,9 +34,6 @@ public sealed class ImageBrightnessHistogramFunction : IFunction, IScalarFunctio
     ];
 
     /// <inheritdoc />
-    public int QueryUnitCost => 10;
-
-    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<ImageBrightnessHistogramFunction>(argumentKinds);
 

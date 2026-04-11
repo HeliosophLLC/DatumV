@@ -58,9 +58,6 @@ public sealed class NoiseImageFunction : IFunction, IScalarFunction
     ];
 
     /// <inheritdoc />
-    public int QueryUnitCost => 50;
-
-    /// <inheritdoc />
     public bool IsPure => false;
 
     /// <inheritdoc />

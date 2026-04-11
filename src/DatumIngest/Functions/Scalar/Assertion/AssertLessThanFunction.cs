@@ -61,6 +61,4 @@ public sealed class AssertLessThanFunction : IFunction, IScalarFunction
         return default;
     }
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 0;
 }

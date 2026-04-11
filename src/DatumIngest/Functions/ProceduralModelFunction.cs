@@ -368,7 +368,6 @@ public sealed class ProceduralModelFunction : IScalarFunction
         // dispatch — a small per-row cost in exchange for parity.
         ExpressionEvaluator postEvaluator = new(
             _functions,
-            meter: null,
             outerRow: null,
             sourceSchema: null,
             letBindingExpressions: null,
@@ -470,7 +469,6 @@ public sealed class ProceduralModelFunction : IScalarFunction
                 // per literal per statement).
                 ExpressionEvaluator broadcastEvaluator = new(
                     _functions,
-                    meter: null,
                     outerRow: null,
                     sourceSchema: null,
                     letBindingExpressions: null,
@@ -588,7 +586,6 @@ public sealed class ProceduralModelFunction : IScalarFunction
             }
             ExpressionEvaluator evaluator = new(
                 _functions,
-                meter: null,
                 outerRow: null,
                 sourceSchema: null,
                 letBindingExpressions: null,
@@ -631,7 +628,6 @@ public sealed class ProceduralModelFunction : IScalarFunction
 
         ExpressionEvaluator evaluator = new(
             _functions,
-            meter: null,
             outerRow: null,
             sourceSchema: null,
             letBindingExpressions: null,
@@ -753,7 +749,6 @@ public sealed class ProceduralModelFunction : IScalarFunction
         {
             checkEvaluator = new ExpressionEvaluator(
                 _functions,
-                meter: null,
                 outerRow: null,
                 sourceSchema: null,
                 letBindingExpressions: null,
@@ -789,7 +784,6 @@ public sealed class ProceduralModelFunction : IScalarFunction
             {
                 paramEvaluator ??= new ExpressionEvaluator(
                     _functions,
-                    meter: null,
                     store: variableStore,
                     sidecarRegistry: frame.SidecarRegistry,
                     accountant: frame.Accountant);
@@ -835,7 +829,6 @@ public sealed class ProceduralModelFunction : IScalarFunction
             {
                 paramEvaluator ??= new ExpressionEvaluator(
                     _functions,
-                    meter: null,
                     store: variableStore,
                     sidecarRegistry: frame.SidecarRegistry,
                     accountant: frame.Accountant);

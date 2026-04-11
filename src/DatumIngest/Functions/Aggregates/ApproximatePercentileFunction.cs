@@ -28,10 +28,6 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
     public string Name => "APPROX_PERCENTILE";
 
     /// <inheritdoc/>
-    // Reservoir sampling up to 100K samples with O(N log N) sort at finalization — Tier 2.
-    public int QueryUnitCost => 2;
-
-    /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)

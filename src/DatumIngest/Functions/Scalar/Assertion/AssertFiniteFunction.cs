@@ -67,6 +67,4 @@ public sealed class AssertFiniteFunction : IFunction, IScalarFunction
         return default;
     }
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 0;
 }

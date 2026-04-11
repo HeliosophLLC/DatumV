@@ -56,6 +56,4 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
         throw new InvalidOperationException(message);
     }
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 0;
 }

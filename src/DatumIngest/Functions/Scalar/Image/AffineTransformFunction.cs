@@ -44,9 +44,6 @@ public sealed class AffineTransformFunction : IFunction, IScalarFunction
     ];
 
     /// <inheritdoc />
-    public int QueryUnitCost => 50;
-
-    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<AffineTransformFunction>(argumentKinds);
 

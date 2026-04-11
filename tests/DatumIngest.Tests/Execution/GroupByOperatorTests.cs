@@ -286,41 +286,6 @@ public class GroupByOperatorTests : ServiceTestBase
         Assert.False(row["SUM(price)"].IsNull);
     }
 
-    // ─────────────── Governor enforcement during materialization ───────────────
-
-    /// <summary>
-    /// When the Query Unit budget is exceeded during GROUP BY materialization,
-    /// the operator throws <see cref="QueryBudgetExceededException"/> instead
-    /// of silently consuming the entire input.
-    /// </summary>
-    [Fact]
-    public async Task GroupBy_BudgetExceeded_ThrowsDuringMaterialization()
-    {
-        // Four rows, each evaluating abs() (QU cost 1) as the GROUP BY key.
-        // Budget of 1: after the first row, consumed = 1 (not exceeded because
-        // IsBudgetExceeded uses >). After the second row, consumed = 2 > 1,
-        // so the third row's pre-evaluation check triggers the exception.
-        MockOperator source = CreateMockOperator(XColumns,
-            [1f],
-            [2f],
-            [3f],
-            [4f]);
-
-        GroupByOperator groupBy = new(
-            source,
-            groupByExpressions: [new FunctionCallExpression("abs", [new ColumnReference("x")])],
-            aggregateColumns:
-            [
-                new AggregateColumn(new CountFunction(), [], "COUNT(*)", IsCountStar: true),
-            ]);
-
-        QueryMeter meter = new(budget: 1);
-        ExecutionContext context = CreateExecutionContext(meter: meter);
-
-        await Assert.ThrowsAsync<QueryBudgetExceededException>(
-            () => CollectAsync(groupBy, context));
-    }
-
     /// <summary>
     /// When the cancellation token is cancelled, the GROUP BY operator
     /// throws <see cref="OperationCanceledException"/> during materialization

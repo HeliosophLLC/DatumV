@@ -65,6 +65,4 @@ public sealed class AssertBetweenFunction : IFunction, IScalarFunction
         return default;
     }
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 0;
 }

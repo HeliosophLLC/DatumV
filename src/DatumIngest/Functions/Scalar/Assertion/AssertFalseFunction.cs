@@ -55,6 +55,4 @@ public sealed class AssertFalseFunction : IFunction, IScalarFunction
         return default;
     }
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 0;
 }

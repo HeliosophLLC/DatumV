@@ -74,6 +74,4 @@ public sealed class AssertMatchesFunction : IFunction, IScalarFunction
         return default;
     }
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 1;
 }

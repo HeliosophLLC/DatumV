@@ -319,9 +319,6 @@ public sealed class FunctionSignature
     /// <summary>Whether this is a window function (used with OVER clause).</summary>
     public bool IsWindowFunction { get; init; }
 
-    /// <summary>The base query-unit cost per invocation, as reported by the function implementation.</summary>
-    public int QueryUnitCost { get; init; }
-
     /// <summary>
     /// Names of the lambda-body <see cref="FunctionContextEntry"/>s this
     /// function is visible inside. Empty (or <see langword="null"/>) means

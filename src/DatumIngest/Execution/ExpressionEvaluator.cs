@@ -23,7 +23,6 @@ namespace DatumIngest.Execution;
 public sealed class ExpressionEvaluator : ILambdaInvoker
 {
     private readonly FunctionRegistry _functions;
-    private readonly QueryMeter? _meter;
 
     /// <summary>
     /// Persistent store used for (1) per-evaluator caches (<see cref="_inValueSetCache"/>)
@@ -185,7 +184,6 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
     /// Creates an evaluator that can resolve function calls.
     /// </summary>
     /// <param name="functions">Registry of available functions.</param>
-    /// <param name="meter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
     /// <param name="outerRow">
     /// Optional outer row from a correlated scalar subquery, or <see langword="null"/> when not inside
     /// a correlated subquery. Column references that cannot be resolved against the current row
@@ -246,7 +244,6 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
     /// </param>
     public ExpressionEvaluator(
         FunctionRegistry functions,
-        QueryMeter? meter = null,
         Row? outerRow = null,
         Schema? sourceSchema = null,
         IReadOnlyDictionary<string, Expression>? letBindingExpressions = null,
@@ -259,7 +256,6 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
         Model.VideoRegistry? videoRegistry = null)
     {
         _functions = functions;
-        _meter = meter;
         _store = store;
         _outerRow = outerRow;
         _sourceSchema = sourceSchema;
@@ -277,7 +273,7 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
 
     /// <summary>
     /// Convenience constructor that pulls every shared dependency from <paramref name="context"/> —
-    /// the function registry, query meter, default value store, outer row, and sidecar registry.
+    /// the function registry, default value store, outer row, and sidecar registry.
     /// Operator-specific extras (<paramref name="sourceSchema"/>, <paramref name="letBindingExpressions"/>)
     /// stay explicit since they're not on the context.
     /// </summary>
@@ -290,7 +286,6 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
         IReadOnlyDictionary<string, Expression>? letBindingExpressions = null)
         : this(
             context.FunctionRegistry,
-            context.QueryMeter,
             context.OuterRow,
             sourceSchema,
             letBindingExpressions,
@@ -303,11 +298,6 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
             context.VideoRegistry)
     {
     }
-
-    /// <summary>
-    /// Gets the <see cref="QueryMeter" /> associated with this <see cref="ExpressionEvaluator"/>
-    /// </summary>
-    public QueryMeter? QueryMeter => _meter;
 
     /// <summary>
     /// The per-query <see cref="Model.VideoRegistry"/> threaded through this
@@ -1043,7 +1033,6 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
             // cost is unwelcome.
             using Activity? scalarSpan = DatumActivity.Scalars.StartActivity(function.CallName);
             ValueRef result = await scalarFunction.ExecuteAsync(arguments.AsMemory(0, argumentCount), frame, cancellationToken).ConfigureAwait(false);
-            _meter?.Add(scalarFunction.QueryUnitCost);
             return result;
         }
         finally
@@ -1127,7 +1116,6 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
             arguments[0] = arg;
             using Activity? scalarSpan = DatumActivity.Scalars.StartActivity(descriptor.FunctionName);
             ValueRef result = await fallback.ExecuteAsync(arguments.AsMemory(0, 1), frame, cancellationToken).ConfigureAwait(false);
-            _meter?.Add(fallback.QueryUnitCost);
             return result;
         }
         finally
@@ -1766,7 +1754,6 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
             arguments[0] = await EvaluateAsValueRefAsync(cast.Expression, frame, cancellationToken).ConfigureAwait(false);
             arguments[1] = ValueRef.FromString(cast.TargetType);
             ValueRef result = await castFunction.ExecuteAsync(arguments.AsMemory(0, 2), frame, cancellationToken).ConfigureAwait(false);
-            _meter?.Add(castFunction.QueryUnitCost);
             return ToDataValue(result, frame);
         }
         finally

@@ -1999,7 +1999,6 @@ internal sealed class RoutineRegistrar
         // earlier parameter to its evaluated default).
         ExpressionEvaluator evaluator = new(
             _functions,
-            meter: null,
             outerRow: null,
             sourceSchema: null,
             letBindingExpressions: null,

@@ -191,7 +191,6 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         // reference outer columns by name.
         ExpressionEvaluator evaluator = new(
             _functions,
-            meter: null,
             outerRow: null,
             sourceSchema: null,
             letBindingExpressions: null,
@@ -278,7 +277,6 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         {
             checkEvaluator = new ExpressionEvaluator(
                 _functions,
-                meter: null,
                 outerRow: null,
                 sourceSchema: null,
                 letBindingExpressions: null,
@@ -318,7 +316,6 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                 // call-site fallbacks).
                 paramEvaluator ??= new ExpressionEvaluator(
                     _functions,
-                    meter: null,
                     store: variableStore,
                     sidecarRegistry: frame.SidecarRegistry,
                     accountant: frame.Accountant);
@@ -362,7 +359,6 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             {
                 paramEvaluator ??= new ExpressionEvaluator(
                     _functions,
-                    meter: null,
                     store: variableStore,
                     sidecarRegistry: frame.SidecarRegistry,
                     accountant: frame.Accountant);

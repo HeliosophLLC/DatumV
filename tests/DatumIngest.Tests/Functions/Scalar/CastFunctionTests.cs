@@ -373,12 +373,6 @@ public sealed class CastFunctionTests
         Assert.Equal(DataKind.Type, result.Kind);
     }
 
-    [Fact]
-    public void Typeof_QueryUnitCost_IsZero()
-    {
-        Assert.Equal(0, new TypeofFunction().QueryUnitCost);
-    }
-
     // ─── registry ──────────────────────────────────────────────────────────
 
     [Fact]

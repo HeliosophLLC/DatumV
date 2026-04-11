@@ -63,6 +63,4 @@ public sealed class AssertEndsWithFunction : IFunction, IScalarFunction
         return default;
     }
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 0;
 }

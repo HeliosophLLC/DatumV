@@ -254,7 +254,6 @@ public abstract class ServiceTestBase : IDisposable
         FunctionRegistry? functionRegistry = null,
         TableCatalog? catalog = null,
         long? memoryBudgetBytes = null,
-        QueryMeter? meter = null,
         AssertionDiagnostics? diagnostics = null,
         int? maxRecursionDepth = null,
         int? batchSize = null,
@@ -269,7 +268,6 @@ public abstract class ServiceTestBase : IDisposable
             functionRegistry ?? FunctionRegistry.CreateDefault(),
             catalog ?? new TableCatalog(pool),
             pool,
-            queryMeter: meter,
             memoryBudgetBytes: memoryBudgetBytes,
             store: store)
         {

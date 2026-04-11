@@ -26,6 +26,15 @@ interface DialogOpenSpec {
 // catalog opener doesn't tolerate (it holds an exclusive file lock).
 // Failing to get the lock → quit immediately; the existing instance's
 // 'second-instance' handler focuses its main window.
+// Identify the app to the OS. On Windows, toast notifications display the
+// AppUserModelId as their title — without this they read "electron.app.Electron".
+// setName also reframes the default menu item ("About electron" → "About DatumIngest")
+// and is the source of `app.getName()` used elsewhere.
+app.setName('DatumIngest');
+if (process.platform === 'win32') {
+  app.setAppUserModelId('DatumIngest');
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
   process.exit(0);

@@ -100,7 +100,6 @@ public sealed class WindowOperator : QueryOperator
                     for (int i = 0; i < inputBatch.Count; i++)
                     {
                         context.CancellationToken.ThrowIfCancellationRequested();
-                        context.QueryMeter?.ThrowIfExceeded();
 
                         Row sourceRow = inputBatch[i];
                         DataValue[] copy = pool.RentAndCopyDataValues(
@@ -147,7 +146,7 @@ public sealed class WindowOperator : QueryOperator
             {
                 WindowSpecification spec = _windowColumns[specGroup.Value[0]].WindowSpecification;
                 await ComputeForSpecificationAsync(
-                    spec, specGroup.Value, allRows, evaluator, windowResults, context.QueryMeter,
+                    spec, specGroup.Value, allRows, evaluator, windowResults,
                     context.Store, context.SidecarRegistry, context.CancellationToken).ConfigureAwait(false);
             }
 
@@ -223,7 +222,6 @@ public sealed class WindowOperator : QueryOperator
         List<Row> allRows,
         ExpressionEvaluator evaluator,
         DataValue[][] windowResults,
-        QueryMeter? meter,
         IValueStore store,
         SidecarRegistry? sidecarRegistry,
         CancellationToken cancellationToken)
@@ -286,7 +284,6 @@ public sealed class WindowOperator : QueryOperator
                     column.NullHandling,
                     column.FromLast,
                     cancellationToken).ConfigureAwait(false);
-                meter?.Add((long)column.Function.QueryUnitCost * count);
 
                 // Write results back to the correct original row positions.
                 for (int i = 0; i < count; i++)

@@ -62,6 +62,4 @@ public sealed class AssertEqualFunction : IFunction, IScalarFunction
         return default;
     }
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 0;
 }

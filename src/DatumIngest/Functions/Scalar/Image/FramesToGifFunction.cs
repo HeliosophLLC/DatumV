@@ -60,9 +60,6 @@ public sealed class FramesToGifFunction : IFunction, IScalarFunction
     ];
 
     /// <inheritdoc />
-    public int QueryUnitCost => 500;
-
-    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<FramesToGifFunction>(argumentKinds);
 

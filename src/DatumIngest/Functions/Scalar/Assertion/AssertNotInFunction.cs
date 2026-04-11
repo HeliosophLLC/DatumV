@@ -68,6 +68,4 @@ public sealed class AssertNotInFunction : IFunction, IScalarFunction
         return new ValueTask<ValueRef>(value);
     }
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 0;
 }

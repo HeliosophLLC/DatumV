@@ -181,7 +181,6 @@ internal sealed class RecursiveCommonTableExpressionOperator : QueryOperator, ID
         await foreach (RowBatch input in _anchorOperator.ExecuteAsync(context).ConfigureAwait(false))
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            context.QueryMeter?.ThrowIfExceeded();
 
             _materializedSchema ??= input.ColumnLookup;
             if (input.Count == 0) { context.ReturnRowBatch(input); continue; }
@@ -220,7 +219,6 @@ internal sealed class RecursiveCommonTableExpressionOperator : QueryOperator, ID
             await foreach (RowBatch input in recursiveMember.ExecuteAsync(context).ConfigureAwait(false))
             {
                 context.CancellationToken.ThrowIfCancellationRequested();
-                context.QueryMeter?.ThrowIfExceeded();
 
                 if (input.Count == 0) { context.ReturnRowBatch(input); continue; }
                 CaptureBatch(pool, input, _materializedSchema!);

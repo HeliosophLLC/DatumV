@@ -597,7 +597,6 @@ public static class CatalogManifestBuilder
                 OutputStructFields = fields,
                 IsAggregate = sig.IsAggregate,
                 IsWindowFunction = sig.IsWindowFunction,
-                QueryUnitCost = sig.QueryUnitCost,
             };
         }
     }

@@ -31,9 +31,6 @@ public sealed class ImageBrightnessMeanFunction : IFunction, IScalarFunction
     ];
 
     /// <inheritdoc />
-    public int QueryUnitCost => 10;
-
-    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<ImageBrightnessMeanFunction>(argumentKinds);
 
@@ -102,9 +99,6 @@ public sealed class ImageBrightnessStdFunction : IFunction, IScalarFunction
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Float32)),
     ];
-
-    /// <inheritdoc />
-    public int QueryUnitCost => 10;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>

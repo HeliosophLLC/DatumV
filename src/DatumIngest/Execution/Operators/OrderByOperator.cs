@@ -211,7 +211,6 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                     {
                         Row sourceRow = inputBatch[i];
                         context.CancellationToken.ThrowIfCancellationRequested();
-                        context.QueryMeter?.ThrowIfExceeded();
 
                         if (heap.Count < topN)
                         {
@@ -357,7 +356,6 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                     {
                         Row sourceRow = inputBatch[i];
                         context.CancellationToken.ThrowIfCancellationRequested();
-                        context.QueryMeter?.ThrowIfExceeded();
 
                         DataValue[] copy = pool.RentAndCopyDataValues(
                             sourceRow, inputBatch.Arena, bufferArena!);

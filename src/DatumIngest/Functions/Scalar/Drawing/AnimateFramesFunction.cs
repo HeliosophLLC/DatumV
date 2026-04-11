@@ -72,9 +72,6 @@ public sealed class AnimateFramesFunction : IFunction, IScalarFunction
     ];
 
     /// <inheritdoc />
-    public int QueryUnitCost => 100;
-
-    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<AnimateFramesFunction>(argumentKinds);
 

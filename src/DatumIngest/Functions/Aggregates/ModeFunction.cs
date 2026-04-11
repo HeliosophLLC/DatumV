@@ -22,10 +22,6 @@ public sealed class ModeFunction : IAggregateFunction
     public string Name => "MODE";
 
     /// <inheritdoc/>
-    // O(D) frequency map per group where D = distinct values — Tier 2.
-    public int QueryUnitCost => 2;
-
-    /// <inheritdoc/>
     public WithinGroupSemantics WithinGroupSemantics => WithinGroupSemantics.OrderedSet;
 
     /// <inheritdoc/>

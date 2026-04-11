@@ -221,7 +221,6 @@ internal sealed class CommonTableExpressionOperator : QueryOperator, IDisposable
         await foreach (RowBatch inputBatch in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            context.QueryMeter?.ThrowIfExceeded();
 
             _materializedSchema ??= inputBatch.ColumnLookup;
 

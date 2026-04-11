@@ -37,9 +37,6 @@ public sealed class BrightenImageFunction : IFunction, IScalarFunction
     ];
 
     /// <inheritdoc />
-    public int QueryUnitCost => 50;
-
-    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<BrightenImageFunction>(argumentKinds);
 
@@ -91,9 +88,6 @@ public sealed class DarkenImageFunction : IFunction, IScalarFunction
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
     ];
-
-    /// <inheritdoc />
-    public int QueryUnitCost => 50;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>

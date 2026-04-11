@@ -24,10 +24,6 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
     public string Name => "PERCENTILE_DISC";
 
     /// <inheritdoc/>
-    // O(N) memory accumulation and O(N log N) sort at finalization — Tier 2.
-    public int QueryUnitCost => 2;
-
-    /// <inheritdoc/>
     public WithinGroupSemantics WithinGroupSemantics => WithinGroupSemantics.OrderedSet;
 
     /// <inheritdoc/>

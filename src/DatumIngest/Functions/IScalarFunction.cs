@@ -112,12 +112,6 @@ public interface IScalarFunction
         => ScalarFunctionBatchHelpers.DefaultLoop(this, argumentColumns, rowCount, frame, cancellationToken);
 
     /// <summary>
-    /// Cost weight of a single invocation in Query Units (QU). Used for
-    /// billing, governance budgets, and pre-execution cost estimation.
-    /// </summary>
-    int QueryUnitCost => 1;
-
-    /// <summary>
     /// Whether this function is pure: same arguments always yield the same
     /// result, with no observable side effects. Defaults to <see langword="true"/>;
     /// functions whose output depends on time, randomness, or external state

@@ -84,11 +84,6 @@ public interface IAggregateFunction
     ReturnTypeRule? ReturnRule => null;
 
     /// <summary>
-    /// The cost weight of a single invocation of this function, measured in Query Units (QU).
-    /// </summary>
-    int QueryUnitCost => 1;
-
-    /// <summary>
     /// How this aggregate consumes <c>WITHIN GROUP (ORDER BY …)</c>.
     /// Default <see cref="WithinGroupSemantics.NotSupported"/> matches
     /// PostgreSQL strictness — most aggregates (<c>SUM</c> / <c>AVG</c> /

@@ -28,11 +28,6 @@ public interface IWindowFunction
     /// results over a partition of rows.
     /// </summary>
     IWindowComputation CreateComputation();
-
-    /// <summary>
-    /// The cost weight of a single invocation of this function, measured in Query Units (QU).
-    /// </summary>
-    int QueryUnitCost => 1;
 }
 
 /// <summary>

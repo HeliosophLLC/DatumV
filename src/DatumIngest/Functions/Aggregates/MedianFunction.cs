@@ -19,10 +19,6 @@ public sealed class MedianFunction : IAggregateFunction
     public string Name => "MEDIAN";
 
     /// <inheritdoc/>
-    // O(N) memory accumulation and O(N log N) sort at finalization — Tier 2.
-    public int QueryUnitCost => 2;
-
-    /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)

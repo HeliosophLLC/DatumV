@@ -265,49 +265,6 @@ public class WindowOperatorTests : ServiceTestBase
         Assert.Equal(20f, results[2]["prev_val"].AsFloat32());
     }
 
-    // ─────────────── Governor enforcement during materialization ───────────────
-
-    /// <summary>
-    /// When the Query Unit budget is already exceeded, the window operator
-    /// throws <see cref="QueryBudgetExceededException"/> during materialization
-    /// instead of consuming the entire input.
-    /// </summary>
-    [Fact]
-    public async Task WindowOperator_BudgetExceeded_ThrowsDuringMaterialization()
-    {
-        MockOperator source = CreateMockOperator(ValColumns,
-            [1f],
-            [2f]);
-
-        WindowSpecification spec = new(
-            PartitionBy: null,
-            OrderBy: [new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)],
-            Frame: null);
-
-        WindowColumn column = new(
-            new RowNumberFunction(),
-            [],
-            spec,
-            "rn");
-
-        WindowOperator window = new(source, [column]);
-
-        // Pre-exceed the budget so the check fires on the first materialized row.
-        QueryMeter meter = new(budget: 5);
-        meter.Add(6);
-
-        Pool pool = GetService<Pool>();
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            pool,
-            meter);
-
-        await Assert.ThrowsAsync<QueryBudgetExceededException>(
-            () => CollectAsync(window, context));
-    }
-
     /// <summary>
     /// When the cancellation token is cancelled, the window operator
     /// throws <see cref="OperationCanceledException"/> during materialization.

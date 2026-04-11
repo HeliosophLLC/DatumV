@@ -57,6 +57,4 @@ public sealed class AssertNonNegativeFunction : IFunction, IScalarFunction
         return default;
     }
 
-    /// <inheritdoc />
-    public int QueryUnitCost => 0;
 }

@@ -9,8 +9,7 @@ namespace DatumIngest.Execution;
 
 /// <summary>
 /// Shared context passed through the operator tree during query execution.
-/// Carries the cancellation token, function registry, table catalog, and
-/// optional query meter for cost tracking.
+/// Carries the cancellation token, function registry, and table catalog.
 /// </summary>
 public sealed class ExecutionContext : IDisposable
 {
@@ -29,7 +28,6 @@ public sealed class ExecutionContext : IDisposable
         Catalog = context.Catalog;
         Pool = context.Pool;
         Store = context.Store;
-        QueryMeter = context.QueryMeter;
         Accountant = context.Accountant;
         BatchSize = context.BatchSize;
         AssertionDiagnostics = context.AssertionDiagnostics;
@@ -52,7 +50,6 @@ public sealed class ExecutionContext : IDisposable
   /// <param name="cancellationToken">Cancellation token for cooperative cancellation.</param>
   /// <param name="functionRegistry">Registry of scalar and table-valued functions.</param>
   /// <param name="catalog">Registry of named tables and provider factories.</param>
-  /// <param name="queryMeter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
   /// <param name="memoryBudgetBytes">
   /// Memory budget in bytes for operators that support spill-to-disk. When
   /// <see langword="null"/>. Pass <see cref="long.MaxValue"/> for
@@ -90,7 +87,6 @@ public sealed class ExecutionContext : IDisposable
         FunctionRegistry functionRegistry,
         TableCatalog catalog,
         Pool pool,
-        QueryMeter? queryMeter = null,
         long? memoryBudgetBytes = null,
         Arena? store = null,
         TypeRegistry? types = null,
@@ -121,7 +117,6 @@ public sealed class ExecutionContext : IDisposable
             Store = store;
             _ownsStore = false;
         }
-        QueryMeter = queryMeter;
         if (accountant is null)
         {
             Accountant = new MemoryAccountant(
@@ -263,12 +258,6 @@ public sealed class ExecutionContext : IDisposable
     public void ReturnRowBatch(RowBatch batch) => Pool.ReturnRowBatch(batch);
 
     /// <summary>
-    /// Optional meter for accumulating Query Unit costs during execution.
-    /// <see langword="null"/> when metering is not active (e.g. CLI execution).
-    /// </summary>
-    public QueryMeter? QueryMeter { get; }
-
-    /// <summary>
     /// Plan-wide memory accountant shared with every materializing operator,
     /// <see cref="VariableScope"/>, and DML executor in this query. Forwards the
     /// budget check (<see cref="MemoryAccountant.WouldExceedBudget"/>) and
@@ -366,7 +355,6 @@ public sealed class ExecutionContext : IDisposable
             FunctionRegistry,
             Catalog,
             Pool,
-            QueryMeter,
             memoryBudgetBytes: null,
             Store,
             types: Types,
