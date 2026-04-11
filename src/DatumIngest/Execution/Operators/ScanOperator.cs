@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
 using DatumIngest.Diagnostics;
+using DatumIngest.Execution.Operators.Scans;
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Manifest;
@@ -267,6 +268,33 @@ public sealed class ScanOperator : QueryOperator
         ExactSeekRowsFetched = null;
         CompositeIndexSeekHits = null;
 
+        // Build the pruner pipeline once per execution. Each pruner enforces one
+        // constraint (zone-map stats, bloom filters, sorted-index membership via
+        // join keys, sorted-index pruning via filter literals, or bitmap-index
+        // pruning); the per-chunk loop short-circuits at the first match.
+        string tableName = TableProvider.QualifiedName.ToString();
+        List<IChunkPruner> pruners = new();
+        if (_filterHint is not null)
+        {
+            pruners.Add(new StatisticsChunkPruner(_filterHint, tableName));
+        }
+        if (_bloomPruningKeys is not null && bloomFilters is not null)
+        {
+            pruners.Add(new BloomChunkPruner(_bloomPruningKeys, bloomFilters, tableName));
+        }
+        if (_sortedIndexPruningKeys is not null)
+        {
+            pruners.Add(new SortedJoinKeyChunkPruner(_sortedIndexPruningKeys, provider, tableName));
+        }
+        if (_filterHint is not null)
+        {
+            pruners.Add(new SortedFilterChunkPruner(_filterHint, provider, tableName));
+        }
+        if (_filterHint is not null && sourceIndex.BitmapIndexes is not null)
+        {
+            pruners.Add(new BitmapChunkPruner(_filterHint, sourceIndex.BitmapIndexes, tableName));
+        }
+
         // Build a set of non-pruned chunk row ranges and track active chunk indexes.
         List<(long Start, long End, int ChunkIndex)> activeRanges = new();
         HashSet<int> activeChunkIndexes = new();
@@ -276,98 +304,12 @@ public sealed class ScanOperator : QueryOperator
             IndexChunk chunk = chunks[chunkIndex];
             bool pruned = false;
 
-            // Statistics-based pruning: check filter predicates against min/max stats.
-            if (!pruned && _filterHint is not null)
+            foreach (IChunkPruner pruner in pruners)
             {
-                using ColumnStatisticsRangeLookup statistics = chunk.CreateStatisticsLookup();
-
-                if (StatisticsPredicateEvaluator.CanSkipPartition(_filterHint, statistics, context.Store))
+                if (pruner.ShouldPrune(chunkIndex, chunk, context.Store))
                 {
-                    if (chunkIndex == 0)
-                    {
-                        DatumActivity.Operators.Trace($"SCAN PRUNE chunk=0  reason=zonemap  table={TableProvider.QualifiedName}  statsKeys=[{string.Join(",", statistics.Keys)}]");
-                    }
                     pruned = true;
-                }
-            }
-
-            // Bloom-filter-based pruning: check if any build-side join key could
-            // be present in this chunk. If no key could possibly match, skip it.
-            if (!pruned && _bloomPruningKeys is not null && bloomFilters is not null)
-            {
-                foreach (KeyValuePair<string, IReadOnlyCollection<DataValue>> entry in _bloomPruningKeys)
-                {
-                    if (bloomFilters.TryGetFilter(entry.Key, chunkIndex, out BloomFilter? filter))
-                    {
-                        bool anyMayMatch = false;
-                        foreach (DataValue keyValue in entry.Value)
-                        {
-                            if (filter.MayContain(keyValue, context.Store))
-                            {
-                                anyMayMatch = true;
-                                break;
-                            }
-                        }
-
-                        if (!anyMayMatch)
-                        {
-                            if (chunkIndex == 0) DatumActivity.Operators.Trace($"SCAN PRUNE chunk=0  reason=bloom  table={TableProvider.QualifiedName}");
-                            pruned = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Sorted-index-based pruning via join keys: if build-side key values
-            // were passed and sorted indexes exist, check whether any build key
-            // is present in this chunk. If none are, skip the chunk.
-            if (!pruned && _sortedIndexPruningKeys is not null)
-            {
-                foreach (KeyValuePair<string, IReadOnlyCollection<DataValue>> entry in _sortedIndexPruningKeys)
-                {
-                    if (provider.TryGetColumnIndex(entry.Key, out IColumnIndex? index))
-                    {
-                        bool anyPresent = false;
-                        foreach (DataValue keyValue in entry.Value)
-                        {
-                            IReadOnlySet<int> matchingChunks = index.FindChunksContaining(keyValue);
-                            if (matchingChunks.Contains(chunkIndex))
-                            {
-                                anyPresent = true;
-                                break;
-                            }
-                        }
-
-                        if (!anyPresent)
-                        {
-                            if (chunkIndex == 0) DatumActivity.Operators.Trace($"SCAN PRUNE chunk=0  reason=sorted_join_key  table={TableProvider.QualifiedName}");
-                            pruned = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Sorted-index-based pruning: if equality predicates are present and
-            // a column index exists, check whether the chunk contains the key.
-            if (!pruned && _filterHint is not null)
-            {
-                if (ShouldPruneWithColumnIndexes(_filterHint, provider, chunkIndex, context.Store))
-                {
-                    if (chunkIndex == 0) DatumActivity.Operators.Trace($"SCAN PRUNE chunk=0  reason=column_index  table={TableProvider.QualifiedName}");
-                    pruned = true;
-                }
-            }
-
-            // Bitmap-index-based pruning: for equality predicates on columns with
-            // bitmap indexes, check whether the value appears in this chunk.
-            if (!pruned && _filterHint is not null && sourceIndex.BitmapIndexes is not null)
-            {
-                if (ShouldPruneWithBitmapIndexes(_filterHint, sourceIndex.BitmapIndexes, chunkIndex, context.Store))
-                {
-                    if (chunkIndex == 0) DatumActivity.Operators.Trace($"SCAN PRUNE chunk=0  reason=bitmap  table={TableProvider.QualifiedName}");
-                    pruned = true;
+                    break;
                 }
             }
 
@@ -384,12 +326,12 @@ public sealed class ScanOperator : QueryOperator
 
         DatumActivity.Operators.Trace($"SCAN index pruning  table={TableProvider.QualifiedName}  totalChunks={chunks.Count}  pruned={PrunedIndexChunks}  active={activeRanges.Count}");
 
-        // Invariant: outputBatch != null ⟺ producer still owns it. Yielding transfers
-        // ownership, so we null the local *before* yield. The outer finally cleans up
-        // only the not-yet-yielded leftover, closing the leak window for mid-fill
-        // exceptions and upstream throws during the next MoveNextAsync. The middle branch
-        // (pure pass-through) doesn't accumulate, so it's safe inside the same try.
-        RowBatch? outputBatch = null;
+        // The writer owns the rent / IsFull / yield cycle and the trailing-batch
+        // ownership across the three execution branches. Its Flush() in the finally
+        // recovers the leftover on mid-fill exceptions and upstream throws during
+        // the next MoveNextAsync. All three branches accumulate through it; the
+        // ReferenceEquals lookup-check guards against schema drift mid-stream.
+        ScanOutputWriter writer = new(context);
 
         try
         {
@@ -402,69 +344,146 @@ public sealed class ScanOperator : QueryOperator
                 ExactSeekRowsFetched = exactPositions.Count;
                 CompositeIndexSeekHits = compositeHits;
 
-                using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns, context.Store);
-
-                foreach (long rowPosition in exactPositions)
+                await foreach (RowBatch batch in ExecuteExactSeekAsync(provider, exactPositions, writer, context).ConfigureAwait(false))
                 {
-                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(
-                        rowPosition, 1, cancellationToken).ConfigureAwait(false))
-                    {
-                        try
-                        {
-                            for (int i = 0; i < inputBatch.Count; i++)
-                            {
-                                outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
-
-                                context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
-
-                                if (outputBatch.IsFull)
-                                {
-                                    RowBatch toYield = outputBatch;
-                                    outputBatch = null;
-                                    yield return toYield;
-                                }
-                            }
-                        }
-                        finally
-                        {
-                            context.ReturnRowBatch(inputBatch);
-                        }
-                    }
+                    yield return batch;
                 }
-
-                if (outputBatch is not null)
-                {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
-                }
-
-                yield break;
             }
             else if (PrunedIndexChunks == 0 && !HasBitmapRowFilter)
             {
-                // No pruning and no bitmap row filtering — stream all rows from the
-                // provider, materialising each into a context.Store-bound output
-                // batch. The copy looks wasteful but it's the price of the
-                // one-arena-per-query invariant: providers manage their own arenas
-                // (mmap, decode buffers); we re-bind into the query's single arena
-                // so downstream operators can read without "which arena?" routing.
-                // ScanOperator is the boundary where that re-binding happens.
-                await foreach (RowBatch inputBatch in provider.ScanAsync(_requiredColumns, _filterHint, context.Store, cancellationToken).ConfigureAwait(false))
+                await foreach (RowBatch batch in ExecuteStreamAllAsync(provider, writer, context).ConfigureAwait(false))
+                {
+                    yield return batch;
+                }
+            }
+            else
+            {
+                await foreach (RowBatch batch in ExecuteRangeScanWithBitmapAsync(provider, sourceIndex, activeRanges, writer, context).ConfigureAwait(false))
+                {
+                    yield return batch;
+                }
+            }
+        }
+        finally
+        {
+            if (writer.Flush() is RowBatch leftover) context.ReturnRowBatch(leftover);
+        }
+    }
+
+    /// <summary>
+    /// Exact-seek path: point-seeks each pre-collected absolute row position
+    /// via the provider's <see cref="ISeekSession"/>. Used when at least one
+    /// indexed equality / BETWEEN / IN predicate in the filter resolves to a
+    /// concrete position set.
+    /// </summary>
+    private async IAsyncEnumerable<RowBatch> ExecuteExactSeekAsync(
+        ITableProvider provider,
+        List<long> exactPositions,
+        ScanOutputWriter writer,
+        ExecutionContext context)
+    {
+        CancellationToken cancellationToken = context.CancellationToken;
+        using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns, context.Store);
+
+        foreach (long rowPosition in exactPositions)
+        {
+            await foreach (RowBatch inputBatch in seekSession.SeekAsync(
+                rowPosition, 1, cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    for (int i = 0; i < inputBatch.Count; i++)
+                    {
+                        if (writer.Add(inputBatch, i) is RowBatch ready) yield return ready;
+                    }
+                }
+                finally
+                {
+                    context.ReturnRowBatch(inputBatch);
+                }
+            }
+        }
+
+        if (writer.Flush() is RowBatch trailing) yield return trailing;
+    }
+
+    /// <summary>
+    /// Stream-all path: passes the filter hint to the provider and streams
+    /// every row through, materialising each into a <c>context.Store</c>-bound
+    /// output batch. Used when no chunk was pruned and no bitmap row filter
+    /// applies — the per-chunk seek path would just re-walk the same rows
+    /// with extra overhead.
+    /// </summary>
+    /// <remarks>
+    /// The copy through <c>RentAndCopyToOutput</c> looks wasteful but it's
+    /// the price of the one-arena-per-query invariant: providers manage their
+    /// own arenas (mmap, decode buffers); the scan re-binds into the query's
+    /// single arena so downstream operators can read without "which arena?"
+    /// routing. ScanOperator is the boundary where that re-binding happens.
+    /// </remarks>
+    private async IAsyncEnumerable<RowBatch> ExecuteStreamAllAsync(
+        ITableProvider provider,
+        ScanOutputWriter writer,
+        ExecutionContext context)
+    {
+        CancellationToken cancellationToken = context.CancellationToken;
+
+        await foreach (RowBatch inputBatch in provider.ScanAsync(
+            _requiredColumns, _filterHint, context.Store, cancellationToken).ConfigureAwait(false))
+        {
+            try
+            {
+                for (int i = 0; i < inputBatch.Count; i++)
+                {
+                    if (writer.Add(inputBatch, i) is RowBatch ready) yield return ready;
+                }
+            }
+            finally
+            {
+                context.ReturnRowBatch(inputBatch);
+            }
+        }
+
+        if (writer.Flush() is RowBatch trailing) yield return trailing;
+    }
+
+    /// <summary>
+    /// Per-chunk seek path: walks the surviving (non-pruned) chunk ranges and
+    /// seeks each contiguous range. When a bitmap row mask exists for the
+    /// chunk's filter predicates, each row is gated on its mask bit.
+    /// </summary>
+    private async IAsyncEnumerable<RowBatch> ExecuteRangeScanWithBitmapAsync(
+        ITableProvider provider,
+        SourceIndex sourceIndex,
+        List<(long Start, long End, int ChunkIndex)> activeRanges,
+        ScanOutputWriter writer,
+        ExecutionContext context)
+    {
+        CancellationToken cancellationToken = context.CancellationToken;
+        using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns, context.Store);
+
+        foreach ((long start, long end, int activeChunkIndex) in activeRanges)
+        {
+            int count = (int)(end - start);
+            byte[]? bitmapMask = BitmapRowMaskBuilder.Build(
+                _filterHint, sourceIndex.BitmapIndexes, activeChunkIndex, count, context.Store);
+
+            if (bitmapMask is not null)
+            {
+                int rowInChunk = 0;
+                await foreach (RowBatch inputBatch in seekSession.SeekAsync(
+                    start, count, cancellationToken).ConfigureAwait(false))
                 {
                     try
                     {
                         for (int i = 0; i < inputBatch.Count; i++)
                         {
-                            outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
-                            context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
-
-                            if (outputBatch.IsFull)
+                            if (BitmapRowMaskBuilder.IsBitSet(bitmapMask, rowInChunk))
                             {
-                                RowBatch toYield = outputBatch;
-                                outputBatch = null;
-                                yield return toYield;
+                                if (writer.Add(inputBatch, i) is RowBatch ready) yield return ready;
                             }
+
+                            rowInChunk++;
                         }
                     }
                     finally
@@ -472,624 +491,29 @@ public sealed class ScanOperator : QueryOperator
                         context.ReturnRowBatch(inputBatch);
                     }
                 }
-
-                if (outputBatch is not null)
-                {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
-                }
-
-                yield break;
             }
             else
             {
-                using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns, context.Store);
-
-                foreach ((long start, long end, int activeChunkIndex) in activeRanges)
+                await foreach (RowBatch inputBatch in seekSession.SeekAsync(
+                    start, count, cancellationToken).ConfigureAwait(false))
                 {
-                    int count = (int)(end - start);
-                    byte[]? bitmapMask = EvaluateBitmapFilter(
-                        _filterHint, sourceIndex.BitmapIndexes, activeChunkIndex, count, context.Store);
-
-                    if (bitmapMask is not null)
+                    try
                     {
-                        int rowInChunk = 0;
-
-                        await foreach (RowBatch inputBatch in seekSession.SeekAsync(start, count, cancellationToken).ConfigureAwait(false))
+                        for (int i = 0; i < inputBatch.Count; i++)
                         {
-                            try
-                            {
-                                for (int i = 0; i < inputBatch.Count; i++)
-                                {
-                                    if (IsBitmapBitSet(bitmapMask, rowInChunk))
-                                    {
-                                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
-
-                                        context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
-
-                                        if (outputBatch.IsFull)
-                                        {
-                                            RowBatch toYield = outputBatch;
-                                            outputBatch = null;
-                                            yield return toYield;
-                                        }
-                                    }
-
-                                    rowInChunk++;
-                                }
-                            }
-                            finally
-                            {
-                                context.ReturnRowBatch(inputBatch);
-                            }
+                            if (writer.Add(inputBatch, i) is RowBatch ready) yield return ready;
                         }
                     }
-                    else
+                    finally
                     {
-                        await foreach (RowBatch inputBatch in seekSession.SeekAsync(start, count, cancellationToken).ConfigureAwait(false))
-                        {
-                            try
-                            {
-                                for (int i = 0; i < inputBatch.Count; i++)
-                                {
-                                    outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
-
-                                    context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
-
-                                    if (outputBatch.IsFull)
-                                    {
-                                        RowBatch toYield = outputBatch;
-                                        outputBatch = null;
-                                        yield return toYield;
-                                    }
-                                }
-                            }
-                            finally
-                            {
-                                context.ReturnRowBatch(inputBatch);
-                            }
-                        }
+                        context.ReturnRowBatch(inputBatch);
                     }
                 }
-
-                if (outputBatch is not null)
-                {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
-                }
-
-                yield break;
             }
         }
-        finally
-        {
-            if (outputBatch is not null)
-            {
-                context.ReturnRowBatch(outputBatch);
-            }
-        }
+
+        if (writer.Flush() is RowBatch trailing) yield return trailing;
     }
-
-    /// <summary>
-    /// Checks whether a chunk can be pruned based on sorted value indexes.
-    /// Extracts equality predicates (column = literal) from the filter expression
-    /// and checks the sorted index to see if the chunk contains any matching key.
-    /// </summary>
-    private static bool ShouldPruneWithColumnIndexes(
-        Expression filterHint, ITableProvider provider, int chunkIndex, Arena arena)
-    {
-        // Walk the expression tree looking for equality comparisons of the form
-        // column = literal. Each such predicate can rule out chunks that do not
-        // contain the literal in their sorted index.
-        return CheckExpressionForPruning(filterHint, provider, chunkIndex, arena);
-    }
-
-    /// <summary>
-    /// Checks whether a chunk can be pruned based on bitmap indexes.
-    /// Walks the filter expression tree extracting equality predicates
-    /// (<c>column = literal</c>) and IN predicates against bitmap-indexed columns.
-    /// AND chains prune when any branch proves the chunk empty; OR chains
-    /// require all branches to prove the chunk empty.
-    /// </summary>
-    private static bool ShouldPruneWithBitmapIndexes(
-        Expression filterHint, BitmapIndexSet bitmapIndexes, int chunkIndex, Arena arena)
-    {
-        return CheckExpressionForBitmapPruning(filterHint, bitmapIndexes, chunkIndex, arena);
-    }
-
-    private static bool CheckExpressionForBitmapPruning(
-        Expression expression, BitmapIndexSet bitmapIndexes, int chunkIndex, Arena arena)
-    {
-        if (expression is BinaryExpression binary)
-        {
-            if (binary.Operator == BinaryOperator.And)
-            {
-                // AND: prune if either side proves the chunk empty.
-                return CheckExpressionForBitmapPruning(binary.Left, bitmapIndexes, chunkIndex, arena)
-                    || CheckExpressionForBitmapPruning(binary.Right, bitmapIndexes, chunkIndex, arena);
-            }
-
-            if (binary.Operator == BinaryOperator.Equal)
-            {
-                return CheckEqualityForBitmapPruning(binary.Left, binary.Right, bitmapIndexes, chunkIndex, arena);
-            }
-        }
-
-        if (expression is InExpression inExpression && !inExpression.Negated)
-        {
-            return CheckInForBitmapPruning(inExpression, bitmapIndexes, chunkIndex, arena);
-        }
-
-        return false;
-    }
-
-    private static bool CheckEqualityForBitmapPruning(
-        Expression left, Expression right, BitmapIndexSet bitmapIndexes, int chunkIndex, Arena arena)
-    {
-        string? columnName = null;
-        object? rawLiteral = null;
-
-        if (left is ColumnReference columnRef && right is LiteralExpression literal)
-        {
-            columnName = columnRef.ColumnName;
-            rawLiteral = literal.Value;
-        }
-        else if (left is LiteralExpression literalLeft && right is ColumnReference columnRight)
-        {
-            columnName = columnRight.ColumnName;
-            rawLiteral = literalLeft.Value;
-        }
-
-        if (columnName is null || rawLiteral is null)
-        {
-            return false;
-        }
-
-        if (!bitmapIndexes.TryGetIndex(columnName, out BitmapColumnIndex? bitmapIndex))
-        {
-            return false;
-        }
-
-        DataValue literalValue = DataValue.FromLiteral(rawLiteral, arena);
-        return literalValue.IsInline
-            && !bitmapIndex.ChunkContainsValue(literalValue, chunkIndex);
-    }
-
-    private static bool CheckInForBitmapPruning(
-        InExpression inExpression, BitmapIndexSet bitmapIndexes, int chunkIndex, Arena arena)
-    {
-        if (inExpression.Expression is not ColumnReference columnRef)
-        {
-            return false;
-        }
-
-        if (!bitmapIndexes.TryGetIndex(columnRef.ColumnName, out BitmapColumnIndex? bitmapIndex))
-        {
-            return false;
-        }
-
-        // If any IN value exists in this chunk, the chunk cannot be pruned.
-        foreach (Expression valueExpression in inExpression.Values)
-        {
-            if (valueExpression is not LiteralExpression { Value: not null } literal)
-            {
-                return false;
-            }
-
-            DataValue value = DataValue.FromLiteral(literal.Value, arena);
-
-            if (value.IsInline && bitmapIndex.ChunkContainsValue(value, chunkIndex))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Builds a combined bitmap row-inclusion mask for a single chunk by evaluating
-    /// bitmap-eligible sub-expressions in the filter hint. Returns <c>null</c> when
-    /// no bitmap-eligible predicates exist (all rows should pass through).
-    /// </summary>
-    private static byte[]? EvaluateBitmapFilter(
-        Expression? filterHint, BitmapIndexSet? bitmapIndexes,
-        int chunkIndex, int rowCount, Arena arena)
-    {
-        if (filterHint is null || bitmapIndexes is null || bitmapIndexes.Count == 0)
-        {
-            return null;
-        }
-
-        return EvaluateBitmapExpression(filterHint, bitmapIndexes, chunkIndex, rowCount, arena);
-    }
-
-    /// <summary>
-    /// Recursively evaluates a filter expression against bitmap indexes, composing
-    /// per-value bitmaps with AND/OR/NOT to produce a row-inclusion bitset.
-    /// Returns <c>null</c> when the sub-expression has no bitmap-eligible predicates.
-    /// </summary>
-    private static byte[]? EvaluateBitmapExpression(
-        Expression expression, BitmapIndexSet bitmapIndexes,
-        int chunkIndex, int rowCount, Arena arena)
-    {
-        if (expression is BinaryExpression binary)
-        {
-            if (binary.Operator == BinaryOperator.And)
-            {
-                byte[]? leftBits = EvaluateBitmapExpression(binary.Left, bitmapIndexes, chunkIndex, rowCount, arena);
-                byte[]? rightBits = EvaluateBitmapExpression(binary.Right, bitmapIndexes, chunkIndex, rowCount, arena);
-
-                if (leftBits is not null && rightBits is not null)
-                {
-                    return BitmapComposer.And(leftBits, rightBits);
-                }
-
-                // Return whichever side produced a bitmap (AND with unknown = keep the known constraint).
-                return leftBits ?? rightBits;
-            }
-
-            if (binary.Operator == BinaryOperator.Or)
-            {
-                byte[]? leftBits = EvaluateBitmapExpression(binary.Left, bitmapIndexes, chunkIndex, rowCount, arena);
-                byte[]? rightBits = EvaluateBitmapExpression(binary.Right, bitmapIndexes, chunkIndex, rowCount, arena);
-
-                if (leftBits is not null && rightBits is not null)
-                {
-                    return BitmapComposer.Or(leftBits, rightBits);
-                }
-
-                // OR with an unknown side: cannot constrain (either side might match any row).
-                return null;
-            }
-
-            if (binary.Operator == BinaryOperator.Equal)
-            {
-                return EvaluateBitmapEquality(binary.Left, binary.Right, bitmapIndexes, chunkIndex, rowCount, arena);
-            }
-
-            if (binary.Operator == BinaryOperator.NotEqual)
-            {
-                byte[]? equalBits = EvaluateBitmapEquality(
-                    binary.Left, binary.Right, bitmapIndexes, chunkIndex, rowCount, arena);
-
-                if (equalBits is not null)
-                {
-                    return BitmapComposer.Not(equalBits, rowCount);
-                }
-
-                return null;
-            }
-        }
-
-        if (expression is InExpression inExpression && !inExpression.Negated)
-        {
-            return EvaluateBitmapIn(inExpression, bitmapIndexes, chunkIndex, rowCount, arena);
-        }
-
-        return null;
-    }
-
-    private static byte[]? EvaluateBitmapEquality(
-        Expression left, Expression right, BitmapIndexSet bitmapIndexes,
-        int chunkIndex, int rowCount, Arena arena)
-    {
-        string? columnName = null;
-        object? rawLiteral = null;
-
-        if (left is ColumnReference columnRef && right is LiteralExpression literal)
-        {
-            columnName = columnRef.ColumnName;
-            rawLiteral = literal.Value;
-        }
-        else if (left is LiteralExpression literalLeft && right is ColumnReference columnRight)
-        {
-            columnName = columnRight.ColumnName;
-            rawLiteral = literalLeft.Value;
-        }
-
-        if (columnName is null || rawLiteral is null)
-        {
-            return null;
-        }
-
-        if (!bitmapIndexes.TryGetIndex(columnName, out BitmapColumnIndex? bitmapIndex))
-        {
-            return null;
-        }
-
-        DataValue literalValue = DataValue.FromLiteral(rawLiteral, arena);
-        if (!literalValue.IsInline)
-        {
-            return null;
-        }
-
-        ChunkBitmap bitmap = bitmapIndex.GetChunkBitmap(literalValue, chunkIndex);
-        return bitmap.Bits.ToArray();
-    }
-
-    private static byte[]? EvaluateBitmapIn(
-        InExpression inExpression, BitmapIndexSet bitmapIndexes,
-        int chunkIndex, int rowCount, Arena arena)
-    {
-        if (inExpression.Expression is not ColumnReference columnRef)
-        {
-            return null;
-        }
-
-        if (!bitmapIndexes.TryGetIndex(columnRef.ColumnName, out BitmapColumnIndex? bitmapIndex))
-        {
-            return null;
-        }
-
-        byte[]? result = null;
-
-        foreach (Expression valueExpression in inExpression.Values)
-        {
-            if (valueExpression is not LiteralExpression { Value: not null } literal)
-            {
-                return null;
-            }
-
-            DataValue value = DataValue.FromLiteral(literal.Value, arena);
-            if (!value.IsInline)
-            {
-                return null;
-            }
-
-            ChunkBitmap bitmap = bitmapIndex.GetChunkBitmap(value, chunkIndex);
-
-            if (result is null)
-            {
-                result = bitmap.Bits.ToArray();
-            }
-            else
-            {
-                BitmapComposer.Or(bitmap.Bits, result, result);
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// Returns whether the bit at the given row offset is set in a bitmap mask.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsBitmapBitSet(byte[] mask, int rowOffset)
-    {
-        int byteIndex = rowOffset >> 3;
-        int bitIndex = rowOffset & 7;
-        return (mask[byteIndex] & (1 << bitIndex)) != 0;
-    }
-
-    private static bool CheckExpressionForPruning(
-        Expression expression, ITableProvider provider, int chunkIndex, Arena arena)
-    {
-        if (expression is BinaryExpression binary)
-        {
-            if (binary.Operator == BinaryOperator.And)
-            {
-                // AND: prune if either side says we can prune.
-                return CheckExpressionForPruning(binary.Left, provider, chunkIndex, arena)
-                    || CheckExpressionForPruning(binary.Right, provider, chunkIndex, arena);
-            }
-
-            if (binary.Operator == BinaryOperator.Equal)
-            {
-                return CheckEqualityForPruning(binary.Left, binary.Right, provider, chunkIndex, arena);
-            }
-
-            if (binary.Operator is BinaryOperator.LessThan or BinaryOperator.LessThanOrEqual
-                or BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual)
-            {
-                return CheckComparisonForPruning(
-                    binary.Left, binary.Right, binary.Operator, provider, chunkIndex, arena);
-            }
-        }
-
-        if (expression is BetweenExpression between && !between.Negated)
-        {
-            return CheckBetweenForPruning(between, provider, chunkIndex, arena);
-        }
-
-        if (expression is InExpression inExpression && !inExpression.Negated)
-        {
-            return CheckInForPruning(inExpression, provider, chunkIndex, arena);
-        }
-
-        return false;
-    }
-
-    private static bool CheckEqualityForPruning(
-        Expression left, Expression right, ITableProvider provider, int chunkIndex, Arena arena)
-    {
-        // Match: column = literal  or  literal = column
-        string? columnName = null;
-        object? rawLiteral = null;
-
-        if (left is ColumnReference columnRef && right is LiteralExpression literal)
-        {
-            columnName = columnRef.ColumnName;
-            rawLiteral = literal.Value;
-        }
-        else if (left is LiteralExpression literalLeft && right is ColumnReference columnRight)
-        {
-            columnName = columnRight.ColumnName;
-            rawLiteral = literalLeft.Value;
-        }
-
-        if (columnName is null || rawLiteral is null)
-        {
-            return false;
-        }
-
-        if (!provider.TryGetColumnIndex(columnName, out IColumnIndex? index))
-        {
-            return false;
-        }
-
-        DataValue literalValue = DataValue.FromLiteral(rawLiteral, arena);
-
-        if (!literalValue.IsInline)
-        {
-            return false;
-        }
-
-        IReadOnlySet<int> matchingChunks = index.FindChunksContaining(literalValue);
-        return !matchingChunks.Contains(chunkIndex);
-    }
-
-    /// <summary>
-    /// Checks whether a chunk can be pruned based on a range comparison
-    /// (<c>&lt;</c>, <c>&lt;=</c>, <c>&gt;</c>, <c>&gt;=</c>) against a sorted index.
-    /// Handles both <c>column op literal</c> and <c>literal op column</c> orientations.
-    /// </summary>
-    private static bool CheckComparisonForPruning(
-        Expression left, Expression right, BinaryOperator op,
-        ITableProvider provider, int chunkIndex, Arena arena)
-    {
-        string? columnName = null;
-        object? rawLiteral = null;
-        BinaryOperator effectiveOperator = op;
-
-        if (left is ColumnReference columnRef && right is LiteralExpression literal)
-        {
-            columnName = columnRef.ColumnName;
-            rawLiteral = literal.Value;
-        }
-        else if (left is LiteralExpression literalLeft && right is ColumnReference columnRight)
-        {
-            columnName = columnRight.ColumnName;
-            rawLiteral = literalLeft.Value;
-            effectiveOperator = FlipComparisonOperator(op);
-        }
-
-        if (columnName is null || rawLiteral is null)
-        {
-            return false;
-        }
-
-        if (!provider.TryGetColumnIndex(columnName, out IColumnIndex? index))
-        {
-            return false;
-        }
-
-        DataValue literalValue = DataValue.FromLiteral(rawLiteral, arena);
-
-        if (!literalValue.IsInline)
-        {
-            return false;
-        }
-
-        IReadOnlySet<int> matchingChunks = effectiveOperator switch
-        {
-            BinaryOperator.LessThan => index.FindChunksLessThan(literalValue),
-            BinaryOperator.LessThanOrEqual => index.FindChunksLessThanOrEqual(literalValue),
-            BinaryOperator.GreaterThan => index.FindChunksGreaterThan(literalValue),
-            BinaryOperator.GreaterThanOrEqual => index.FindChunksGreaterThanOrEqual(literalValue),
-            _ => throw new InvalidOperationException($"Unexpected operator: {effectiveOperator}"),
-        };
-
-        return !matchingChunks.Contains(chunkIndex);
-    }
-
-    /// <summary>
-    /// Flips a comparison operator to account for reversed operand order
-    /// (e.g. <c>5 &lt; col</c> becomes <c>col &gt; 5</c>).
-    /// </summary>
-    private static BinaryOperator FlipComparisonOperator(BinaryOperator op)
-    {
-        return op switch
-        {
-            BinaryOperator.LessThan => BinaryOperator.GreaterThan,
-            BinaryOperator.LessThanOrEqual => BinaryOperator.GreaterThanOrEqual,
-            BinaryOperator.GreaterThan => BinaryOperator.LessThan,
-            BinaryOperator.GreaterThanOrEqual => BinaryOperator.LessThanOrEqual,
-            _ => op,
-        };
-    }
-
-    /// <summary>
-    /// Checks whether a chunk can be pruned based on a BETWEEN predicate
-    /// by looking up the inclusive range in a sorted index.
-    /// </summary>
-    private static bool CheckBetweenForPruning(
-        BetweenExpression between, ITableProvider provider, int chunkIndex, Arena arena)
-    {
-        if (between.Expression is not ColumnReference columnRef)
-        {
-            return false;
-        }
-
-        if (between.Low is not LiteralExpression { Value: not null } lowLiteral
-            || between.High is not LiteralExpression { Value: not null } highLiteral)
-        {
-            return false;
-        }
-
-        if (!provider.TryGetColumnIndex(columnRef.ColumnName, out IColumnIndex? index))
-        {
-            return false;
-        }
-
-        DataValue low = DataValue.FromLiteral(lowLiteral.Value, arena);
-        DataValue high = DataValue.FromLiteral(highLiteral.Value, arena);
-
-        if (!low.IsInline || !high.IsInline)
-        {
-            return false;
-        }
-
-        IReadOnlySet<int> matchingChunks = index.FindChunksInRange(low, high);
-        return !matchingChunks.Contains(chunkIndex);
-    }
-
-    /// <summary>
-    /// Checks whether a chunk can be pruned based on an IN predicate
-    /// by looking up each value in a sorted index.
-    /// </summary>
-    private static bool CheckInForPruning(
-        InExpression inExpression, ITableProvider provider, int chunkIndex, Arena arena)
-    {
-        if (inExpression.Expression is not ColumnReference columnRef)
-        {
-            return false;
-        }
-
-        if (!provider.TryGetColumnIndex(columnRef.ColumnName, out IColumnIndex? index))
-        {
-            return false;
-        }
-
-        // If any IN value exists in this chunk, the chunk cannot be pruned.
-        foreach (Expression valueExpression in inExpression.Values)
-        {
-            if (valueExpression is not LiteralExpression { Value: not null } literal)
-            {
-                return false;
-            }
-
-            DataValue value = DataValue.FromLiteral(literal.Value, arena);
-            if (!value.IsInline)
-            {
-                return false;
-            }
-
-            IReadOnlySet<int> matchingChunks = index.FindChunksContaining(value);
-
-            if (matchingChunks.Contains(chunkIndex))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-
 
     /// <summary>
     /// Attempts to collect row positions from index-seekable predicates (equality,
@@ -1105,345 +529,30 @@ public sealed class ScanOperator : QueryOperator
         HashSet<int> activeChunkIndexes, Arena arena,
         out int? compositeHits)
     {
-        List<long>? bestPositions = null;
-        compositeHits = null;
-
-        // Equality predicates: col = literal → FindExact
-        List<(string Column, DataValue Value)> equalities = new();
-        ExtractTopLevelEqualities(filterHint, equalities, arena);
-
-        // Schema needed to coerce equality literals to the column kind
-        // before probing indexes. The parser narrows numeric literals
-        // (sbyte → short → int → long) so `WHERE a = 1` on an Int32
-        // column lands here with an Int8 literal; without coercion the
-        // index probe sees a kind mismatch and returns 0 results, which
-        // would then incorrectly become "bestPositions" under the
-        // fewest-wins rule.
+        SeekPlanningContext predicates = new(filterHint, arena);
+        SeekPlanner planner = new(chunks, activeChunkIndexes);
         Schema providerSchema = provider.GetSchema();
 
-        foreach ((string column, DataValue value) in equalities)
+        // Strategies run in series; each submits zero or more candidate
+        // position lists to the planner. The planner retains the
+        // fewest-positions winner across all of them, and (via
+        // SubmitCompositeEntries) tracks the composite-index counter
+        // independently of whether the composite path wins the tiebreak.
+        ISeekStrategy[] strategies =
+        [
+            new EqualitySeekStrategy(),
+            new BetweenSeekStrategy(),
+            new InSeekStrategy(),
+            new CompositeSeekStrategy(),
+        ];
+
+        foreach (ISeekStrategy strategy in strategies)
         {
-            if (!provider.TryGetColumnIndex(column, out IColumnIndex? index))
-            {
-                continue;
-            }
-
-            DataValue coercedValue = CoerceLiteralToColumnKind(value, column, providerSchema);
-            if (coercedValue.IsNull) continue;
-
-            IReadOnlyList<ValueIndexEntry> entries = index.FindExact(coercedValue);
-            List<long> positions = CollectPositionsFromEntries(entries, chunks, activeChunkIndexes);
-
-            if (bestPositions is null || positions.Count < bestPositions.Count)
-            {
-                bestPositions = positions;
-            }
+            strategy.Contribute(predicates, provider, providerSchema, planner, arena);
         }
 
-        // BETWEEN predicates: col BETWEEN low AND high → FindRange
-        List<(string Column, DataValue Low, DataValue High)> betweens = new();
-        ExtractTopLevelBetweens(filterHint, betweens, arena);
-
-        foreach ((string column, DataValue low, DataValue high) in betweens)
-        {
-            if (!provider.TryGetColumnIndex(column, out IColumnIndex? index))
-            {
-                continue;
-            }
-
-            IReadOnlyList<ValueIndexEntry> entries = index.FindRange(low, high);
-            List<long> positions = CollectPositionsFromEntries(entries, chunks, activeChunkIndexes);
-
-            if (bestPositions is null || positions.Count < bestPositions.Count)
-            {
-                bestPositions = positions;
-            }
-        }
-
-        // IN predicates: col IN (v1, v2, ...) → union of FindExact per value
-        List<(string Column, List<DataValue> Values)> inPredicates = new();
-        ExtractTopLevelIns(filterHint, inPredicates, arena);
-
-        foreach ((string column, List<DataValue> values) in inPredicates)
-        {
-            if (!provider.TryGetColumnIndex(column, out IColumnIndex? index))
-            {
-                continue;
-            }
-
-            List<long> positions = new();
-
-            foreach (DataValue value in values)
-            {
-                IReadOnlyList<ValueIndexEntry> entries = index.FindExact(value);
-                positions.AddRange(
-                    CollectPositionsFromEntries(entries, chunks, activeChunkIndexes));
-            }
-
-            if (bestPositions is null || positions.Count < bestPositions.Count)
-            {
-                bestPositions = positions;
-            }
-        }
-
-        // Composite indexes: for each one, find the longest leftmost prefix
-        // of declared columns covered by the equality predicates. If the
-        // prefix is the full column list, use the cheaper FindExact (point
-        // lookup); otherwise use FindPrefix (range scan over a byte-encoded
-        // prefix). Partial-prefix matching mirrors Postgres B-tree
-        // composite-index semantics — `WHERE a = X` on `(a, b)` is a valid
-        // leftmost-prefix query.
-        //
-        // Each prefix value is coerced to the column's declared schema kind
-        // before encoding. The parser narrows numeric literals to their
-        // smallest representable type (sbyte → short → int → …), so a query
-        // like `WHERE a = 1` produces an Int8 literal even when `a` is
-        // Int32; the index entries were encoded against the column kind at
-        // INSERT time, so the probe key must match.
-        IReadOnlyList<Indexing.ICompositeIndex> compositeIndexes = provider.GetCompositeIndexes();
-        if (compositeIndexes.Count > 0 && equalities.Count > 0)
-        {
-            // Build a case-insensitive lookup of equality column → value once.
-            Dictionary<string, DataValue> equalityByColumn = new(StringComparer.OrdinalIgnoreCase);
-            foreach ((string col, DataValue val) in equalities)
-            {
-                equalityByColumn[col] = val;
-            }
-
-            foreach (Indexing.ICompositeIndex compositeIndex in compositeIndexes)
-            {
-                // Walk the index's columns from the left, collecting coerced
-                // values for each one covered by the equality predicates.
-                // Stop at the first uncovered column — leftmost-prefix
-                // semantics. A gap in the middle (e.g. predicate covers
-                // columns 0 and 2 of a 3-column index) yields a prefix of
-                // length 1, NOT a 3-tuple with a hole.
-                DataValue[] fullTuple = new DataValue[compositeIndex.Columns.Count];
-                int prefixLen = 0;
-                for (int i = 0; i < compositeIndex.Columns.Count; i++)
-                {
-                    string indexedCol = compositeIndex.Columns[i];
-                    if (!equalityByColumn.TryGetValue(indexedCol, out DataValue v))
-                    {
-                        break;
-                    }
-
-                    // Coerce to the schema kind so the encoded probe key
-                    // matches the encoded entry key. FindColumn is
-                    // case-insensitive; null means the index references a
-                    // column that no longer exists (schema drift), which
-                    // should be impossible because ALTER DROP COLUMN
-                    // cascades — defensive skip just in case.
-                    ColumnInfo? column = providerSchema.FindColumn(indexedCol);
-                    if (column is null) break;
-
-                    DataValue coerced = v.Kind == column.Kind
-                        ? v
-                        : TypeCoercion.CoerceValue(v, column.Kind);
-
-                    // Coercion can produce a null when no path exists
-                    // (e.g. a non-parseable string into an int). The
-                    // probe would never match — stop accumulating prefix.
-                    if (coerced.IsNull) break;
-                    fullTuple[i] = coerced;
-                    prefixLen++;
-                }
-
-                if (prefixLen == 0) continue;
-
-                IReadOnlyList<ValueIndexEntry> entries;
-                if (prefixLen == compositeIndex.Columns.Count)
-                {
-                    // Full-tuple match → cheaper point lookup.
-                    entries = compositeIndex.FindExact(fullTuple);
-                }
-                else
-                {
-                    // Leftmost-prefix match → range scan over byte-encoded
-                    // prefix. Slice the tuple to the covered length so the
-                    // adapter encodes only the leading columns.
-                    DataValue[] prefixTuple = new DataValue[prefixLen];
-                    Array.Copy(fullTuple, prefixTuple, prefixLen);
-                    entries = compositeIndex.FindPrefix(prefixTuple);
-                }
-                List<long> positions = CollectPositionsFromEntries(entries, chunks, activeChunkIndexes);
-
-                // Record that the composite path was consulted and produced
-                // these many positions, independent of whether it wins the
-                // fewest-positions tiebreak below. Tests use this to prove
-                // composite indexes are doing work that wouldn't be visible
-                // via the global ExactSeekRowsFetched counter (which could
-                // come from a single-column auto-built tree returning the
-                // same set).
-                compositeHits = (compositeHits ?? 0) + positions.Count;
-
-                if (bestPositions is null || positions.Count < bestPositions.Count)
-                {
-                    bestPositions = positions;
-                }
-            }
-        }
-
-        if (bestPositions is null || bestPositions.Count == 0)
-        {
-            return bestPositions;
-        }
-
-        bestPositions.Sort();
-        return bestPositions;
-    }
-
-    /// <summary>
-    /// Coerces a literal value to the schema kind of <paramref name="columnName"/>
-    /// so an index probe doesn't see a kind mismatch. Returns a typed null when
-    /// no coercion path exists (the caller should treat this as "skip this
-    /// strategy" rather than "matched zero rows").
-    /// </summary>
-    private static DataValue CoerceLiteralToColumnKind(
-        DataValue value, string columnName, Schema schema)
-    {
-        ColumnInfo? column = schema.FindColumn(columnName);
-        if (column is null) return DataValue.Null(value.Kind);
-        if (value.Kind == column.Kind) return value;
-        return TypeCoercion.CoerceValue(value, column.Kind);
-    }
-
-    /// <summary>
-    /// Converts index entries to absolute row positions, keeping only entries
-    /// in active (non-pruned) chunks.
-    /// </summary>
-    private static List<long> CollectPositionsFromEntries(
-        IReadOnlyList<ValueIndexEntry> entries,
-        IReadOnlyList<IndexChunk> chunks,
-        HashSet<int> activeChunkIndexes)
-    {
-        List<long> positions = new(entries.Count);
-
-        foreach (ValueIndexEntry entry in entries)
-        {
-            if (activeChunkIndexes.Contains(entry.ChunkIndex))
-            {
-                long absoluteRow = chunks[entry.ChunkIndex].RowOffset
-                    + entry.RowOffsetInChunk;
-                positions.Add(absoluteRow);
-            }
-        }
-
-        return positions;
-    }
-
-    /// <summary>
-    /// Extracts <c>column = literal</c> equality predicates from the top-level
-    /// AND chain of the filter expression. OR branches are ignored since they
-    /// cannot guarantee that all matching rows are in the index result set.
-    /// </summary>
-    private static void ExtractTopLevelEqualities(
-        Expression expression,
-        List<(string Column, DataValue Value)> results, Arena arena)
-    {
-        if (expression is BinaryExpression binary)
-        {
-            if (binary.Operator == BinaryOperator.And)
-            {
-                ExtractTopLevelEqualities(binary.Left, results, arena);
-                ExtractTopLevelEqualities(binary.Right, results, arena);
-                return;
-            }
-
-            if (binary.Operator == BinaryOperator.Equal)
-            {
-                string? columnName = null;
-                object? rawLiteral = null;
-
-                if (binary.Left is ColumnReference columnRef
-                    && binary.Right is LiteralExpression literal)
-                {
-                    columnName = columnRef.ColumnName;
-                    rawLiteral = literal.Value;
-                }
-                else if (binary.Left is LiteralExpression literalLeft
-                    && binary.Right is ColumnReference columnRight)
-                {
-                    columnName = columnRight.ColumnName;
-                    rawLiteral = literalLeft.Value;
-                }
-
-                if (columnName is not null && rawLiteral is not null)
-                {
-                    DataValue literalValue = DataValue.FromLiteral(rawLiteral, arena);
-                    if (!literalValue.IsInline) return;
-                    results.Add((columnName, literalValue));
-                }
-
-            }
-        }
-    }
-
-    /// <summary>
-    /// Extracts <c>column BETWEEN low AND high</c> predicates from the top-level
-    /// AND chain. Only non-negated BETWEEN with literal bounds is extracted.
-    /// </summary>
-    private static void ExtractTopLevelBetweens(
-        Expression expression,
-        List<(string Column, DataValue Low, DataValue High)> results, Arena arena)
-    {
-        if (expression is BinaryExpression binary && binary.Operator == BinaryOperator.And)
-        {
-            ExtractTopLevelBetweens(binary.Left, results, arena);
-            ExtractTopLevelBetweens(binary.Right, results, arena);
-            return;
-        }
-
-        if (expression is BetweenExpression between && !between.Negated
-            && between.Expression is ColumnReference columnRef
-            && between.Low is LiteralExpression { Value: not null } lowLiteral
-            && between.High is LiteralExpression { Value: not null } highLiteral)
-        {
-            DataValue low = DataValue.FromLiteral(lowLiteral.Value, arena);
-            DataValue high = DataValue.FromLiteral(highLiteral.Value, arena);
-
-            if (!low.IsInline || !high.IsInline) return;
-
-            results.Add((columnRef.ColumnName, low, high));
-        }
-    }
-
-    /// <summary>
-    /// Extracts <c>column IN (v1, v2, ...)</c> predicates from the top-level
-    /// AND chain. Only non-negated IN with all-literal values is extracted.
-    /// </summary>
-    private static void ExtractTopLevelIns(
-        Expression expression,
-        List<(string Column, List<DataValue> Values)> results, Arena arena)
-    {
-        if (expression is BinaryExpression binary && binary.Operator == BinaryOperator.And)
-        {
-            ExtractTopLevelIns(binary.Left, results, arena);
-            ExtractTopLevelIns(binary.Right, results, arena);
-            return;
-        }
-
-        if (expression is InExpression inExpression && !inExpression.Negated
-            && inExpression.Expression is ColumnReference columnRef)
-        {
-            List<DataValue> values = new(inExpression.Values.Count);
-
-            foreach (Expression valueExpression in inExpression.Values)
-            {
-                if (valueExpression is not LiteralExpression { Value: not null } literal)
-                {
-                    return;
-                }
-
-                DataValue dv = DataValue.FromLiteral(literal.Value, arena);
-                
-                if (!dv.IsInline) return;
-
-                values.Add(dv);
-            }
-
-            results.Add((columnRef.ColumnName, values));
-        }
+        compositeHits = planner.CompositeHits;
+        return planner.Finalize();
     }
 
 }
