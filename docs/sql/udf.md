@@ -596,7 +596,7 @@ must be discarded and recreated.
 - [Models](../models.md) — the `models` schema, whose entries UDFs commonly wrap
 - [Lambda Expressions](lambda-expressions.md) — how scope shadowing interacts with UDF parameters
 - [Common Table Expressions](cte.md) — for recursive logic that UDFs cannot express
-- [Common Subexpression Elimination](../common-subexpression-elimination.md) — how `PURE` interacts with the CSE pass
+- [Common Subexpression Elimination](../technical/common-subexpression-elimination.md) — how `PURE` interacts with the CSE pass
 - [system.udfs](#introspection) — querying registered UDFs from SQL
 - [CREATE PROCEDURE](procedural.md#create-procedure) — the multi-statement equivalent, invoked via `CALL`, that produces rows rather than a scalar
 - [CREATE MODEL](create-model.md) — sibling DDL surface for binding ONNX inference sessions to a SQL-callable name. Same procedural body shape; adds the `USING '...'` clause and the body-scoped `infer()` function.

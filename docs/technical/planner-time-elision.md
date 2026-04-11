@@ -4,7 +4,7 @@ title: Planner-Time Inline-Metadata Accessor Elision
 
 Inline-metadata accessor elision is a plan-time pass that recognises calls to scalar functions whose body is a direct payload-byte read on the argument's [`DataValue`](data-value-layout.md), and rewrites them into a dedicated AST node that the evaluator handles without going through `IScalarFunction.ExecuteAsync`. The rewrite eliminates per-call dispatch overhead — `ValueTask` allocation, the `ArrayPool` argument rent, function-by-name lookup, and the per-call activity span — on the common case where the metadata is cached as a struct field.
 
-The pass is implemented by [`InlineAccessorElider`](../src/DatumIngest/Execution/InlineAccessorElider.cs) and runs during [`QueryPlanner.Finalize`](../src/DatumIngest/Execution/QueryPlanner.cs), between [`ImageMetadataLowerer`](../src/DatumIngest/Execution/ImageMetadataLowerer.cs) and [`CommonSubexpressionEliminator`](common-subexpression-elimination.md). The upstream lowerer rewrites composite image-metadata calls (`pixel_count`, `dimensions(img, literal)`) into compositions of the elidable accessors below, so a single planner pipeline turns both the primitive accessors and their composites into struct-byte reads.
+The pass is implemented by [`InlineAccessorElider`](../../src/DatumIngest/Execution/InlineAccessorElider.cs) and runs during [`QueryPlanner.Finalize`](../../src/DatumIngest/Execution/QueryPlanner.cs), between [`ImageMetadataLowerer`](../../src/DatumIngest/Execution/ImageMetadataLowerer.cs) and [`CommonSubexpressionEliminator`](common-subexpression-elimination.md). The upstream lowerer rewrites composite image-metadata calls (`pixel_count`, `dimensions(img, literal)`) into compositions of the elidable accessors below, so a single planner pipeline turns both the primitive accessors and their composites into struct-byte reads.
 
 ## Why It's Worth Doing
 
@@ -16,14 +16,14 @@ The substrate this elision rides on — per-kind inline metadata stamped at cons
 
 ## Eligibility
 
-A function is eligible for elision when it implements [`IInlineMetadataAccessor`](../src/DatumIngest/Functions/IInlineMetadataAccessor.cs). The marker is a one-property interface — `InlineAccessorField Field { get; }` — that names which inline-metadata field the function reads. Implementing it is an opt-in choice by the function author: the function continues to ship its original `ExecuteAsync` body, which the evaluator delegates back to whenever the inline metadata isn't available (the **fallback** path described below).
+A function is eligible for elision when it implements [`IInlineMetadataAccessor`](../../src/DatumIngest/Functions/IInlineMetadataAccessor.cs). The marker is a one-property interface — `InlineAccessorField Field { get; }` — that names which inline-metadata field the function reads. Implementing it is an opt-in choice by the function author: the function continues to ship its original `ExecuteAsync` body, which the evaluator delegates back to whenever the inline metadata isn't available (the **fallback** path described below).
 
 For a call site to be rewritten, all of the following must hold:
 
 - The function resolved through the live `FunctionRegistry` (honouring the catalog search path) implements `IInlineMetadataAccessor`. A user UDF shadowing a built-in accessor's bare name does not get elided.
 - The call has exactly one argument and no modifier clauses (no `DISTINCT`, no `ORDER BY`, no `WITHIN GROUP`). Today's accessors are all unary; the gate is defensive.
 
-The resolved instance's `Field` value identifies which inline-metadata field to read; the [`InlineAccessorDescriptors`](../src/DatumIngest/Execution/InlineAccessorField.cs) static table maps each field to the expected argument kind, the result kind, and the canonical SQL function name used to recover the fallback function at evaluation time.
+The resolved instance's `Field` value identifies which inline-metadata field to read; the [`InlineAccessorDescriptors`](../../src/DatumIngest/Execution/InlineAccessorField.cs) static table maps each field to the expected argument kind, the result kind, and the canonical SQL function name used to recover the fallback function at evaluation time.
 
 ## Currently Elided Functions
 
@@ -44,11 +44,11 @@ The resolved instance's `Field` value identifies which inline-metadata field to 
 
 ## How It Works
 
-The rewrite replaces a `FunctionCallExpression` with a sealed-record [`InlineAccessorExpression(Expression Argument, InlineAccessorField Field)`](../src/DatumIngest/Execution/InlineAccessorExpression.cs). Record equality on `(Argument, Field)` is what lets the downstream CSE pass deduplicate repeated accessor calls without extra machinery.
+The rewrite replaces a `FunctionCallExpression` with a sealed-record [`InlineAccessorExpression(Expression Argument, InlineAccessorField Field)`](../../src/DatumIngest/Execution/InlineAccessorExpression.cs). Record equality on `(Argument, Field)` is what lets the downstream CSE pass deduplicate repeated accessor calls without extra machinery.
 
 ### Planner Pass
 
-[`InlineAccessorElider.Elide(plan, registry, searchPath)`](../src/DatumIngest/Execution/InlineAccessorElider.cs) walks every operator's expression tree via `QueryOperator.RewriteExpressions`. The walk is children-first (so an accessor nested inside arithmetic gets rewritten alongside the outer expression), and it matches `FunctionCallExpression` whose resolved function implements `IInlineMetadataAccessor`. The pass is wired into `QueryPlanner.Finalize`:
+[`InlineAccessorElider.Elide(plan, registry, searchPath)`](../../src/DatumIngest/Execution/InlineAccessorElider.cs) walks every operator's expression tree via `QueryOperator.RewriteExpressions`. The walk is children-first (so an accessor nested inside arithmetic gets rewritten alongside the outer expression), and it matches `FunctionCallExpression` whose resolved function implements `IInlineMetadataAccessor`. The pass is wired into `QueryPlanner.Finalize`:
 
 ```
 ModelInvocationHoister.Hoist(plan, modelCatalog)
@@ -127,7 +127,7 @@ The pattern is the same shape as the nine media accessors that shipped first. To
 
 1. **Have the inline-metadata substrate ready.** The relevant byte(s) must be stamped on the value at construction time. See [Data Value Layout](data-value-layout.md) for the per-kind byte map.
 2. **Implement the function.** A regular `IScalarFunction` whose body reads the inline byte(s) first and falls back to a decode (or returns NULL) when the bytes read as the unstamped sentinel.
-3. **Add an [`InlineAccessorField`](../src/DatumIngest/Execution/InlineAccessorField.cs) entry** and a descriptor row with the argument kind, result kind, and the SQL function name.
+3. **Add an [`InlineAccessorField`](../../src/DatumIngest/Execution/InlineAccessorField.cs) entry** and a descriptor row with the argument kind, result kind, and the SQL function name.
 4. **Mark the function class `IInlineMetadataAccessor`** — one-line `Field` getter returning the new enum value.
 5. **Add an evaluator case** in `TryReadInlineMetadata` (same file as the evaluator handler) that reads the inline payload and returns either the stamped `ValueRef` or `null` (which triggers fallback to the function's `ExecuteAsync`).
 
@@ -135,7 +135,7 @@ The function's own decode/walk fallback is what the evaluator delegates to on th
 
 ## Runtime Side
 
-Unlike CSE, this pass adds no new operator types. The rewrite is purely at the expression level; the evaluator gains one new `case InlineAccessorExpression iax:` in both [`EvaluateAsync`](../src/DatumIngest/Execution/ExpressionEvaluator.cs) (DataValue path) and `EvaluateAsValueRefAsync` (ValueRef fast path). The hot path is synchronous and allocation-free in the stamped case; the fallback uses the same `ArrayPool` argument buffer and `DatumActivity.Scalars` activity span as the un-elided dispatch.
+Unlike CSE, this pass adds no new operator types. The rewrite is purely at the expression level; the evaluator gains one new `case InlineAccessorExpression iax:` in both [`EvaluateAsync`](../../src/DatumIngest/Execution/ExpressionEvaluator.cs) (DataValue path) and `EvaluateAsValueRefAsync` (ValueRef fast path). The hot path is synchronous and allocation-free in the stamped case; the fallback uses the same `ArrayPool` argument buffer and `DatumActivity.Scalars` activity span as the un-elided dispatch.
 
 The pass relies on every operator with expression slots overriding `QueryOperator.RewriteExpressions`. `Project`, `Filter`, `OrderBy`, `GroupBy`, `Window`, `Limit`, `RowEnricher`, `FullTextSearch`, and `ModelInvocation` all override. **New operators with expression slots must override too** or the elider (and any future plan-time rewrite pass) will silently skip their expressions.
 

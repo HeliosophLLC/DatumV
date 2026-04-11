@@ -275,6 +275,6 @@ The future `system.functions` (when `datum_catalog.*` consolidates) inherits the
 ## See also
 
 - [`docs/models.md`](../models.md) — built-in model zoo reference (the integrations that ride on this infrastructure).
-- [`docs/architecture.md`](../architecture.md) — high-level engine architecture.
+- [`docs/architecture.md`](../technical/architecture.md) — high-level engine architecture.
 - [`docs/sql/procedural.md`](../sql/procedural.md) — procedural body semantics shared with UDFs.
 - [`docs/sql/ddl-dml.md`](../sql/ddl-dml.md) — DDL surface (CREATE TABLE / FUNCTION / PROCEDURE / MODEL).

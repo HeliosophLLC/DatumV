@@ -7,11 +7,11 @@ CSE is the engine's answer to two distinct sources of redundant work:
 1. **Pure scalar duplication** — `WHERE expensive(x) > 10 AND expensive(x) < 100`, `ORDER BY upper(name)` paired with `SELECT upper(name)`, etc.
 2. **Model call duplication** — `SELECT models.phi3('test'), models.phi3('test')` should dispatch the model once, not twice.
 
-The first is handled by [`CommonSubexpressionEliminator`](../src/DatumIngest/Execution/CommonSubexpressionEliminator.cs); the second by [`ModelInvocationHoister`](../src/DatumIngest/Execution/ModelInvocationHoister.cs). They run in series during planning and share the same dependency-ordering helper. This page documents both.
+The first is handled by [`CommonSubexpressionEliminator`](../../src/DatumIngest/Execution/CommonSubexpressionEliminator.cs); the second by [`ModelInvocationHoister`](../../src/DatumIngest/Execution/ModelInvocationHoister.cs). They run in series during planning and share the same dependency-ordering helper. This page documents both.
 
 ## Why It's Worth Doing
 
-A SQL writer may legitimately repeat an expression — once in `WHERE`, once in `SELECT`, once in `ORDER BY` — because the language doesn't offer a clean way to bind a per-row value across clauses. ([`LET` bindings](sql/let-bindings.md) work inside a single `SELECT` projection, but `WHERE` runs before they exist.) Without CSE, the expression evaluates once per clause per row.
+A SQL writer may legitimately repeat an expression — once in `WHERE`, once in `SELECT`, once in `ORDER BY` — because the language doesn't offer a clean way to bind a per-row value across clauses. ([`LET` bindings](../sql/let-bindings.md) work inside a single `SELECT` projection, but `WHERE` runs before they exist.) Without CSE, the expression evaluates once per clause per row.
 
 For pure scalar work this is a constant-factor cost. For model invocations it's a correctness concern: the engine guarantees *same call site → one evaluation per row*, even for nondeterministic models, because users naturally treat `models.phi3('test')` as a referentially transparent reference rather than a fresh dispatch.
 
@@ -90,13 +90,13 @@ The pass detects this and stacks `RowEnricherOperator`s in dependency order:
             └─ Scan
 ```
 
-[`HoistDependencyOrdering.OrderByDependency`](../src/DatumIngest/Execution/HoistDependencyOrdering.cs) topologically groups the hoists into levels — level 0 references no other hoists, level *n* may reference any earlier level. One operator is emitted per level, with level 0 closest to the source. Within a level, the order is unspecified (level peers don't depend on each other).
+[`HoistDependencyOrdering.OrderByDependency`](../../src/DatumIngest/Execution/HoistDependencyOrdering.cs) topologically groups the hoists into levels — level 0 references no other hoists, level *n* may reference any earlier level. One operator is emitted per level, with level 0 closest to the source. Within a level, the order is unspecified (level peers don't depend on each other).
 
 The same machinery applies to model hoists. If a query nests one model call inside another (`models.classifier(models.embedder(x))`), the embedder's `ModelInvocationOperator` lands below the classifier's, and the classifier's argument rewrites to the embedder's hidden column.
 
 ## Pass Ordering
 
-In [`QueryPlanner.Finalize`](../src/DatumIngest/Execution/QueryPlanner.cs):
+In [`QueryPlanner.Finalize`](../../src/DatumIngest/Execution/QueryPlanner.cs):
 
 ```
 ModelInvocationHoister.Hoist(plan, modelCatalog)
@@ -174,5 +174,5 @@ The duplicate `upper(name)` rewrites to a reference to `u`. No `__cse_*` column 
 
 - [Operators](operators.md) — runtime contract for `RowEnricherOperator` and `ModelInvocationOperator`.
 - [Execution Plans](execution-plans.md) — how these operators render in EXPLAIN.
-- [LET Bindings](sql/let-bindings.md) — the user-visible memoisation primitive that CSE complements.
+- [LET Bindings](../sql/let-bindings.md) — the user-visible memoisation primitive that CSE complements.
 - [Planner-Time Inline-Metadata Accessor Elision](planner-time-elision.md) — sibling pass that runs immediately before CSE; rewrites cheap inline-metadata reads (`image_width`, `length`, …) so their elided form deduplicates here.

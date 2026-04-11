@@ -64,7 +64,7 @@ WITH latest AS NOT MATERIALIZED (
 SELECT * FROM latest
 ```
 
-Materialized CTEs buffer their results in memory. When a memory budget is configured and the buffer exceeds it, rows spill to temporary files on disk. Materialization adds no Query Units (0 QU) but enforces per-query QU budgets during buffering.
+Materialized CTEs buffer their results in memory. When a memory budget is configured and the buffer exceeds it, rows spill to temporary files on disk.
 
 ### Data-modifying CTEs
 

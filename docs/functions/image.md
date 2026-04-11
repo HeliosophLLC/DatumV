@@ -13,7 +13,7 @@ category: image
 
 `image_channels(img)` → Int32
 
-Colour-channel count (1=grayscale, 3=RGB, 4=RGBA). [Elidable accessor](../planner-time-elision.md) — reads the inline channels byte stamped at ingest / bitmap construction; falls back to a SkiaSharp decode when the byte is unstamped.
+Colour-channel count (1=grayscale, 3=RGB, 4=RGBA). [Elidable accessor](../technical/planner-time-elision.md) — reads the inline channels byte stamped at ingest / bitmap construction; falls back to a SkiaSharp decode when the byte is unstamped.
 
 ### pixel_count
 

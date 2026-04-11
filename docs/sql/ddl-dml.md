@@ -70,7 +70,7 @@ CREATE TABLE order_products (
 
 Both single-column and composite `PRIMARY KEY` are backed by a maintained mutable B+Tree in a `.datum-pkindex` sidecar. Each row's PK tuple is encoded into a memcmp-orderable byte sequence (sign-flipped big-endian integers, IEEE-to-sortable floats, escape-encoded strings) and probed against the tree in `O(log table_size)` per row. Within-batch duplicates and `NULL` in any PK column are rejected before the tree is consulted. TEMP / InMemory tables don't maintain a tree — they fall back to a scan-based check that loads existing PK values into a `HashSet` at `INSERT` start.
 
-See [Source Indexes — Mutable B+Trees](../indexes.md#mutable-btrees) for the on-disk layout and the rationale behind the bytes-keyed tree.
+See [Source Indexes — Mutable B+Trees](../technical/indexes.md#mutable-btrees) for the on-disk layout and the rationale behind the bytes-keyed tree.
 
 #### IF NOT EXISTS
 

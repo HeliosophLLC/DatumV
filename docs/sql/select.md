@@ -67,7 +67,7 @@ SELECT DISTINCT category FROM products
 SELECT DISTINCT department, status FROM employees
 ```
 
-`SELECT DISTINCT` uses a streaming hash-based operator. When a memory budget is configured and the in-memory set exceeds the budget, the operator spills unseen rows to hash-partitioned temporary files and deduplicates them in a drain phase. This adds no Query Units (0 QU).
+`SELECT DISTINCT` uses a streaming hash-based operator. When a memory budget is configured and the in-memory set exceeds the budget, the operator spills unseen rows to hash-partitioned temporary files and deduplicates them in a drain phase.
 
 **ORDER BY constraint:** When `SELECT DISTINCT` is combined with `ORDER BY`, every `ORDER BY` expression must appear in the `SELECT` list. This avoids ambiguity because DISTINCT collapses rows before sorting.
 

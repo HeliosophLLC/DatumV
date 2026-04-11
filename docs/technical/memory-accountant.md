@@ -195,4 +195,4 @@ In tests that construct `MemoryAccountant` directly, the `using` pattern ensures
 
 - [Execution Plans](execution-plans.md) — operator-level explanations and EXPLAIN output.
 - [Architecture](architecture.md) — high-level engine overview.
-- [SQL: GROUP BY](sql/group-by.md), [Set Operations](sql/set-operations.md), [CTEs](sql/cte.md) — the materializing operators that spill against this budget.
+- [SQL: GROUP BY](../sql/group-by.md), [Set Operations](../sql/set-operations.md), [CTEs](../sql/cte.md) — the materializing operators that spill against this budget.

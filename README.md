@@ -58,7 +58,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **Virtual schemas** — `information_schema` (PostgreSQL-compatible tables/columns/schemata views) and `datum_catalog` (providers, functions, per-column statistics) queryable via standard SQL with `schema.table` syntax
 - **EXPLAIN / EXPLAIN ANALYZE** — inspect query plans with manifest-driven cardinality estimation (NDV-based selectivity) and optional runtime metrics
 - **Parameterized queries** — named `$parameter` placeholders with early binding (AST-level substitution before planning), preserving all optimizer paths
-- **Resource governance** — per-session query deadlines, row budgets, Query Unit metering, and throttle delays for multi-tenant gRPC deployments
+- **Resource governance** — per-session query deadlines, row budgets, and throttle delays for multi-tenant gRPC deployments
 - **Temp tables** — session-scoped mutable tables with CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE ADD COLUMN, DROP TABLE, and ANALYZE; auto-generated source indexes and column statistics manifests for query planner integration; table mutability model (ReadOnly, SessionOwned, Writable) prevents accidental mutation of source data
 
 ## Why Not DuckDB / Pandas?
@@ -141,7 +141,7 @@ await foreach (Row row in plan.ExecuteAsync(context))
 OutputSummary summary = await writer.FinalizeAsync();
 ```
 
-See [docs/api.md](docs/api.md) for the full programmatic API (manifest, EXPLAIN, schema, checkpointing).
+See [docs/technical/api.md](docs/technical/api.md) for the full programmatic API (manifest, EXPLAIN, schema, checkpointing).
 
 ## CLI Reference
 
@@ -207,14 +207,12 @@ datum-ingest explore "SELECT * FROM [orders.csv] LIMIT 10" --source ./datasets/m
 | [docs/sql/](docs/sql/) | SQL dialect reference: SELECT, JOIN, GROUP BY, window functions, type system, DDL/DML, EXPLAIN |
 | [docs/functions/](docs/functions/) | All 200+ functions: math, string, JSON, temporal, image, vector, UUID, hashing, window |
 | [docs/providers.md](docs/providers.md) | Data provider details, options, catalog file format |
-| [docs/statistics.md](docs/statistics.md) | Statistics accumulators, manifest schema, column interactions |
-| [docs/datum-format.md](docs/datum-format.md) | `.datum` binary columnar format: physical layout, encoding strategies, zone maps, compression |
-| [docs/indexes.md](docs/indexes.md) | Source indexes: `.datum-index` format, bloom filters, sorted values, bitmap indexes, CLI usage |
-| [docs/architecture.md](docs/architecture.md) | Execution model, lazy evaluation, pushdown, project structure |
-| [docs/language-server.md](docs/language-server.md) | SQL language server: autocomplete, diagnostics, hover, WASM integration |
-| [docs/api.md](docs/api.md) | Programmatic C# API: manifest, EXPLAIN, schema, checkpointing, streaming output |
-| [docs/compute.md](docs/compute.md) | gRPC compute library: embedding, remote sessions, streaming queries, admin operations, resource governance |
-| [ROADMAP.md](ROADMAP.md) | Deferred features for future releases |
+| [docs/technical/statistics.md](docs/technical/statistics.md) | Statistics accumulators, manifest schema, column interactions |
+| [docs/technical/datum-format.md](docs/technical/datum-format.md) | `.datum` binary columnar format: physical layout, encoding strategies, zone maps, compression |
+| [docs/technical/indexes.md](docs/technical/indexes.md) | Source indexes: `.datum-index` format, bloom filters, sorted values, bitmap indexes, CLI usage |
+| [docs/technical/architecture.md](docs/technical/architecture.md) | Execution model, lazy evaluation, pushdown, project structure |
+| [docs/technical/language-server.md](docs/technical/language-server.md) | SQL language server: autocomplete, diagnostics, hover, WASM integration |
+| [docs/technical/api.md](docs/technical/api.md) | Programmatic C# API: manifest, EXPLAIN, schema, checkpointing, streaming output |
 
 ## Installation
 

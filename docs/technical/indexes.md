@@ -1,7 +1,5 @@
 # Source Indexes
 
-[← Back to README](../README.md) · [SQL Reference](sql/select.md) · [Functions](functions/string.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
-
 DatumIngest builds `.datum-index` sidecar files that accelerate queries by enabling chunk-level pruning without reading source data. Any provider and format can benefit — unlike Parquet's built-in row group statistics, source indexes are format-independent and support bloom filters, B+Tree indexes, bitmap indexes, and cached schema inference.
 
 A separate `.datum-pkindex` sidecar holds a maintained mutable B+Tree backing a table's `PRIMARY KEY` constraint. See [Mutable B+Tree (PRIMARY KEY index)](#mutable-btree-primary-key-index) at the end of this page.
@@ -83,7 +81,7 @@ The source is logically divided into fixed-size row chunks (default: 10,000 rows
 | RowCount | int64 | Number of rows in this chunk |
 | ColumnStatistics | dictionary | Per-column minimum, maximum, null count, row count, and HyperLogLog cardinality estimate |
 
-Per-chunk statistics are encoded as a fixed-width zone map in the `ChunkDirectory` section, enabling random-access lookup by chunk index without decoding earlier entries. See [`MappedChunkDirectory`](../src/DatumIngest/Indexing/MappedChunkDirectory.cs) for the on-disk layout.
+Per-chunk statistics are encoded as a fixed-width zone map in the `ChunkDirectory` section, enabling random-access lookup by chunk index without decoding earlier entries. See [`MappedChunkDirectory`](../../src/DatumIngest/Indexing/MappedChunkDirectory.cs) for the on-disk layout.
 
 ## Bloom filters
 
@@ -128,7 +126,7 @@ datum-ingest index --source "csv:data=./data.csv" --index-columns "user_id,times
 
 ### Automatic column selection
 
-When no explicit `--index-columns` are provided, the indexing pipeline automatically selects columns for sorted indexing based on their data kind. Compact types are indexed; wide types are not. The eligibility rule is in [`SourceIndexBuilder.IsAutoIndexableKind`](../src/DatumIngest/Indexing/SourceIndexBuilder.cs):
+When no explicit `--index-columns` are provided, the indexing pipeline automatically selects columns for sorted indexing based on their data kind. Compact types are indexed; wide types are not. The eligibility rule is in [`SourceIndexBuilder.IsAutoIndexableKind`](../../src/DatumIngest/Indexing/SourceIndexBuilder.cs):
 
 | Eligible (auto-indexed) | Skipped |
 |------------------------|---------|
@@ -572,11 +570,11 @@ In addition to the bulk-loaded immutable B+Tree sections inside `.datum-index`, 
 
 ### Why two implementations instead of one
 
-The typed tree ([`MutableBPlusTree`](../src/DatumIngest/Indexing/BTree/Mutable/MutableBPlusTree.cs)) stores keys as fixed-width `DataValue` slots — the same 16-byte struct used everywhere else in the engine. That keeps page codecs trivial and lets the column index hand `IColumnIndex` consumers (`ScanOperator`, the planner's range-predicate pruner, `IndexScanOperator`'s ORDER BY elimination) the same `DataValue` shape the rest of the query pipeline already speaks.
+The typed tree ([`MutableBPlusTree`](../../src/DatumIngest/Indexing/BTree/Mutable/MutableBPlusTree.cs)) stores keys as fixed-width `DataValue` slots — the same 16-byte struct used everywhere else in the engine. That keeps page codecs trivial and lets the column index hand `IColumnIndex` consumers (`ScanOperator`, the planner's range-predicate pruner, `IndexScanOperator`'s ORDER BY elimination) the same `DataValue` shape the rest of the query pipeline already speaks.
 
 The trade-off is the inline-payload budget. A `DataValue` inlines up to 16 bytes of string or byte-array content; longer values would have to be stored out-of-line in an `IValueStore`, which doesn't survive across process restarts the way the tree file does. That makes the typed tree a non-starter for long-string primary keys — a 25-character COCO filename like `test2017/000000290551.jpg` overflows the inline budget, and so does any composite tuple encoded as a single key.
 
-The bytes-keyed tree ([`MutableBPlusTreeBytes`](../src/DatumIngest/Indexing/BTree/MutableBytes/MutableBPlusTreeBytes.cs)) sidesteps that by storing keys as raw variable-length `byte[]` and comparing with `SequenceCompareTo`. [`CompositeKeyEncoder`](../src/DatumIngest/Indexing/CompositeKeyEncoder.cs) produces order-preserving byte encodings per `DataKind` (sign-flipped big-endian integers, IEEE-to-sortable floats, `\x00\x00`-terminated escaped strings/byte arrays), so a tuple of any supported kinds round-trips to a single comparable byte sequence. Single-column keys are just the degenerate "tuple of one" case. The PK index and user-defined composite indexes share the same tree implementation; they differ only in lifecycle, duplicate-allowance, and integration point.
+The bytes-keyed tree ([`MutableBPlusTreeBytes`](../../src/DatumIngest/Indexing/BTree/MutableBytes/MutableBPlusTreeBytes.cs)) sidesteps that by storing keys as raw variable-length `byte[]` and comparing with `SequenceCompareTo`. [`CompositeKeyEncoder`](../../src/DatumIngest/Indexing/CompositeKeyEncoder.cs) produces order-preserving byte encodings per `DataKind` (sign-flipped big-endian integers, IEEE-to-sortable floats, `\x00\x00`-terminated escaped strings/byte arrays), so a tuple of any supported kinds round-trips to a single comparable byte sequence. Single-column keys are just the degenerate "tuple of one" case. The PK index and user-defined composite indexes share the same tree implementation; they differ only in lifecycle, duplicate-allowance, and integration point.
 
 The bytes-keyed tree's read surface — `FindAll`, `FindRange`, `FindPrefix`, `TraverseForward/Backward`, `Delete` — is at parity with the typed tree's. Retiring the typed implementation is a planned future cleanup; what holds it now is that `IColumnIndex` consumers natively speak `DataValue`, and the bytes tree would force a per-call encode + decode that the typed tree skips.
 
@@ -606,7 +604,7 @@ See [.datum format — `.datum-pkindex`](datum-format.md#optional-sidecar-datum-
 - **Planner integration** — the planner exposes composite indexes via `ITableProvider.GetCompositeIndexes()` (returns a `_compositeIndexSync`-snapshotted list). `ScanOperator`'s exact-row-seek path matches AND-chained equality predicates against the longest *leftmost prefix* of each index's columns: a full match uses `FindExact` (point lookup), a partial prefix uses `FindPrefix` (range scan over byte-encoded prefix). The seek-path's selectivity-based tiebreak picks the strategy that fewest positions back from among all candidates (composite, single-column, statistics-pruned chunk).
 - **Maintenance under mutation** — INSERT queues per-row entries during `WriteAsync` and flushes at `CommitAsync` (same pattern as PK). UPDATE rebuilds every composite index from scratch after the data commit (the indexed key may have changed; rebuild from the post-mutation table is simpler than trying to encode an incremental delta). DELETE doesn't currently touch the tree — tombstoned rows leave stale entries that get pruned at the next `DROP INDEX` / `CREATE INDEX` cycle, but the seek path still produces correct results because downstream filters reject the tombstoned rows.
 
-See the DDL surface in [DDL / DML — CREATE INDEX](sql/ddl-dml.md#create-index--create-unique-index) for the user-facing syntax.
+See the DDL surface in [DDL / DML — CREATE INDEX](../sql/ddl-dml.md#create-index--create-unique-index) for the user-facing syntax.
 
 ### Full-text indexes
 
@@ -651,7 +649,7 @@ An `IFullTextAnalyzer` tokenizes both at index-build time and at query time — 
 
 Backfill on `CREATE INDEX` over a populated table runs under `_mutationLock`, scans the table once, tokenizes each row's column value through the chosen analyzer, deduplicates terms within a document (so `"fox fox fox"` produces one posting per chunk-row), and inserts one posting per surviving `(term, chunk, row)` triple. NULL values are skipped. The new sidecar is published to the provider's visible-state dictionaries only after the scan completes — a concurrent reader either misses the index entirely (and queries fall through to scan) or sees the fully populated tree, never a half-built one.
 
-Steady-state INSERT / UPDATE / DELETE maintenance is handled by `REINDEX` rather than per-row updates; see [deferred-decisions.md](deferred-decisions.md#full-text-search) for the incremental-maintenance roadmap.
+Steady-state INSERT / UPDATE / DELETE maintenance is handled by `REINDEX` rather than per-row updates.
 
 #### Query surface
 
@@ -697,5 +695,3 @@ When the FTS predicate is one conjunct of a larger `WHERE` (`body @@ 'fox' AND i
 - Postings carry `(chunk, row)` only — no term frequencies, no positions. Results stream in source-row order, not relevance order; `ts_rank` is not provided.
 - INSERT / UPDATE / DELETE refresh the sidecar through `REINDEX` rather than per-row maintenance.
 - Storage repeats the term bytes once per posting (one tree entry per `(term, chunk, row)` triple) and intersects posting lists with a `HashSet`. Compact at chat scale; the term-dictionary + posting-heap layout with skip pointers is the upgrade lever when posting counts grow.
-
-[deferred-decisions.md](deferred-decisions.md) carries the forward-looking ledger for each of these scope boundaries — what triggers an upgrade, what it costs, and what it breaks.

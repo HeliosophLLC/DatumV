@@ -1,7 +1,5 @@
 # `.datum` File Format
 
-[← Back to README](../README.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Providers](providers.md)
-
 The `.datum` format is a binary columnar store designed for high-throughput ML/ETL workloads. It's **uncompressed and mmap-friendly**: data lives in fixed-stride 1024-row pages with three compact encoders, hierarchical zone maps for predicate pruning, and a companion sidecar heap for non-inline payloads. The trade vs a heavily-compressed alternative is ~2–4× larger files; the win is decompress-free reads, simpler decode logic, and bounded peak memory during both write and read.
 
 The current on-disk format version is **`4`**. v4 introduces a footer prologue (commit lineage, file table, chapter tombstone offsets), a `fileId` field on every page descriptor, and a `Tombstoned` column flag. These hooks back: crash-safe append (tail-flip-as-commit + torn-tail recovery), soft-drop column, soft-delete rows (chapter-level tombstone bitmaps with copy-on-write per commit), add column (all-null backfill), and external pages in companion `.datum-pack` files. Catalog-level `ALTER TABLE` / `INSERT` / `DELETE` route to these primitives through `TableCatalog`.

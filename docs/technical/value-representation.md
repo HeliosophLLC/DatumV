@@ -1,7 +1,5 @@
 # Value Representation: `DataValue` and `ValueRef`
 
-[← Back to README](../README.md) · [Architecture](architecture.md) · [`.datum` Format](datum-format.md) · [Type System (SQL)](sql/type-system.md)
-
 DatumIngest carries values through the engine in two complementary forms.
 `DataValue` is the universal storage currency — a 20-byte struct that lives
 in rows, batches, and the on-disk format. `ValueRef` is the function-internal
@@ -24,7 +22,7 @@ values cross between them.
 
 ## `DataValue`: the row-layer currency
 
-`DataValue` is a fixed 20-byte struct ([`src/DatumIngest/Model/DataValue.cs`](../src/DatumIngest/Model/DataValue.cs)) that tags a value
+`DataValue` is a fixed 20-byte struct ([`src/DatumIngest/Model/DataValue.cs`](../../src/DatumIngest/Model/DataValue.cs)) that tags a value
 with its `DataKind` and one of three storage shapes:
 
 | Storage | When | Resolution |
@@ -74,7 +72,7 @@ That's the friction `ValueRef` exists to remove.
 
 ## `ValueRef`: the function-internal currency
 
-`ValueRef` ([`src/DatumIngest/Functions/ValueRef.cs`](../src/DatumIngest/Functions/ValueRef.cs)) is also a struct, but its payload model is
+`ValueRef` ([`src/DatumIngest/Functions/ValueRef.cs`](../../src/DatumIngest/Functions/ValueRef.cs)) is also a struct, but its payload model is
 different:
 
 ```csharp
@@ -292,11 +290,11 @@ code, easy to write, easy to test, no arena bug-class to worry about.
 
 | What | Where |
 |---|---|
-| `DataValue` struct, factories, accessors | [`src/DatumIngest/Model/DataValue.cs`](../src/DatumIngest/Model/DataValue.cs) |
-| Storage flag bits, inline-vs-arena-vs-sidecar dispatch | [`src/DatumIngest/Model/DataValue.cs`](../src/DatumIngest/Model/DataValue.cs) (search `DataValueFlags`) |
-| `Arena` | [`src/DatumIngest/Model/Arena.cs`](../src/DatumIngest/Model/Arena.cs) |
-| `ValueRef` struct, recursive constructors, `ToDataValue` | [`src/DatumIngest/Functions/ValueRef.cs`](../src/DatumIngest/Functions/ValueRef.cs) |
-| `DataValue → ValueRef` boundary (`ToValueRef`) | [`src/DatumIngest/Execution/ExpressionEvaluator.cs`](../src/DatumIngest/Execution/ExpressionEvaluator.cs) |
-| Scalar function interface using `ValueRef` | [`src/DatumIngest/Functions/IScalarFunction.cs`](../src/DatumIngest/Functions/IScalarFunction.cs) |
-| Model interface using `ValueRef` | [`src/DatumIngest/Models/IModel.cs`](../src/DatumIngest/Models/IModel.cs) |
-| Model invocation operator (where `ToDataValue` happens at scatter) | [`src/DatumIngest/Execution/Operators/ModelInvocationOperator.cs`](../src/DatumIngest/Execution/Operators/ModelInvocationOperator.cs) |
+| `DataValue` struct, factories, accessors | [`src/DatumIngest/Model/DataValue.cs`](../../src/DatumIngest/Model/DataValue.cs) |
+| Storage flag bits, inline-vs-arena-vs-sidecar dispatch | [`src/DatumIngest/Model/DataValue.cs`](../../src/DatumIngest/Model/DataValue.cs) (search `DataValueFlags`) |
+| `Arena` | [`src/DatumIngest/Model/Arena.cs`](../../src/DatumIngest/Model/Arena.cs) |
+| `ValueRef` struct, recursive constructors, `ToDataValue` | [`src/DatumIngest/Functions/ValueRef.cs`](../../src/DatumIngest/Functions/ValueRef.cs) |
+| `DataValue → ValueRef` boundary (`ToValueRef`) | [`src/DatumIngest/Execution/ExpressionEvaluator.cs`](../../src/DatumIngest/Execution/ExpressionEvaluator.cs) |
+| Scalar function interface using `ValueRef` | [`src/DatumIngest/Functions/IScalarFunction.cs`](../../src/DatumIngest/Functions/IScalarFunction.cs) |
+| Model interface using `ValueRef` | [`src/DatumIngest/Models/IModel.cs`](../../src/DatumIngest/Models/IModel.cs) |
+| Model invocation operator (where `ToDataValue` happens at scatter) | [`src/DatumIngest/Execution/Operators/ModelInvocationOperator.cs`](../../src/DatumIngest/Execution/Operators/ModelInvocationOperator.cs) |
