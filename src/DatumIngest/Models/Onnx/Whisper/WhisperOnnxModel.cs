@@ -99,11 +99,11 @@ public sealed class WhisperOnnxModel : OnnxModel
     {
         _maxTokens = maxTokens;
 
-        string modelDirectory = Path.GetDirectoryName(encoderModelFilePath)
+        string onnxDirectory = Path.GetDirectoryName(encoderModelFilePath)
             ?? throw new InvalidOperationException(
                 $"Could not derive model directory from '{encoderModelFilePath}'.");
 
-        string decoderPath = Path.Combine(modelDirectory, "decoder_model.onnx");
+        string decoderPath = Path.Combine(onnxDirectory, "decoder_model.onnx");
         if (!File.Exists(decoderPath))
         {
             throw new FileNotFoundException(
@@ -113,12 +113,30 @@ public sealed class WhisperOnnxModel : OnnxModel
         }
         _decoderSession = OnnxSessionFactory.Create(decoderPath);
 
-        string vocabPath = Path.Combine(modelDirectory, "vocab.json");
-        string mergesPath = Path.Combine(modelDirectory, "merges.txt");
+        // Tokenizer + configs live one level up from `onnx/` in the
+        // Xenova / onnx-community export layout (the catalog's downloader
+        // matches that with `"include": ["onnx/*", "*.json", "*.txt"]`).
+        // Walking up handles both layouts: the new bundle (encoder at
+        // {model_dir}/onnx/encoder_model.onnx, tokenizer at {model_dir}/)
+        // AND any legacy bundle that kept tokenizer alongside the ONNX
+        // (we still find it via the GetDirectoryName-then-walk-up logic
+        // since the legacy directory IS the root).
+        string tokenizerDirectory = Path.GetDirectoryName(onnxDirectory) ?? onnxDirectory;
+        string vocabPath = Path.Combine(tokenizerDirectory, "vocab.json");
+        string mergesPath = Path.Combine(tokenizerDirectory, "merges.txt");
+        if (!File.Exists(vocabPath) || !File.Exists(mergesPath))
+        {
+            // Fall back to the legacy flat layout for backwards compat.
+            vocabPath = Path.Combine(onnxDirectory, "vocab.json");
+            mergesPath = Path.Combine(onnxDirectory, "merges.txt");
+        }
         if (!File.Exists(vocabPath) || !File.Exists(mergesPath))
         {
             throw new FileNotFoundException(
-                "Whisper tokenizer files (vocab.json + merges.txt) not found alongside the model.",
+                "Whisper tokenizer files (vocab.json + merges.txt) not found alongside the model. " +
+                "Expected the Xenova / onnx-community layout " +
+                "({model_dir}/onnx/encoder_model.onnx + {model_dir}/vocab.json) or a " +
+                "flat directory with all files together.",
                 File.Exists(vocabPath) ? mergesPath : vocabPath);
         }
         using FileStream vocabStream = File.OpenRead(vocabPath);

@@ -1637,6 +1637,13 @@ public static class BuiltinModels
             ]));
     }
 
+    /// <summary>
+    /// Default folder for the MobileSAM bundle. Matches the catalog id
+    /// (<c>mobile-sam</c>) so the downloader's per-entry folder convention
+    /// resolves to the same on-disk location.
+    /// </summary>
+    public const string MobileSamFolder = "mobile-sam";
+
     /// <summary>Default filename for the MobileSAM (TinyViT) image encoder.</summary>
     public const string MobileSamEncoderFilename = "mobile_sam_image_encoder.onnx";
 
@@ -1684,17 +1691,23 @@ public static class BuiltinModels
         string encoderFilename = MobileSamEncoderFilename,
         string decoderFilename = MobileSamMaskDecoderMultiFilename)
     {
+        // All files land under {ModelDirectory}/{MobileSamFolder}/ once the
+        // catalog downloader extracts the bundle. Prefix every path with
+        // the folder so the loader + Files manifest agree with on-disk
+        // layout.
+        string encoderRelativePath = $"{MobileSamFolder}/{encoderFilename}";
+        string decoderRelativePath = $"{MobileSamFolder}/{decoderFilename}";
         catalog.Register(new ModelCatalogEntry(
             Name: modelName,
             Backend: "onnx",
-            RelativePath: encoderFilename,
+            RelativePath: encoderRelativePath,
             InputKinds: [DataKind.Image, DataKind.Float64, DataKind.Float64],
             OutputKind: DataKind.Image,
             IsDeterministic: true,
             Loader: ctx =>
             {
-                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderFilename);
-                string decoderPath = Path.Combine(ctx.ModelDirectory, decoderFilename);
+                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
+                string decoderPath = Path.Combine(ctx.ModelDirectory, decoderRelativePath);
                 return new MobileSamModel(modelName, encoderPath, decoderPath, MobileSamMode.Prompted);
             },
             DisplayName: "MobileSAM (prompted segmentation)",
@@ -1704,7 +1717,7 @@ public static class BuiltinModels
             SourceUrl: "https://github.com/ChaoningZhang/MobileSAM",
             Category: "segmenter",
             Modalities: ["image"],
-            Files: [encoderFilename, decoderFilename]));
+            Files: [encoderRelativePath, decoderRelativePath]));
     }
 
     /// <summary>
@@ -1735,17 +1748,19 @@ public static class BuiltinModels
         string decoderFilename = MobileSamMaskDecoderMultiFilename,
         int defaultGridSize = 32)
     {
+        string encoderRelativePath = $"{MobileSamFolder}/{encoderFilename}";
+        string decoderRelativePath = $"{MobileSamFolder}/{decoderFilename}";
         catalog.Register(new ModelCatalogEntry(
             Name: modelName,
             Backend: "onnx",
-            RelativePath: encoderFilename,
+            RelativePath: encoderRelativePath,
             InputKinds: [DataKind.Image],
             OutputKind: DataKind.Image,
             IsDeterministic: true,
             Loader: ctx =>
             {
-                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderFilename);
-                string decoderPath = Path.Combine(ctx.ModelDirectory, decoderFilename);
+                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
+                string decoderPath = Path.Combine(ctx.ModelDirectory, decoderRelativePath);
                 return new MobileSamModel(
                     modelName, encoderPath, decoderPath,
                     MobileSamMode.Everything, defaultGridSize);
@@ -1761,7 +1776,7 @@ public static class BuiltinModels
             SourceUrl: "https://github.com/ChaoningZhang/MobileSAM",
             Category: "segmenter",
             Modalities: ["image"],
-            Files: [encoderFilename, decoderFilename]));
+            Files: [encoderRelativePath, decoderRelativePath]));
     }
 
     // YOLOX-{nano,tiny,s,m,l,x,darknet} previously registered here as built-in
@@ -1816,27 +1831,33 @@ public static class BuiltinModels
     // plus a Slaney mel-spectrogram pipeline for the audio side. MIT
     // license, fully unencumbered.
 
-    /// <summary>Default folder for Whisper Tiny (~78 MB encoder + 250 MB decoder).</summary>
-    public const string WhisperTinyFolder = "whisper-tiny-onnx";
+    /// <summary>Default folder for Whisper Tiny (~78 MB encoder + 250 MB decoder).
+    /// Matches the catalog id so the downloader's per-entry folder convention
+    /// resolves to the same on-disk location.</summary>
+    public const string WhisperTinyFolder = "whisper-tiny";
 
     /// <summary>Default folder for Whisper Base (~78 MB encoder + 300 MB decoder).</summary>
-    public const string WhisperBaseFolder = "whisper-base-onnx";
+    public const string WhisperBaseFolder = "whisper-base";
 
     /// <summary>Default folder for Whisper Small (~280 MB encoder + 1.1 GB decoder).</summary>
-    public const string WhisperSmallFolder = "whisper-small-onnx";
+    public const string WhisperSmallFolder = "whisper-small";
 
     /// <summary>Default folder for Whisper Medium (~870 MB encoder + 2.5 GB decoder).</summary>
-    public const string WhisperMediumFolder = "whisper-medium-onnx";
+    public const string WhisperMediumFolder = "whisper-medium";
 
     /// <summary>
-    /// Files needed for any Whisper install (relative to its variant
-    /// folder). Tracks both ONNX components plus tokenizer + configs so
-    /// <c>system.models</c> reports missing pieces accurately.
+    /// Files needed for any Whisper install (relative to the model
+    /// directory). The Xenova / onnx-community export convention puts
+    /// the two ONNX components in an <c>onnx/</c> subdir and the
+    /// tokenizer + configs at the catalog folder's root — matches what
+    /// the downloader gets from <c>"include": ["onnx/*", "*.json", "*.txt"]</c>.
+    /// Tracks every file so <c>system.models</c> reports missing pieces
+    /// accurately.
     /// </summary>
     private static IReadOnlyList<string> WhisperFiles(string folder) =>
     [
-        $"{folder}/encoder_model.onnx",
-        $"{folder}/decoder_model.onnx",
+        $"{folder}/onnx/encoder_model.onnx",
+        $"{folder}/onnx/decoder_model.onnx",
         $"{folder}/vocab.json",
         $"{folder}/merges.txt",
         $"{folder}/tokenizer.json",
@@ -1858,7 +1879,9 @@ public static class BuiltinModels
         string parameters,
         int maxTokens)
     {
-        string encoderRelativePath = $"{folder}/encoder_model.onnx";
+        // Encoder/decoder live in {folder}/onnx/ per the Xenova export
+        // convention; tokenizer + configs at {folder}/ root.
+        string encoderRelativePath = $"{folder}/onnx/encoder_model.onnx";
 
         catalog.Register(new ModelCatalogEntry(
             Name: modelName,

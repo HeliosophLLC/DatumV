@@ -1080,6 +1080,13 @@ public sealed class CompletionProvider
 
         foreach (ModelEntry model in _manifest.Models)
         {
+            // Hide uninstalled (Missing) and externally-gated (Bridge) entries
+            // from the `models.` autocomplete list — users should see only
+            // what they can actually call right now. The Model Manager UI is
+            // the discovery surface for everything else; `system.models`
+            // remains the introspection view of all catalogued entries.
+            if (model.Status != ModelInstallStatus.Available) continue;
+
             string parameters = model.Parameters is null
                 ? ""
                 : string.Join(", ", model.Parameters.Select(FormatParameter));

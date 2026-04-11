@@ -1057,6 +1057,18 @@
       "approxSizeMb": 970
     },
     {
+      "id": "whisper-tiny",
+      "displayName": "Whisper Tiny (Speech-to-Text)",
+      "description": "OpenAI Whisper, tiny size. Fastest but least accurate. Good for resource-constrained environments.",
+      "task": "speech-to-text",
+      "tags": ["stt", "speech", "multilingual"],
+      "licenseIds": ["mit"],
+      "attributions": ["OpenAI — Whisper (Radford, Kim, Xu et al.)", "onnx-community (ONNX export)"],
+      "hardware": { "minRamMb": 2048, "minVramMb": 0, "preferred": "cpu" },
+      "sources": [{ "type": "huggingface", "repo": "onnx-community/whisper-tiny", "revision": "ff4177021cc41f7db950912b73ea4fdf7d01d8e7", "include": ["onnx/*", "*.json", "*.txt"] }],
+      "approxSizeMb": 598
+    },
+    {
       "id": "clip-vit-base-patch32",
       "displayName": "CLIP ViT-B/32",
       "description": "OpenAI CLIP for image-text contrastive embeddings. Use for zero-shot image classification, cross-modal search.",

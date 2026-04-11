@@ -140,10 +140,44 @@ public sealed class UdfEntry
 /// Lightweight description of a registered model for completion / hover.
 /// Mirrors the subset of <c>ModelCatalogEntry</c> useful at edit time.
 /// </summary>
+/// <summary>
+/// Install-state of a model entry on the current host. Mirrors the
+/// three-state <c>status</c> column on <c>system.models</c> so a single
+/// concept governs both the runtime introspection view and the language
+/// server's behaviour. Used by <c>CompletionProvider</c> to hide
+/// unavailable models from the <c>models.</c> autocomplete list — users
+/// see only what they can actually call right now; the Model Manager UI
+/// remains the discovery surface for everything else.
+/// </summary>
+public enum ModelInstallStatus
+{
+    /// <summary>Backend files present + runnable. Native backends (ONNX, LlamaSharp, synthetic) ready to load.</summary>
+    Available,
+    /// <summary>Anchor file absent on disk. The model is catalogued but not downloaded.</summary>
+    Missing,
+    /// <summary>Files present but requires an external runtime (e.g. Python venv) we can't validate from the catalog alone.</summary>
+    Bridge,
+}
+
+/// <summary>
+/// A single model entry surfaced by <see cref="LanguageServerManifest"/>.
+/// Carries enough metadata for completions, signature help, and hover
+/// rendering — name, install status, output kind, parameter list, and
+/// (for struct-returning models) the declared field shape.
+/// </summary>
 public sealed class ModelEntry
 {
     /// <summary>Stable model identifier as it appears after <c>models.</c>.</summary>
     public required string Name { get; init; }
+
+    /// <summary>
+    /// On-disk install state. <see cref="ModelInstallStatus.Available"/>
+    /// for entries the language server should expose in
+    /// <c>models.</c> completion; everything else is hidden from
+    /// completion but still surfaces in <c>system.models</c> introspection
+    /// and the Model Manager UI.
+    /// </summary>
+    public ModelInstallStatus Status { get; init; } = ModelInstallStatus.Available;
 
     /// <summary>Output <c>DataKind</c> name (e.g. <c>"String"</c>, <c>"Float32"</c>).</summary>
     public string? OutputKind { get; init; }

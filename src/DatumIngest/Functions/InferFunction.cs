@@ -260,22 +260,25 @@ public sealed class InferFunction : IFunction, IScalarFunction
         IInferenceSession session = await model.BoundSessions
             .ResolveAsync("default", cancellationToken)
             .ConfigureAwait(false);
-        // The columnar-packing path materialises every row as `float[]` and
-        // copies into a single Float32 packed tensor, so sessions whose input
-        // element kind isn't Float32 (e.g. CLIP's text encoder with
-        // input_ids: Int64, BERT-family ID inputs, any tokenizer-driven path)
-        // can't ride the fast path even when the shape pattern matches. Gate
-        // on element kind here so Int64/Int32 token inputs cleanly fall back
-        // to the per-row default loop instead of failing in the packing
-        // loop's Float32 assertion. Extending the batched path to handle
-        // Int64/Int32 packing is a follow-up.
+        // Batched packing dispatches over the input element kind — Float32
+        // for image-classifier / embedder workloads, Int64 for tokenized
+        // text encoders (CLIP, BERT), Int32 for the same shape in older
+        // exports. Sessions whose input kind we don't know how to pack fall
+        // through to the per-row default loop. Output reading stays Float32
+        // (line 433 below uses AsSpan<float>); models with non-Float32
+        // outputs fall back to per-row dispatch too.
+        DataKind inputKind = session.Inputs.Count > 0 ? session.Inputs[0].ElementKind : DataKind.Float32;
+        DataKind outputKind = session.Outputs.Count > 0 ? session.Outputs[0].ElementKind : DataKind.Float32;
+        bool packableInput = inputKind is DataKind.Float32 or DataKind.Int64 or DataKind.Int32;
         if (session.Inputs.Count != 1
-            || session.Inputs[0].ElementKind != DataKind.Float32
+            || !packableInput
+            || outputKind != DataKind.Float32
             || !HasDynamicLeadingDim(session.Inputs[0]))
         {
             DatumActivity.Scalars.Trace(
                 $"infer.batch fallback=session-shape model={model.Name} inputs={session.Inputs.Count} "
                 + $"inputKind={(session.Inputs.Count > 0 ? session.Inputs[0].ElementKind.ToString() : "n/a")} "
+                + $"outputKind={(session.Outputs.Count > 0 ? session.Outputs[0].ElementKind.ToString() : "n/a")} "
                 + $"shape0={(session.Inputs.Count > 0 ? (session.Inputs[0].Shape.Count > 0 ? (session.Inputs[0].Shape[0]?.ToString() ?? "null") : "rank0") : "n/a")}");
             return await ScalarFunctionBatchHelpers.DefaultLoop(
                 this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
@@ -322,10 +325,18 @@ public sealed class InferFunction : IFunction, IScalarFunction
 
     /// <summary>
     /// Cross-row packing path. Pre-validates every row's input as a
-    /// Float32 array of the same length, packs them into a single
-    /// <c>[B, ...]</c> Float32 tensor, runs the session once, splits the
-    /// output back into per-row results.
+    /// homogeneous typed array (Float32 / Int64 / Int32, matching the
+    /// session's declared input element kind), packs them into a single
+    /// <c>[B, ...]</c> tensor of the same kind, runs the session once,
+    /// splits the output back into per-row results.
     /// </summary>
+    /// <remarks>
+    /// Input element kind is dispatched at the packing step so embedders
+    /// with token-ID inputs (CLIP text, BERT-family) get the same
+    /// columnar acceleration as Float32 image classifiers. Output side
+    /// is Float32-only — caller gates on output kind so non-Float32-output
+    /// sessions fall back to per-row dispatch.
+    /// </remarks>
     private static async ValueTask<ValueRef[]> ExecuteBatchedSingleInputAsync(
         IInferenceSession session,
         ReadOnlyMemory<ValueRef> valueColumn,
@@ -335,10 +346,15 @@ public sealed class InferFunction : IFunction, IScalarFunction
         IValueStore? arena,
         CancellationToken cancellationToken)
     {
-        // Materialise every row's input as a managed float[]. We need
-        // them anyway for the packed copy, and the homogeneous-length
-        // check decides whether batching is even legal for this batch.
-        float[][] inputs = new float[rowCount][];
+        TensorSpec inputSpec = session.Inputs[0];
+        DataKind inputKind = inputSpec.ElementKind;
+
+        // Materialise every row as a typed array matching the session's
+        // declared input kind. ValueRef.Materialized is the typed-payload
+        // fast path; rows built via a SQL array literal fall back to the
+        // per-element coercion loop. The homogeneous-length check decides
+        // whether batching is even legal for this batch.
+        Array[] inputs = new Array[rowCount];
         int perRowLen = -1;
         ReadOnlySpan<ValueRef> col = valueColumn.Span;
         for (int row = 0; row < rowCount; row++)
@@ -349,29 +365,26 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 throw new InvalidOperationException(
                     $"Model '{modelName}': infer() input must not be null (row {row}).");
             }
-            if (!cell.IsArray || cell.ArrayElementKind != DataKind.Float32)
+            if (!cell.IsArray || cell.ArrayElementKind != inputKind)
             {
                 throw new InvalidOperationException(
-                    $"Model '{modelName}': infer() batched dispatch expected Float32[] inputs; "
+                    $"Model '{modelName}': infer() batched dispatch expected {inputKind}[] inputs; "
                     + $"row {row} has {cell.Kind}{(cell.IsArray ? "[]" : "")}.");
             }
-            if (cell.Materialized is not float[] rowInput)
+
+            Array rowInput = inputKind switch
             {
-                ReadOnlySpan<ValueRef> elements = cell.GetArrayElements();
-                float[] copied = new float[elements.Length];
-                for (int i = 0; i < elements.Length; i++)
-                {
-                    if (!elements[i].TryToFloat(out float f))
-                    {
-                        throw new InvalidOperationException(
-                            $"Model '{modelName}': infer() row {row} array element [{i}] is not Float32-coercible.");
-                    }
-                    copied[i] = f;
-                }
-                rowInput = copied;
-            }
-            if (perRowLen < 0) perRowLen = rowInput.Length;
-            else if (rowInput.Length != perRowLen)
+                DataKind.Float32 => MaterializeFloat32Row(cell, row, modelName),
+                DataKind.Int64   => MaterializeInt64Row(cell, row, modelName),
+                DataKind.Int32   => MaterializeInt32Row(cell, row, modelName),
+                _ => throw new InvalidOperationException(
+                    $"Model '{modelName}': batched packing path doesn't support input kind {inputKind}. "
+                    + "Caller's element-kind gate should have routed to per-row dispatch."),
+            };
+            int rowLen = rowInput.Length;
+
+            if (perRowLen < 0) perRowLen = rowLen;
+            else if (rowLen != perRowLen)
             {
                 // Variable element counts can't be cross-row packed — bail
                 // to per-row dispatch via the static helper. The work done
@@ -387,7 +400,6 @@ public sealed class InferFunction : IFunction, IScalarFunction
         // session spec's concrete trailing dims (1-arg form) or the
         // uniform explicit-shape literal across rows (2-arg form), so
         // this helper stays agnostic to where the dims came from.
-        TensorSpec inputSpec = session.Inputs[0];
         int[] shape = new int[packedShape.Length];
         shape[0] = rowCount;
         for (int i = 1; i < packedShape.Length; i++)
@@ -406,21 +418,60 @@ public sealed class InferFunction : IFunction, IScalarFunction
             return await PerRowFallbackAsync().ConfigureAwait(false);
         }
 
-        float[] packed = new float[(long)rowCount * perRowLen];
-        for (int row = 0; row < rowCount; row++)
-        {
-            Buffer.BlockCopy(
-                inputs[row], 0,
-                packed, row * perRowLen * sizeof(float),
-                perRowLen * sizeof(float));
-        }
-
         TensorSpec outputSpec = session.Outputs[0];
         TensorBag inputBag = session.CreateInputBag();
         TensorBag? outputBag = null;
         try
         {
-            inputBag.Add<float>(inputSpec.Name, DataKind.Float32, shape, packed);
+            // Pack into a single contiguous buffer of the matching kind and
+            // add to the input bag. Buffer.BlockCopy handles the per-element
+            // byte copy uniformly regardless of unmanaged T.
+            switch (inputKind)
+            {
+                case DataKind.Float32:
+                {
+                    float[] packed = new float[(long)rowCount * perRowLen];
+                    for (int row = 0; row < rowCount; row++)
+                    {
+                        Buffer.BlockCopy(
+                            (float[])inputs[row], 0,
+                            packed, row * perRowLen * sizeof(float),
+                            perRowLen * sizeof(float));
+                    }
+                    inputBag.Add<float>(inputSpec.Name, DataKind.Float32, shape, packed);
+                    break;
+                }
+                case DataKind.Int64:
+                {
+                    long[] packed = new long[(long)rowCount * perRowLen];
+                    for (int row = 0; row < rowCount; row++)
+                    {
+                        Buffer.BlockCopy(
+                            (long[])inputs[row], 0,
+                            packed, row * perRowLen * sizeof(long),
+                            perRowLen * sizeof(long));
+                    }
+                    inputBag.Add<long>(inputSpec.Name, DataKind.Int64, shape, packed);
+                    break;
+                }
+                case DataKind.Int32:
+                {
+                    int[] packed = new int[(long)rowCount * perRowLen];
+                    for (int row = 0; row < rowCount; row++)
+                    {
+                        Buffer.BlockCopy(
+                            (int[])inputs[row], 0,
+                            packed, row * perRowLen * sizeof(int),
+                            perRowLen * sizeof(int));
+                    }
+                    inputBag.Add<int>(inputSpec.Name, DataKind.Int32, shape, packed);
+                    break;
+                }
+                default:
+                    throw new InvalidOperationException(
+                        $"Model '{modelName}': batched packing path doesn't support input kind {inputKind}.");
+            }
+
             outputBag = await session.RunAsync(inputBag, cancellationToken).ConfigureAwait(false);
 
             if (!outputBag.TryGet(outputSpec.Name, out IInferenceTensor outputTensor))
@@ -486,6 +537,65 @@ public sealed class InferFunction : IFunction, IScalarFunction
             return ScalarFunctionBatchHelpers.DefaultLoop(
                 Instance, [valueColumn], rowCount, default!, cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// Per-row materialiser for Float32 array inputs. Fast-paths the
+    /// typed <c>float[]</c> payload that <see cref="ValueRef.FromPrimitiveArray{T}"/>
+    /// produces; falls back to per-element coercion for SQL-array-literal-built
+    /// rows whose payload is <c>ValueRef[]</c>.
+    /// </summary>
+    private static float[] MaterializeFloat32Row(ValueRef cell, int row, string modelName)
+    {
+        if (cell.Materialized is float[] direct) return direct;
+        ReadOnlySpan<ValueRef> elements = cell.GetArrayElements();
+        float[] copied = new float[elements.Length];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            if (!elements[i].TryToFloat(out float f))
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer() row {row} array element [{i}] is not Float32-coercible.");
+            }
+            copied[i] = f;
+        }
+        return copied;
+    }
+
+    /// <summary>Int64 sibling of <see cref="MaterializeFloat32Row"/>.</summary>
+    private static long[] MaterializeInt64Row(ValueRef cell, int row, string modelName)
+    {
+        if (cell.Materialized is long[] direct) return direct;
+        ReadOnlySpan<ValueRef> elements = cell.GetArrayElements();
+        long[] copied = new long[elements.Length];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            if (!elements[i].TryToInt64(out long v))
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer() row {row} array element [{i}] is not Int64-coercible.");
+            }
+            copied[i] = v;
+        }
+        return copied;
+    }
+
+    /// <summary>Int32 sibling of <see cref="MaterializeFloat32Row"/>.</summary>
+    private static int[] MaterializeInt32Row(ValueRef cell, int row, string modelName)
+    {
+        if (cell.Materialized is int[] direct) return direct;
+        ReadOnlySpan<ValueRef> elements = cell.GetArrayElements();
+        int[] copied = new int[elements.Length];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            if (!elements[i].TryToInt32(out int v))
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer() row {row} array element [{i}] is not Int32-coercible.");
+            }
+            copied[i] = v;
+        }
+        return copied;
     }
 
     /// <summary>

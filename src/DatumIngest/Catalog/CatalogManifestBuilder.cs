@@ -132,6 +132,7 @@ public static class CatalogManifestBuilder
         IReadOnlyList<ModelEntry>? models = null;
         if (catalog.Models is not null)
         {
+            string modelDirectory = catalog.Models.ModelDirectory;
             List<ModelEntry> modelEntries = new(catalog.Models.Entries.Count);
             foreach (KeyValuePair<string, Models.ModelCatalogEntry> entry in catalog.Models.Entries)
             {
@@ -145,9 +146,11 @@ public static class CatalogManifestBuilder
                 string outputKindLabel = BuildModelOutputKindLabel(entry.Value);
                 IReadOnlyList<StructFieldSignature>? structFields =
                     BuildModelOutputStructFieldSignatures(entry.Value);
+                ModelInstallStatus status = ResolveInstallStatus(entry.Value, modelDirectory);
                 modelEntries.Add(new ModelEntry
                 {
                     Name = entry.Value.Name,
+                    Status = status,
                     OutputKind = outputKindLabel,
                     Category = entry.Value.Category,
                     Backend = entry.Value.Backend,
@@ -466,6 +469,33 @@ public static class CatalogManifestBuilder
     /// <c>Kind</c> rendering for non-struct outputs and for opaque
     /// <c>RETURNS Struct</c> models.
     /// </summary>
+    /// <summary>
+    /// Computes the install state of a catalog entry against the host's
+    /// model directory. Mirrors the same three-state classification that
+    /// <c>ModelsTableProvider</c> renders into <c>system.models.status</c>,
+    /// so completion + introspection agree on what's installed.
+    /// </summary>
+    private static ModelInstallStatus ResolveInstallStatus(
+        Models.ModelCatalogEntry entry, string modelDirectory)
+    {
+        // Synthetic backends declare no RelativePath (EchoModel and friends);
+        // they're always loadable.
+        if (entry.RelativePath is null)
+        {
+            return string.Equals(entry.Backend, "python", System.StringComparison.OrdinalIgnoreCase)
+                ? ModelInstallStatus.Bridge
+                : ModelInstallStatus.Available;
+        }
+        string resolved = System.IO.Path.Combine(modelDirectory, entry.RelativePath);
+        if (!System.IO.File.Exists(resolved))
+        {
+            return ModelInstallStatus.Missing;
+        }
+        return string.Equals(entry.Backend, "python", System.StringComparison.OrdinalIgnoreCase)
+            ? ModelInstallStatus.Bridge
+            : ModelInstallStatus.Available;
+    }
+
     private static string BuildModelOutputKindLabel(Models.ModelCatalogEntry entry)
     {
         if (entry.OutputStructFields is { Count: > 0 } structFields)
