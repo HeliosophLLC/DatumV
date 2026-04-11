@@ -17,6 +17,7 @@ namespace DatumIngest.Tests.Inference.Cpu;
 /// <c>LabeledTextMultiClassifier</c> task contract returning
 /// <c>Array&lt;ScoredLabel&gt;</c>.
 /// </summary>
+[Trait("Category", "CpuInference")]
 public sealed class ToxicBertSqlE2ETests : ServiceTestBase
 {
     private const string ModelId = "toxic-bert";

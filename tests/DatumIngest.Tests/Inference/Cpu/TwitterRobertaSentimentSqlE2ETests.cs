@@ -22,6 +22,7 @@ namespace DatumIngest.Tests.Inference.Cpu;
 /// sentiment classification (depends on weights) — only that the output
 /// shape and label vocabulary are correct.
 /// </remarks>
+[Trait("Category", "CpuInference")]
 public sealed class TwitterRobertaSentimentSqlE2ETests : ServiceTestBase
 {
     private const string ModelId = "twitter-roberta-sentiment";

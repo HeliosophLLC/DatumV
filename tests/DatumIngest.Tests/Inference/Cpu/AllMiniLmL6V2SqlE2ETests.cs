@@ -32,6 +32,7 @@ namespace DatumIngest.Tests.Inference.Cpu;
 /// 3-input ONNX session.
 /// </para>
 /// </remarks>
+[Trait("Category", "CpuInference")]
 public sealed class AllMiniLmL6V2SqlE2ETests : ServiceTestBase
 {
     private const string ModelId = "all-minilm-l6-v2";

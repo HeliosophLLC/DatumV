@@ -25,6 +25,7 @@ namespace DatumIngest.Tests.Inference.Cpu;
 /// removed. Self-skips when the ONNX bundle isn't downloaded so CI
 /// without internet stays green.
 /// </remarks>
+[Trait("Category", "CpuInference")]
 public sealed class MobileNetV2SqlE2ETests : ServiceTestBase
 {
     private const string ModelId = "mobilenetv2";

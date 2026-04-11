@@ -26,6 +26,7 @@ namespace DatumIngest.Tests.Inference.Cpu;
 /// Skips gracefully when the ONNX file isn't downloaded so CI without
 /// internet stays green.
 /// </remarks>
+[Trait("Category", "CpuInference")]
 public sealed class YoloxSqlE2ETests : ServiceTestBase
 {
     private const string ModelId = "yolox-s";

@@ -26,6 +26,7 @@ namespace DatumIngest.Tests.Inference.Cpu;
 /// scatter parity for both, plus the `image_to_tensor_chw_bgr` path
 /// is covered separately at the unit level.
 /// </remarks>
+[Trait("Category", "CpuInference")]
 public sealed class DptLargeSqlE2ETests : ServiceTestBase
 {
     private const string ModelId = "dpt-large";

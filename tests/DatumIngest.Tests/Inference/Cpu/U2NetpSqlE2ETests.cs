@@ -25,6 +25,7 @@ namespace DatumIngest.Tests.Inference.Cpu;
 /// infer + depth_map_to_image) and produces a mask image at the input's
 /// original dimensions. Self-skips when the ONNX file isn't downloaded.
 /// </remarks>
+[Trait("Category", "CpuInference")]
 public sealed class U2NetpSqlE2ETests : ServiceTestBase
 {
     private const string ModelId = "u2netp";

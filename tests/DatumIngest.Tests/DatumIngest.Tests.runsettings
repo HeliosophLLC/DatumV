@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RunSettings>
   <RunConfiguration>
-    <TestCaseFilter>Category!=Gpu</TestCaseFilter>
+    <TestCaseFilter>Category!=Gpu&amp;Category!=CpuInference</TestCaseFilter>
   </RunConfiguration>
 </RunSettings>

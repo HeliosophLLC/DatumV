@@ -24,6 +24,7 @@ namespace DatumIngest.Tests.Inference.Cpu;
 /// composition of existing scalars — no new model-specific functions.
 /// Self-skips when the ONNX file isn't downloaded.
 /// </remarks>
+[Trait("Category", "CpuInference")]
 public sealed class RealesrganSqlE2ETests : ServiceTestBase
 {
     private const string ModelId = "realesrgan-x4v3";

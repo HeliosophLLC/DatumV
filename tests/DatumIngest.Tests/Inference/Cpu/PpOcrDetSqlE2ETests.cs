@@ -50,6 +50,7 @@ namespace DatumIngest.Tests.Inference.Cpu;
 /// </list>
 /// </para>
 /// </remarks>
+[Trait("Category", "CpuInference")]
 public sealed class PpOcrDetSqlE2ETests : ServiceTestBase
 {
     private const string ModelId = "paddleocr-v4-det";
