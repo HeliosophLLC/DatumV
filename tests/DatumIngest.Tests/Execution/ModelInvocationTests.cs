@@ -177,6 +177,127 @@ public sealed class ModelInvocationTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Test backend that splits its String input on commas and returns the
+    /// pieces as <c>Array&lt;String&gt;</c>. Lets a test exercise the
+    /// hoister path that lifts a model call out of a TVF argument inside a
+    /// lateral join.
+    /// </summary>
+    private sealed class SplitModel : DatumIngest.Models.IModel
+    {
+        public string Name => "split";
+        public bool IsDeterministic => true;
+        public IReadOnlyList<DataKind> InputKinds { get; } = [DataKind.String];
+        public DataKind OutputKind => DataKind.String;
+
+        public Task<IReadOnlyList<DatumIngest.Functions.ValueRef>> InferBatchAsync(
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides,
+            CancellationToken cancellationToken)
+        {
+            _ = overrides;
+            DatumIngest.Functions.ValueRef[] outputs = new DatumIngest.Functions.ValueRef[inputs.Count];
+            for (int row = 0; row < inputs.Count; row++)
+            {
+                string text = inputs[row][0].AsString();
+                string[] pieces = text.Split(',');
+                DatumIngest.Functions.ValueRef[] elements = new DatumIngest.Functions.ValueRef[pieces.Length];
+                for (int i = 0; i < pieces.Length; i++)
+                {
+                    elements[i] = DatumIngest.Functions.ValueRef.FromString(pieces[i]);
+                }
+                outputs[row] = DatumIngest.Functions.ValueRef.FromArray(DataKind.String, elements);
+            }
+            return Task.FromResult<IReadOnlyList<DatumIngest.Functions.ValueRef>>(outputs);
+        }
+    }
+
+    private static ModelCatalog BuildCatalogWithSplit()
+    {
+        ModelCatalog catalog = new(modelDirectory: System.IO.Path.GetTempPath());
+        catalog.Register(new ModelCatalogEntry(
+            Name: "split",
+            Backend: "split",
+            RelativePath: null,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: true,
+            Loader: _ => new SplitModel(),
+            OutputIsArray: true));
+        return catalog;
+    }
+
+    /// <summary>
+    /// Regression: <c>CROSS JOIN LATERAL unnest(models.X(t.col))</c> requires
+    /// the hoister to lift the model call out of the TVF argument and place
+    /// the resulting <see cref="ModelInvocationOperator"/> above the lateral
+    /// join's left side. The rewritten TVF arg becomes a column reference
+    /// resolved against <see cref="ExecutionContext.OuterRow"/> per driving
+    /// row. Without the hoist, the model call reaches
+    /// <see cref="FunctionSourceOperator"/>'s scalar evaluator, which has no
+    /// dispatch for <c>models.*</c> markers and would throw "unknown
+    /// function" at runtime.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_LateralTvfArg_ModelCallHoistsAboveLeftSide()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["csv"],
+            new object?[] { "a,b,c" },
+            new object?[] { "d,e" });
+        catalog.Models = BuildCatalogWithSplit();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT csv, value FROM t CROSS JOIN LATERAL unnest(models.split(t.csv))",
+            catalog);
+
+        Assert.Equal(5, rows.Count);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        Assert.Equal(("a,b,c", "a"), (rows[0][0].AsString(scratch), rows[0][1].AsString(scratch)));
+        Assert.Equal(("a,b,c", "b"), (rows[1][0].AsString(scratch), rows[1][1].AsString(scratch)));
+        Assert.Equal(("a,b,c", "c"), (rows[2][0].AsString(scratch), rows[2][1].AsString(scratch)));
+        Assert.Equal(("d,e", "d"), (rows[3][0].AsString(scratch), rows[3][1].AsString(scratch)));
+        Assert.Equal(("d,e", "e"), (rows[4][0].AsString(scratch), rows[4][1].AsString(scratch)));
+    }
+
+    /// <summary>
+    /// Plan-shape assertion for the lateral TVF hoist: the model call must
+    /// land in a <see cref="ModelInvocationOperator"/> on the LEFT side of
+    /// the <see cref="LateralJoinOperator"/>. If it were left in the TVF
+    /// arg, the right side would carry it; that's the negative case.
+    /// </summary>
+    [Fact]
+    public void Planner_HoistsModelCall_OutOfLateralTvfArg_AboveLeftSide()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["csv"],
+            new object?[] { "a,b" });
+        catalog.Models = BuildCatalogWithSplit();
+
+        QueryExpression query = SqlParser.Parse(
+            "SELECT csv, value FROM t CROSS JOIN LATERAL unnest(models.split(t.csv))");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        QueryOperator plan = planner.Plan(query);
+
+        ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+        LateralJoinOperator lateral = Assert.IsType<LateralJoinOperator>(project.Source);
+
+        // Left side: AliasOperator(t) -> MIO. MIO sits above the alias so its
+        // input expression (t.csv) resolves against the aliased row schema.
+        ModelInvocationOperator leftMio = Assert.IsType<ModelInvocationOperator>(lateral.Left);
+        Assert.Equal("split", leftMio.ModelName);
+
+        // Right side: the TVF's argument list no longer contains the model
+        // call — it's been rewritten to a ColumnReference to the synth column.
+        AliasOperator rightAlias = Assert.IsType<AliasOperator>(lateral.Right);
+        FunctionSourceOperator fnSrc = Assert.IsType<FunctionSourceOperator>(rightAlias.Source);
+        Assert.Single(fnSrc.Arguments);
+        ColumnReference argCol = Assert.IsType<ColumnReference>(fnSrc.Arguments[0]);
+        Assert.Equal(leftMio.OutputColumnName, argCol.ColumnName);
+    }
+
+    /// <summary>
     /// Hoister accepts a trailing positional override when the catalog entry
     /// declares an <c>OptionalArgKinds</c> slot for it. The first <em>required</em>
     /// arg ends up in <see cref="ModelInvocationOperator.InputExpressions"/>;

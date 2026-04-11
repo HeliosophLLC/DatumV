@@ -50,7 +50,7 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
             Parameters:
             [
                 new ParameterSpec("image", DataKindMatcher.Exact(DataKind.Image)),
-                new ParameterSpec("boxes", DataKindMatcher.Exact(DataKind.Struct)),
+                new ParameterSpec("boxes", DataKindMatcher.Exact(DataKind.Struct), IsOptional: false, IsArray: ArrayMatch.FlatArray),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Image)),

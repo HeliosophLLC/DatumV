@@ -260,10 +260,22 @@ public sealed class InferFunction : IFunction, IScalarFunction
         IInferenceSession session = await model.BoundSessions
             .ResolveAsync("default", cancellationToken)
             .ConfigureAwait(false);
-        if (session.Inputs.Count != 1 || !HasDynamicLeadingDim(session.Inputs[0]))
+        // The columnar-packing path materialises every row as `float[]` and
+        // copies into a single Float32 packed tensor, so sessions whose input
+        // element kind isn't Float32 (e.g. CLIP's text encoder with
+        // input_ids: Int64, BERT-family ID inputs, any tokenizer-driven path)
+        // can't ride the fast path even when the shape pattern matches. Gate
+        // on element kind here so Int64/Int32 token inputs cleanly fall back
+        // to the per-row default loop instead of failing in the packing
+        // loop's Float32 assertion. Extending the batched path to handle
+        // Int64/Int32 packing is a follow-up.
+        if (session.Inputs.Count != 1
+            || session.Inputs[0].ElementKind != DataKind.Float32
+            || !HasDynamicLeadingDim(session.Inputs[0]))
         {
             DatumActivity.Scalars.Trace(
                 $"infer.batch fallback=session-shape model={model.Name} inputs={session.Inputs.Count} "
+                + $"inputKind={(session.Inputs.Count > 0 ? session.Inputs[0].ElementKind.ToString() : "n/a")} "
                 + $"shape0={(session.Inputs.Count > 0 ? (session.Inputs[0].Shape.Count > 0 ? (session.Inputs[0].Shape[0]?.ToString() ?? "null") : "rank0") : "n/a")}");
             return await ScalarFunctionBatchHelpers.DefaultLoop(
                 this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);

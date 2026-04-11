@@ -218,18 +218,6 @@
       "approxSizeMb": 440,
       "installSql": "sql/toxic-bert.sql"
     },
-    {
-      "id": "roberta-base",
-      "displayName": "RoBERTa base",
-      "description": "Extractive question answering — finds the answer span in a passage. Handles unanswerable.",
-      "task": "question-answering",
-      "tags": ["qa", "extractive", "english"],
-      "licenseIds": ["cc-by-4.0"],
-      "attributions": ["deepset", "Joshua Lochner / Xenova (ONNX export)"],
-      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "sources": [{ "type": "huggingface", "repo": "Xenova/roberta-base", "revision": "bb432e3f5502192ed482fae6a2bb0124ef61c51d", "include": ["onnx/*", "*.json", "*.txt"] }],
-      "approxSizeMb": 500
-    },
 
     {
       "id": "florence-2-base-ft-fp16",
@@ -602,26 +590,28 @@
     },
     {
       "id": "mediapipe-face",
-      "displayName": "MediaPipe Face (Detector + 6-point Landmarks)",
-      "description": "Two-stage face pipeline: BlazeFace-derived detector + 6-keypoint landmark model (eyes, nose tip, mouth, eye tragions). Tiny (~3 MB combined). Apache-2.0 throughout.",
+      "displayName": "MediaPipe Face Detector (+ FaceMesh)",
+      "description": "BlazeFace-derived face detector (256×256, ~896 SSD anchors) emitting box + 6 BlazeFace keypoints (eyes, nose, mouth, tragions) + confidence per face. Ships alongside the 468-point MediaPipe FaceMesh landmark model (currently not wired to a SQL surface — bundled for future two-stage workflows). Tiny (~3 MB combined). Apache-2.0 throughout.",
       "task": "face-detection",
       "tags": ["face-detection", "mediapipe", "blazeface", "landmarks"],
       "licenseIds": ["apache-2.0"],
       "attributions": ["Google MediaPipe team", "Zak Murez (MediaPipePyTorch PyTorch port)", "Qualcomm AI Hub (ONNX export)"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/mediapipe-face-onnx", "revision": "40558a441d87663a533137cefb838e853ef491da", "include": ["float/*"] }],
+      "installSql": "sql/mediapipe-face.sql",
       "approxSizeMb": 3
     },
     {
       "id": "mediapipe-face-int8",
-      "displayName": "MediaPipe Face (INT8)",
-      "description": "INT8-quantized MediaPipe Face pipeline. ~half the disk of the float variant. CPU / NPU / mobile target. Modest accuracy drop on small/distant faces.",
+      "displayName": "MediaPipe Face Detector (INT8)",
+      "description": "INT8-quantized MediaPipe Face detector + FaceMesh bundle. ~half the disk of the float variant. CPU / NPU / mobile target. Modest accuracy drop on small/distant faces.",
       "task": "face-detection",
       "tags": ["face-detection", "mediapipe", "blazeface", "landmarks", "int8", "edge"],
       "licenseIds": ["apache-2.0"],
       "attributions": ["Google MediaPipe team", "Zak Murez (MediaPipePyTorch PyTorch port)", "Qualcomm AI Hub (ONNX export + W8A8 quantization)"],
       "hardware": { "minRamMb": 64, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/mediapipe-face-onnx", "revision": "40558a441d87663a533137cefb838e853ef491da", "include": ["int8/*"] }],
+      "installSql": "sql/mediapipe-face-int8.sql",
       "approxSizeMb": 2
     },
     {
@@ -777,6 +767,7 @@
       "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_gray_15.onnx", "scunet_gray_15.onnx.data"] }],
+      "installSql": "sql/scunet-gray-15.sql",
       "approxSizeMb": 73
     },
     {
@@ -789,6 +780,7 @@
       "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_gray_25.onnx", "scunet_gray_25.onnx.data"] }],
+      "installSql": "sql/scunet-gray-25.sql",
       "approxSizeMb": 73,
       "placeholder": true
     },
@@ -802,6 +794,7 @@
       "attributions": ["Kai Zhang", "Yawei Li", "Jingyun Liang", "Jiezhang Cao", "Yulun Zhang", "Hao Tang", "Deng-Ping Fan", "Radu Timofte", "Luc Van Gool"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Heliosoph/scunet-onnx", "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf", "include": ["scunet_gray_50.onnx", "scunet_gray_50.onnx.data"] }],
+      "installSql": "sql/scunet-gray-50.sql",
       "approxSizeMb": 73,
       "placeholder": true
     },
@@ -1073,6 +1066,7 @@
       "attributions": ["OpenAI — CLIP (Radford, Kim, Hallacy et al.)", "Joshua Lochner / Xenova (ONNX export)"],
       "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
       "sources": [{ "type": "huggingface", "repo": "Xenova/clip-vit-base-patch32", "revision": "d15189d7028b43f1d3e65039190477f6af591c2a", "include": ["onnx/*", "*.json", "*.txt"] }],
+      "installSql": "sql/clip-vit-base-patch32.sql",
       "approxSizeMb": 600
     }
   ]

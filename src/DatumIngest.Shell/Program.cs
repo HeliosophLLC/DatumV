@@ -108,11 +108,11 @@ else
 // Kokoro-82M voice override: the bundled voices-v1.0.bin default works
 // out of the box, but if you have per-voice .bin files instead, point at
 // the directory here and reset the default voice to one you actually have.
-modelCatalog.Unregister("kokoro_82m");
-BuiltinModels.RegisterKokoro82M(
-    modelCatalog,
-    voicesPath: "kokoro-voices",
-    defaultVoice: "af_bella");
+// modelCatalog.Unregister("kokoro_82m");
+// BuiltinModels.RegisterKokoro82M(
+//     modelCatalog,
+//     voicesPath: "kokoro-voices",
+//     defaultVoice: "af_bella");
 
 int datumFilesAdded = 0;
 try

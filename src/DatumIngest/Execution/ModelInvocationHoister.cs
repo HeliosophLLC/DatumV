@@ -466,8 +466,104 @@ public static class ModelInvocationHoister
             QueryOperator hoistedSource = HoistRecursive(window.Source, catalog);
             return HoistWindow(window, hoistedSource, catalog);
         }
+        else if (op is LateralJoinOperator lateral)
+        {
+            QueryOperator hoistedLeft = HoistRecursive(lateral.Left, catalog);
+            QueryOperator hoistedRight = HoistRecursive(lateral.Right, catalog);
+            return HoistLateralJoin(lateral, hoistedLeft, hoistedRight, catalog);
+        }
 
         return RewriteChildren(op, child => HoistRecursive(child, catalog));
+    }
+
+    /// <summary>
+    /// Lifts <c>models.*</c> calls out of a <see cref="FunctionSourceOperator"/>
+    /// argument on the right side of a <see cref="LateralJoinOperator"/>,
+    /// placing the resulting <see cref="ModelInvocationOperator"/> stack
+    /// <em>above the left side</em>. The TVF arg is rewritten to a
+    /// <see cref="ColumnReference"/> to the synth column; the lateral right
+    /// reads that column via <see cref="ExecutionContext.OuterRow"/> per
+    /// driving row. Same evaluation count and order as the inline form —
+    /// the rewrite is semantics-preserving.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Without this pass, <c>FROM t CROSS JOIN LATERAL unnest(models.X(t.col))</c>
+    /// reaches the runtime with the model call still inline in the TVF arg.
+    /// <see cref="FunctionSourceOperator"/> evaluates args via the scalar
+    /// evaluator, which has no <c>models.*</c> dispatch — they're hoist-only
+    /// markers — so the call fails. Hoisting it above the left turns the
+    /// model output into a regular column the lateral right reads.
+    /// </para>
+    /// <para>
+    /// Only the right side's TVF args are walked; the left was already hoisted
+    /// recursively. ON conditions are left for a follow-up — single-input
+    /// LATERAL is the common shape and the one repro'd against the engine.
+    /// </para>
+    /// </remarks>
+    private static QueryOperator HoistLateralJoin(
+        LateralJoinOperator lateral,
+        QueryOperator hoistedLeft,
+        QueryOperator hoistedRight,
+        ModelCatalog catalog)
+    {
+        // The planner wraps a FunctionSource in an AliasOperator whenever the
+        // statement has joins or an explicit alias — peel one layer to reach
+        // the TVF's arg list.
+        string? rightAlias = null;
+        FunctionSourceOperator? fnSource;
+        if (hoistedRight is AliasOperator aliasOp && aliasOp.Source is FunctionSourceOperator wrappedFn)
+        {
+            rightAlias = aliasOp.Alias;
+            fnSource = wrappedFn;
+        }
+        else
+        {
+            fnSource = hoistedRight as FunctionSourceOperator;
+        }
+
+        if (fnSource is null)
+        {
+            return ReferenceEquals(hoistedLeft, lateral.Left)
+                && ReferenceEquals(hoistedRight, lateral.Right)
+                    ? lateral
+                    : new LateralJoinOperator(hoistedLeft, hoistedRight, lateral.JoinType, lateral.OnCondition);
+        }
+
+        ModelHoistCollector collector = new(catalog);
+        foreach (Expression arg in fnSource.Arguments)
+        {
+            collector.Visit(arg);
+        }
+
+        if (collector.HoistedOrder.Count == 0)
+        {
+            return ReferenceEquals(hoistedLeft, lateral.Left)
+                && ReferenceEquals(hoistedRight, lateral.Right)
+                    ? lateral
+                    : new LateralJoinOperator(hoistedLeft, hoistedRight, lateral.JoinType, lateral.OnCondition);
+        }
+
+        // Stack the MIO(s) above the left. Each invocation's input expressions
+        // evaluate against the left's row schema (which includes the alias-
+        // doubled NameIndex), so `t.col` and bare `col` both resolve there.
+        QueryOperator augmentedLeft = BuildMioStack(hoistedLeft, collector, catalog);
+
+        // Rewrite TVF args so each hoisted call is now a ColumnReference to
+        // its synth column. The lateral right reads these via OuterRow.
+        Expression[] rewrittenArgs = new Expression[fnSource.Arguments.Count];
+        for (int i = 0; i < fnSource.Arguments.Count; i++)
+        {
+            rewrittenArgs[i] = RewriteExpression(fnSource.Arguments[i], collector.HoistedColumns);
+        }
+
+        QueryOperator newRight = new FunctionSourceOperator(fnSource.Function, rewrittenArgs);
+        if (rightAlias is not null)
+        {
+            newRight = new AliasOperator(newRight, rightAlias);
+        }
+
+        return new LateralJoinOperator(augmentedLeft, newRight, lateral.JoinType, lateral.OnCondition);
     }
 
     private static QueryOperator HoistProject(

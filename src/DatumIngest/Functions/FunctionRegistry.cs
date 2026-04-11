@@ -763,6 +763,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.VideoFrameToImageFunction>();
         registry.RegisterScalar<Scalar.Image.YoloxPreprocessFunction>();
         registry.RegisterScalar<Scalar.Image.YoloxPostprocessFunction>();
+        registry.RegisterScalar<Scalar.Image.BlazefaceDecodeFunction>();
         registry.RegisterScalar<Scalar.Image.RtdetrPostprocessFunction>();
         registry.RegisterScalar<Scalar.Image.ImageToTensorChwBgrFunction>();
         registry.RegisterScalar<Scalar.Image.DepthMapToImageFunction>();
@@ -805,10 +806,12 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ImagePixelCountFunction>();
         registry.RegisterScalar<Scalar.Image.ImageDimensionsFunction>();
         registry.RegisterScalar<Scalar.Image.ImageToTensorChwFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageToTensorChwGrayFunction>();
         registry.RegisterScalar<Scalar.Image.ImageToTensorHwcFunction>();
         registry.RegisterScalar<Scalar.Image.ImageLetterboxTensorChwFunction>();
         registry.RegisterScalar<Scalar.Image.ImageLetterboxTensorHwcFunction>();
         registry.RegisterScalar<Scalar.Image.TensorToImageChwFunction>();
+        registry.RegisterScalar<Scalar.Image.TensorToImageChwGrayFunction>();
         registry.RegisterScalar<Scalar.Image.TensorToImageHwcFunction>();
         registry.RegisterScalar<Scalar.Image.DbnetPostprocessFunction>();
         registry.RegisterScalar<Scalar.Image.ImagenetMeanFunction>();

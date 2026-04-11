@@ -1637,44 +1637,6 @@ public static class BuiltinModels
             ]));
     }
 
-    // Florence-2 (5 task variants) was previously registered here as a set
-    // of C# IModel wrappers (Florence2Model.cs). The fp16 binary serves
-    // four catalog-visible models (florence2_caption,
-    // florence2_detailed_caption, florence2_more_detailed_caption,
-    // florence2_ocr_with_region); the INT8-quantized binary serves a
-    // fifth (florence2_caption_q8). All five now ship as SQL-defined
-    // models in models/sql/florence-2-base-ft-fp16.sql and
-    // models/sql/florence-2-base-ft-quantized.sql, backed by
-    // image_to_tensor_chw, the multi-session encoder/decoder USING form,
-    // array_concat + array_repeat for the visual||prompt concat and
-    // attention mask, and decode_seq2seq's 8-arg inputs_embeds form
-    // (Florence-2's decoder takes inputs_embeds, so embed_tokens runs
-    // each step). The catalog entries' installSql declarations re-register
-    // the SQL forms when the model directories are rehydrated.
-
-    // SCRFD-10G was previously registered here as a built-in C# IModel
-    // (ScrfdModel.cs). Removed 2026-05-17 after a license review:
-    // InsightFace's repo is MIT for the *code* only; the model weights /
-    // pretrained ONNX bundle don't carry an open license, so we can't
-    // redistribute them as a built-in. Use MediaPipe Face (Apache-2.0
-    // throughout) for face detection. RetinaFace would face the same
-    // license issue.
-
-    // PP-OCRv4-det was previously a built-in C# IModel registered here. It
-    // shipped as a SQL-defined model in models/sql/paddleocr-v4-det.sql
-    // (catalog id `paddleocr-v4-det`) and the C# class was deleted. The
-    // deletion is the success metric for the "registry replaces builtins"
-    // arc — every model that lands as SQL retires the bespoke C# version.
-
-    // Real-ESRGAN-General x4 was previously registered here as a built-in
-    // C# IModel (SuperResolutionModel.cs). It shipped as a SQL-defined
-    // model in models/sql/realesrgan-x4v3.sql backed by existing scalars
-    // (image_to_tensor_chw + infer + tensor_to_image_chw) — pure
-    // composition, zero new model-specific functions. The per-call
-    // `outscale` Float64 override was dropped in the migration; users
-    // wanting <4× output can compose with a downstream image_resize
-    // primitive once that lands.
-
     /// <summary>Default filename for the MobileSAM (TinyViT) image encoder.</summary>
     public const string MobileSamEncoderFilename = "mobile_sam_image_encoder.onnx";
 
@@ -1845,13 +1807,6 @@ public static class BuiltinModels
     /// have to drop their own copy.
     /// </summary>
     public const string Kokoro82MWorkerFilename = "kokoro_worker.py";
-
-    // Bark Small + Bark (Suno) are now catalog-driven via
-    // models/catalog.json's `bark-small` and `bark` entries. The
-    // hardcoded `RegisterBarkSmall` / `RegisterBark` / `RegisterBarkVariant`
-    // helpers were removed once `CatalogDrivenPythonRegistrar` proved
-    // out: every kind="python" row in the manifest auto-registers at
-    // `AttachStandardModels` time.
 
     // ─────────────────────────── Whisper STT ──────────────────────────────
     //

@@ -358,7 +358,7 @@ internal static class ImageToTensorShared
     /// when the array has a different length or carries a value that can't
     /// fit in a positive Int32.
     /// </summary>
-    private static (int Height, int Width) ReadTargetSize(string fnName, ValueRef arg)
+    internal static (int Height, int Width) ReadTargetSize(string fnName, ValueRef arg)
     {
         if (arg.IsNull)
         {

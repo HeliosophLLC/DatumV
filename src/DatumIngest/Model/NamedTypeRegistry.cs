@@ -214,10 +214,11 @@ public static class NamedTypeRegistry
 
         new(
             "FaceDetection",
-            "Struct<bbox: BoundingBox, landmarks: Array<Point2D>, score: Float32>",
+            "Struct<bbox: BoundingBox, label: String, landmarks: Array<Point2D>, score: Float32>",
             (reg, byName) => reg.InternStructType(
             [
                 new("bbox", byName["BoundingBox"]),
+                new("label", reg.InternScalarType(DataKind.String)),
                 new("landmarks", reg.InternArrayType(DataKind.Point2D)),
                 new("score", reg.InternScalarType(DataKind.Float32)),
             ])),
