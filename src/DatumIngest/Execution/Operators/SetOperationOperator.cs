@@ -241,7 +241,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                             // subsequent rows route to spill via the IsActive check above.
                         }
 
-                        RowBatch? full = writer.Add(inputBatch, i);
+                        RowBatch? full = writer.Add(schema!, inputBatch, i);
                         if (full is not null) yield return full;
                     }
                 }
@@ -278,7 +278,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                                 context.CancellationToken.ThrowIfCancellationRequested();
                                 if (!partitionKeys.Add(spilledBatch[i])) continue;
 
-                                RowBatch? full = writer.Add(spilledBatch, i);
+                                RowBatch? full = writer.Add(schema!, spilledBatch, i);
                                 DrainEmittedRowCount++;
                                 if (full is not null) yield return full;
                             }
@@ -342,9 +342,11 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
         long residentBytesNotified = 0;
 
         DedupKeySet rightSet = new(context.Pool, poolBoundKeys: true);
-        // emittedSet shares rightSet's pool-bound comparer + composite-key scratch:
-        // two co-living dedup sets only need one rented scratch and one comparer.
-        DedupKeySet emittedSet = new(context.Pool, rightSet.Comparer, rightSet.Scratch);
+        // emittedSet shares rightSet's pool-bound comparer + composite-key scratch.
+        // Lazy-constructed once rightSet is Initialized so its Scratch is populated
+        // — constructing here would capture rightSet.Scratch == null and trigger
+        // DedupKeySet's fast-fail on Initialize.
+        DedupKeySet? emittedSet = null;
 
         PartitionedRowSpiller rightSpiller = new(context, SpillPartitionCount);
         PartitionedRowSpiller leftSpiller = new(context, SpillPartitionCount);
@@ -370,7 +372,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         if (!rightSet.IsInitialized)
                         {
                             rightSet.Initialize(row.FieldCount);
-                            // emittedSet uses rightSet's scratch — Initialize doesn't re-rent.
+                            emittedSet = new DedupKeySet(context.Pool, rightSet.Comparer, rightSet.Scratch);
                             emittedSet.Initialize(row.FieldCount);
                             perRowBytes = 20L * row.FieldCount + 48L;
                         }
@@ -432,9 +434,9 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         }
 
                         if (!rightSet.Contains(row)) continue;
-                        if (!emittedSet.Add(row)) continue;
+                        if (!emittedSet!.Add(row)) continue;
 
-                        RowBatch? full = writer.Add(leftBatch, i);
+                        RowBatch? full = writer.Add(schema!, leftBatch, i);
                         if (full is not null) yield return full;
                     }
                 }
@@ -496,7 +498,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                                 if (!partRight.Contains(row, fallback: rightSet)) continue;
                                 if (!partEmitted.Add(row)) continue;
 
-                                RowBatch? full = writer.Add(spilledLeftBatch, i);
+                                RowBatch? full = writer.Add(schema!, spilledLeftBatch, i);
                                 if (full is not null) yield return full;
                             }
                         }
@@ -521,7 +523,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
             // emittedSet shares scratch with rightSet — disposed first so the scratch
             // is still available to rightSet's composite-key returner. Order matters
             // only if both owned scratch; here only rightSet does.
-            emittedSet.Dispose();
+            emittedSet?.Dispose();
             rightSet.Dispose();
             rightSpiller.Dispose();
             leftSpiller.Dispose();
@@ -629,7 +631,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                         if (!rightCounts.TryDecrement(row)) continue;
 
-                        RowBatch? full = writer.Add(leftBatch, i);
+                        RowBatch? full = writer.Add(schema!, leftBatch, i);
                         if (full is not null) yield return full;
                     }
                 }
@@ -684,7 +686,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                                 if (!partRight.TryDecrement(row, fallback: rightCounts)) continue;
 
-                                RowBatch? full = writer.Add(spilledLeftBatch, i);
+                                RowBatch? full = writer.Add(schema!, spilledLeftBatch, i);
                                 if (full is not null) yield return full;
                             }
                         }
@@ -732,7 +734,9 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
         long residentBytesNotified = 0;
 
         DedupKeySet rightSet = new(context.Pool, poolBoundKeys: true);
-        DedupKeySet emittedSet = new(context.Pool, rightSet.Comparer, rightSet.Scratch);
+        // Lazy-constructed once rightSet is Initialized so its Scratch is populated
+        // — see ExecuteIntersectDistinctAsync for the same fast-fail rationale.
+        DedupKeySet? emittedSet = null;
 
         PartitionedRowSpiller rightSpiller = new(context, SpillPartitionCount);
         PartitionedRowSpiller leftSpiller = new(context, SpillPartitionCount);
@@ -758,6 +762,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         if (!rightSet.IsInitialized)
                         {
                             rightSet.Initialize(row.FieldCount);
+                            emittedSet = new DedupKeySet(context.Pool, rightSet.Comparer, rightSet.Scratch);
                             emittedSet.Initialize(row.FieldCount);
                             perRowBytes = 20L * row.FieldCount + 48L;
                         }
@@ -808,6 +813,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         if (!rightSet.IsInitialized)
                         {
                             rightSet.Initialize(row.FieldCount);
+                            emittedSet = new DedupKeySet(context.Pool, rightSet.Comparer, rightSet.Scratch);
                             emittedSet.Initialize(row.FieldCount);
                             perRowBytes = 20L * row.FieldCount + 48L;
                         }
@@ -826,9 +832,9 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         // Inverted match: emit only when NOT in the right set. Empty-right
                         // correctly passes every left row through (subject to emit dedup).
                         if (rightSet.Contains(row)) continue;
-                        if (!emittedSet.Add(row)) continue;
+                        if (!emittedSet!.Add(row)) continue;
 
-                        RowBatch? full = writer.Add(leftBatch, i);
+                        RowBatch? full = writer.Add(schema!, leftBatch, i);
                         if (full is not null) yield return full;
                     }
                 }
@@ -884,7 +890,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                                 if (partRight.Contains(row, fallback: rightSet)) continue;
                                 if (!partEmitted.Add(row)) continue;
 
-                                RowBatch? full = writer.Add(spilledLeftBatch, i);
+                                RowBatch? full = writer.Add(schema!, spilledLeftBatch, i);
                                 if (full is not null) yield return full;
                             }
                         }
@@ -906,7 +912,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                 context.Accountant.NotifyReleased(residentBytesNotified);
             }
 
-            emittedSet.Dispose();
+            emittedSet?.Dispose();
             rightSet.Dispose();
             rightSpiller.Dispose();
             leftSpiller.Dispose();
@@ -1024,7 +1030,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         // multiset, so empty-right correctly emits every left row.
                         if (rightCounts.TryDecrement(row)) continue;
 
-                        RowBatch? full = writer.Add(leftBatch, i);
+                        RowBatch? full = writer.Add(schema!, leftBatch, i);
                         if (full is not null) yield return full;
                     }
                 }
@@ -1075,7 +1081,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
 
                                 if (partRight.TryDecrement(row, fallback: rightCounts)) continue;
 
-                                RowBatch? full = writer.Add(spilledLeftBatch, i);
+                                RowBatch? full = writer.Add(schema!, spilledLeftBatch, i);
                                 if (full is not null) yield return full;
                             }
                         }

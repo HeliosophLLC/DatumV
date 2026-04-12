@@ -115,6 +115,17 @@ internal sealed class DedupKeySet : IDisposable
             _compositeLookup = _compositeSet.GetAlternateLookup<ReadOnlySpan<DataValue>>();
             if (_scratch is null)
             {
+                if (!_ownsScratch)
+                {
+                    // Shared-scratch ctor was used but the caller passed a null scratch —
+                    // typically because the scratch owner hadn't been Initialized yet at
+                    // ctor time. Silently renting here would mark _ownsScratch=false, so
+                    // Dispose would never return the buffer. Fast-fail instead.
+                    throw new InvalidOperationException(
+                        "DedupKeySet was constructed with a shared scratch but the scratch was null. " +
+                        "Initialize the scratch-owning set first, or construct this set inline once the " +
+                        "owner's Scratch is populated.");
+                }
                 _scratch = _pool.RentDataValues(columnCount);
             }
         }

@@ -95,6 +95,14 @@ internal sealed class CountedKeyMultiset : IDisposable
             _compositeLookup = _compositeCounts.GetAlternateLookup<ReadOnlySpan<DataValue>>();
             if (_scratch is null)
             {
+                if (!_ownsScratch)
+                {
+                    // Shared-scratch ctor with a null scratch — see DedupKeySet.Initialize
+                    // for the same fast-fail rationale.
+                    throw new InvalidOperationException(
+                        "CountedKeyMultiset was constructed with a shared scratch but the scratch was null. " +
+                        "Initialize the scratch-owning multiset first.");
+                }
                 _scratch = _pool.RentDataValues(columnCount);
             }
         }

@@ -1,4 +1,5 @@
 using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Execution.Operators.Windows;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -74,55 +75,20 @@ public sealed class WindowOperator : QueryOperator
     {
         Pool pool = context.Pool;
         ExpressionEvaluator evaluator = new(context);
-
-        // Window is a blocking operator: every input row must be materialised
-        // before any output emits, since window functions need partition-wide
-        // visibility. Source rows are stabilised into operator-owned
-        // DataValue[] rentals so input batches return to the pool immediately
-        // (same-arena fast path under one-arena-per-query — just a fresh
-        // DataValue[] rental, no payload copy). Released in the finally below.
-        List<Row> allRows = new();
-        ColumnLookup? sourceLookup = null;
-        ColumnLookup? outputLookup = null;
+        using MaterializedInput input = new(context, "WINDOW");
         RowBatch? outputBatch = null;
 
         try
         {
-            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
-            {
-                try
-                {
-                    if (sourceLookup is null && inputBatch.Count > 0)
-                    {
-                        sourceLookup = inputBatch.ColumnLookup;
-                    }
+            await input.CollectAsync(_source.ExecuteAsync(context)).ConfigureAwait(false);
 
-                    for (int i = 0; i < inputBatch.Count; i++)
-                    {
-                        context.CancellationToken.ThrowIfCancellationRequested();
+            if (input.Rows.Count == 0) yield break;
 
-                        Row sourceRow = inputBatch[i];
-                        DataValue[] copy = pool.RentAndCopyDataValues(
-                            sourceRow, inputBatch.Arena, context.Store);
-                        allRows.Add(new Row(sourceRow.ColumnLookup, copy));
-                    }
-                }
-                finally
-                {
-                    context.ReturnRowBatch(inputBatch);
-                }
-            }
-
-            if (allRows.Count == 0)
-            {
-                yield break;
-            }
-
-            int inputFieldCount = allRows[0].FieldCount;
+            int inputFieldCount = input.Rows[0].FieldCount;
             int totalFieldCount = inputFieldCount + _windowColumns.Count;
 
             // Result slot for each row × each window column.
-            DataValue[][] windowResults = new DataValue[allRows.Count][];
+            DataValue[][] windowResults = new DataValue[input.Rows.Count][];
             for (int i = 0; i < windowResults.Length; i++)
             {
                 windowResults[i] = new DataValue[_windowColumns.Count];
@@ -146,7 +112,7 @@ public sealed class WindowOperator : QueryOperator
             {
                 WindowSpecification spec = _windowColumns[specGroup.Value[0]].WindowSpecification;
                 await ComputeForSpecificationAsync(
-                    spec, specGroup.Value, allRows, evaluator, windowResults,
+                    spec, specGroup.Value, input.Rows, evaluator, windowResults,
                     context.Store, context.SidecarRegistry, context.CancellationToken).ConfigureAwait(false);
             }
 
@@ -155,19 +121,19 @@ public sealed class WindowOperator : QueryOperator
             string[] outputNames = new string[totalFieldCount];
             for (int field = 0; field < inputFieldCount; field++)
             {
-                outputNames[field] = sourceLookup!.ColumnNames[field];
+                outputNames[field] = input.SourceLookup!.ColumnNames[field];
             }
             for (int windowColumnIndex = 0; windowColumnIndex < _windowColumns.Count; windowColumnIndex++)
             {
                 outputNames[inputFieldCount + windowColumnIndex] =
                     _windowColumns[windowColumnIndex].OutputName;
             }
-            outputLookup = new ColumnLookup(outputNames);
+            ColumnLookup outputLookup = new(outputNames);
 
             // Emit rows in original input order, augmented with window columns.
-            for (int rowIndex = 0; rowIndex < allRows.Count; rowIndex++)
+            for (int rowIndex = 0; rowIndex < input.Rows.Count; rowIndex++)
             {
-                Row sourceRow = allRows[rowIndex];
+                Row sourceRow = input.Rows[rowIndex];
 
                 DataValue[] values = pool.RentDataValues(totalFieldCount);
                 for (int field = 0; field < inputFieldCount; field++)
@@ -203,12 +169,7 @@ public sealed class WindowOperator : QueryOperator
             {
                 context.ReturnRowBatch(outputBatch);
             }
-
-            // Release the stabilised source-row rentals.
-            foreach (Row row in allRows)
-            {
-                pool.ReturnRow(row);
-            }
+            // MaterializedInput's using-Dispose releases source-row rentals + accountant.
         }
     }
 
@@ -233,29 +194,18 @@ public sealed class WindowOperator : QueryOperator
             originalIndices[i] = i;
         }
 
-        // Partition the rows by PARTITION BY expressions.
-        List<(int StartIndex, int Count)> partitionRanges;
-        if (spec.PartitionBy is null or { Count: 0 })
-        {
-            // No PARTITION BY: entire result set is one partition.
-            partitionRanges = [(0, allRows.Count)];
-        }
-        else
-        {
-            // Hash-partition rows by PARTITION BY key values.
-            partitionRanges = await BuildPartitionsAsync(
+        List<(int StartIndex, int Count)> partitionRanges = spec.PartitionBy is null or { Count: 0 }
+            ? [(0, allRows.Count)]
+            : await PartitionBuilder.BuildPartitionsAsync(
                 allRows, originalIndices, spec.PartitionBy, evaluator, cancellationToken).ConfigureAwait(false);
-        }
 
-        // For each partition, sort by ORDER BY and compute all window columns.
         foreach ((int startIndex, int count) in partitionRanges)
         {
-            // Sort partition rows by ORDER BY expressions (stable sort via index).
             if (spec.OrderBy is { Count: > 0 })
             {
-                await SortPartitionAsync(
+                await PartitionSorter.SortPartitionAsync(
                     allRows, originalIndices, startIndex, count, spec.OrderBy, evaluator,
-                    store, sidecarRegistry, cancellationToken).ConfigureAwait(false);
+                    store, sidecarRegistry, "WINDOW", cancellationToken).ConfigureAwait(false);
             }
 
             // Build partition row list for the computation interface.
@@ -292,213 +242,6 @@ public sealed class WindowOperator : QueryOperator
                     windowResults[originalRowIndex][windowColumnIndex] = partitionResults[i];
                 }
             }
-        }
-    }
-
-    /// <summary>
-    /// Groups rows into partitions based on PARTITION BY key expressions.
-    /// Returns contiguous ranges in the reordered <paramref name="indices"/> array.
-    /// </summary>
-    private static async ValueTask<List<(int StartIndex, int Count)>> BuildPartitionsAsync(
-        List<Row> rows,
-        int[] indices,
-        IReadOnlyList<Expression> partitionByExpressions,
-        ExpressionEvaluator evaluator,
-        CancellationToken cancellationToken)
-    {
-        bool useSingleKey = partitionByExpressions.Count == 1;
-
-        if (useSingleKey)
-        {
-            Dictionary<DataValue, List<int>> groups = new();
-            for (int i = 0; i < indices.Length; i++)
-            {
-                DataValue key = await evaluator.EvaluateAsync(partitionByExpressions[0], rows[indices[i]], cancellationToken).ConfigureAwait(false);
-                if (!groups.TryGetValue(key, out List<int>? list))
-                {
-                    list = new List<int>();
-                    groups[key] = list;
-                }
-                list.Add(indices[i]);
-            }
-
-            List<(int, int)> ranges = new(groups.Count);
-            int position = 0;
-            foreach (List<int> group in groups.Values)
-            {
-                for (int i = 0; i < group.Count; i++)
-                {
-                    indices[position + i] = group[i];
-                }
-                ranges.Add((position, group.Count));
-                position += group.Count;
-            }
-            return ranges;
-        }
-        else
-        {
-            Dictionary<CompositeKey, List<int>> groups = new();
-            for (int i = 0; i < indices.Length; i++)
-            {
-                DataValue[] parts = new DataValue[partitionByExpressions.Count];
-                for (int j = 0; j < partitionByExpressions.Count; j++)
-                {
-                    parts[j] = await evaluator.EvaluateAsync(partitionByExpressions[j], rows[indices[i]], cancellationToken).ConfigureAwait(false);
-                }
-                CompositeKey key = new(parts);
-                if (!groups.TryGetValue(key, out List<int>? list))
-                {
-                    list = new List<int>();
-                    groups[key] = list;
-                }
-                list.Add(indices[i]);
-            }
-
-            List<(int, int)> ranges = new(groups.Count);
-            int position = 0;
-            foreach (List<int> group in groups.Values)
-            {
-                for (int i = 0; i < group.Count; i++)
-                {
-                    indices[position + i] = group[i];
-                }
-                ranges.Add((position, group.Count));
-                position += group.Count;
-            }
-            return ranges;
-        }
-    }
-
-    /// <summary>
-    /// Sorts a contiguous partition range within the <paramref name="indices"/> array
-    /// by the given ORDER BY items using the same comparison logic as <see cref="OrderByOperator"/>.
-    /// Pre-evaluates sort keys per row so the inner comparator stays synchronous
-    /// (Array.Sort can't await).
-    /// </summary>
-    private static async ValueTask SortPartitionAsync(
-        List<Row> rows,
-        int[] indices,
-        int startIndex,
-        int count,
-        IReadOnlyList<OrderByItem> orderByItems,
-        ExpressionEvaluator evaluator,
-        IValueStore store,
-        SidecarRegistry? sidecarRegistry,
-        CancellationToken cancellationToken)
-    {
-        // Pre-evaluate sort keys once per (row, item) so the comparator can stay sync.
-        DataValue[][] sortKeys = new DataValue[count][];
-        for (int i = 0; i < count; i++)
-        {
-            int rowIndex = indices[startIndex + i];
-            Row row = rows[rowIndex];
-            DataValue[] keys = new DataValue[orderByItems.Count];
-            for (int j = 0; j < orderByItems.Count; j++)
-            {
-                keys[j] = await evaluator.EvaluateAsync(orderByItems[j].Expression, row, cancellationToken).ConfigureAwait(false);
-            }
-            sortKeys[i] = keys;
-        }
-
-        // Build a parallel index array (0..count-1) we sort, swapping sortKeys in lockstep.
-        int[] localIndices = new int[count];
-        for (int i = 0; i < count; i++) localIndices[i] = i;
-
-        Array.Sort(localIndices, Comparer<int>.Create((a, b) =>
-        {
-            for (int k = 0; k < orderByItems.Count; k++)
-            {
-                DataValue leftValue = sortKeys[a][k];
-                DataValue rightValue = sortKeys[b][k];
-                int comparison = CompareDataValues(
-                    leftValue, store, sidecarRegistry,
-                    rightValue, store, sidecarRegistry);
-                if (orderByItems[k].Direction == SortDirection.Descending)
-                {
-                    comparison = -comparison;
-                }
-                if (comparison != 0)
-                {
-                    return comparison;
-                }
-            }
-            return 0;
-        }));
-
-        // Apply the sorted order back to `indices[startIndex .. startIndex+count]`.
-        int[] reordered = new int[count];
-        for (int i = 0; i < count; i++)
-        {
-            reordered[i] = indices[startIndex + localIndices[i]];
-        }
-        Array.Copy(reordered, 0, indices, startIndex, count);
-    }
-
-    private static int CompareDataValues(
-        DataValue left, IValueStore leftStore, SidecarRegistry? leftRegistry,
-        DataValue right, IValueStore rightStore, SidecarRegistry? rightRegistry)
-    {
-        if (left.IsNull && right.IsNull) return 0;
-        if (left.IsNull) return 1;
-        if (right.IsNull) return -1;
-
-        return DataValueComparer.Compare(
-            left, leftStore, leftRegistry,
-            right, rightStore, rightRegistry);
-    }
-
-    /// <summary>
-    /// Structural equality key for <see cref="WindowSpecification"/> to group
-    /// window columns that share identical partitioning, ordering, and framing.
-    /// </summary>
-    private sealed class WindowSpecificationKey : IEquatable<WindowSpecificationKey>
-    {
-        private readonly WindowSpecification _spec;
-        private readonly int _hashCode;
-
-        public WindowSpecificationKey(WindowSpecification spec)
-        {
-            _spec = spec;
-            _hashCode = ComputeHash(spec);
-        }
-
-        public bool Equals(WindowSpecificationKey? other)
-        {
-            if (other is null) return false;
-            if (ReferenceEquals(this, other)) return true;
-            return SpecsEqual(_spec, other._spec);
-        }
-
-        public override bool Equals(object? other) => other is WindowSpecificationKey key && Equals(key);
-        public override int GetHashCode() => _hashCode;
-
-        private static int ComputeHash(WindowSpecification spec)
-        {
-            HashCode hash = new();
-            if (spec.PartitionBy is not null)
-            {
-                foreach (Expression expression in spec.PartitionBy)
-                {
-                    hash.Add(expression);
-                }
-            }
-            if (spec.OrderBy is not null)
-            {
-                foreach (OrderByItem item in spec.OrderBy)
-                {
-                    hash.Add(item);
-                }
-            }
-            if (spec.Frame is not null)
-            {
-                hash.Add(spec.Frame);
-            }
-            return hash.ToHashCode();
-        }
-
-        private static bool SpecsEqual(WindowSpecification a, WindowSpecification b)
-        {
-            return Equals(a, b);
         }
     }
 }
