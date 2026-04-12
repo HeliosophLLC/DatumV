@@ -113,7 +113,7 @@ public sealed class MergeJoinOperator : QueryOperator
         bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
         bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
 
-        JoinOutputWriter writer = new(context, pool);
+        JoinOutputWriter writer = new(context);
         Row? residualCheckRow = null;
         DataValue[]? residualCheckBuffer = null;
         NullPadCache cachedNullRight = new(pool);

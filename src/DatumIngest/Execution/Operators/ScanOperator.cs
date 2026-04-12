@@ -331,7 +331,7 @@ public sealed class ScanOperator : QueryOperator
         // recovers the leftover on mid-fill exceptions and upstream throws during
         // the next MoveNextAsync. All three branches accumulate through it; the
         // ReferenceEquals lookup-check guards against schema drift mid-stream.
-        ScanOutputWriter writer = new(context);
+        RowCopyOutputWriter writer = new(context);
 
         try
         {
@@ -379,7 +379,7 @@ public sealed class ScanOperator : QueryOperator
     private async IAsyncEnumerable<RowBatch> ExecuteExactSeekAsync(
         ITableProvider provider,
         List<long> exactPositions,
-        ScanOutputWriter writer,
+        RowCopyOutputWriter writer,
         ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
@@ -423,7 +423,7 @@ public sealed class ScanOperator : QueryOperator
     /// </remarks>
     private async IAsyncEnumerable<RowBatch> ExecuteStreamAllAsync(
         ITableProvider provider,
-        ScanOutputWriter writer,
+        RowCopyOutputWriter writer,
         ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
@@ -456,7 +456,7 @@ public sealed class ScanOperator : QueryOperator
         ITableProvider provider,
         SourceIndex sourceIndex,
         List<(long Start, long End, int ChunkIndex)> activeRanges,
-        ScanOutputWriter writer,
+        RowCopyOutputWriter writer,
         ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;

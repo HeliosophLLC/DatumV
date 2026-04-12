@@ -87,7 +87,7 @@ public sealed class LateralJoinOperator : QueryOperator
     {
         Pool pool = context.Pool;
         ExpressionEvaluator evaluator = new(context);
-        JoinOutputWriter writer = new(context, pool);
+        JoinOutputWriter writer = new(context);
         Row? residualCheckRow = null;
         DataValue[]? residualCheckBuffer = null;
         NullPadCache cachedNullRight = new(pool);

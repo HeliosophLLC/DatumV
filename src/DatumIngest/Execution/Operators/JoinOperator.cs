@@ -420,7 +420,7 @@ public sealed class JoinOperator : QueryOperator
         DataValue[]? probeKeyScratch = (hashTable.KeyCount > 1)
             ? ArrayPool<DataValue>.Shared.Rent(hashTable.KeyCount)
             : null;
-        JoinOutputWriter writer = new(context, pool);
+        JoinOutputWriter writer = new(context);
         NullPadCache cachedNullBuild = new(pool);
         NullPadCache cachedNullProbe = new(pool);
 
@@ -903,7 +903,7 @@ public sealed class JoinOperator : QueryOperator
         // build batches can return to the pool immediately. Same-store fast path
         // under one-arena-per-query keeps this allocation-only (no payload copy).
         BuildSideMaterializer buildRows = new(pool, context.Store);
-        JoinOutputWriter writer = new(context, pool);
+        JoinOutputWriter writer = new(context);
         NullPadCache cachedNullBuild = new(pool);
         NullPadCache cachedNullProbe = new(pool);
         Row? reusableFilterRow = null;
@@ -1025,7 +1025,7 @@ public sealed class JoinOperator : QueryOperator
     private async IAsyncEnumerable<RowBatch> ExecuteCrossJoinAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        JoinOutputWriter writer = new(context, pool);
+        JoinOutputWriter writer = new(context);
 
         // Right side rows are held in an operator-local list across the entire
         // probe phase, so we need DataValue[] arrays we own — not slices of the

@@ -1,7 +1,6 @@
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators.GroupBy;
 
@@ -22,25 +21,20 @@ namespace DatumIngest.Execution.Operators.GroupBy;
 /// must match <see cref="ExecutionContext.Store"/> so emitted accumulator
 /// values resolve correctly against the output batch's arena.
 /// </remarks>
-internal sealed class OutputBatchWriter
+internal sealed class OutputBatchWriter : OutputBatchAccumulator
 {
     private readonly IReadOnlyList<Expression> _groupByExpressions;
     private readonly IReadOnlyList<AggregateColumn> _aggregateColumns;
-    private readonly ExecutionContext _context;
-    private readonly Pool _pool;
 
     private ColumnLookup? _outputLookup;
-    private RowBatch? _current;
 
     public OutputBatchWriter(
         IReadOnlyList<Expression> groupByExpressions,
         IReadOnlyList<AggregateColumn> aggregateColumns,
-        ExecutionContext context)
+        ExecutionContext context) : base(context)
     {
         _groupByExpressions = groupByExpressions;
         _aggregateColumns = aggregateColumns;
-        _context = context;
-        _pool = context.Pool;
     }
 
     /// <summary>
@@ -51,28 +45,9 @@ internal sealed class OutputBatchWriter
     public async ValueTask<RowBatch?> AddAsync(GroupState group, bool isGlobalAggregation, InvocationFrame frame)
     {
         Row emitted = await EmitGroupRowAsync(group, isGlobalAggregation, frame).ConfigureAwait(false);
-        _current ??= _context.RentRowBatch(_outputLookup!);
-        _current.Add(emitted.RawValues);
-        if (_current.IsFull)
-        {
-            RowBatch ready = _current;
-            _current = null;
-            return ready;
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// Detaches and returns the in-progress batch (if any). Call once after the
-    /// last <see cref="AddAsync"/> to retrieve the trailing batch for yielding.
-    /// Safe to call from a <c>finally</c> block to recover ownership on
-    /// exception paths — returns <see langword="null"/> if already flushed.
-    /// </summary>
-    public RowBatch? Flush()
-    {
-        RowBatch? trailing = _current;
-        _current = null;
-        return trailing;
+        RowBatch current = EnsureRentedAndGetCurrent(_outputLookup!);
+        current.Add(emitted.RawValues);
+        return TakeIfFull();
     }
 
     private async ValueTask<Row> EmitGroupRowAsync(GroupState group, bool isGlobalAggregation, InvocationFrame frame)
@@ -96,7 +71,7 @@ internal sealed class OutputBatchWriter
             _outputLookup = new ColumnLookup(outputNames);
         }
 
-        DataValue[] values = _pool.RentDataValues(outputFieldCount);
+        DataValue[] values = Pool.RentDataValues(outputFieldCount);
 
         if (!isGlobalAggregation)
         {

@@ -14,33 +14,26 @@ namespace DatumIngest.Execution.Operators.Joins;
 /// <para>
 /// Each emit method returns a <see cref="RowBatch"/> when the current batch
 /// fills (caller must <c>yield return</c> it) and <see langword="null"/>
-/// otherwise. <see cref="Flush"/> returns the in-progress batch (if any) and
-/// detaches it from the writer; safe to call from a <c>finally</c> block.
+/// otherwise. <see cref="OutputBatchAccumulator.Flush"/> returns the
+/// in-progress batch (if any) and detaches it from the writer; safe to call
+/// from a <c>finally</c> block.
 /// </para>
 /// <para>
 /// <b>Schema invariant:</b> within a single execution, only one of the emit
 /// shapes (<see cref="EmitCombined"/> or <see cref="EmitPassThrough"/>) is
 /// expected to fire. This matches the join semantics today — combined emits
 /// require a non-empty build side, pass-through emits fire only when the
-/// build side is empty or the join is semi-style. The writer asserts the
-/// invariant on each call: the rented batch's
-/// <see cref="ColumnLookup"/> must match every subsequent emit's lookup.
-/// A mismatch throws — defending against future regressions.
+/// build side is empty or the join is semi-style. The shape-stability
+/// assertion in <see cref="OutputBatchAccumulator"/> defends against future
+/// regressions.
 /// </para>
 /// </remarks>
-internal sealed class JoinOutputWriter
+internal sealed class JoinOutputWriter : OutputBatchAccumulator
 {
-    private readonly ExecutionContext _context;
-    private readonly Pool _pool;
-
     private JoinSchema? _combinedSchema;
-    private ColumnLookup? _rentedLookup;
-    private RowBatch? _current;
 
-    public JoinOutputWriter(ExecutionContext context, Pool pool)
+    public JoinOutputWriter(ExecutionContext context) : base(context)
     {
-        _context = context;
-        _pool = pool;
     }
 
     /// <summary>
@@ -59,8 +52,8 @@ internal sealed class JoinOutputWriter
     public RowBatch? EmitCombined(Row left, Row right)
     {
         JoinSchema schema = _combinedSchema ??= JoinSchema.Build(left, right);
-        EnsureRented(schema.ColumnLookup);
-        _current!.Add(schema.CombinePooledValues(left, right, _pool));
+        RowBatch current = EnsureRentedAndGetCurrent(schema.ColumnLookup);
+        current.Add(schema.CombinePooledValues(left, right, Pool));
         return TakeIfFull();
     }
 
@@ -72,50 +65,9 @@ internal sealed class JoinOutputWriter
     /// </summary>
     public RowBatch? EmitPassThrough(Row row, Arena sourceArena)
     {
-        EnsureRented(row.ColumnLookup);
-        DataValue[] copy = _pool.RentAndCopyDataValues(row, sourceArena, _current!.Arena);
-        _current.Add(copy);
+        RowBatch current = EnsureRentedAndGetCurrent(row.ColumnLookup);
+        DataValue[] copy = Pool.RentAndCopyDataValues(row, sourceArena, current.Arena);
+        current.Add(copy);
         return TakeIfFull();
-    }
-
-    /// <summary>
-    /// Detaches and returns the in-progress batch (if any). Idempotent — calls
-    /// after the first non-null return null. Safe to invoke from a
-    /// <c>finally</c> block to recover ownership on exception paths.
-    /// </summary>
-    public RowBatch? Flush()
-    {
-        RowBatch? trailing = _current;
-        _current = null;
-        _rentedLookup = null;
-        return trailing;
-    }
-
-    private void EnsureRented(ColumnLookup lookup)
-    {
-        if (_current is null)
-        {
-            _current = _context.RentRowBatch(lookup);
-            _rentedLookup = lookup;
-            return;
-        }
-
-        if (!ReferenceEquals(_rentedLookup, lookup))
-        {
-            throw new InvalidOperationException(
-                "JoinOutputWriter received emits with different ColumnLookup references in the same batch — the writer assumes one shape per execution.");
-        }
-    }
-
-    private RowBatch? TakeIfFull()
-    {
-        if (_current!.IsFull)
-        {
-            RowBatch ready = _current;
-            _current = null;
-            _rentedLookup = null;
-            return ready;
-        }
-        return null;
     }
 }
