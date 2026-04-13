@@ -1,8 +1,6 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -17,7 +15,7 @@ public sealed class DetectBlurFunctionTests : ServiceTestBase
     public async Task SolidImage_HasZeroLaplacianVariance()
     {
         ValueRef result = await new DetectBlurFunction().ExecuteAsync(
-            new[] { MakeSolid(16, 16, 128, 128, 128) }, MakeFrame(), default);
+            new[] { MakeSolid(16, 16, 128, 128, 128) }, CreateEvaluationFrame(), default);
         Assert.Equal(0f, result.AsFloat32(), 3);
     }
 
@@ -26,9 +24,9 @@ public sealed class DetectBlurFunctionTests : ServiceTestBase
     {
         // Sharp transitions (checker) should outscore a smooth gradient.
         ValueRef checker = await new DetectBlurFunction().ExecuteAsync(
-            new[] { MakeCheckerboard(16, 16) }, MakeFrame(), default);
+            new[] { MakeCheckerboard(16, 16) }, CreateEvaluationFrame(), default);
         ValueRef gradient = await new DetectBlurFunction().ExecuteAsync(
-            new[] { MakeHorizontalGradient(16, 16) }, MakeFrame(), default);
+            new[] { MakeHorizontalGradient(16, 16) }, CreateEvaluationFrame(), default);
 
         Assert.True(checker.AsFloat32() > gradient.AsFloat32(),
             $"Expected checker variance ({checker.AsFloat32()}) > gradient variance ({gradient.AsFloat32()}).");
@@ -38,7 +36,7 @@ public sealed class DetectBlurFunctionTests : ServiceTestBase
     public async Task ImageSmallerThan3x3_ReturnsZero()
     {
         ValueRef result = await new DetectBlurFunction().ExecuteAsync(
-            new[] { MakeSolid(2, 2, 128, 128, 128) }, MakeFrame(), default);
+            new[] { MakeSolid(2, 2, 128, 128, 128) }, CreateEvaluationFrame(), default);
         Assert.Equal(0f, result.AsFloat32(), 3);
     }
 
@@ -46,7 +44,7 @@ public sealed class DetectBlurFunctionTests : ServiceTestBase
     public async Task Null_ReturnsNullFloat32()
     {
         ValueRef result = await new DetectBlurFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Image) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Image) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Float32, result.Kind);
     }
@@ -87,12 +85,5 @@ public sealed class DetectBlurFunctionTests : ServiceTestBase
             }
         }
         return ValueRef.FromImage(bmp);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

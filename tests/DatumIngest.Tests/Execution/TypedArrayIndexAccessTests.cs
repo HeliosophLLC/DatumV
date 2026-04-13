@@ -1,4 +1,4 @@
-﻿using DatumIngest.Execution;
+using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -8,31 +8,33 @@ namespace DatumIngest.Tests.Execution;
 
 /// <summary>
 /// Tests that <see cref="ExpressionEvaluator"/>'s index-access path can read
-/// elements out of typed arrays (<c>Kind=elementKind + IsArray</c>) — the
+/// elements out of typed arrays (<c>Kind=elementKind + IsArray</c>) � the
 /// shape <c>ARRAY_AGG</c>, <c>ValueRef.FromArray</c>, and the YOLO output
 /// path produce.
 /// </summary>
 public class TypedArrayIndexAccessTests : ServiceTestBase
 {
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
+    private Row MakeRow(params (string Name, DataValue Value)[] columns)
     {
         string[] names = columns.Select(c => c.Name).ToArray();
         DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(new ColumnLookup(names), values);
+        return MakeRow(names, values);
     }
 
-    private static async Task<DataValue> EvalAsync(IndexAccessExpression access, Row row, Arena arena)
+    private async Task<DataValue> EvalAsync(IndexAccessExpression access, Row row, Arena arena)
     {
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
-        EvaluationFrame frame = new(row, arena, arena, evaluator.Accountant);
+        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
+        EvaluationFrame frame = evaluator.CreateFrame(row, arena);
         return await evaluator.EvaluateAsync(access, frame);
     }
 
-    private static async Task<DataValue> EvalWithRegistryAsync(
+    private async Task<DataValue> EvalWithRegistryAsync(
         IndexAccessExpression access, Row row, Arena arena, TypeRegistry registry)
     {
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), typeRegistry: registry);
-        EvaluationFrame frame = new(row, arena, arena, evaluator.Accountant);
+        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
+        EvaluationFrame frame = evaluator.CreateFrame(row, arena);
         return await evaluator.EvaluateAsync(access, frame);
     }
 
@@ -42,7 +44,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
         // After the per-element TypeId layout, FromStructArray writes the
         // element struct's TypeId directly into each slot's reserved bytes.
         // Index access just returns the per-element DataValue, which already
-        // carries its TypeId — no array-container hop, works for N=1 too.
+        // carries its TypeId � no array-container hop, works for N=1 too.
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
         try
@@ -76,10 +78,10 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
     [Fact]
     public async Task IndexAccess_ArrayOfStruct_N1Inline_StampsElementTypeId()
     {
-        // The case that motivated the layout change — single-element struct
+        // The case that motivated the layout change � single-element struct
         // arrays previously stripped TypeId because the inline layout used
         // _charCount as the element count. With per-element TypeId in the
-        // slot's reserved bytes, N=1 round-trips just like N≥2.
+        // slot's reserved bytes, N=1 round-trips just like N=2.
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
         try

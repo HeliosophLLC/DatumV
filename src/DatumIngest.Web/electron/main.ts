@@ -30,10 +30,7 @@ interface DialogOpenSpec {
 // AppUserModelId as their title — without this they read "electron.app.Electron".
 // setName also reframes the default menu item ("About electron" → "About DatumIngest")
 // and is the source of `app.getName()` used elsewhere.
-app.setName('DatumIngest');
-if (process.platform === 'win32') {
-  app.setAppUserModelId('DatumIngest');
-}
+
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();

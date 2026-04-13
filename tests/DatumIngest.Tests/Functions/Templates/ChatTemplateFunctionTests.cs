@@ -16,7 +16,7 @@ namespace DatumIngest.Tests.Functions.Templates;
 /// composition that SQL would produce, locking in the expected wire-text
 /// output for at least one multi-turn conversation per family.
 /// </remarks>
-public sealed class ChatTemplateFunctionTests
+public sealed class ChatTemplateFunctionTests : ServiceTestBase
 {
     /// <summary>
     /// Composes the equivalent of:
@@ -27,7 +27,7 @@ public sealed class ChatTemplateFunctionTests
     /// them in order. Lets the assertions match exactly what a SQL
     /// pipeline would produce, not just the underlying LlamaChatTemplate.
     /// </summary>
-    private static string ComposeViaFunctions(
+    private string ComposeViaFunctions(
         FunctionRegistry registry,
         string family,
         params (string Role, string Content)[] msgs)
@@ -52,9 +52,9 @@ public sealed class ChatTemplateFunctionTests
         return f;
     }
 
-    private static ValueRef Invoke(IScalarFunction fn, params ValueRef[] arguments)
+    private ValueRef Invoke(IScalarFunction fn, params ValueRef[] arguments)
     {
-        EvaluationFrame frame = default;
+        EvaluationFrame frame = CreateEvaluationFrame();
         return fn.ExecuteAsync(arguments, frame, default).GetAwaiter().GetResult();
     }
 

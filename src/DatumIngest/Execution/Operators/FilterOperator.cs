@@ -56,7 +56,7 @@ public sealed class FilterOperator : QueryOperator
     /// <inheritdoc/>
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         Pool pool = context.Pool;
         // Invariant: outputBatch != null ⟺ producer still owns it. Yielding transfers
         // ownership, so we null the local *before* yield. The outer finally cleans up
@@ -81,7 +81,7 @@ public sealed class FilterOperator : QueryOperator
                     for (int index = 0, count = inputBatch.Count; index < count; index++)
                     {
                         Row row = inputBatch[index];
-                        EvaluationFrame frame = new(row, sourceArena, targetArena, context.Accountant, context.OuterRow, context.SidecarRegistry, context.Types, context.TypeIdTranslations);
+                        EvaluationFrame frame = new(row, sourceArena, targetArena, context, context.OuterRow);
 
                         if (!await evaluator.EvaluateAsBooleanAsync(Predicate, frame, context.CancellationToken).ConfigureAwait(false)) continue;
 

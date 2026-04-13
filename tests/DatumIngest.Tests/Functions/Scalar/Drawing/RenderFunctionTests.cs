@@ -1,7 +1,5 @@
 using System.Collections.Immutable;
-using System.Numerics;
 
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Drawing;
 using DatumIngest.Model;
@@ -179,7 +177,7 @@ public sealed class RenderFunctionTests : ServiceTestBase
     [Fact]
     public async Task Render_NullDrawing_ReturnsNullImage()
     {
-        var (frame, _) = MakeFrame();
+        var frame = CreateEvaluationFrame();
         ValueRef result = await new RenderFunction().ExecuteAsync(
             new[] { ValueRef.Null(DataKind.Drawing), MakeSize(4, 4) },
             frame, default);
@@ -232,7 +230,7 @@ public sealed class RenderFunctionTests : ServiceTestBase
 
     private async Task<ValueRef> Render(DrawingPayload payload, int width, int height)
     {
-        var (frame, _) = MakeFrame();
+        var frame = CreateEvaluationFrame();
         return await new RenderFunction().ExecuteAsync(
             new[] { ValueRef.FromDrawing(payload), MakeSize(width, height) },
             frame, default);
@@ -240,12 +238,4 @@ public sealed class RenderFunctionTests : ServiceTestBase
 
     private static ValueRef MakeSize(int w, int h) => ValueRef.FromPoint2D(w, h);
 
-    private (EvaluationFrame Frame, Arena Arena) MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        EvaluationFrame frame = new(
-            Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-        return (frame, arena);
-    }
 }

@@ -17,10 +17,9 @@ namespace DatumIngest.Tests.Functions;
 public sealed class TypeofFunctionTests : ServiceTestBase
 {
     private static readonly TypeofFunction Func = new();
-    private static readonly EvaluationFrame DummyFrame = default;
 
-    private static ValueRef Invoke(ValueRef arg) =>
-        Func.ExecuteAsync(new ReadOnlyMemory<ValueRef>(new[] { arg }), DummyFrame, default)
+    private ValueRef Invoke(ValueRef arg) =>
+        Func.ExecuteAsync(new ReadOnlyMemory<ValueRef>([arg]), CreateEvaluationFrame(), default)
             .GetAwaiter().GetResult();
 
     [Fact]

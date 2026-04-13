@@ -102,7 +102,7 @@ public sealed class RowEnricherOperator : QueryOperator
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         Pool pool = context.Pool;
         ColumnLookup? outputLookup = null;
         int[]? sourceCopySlots = null;
@@ -137,12 +137,8 @@ public sealed class RowEnricherOperator : QueryOperator
                         sourceRow,
                         sourceBatch.Arena,
                         outputBatch.Arena,
-                        context.Accountant,
-                        context.OuterRow,
-                        context.SidecarRegistry,
-                        context.Types,
-                        context.TypeIdTranslations,
-                        videoRegistry: context.VideoRegistry);
+                        context,
+                        context.OuterRow);
 
                     DataValue[] outValues = pool.RentDataValues(outputLookup.Count);
 

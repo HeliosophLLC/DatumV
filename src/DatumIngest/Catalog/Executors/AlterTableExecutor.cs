@@ -651,7 +651,8 @@ internal static class AlterTableExecutor
         if (newColIdx < 0) return;
 
         using Arena workArena = new();
-        ExpressionEvaluator evaluator = new(catalog.Functions, sidecarRegistry: catalog.SidecarRegistry);
+        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(store: workArena);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         List<RowUpdateRequest> requests = new();
         long liveRowIndex = 0;
 
@@ -667,14 +668,7 @@ internal static class AlterTableExecutor
                 for (int r = 0; r < batch.Count; r++, liveRowIndex++)
                 {
                     Row row = batch[r];
-                    EvaluationFrame frame = new(
-                        row,
-                        scanArena,
-                        workArena,
-                        evaluator.Accountant,
-                        outerRow: null,
-                        sidecarRegistry: catalog.SidecarRegistry,
-                        types: null);
+                    EvaluationFrame frame = new(row, scanArena, workArena, context);
                     ValueRef result = await evaluator.EvaluateAsValueRefAsync(
                         column.ComputedExpression!, frame, CancellationToken.None).ConfigureAwait(false);
                     DataValue computed = ComputedColumnEvaluator.ConvertValueRefToTarget(

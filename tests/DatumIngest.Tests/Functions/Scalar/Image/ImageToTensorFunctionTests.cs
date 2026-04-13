@@ -3,7 +3,6 @@ using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -31,12 +30,6 @@ public sealed class ImageToTensorChwFunctionTests : ServiceTestBase
         return bmp;
     }
 
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-    }
 
     private static ValueRef Int32Array(params int[] values)
         => ValueRef.FromPrimitiveArray(values, DataKind.Int32);
@@ -44,12 +37,12 @@ public sealed class ImageToTensorChwFunctionTests : ServiceTestBase
     private static ValueRef Float32Array(params float[] values)
         => ValueRef.FromPrimitiveArray(values, DataKind.Float32);
 
-    private static async Task<float[]> InvokeAsync(params ValueRef[] args)
+    private async Task<float[]> InvokeAsync(params ValueRef[] args)
     {
         ImageToTensorChwFunction fn = new();
         ValueRef result = await fn.ExecuteAsync(
             args.AsMemory(),
-            new EvaluationFrame(Row.Empty, new Arena(), new Arena(), new MemoryAccountant(), types: new TypeRegistry()),
+            CreateEvaluationFrame(),
             CancellationToken.None);
 
         Assert.True(result.IsArray, $"Expected array result, got Kind={result.Kind}");
@@ -208,7 +201,7 @@ public sealed class ImageToTensorChwFunctionTests : ServiceTestBase
         ImageToTensorChwFunction fn = new();
         ValueRef result = await fn.ExecuteAsync(
             new ReadOnlyMemory<ValueRef>([ValueRef.Null(DataKind.Image), Int32Array(1, 1)]),
-            MakeFrame(),
+            CreateEvaluationFrame(),
             CancellationToken.None);
 
         Assert.True(result.IsArray);

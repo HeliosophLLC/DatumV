@@ -170,10 +170,12 @@ internal static class InsertExecutor
         // columns (no source row). Same arena for source and target so array
         // payloads materialised by array(...) land directly in the batch's
         // arena and ConvertSourceValue can pass them through without copy.
-        ExpressionEvaluator evaluator = new(catalog.Functions, store: arena, accountant: accountant);
+        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(store: arena,
+            accountant: accountant);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         ColumnLookup emptyLookup = new(Array.Empty<string>());
         Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
-        EvaluationFrame frame = new(emptyRow, arena, arena, accountant);
+        EvaluationFrame frame = new(emptyRow, arena, context);
 
         for (int rowIndex = 0; rowIndex < values.Rows.Count; rowIndex++)
         {
@@ -360,10 +362,12 @@ internal static class InsertExecutor
                 // Tableless evaluator + empty frame for the per-row DEFAULT
                 // evaluation path. Built per batch because targetArena is
                 // batch-scoped; reused across every row in the batch.
-                ExpressionEvaluator defaultEvaluator = new(catalog.Functions, store: targetArena, accountant: accountant);
+                using DatumIngest.Execution.ExecutionContext defaultContext = catalog.CreateExecutionContext(store: targetArena,
+                    accountant: accountant);
+                ExpressionEvaluator defaultEvaluator = defaultContext.CreateEvaluator();
                 ColumnLookup emptyLookup = new(Array.Empty<string>());
                 Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
-                EvaluationFrame defaultFrame = new(emptyRow, targetArena, targetArena, accountant);
+                EvaluationFrame defaultFrame = new(emptyRow, targetArena, defaultContext);
 
                 for (int r = 0; r < sourceBatch.Count; r++)
                 {
@@ -1062,9 +1066,10 @@ internal static class InsertExecutor
         // expression can read column references via ColumnReference.
         // Source and Target arenas are both the INSERT batch's arena —
         // computed values land directly in the batch.
-        ExpressionEvaluator evaluator = new(catalog.Functions, store: arena);
+        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(store: arena);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         Row partialRow = new(targetLookup, targetRow);
-        EvaluationFrame frame = new(partialRow, arena, arena, evaluator.Accountant);
+        EvaluationFrame frame = new(partialRow, arena, context);
 
         for (int i = 0; i < plan.OmittedFills.Length; i++)
         {

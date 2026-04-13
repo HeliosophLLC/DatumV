@@ -73,7 +73,7 @@ internal sealed class ScalarSubqueryOperator : QueryOperator
                         context.CancellationToken.ThrowIfCancellationRequested();
 
                         // Execute the inner subquery with the current outer row as correlation context.
-                        ExecutionContext innerContext = context.WithOuterRow(outerRow);
+                        ExecutionContext innerContext = context.Derive(outerRow: outerRow);
 
                         // Extract scalar value: zero rows → NULL, one row → first column value.
                         // The DataValue is copied out as a struct before the inner batch is

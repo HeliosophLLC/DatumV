@@ -1,8 +1,6 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -94,7 +92,7 @@ public sealed class ImageToBytesFunctionTests : ServiceTestBase
     {
         return await new ImageToBytesFunction().ExecuteAsync(
             new[] { image },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
     }
 
@@ -107,12 +105,5 @@ public sealed class ImageToBytesFunctionTests : ServiceTestBase
             canvas.Clear(new SKColor(r, g, b, 255));
         }
         return ValueRef.FromImage(bmp);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

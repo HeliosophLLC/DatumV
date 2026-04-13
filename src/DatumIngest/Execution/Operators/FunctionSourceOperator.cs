@@ -53,8 +53,8 @@ public sealed class FunctionSourceOperator : QueryOperator
     /// <inheritdoc/>
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context);
-        EvaluationFrame frame = new(Row.Empty, context.Store, context.Store, context.Accountant, context.OuterRow, context.SidecarRegistry, context.Types, context.TypeIdTranslations);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
+        EvaluationFrame frame = new(Row.Empty, context.Store, context, context.OuterRow);
 
         ValueRef[] evaluatedArguments = new ValueRef[_arguments.Count];
         for (int index = 0; index < _arguments.Count; index++)

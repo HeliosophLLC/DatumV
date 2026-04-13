@@ -106,7 +106,7 @@ public sealed class MergeJoinOperator : QueryOperator
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         Expression leftKeyExpression = _extraction.KeyPairs[0].Left;
         Expression rightKeyExpression = _extraction.KeyPairs[0].Right;
 

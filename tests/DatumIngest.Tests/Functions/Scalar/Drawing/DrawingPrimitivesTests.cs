@@ -1,10 +1,6 @@
-using System.Collections.Immutable;
-
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Drawing;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -18,13 +14,6 @@ namespace DatumIngest.Tests.Functions.Scalar.Drawing;
 /// </summary>
 public sealed class DrawingPrimitivesTests : ServiceTestBase
 {
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-    }
-
     // ----- color() -----
 
     [Fact]
@@ -32,7 +21,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
     {
         ValueRef result = await new ColorFunction().ExecuteAsync(
             new[] { ValueRef.FromInt32(100), ValueRef.FromInt32(150), ValueRef.FromInt32(200) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         (byte r, byte g, byte b, byte a) = result.AsColor();
         Assert.Equal((byte)100, r);
         Assert.Equal((byte)150, g);
@@ -45,7 +34,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
     {
         ValueRef result = await new ColorFunction().ExecuteAsync(
             new[] { ValueRef.FromInt32(10), ValueRef.FromInt32(20), ValueRef.FromInt32(30), ValueRef.FromInt32(128) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         (_, _, _, byte a) = result.AsColor();
         Assert.Equal((byte)128, a);
     }
@@ -56,7 +45,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new ColorFunction().ExecuteAsync(
                 new[] { ValueRef.FromInt32(256), ValueRef.FromInt32(0), ValueRef.FromInt32(0) },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("[0, 255]", ex.Message);
     }
 
@@ -65,7 +54,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
     {
         ValueRef result = await new ColorFunction().ExecuteAsync(
             new[] { ValueRef.Null(DataKind.Int32), ValueRef.FromInt32(0), ValueRef.FromInt32(0) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Color, result.Kind);
     }
@@ -82,7 +71,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
     public async Task ColorHex_KnownForms_ParseCorrectly(string hex, int r, int g, int b, int a)
     {
         ValueRef result = await new ColorHexFunction().ExecuteAsync(
-            new[] { ValueRef.FromString(hex) }, MakeFrame(), default);
+            new[] { ValueRef.FromString(hex) }, CreateEvaluationFrame(), default);
         (byte rb, byte gb, byte bb, byte ab) = result.AsColor();
         Assert.Equal((byte)r, rb);
         Assert.Equal((byte)g, gb);
@@ -98,7 +87,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
     {
         await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new ColorHexFunction().ExecuteAsync(
-                new[] { ValueRef.FromString(input) }, MakeFrame(), default));
+                new[] { ValueRef.FromString(input) }, CreateEvaluationFrame(), default));
     }
 
     // ----- draw_rect / draw_ellipse / draw_circle -----
@@ -113,7 +102,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
                 ValueRef.FromPoint2D(10, 20),
                 ValueRef.FromColor(255, 0, 0),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         ShapeDrawing shape = (ShapeDrawing)result.AsDrawing();
         Assert.Equal(ShapeKind.Rectangle, shape.Kind);
         Assert.Equal(new SKPoint(2, 3), shape.Position);
@@ -131,7 +120,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
                 ValueRef.FromPoint2D(8, 4),
                 ValueRef.FromColor(0, 0, 255),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         ShapeDrawing shape = (ShapeDrawing)result.AsDrawing();
         Assert.Equal(ShapeKind.Ellipse, shape.Kind);
         Assert.Equal(new SKPoint(16, 16), shape.Position);
@@ -148,7 +137,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
                 ValueRef.FromFloat32(7),
                 ValueRef.FromColor(0, 255, 0),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         ShapeDrawing shape = (ShapeDrawing)result.AsDrawing();
         Assert.Equal(ShapeKind.Ellipse, shape.Kind);
         Assert.Equal(7f, shape.Size.Width);
@@ -166,7 +155,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
                     ValueRef.FromFloat32(-1),
                     ValueRef.FromColor(0, 0, 0),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
     }
 
     // ----- draw_line -----
@@ -182,7 +171,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
                 ValueRef.FromColor(128, 128, 128),
                 ValueRef.FromFloat32(2.5f),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         ShapeDrawing shape = (ShapeDrawing)result.AsDrawing();
         Assert.Equal(ShapeKind.Line, shape.Kind);
         Assert.Equal(new SKPoint(0, 0), shape.Position);
@@ -206,7 +195,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
 
         ValueRef result = await new DrawPolygonFunction().ExecuteAsync(
             new[] { polygonPoints, ValueRef.FromColor(0, 100, 200) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         ShapeDrawing shape = (ShapeDrawing)result.AsDrawing();
         Assert.Equal(ShapeKind.Polygon, shape.Kind);
         Assert.Equal(3, shape.Points.Length);
@@ -222,7 +211,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
         await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new DrawPolygonFunction().ExecuteAsync(
                 new[] { polygonPoints, ValueRef.FromColor(0, 0, 0) },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
     }
 
     // ----- group -----
@@ -236,7 +225,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
 
         ValueRef result = await new GroupFunction().ExecuteAsync(
             new[] { ValueRef.FromArray(DataKind.Drawing, children) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         GroupDrawing group = (GroupDrawing)result.AsDrawing();
         Assert.Equal(2, group.Children.Length);
         Assert.Same(a, group.Children[0]);
@@ -255,7 +244,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
 
         ValueRef result = await new GroupFunction().ExecuteAsync(
             new[] { ValueRef.FromArray(DataKind.Drawing, children) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         GroupDrawing group = (GroupDrawing)result.AsDrawing();
         Assert.Single(group.Children);
     }
@@ -276,7 +265,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
                 ValueRef.FromFloat32(1.5f),
                 ValueRef.FromFloat32(0.8f),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         TransformedDrawing t = (TransformedDrawing)result.AsDrawing();
         Assert.Same(inner, t.Inner);
         Assert.Equal(new SKPoint(16, 16), t.Anchor);
@@ -299,7 +288,7 @@ public sealed class DrawingPrimitivesTests : ServiceTestBase
                 ValueRef.FromFloat32(1),
                 ValueRef.FromFloat32(5f),  // > 1
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         TransformedDrawing t = (TransformedDrawing)result.AsDrawing();
         Assert.Equal(1f, t.Opacity);
     }

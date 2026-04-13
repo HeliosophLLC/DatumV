@@ -149,6 +149,12 @@ public abstract class ServiceTestBase : IDisposable
     /// <returns></returns>
     protected Pool CreatePool() => GetService<Pool>();
 
+    protected EvaluationFrame CreateEvaluationFrame(DatumIngest.Execution.ExecutionContext? context = null)
+    {
+        context ??= CreateExecutionContext();
+        return new EvaluationFrame(Row.Empty, context.Store, context);
+    }
+
     /// <summary>
     /// Creates an empty <see cref="TableCatalog"/> backed by a <see cref="Pool"/>
     /// resolved from the test's DI container. Each test instance gets its own
@@ -260,16 +266,25 @@ public abstract class ServiceTestBase : IDisposable
         int? maxStratifyClasses = null,
         Arena? store = null,
         Pool? pool = null,
+        MemoryAccountant? accountant = null,
+        TypeRegistry? typeRegistry = null,
+        VideoRegistry? videoRegistry = null,
         CancellationToken cancellationToken = default)
     {
         pool ??= CreatePool();
+        // functionRegistry parameter is vestigial: TableCatalog owns its FunctionRegistry,
+        // and the catalog-derived factory honors that ownership. Tests that supplied
+        // a custom registry would need to construct a catalog around it instead.
+        _ = functionRegistry;
+        TableCatalog effectiveCatalog = catalog ?? new TableCatalog(pool);
         return new(
-            cancellationToken,
-            functionRegistry ?? FunctionRegistry.CreateDefault(),
-            catalog ?? new TableCatalog(pool),
-            pool,
+            effectiveCatalog,
             memoryBudgetBytes: memoryBudgetBytes,
-            store: store)
+            accountant: accountant,
+            store: store,
+            types: typeRegistry ?? new TypeRegistry(),
+            videoRegistry: videoRegistry ?? new VideoRegistry(),
+            cancellationToken: cancellationToken)
         {
             AssertionDiagnostics = diagnostics,
             MaxRecursionDepth = maxRecursionDepth ?? 1000,

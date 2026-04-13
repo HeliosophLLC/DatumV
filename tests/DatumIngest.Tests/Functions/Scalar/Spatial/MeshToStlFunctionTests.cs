@@ -31,7 +31,7 @@ public sealed class MeshToStlFunctionTests : ServiceTestBase
     public async Task Execute_NullInput_ReturnsNullArray()
     {
         ValueRef result = await new MeshToStlFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Mesh) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Mesh) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
     }
 
@@ -41,7 +41,7 @@ public sealed class MeshToStlFunctionTests : ServiceTestBase
         ValueRef mesh = BuildSampleQuadMesh();
 
         ValueRef result = await new MeshToStlFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
 
         byte[] stl = result.AsBytes();
         // Binary STL: 80 bytes header + 4 bytes count + N × 50 bytes.
@@ -62,7 +62,7 @@ public sealed class MeshToStlFunctionTests : ServiceTestBase
         ValueRef mesh = BuildSampleQuadMesh();
 
         ValueRef result = await new MeshToStlFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
 
         byte[] stl = result.AsBytes();
         string headerStart = Encoding.ASCII.GetString(stl, 0, 5);
@@ -79,7 +79,7 @@ public sealed class MeshToStlFunctionTests : ServiceTestBase
         ValueRef mesh = BuildSampleQuadMesh();
 
         ValueRef result = await new MeshToStlFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
 
         byte[] stl = result.AsBytes();
         // First triangle begins at offset 84. First 12 bytes are the face
@@ -101,7 +101,7 @@ public sealed class MeshToStlFunctionTests : ServiceTestBase
         ValueRef mesh = BuildSampleQuadMesh();
 
         ValueRef result = await new MeshToStlFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
 
         byte[] stl = result.AsBytes();
         // First triangle's attribute bytes at offset 84+48=132.
@@ -165,12 +165,5 @@ public sealed class MeshToStlFunctionTests : ServiceTestBase
             BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(indicesBase + i * 4, 4), indices[i]);
         }
         return ValueRef.FromMesh(blob);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

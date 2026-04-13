@@ -198,15 +198,12 @@ public sealed class AnimateFramesFunctionTests : ServiceTestBase
         Arena arena = pool.Backing.RentArena();
         MemoryAccountant accountant = new();
         VariableScope scope = new(accountant);
-        ExpressionEvaluator evaluator = new(
-            FunctionRegistry.CreateDefault(),
-            variableScope: scope,
-            typeRegistry: new TypeRegistry(),
-            accountant: accountant);
-        EvaluationFrame frame = new(
-            Row.Empty, arena, arena, accountant,
-            types: new TypeRegistry(),
-            lambdaInvoker: evaluator);
+        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(
+            store: arena, accountant: accountant);
+        DatumIngest.Execution.ExecutionContext scoped = context.Derive(
+            variableScope: scope, variableStore: arena);
+        ExpressionEvaluator evaluator = scoped.CreateEvaluator();
+        EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, arena);
         return (evaluator, frame);
     }
 

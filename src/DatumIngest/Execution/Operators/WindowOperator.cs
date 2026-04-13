@@ -74,7 +74,7 @@ public sealed class WindowOperator : QueryOperator
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         using MaterializedInput input = new(context, "WINDOW");
         RowBatch? outputBatch = null;
 

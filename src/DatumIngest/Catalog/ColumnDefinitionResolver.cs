@@ -204,10 +204,11 @@ internal static class ColumnDefinitionResolver
         TableCatalog catalog, Expression expression, string columnName, DataKind kind, bool isArray)
     {
         using Arena probeArena = new();
-        ExpressionEvaluator evaluator = new(catalog.Functions, store: probeArena);
+        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(store: probeArena);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         ColumnLookup emptyLookup = new(Array.Empty<string>());
         Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
-        EvaluationFrame frame = new(emptyRow, probeArena, probeArena, evaluator.Accountant);
+        EvaluationFrame frame = context.CreateFrame(emptyRow, probeArena);
 
         // Build a column-info shim with the target kind/nullable/array
         // shape so ConvertValueRefToTarget validates against the real

@@ -1,4 +1,4 @@
-﻿using DatumIngest.Execution;
+using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -7,10 +7,15 @@ namespace DatumIngest.Tests.Execution;
 
 public class ExpressionEvaluatorTests : ServiceTestBase
 {
-    //rivate readonly Arena _arena = new();
-    private readonly ExpressionEvaluator _evaluator = new(FunctionRegistry.CreateDefault(), store: new Arena());
+    private readonly ExpressionEvaluator _evaluator;
 
-    // ─────────────── Literals ───────────────
+    public ExpressionEvaluatorTests()
+    {
+        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        _evaluator = context.CreateEvaluator();
+    }
+
+    // --------------- Literals ---------------
 
     [Fact]
     public async Task Literal_Integer()
@@ -50,7 +55,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.True(result.AsBoolean());
     }
 
-    // ─────────────── Column references ───────────────
+    // --------------- Column references ---------------
 
     [Fact]
     public async Task ColumnReference_ByName()
@@ -75,7 +80,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         await Assert.ThrowsAsync<InvalidOperationException>(async () => await _evaluator.EvaluateAsync(new ColumnReference("missing"), row));
     }
 
-    // ─────────────── Arithmetic ───────────────
+    // --------------- Arithmetic ---------------
 
     [Fact]
     public async Task BinaryAdd()
@@ -173,7 +178,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal(1024f, result.AsFloat32());
     }
 
-    // ─────────────── Comparisons ───────────────
+    // --------------- Comparisons ---------------
 
     [Fact]
     public async Task Equal_True()
@@ -283,7 +288,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.True(result.AsBoolean());
     }
 
-    // ─────────────── Logical operators ───────────────
+    // --------------- Logical operators ---------------
 
     [Fact]
     public async Task And_BothTrue()
@@ -360,7 +365,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal(-42f, result.AsFloat32());
     }
 
-    // ─────────────── NULL propagation ───────────────
+    // --------------- NULL propagation ---------------
 
     [Fact]
     public async Task NullPropagation_BinaryAdd()
@@ -383,7 +388,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.True(result.IsNull);
     }
 
-    // ─────────────── IN expression ───────────────
+    // --------------- IN expression ---------------
 
     [Fact]
     public async Task In_Found()
@@ -498,7 +503,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.True(result.AsBoolean());
     }
 
-    // ─────────────── BETWEEN expression ───────────────
+    // --------------- BETWEEN expression ---------------
 
     [Fact]
     public async Task Between_InRange()
@@ -549,7 +554,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.False(result.AsBoolean());
     }
 
-    // ─────────────── IS NULL ───────────────
+    // --------------- IS NULL ---------------
 
     [Fact]
     public async Task IsNull_True()
@@ -581,7 +586,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.True(result.AsBoolean());
     }
 
-    // ─────────────── LIKE ───────────────
+    // --------------- LIKE ---------------
 
     [Fact]
     public async Task Like_Percent_Prefix()
@@ -655,7 +660,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.True(result.AsBoolean());
     }
 
-    // ─────────────── ILIKE ───────────────
+    // --------------- ILIKE ---------------
 
     [Fact]
     public async Task ILike_CaseInsensitive_Match()
@@ -693,7 +698,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.False(result.AsBoolean());
     }
 
-    // ─────────────── REGEXP ───────────────
+    // --------------- REGEXP ---------------
 
     [Fact]
     public async Task Regexp_SubstringMatch()
@@ -767,7 +772,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 Row.Empty));
     }
 
-    // ─────────────── LIKE ESCAPE ───────────────
+    // --------------- LIKE ESCAPE ---------------
 
     [Fact]
     public async Task LikeEscape_LiteralPercent_Matches()
@@ -860,7 +865,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 Row.Empty));
     }
 
-    // ─────────────── Function calls ───────────────
+    // --------------- Function calls ---------------
 
     [Fact]
     public async Task FunctionCall_Length()
@@ -880,7 +885,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 Row.Empty));
     }
 
-    // ─────────────── CAST expression ───────────────
+    // --------------- CAST expression ---------------
 
     [Fact]
     public async Task Cast_UInt8ToScalar()
@@ -893,7 +898,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal(200f, result.AsFloat32());
     }
 
-    // ─────────────── EvaluateAsBoolean ───────────────
+    // --------------- EvaluateAsBoolean ---------------
 
     [Fact]
     public async Task EvaluateAsBoolean_NonZero_True()
@@ -925,7 +930,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.False(await _evaluator.EvaluateAsBooleanAsync(new LiteralExpression(""), Row.Empty));
     }
 
-    // ─────────────── Column expressions with row data ───────────────
+    // --------------- Column expressions with row data ---------------
 
     [Fact]
     public async Task ArithmeticOnColumns()
@@ -960,7 +965,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.True(result.AsBoolean());
     }
 
-    // ─────────────── Duration arithmetic ───────────────
+    // --------------- Duration arithmetic ---------------
 
     [Fact]
     public async Task DurationAdd_ReturnsDuration()
@@ -1022,7 +1027,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task DurationMultiply_WidensToScalar()
     {
-        // Duration * Scalar is not a Duration operation — widens both to float.
+        // Duration * Scalar is not a Duration operation � widens both to float.
         Row row = MakeRow(
             ["d", "n"],
             DataValue.FromDuration(TimeSpan.FromHours(1)),
@@ -1039,7 +1044,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal(7200f, result.AsFloat32());
     }
 
-    // ─────────────── CASE expression ───────────────
+    // --------------- CASE expression ---------------
 
     [Fact]
     public async Task Case_Searched_MatchesFirstTrueBranch()
@@ -1163,12 +1168,12 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal("first", result.AsString());
     }
 
-    // ─────────────── CASE mixed-type coercion ───────────────
+    // --------------- CASE mixed-type coercion ---------------
 
     [Fact]
     public async Task Case_MixedStringAndScalar_CoercesStringToScalar()
     {
-        // CASE WHEN true THEN '42' ELSE 1 END → '42' is coerced to Int32(42)
+        // CASE WHEN true THEN '42' ELSE 1 END ? '42' is coerced to Int32(42)
         DataValue result = await _evaluator.EvaluateAsync(
             new CaseExpression(
                 null,
@@ -1182,7 +1187,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task Case_MixedStringAndScalar_ElseBranchPreservesScalar()
     {
-        // CASE WHEN false THEN '0' ELSE 1 END → 1 stays Int32
+        // CASE WHEN false THEN '0' ELSE 1 END ? 1 stays Int32
         DataValue result = await _evaluator.EvaluateAsync(
             new CaseExpression(
                 null,
@@ -1196,7 +1201,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task Case_MixedStringAndScalar_UnparseableReturnsNull()
     {
-        // CASE WHEN true THEN 'abc' ELSE 1 END → 'abc' can't parse as Scalar → null
+        // CASE WHEN true THEN 'abc' ELSE 1 END ? 'abc' can't parse as Scalar ? null
         DataValue result = await _evaluator.EvaluateAsync(
             new CaseExpression(
                 null,
@@ -1210,7 +1215,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task Case_MixedBooleanAndFloat32_CoercesBooleanToFloat64()
     {
-        // CASE WHEN true THEN false ELSE 1 END → common kind (Boolean → Int32) is Int32
+        // CASE WHEN true THEN false ELSE 1 END ? common kind (Boolean ? Int32) is Int32
         DataValue result = await _evaluator.EvaluateAsync(
             new CaseExpression(
                 null,
@@ -1224,7 +1229,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task Case_NullResult_AdoptsResolvedKind()
     {
-        // CASE WHEN false THEN '0' END → no match, no ELSE → null with Int32 kind
+        // CASE WHEN false THEN '0' END ? no match, no ELSE ? null with Int32 kind
         // (String + Int32 unifies to Int32; string values are parsed at runtime).
         Row row = MakeRow(["x"], DataValue.FromFloat32(5));
         DataValue result = await _evaluator.EvaluateAsync(
@@ -1282,7 +1287,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal(1, result.AsInt32());
     }
 
-    // ─────────────── Struct literal ───────────────
+    // --------------- Struct literal ---------------
 
     [Fact]
     public async Task StructLiteral_TwoFields_ProducesStructValue()
@@ -1321,7 +1326,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal("hi", fields[1].AsString());
     }
 
-    // ─────────────── Index access on struct literal ───────────────
+    // --------------- Index access on struct literal ---------------
 
     [Fact]
     public async Task IndexAccess_StructLiteral_ReturnsFieldByName()
@@ -1344,7 +1349,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task IndexAccess_StructLiteral_UnknownField_ReturnsNull()
     {
-        // {x: 1}['z']  — field 'z' does not exist
+        // {x: 1}['z']  � field 'z' does not exist
         IndexAccessExpression access = new(
             new StructLiteralExpression(
             [
@@ -1373,13 +1378,13 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal(42, result.AsInt32());
     }
 
-    // ─────────────── Index access on struct column reference ───────────────
+    // --------------- Index access on struct column reference ---------------
 
     [Fact]
     public async Task IndexAccess_StructColumnReference_ResolvesFieldViaSchema()
     {
         // Row has a struct column "info" with fields [name, score].
-        // Access info['score'] — evaluator needs schema to know field positions.
+        // Access info['score'] � evaluator needs schema to know field positions.
         Arena arena = new();
         DataValue structValue = DataValue.FromUntypedStruct(
             [DataValue.FromString("alice"), DataValue.FromFloat32(9.5f)],
@@ -1395,7 +1400,8 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         ColumnInfo structColumn = new("info", false, fieldInfos);
         Schema schema = new([structColumn]);
 
-        ExpressionEvaluator evaluatorWithSchema = new(FunctionRegistry.CreateDefault(), sourceSchema: schema, store: arena);
+        using DatumIngest.Execution.ExecutionContext schemaContext = CreateExecutionContext(store: arena);
+        ExpressionEvaluator evaluatorWithSchema = schemaContext.CreateEvaluator(sourceSchema: schema);
 
         IndexAccessExpression access = new(
             new ColumnReference("info"),
@@ -1407,13 +1413,13 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal(9.5f, result.AsFloat32(), precision: 4);
     }
 
-    // ─────────────── AT TIME ZONE ───────────────
+    // --------------- AT TIME ZONE ---------------
 
     [Fact]
     public async Task AtTimeZone_UtcToEasternStandardTime()
     {
-        // PG: timestamptz AT TIME ZONE 'z' → timestamp (wall clock in z).
-        // 2026-01-15 12:00 UTC → naive 2026-01-15 07:00 (NY wall clock).
+        // PG: timestamptz AT TIME ZONE 'z' ? timestamp (wall clock in z).
+        // 2026-01-15 12:00 UTC ? naive 2026-01-15 07:00 (NY wall clock).
         DateTimeOffset utc = new(2026, 1, 15, 12, 0, 0, TimeSpan.Zero);
         Row row = MakeRow(["ts"], DataValue.FromTimestampTz(utc));
 
@@ -1432,7 +1438,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task AtTimeZone_UtcToEasternDaylightTime()
     {
-        // 2026-07-15 12:00 UTC → naive 2026-07-15 08:00 (NY EDT wall clock).
+        // 2026-07-15 12:00 UTC ? naive 2026-07-15 08:00 (NY EDT wall clock).
         DateTimeOffset utc = new(2026, 7, 15, 12, 0, 0, TimeSpan.Zero);
         Row row = MakeRow(["ts"], DataValue.FromTimestampTz(utc));
 
@@ -1449,7 +1455,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task AtTimeZone_NullInputReturnsNull()
     {
-        // timestamptz null → timestamp null (kind-shifted, still null).
+        // timestamptz null ? timestamp null (kind-shifted, still null).
         Row row = MakeRow(["ts"], DataValue.Null(DataKind.TimestampTz));
 
         Expression expr = new AtTimeZoneExpression(
@@ -1465,10 +1471,10 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task AtTimeZone_RoundTripsBackToUtc()
     {
-        // PG: timestamptz AT TZ 'NY' → timestamp; timestamp AT TZ 'UTC' →
+        // PG: timestamptz AT TZ 'NY' ? timestamp; timestamp AT TZ 'UTC' ?
         // timestamptz (reinterpret wall clock as UTC). For the round-trip to
         // recover the original instant, the second AT TIME ZONE must use the
-        // same zone the first call shifted into — i.e. 'America/New_York', not
+        // same zone the first call shifted into � i.e. 'America/New_York', not
         // 'UTC'. (Going through 'UTC' would treat the NY wall clock as UTC
         // ticks, shifting the instant by 5h.)
         DateTimeOffset utc = new(2026, 6, 15, 18, 0, 0, TimeSpan.Zero);
@@ -1500,7 +1506,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         await Assert.ThrowsAsync<TimeZoneNotFoundException>(async () => await _evaluator.EvaluateAsync(expr, row));
     }
 
-    // ─────────────── PG temporal arithmetic ───────────────
+    // --------------- PG temporal arithmetic ---------------
 
     [Fact]
     public async Task TimestampTz_PlusDuration_ReturnsShiftedTimestampTz()
@@ -1584,7 +1590,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal(baseAt.AddHours(3), result.AsTimestampTz());
     }
 
-    // ─────────────── typeof() and type literals ───────────────
+    // --------------- typeof() and type literals ---------------
 
     [Fact]
     public async Task Typeof_ReturnsTypeTag()
@@ -1660,7 +1666,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal("Float64", typeValue.ToDisplayString());
     }
 
-    // ─────────────── IS [NOT] Type (desugared) ───────────────
+    // --------------- IS [NOT] Type (desugared) ---------------
 
     [Fact]
     public async Task IsType_Desugared_MatchingType_ReturnsTrue()
@@ -1694,7 +1700,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.True(result.AsBoolean());
     }
 
-    // ─────────────── can_cast() ───────────────
+    // --------------- can_cast() ---------------
 
     [Fact]
     public async Task CanCast_SameType_ReturnsTrue()
@@ -1739,7 +1745,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task CanCast_FloatToInt_WithFraction_ReturnsTrue()
     {
-        // Truncation is allowed — only overflow returns false.
+        // Truncation is allowed � only overflow returns false.
         // can_cast(3.14, Int32) is true because CAST(3.14 AS Int32) succeeds (returns 3).
         Row row = MakeRow(["x"], DataValue.FromFloat64(3.14));
         Expression expr = new FunctionCallExpression("can_cast",
@@ -1788,7 +1794,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.False(await _evaluator.EvaluateAsBooleanAsync(expr, row));
     }
 
-    // ─────────────── try_cast() ───────────────
+    // --------------- try_cast() ---------------
 
     [Fact]
     public async Task TryCast_ValidConversion_ReturnsValue()
@@ -1846,7 +1852,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task TryCast_NumericTruncation_Succeeds()
     {
-        // try_cast follows CAST semantics — truncation is allowed
+        // try_cast follows CAST semantics � truncation is allowed
         Row row = MakeRow(["x"], DataValue.FromFloat64(3.99));
         Expression expr = new FunctionCallExpression("try_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
@@ -1883,7 +1889,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Equal(DataKind.Int32, result.Kind);
     }
 
-    // ─────────────── Type-narrowing bind (desugared with can_cast) ───────────────
+    // --------------- Type-narrowing bind (desugared with can_cast) ---------------
 
     [Fact]
     public async Task TypeNarrow_MatchingType_GuardPassesAndCastApplies()
@@ -1943,7 +1949,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.False(await _evaluator.EvaluateAsBooleanAsync(expr, row));
     }
 
-    // ─────────────── Source span error enrichment ───────────────
+    // --------------- Source span error enrichment ---------------
 
     [Fact]
     public async Task Error_IncludesSourceSpan_WhenExpressionHasSpan()
@@ -1964,7 +1970,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task Error_IncludesSourceSpan_FromFunctionCall()
     {
-        // date_add() with a String amount — not numeric, triggers validation error.
+        // date_add() with a String amount � not numeric, triggers validation error.
         var span = new SourceSpan(7, 12, 30);
         var expr = new FunctionCallExpression("date_add",
             [
@@ -1985,7 +1991,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task Error_FallsBackToChildSpan_ForBinaryExpression()
     {
-        // BinaryExpression has no span itself — the enrichment should
+        // BinaryExpression has no span itself � the enrichment should
         // walk to the left child's span.
         var childSpan = new SourceSpan(3, 10, 5);
         var expr = new BinaryExpression(
@@ -2004,7 +2010,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     public async Task Error_DoesNotDoubleWrap_OnRecursiveEvaluation()
     {
         // A nested expression where the inner node has a span and the outer
-        // node also has a span — should only wrap once (the innermost catch).
+        // node also has a span � should only wrap once (the innermost catch).
         var innerSpan = new SourceSpan(5, 1, 10);
         var expr = new CastExpression(
             new CastExpression(
@@ -2022,7 +2028,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     public async Task Error_RethrowsUnchanged_WhenNoSpanAvailable()
     {
         // LiteralExpression has no span, and the value type (a bare object)
-        // is unsupported — should throw without wrapping.
+        // is unsupported � should throw without wrapping.
         var expr = new LiteralExpression(new object());
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () => await _evaluator.EvaluateAsync(expr, Row.Empty));

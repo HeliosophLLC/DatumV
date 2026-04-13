@@ -29,15 +29,12 @@ public sealed class LambdaInvokerTests : ServiceTestBase
         Arena arena = pool.Backing.RentArena();
         MemoryAccountant accountant = new();
         VariableScope scope = new(accountant);
-        ExpressionEvaluator evaluator = new(
-            FunctionRegistry.CreateDefault(),
-            variableScope: scope,
-            typeRegistry: new TypeRegistry(),
-            accountant: accountant);
-        EvaluationFrame frame = new(
-            Row.Empty, arena, arena, accountant,
-            types: new TypeRegistry(),
-            lambdaInvoker: evaluator);
+        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(
+            store: arena, accountant: accountant);
+        DatumIngest.Execution.ExecutionContext scoped = context.Derive(
+            variableScope: scope, variableStore: arena);
+        ExpressionEvaluator evaluator = scoped.CreateEvaluator();
+        EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, arena);
         return (evaluator, frame);
     }
 
@@ -111,12 +108,11 @@ public sealed class LambdaInvokerTests : ServiceTestBase
         // evaluators without an explicit scope — invoke lambdas without
         // requiring every operator to know about scope management.
         LambdaExpression ast = ParseLambda("x -> x + 1");
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
         // Evaluator constructed WITHOUT a VariableScope — should now succeed
         // because the scope is created on demand.
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
-        EvaluationFrame frame = new(Row.Empty, arena, arena, new MemoryAccountant());
+        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
+        EvaluationFrame frame = evaluator.CreateFrame(Row.Empty);
         ValueRef lambda = ValueRef.FromLambda(LambdaValue.Capture(ast, Row.Empty));
 
         ValueRef result = await evaluator.InvokeLambdaAsync(
@@ -167,10 +163,9 @@ public sealed class LambdaInvokerTests : ServiceTestBase
     {
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
-        EvaluationFrame frame = new(
-            Row.Empty, arena, arena, new MemoryAccountant(),
-            lambdaInvoker: evaluator);
+        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
+        EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, arena);
         Assert.Same(evaluator, frame.LambdaInvoker);
 
         // WithRow preserves the invoker.

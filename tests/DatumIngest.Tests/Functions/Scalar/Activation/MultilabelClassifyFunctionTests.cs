@@ -1,4 +1,3 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Activation;
 using DatumIngest.Model;
@@ -10,12 +9,9 @@ namespace DatumIngest.Tests.Functions.Scalar.Activation;
 /// shared postprocess scalar for multi-label classifiers (Toxic-BERT,
 /// content-tag classifiers, attribute classifiers).
 /// </summary>
-public sealed class MultilabelClassifyFunctionTests
+public sealed class MultilabelClassifyFunctionTests : ServiceTestBase
 {
-    private static EvaluationFrame Frame() =>
-        new(Row.Empty, new Arena(), new Arena(), new MemoryAccountant(), types: new TypeRegistry());
-
-    private static async Task<ValueRef> InvokeAsync(float[] logits, string[] labels, float threshold)
+    private async Task<ValueRef> InvokeAsync(float[] logits, string[] labels, float threshold)
     {
         MultilabelClassifyFunction fn = new();
         ValueRef[] labelRefs = new ValueRef[labels.Length];
@@ -28,7 +24,7 @@ public sealed class MultilabelClassifyFunctionTests
                 ValueRef.FromArray(DataKind.String, labelRefs),
                 ValueRef.FromFloat32(threshold),
             }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
     }
 
     [Fact]
@@ -99,7 +95,7 @@ public sealed class MultilabelClassifyFunctionTests
                     }),
                     ValueRef.FromFloat32(0.5f),
                 }.AsMemory(),
-                Frame(), CancellationToken.None));
+                CreateEvaluationFrame(), CancellationToken.None));
     }
 
     [Fact]

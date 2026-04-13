@@ -1,13 +1,11 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Spatial;
 
@@ -40,7 +38,7 @@ public sealed class MeshFromOrganizedFunctionTests : ServiceTestBase
     public async Task Execute_NullInput_ReturnsNullMesh()
     {
         ValueRef result = await new MeshFromOrganizedFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.PointCloud) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.PointCloud) }, CreateEvaluationFrame(), default);
 
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Mesh, result.Kind);
@@ -53,7 +51,7 @@ public sealed class MeshFromOrganizedFunctionTests : ServiceTestBase
 
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new MeshFromOrganizedFunction().ExecuteAsync(
-                new[] { pc }, MakeFrame(), default));
+                new[] { pc }, CreateEvaluationFrame(), default));
         Assert.Contains("organized", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -65,7 +63,7 @@ public sealed class MeshFromOrganizedFunctionTests : ServiceTestBase
         ValueRef pc = BuildOrganizedColoredCloud(width: 4, height: 4, flatZ: -0.5f);
 
         ValueRef result = await new MeshFromOrganizedFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
 
         byte[] meshBlob = result.AsMesh();
         MeshHeader header = MeshHeader.Read(meshBlob);
@@ -84,7 +82,7 @@ public sealed class MeshFromOrganizedFunctionTests : ServiceTestBase
         ValueRef pc = BuildCloudWithCornerSpike(width: 4, height: 4);
 
         ValueRef result = await new MeshFromOrganizedFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
 
         MeshHeader header = MeshHeader.Read(result.AsMesh());
         // Full triangulation would be 2 × 3 × 3 = 18 triangles. The corner spike
@@ -103,7 +101,7 @@ public sealed class MeshFromOrganizedFunctionTests : ServiceTestBase
             frame: PointCloudCoordinateFrame.CameraOpenCv);
 
         ValueRef result = await new MeshFromOrganizedFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
 
         MeshHeader header = MeshHeader.Read(result.AsMesh());
         Assert.Equal(PointCloudCoordinateFrame.CameraOpenCv, header.CoordinateFrame);
@@ -115,7 +113,7 @@ public sealed class MeshFromOrganizedFunctionTests : ServiceTestBase
         ValueRef pc = BuildOrganizedColoredCloud(width: 4, height: 4, flatZ: -0.5f);
 
         ValueRef result = await new MeshFromOrganizedFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
 
         byte[] meshBlob = result.AsMesh();
         MeshHeader header = MeshHeader.Read(meshBlob);
@@ -136,7 +134,7 @@ public sealed class MeshFromOrganizedFunctionTests : ServiceTestBase
         ValueRef pc = BuildOrganizedColoredCloud(width: 4, height: 4, flatZ: -0.5f);
 
         ValueRef result = await new MeshFromOrganizedFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
 
         byte[] meshBlob = result.AsMesh();
         MeshHeader header = MeshHeader.Read(meshBlob);
@@ -294,12 +292,5 @@ public sealed class MeshFromOrganizedFunctionTests : ServiceTestBase
             BinaryPrimitives.ReadSingleLittleEndian(span.Slice(offset + 0, 4)),
             BinaryPrimitives.ReadSingleLittleEndian(span.Slice(offset + 4, 4)),
             BinaryPrimitives.ReadSingleLittleEndian(span.Slice(offset + 8, 4)));
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Functions.Scalar.File;
 /// shared catalog-relative JSON-array reader used by SQL-defined models
 /// (YOLOX label lookup, future classifier vocabularies).
 /// </summary>
-public sealed class ReadStringListFunctionTests : IDisposable
+public sealed class ReadStringListFunctionTests : ServiceTestBase, IDisposable
 {
     private readonly string _tempPath;
 
@@ -22,7 +22,7 @@ public sealed class ReadStringListFunctionTests : IDisposable
             $"datum-test-string-list-{Guid.NewGuid():N}.json");
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         if (System.IO.File.Exists(_tempPath))
         {
@@ -30,15 +30,12 @@ public sealed class ReadStringListFunctionTests : IDisposable
         }
     }
 
-    private static EvaluationFrame Frame() =>
-        new(Row.Empty, new Arena(), new Arena(), new MemoryAccountant(), types: new TypeRegistry());
-
-    private static async Task<string[]> InvokeAsync(string path, EvaluationFrame? frame = null)
+    private async Task<string[]> InvokeAsync(string path, EvaluationFrame? frame = null)
     {
         ReadStringListFunction fn = new();
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromString(path) }.AsMemory(),
-            frame ?? Frame(),
+            frame ?? CreateEvaluationFrame(),
             CancellationToken.None);
         Assert.True(result.IsArray);
         Assert.False(result.IsNull);
@@ -117,7 +114,7 @@ public sealed class ReadStringListFunctionTests : IDisposable
         ReadStringListFunction fn = new();
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.Null(DataKind.String) }.AsMemory(),
-            Frame(),
+            CreateEvaluationFrame(),
             CancellationToken.None);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.String, result.Kind);

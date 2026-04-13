@@ -10,7 +10,7 @@ namespace DatumIngest.Tests.Execution;
 /// (bool, int) so no arena interaction is required — payload-store
 /// semantics are covered separately in <see cref="BatchContextTests"/>.
 /// </summary>
-public sealed class VariableScopeTests
+public sealed class VariableScopeTests : ServiceTestBase
 {
     [Fact]
     public void NewScope_HasOneRootFrame()
@@ -312,17 +312,15 @@ public sealed class VariableScopeTests
         store.AddReference();
         long bytesBeforeRead = store.BytesWritten;
 
-        ExpressionEvaluator evaluator = new(
-            DatumIngest.Functions.FunctionRegistry.CreateDefault(),
-            store: store,
-            variableScope: scope,
-            variableStore: store);
+        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: store, accountant: accountant);
+        DatumIngest.Execution.ExecutionContext scoped = context.Derive(variableScope: scope, variableStore: store);
+        ExpressionEvaluator evaluator = scoped.CreateEvaluator();
 
         DatumIngest.Parsing.Ast.ColumnReference ref_ = new(
             ColumnName: "tensor",
             TableName: null,
             Span: null);
-        EvaluationFrame frame = new(Row.Empty, store, store, evaluator.Accountant);
+        EvaluationFrame frame = evaluator.CreateFrame(Row.Empty);
 
         ValueRef result = await evaluator.EvaluateAsValueRefAsync(ref_, frame);
 

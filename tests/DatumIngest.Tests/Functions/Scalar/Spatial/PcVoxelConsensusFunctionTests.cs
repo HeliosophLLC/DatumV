@@ -1,12 +1,10 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Spatial;
 
@@ -30,7 +28,7 @@ public sealed class PcVoxelConsensusFunctionTests : ServiceTestBase
 
         ValueRef result = await new PcVoxelConsensusFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(1.0f), ValueRef.FromInt32(2) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(1u, header.PointCount);   // Only cell A survives
@@ -49,10 +47,10 @@ public sealed class PcVoxelConsensusFunctionTests : ServiceTestBase
 
         ValueRef consensusResult = await new PcVoxelConsensusFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(1.0f), ValueRef.FromInt32(1) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         ValueRef downsampleResult = await new PcVoxelDownsampleFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(1.0f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader hC = PointCloudHeader.Read(consensusResult.AsPointCloud());
         PointCloudHeader hD = PointCloudHeader.Read(downsampleResult.AsPointCloud());
@@ -71,7 +69,7 @@ public sealed class PcVoxelConsensusFunctionTests : ServiceTestBase
 
         ValueRef result = await new PcVoxelConsensusFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(1.0f), ValueRef.FromInt32(5) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(0u, header.PointCount);
@@ -93,7 +91,7 @@ public sealed class PcVoxelConsensusFunctionTests : ServiceTestBase
 
         ValueRef result = await new PcVoxelConsensusFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(1.0f), ValueRef.FromInt32(3) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(1u, header.PointCount);
@@ -113,11 +111,11 @@ public sealed class PcVoxelConsensusFunctionTests : ServiceTestBase
     public async Task EmptyCloud_ReturnsEmpty()
     {
         ValueRef empty = await new PcEmptyFunction().ExecuteAsync(
-            ReadOnlyMemory<ValueRef>.Empty, MakeFrame(), default);
+            ReadOnlyMemory<ValueRef>.Empty, CreateEvaluationFrame(), default);
 
         ValueRef result = await new PcVoxelConsensusFunction().ExecuteAsync(
             new[] { empty, ValueRef.FromFloat32(0.02f), ValueRef.FromInt32(2) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(0u, header.PointCount);
@@ -131,7 +129,7 @@ public sealed class PcVoxelConsensusFunctionTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new PcVoxelConsensusFunction().ExecuteAsync(
                 new[] { pc, ValueRef.FromFloat32(0.02f), ValueRef.FromInt32(0) },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("min_votes", ex.Message);
     }
 
@@ -144,16 +142,9 @@ public sealed class PcVoxelConsensusFunctionTests : ServiceTestBase
                 ValueRef.FromFloat32(0.02f),
                 ValueRef.FromInt32(2),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.PointCloud, result.Kind);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 
     private static ValueRef BuildColoredCloud((Vector3 pos, byte r, byte g, byte b)[] points)

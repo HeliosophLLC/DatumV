@@ -253,11 +253,7 @@ public sealed class VideoFrameTests : ServiceTestBase
     public void ExecutionContext_AllocatesAndOwnsVideoRegistry()
     {
         Pool pool = CreatePool();
-        ExecutionContext ctx = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            pool);
+        ExecutionContext ctx = new DatumIngest.Execution.ExecutionContext(CreateCatalog());
 
         Assert.NotNull(ctx.VideoRegistry);
 
@@ -274,11 +270,7 @@ public sealed class VideoFrameTests : ServiceTestBase
         VideoRegistry shared = new();
         try
         {
-            ExecutionContext child = new(
-                CancellationToken.None,
-                FunctionRegistry.CreateDefault(),
-                CreateCatalog(),
-                pool,
+            ExecutionContext child = new DatumIngest.Execution.ExecutionContext(CreateCatalog(),
                 videoRegistry: shared);
             Assert.Same(shared, child.VideoRegistry);
             child.Dispose();

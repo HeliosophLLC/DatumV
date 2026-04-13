@@ -255,7 +255,7 @@ public sealed class BatchExecutor
         IReadOnlyList<(Statement Statement, string? SourceText)> statements,
         CancellationToken cancellationToken)
     {
-        using BatchContext batchContext = new();
+        using BatchContext batchContext = new(_catalog);
         // 1Hz residency sampling for the whole batch. Each child query
         // borrows this accountant so the timer ticks during every query
         // inside the batch.
@@ -323,7 +323,7 @@ public sealed class BatchExecutor
         // streaming UI's pressure indicator always has a denominator and
         // a single runaway statement can't OOM the host. Callers that
         // truly need unbounded behaviour pass long.MaxValue explicitly.
-        using BatchContext batchContext = new(memoryBudgetBytes ?? DefaultMemoryBudgetBytes);
+        using BatchContext batchContext = new(_catalog, memoryBudgetBytes ?? DefaultMemoryBudgetBytes);
         // 1Hz residency sampling for the whole batch. See ExecuteAsync for the rationale.
         batchContext.Accountant.StartProfiling();
 
@@ -848,14 +848,10 @@ public sealed class BatchExecutor
     /// </summary>
     private ValueRef LiftBoundaryValue(DataValue value, BatchContext batchContext)
     {
-        EvaluationFrame boundary = new(
-            Row.Empty,
-            batchContext.VariableStore,
-            batchContext.VariableStore,
-            batchContext.Accountant,
-            outerRow: null,
-            sidecarRegistry: _catalog.SidecarRegistry,
-            types: batchContext.Types);
+        using ExecutionContext context = _catalog.CreateExecutionContext(store: batchContext.VariableStore,
+            types: batchContext.Types,
+            accountant: batchContext.Accountant);
+        EvaluationFrame boundary = new(Row.Empty, batchContext.VariableStore, context);
         return ExpressionEvaluator.ToValueRef(value, boundary);
     }
 
@@ -993,7 +989,7 @@ public sealed class BatchExecutor
         // become unreachable, matching how a top-level procedural batch
         // tears down. Carries the bumped call depth so any further
         // CALLs the body issues see the running total.
-        using BatchContext procContext = new() { ProcedureCallDepth = newDepth };
+        using BatchContext procContext = new(_catalog) { ProcedureCallDepth = newDepth };
         for (int i = 0; i < descriptor.Parameters.Count; i++)
         {
             // Stabilise from the caller's variable store into the
@@ -1112,6 +1108,13 @@ public sealed class BatchExecutor
     {
         IQueryPlan plan = await _catalog.PlanAsync(statement, sourceText: null, batchContext).ConfigureAwait(false);
 
+        // Reuse one ExecutionContext across every row of every batch — the
+        // ambient state (registries, accountant, types) is stable for the
+        // duration of this assignment SELECT.
+        using ExecutionContext context = _catalog.CreateExecutionContext(store: batchContext.VariableStore,
+            types: batchContext.Types,
+            accountant: batchContext.Accountant, cancellationToken: ct);
+
         await foreach (RowBatch batch in plan
             .ExecuteAsync(ct, batchContext)
             .ConfigureAwait(false))
@@ -1127,11 +1130,7 @@ public sealed class BatchExecutor
                     // Lift directly from the producing batch's arena into a
                     // managed-payload ValueRef so the binding survives the
                     // batch's recycle without going through VariableStore.
-                    EvaluationFrame batchFrame = new(
-                        row, batch.Arena, batchContext.VariableStore, batchContext.Accountant,
-                        outerRow: null,
-                        sidecarRegistry: _catalog.SidecarRegistry,
-                        types: batchContext.Types);
+                    EvaluationFrame batchFrame = new(row, batch.Arena, batchContext.VariableStore, context);
                     ValueRef bound = ExpressionEvaluator.ToValueRef(row[colIdx], batchFrame);
                     batchContext.VariableScope.Set(variableName, bound);
                 }
@@ -1337,6 +1336,12 @@ public sealed class BatchExecutor
         ushort rowTypeId = 0;
         bool broke = false;
 
+        // Reuse one ExecutionContext across the loop — ambient state is
+        // stable for the duration of the FOR-IN.
+        using ExecutionContext context = _catalog.CreateExecutionContext(store: batchContext.VariableStore,
+            types: batchContext.Types,
+            accountant: batchContext.Accountant, cancellationToken: ct);
+
         await foreach (RowBatch batch in plan
             .ExecuteAsync(ct, batchContext)
             .ConfigureAwait(false))
@@ -1357,11 +1362,7 @@ public sealed class BatchExecutor
                 // ValueRef.FromStruct — the resulting binding has no arena
                 // dependency and survives the batch recycle without
                 // touching VariableStore.
-                EvaluationFrame batchFrame = new(
-                    row, batch.Arena, batchContext.VariableStore, batchContext.Accountant,
-                    outerRow: null,
-                    sidecarRegistry: _catalog.SidecarRegistry,
-                    types: batchContext.Types);
+                EvaluationFrame batchFrame = new(row, batch.Arena, batchContext.VariableStore, context);
                 ValueRef[] fieldRefs = new ValueRef[colCount];
                 for (int j = 0; j < colCount; j++)
                 {

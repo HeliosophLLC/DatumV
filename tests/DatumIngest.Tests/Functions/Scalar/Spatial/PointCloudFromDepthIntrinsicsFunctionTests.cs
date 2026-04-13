@@ -1,9 +1,7 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -19,7 +17,7 @@ public sealed class PointCloudFromDepthIntrinsicsFunctionTests : ServiceTestBase
         ValueRef intrinsics = BuildIntrinsics(fx: 4f, fy: 4f, cx: 2f, cy: 2f);
 
         ValueRef result = await new PointCloudFromDepthOrthographicIntrinsicsFunction().ExecuteAsync(
-            new[] { color, depth, intrinsics }, MakeFrame(), default);
+            new[] { color, depth, intrinsics }, CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(16u, header.PointCount);
@@ -42,11 +40,11 @@ public sealed class PointCloudFromDepthIntrinsicsFunctionTests : ServiceTestBase
         // Shift cx far left so the bbox shifts right (since x = (u - cx)/fx).
         ValueRef shiftedIntrinsics = BuildIntrinsics(fx: 4f, fy: 4f, cx: 0f, cy: 0f);
         ValueRef shiftedResult = await new PointCloudFromDepthOrthographicIntrinsicsFunction().ExecuteAsync(
-            new[] { color, depth, shiftedIntrinsics }, MakeFrame(), default);
+            new[] { color, depth, shiftedIntrinsics }, CreateEvaluationFrame(), default);
 
         ValueRef centered = BuildIntrinsics(fx: 4f, fy: 4f, cx: 2f, cy: 2f);
         ValueRef centeredResult = await new PointCloudFromDepthOrthographicIntrinsicsFunction().ExecuteAsync(
-            new[] { color, depth, centered }, MakeFrame(), default);
+            new[] { color, depth, centered }, CreateEvaluationFrame(), default);
 
         PointCloudHeader hShifted = PointCloudHeader.Read(shiftedResult.AsPointCloud());
         PointCloudHeader hCentered = PointCloudHeader.Read(centeredResult.AsPointCloud());
@@ -77,7 +75,7 @@ public sealed class PointCloudFromDepthIntrinsicsFunctionTests : ServiceTestBase
         ValueRef intrinsics = ValueRef.FromPrimitiveArray(batchedK, DataKind.Float32);
 
         ValueRef result = await new PointCloudFromDepthOrthographicIntrinsicsFunction().ExecuteAsync(
-            new[] { color, depth, intrinsics }, MakeFrame(), default);
+            new[] { color, depth, intrinsics }, CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(4u, header.PointCount);
@@ -92,7 +90,7 @@ public sealed class PointCloudFromDepthIntrinsicsFunctionTests : ServiceTestBase
 
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new PointCloudFromDepthOrthographicIntrinsicsFunction().ExecuteAsync(
-                new[] { color, depth, shortK }, MakeFrame(), default));
+                new[] { color, depth, shortK }, CreateEvaluationFrame(), default));
         Assert.Contains("9", ex.Message);
     }
 
@@ -105,7 +103,7 @@ public sealed class PointCloudFromDepthIntrinsicsFunctionTests : ServiceTestBase
 
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new PointCloudFromDepthOrthographicIntrinsicsFunction().ExecuteAsync(
-                new[] { color, depth, badK }, MakeFrame(), default));
+                new[] { color, depth, badK }, CreateEvaluationFrame(), default));
         Assert.Contains("focal", ex.Message);
     }
 
@@ -116,16 +114,9 @@ public sealed class PointCloudFromDepthIntrinsicsFunctionTests : ServiceTestBase
         ValueRef intrinsics = BuildIntrinsics(fx: 1f, fy: 1f, cx: 1f, cy: 1f);
 
         ValueRef result = await new PointCloudFromDepthOrthographicIntrinsicsFunction().ExecuteAsync(
-            new[] { color, ValueRef.Null(DataKind.Image), intrinsics }, MakeFrame(), default);
+            new[] { color, ValueRef.Null(DataKind.Image), intrinsics }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.PointCloud, result.Kind);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 
     private static ValueRef BuildColorImage(int w, int h)

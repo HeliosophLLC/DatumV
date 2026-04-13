@@ -468,6 +468,33 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     }
 
     /// <summary>
+    /// Creates an <see cref="ExecutionContext"/> parented to this catalog.
+    /// The context inherits <see cref="Functions"/> and <see cref="Pool"/>
+    /// from the catalog; pass overrides for memory budget, value store, type
+    /// registry, accountant, video registry, or cancellation token as named
+    /// arguments when entering a scope that already owns them (e.g. a
+    /// <see cref="BatchContext"/> borrowing its accountant across child
+    /// queries).
+    /// </summary>
+    public DatumIngest.Execution.ExecutionContext CreateExecutionContext(
+        long? memoryBudgetBytes = null,
+        Arena? store = null,
+        TypeRegistry? types = null,
+        MemoryAccountant? accountant = null,
+        VideoRegistry? videoRegistry = null,
+        VariableScope? variableScope = null,
+        Arena? variableStore = null,
+        CancellationToken cancellationToken = default)
+        => new(this, memoryBudgetBytes, store, types, accountant, videoRegistry, variableScope, variableStore, cancellationToken)
+        {
+            // Snapshot the catalog's tracer into the per-query context.
+            // Setting / clearing TableCatalog.ModelTracer at runtime affects
+            // subsequently planned queries; queries already running keep the
+            // tracer they captured at execution start.
+            ModelTracer = ModelTracer,
+        };
+
+    /// <summary>
     /// Parses and plans <paramref name="sql"/> against this catalog, returning an
     /// <see cref="IQueryPlan"/> that may be inspected (<see cref="IQueryPlan.ExplainTree"/>),
     /// analyzed (<see cref="IQueryPlan.AnalyzeAsync"/>), or executed

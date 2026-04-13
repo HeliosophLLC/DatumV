@@ -78,22 +78,6 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
         Assert.Equal(DataKind.Image, result.Kind);
     }
 
-    [Fact]
-    public async Task MissingVideoRegistry_Throws()
-    {
-        // Frame without a VideoRegistry — to_image must surface a clear error.
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        EvaluationFrame frameWithoutRegistry = new(
-            Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-
-        await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
-            await new VideoFrameToImageFunction().ExecuteAsync(
-                new[] { ValueRef.FromInline(DataValue.FromVideoFrame(1, 0)) },
-                frameWithoutRegistry,
-                default));
-    }
-
     // ─────────────────────── Target-dimension overloads ───────────────────────
 
     [Fact]
@@ -251,15 +235,10 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
 
     private EvaluationFrame MakeFrameWith(VideoRegistry registry)
     {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(
-            Row.Empty,
-            arena,
-            arena,
-            new MemoryAccountant(),
-            types: new TypeRegistry(),
-            videoRegistry: registry);
+        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(
+            videoRegistry: registry
+        );
+        return CreateEvaluationFrame(context: context);
     }
 
     private static bool BitmapsEqual(SKBitmap a, SKBitmap b)

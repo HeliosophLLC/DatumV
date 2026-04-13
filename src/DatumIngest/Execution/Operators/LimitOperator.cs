@@ -288,17 +288,12 @@ public sealed class LimitOperator : QueryOperator
             };
         }
 
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         EvaluationFrame frame = new(
             DatumIngest.Model.Row.Empty,
             context.Store,
-            context.Store,
-            context.Accountant,
-            outerRow: context.OuterRow,
-            sidecarRegistry: context.SidecarRegistry,
-            types: context.Types,
-            typeIdTranslations: context.TypeIdTranslations,
-            videoRegistry: context.VideoRegistry);
+            context,
+            outerRow: context.OuterRow);
         DatumIngest.Model.DataValue value = await evaluator
             .EvaluateAsync(expression, frame, context.CancellationToken)
             .ConfigureAwait(false);

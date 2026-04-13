@@ -1,10 +1,8 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -49,7 +47,7 @@ public sealed class MeshFromDepthFunctionsTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.Null(DataKind.Image), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Mesh, result.Kind);
@@ -68,7 +66,7 @@ public sealed class MeshFromDepthFunctionsTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         MeshHeader header = MeshHeader.Read(result.AsMesh());
         Assert.Equal((uint)(w * h), header.VertexCount);
@@ -90,7 +88,7 @@ public sealed class MeshFromDepthFunctionsTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromInt32(60) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         Assert.False(result.IsNull);
@@ -123,7 +121,7 @@ public sealed class MeshFromDepthFunctionsTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), depthArr, ValueRef.FromFloat32(60f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         Assert.False(result.IsNull);
@@ -165,12 +163,5 @@ public sealed class MeshFromDepthFunctionsTests : ServiceTestBase
             }
         }
         return bmp;
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

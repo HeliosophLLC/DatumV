@@ -1,13 +1,11 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Spatial;
 
@@ -30,7 +28,7 @@ public sealed class MeshComputeNormalsFunctionTests : ServiceTestBase
     public async Task Execute_NullInput_ReturnsNullMesh()
     {
         ValueRef result = await new MeshComputeNormalsFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Mesh) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Mesh) }, CreateEvaluationFrame(), default);
 
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Mesh, result.Kind);
@@ -44,7 +42,7 @@ public sealed class MeshComputeNormalsFunctionTests : ServiceTestBase
         Assert.False(inputHeader.HasNormals);
 
         ValueRef result = await new MeshComputeNormalsFunction().ExecuteAsync(
-            new[] { input }, MakeFrame(), default);
+            new[] { input }, CreateEvaluationFrame(), default);
 
         byte[] outBlob = result.AsMesh();
         MeshHeader outHeader = MeshHeader.Read(outBlob);
@@ -63,7 +61,7 @@ public sealed class MeshComputeNormalsFunctionTests : ServiceTestBase
         ValueRef input = BuildFlatQuadMesh(includeNormals: false);
 
         ValueRef result = await new MeshComputeNormalsFunction().ExecuteAsync(
-            new[] { input }, MakeFrame(), default);
+            new[] { input }, CreateEvaluationFrame(), default);
 
         byte[] outBlob = result.AsMesh();
         MeshHeader outHeader = MeshHeader.Read(outBlob);
@@ -156,12 +154,5 @@ public sealed class MeshComputeNormalsFunctionTests : ServiceTestBase
             BinaryPrimitives.ReadSingleLittleEndian(span.Slice(offset + 0, 4)),
             BinaryPrimitives.ReadSingleLittleEndian(span.Slice(offset + 4, 4)),
             BinaryPrimitives.ReadSingleLittleEndian(span.Slice(offset + 8, 4)));
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

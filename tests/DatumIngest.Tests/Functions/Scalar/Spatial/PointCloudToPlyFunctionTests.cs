@@ -27,7 +27,7 @@ public sealed class PointCloudToPlyFunctionTests : ServiceTestBase
         });
 
         ValueRef result = await new PointCloudToPlyFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         string headerText = ReadAsciiHeader(result.AsBytes());
 
         Assert.StartsWith("ply\n", headerText);
@@ -49,7 +49,7 @@ public sealed class PointCloudToPlyFunctionTests : ServiceTestBase
         ValueRef pc = BuildPositionOnlyCloud(new[] { new Vector3(0, 0, 0), new Vector3(1, 1, 1) });
 
         ValueRef result = await new PointCloudToPlyFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         string headerText = ReadAsciiHeader(result.AsBytes());
 
         Assert.Contains("property float x", headerText);
@@ -67,7 +67,7 @@ public sealed class PointCloudToPlyFunctionTests : ServiceTestBase
         });
 
         ValueRef result = await new PointCloudToPlyFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         byte[] ply = result.AsBytes();
 
         int headerEnd = FindHeaderEnd(ply);
@@ -94,7 +94,7 @@ public sealed class PointCloudToPlyFunctionTests : ServiceTestBase
             frame: PointCloudCoordinateFrame.CameraOpenCv);
 
         ValueRef result = await new PointCloudToPlyFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         byte[] ply = result.AsBytes();
 
         int headerEnd = FindHeaderEnd(ply);
@@ -108,10 +108,10 @@ public sealed class PointCloudToPlyFunctionTests : ServiceTestBase
     public async Task EmptyCloud_EmitsHeaderOnly()
     {
         ValueRef empty = await new PcEmptyFunction().ExecuteAsync(
-            ReadOnlyMemory<ValueRef>.Empty, MakeFrame(), default);
+            ReadOnlyMemory<ValueRef>.Empty, CreateEvaluationFrame(), default);
 
         ValueRef result = await new PointCloudToPlyFunction().ExecuteAsync(
-            new[] { empty }, MakeFrame(), default);
+            new[] { empty }, CreateEvaluationFrame(), default);
         byte[] ply = result.AsBytes();
 
         string headerText = ReadAsciiHeader(ply);
@@ -123,7 +123,7 @@ public sealed class PointCloudToPlyFunctionTests : ServiceTestBase
     public async Task NullInput_ReturnsNullArray()
     {
         ValueRef result = await new PointCloudToPlyFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.PointCloud) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.PointCloud) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.UInt8, result.Kind);
     }
@@ -142,13 +142,6 @@ public sealed class PointCloudToPlyFunctionTests : ServiceTestBase
         int idx = span.IndexOf(needle);
         Assert.True(idx >= 0, "PLY output is missing end_header terminator");
         return idx + needle.Length;
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 
     private static ValueRef BuildColoredCloud(

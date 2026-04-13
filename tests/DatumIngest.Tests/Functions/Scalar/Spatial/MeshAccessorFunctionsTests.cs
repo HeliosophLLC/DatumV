@@ -1,13 +1,10 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
-using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Spatial;
 
@@ -27,7 +24,7 @@ public sealed class MeshAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef mesh = BuildSampleMesh();
         ValueRef result = await new MeshVertexCountFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
         Assert.Equal(DataKind.Int32, result.Kind);
         Assert.Equal(4, result.AsInt32());
     }
@@ -37,7 +34,7 @@ public sealed class MeshAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef mesh = BuildSampleMesh();
         ValueRef result = await new MeshTriangleCountFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
         Assert.Equal(2, result.AsInt32());
     }
 
@@ -49,9 +46,9 @@ public sealed class MeshAccessorFunctionsTests : ServiceTestBase
         ValueRef mesh = BuildMeshWithBbox(min, max);
 
         ValueRef minResult = await new MeshBboxMinFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
         ValueRef maxResult = await new MeshBboxMaxFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
 
         Assert.Equal(DataKind.Point3D, minResult.Kind);
         Assert.Equal(DataKind.Point3D, maxResult.Kind);
@@ -64,7 +61,7 @@ public sealed class MeshAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef mesh = BuildSampleMesh();
         ValueRef result = await new MeshHasColorFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
         Assert.True(result.AsBoolean());
     }
 
@@ -73,7 +70,7 @@ public sealed class MeshAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef mesh = BuildSampleMesh();
         ValueRef result = await new MeshHasNormalsFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
         Assert.True(result.AsBoolean());
     }
 
@@ -84,7 +81,7 @@ public sealed class MeshAccessorFunctionsTests : ServiceTestBase
         // when Phase 2 adds UV-carrying meshes.
         ValueRef mesh = BuildSampleMesh();
         ValueRef result = await new MeshHasUVsFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
         Assert.False(result.AsBoolean());
     }
 
@@ -93,7 +90,7 @@ public sealed class MeshAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef mesh = BuildSampleMesh();
         ValueRef result = await new MeshHasTextureFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
         Assert.False(result.AsBoolean());
     }
 
@@ -103,7 +100,7 @@ public sealed class MeshAccessorFunctionsTests : ServiceTestBase
     public async Task VertexCount_NullInput_ReturnsNullInt32()
     {
         ValueRef result = await new MeshVertexCountFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Mesh) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Mesh) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Int32, result.Kind);
     }
@@ -112,7 +109,7 @@ public sealed class MeshAccessorFunctionsTests : ServiceTestBase
     public async Task BboxMin_NullInput_ReturnsNullPoint3D()
     {
         ValueRef result = await new MeshBboxMinFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Mesh) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Mesh) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Point3D, result.Kind);
     }
@@ -121,7 +118,7 @@ public sealed class MeshAccessorFunctionsTests : ServiceTestBase
     public async Task HasColor_NullInput_ReturnsNullBoolean()
     {
         ValueRef result = await new MeshHasColorFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Mesh) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Mesh) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Boolean, result.Kind);
     }
@@ -186,10 +183,4 @@ public sealed class MeshAccessorFunctionsTests : ServiceTestBase
         return ValueRef.FromMesh(blob);
     }
 
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-    }
 }

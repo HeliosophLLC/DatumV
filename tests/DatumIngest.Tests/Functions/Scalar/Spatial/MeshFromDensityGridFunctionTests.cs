@@ -1,13 +1,11 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Spatial;
 
@@ -47,7 +45,7 @@ public sealed class MeshFromDensityGridFunctionTests : ServiceTestBase
                 ValueRef.FromFloat32(0f),
                 ValueRef.FromFloat32(1f),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Mesh, result.Kind);
@@ -67,7 +65,7 @@ public sealed class MeshFromDensityGridFunctionTests : ServiceTestBase
                     ValueRef.FromFloat32(0f),
                     ValueRef.FromFloat32(1f),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("resolution", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -86,7 +84,7 @@ public sealed class MeshFromDensityGridFunctionTests : ServiceTestBase
                     ValueRef.FromFloat32(0f),
                     ValueRef.FromFloat32(1f),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("density array length", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -104,7 +102,7 @@ public sealed class MeshFromDensityGridFunctionTests : ServiceTestBase
                     ValueRef.FromFloat32(0f),
                     ValueRef.FromFloat32(-1f),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("radius", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -246,10 +244,10 @@ public sealed class MeshFromDensityGridFunctionTests : ServiceTestBase
                 ValueRef.FromFloat32(0f),
                 ValueRef.FromFloat32(1f),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         ValueRef withNormals = await new MeshComputeNormalsFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
 
         MeshHeader header = MeshHeader.Read(withNormals.AsMesh());
         Assert.True(header.HasNormals);
@@ -297,7 +295,7 @@ public sealed class MeshFromDensityGridFunctionTests : ServiceTestBase
                 ValueRef.FromFloat32(isolevel),
                 ValueRef.FromFloat32(radius),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         return MeshHeader.Read(result.AsMesh());
     }
 
@@ -312,15 +310,8 @@ public sealed class MeshFromDensityGridFunctionTests : ServiceTestBase
                 ValueRef.FromFloat32(isolevel),
                 ValueRef.FromFloat32(radius),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         byte[] blob = result.AsMesh();
         return (MeshHeader.Read(blob), blob);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

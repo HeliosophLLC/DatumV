@@ -3,6 +3,7 @@ using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.DatumFile.V2;
 using DatumIngest.Functions;
 using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution;
@@ -13,10 +14,10 @@ namespace DatumIngest.Execution;
 /// </summary>
 public sealed class ExecutionContext : IDisposable
 {
+    private int _disposeCount;
     private readonly bool _ownsStore;
     private readonly bool _ownsAccountant;
     private readonly bool _ownsVideoRegistry;
-    private int _disposed;
 
     /// <summary>
     /// Creates a new execution context from an existing context, copying all properties. Useful for creating a child
@@ -44,62 +45,49 @@ public sealed class ExecutionContext : IDisposable
     }
 
 
-  /// <summary>
-  /// Creates a new execution context.
-  /// </summary>
-  /// <param name="cancellationToken">Cancellation token for cooperative cancellation.</param>
-  /// <param name="functionRegistry">Registry of scalar and table-valued functions.</param>
-  /// <param name="catalog">Registry of named tables and provider factories.</param>
-  /// <param name="memoryBudgetBytes">
-  /// Memory budget in bytes for operators that support spill-to-disk. When
-  /// <see langword="null"/>. Pass <see cref="long.MaxValue"/> for
-  /// effectively-unbounded memory (skips spill but keeps the spill-capable
-  /// code paths exercised). When set, operators spill to temporary files when
-  /// estimated memory exceeds this budget. Ignored when
-  /// <paramref name="accountant"/> is non-null — the supplied accountant carries
-  /// its own budget. Supported operators: hash join, ORDER BY, GROUP BY, DISTINCT,
-  /// PIVOT, UNION/INTERSECT/EXCEPT, and materialised CTEs.
-  /// </param>
-  /// <param name="pool">Pool for reusing buffers during query execution.</param>
-  /// <param name="store">
-  /// Optional value store for reference-type payloads. Defaults to a new <see cref="Model.Arena"/>
-  /// if not provided.
-  /// </param>
-  /// <param name="types">
-  /// Optional pre-existing type registry to share across multiple query contexts (e.g. across
-  /// queries within a single procedural batch). When <see langword="null"/>, a fresh registry
-  /// is allocated per context.
-  /// </param>
-  /// <param name="accountant">
-  /// Optional existing <see cref="MemoryAccountant"/> to share with the surrounding scope
-  /// (typically a <see cref="BatchContext"/>'s accountant). When <see langword="null"/>, the
-  /// context constructs and owns its own; the owned accountant is disposed when this
-  /// context is disposed.
-  /// </param>
-  /// <param name="videoRegistry">
-  /// Optional pre-existing <see cref="Model.VideoRegistry"/> to share with a surrounding
-  /// scope (e.g. a procedural <see cref="BatchContext"/> where registered videos must
-  /// survive across statements). When <see langword="null"/>, the context constructs and
-  /// owns its own; the owned registry is disposed when this context is disposed.
-  /// </param>
-    public ExecutionContext(
-        CancellationToken cancellationToken,
-        FunctionRegistry functionRegistry,
+    /// <summary>
+    /// Creates a new execution context against <paramref name="catalog"/>.
+    /// Internal because construction should normally go through
+    /// <see cref="TableCatalog.CreateExecutionContext"/> — the context is a
+    /// child of the catalog and the factory keeps that relationship explicit.
+    /// The catalog supplies the function registry and pool, so they're not
+    /// separate parameters.
+    /// </summary>
+    /// <param name="catalog">Registry of named tables and provider factories.</param>
+    /// <param name="cancellationToken">Cancellation token for cooperative cancellation.</param>
+    /// <param name="memoryBudgetBytes">Memory budget in bytes for operators that
+    /// support spill-to-disk. Pass <see cref="long.MaxValue"/> for effectively-unbounded
+    /// memory. Ignored when <paramref name="accountant"/> is non-null — the supplied
+    /// accountant carries its own budget.</param>
+    /// <param name="store">Optional value store for reference-type payloads.
+    /// Defaults to a new <see cref="Model.Arena"/> if not provided.</param>
+    /// <param name="types">Optional pre-existing type registry to share across
+    /// multiple query contexts (e.g. across queries within a single procedural batch).</param>
+    /// <param name="accountant">Optional existing <see cref="MemoryAccountant"/>
+    /// to share with the surrounding scope (typically a <see cref="BatchContext"/>'s
+    /// accountant). When <see langword="null"/>, the context constructs and owns its own.</param>
+    /// <param name="videoRegistry">Optional pre-existing <see cref="Model.VideoRegistry"/>
+    /// to share with a surrounding scope.</param>
+    /// <param name="variableScope">Optional procedural variable scope, threaded
+    /// from a surrounding <see cref="BatchContext"/>.</param>
+    /// <param name="variableStore">Optional procedure-lifetime variable arena,
+    /// paired with <paramref name="variableScope"/>.</param>
+    internal ExecutionContext(
         TableCatalog catalog,
-        Pool pool,
         long? memoryBudgetBytes = null,
         Arena? store = null,
         TypeRegistry? types = null,
         MemoryAccountant? accountant = null,
-        VideoRegistry? videoRegistry = null)
+        VideoRegistry? videoRegistry = null,
+        VariableScope? variableScope = null,
+        Arena? variableStore = null,
+        CancellationToken cancellationToken = default)
     {
-        // Null no longer means "no budget" — it means "use the default" so every
-        // execution path goes through the spill-capable operators. Callers who
-        // want unbounded memory must pass long.MaxValue explicitly.
+        ArgumentNullException.ThrowIfNull(catalog);
         CancellationToken = cancellationToken;
-        FunctionRegistry = functionRegistry;
+        FunctionRegistry = catalog.Functions;
         Catalog = catalog;
-        Pool = pool;
+        Pool = catalog.Pool;
         if (store is null)
         {
             // We own this arena's lifetime — give it a baseline reference so
@@ -143,7 +131,14 @@ public sealed class ExecutionContext : IDisposable
             VideoRegistry = videoRegistry;
             _ownsVideoRegistry = false;
         }
+        VariableScope = variableScope;
+        VariableStore = variableStore;
     }
+
+    /// <summary>
+    /// Gets or sets whether <see cref="Dispose"/> has been called on this context.
+    /// </summary>
+    public bool Disposed { get; private set;}
 
     /// <summary>
     /// Per-query registry of source videos backing <see cref="DataKind.VideoFrame"/>
@@ -227,6 +222,8 @@ public sealed class ExecutionContext : IDisposable
     /// </summary>
     public RowBatch RentRowBatch(ColumnLookup columnLookup)
     {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+        
         RowBatch batch = Pool.RentRowBatch(columnLookup, BatchSize, Store);
         batch.Types = Types;
         batch.TypeIdTranslations = TypeIdTranslations;
@@ -243,6 +240,8 @@ public sealed class ExecutionContext : IDisposable
     /// </summary>
     public RowBatch RentRowBatch(ColumnLookup columnLookup, int capacity)
     {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
         RowBatch batch = Pool.RentRowBatch(columnLookup, capacity, Store);
         batch.Types = Types;
         batch.TypeIdTranslations = TypeIdTranslations;
@@ -255,7 +254,12 @@ public sealed class ExecutionContext : IDisposable
     /// <c>Pool.ReturnRowBatch(batch)</c>; spelled on the context so operator
     /// call sites read as a rent/return pair against the same handle.
     /// </summary>
-    public void ReturnRowBatch(RowBatch batch) => Pool.ReturnRowBatch(batch);
+    public void ReturnRowBatch(RowBatch batch)
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
+        Pool.ReturnRowBatch(batch);
+    }
 
     /// <summary>
     /// Plan-wide memory accountant shared with every materializing operator,
@@ -343,25 +347,93 @@ public sealed class ExecutionContext : IDisposable
     public Pool Pool { get; }
 
     /// <summary>
-    /// Returns a new context with the given outer row set for correlated subquery execution.
-    /// All other properties are copied from the current context.
+    /// Builds an <see cref="ExpressionEvaluator"/> parented to this context.
+    /// The evaluator reads its function registry, sidecar registry, type
+    /// registry, accountant, video registry, and (optional) variable scope /
+    /// store off this context; <paramref name="sourceSchema"/> and
+    /// <paramref name="letBindingExpressions"/> are operator-specific extras
+    /// that aren't on the context.
     /// </summary>
-    /// <param name="outerRow">The outer row providing correlated column values.</param>
-    /// <returns>A new <see cref="ExecutionContext"/> with <see cref="OuterRow"/> set.</returns>
-    public ExecutionContext WithOuterRow(Row outerRow)
+    public ExpressionEvaluator CreateEvaluator(
+        Schema? sourceSchema = null,
+        IReadOnlyDictionary<string, Expression>? letBindingExpressions = null)
+        => new(this, sourceSchema, letBindingExpressions);
+
+    /// <summary>
+    /// Builds an <see cref="EvaluationFrame"/> against this context's ambient
+    /// state without wiring a lambda dispatcher. Use this for call sites that
+    /// only need a frame for value stabilisation or accessor-style reads
+    /// (e.g. <see cref="ExpressionEvaluator.ToValueRef(DatumIngest.Model.DataValue, EvaluationFrame)"/>);
+    /// callers that need lambda dispatch should use
+    /// <c>ExpressionEvaluator.CreateFrame</c> instead so the
+    /// <see cref="EvaluationFrame.LambdaInvoker"/> slot is populated.
+    /// </summary>
+    /// <param name="row">The row to evaluate against.</param>
+    /// <param name="store">Optional source arena for the frame. Defaults to
+    /// <see cref="Store"/>.</param>
+    public EvaluationFrame CreateFrame(Row row, IValueStore? store = null)
+        => new(row, store ?? Store, this, outerRow: OuterRow);
+
+    /// <summary>
+    /// Builds an <see cref="EvaluationFrame"/> with distinct source / target
+    /// arenas. Use when reads come from one store and materialised results
+    /// must land in another (e.g. <see cref="BatchContext.Declare"/> reading
+    /// from a producing query's arena and writing into the variable store).
+    /// No <see cref="EvaluationFrame.LambdaInvoker"/> is wired; build via
+    /// <c>ExpressionEvaluator.CreateFrame</c> if you need lambda
+    /// dispatch.
+    /// </summary>
+    public EvaluationFrame CreateFrame(Row row, IValueStore source, IValueStore target)
+        => new(row, source, target, this, outerRow: OuterRow);
+
+    /// <summary>
+    /// Returns a child context derived from this one. Every parameter defaults to
+    /// "inherit from parent"; explicitly supplied parameters override that slot in
+    /// the child. The child <strong>borrows</strong> every inherited resource —
+    /// disposing the child does not release the parent's <see cref="Store"/>,
+    /// <see cref="Accountant"/>, or <see cref="VideoRegistry"/>. Use this when
+    /// entering a nested scope (correlated subquery, procedural body, lateral join)
+    /// that needs to override one or two slots while keeping everything else
+    /// pointing at the parent's ambient state.
+    /// </summary>
+    /// <param name="store">Override the value store. Pass when the child scope
+    /// has its own arena (e.g. a procedural body's private variableStore).
+    /// Inherits parent's <see cref="Store"/> if omitted.</param>
+    /// <param name="variableScope">Override the procedural variable scope.
+    /// Pass when entering a procedural body or BEGIN/END block. Inherits if omitted.</param>
+    /// <param name="variableStore">Override the procedural variable arena.
+    /// Must be passed together with <paramref name="variableScope"/>.</param>
+    /// <param name="outerRow">Override the outer row for correlated subqueries.
+    /// Inherits parent's <see cref="OuterRow"/> if omitted.</param>
+    /// <param name="types">Override the type registry. Inherits if omitted.</param>
+    /// <param name="accountant">Override the memory accountant. Inherits if omitted.</param>
+    /// <param name="videoRegistry">Override the video registry. Inherits if omitted.</param>
+    public ExecutionContext Derive(
+        Arena? store = null,
+        VariableScope? variableScope = null,
+        Arena? variableStore = null,
+        Row? outerRow = null,
+        TypeRegistry? types = null,
+        MemoryAccountant? accountant = null,
+        VideoRegistry? videoRegistry = null)
     {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
+        // Pass non-null values for store/accountant/videoRegistry so the new
+        // context's constructor sets _ownsX = false — the child borrows from
+        // the parent (or from the explicit override). Disposing the child is
+        // a no-op for the inherited resources.
         return new ExecutionContext(
-            CancellationToken,
-            FunctionRegistry,
             Catalog,
-            Pool,
-            memoryBudgetBytes: null,
-            Store,
-            types: Types,
-            accountant: Accountant,
-            videoRegistry: VideoRegistry)
+            store: store ?? Store,
+            types: types ?? Types,
+            accountant: accountant ?? Accountant,
+            videoRegistry: videoRegistry ?? VideoRegistry,
+            cancellationToken: CancellationToken)
         {
-            OuterRow = outerRow,
+            OuterRow = outerRow ?? OuterRow,
+            VariableStore = variableStore ?? VariableStore,
+            VariableScope = variableScope ?? VariableScope,
             RowLimit = RowLimit,
             MaxRecursionDepth = MaxRecursionDepth,
             DegreeOfParallelism = DegreeOfParallelism,
@@ -369,6 +441,8 @@ public sealed class ExecutionContext : IDisposable
             BatchSize = BatchSize,
             AssertionDiagnostics = AssertionDiagnostics,
             MaxStratifyClasses = MaxStratifyClasses,
+            ModelTracer = ModelTracer,
+            SpillDirectory = SpillDirectory,
         };
     }
 
@@ -461,9 +535,11 @@ public sealed class ExecutionContext : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (Interlocked.Exchange(ref _disposeCount, 1) != 0) return;
         if (_ownsAccountant) Accountant.Dispose();
         if (_ownsStore) Store.ReleaseReference();
         if (_ownsVideoRegistry) VideoRegistry.Dispose();
+
+        Disposed = true;
     }
 }

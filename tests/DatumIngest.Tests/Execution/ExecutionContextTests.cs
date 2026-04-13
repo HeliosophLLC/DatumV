@@ -13,19 +13,17 @@ namespace DatumIngest.Tests.Execution;
 public sealed class ExecutionContextTests : ServiceTestBase
 {
     /// <summary>
-    /// Verifies that <see cref="ExecutionContext.WithOuterRow"/> propagates all
-    /// init-only properties, including <see cref="ExecutionContext.MaxRecursionDepth"/>.
+    /// Verifies that <see cref="ExecutionContext.Derive"/> with an outer row
+    /// propagates all init-only properties, including
+    /// <see cref="ExecutionContext.MaxRecursionDepth"/>.
     /// </summary>
     [Fact]
-    public void WithOuterRow_PropagatesAllProperties()
+    public void Derive_WithOuterRow_PropagatesAllProperties()
     {
         Row outerRow = MakeRow(["x"], DataValue.FromFloat32(1f));
         using ParallelismBudget budget = new(4);
-        ExecutionContext original = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
+        ExecutionContext original = new DatumIngest.Execution.ExecutionContext(
             CreateCatalog(),
-            GetService<Pool>(),
             memoryBudgetBytes: 512)
         {
             MaxRecursionDepth = 42,
@@ -34,7 +32,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
             ParallelismBudget = budget,
         };
 
-        ExecutionContext cloned = original.WithOuterRow(outerRow);
+        ExecutionContext cloned = original.Derive(outerRow: outerRow);
 
         Assert.Equal(outerRow, cloned.OuterRow);
         Assert.Equal(42, cloned.MaxRecursionDepth);
@@ -47,17 +45,17 @@ public sealed class ExecutionContextTests : ServiceTestBase
     }
 
     /// <summary>
-    /// Verifies that <see cref="ExecutionContext.WithOuterRow"/> uses the default
+    /// Verifies that <see cref="ExecutionContext.Derive"/> uses the default
     /// <see cref="ExecutionContext.MaxRecursionDepth"/> when the original context
     /// was created with the default value.
     /// </summary>
     [Fact]
-    public void WithOuterRow_PreservesDefaultMaxRecursionDepth()
+    public void Derive_PreservesDefaultMaxRecursionDepth()
     {
         Row outerRow = MakeRow(["y"], DataValue.FromFloat32(2f));
         ExecutionContext original = CreateExecutionContext();
 
-        ExecutionContext cloned = original.WithOuterRow(outerRow);
+        ExecutionContext cloned = original.Derive(outerRow: outerRow);
 
         Assert.Equal(1000, cloned.MaxRecursionDepth);
     }
@@ -68,11 +66,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     [Fact]
     public void Dispose_OwnedAccountant_IsReleased()
     {
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            GetService<Pool>());
+        ExecutionContext context = new DatumIngest.Execution.ExecutionContext(CreateCatalog());
 
         MemoryAccountant accountant = context.Accountant;
         context.Dispose();
@@ -86,17 +80,14 @@ public sealed class ExecutionContextTests : ServiceTestBase
     /// child must not tear down the parent's accountant.
     /// </summary>
     [Fact]
-    public void WithOuterRow_ChildContextSharesAccountant_AndDoesNotDisposeIt()
+    public void Derive_ChildContextSharesAccountant_AndDoesNotDisposeIt()
     {
         Row outerRow = MakeRow(["x"], DataValue.FromFloat32(1f));
-        using ExecutionContext parent = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
+        using ExecutionContext parent = new DatumIngest.Execution.ExecutionContext(
             CreateCatalog(),
-            GetService<Pool>(),
             memoryBudgetBytes: 1000);
 
-        ExecutionContext child = parent.WithOuterRow(outerRow);
+        ExecutionContext child = parent.Derive(outerRow: outerRow);
         Assert.Same(parent.Accountant, child.Accountant);
 
         parent.Accountant.NotifyMaterialized(500);
@@ -118,11 +109,8 @@ public sealed class ExecutionContextTests : ServiceTestBase
         using MemoryAccountant borrowed = new(memoryBudgetBytes: 1000);
         borrowed.NotifyMaterialized(200);
 
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
+        ExecutionContext context = new DatumIngest.Execution.ExecutionContext(
             CreateCatalog(),
-            GetService<Pool>(),
             accountant: borrowed);
         context.Dispose();
 

@@ -1,8 +1,6 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -18,7 +16,7 @@ public sealed class CompressionArtifactScoreFunctionTests : ServiceTestBase
     public async Task SolidImage_ScoresZero()
     {
         ValueRef result = await new CompressionArtifactScoreFunction().ExecuteAsync(
-            new[] { MakeSolid(32, 32, 128, 128, 128) }, MakeFrame(), default);
+            new[] { MakeSolid(32, 32, 128, 128, 128) }, CreateEvaluationFrame(), default);
         Assert.Equal(0f, result.AsFloat32(), 3);
     }
 
@@ -26,7 +24,7 @@ public sealed class CompressionArtifactScoreFunctionTests : ServiceTestBase
     public async Task ImageSmallerThanBlockBoundary_ReturnsZero()
     {
         ValueRef result = await new CompressionArtifactScoreFunction().ExecuteAsync(
-            new[] { MakeSolid(15, 15, 128, 128, 128) }, MakeFrame(), default);
+            new[] { MakeSolid(15, 15, 128, 128, 128) }, CreateEvaluationFrame(), default);
         Assert.Equal(0f, result.AsFloat32(), 3);
     }
 
@@ -34,9 +32,9 @@ public sealed class CompressionArtifactScoreFunctionTests : ServiceTestBase
     public async Task BlockyImage_ScoresHigherThanSmoothGradient()
     {
         ValueRef blocky = await new CompressionArtifactScoreFunction().ExecuteAsync(
-            new[] { MakeBlocky(32, 32) }, MakeFrame(), default);
+            new[] { MakeBlocky(32, 32) }, CreateEvaluationFrame(), default);
         ValueRef gradient = await new CompressionArtifactScoreFunction().ExecuteAsync(
-            new[] { MakeHorizontalGradient(32, 32) }, MakeFrame(), default);
+            new[] { MakeHorizontalGradient(32, 32) }, CreateEvaluationFrame(), default);
 
         Assert.True(blocky.AsFloat32() > gradient.AsFloat32(),
             $"Blocky ({blocky.AsFloat32()}) should outscore smooth gradient ({gradient.AsFloat32()}).");
@@ -46,7 +44,7 @@ public sealed class CompressionArtifactScoreFunctionTests : ServiceTestBase
     public async Task ResultIsClampedToZeroOne()
     {
         ValueRef result = await new CompressionArtifactScoreFunction().ExecuteAsync(
-            new[] { MakeBlocky(32, 32) }, MakeFrame(), default);
+            new[] { MakeBlocky(32, 32) }, CreateEvaluationFrame(), default);
         float score = result.AsFloat32();
         Assert.InRange(score, 0f, 1f);
     }
@@ -55,7 +53,7 @@ public sealed class CompressionArtifactScoreFunctionTests : ServiceTestBase
     public async Task Null_ReturnsNullFloat32()
     {
         ValueRef result = await new CompressionArtifactScoreFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Image) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Image) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Float32, result.Kind);
     }
@@ -110,12 +108,5 @@ public sealed class CompressionArtifactScoreFunctionTests : ServiceTestBase
             }
         }
         return ValueRef.FromImage(bmp);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

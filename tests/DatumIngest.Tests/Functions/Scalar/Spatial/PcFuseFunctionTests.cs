@@ -32,7 +32,7 @@ public sealed class PcFuseFunctionTests : ServiceTestBase
             });
 
         ValueRef fused = await new PcFuseFunction().ExecuteAsync(
-            new[] { a, b }, MakeFrame(), default);
+            new[] { a, b }, CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(fused.AsPointCloud());
         Assert.Equal(3u, header.PointCount);
@@ -49,7 +49,7 @@ public sealed class PcFuseFunctionTests : ServiceTestBase
         ValueRef b = BuildColoredCloud(new[] { (new Vector3(3, 7, 2), (byte)255, (byte)255, (byte)255) });
 
         ValueRef fused = await new PcFuseFunction().ExecuteAsync(
-            new[] { a, b }, MakeFrame(), default);
+            new[] { a, b }, CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(fused.AsPointCloud());
         Assert.Equal(new Vector3(-5, -5, -5), header.BboxMin);
@@ -66,7 +66,7 @@ public sealed class PcFuseFunctionTests : ServiceTestBase
         ValueRef b = BuildColoredCloud(new[] { (new Vector3(4, 5, 6), (byte)0, (byte)255, (byte)0) });
 
         ValueRef fused = await new PcFuseFunction().ExecuteAsync(
-            new[] { a, b }, MakeFrame(), default);
+            new[] { a, b }, CreateEvaluationFrame(), default);
 
         byte[] blob = fused.AsPointCloud();
         ReadOnlySpan<byte> span = blob;
@@ -87,7 +87,7 @@ public sealed class PcFuseFunctionTests : ServiceTestBase
     public async Task FuseEmptyWithNonEmpty_YieldsNonEmpty()
     {
         ValueRef empty = await new PcEmptyFunction().ExecuteAsync(
-            ReadOnlyMemory<ValueRef>.Empty, MakeFrame(), default);
+            ReadOnlyMemory<ValueRef>.Empty, CreateEvaluationFrame(), default);
         ValueRef populated = BuildColoredCloud(new[]
         {
             (new Vector3(1, 1, 1), (byte)100, (byte)150, (byte)200),
@@ -95,7 +95,7 @@ public sealed class PcFuseFunctionTests : ServiceTestBase
         });
 
         ValueRef fused = await new PcFuseFunction().ExecuteAsync(
-            new[] { empty, populated }, MakeFrame(), default);
+            new[] { empty, populated }, CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(fused.AsPointCloud());
         Assert.Equal(2u, header.PointCount);
@@ -108,10 +108,10 @@ public sealed class PcFuseFunctionTests : ServiceTestBase
     public async Task FuseTwoEmpty_YieldsEmpty()
     {
         ValueRef empty = await new PcEmptyFunction().ExecuteAsync(
-            ReadOnlyMemory<ValueRef>.Empty, MakeFrame(), default);
+            ReadOnlyMemory<ValueRef>.Empty, CreateEvaluationFrame(), default);
 
         ValueRef fused = await new PcFuseFunction().ExecuteAsync(
-            new[] { empty, empty }, MakeFrame(), default);
+            new[] { empty, empty }, CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(fused.AsPointCloud());
         Assert.Equal(0u, header.PointCount);
@@ -124,7 +124,7 @@ public sealed class PcFuseFunctionTests : ServiceTestBase
         // a sequence of clouds, end with the sum of all points. This is the
         // actual shape the COCO proof will use.
         ValueRef accumulator = await new PcEmptyFunction().ExecuteAsync(
-            ReadOnlyMemory<ValueRef>.Empty, MakeFrame(), default);
+            ReadOnlyMemory<ValueRef>.Empty, CreateEvaluationFrame(), default);
 
         for (int i = 0; i < 5; i++)
         {
@@ -134,7 +134,7 @@ public sealed class PcFuseFunctionTests : ServiceTestBase
                 (new Vector3(i, 1, 0), (byte)0, (byte)0, (byte)0),
             });
             accumulator = await new PcFuseFunction().ExecuteAsync(
-                new[] { accumulator, step }, MakeFrame(), default);
+                new[] { accumulator, step }, CreateEvaluationFrame(), default);
         }
 
         PointCloudHeader header = PointCloudHeader.Read(accumulator.AsPointCloud());
@@ -155,7 +155,7 @@ public sealed class PcFuseFunctionTests : ServiceTestBase
 
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new PcFuseFunction().ExecuteAsync(
-                new[] { a, b }, MakeFrame(), default));
+                new[] { a, b }, CreateEvaluationFrame(), default));
         Assert.Contains("coordinate frame", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -166,16 +166,9 @@ public sealed class PcFuseFunctionTests : ServiceTestBase
         ValueRef nullPc = ValueRef.Null(DataKind.PointCloud);
 
         ValueRef result = await new PcFuseFunction().ExecuteAsync(
-            new[] { a, nullPc }, MakeFrame(), default);
+            new[] { a, nullPc }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.PointCloud, result.Kind);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 
     private static ValueRef BuildColoredCloud(

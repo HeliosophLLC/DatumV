@@ -1,9 +1,7 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 using SkiaSharp;
 
 namespace DatumIngest.Tests.Functions.Scalar.Image;
@@ -152,7 +150,7 @@ public sealed class ImageResizeForegroundFunctionTests : ServiceTestBase
     {
         ValueRef result = await new ImageResizeForegroundFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.Null(DataKind.Image), ValueRef.FromFloat32(0.85f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Image, result.Kind);
     }
@@ -176,7 +174,7 @@ public sealed class ImageResizeForegroundFunctionTests : ServiceTestBase
     {
         return await new ImageResizeForegroundFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(source), ValueRef.FromFloat32(ratio) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
     }
 
     private static SKBitmap MakeSolidBitmap(int width, int height, SKColor color)
@@ -184,12 +182,5 @@ public sealed class ImageResizeForegroundFunctionTests : ServiceTestBase
         SKBitmap bmp = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         bmp.Erase(color);
         return bmp;
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

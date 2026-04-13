@@ -1,4 +1,4 @@
-﻿using DatumIngest.Execution;
+using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -17,21 +17,28 @@ namespace DatumIngest.Tests.Execution;
 /// arena migration. The point isn't to prove arena bytes are zero
 /// (that needs a counter we don't have yet); it's to prove the new
 /// dispatch path produces the same boolean results as the old one
-/// across the predicate operators that matter — comparisons, AND/OR/NOT,
+/// across the predicate operators that matter � comparisons, AND/OR/NOT,
 /// LIKE/ILIKE/REGEXP, IS NULL, arithmetic-in-predicate.
 /// </para>
 /// </remarks>
-public sealed class PredicateValueRefPathTests
+public sealed class PredicateValueRefPathTests : ServiceTestBase
 {
-    private readonly ExpressionEvaluator _evaluator = new(FunctionRegistry.CreateDefault());
-    private static readonly EvaluationFrame Frame = default;
+    private readonly ExpressionEvaluator _evaluator;
+    private readonly EvaluationFrame _frame;
+
+    public PredicateValueRefPathTests()
+    {
+        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        _evaluator = context.CreateEvaluator();
+        _frame = _evaluator.CreateFrame(Row.Empty);
+    }
 
     private static LiteralExpression Lit(object? value) => new(value);
     private static FunctionCallExpression Call(string name, params Expression[] args) => new(name, args);
     private static BinaryExpression Bin(Expression l, BinaryOperator op, Expression r) => new(l, op, r);
     private static UnaryExpression Un(UnaryOperator op, Expression operand) => new(op, operand);
 
-    // ─── Comparison through function chain ─────────────────────────────────
+    // --- Comparison through function chain ---------------------------------
 
     [Fact]
     public async Task Equal_FunctionCallVsLiteral_ReturnsTrue()
@@ -41,7 +48,7 @@ public sealed class PredicateValueRefPathTests
             Call("upper", Lit("alice")),
             BinaryOperator.Equal,
             Lit("ALICE"));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -51,7 +58,7 @@ public sealed class PredicateValueRefPathTests
             Call("upper", Lit("alice")),
             BinaryOperator.Equal,
             Lit("BOB"));
-        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -61,7 +68,7 @@ public sealed class PredicateValueRefPathTests
             Call("upper", Lit("alice")),
             BinaryOperator.NotEqual,
             Lit("alice"));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -72,7 +79,7 @@ public sealed class PredicateValueRefPathTests
             Call("upper", Call("lower", Lit("Alice"))),
             BinaryOperator.Equal,
             Lit("ALICE"));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -83,10 +90,10 @@ public sealed class PredicateValueRefPathTests
             Call("concat", Lit("hi "), Lit("there")),
             BinaryOperator.Equal,
             Lit("hi there"));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
-    // ─── LIKE / ILIKE / REGEXP through function chain ──────────────────────
+    // --- LIKE / ILIKE / REGEXP through function chain ----------------------
 
     [Fact]
     public async Task Like_FunctionResult_Matches()
@@ -96,7 +103,7 @@ public sealed class PredicateValueRefPathTests
             Call("upper", Lit("alice")),
             BinaryOperator.Like,
             Lit("AL%"));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -106,7 +113,7 @@ public sealed class PredicateValueRefPathTests
             Call("upper", Lit("alice")),
             BinaryOperator.Like,
             Lit("BO%"));
-        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -116,7 +123,7 @@ public sealed class PredicateValueRefPathTests
             Call("upper", Lit("alice")),
             BinaryOperator.ILike,
             Lit("al%"));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -126,10 +133,10 @@ public sealed class PredicateValueRefPathTests
             Call("upper", Lit("alice")),
             BinaryOperator.Regexp,
             Lit("^AL"));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
-    // ─── Compound predicates (AND / OR / NOT) ──────────────────────────────
+    // --- Compound predicates (AND / OR / NOT) ------------------------------
 
     [Fact]
     public async Task And_BothFunctionPredicates_True()
@@ -139,7 +146,7 @@ public sealed class PredicateValueRefPathTests
             Bin(Call("upper", Lit("alice")), BinaryOperator.Equal, Lit("ALICE")),
             BinaryOperator.And,
             Bin(Call("lower", Lit("Bob")), BinaryOperator.Equal, Lit("bob")));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -149,7 +156,7 @@ public sealed class PredicateValueRefPathTests
             Bin(Call("upper", Lit("alice")), BinaryOperator.Equal, Lit("BOB")),
             BinaryOperator.And,
             Bin(Call("lower", Lit("Bob")), BinaryOperator.Equal, Lit("bob")));
-        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -159,7 +166,7 @@ public sealed class PredicateValueRefPathTests
             Bin(Call("upper", Lit("alice")), BinaryOperator.Equal, Lit("BOB")),
             BinaryOperator.Or,
             Bin(Call("lower", Lit("Bob")), BinaryOperator.Equal, Lit("bob")));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -168,10 +175,10 @@ public sealed class PredicateValueRefPathTests
         Expression predicate = Un(
             UnaryOperator.Not,
             Bin(Call("upper", Lit("alice")), BinaryOperator.Equal, Lit("ALICE")));
-        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
-    // ─── IS NULL through function chain ────────────────────────────────────
+    // --- IS NULL through function chain ------------------------------------
 
     [Fact]
     public async Task IsNull_FunctionResult_NotNull_ReturnsFalse()
@@ -179,7 +186,7 @@ public sealed class PredicateValueRefPathTests
         Expression predicate = new IsNullExpression(
             Call("upper", Lit("alice")),
             Negated: false);
-        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -188,17 +195,17 @@ public sealed class PredicateValueRefPathTests
         Expression predicate = new IsNullExpression(
             Call("upper", Lit("alice")),
             Negated: true);
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
     public async Task IsNull_NullLiteral_ReturnsTrue()
     {
         Expression predicate = new IsNullExpression(Lit(null), Negated: false);
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
-    // ─── Arithmetic in predicate ───────────────────────────────────────────
+    // --- Arithmetic in predicate -------------------------------------------
 
     [Fact]
     public async Task Arithmetic_FunctionInComparison_ReturnsTrue()
@@ -208,7 +215,7 @@ public sealed class PredicateValueRefPathTests
             Call("cast", Lit("42"), new TypeLiteralExpression("Int32")),
             BinaryOperator.GreaterThan,
             Lit(10));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
     [Fact]
@@ -219,10 +226,10 @@ public sealed class PredicateValueRefPathTests
             Bin(Lit(10), BinaryOperator.Add, Lit(5)),
             BinaryOperator.GreaterThan,
             Lit(12));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
-    // ─── Null propagation through binary ───────────────────────────────────
+    // --- Null propagation through binary -----------------------------------
 
     [Fact]
     public async Task Equal_NullOperand_ReturnsFalse()
@@ -232,10 +239,10 @@ public sealed class PredicateValueRefPathTests
             Lit(null),
             BinaryOperator.Equal,
             Call("upper", Lit("alice")));
-        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.False(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 
-    // ─── typeof in predicate ───────────────────────────────────────────────
+    // --- typeof in predicate -----------------------------------------------
 
     [Fact]
     public async Task Typeof_EqualsTypeLiteral_ReturnsTrue()
@@ -245,6 +252,6 @@ public sealed class PredicateValueRefPathTests
             Call("typeof", Lit("hi")),
             BinaryOperator.Equal,
             new TypeLiteralExpression("String"));
-        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, Frame));
+        Assert.True(await _evaluator.EvaluateAsBooleanAsync(predicate, _frame));
     }
 }

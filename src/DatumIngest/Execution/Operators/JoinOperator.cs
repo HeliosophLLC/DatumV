@@ -211,7 +211,7 @@ public sealed class JoinOperator : QueryOperator
 
             if (context.MemoryBudgetBytes is long memoryBudget)
             {
-                ExpressionEvaluator evaluator = new(context);
+                ExpressionEvaluator evaluator = context.CreateEvaluator();
                 QueryOperator buildSide = _flipped ? _left : _right;
                 long? estimatedBuildRows = GetEstimatedRowCount(buildSide);
                 DatumActivity.Operators.Trace($"JOIN GraceHash starting  build={GetOperatorLabel(buildSide)}  estimatedBuild={estimatedBuildRows}");
@@ -370,7 +370,7 @@ public sealed class JoinOperator : QueryOperator
         // fetched directly from the seekable provider (which bypasses AliasOperator).
         string? buildAlias = FindBuildAlias(_right);
 
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
 
         return new IndexNestedLoopJoinExecutor(
             buildScan.TableProvider,
@@ -386,7 +386,7 @@ public sealed class JoinOperator : QueryOperator
         ExecutionContext context, JoinKeyExtractionResult extraction)
     {
         Pool pool = context.Pool;
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = extraction.KeyPairs;
         bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
 
@@ -692,7 +692,7 @@ public sealed class JoinOperator : QueryOperator
             {
                 workers[workerIndex] = Task.Run(async () =>
                 {
-                    ExpressionEvaluator workerEvaluator = new(context);
+                    ExpressionEvaluator workerEvaluator = context.CreateEvaluator();
                     JoinSchema? workerSchema = null;
                     Row? workerResidualRow = null;
                     DataValue[]? workerResidualBuffer = null;
@@ -887,7 +887,7 @@ public sealed class JoinOperator : QueryOperator
     private async IAsyncEnumerable<RowBatch> ExecuteNestedLoopJoinAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
 
         // Physical side assignment mirrors the hash join path.

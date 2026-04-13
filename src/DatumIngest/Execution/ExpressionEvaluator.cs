@@ -43,15 +43,6 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
     /// </summary>
     public IValueStore? Store => _store;
 
-    /// <summary>
-    /// Optional sidecar registry for resolving <c>FlagInSidecar</c> DataValues. Threaded into
-    /// <see cref="EvaluationFrame.SidecarRegistry"/> by the simple
-    /// <see cref="EvaluateAsync(Expression, Row, CancellationToken)"/> overload and into the
-    /// <see cref="InvocationFrame"/> built for scalar-function dispatch, so image / byte-array
-    /// functions can resolve sidecar-backed payloads.
-    /// </summary>
-    private readonly SidecarRegistry? _sidecarRegistry;
-
     private readonly Row? _outerRow;
     private readonly Schema? _sourceSchema;
 
@@ -115,12 +106,29 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
     private readonly MemoryAccountant _accountant;
 
     /// <summary>
+    /// The <see cref="ExecutionContext"/> the evaluator was built against.
+    /// Threaded into every <see cref="EvaluationFrame"/> built by the
+    /// convenience overloads so consumer scalar functions can route ambient
+    /// state (sidecar registry, type registry, translations, video registry)
+    /// through a single handle.
+    /// </summary>
+    private readonly ExecutionContext _context;
+
+    /// <summary>
     /// The <see cref="MemoryAccountant"/> this evaluator threads into the
     /// frames it constructs. Callers building their own frames (or wrapping
     /// the evaluator in a different scope) read this to keep notifications
     /// flowing into the same counter.
     /// </summary>
     public MemoryAccountant Accountant => _accountant;
+
+    /// <summary>
+    /// The owning <see cref="ExecutionContext"/>. Operator code building
+    /// its own <see cref="EvaluationFrame"/>s (e.g. ORDER BY key materialisation)
+    /// passes this through the frame ctor so the ambient registries / accountant
+    /// flow consistently.
+    /// </summary>
+    public ExecutionContext Context => _context;
 
     /// <summary>
     /// Compiled regex cache for case-sensitive LIKE patterns. Avoids recompiling
@@ -181,122 +189,36 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
     private readonly record struct ParameterCheckBinding(int ArgIndex, string ParamName, ParameterCheck Check);
 
     /// <summary>
-    /// Creates an evaluator that can resolve function calls.
+    /// Constructs an evaluator bound to <paramref name="context"/>. Every shared
+    /// dependency (function registry, sidecar registry, type registry, accountant,
+    /// video registry, optional variable scope / store) is read off the context.
+    /// Operator-specific extras (<paramref name="sourceSchema"/>,
+    /// <paramref name="letBindingExpressions"/>) stay as explicit parameters since
+    /// they aren't on the context.
     /// </summary>
-    /// <param name="functions">Registry of available functions.</param>
-    /// <param name="outerRow">
-    /// Optional outer row from a correlated scalar subquery, or <see langword="null"/> when not inside
-    /// a correlated subquery. Column references that cannot be resolved against the current row
-    /// will fall back to this row. Only consulted by the <see cref="EvaluateAsync(Expression, Row, CancellationToken)"/>
-    /// backward-compatible overload; the <see cref="EvaluationFrame"/>-based overloads carry the
-    /// outer row per-call.
-    /// </param>
-    /// <param name="sourceSchema">
-    /// Optional query output schema used to resolve struct field names at evaluation time.
-    /// When provided, struct field access via a column reference can locate field positions by name
-    /// without scanning the AST at runtime.
-    /// </param>
-    /// <param name="letBindingExpressions">
-    /// Optional map of LET binding names to their source expressions. Used as a fallback when
-    /// struct field access cannot be resolved via <paramref name="sourceSchema"/> — if the
-    /// referenced binding's expression is a struct literal, field positions are recovered from
-    /// the AST. Enables named destructuring of struct literals through hidden bindings.
-    /// </param>
-    /// <param name="store">
-    /// Optional persistent value store used for per-evaluator caches (cast target names, IN
-    /// literal sets) and as the default source/target arena for the <see cref="Row"/>-only
-    /// <see cref="EvaluateAsync(Expression, Row, CancellationToken)"/> overload. For true two-arena
-    /// evaluation use the <see cref="EvaluationFrame"/>-based overloads.
-    /// </param>
-    /// <param name="sidecarRegistry">
-    /// Optional registry for resolving <c>FlagInSidecar</c> DataValues (LBO payloads stored in
-    /// <c>.datum-blob</c> sidecars). Threaded into both the simple
-    /// <see cref="EvaluateAsync(Expression, Row, CancellationToken)"/> frame and the per-call
-    /// <see cref="InvocationFrame"/> built for scalar dispatch so image / byte-array functions
-    /// can resolve sidecar-backed values.
-    /// </param>
-    /// <param name="variableScope">
-    /// Optional procedural variable scope chain. When non-<see langword="null"/>,
-    /// unqualified <see cref="ColumnReference"/> nodes are resolved against
-    /// this chain before the row schema (variable-first precedence).
-    /// </param>
-    /// <param name="variableStore">
-    /// Optional procedure-lifetime store paired with <paramref name="variableScope"/>:
-    /// the source arena from which bound variable payloads are stabilised on read.
-    /// Both must be supplied (or both omitted) for the variable path to work.
-    /// </param>
-    /// <param name="typeRegistry">
-    /// Optional per-query type registry. When provided, struct literals stamp a type-id
-    /// at construction and struct field access uses the registry as the primary resolution
-    /// path before falling back to schema/AST-based resolution.
-    /// </param>
-    /// <param name="accountant">
-    /// Optional shared <see cref="MemoryAccountant"/>. Threaded into every
-    /// <see cref="EvaluationFrame"/> built by the convenience overloads. When
-    /// <see langword="null"/>, the evaluator allocates a private throwaway
-    /// (no Timer, no resources) so frames always carry a non-null reference.
-    /// </param>
-    /// <param name="videoRegistry">
-    /// Optional per-query <see cref="Model.VideoRegistry"/>. Threaded into every
-    /// <see cref="EvaluationFrame"/> built by the convenience overloads so
-    /// scalar functions that materialise <see cref="DataKind.VideoFrame"/>
-    /// handles (e.g. <c>to_image</c>) can route through the warm FFmpeg decoder.
-    /// </param>
-    public ExpressionEvaluator(
-        FunctionRegistry functions,
-        Row? outerRow = null,
-        Schema? sourceSchema = null,
-        IReadOnlyDictionary<string, Expression>? letBindingExpressions = null,
-        IValueStore? store = null,
-        SidecarRegistry? sidecarRegistry = null,
-        VariableScope? variableScope = null,
-        IValueStore? variableStore = null,
-        TypeRegistry? typeRegistry = null,
-        MemoryAccountant? accountant = null,
-        Model.VideoRegistry? videoRegistry = null)
-    {
-        _functions = functions;
-        _store = store;
-        _outerRow = outerRow;
-        _sourceSchema = sourceSchema;
-        _letBindingExpressions = letBindingExpressions;
-        _sidecarRegistry = sidecarRegistry;
-        _variableScope = variableScope;
-        _variableStore = variableStore;
-        _typeRegistry = typeRegistry;
-        _videoRegistry = videoRegistry;
-        // Evaluators built without a context (tests, ad-hoc UDF bodies) get
-        // a private throwaway accountant. The frame builders below read this
-        // field, so frames produced by store-only overloads always carry one.
-        _accountant = accountant ?? new MemoryAccountant();
-    }
-
-    /// <summary>
-    /// Convenience constructor that pulls every shared dependency from <paramref name="context"/> —
-    /// the function registry, default value store, outer row, and sidecar registry.
-    /// Operator-specific extras (<paramref name="sourceSchema"/>, <paramref name="letBindingExpressions"/>)
-    /// stay explicit since they're not on the context.
-    /// </summary>
-    /// <param name="context">Execution context the evaluator runs under.</param>
-    /// <param name="sourceSchema">See the field-based constructor.</param>
-    /// <param name="letBindingExpressions">See the field-based constructor.</param>
-    public ExpressionEvaluator(
+    /// <param name="context">Execution context the evaluator runs under. Required.</param>
+    /// <param name="sourceSchema">Optional query output schema used to resolve
+    /// struct field names at evaluation time.</param>
+    /// <param name="letBindingExpressions">Optional map of LET binding names to
+    /// their source expressions, used as fallback when struct field access
+    /// cannot be resolved via <paramref name="sourceSchema"/>.</param>
+    internal ExpressionEvaluator(
         ExecutionContext context,
         Schema? sourceSchema = null,
         IReadOnlyDictionary<string, Expression>? letBindingExpressions = null)
-        : this(
-            context.FunctionRegistry,
-            context.OuterRow,
-            sourceSchema,
-            letBindingExpressions,
-            context.Store,
-            context.SidecarRegistry,
-            context.VariableScope,
-            context.VariableStore,
-            context.Types,
-            context.Accountant,
-            context.VideoRegistry)
     {
+        ArgumentNullException.ThrowIfNull(context);
+        _context = context;
+        _functions = context.FunctionRegistry;
+        _store = context.Store;
+        _outerRow = context.OuterRow;
+        _sourceSchema = sourceSchema;
+        _letBindingExpressions = letBindingExpressions;
+        _variableScope = context.VariableScope;
+        _variableStore = context.VariableStore;
+        _typeRegistry = context.Types;
+        _accountant = context.Accountant;
+        _videoRegistry = context.VideoRegistry;
     }
 
     /// <summary>
@@ -315,6 +237,33 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
     // ──────────────────── Public entry points ────────────────────
 
     /// <summary>
+    /// Builds an <see cref="EvaluationFrame"/> for evaluating expressions against
+    /// <paramref name="row"/> through this evaluator. The frame inherits the
+    /// evaluator's context (ambient registries, accountant) and is wired as a
+    /// lambda dispatcher back to this evaluator so consumer functions that call
+    /// <see cref="ILambdaInvoker.InvokeLambdaAsync"/> route through here.
+    /// </summary>
+    /// <param name="row">The row to evaluate against.</param>
+    /// <param name="store">Optional source arena for the frame. Defaults to the
+    /// evaluator's context store, which is the right choice for the common
+    /// "evaluate against my own store" path. Pass an explicit arena when the
+    /// row's payloads live in a different arena (e.g. a scan batch's arena).</param>
+    public EvaluationFrame CreateFrame(Row row, IValueStore? store = null)
+    {
+        IValueStore effectiveStore = store ?? _store ?? ThrowStoreRequired();
+        return new EvaluationFrame(row, effectiveStore, _context, outerRow: _outerRow, lambdaInvoker: this);
+    }
+
+    /// <summary>
+    /// Builds an <see cref="EvaluationFrame"/> with distinct source / target
+    /// arenas, wired to this evaluator as the lambda dispatcher. Used by
+    /// operators whose target arena (the output batch's) differs from the
+    /// source row's arena.
+    /// </summary>
+    public EvaluationFrame CreateFrame(Row row, IValueStore source, IValueStore target)
+        => new EvaluationFrame(row, source, target, _context, outerRow: _outerRow, lambdaInvoker: this);
+
+    /// <summary>
     /// Evaluates an expression tree against the given row, using the store supplied at
     /// construction for both reads and writes. Convenience overload for callers that don't
     /// yet distinguish source and target arenas.
@@ -322,11 +271,8 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
     public ValueTask<DataValue> EvaluateAsync(
         Expression expression, Row row, CancellationToken cancellationToken = default)
     {
-        IValueStore store = _store ?? ThrowStoreRequired();
-        return EvaluateAsync(
-            expression,
-            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry, videoRegistry: _videoRegistry, lambdaInvoker: this),
-            cancellationToken);
+        EvaluationFrame frame = CreateFrame(row);
+        return EvaluateAsync(expression, frame, cancellationToken);
     }
 
     /// <summary>
@@ -336,11 +282,8 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
     public ValueTask<bool> EvaluateAsBooleanAsync(
         Expression expression, Row row, CancellationToken cancellationToken = default)
     {
-        IValueStore store = _store ?? ThrowStoreRequired();
-        return EvaluateAsBooleanAsync(
-            expression,
-            new EvaluationFrame(row, store, store, _accountant, _outerRow, _sidecarRegistry, _typeRegistry, videoRegistry: _videoRegistry, lambdaInvoker: this),
-            cancellationToken);
+        EvaluationFrame frame = CreateFrame(row);
+        return EvaluateAsBooleanAsync(expression, frame, cancellationToken);
     }
 
     private static IValueStore ThrowStoreRequired() =>
@@ -1625,7 +1568,8 @@ public sealed class ExpressionEvaluator : ILambdaInvoker
         // remain valid across batches. Falls back to the frame's target arena when
         // no persistent store is configured.
         IValueStore cacheStore = _store ?? frame.Target;
-        EvaluationFrame cacheFrame = new(frame.Row, frame.Source, cacheStore, frame.Accountant, frame.OuterRow, frame.SidecarRegistry, frame.Types);
+        EvaluationFrame cacheFrame = new EvaluationFrame(
+            frame.Row, frame.Source, cacheStore, _context, frame.OuterRow);
 
         foreach (Expression valueExpression in inExpr.Values)
         {

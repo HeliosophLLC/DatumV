@@ -1,9 +1,7 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 using SkiaSharp;
 
 namespace DatumIngest.Tests.Functions.Scalar.Image;
@@ -50,7 +48,7 @@ public sealed class ApplyColormapFunctionTests : ServiceTestBase
 
         ValueRef result = await new ApplyColormapFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(source), ValueRef.FromString(palette) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         Assert.False(result.IsNull);
@@ -70,7 +68,7 @@ public sealed class ApplyColormapFunctionTests : ServiceTestBase
 
         ValueRef result = await new ApplyColormapFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(source), ValueRef.FromString("gray") },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         SKBitmap output = result.AsImage();
@@ -97,7 +95,7 @@ public sealed class ApplyColormapFunctionTests : ServiceTestBase
 
         ValueRef result = await new ApplyColormapFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(source), ValueRef.FromString("turbo") },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         SKBitmap output = result.AsImage();
@@ -124,7 +122,7 @@ public sealed class ApplyColormapFunctionTests : ServiceTestBase
 
         ValueRef result = await new ApplyColormapFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(source), ValueRef.FromString("jet") },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         SKBitmap output = result.AsImage();
@@ -155,7 +153,7 @@ public sealed class ApplyColormapFunctionTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new ApplyColormapFunction().ExecuteAsync(
                 new ValueRef[] { ValueRef.FromImage(source), ValueRef.FromString("not_a_palette") },
-                MakeFrame(),
+                CreateEvaluationFrame(),
                 default));
         Assert.Contains("not_a_palette", ex.Message);
         Assert.Contains("turbo", ex.Message);
@@ -166,7 +164,7 @@ public sealed class ApplyColormapFunctionTests : ServiceTestBase
     {
         ValueRef result = await new ApplyColormapFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.Null(DataKind.Image), ValueRef.FromString("turbo") },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Image, result.Kind);
@@ -178,7 +176,7 @@ public sealed class ApplyColormapFunctionTests : ServiceTestBase
         using SKBitmap source = MakeRamp(width: 4, height: 4);
         ValueRef result = await new ApplyColormapFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(source), ValueRef.Null(DataKind.String) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Image, result.Kind);
@@ -201,12 +199,5 @@ public sealed class ApplyColormapFunctionTests : ServiceTestBase
             }
         }
         return bmp;
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

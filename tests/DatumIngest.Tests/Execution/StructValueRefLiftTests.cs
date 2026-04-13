@@ -46,8 +46,9 @@ public class StructValueRefLiftTests : ServiceTestBase
             DataValue[] s1 = [DataValue.FromString("dog", arena), DataValue.FromFloat32(0.7f)];
             DataValue array = DataValue.FromStructArray([s0, s1], arena, (ushort)structTypeId);
 
-            ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), typeRegistry: registry);
-            EvaluationFrame frame = new(MakeRow(("detections", array)), arena, arena, evaluator.Accountant);
+            using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
+            ExpressionEvaluator evaluator = context.CreateEvaluator();
+            EvaluationFrame frame = evaluator.CreateFrame(MakeRow(("detections", array)), arena);
 
             ValueRef lifted = await evaluator.EvaluateAsValueRefAsync(
                 new ColumnReference("detections"), frame);
@@ -107,8 +108,9 @@ public class StructValueRefLiftTests : ServiceTestBase
             DataValue[] det = [DataValue.FromFloat32(0.95f), landmarks];
             DataValue array = DataValue.FromStructArray([det], arena, (ushort)detectionTypeId);
 
-            ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), typeRegistry: registry);
-            EvaluationFrame frame = new(MakeRow(("faces", array)), arena, arena, evaluator.Accountant);
+            using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
+            ExpressionEvaluator evaluator = context.CreateEvaluator();
+            EvaluationFrame frame = evaluator.CreateFrame(MakeRow(("faces", array)), arena);
 
             ValueRef lifted = await evaluator.EvaluateAsValueRefAsync(
                 new ColumnReference("faces"), frame);
@@ -148,8 +150,9 @@ public class StructValueRefLiftTests : ServiceTestBase
         try
         {
             DataValue nullArray = DataValue.NullArrayOf(DataKind.Struct);
-            ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
-            EvaluationFrame frame = new(MakeRow(("detections", nullArray)), arena, arena, evaluator.Accountant);
+            using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena);
+            ExpressionEvaluator evaluator = context.CreateEvaluator();
+            EvaluationFrame frame = evaluator.CreateFrame(MakeRow(("detections", nullArray)), arena);
 
             ValueRef lifted = await evaluator.EvaluateAsValueRefAsync(
                 new ColumnReference("detections"), frame);
@@ -181,8 +184,9 @@ public class StructValueRefLiftTests : ServiceTestBase
             DataValue[] fields = [DataValue.FromString("widget", arena), DataValue.FromInt32(42)];
             DataValue s = DataValue.FromStruct(fields, arena, (ushort)typeId);
 
-            ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), typeRegistry: registry);
-            EvaluationFrame frame = new(MakeRow(("s", s)), arena, arena, evaluator.Accountant);
+            using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
+            ExpressionEvaluator evaluator = context.CreateEvaluator();
+            EvaluationFrame frame = evaluator.CreateFrame(MakeRow(("s", s)), arena);
 
             ValueRef lifted = await evaluator.EvaluateAsValueRefAsync(
                 new ColumnReference("s"), frame);

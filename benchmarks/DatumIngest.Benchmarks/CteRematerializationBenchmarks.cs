@@ -174,11 +174,7 @@ public class CteRematerializationBenchmarks
         QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, functions);
 
-        ExecutionContext context = new(
-            CancellationToken.None,
-            functions,
-            catalog,
-            _pool);
+        ExecutionContext context = catalog.CreateExecutionContext();
 
         QueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None)
             .ConfigureAwait(false);

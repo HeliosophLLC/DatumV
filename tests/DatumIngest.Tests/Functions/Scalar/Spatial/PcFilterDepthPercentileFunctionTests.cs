@@ -1,12 +1,10 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Spatial;
 
@@ -21,7 +19,7 @@ public sealed class PcFilterDepthPercentileFunctionTests : ServiceTestBase
 
         ValueRef result = await new PcFilterDepthPercentileFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(0.3f), ValueRef.FromFloat32(1.0f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(7u, header.PointCount);
@@ -37,7 +35,7 @@ public sealed class PcFilterDepthPercentileFunctionTests : ServiceTestBase
 
         ValueRef result = await new PcFilterDepthPercentileFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(0f), ValueRef.FromFloat32(1f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(5u, header.PointCount);
@@ -53,7 +51,7 @@ public sealed class PcFilterDepthPercentileFunctionTests : ServiceTestBase
 
         ValueRef result = await new PcFilterDepthPercentileFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(0.1f), ValueRef.FromFloat32(0.9f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         // Linear-interpolation percentiles at 0.1 and 0.9 over 10 points produce
@@ -71,7 +69,7 @@ public sealed class PcFilterDepthPercentileFunctionTests : ServiceTestBase
         // (0, 1) is "no percentile trim" — but NaN/Inf still get dropped.
         ValueRef result = await new PcFilterDepthPercentileFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(0f), ValueRef.FromFloat32(1f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(3u, header.PointCount);   // -1, -2, -3 survive
@@ -81,11 +79,11 @@ public sealed class PcFilterDepthPercentileFunctionTests : ServiceTestBase
     public async Task EmptyCloud_ReturnsEmpty()
     {
         ValueRef empty = await new PcEmptyFunction().ExecuteAsync(
-            ReadOnlyMemory<ValueRef>.Empty, MakeFrame(), default);
+            ReadOnlyMemory<ValueRef>.Empty, CreateEvaluationFrame(), default);
 
         ValueRef result = await new PcFilterDepthPercentileFunction().ExecuteAsync(
             new[] { empty, ValueRef.FromFloat32(0.3f), ValueRef.FromFloat32(1.0f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(0u, header.PointCount);
@@ -99,7 +97,7 @@ public sealed class PcFilterDepthPercentileFunctionTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new PcFilterDepthPercentileFunction().ExecuteAsync(
                 new[] { pc, ValueRef.FromFloat32(0.8f), ValueRef.FromFloat32(0.3f) },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("upper", ex.Message);
     }
 
@@ -110,7 +108,7 @@ public sealed class PcFilterDepthPercentileFunctionTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new PcFilterDepthPercentileFunction().ExecuteAsync(
                 new[] { pc, ValueRef.FromFloat32(-0.5f), ValueRef.FromFloat32(1.0f) },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("[0, 1]", ex.Message);
     }
 
@@ -123,7 +121,7 @@ public sealed class PcFilterDepthPercentileFunctionTests : ServiceTestBase
                 ValueRef.FromFloat32(0.0f),
                 ValueRef.FromFloat32(0.7f),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.PointCloud, result.Kind);
     }
@@ -138,21 +136,14 @@ public sealed class PcFilterDepthPercentileFunctionTests : ServiceTestBase
 
         ValueRef normResult = await new PcFilterDepthPercentileFunction().ExecuteAsync(
             new[] { normalized, ValueRef.FromFloat32(0.3f), ValueRef.FromFloat32(1.0f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         ValueRef metricResult = await new PcFilterDepthPercentileFunction().ExecuteAsync(
             new[] { metric, ValueRef.FromFloat32(0.3f), ValueRef.FromFloat32(1.0f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader hNorm = PointCloudHeader.Read(normResult.AsPointCloud());
         PointCloudHeader hMet  = PointCloudHeader.Read(metricResult.AsPointCloud());
         Assert.Equal(hNorm.PointCount, hMet.PointCount);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 
     private static ValueRef BuildCloudWithZValues(float[] zValues)

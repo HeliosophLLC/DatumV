@@ -6,7 +6,6 @@ using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Spatial;
 
@@ -27,10 +26,10 @@ public sealed class PcTransformFunctionTests : ServiceTestBase
         });
         ValueRef pose = await new PoseTranslateFunction().ExecuteAsync(
             new[] { ValueRef.FromFloat32(10f), ValueRef.FromFloat32(20f), ValueRef.FromFloat32(30f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         ValueRef result = await new PcTransformFunction().ExecuteAsync(
-            new[] { pc, pose }, MakeFrame(), default);
+            new[] { pc, pose }, CreateEvaluationFrame(), default);
 
         // Each point should be shifted by (10, 20, 30).
         ReadPoints(result, out Vector3[] positions, out _);
@@ -47,10 +46,10 @@ public sealed class PcTransformFunctionTests : ServiceTestBase
         });
         ValueRef pose = await new PoseTranslateFunction().ExecuteAsync(
             new[] { ValueRef.FromFloat32(5f), ValueRef.FromFloat32(0f), ValueRef.FromFloat32(0f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         ValueRef result = await new PcTransformFunction().ExecuteAsync(
-            new[] { pc, pose }, MakeFrame(), default);
+            new[] { pc, pose }, CreateEvaluationFrame(), default);
 
         ReadPoints(result, out _, out (byte r, byte g, byte b, byte a)[] colors);
         Assert.Equal((200, 100, 50, 255), colors[0]);
@@ -66,10 +65,10 @@ public sealed class PcTransformFunctionTests : ServiceTestBase
         });
         ValueRef pose = await new PoseTranslateFunction().ExecuteAsync(
             new[] { ValueRef.FromFloat32(100f), ValueRef.FromFloat32(0f), ValueRef.FromFloat32(0f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         ValueRef result = await new PcTransformFunction().ExecuteAsync(
-            new[] { pc, pose }, MakeFrame(), default);
+            new[] { pc, pose }, CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(new Vector3(99, -1, -1), header.BboxMin);
@@ -96,7 +95,7 @@ public sealed class PcTransformFunctionTests : ServiceTestBase
         ValueRef pose = ValueRef.FromPrimitiveArray(rotZ90, DataKind.Float32);
 
         ValueRef result = await new PcTransformFunction().ExecuteAsync(
-            new[] { pc, pose }, MakeFrame(), default);
+            new[] { pc, pose }, CreateEvaluationFrame(), default);
 
         ReadPoints(result, out Vector3[] positions, out _);
         Assert.Equal(0f, positions[0].X, precision: 5);
@@ -108,13 +107,13 @@ public sealed class PcTransformFunctionTests : ServiceTestBase
     public async Task EmptyCloud_PassesThrough()
     {
         ValueRef empty = await new PcEmptyFunction().ExecuteAsync(
-            ReadOnlyMemory<ValueRef>.Empty, MakeFrame(), default);
+            ReadOnlyMemory<ValueRef>.Empty, CreateEvaluationFrame(), default);
         ValueRef pose = await new PoseTranslateFunction().ExecuteAsync(
             new[] { ValueRef.FromFloat32(5f), ValueRef.FromFloat32(5f), ValueRef.FromFloat32(5f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         ValueRef result = await new PcTransformFunction().ExecuteAsync(
-            new[] { empty, pose }, MakeFrame(), default);
+            new[] { empty, pose }, CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(0u, header.PointCount);
@@ -128,7 +127,7 @@ public sealed class PcTransformFunctionTests : ServiceTestBase
 
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new PcTransformFunction().ExecuteAsync(
-                new[] { pc, wrongPose }, MakeFrame(), default));
+                new[] { pc, wrongPose }, CreateEvaluationFrame(), default));
         Assert.Contains("16", ex.Message);
     }
 
@@ -137,10 +136,10 @@ public sealed class PcTransformFunctionTests : ServiceTestBase
     {
         ValueRef pose = await new PoseTranslateFunction().ExecuteAsync(
             new[] { ValueRef.FromFloat32(1f), ValueRef.FromFloat32(1f), ValueRef.FromFloat32(1f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         ValueRef result = await new PcTransformFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.PointCloud), pose }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.PointCloud), pose }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.PointCloud, result.Kind);
     }
@@ -148,7 +147,7 @@ public sealed class PcTransformFunctionTests : ServiceTestBase
     [Fact]
     public async Task PoseTranslate_ReturnsIdentityFor000()
     {
-        EvaluationFrame frame = MakeFrame();
+        EvaluationFrame frame = CreateEvaluationFrame();
         ValueRef result = await new PoseTranslateFunction().ExecuteAsync(
             new[] { ValueRef.FromFloat32(0f), ValueRef.FromFloat32(0f), ValueRef.FromFloat32(0f) },
             frame, default);
@@ -165,13 +164,6 @@ public sealed class PcTransformFunctionTests : ServiceTestBase
         Assert.Equal(0f, matrix[3]);
         Assert.Equal(0f, matrix[7]);
         Assert.Equal(0f, matrix[11]);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 
     private static ValueRef BuildColoredCloud(

@@ -1,8 +1,6 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -19,7 +17,7 @@ public sealed class ImagePixelStatisticsFunctionsTests : ServiceTestBase
     {
         // (100, 150, 200) → (100+150+200)/3 = 150. Alpha (255) excluded.
         ValueRef result = await new ImagePixelMeanFunction().ExecuteAsync(
-            new[] { MakeSolid(4, 4, 100, 150, 200) }, MakeFrame(), default);
+            new[] { MakeSolid(4, 4, 100, 150, 200) }, CreateEvaluationFrame(), default);
         Assert.Equal(150f, result.AsFloat32(), 2);
     }
 
@@ -29,7 +27,7 @@ public sealed class ImagePixelStatisticsFunctionsTests : ServiceTestBase
         // Channels [2, 0, 1] → [B=200, R=100, G=150].
         ValueRef channels = ValueRef.FromPrimitiveArray(new[] { 2, 0, 1 }, DataKind.Int32);
         ValueRef result = await new ImagePixelMeanFunction().ExecuteAsync(
-            new[] { MakeSolid(4, 4, 100, 150, 200), channels }, MakeFrame(), default);
+            new[] { MakeSolid(4, 4, 100, 150, 200), channels }, CreateEvaluationFrame(), default);
         Assert.True(result.IsArray);
         Assert.Equal(DataKind.Float32, result.Kind);
 
@@ -45,7 +43,7 @@ public sealed class ImagePixelStatisticsFunctionsTests : ServiceTestBase
     {
         ValueRef channels = ValueRef.FromPrimitiveArray(new[] { 3 }, DataKind.Int32);
         ValueRef result = await new ImagePixelMeanFunction().ExecuteAsync(
-            new[] { MakeSolid(2, 2, 0, 0, 0), channels }, MakeFrame(), default);
+            new[] { MakeSolid(2, 2, 0, 0, 0), channels }, CreateEvaluationFrame(), default);
         float[] means = (float[])result.Materialized!;
         Assert.Equal(255f, means[0], 2);
     }
@@ -56,7 +54,7 @@ public sealed class ImagePixelStatisticsFunctionsTests : ServiceTestBase
         ValueRef channels = ValueRef.FromPrimitiveArray(new[] { 4 }, DataKind.Int32);
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new ImagePixelMeanFunction().ExecuteAsync(
-                new[] { MakeSolid(2, 2, 0, 0, 0), channels }, MakeFrame(), default));
+                new[] { MakeSolid(2, 2, 0, 0, 0), channels }, CreateEvaluationFrame(), default));
         Assert.Contains("out of range", ex.Message);
     }
 
@@ -64,7 +62,7 @@ public sealed class ImagePixelStatisticsFunctionsTests : ServiceTestBase
     public async Task PixelStd_SolidImage_IsZero()
     {
         ValueRef result = await new ImagePixelStdFunction().ExecuteAsync(
-            new[] { MakeSolid(4, 4, 128, 128, 128) }, MakeFrame(), default);
+            new[] { MakeSolid(4, 4, 128, 128, 128) }, CreateEvaluationFrame(), default);
         Assert.Equal(0f, result.AsFloat32(), 3);
     }
 
@@ -73,7 +71,7 @@ public sealed class ImagePixelStatisticsFunctionsTests : ServiceTestBase
     {
         ValueRef channels = ValueRef.FromPrimitiveArray(new[] { 0, 1, 2 }, DataKind.Int32);
         ValueRef result = await new ImagePixelStdFunction().ExecuteAsync(
-            new[] { MakeSolid(4, 4, 50, 100, 200), channels }, MakeFrame(), default);
+            new[] { MakeSolid(4, 4, 50, 100, 200), channels }, CreateEvaluationFrame(), default);
         float[] stds = (float[])result.Materialized!;
         Assert.Equal(3, stds.Length);
         Assert.Equal(0f, stds[0], 3);
@@ -85,7 +83,7 @@ public sealed class ImagePixelStatisticsFunctionsTests : ServiceTestBase
     public async Task PixelMean_NullImage_ScalarForm_ReturnsNullFloat32()
     {
         ValueRef result = await new ImagePixelMeanFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Image) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Image) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.False(result.IsArray);
         Assert.Equal(DataKind.Float32, result.Kind);
@@ -96,7 +94,7 @@ public sealed class ImagePixelStatisticsFunctionsTests : ServiceTestBase
     {
         ValueRef channels = ValueRef.FromPrimitiveArray(new[] { 0, 1, 2 }, DataKind.Int32);
         ValueRef result = await new ImagePixelMeanFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Image), channels }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Image), channels }, CreateEvaluationFrame(), default);
         Assert.True(result.IsArray);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Float32, result.Kind);
@@ -110,12 +108,5 @@ public sealed class ImagePixelStatisticsFunctionsTests : ServiceTestBase
             canvas.Clear(new SKColor(r, g, b, 255));
         }
         return ValueRef.FromImage(bmp);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

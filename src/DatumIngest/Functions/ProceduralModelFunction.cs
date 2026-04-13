@@ -234,7 +234,7 @@ public sealed class ProceduralModelFunction : IScalarFunction
         int rowCount,
         CancellationToken cancellationToken)
     {
-        IValueStore variableStore = outerFrame.Target;
+        Arena variableStore = (Arena)outerFrame.Target;
         // One column per declared variable / parameter, each holding rowCount
         // ValueRefs in row order. Case-insensitive to match VariableScope's
         // lookup contract.
@@ -273,17 +273,14 @@ public sealed class ProceduralModelFunction : IScalarFunction
         }
 
         // Body frame carries the model descriptor so infer() can resolve its
-        // session, exactly like the per-row body's frame.
-        EvaluationFrame bodyFrame = new(
-            Row.Empty,
-            variableStore,
-            variableStore,
-            outerFrame.Accountant,
-            outerRow: null,
-            sidecarRegistry: outerFrame.SidecarRegistry,
-            types: outerFrame.Types,
-            typeIdTranslations: outerFrame.TypeIdTranslations,
-            currentModel: _descriptor);
+        // session, exactly like the per-row body's frame. The batched body
+        // doesn't declare a single VariableScope (each row has its own perRowScope
+        // above + the body's straight-line DECLARE/SET path threads columns through
+        // EvaluateColumnAsync, not the frame), so the derived context only needs
+        // Store overridden.
+        using DatumIngest.Execution.ExecutionContext bodyContext = outerFrame.Context!.Derive(
+            store: variableStore);
+        EvaluationFrame bodyFrame = new EvaluationFrame(Row.Empty, variableStore, bodyContext, currentModel: _descriptor);
 
         // Walk the body. The IsStraightLineBody contract guarantees the
         // sequence is DECLARE/SET-only up to a terminal RETURN — no IF /
@@ -366,17 +363,10 @@ public sealed class ProceduralModelFunction : IScalarFunction
         // named-type TypeId stamping, and IS NOT NULL enforcement. The per-row
         // pass keeps these semantics identical between batched and per-row
         // dispatch — a small per-row cost in exchange for parity.
-        ExpressionEvaluator postEvaluator = new(
-            _functions,
-            outerRow: null,
-            sourceSchema: null,
-            letBindingExpressions: null,
-            store: variableStore,
-            sidecarRegistry: outerFrame.SidecarRegistry,
-            variableScope: null,
-            variableStore: variableStore,
-            typeRegistry: outerFrame.Types,
-            accountant: outerFrame.Accountant);
+        // Post-evaluator runs cast-on-RETURN; it doesn't need a variable
+        // scope because the cast operates on the just-evaluated returnValue,
+        // not on body-declared variables.
+        ExpressionEvaluator postEvaluator = bodyContext.CreateEvaluator();
 
         for (int row = 0; row < rowCount; row++)
         {
@@ -467,17 +457,9 @@ public sealed class ProceduralModelFunction : IScalarFunction
                 // benefit on real model bodies (the GPU waits while CPU
                 // rebuilds a VariableScope + ExpressionEvaluator N times
                 // per literal per statement).
-                ExpressionEvaluator broadcastEvaluator = new(
-                    _functions,
-                    outerRow: null,
-                    sourceSchema: null,
-                    letBindingExpressions: null,
-                    store: frame.Target,
-                    sidecarRegistry: frame.SidecarRegistry,
-                    variableScope: null,
-                    variableStore: frame.Target,
-                    typeRegistry: frame.Types,
-                    accountant: frame.Accountant);
+                // frame.Context is always set when this batched path runs
+                // (the body's Derive context wired it). Reuse it directly.
+                ExpressionEvaluator broadcastEvaluator = frame.Context!.CreateEvaluator();
                 ValueRef broadcast = await broadcastEvaluator
                     .EvaluateAsValueRefAsync(literalExpr, frame, cancellationToken)
                     .ConfigureAwait(false);
@@ -574,7 +556,7 @@ public sealed class ProceduralModelFunction : IScalarFunction
         EvaluationFrame frame,
         CancellationToken cancellationToken)
     {
-        IValueStore store = frame.Target;
+        Arena store = (Arena)frame.Target;
         ValueRef[] result = new ValueRef[rowCount];
         for (int row = 0; row < rowCount; row++)
         {
@@ -584,17 +566,11 @@ public sealed class ProceduralModelFunction : IScalarFunction
             {
                 scope.Declare(kv.Key, kv.Value[row]);
             }
-            ExpressionEvaluator evaluator = new(
-                _functions,
-                outerRow: null,
-                sourceSchema: null,
-                letBindingExpressions: null,
+            using DatumIngest.Execution.ExecutionContext rowContext = frame.Context!.Derive(
                 store: store,
-                sidecarRegistry: frame.SidecarRegistry,
                 variableScope: scope,
-                variableStore: store,
-                typeRegistry: frame.Types,
-                accountant: frame.Accountant);
+                variableStore: store);
+            ExpressionEvaluator evaluator = rowContext.CreateEvaluator();
             result[row] = await evaluator
                 .EvaluateAsValueRefAsync(expr, frame, cancellationToken)
                 .ConfigureAwait(false);
@@ -619,38 +595,22 @@ public sealed class ProceduralModelFunction : IScalarFunction
     private async ValueTask<ValueRef> ExecuteBodyAsync(
         ReadOnlyMemory<ValueRef> arguments, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        IValueStore variableStore = frame.Target;
+        Arena variableStore = (Arena)frame.Target;
         // Body shares the surrounding plan's accountant via frame.Accountant —
         // DECLARE'd payloads inside this body count against the outer budget.
         VariableScope scope = new(frame.Accountant);
 
         await BindParametersAsync(arguments, frame, variableStore, scope, cancellationToken).ConfigureAwait(false);
 
-        ExpressionEvaluator evaluator = new(
-            _functions,
-            outerRow: null,
-            sourceSchema: null,
-            letBindingExpressions: null,
+        using DatumIngest.Execution.ExecutionContext bodyContext = frame.Context!.Derive(
             store: variableStore,
-            sidecarRegistry: frame.SidecarRegistry,
             variableScope: scope,
-            variableStore: variableStore,
-            typeRegistry: frame.Types,
-            accountant: frame.Accountant);
-
-        // The load-bearing tweak vs ProceduralUdfFunction: body frame
-        // carries this model's descriptor so infer() can resolve its
-        // bound session.
-        EvaluationFrame bodyFrame = new(
-            Row.Empty,
-            variableStore,
-            variableStore,
-            frame.Accountant,
-            outerRow: null,
-            sidecarRegistry: frame.SidecarRegistry,
-            types: frame.Types,
-            typeIdTranslations: frame.TypeIdTranslations,
-            currentModel: _descriptor);
+            variableStore: variableStore);
+        ExpressionEvaluator evaluator = bodyContext.CreateEvaluator();
+        // Body frame additionally carries this model's descriptor so infer()
+        // resolves its bound session. CreateFrame sets the LambdaInvoker;
+        // currentModel is the only thing it doesn't pick up.
+        EvaluationFrame bodyFrame = evaluator.CreateFrame(Row.Empty).WithCurrentModel(_descriptor);
 
         ReturnSignal? signal = await ExecuteStatementsAsync(
             _descriptor.StatementBody, scope, evaluator, bodyFrame, cancellationToken).ConfigureAwait(false);
@@ -724,7 +684,7 @@ public sealed class ProceduralModelFunction : IScalarFunction
     private async ValueTask BindParametersAsync(
         ReadOnlyMemory<ValueRef> arguments,
         EvaluationFrame frame,
-        IValueStore variableStore,
+        Arena variableStore,
         VariableScope scope,
         CancellationToken cancellationToken)
     {
@@ -737,6 +697,14 @@ public sealed class ProceduralModelFunction : IScalarFunction
         ValueRef[] supplied = new ValueRef[suppliedCount];
         arguments.Span.CopyTo(supplied);
 
+        // Child context for parameter binding — same Store / VariableScope /
+        // VariableStore as the body's bodyContext, built once here so the
+        // optional check + param evaluators below share it.
+        using DatumIngest.Execution.ExecutionContext paramContext = frame.Context!.Derive(
+            store: variableStore,
+            variableScope: scope,
+            variableStore: variableStore);
+
         // Custom checks need an evaluator with the scope wired in so the
         // parameter name resolves to its just-declared value (and earlier
         // params resolve to theirs). Constructed lazily — only if any
@@ -747,26 +715,8 @@ public sealed class ProceduralModelFunction : IScalarFunction
         EvaluationFrame checkFrame = default;
         if (_hasCustomChecks)
         {
-            checkEvaluator = new ExpressionEvaluator(
-                _functions,
-                outerRow: null,
-                sourceSchema: null,
-                letBindingExpressions: null,
-                store: variableStore,
-                sidecarRegistry: frame.SidecarRegistry,
-                variableScope: scope,
-                variableStore: variableStore,
-                typeRegistry: frame.Types,
-                accountant: frame.Accountant);
-            checkFrame = new EvaluationFrame(
-                Row.Empty,
-                variableStore,
-                variableStore,
-                frame.Accountant,
-                outerRow: null,
-                sidecarRegistry: frame.SidecarRegistry,
-                types: frame.Types,
-                videoRegistry: frame.VideoRegistry);
+            checkEvaluator = paramContext.CreateEvaluator();
+            checkFrame = checkEvaluator.CreateFrame(Row.Empty);
         }
 
         ExpressionEvaluator? paramEvaluator = null;
@@ -782,22 +732,10 @@ public sealed class ProceduralModelFunction : IScalarFunction
             }
             else if (param.Default is not null)
             {
-                paramEvaluator ??= new ExpressionEvaluator(
-                    _functions,
-                    store: variableStore,
-                    sidecarRegistry: frame.SidecarRegistry,
-                    accountant: frame.Accountant);
+                paramEvaluator ??= paramContext.CreateEvaluator();
                 if (paramFrame.Source is null)
                 {
-                    paramFrame = new EvaluationFrame(
-                        Row.Empty,
-                        variableStore,
-                        variableStore,
-                        frame.Accountant,
-                        outerRow: null,
-                        sidecarRegistry: frame.SidecarRegistry,
-                        types: frame.Types,
-                        videoRegistry: frame.VideoRegistry);
+                    paramFrame = paramEvaluator.CreateFrame(Row.Empty);
                 }
                 value = await paramEvaluator.EvaluateAsValueRefAsync(param.Default, paramFrame, cancellationToken).ConfigureAwait(false);
             }
@@ -827,22 +765,10 @@ public sealed class ProceduralModelFunction : IScalarFunction
                 && TypeAnnotationResolver.TryParse(param.TypeName, out DataKind declaredKind, out bool declaredIsArray)
                 && NeedsCoercion(value, declaredKind, declaredIsArray))
             {
-                paramEvaluator ??= new ExpressionEvaluator(
-                    _functions,
-                    store: variableStore,
-                    sidecarRegistry: frame.SidecarRegistry,
-                    accountant: frame.Accountant);
+                paramEvaluator ??= paramContext.CreateEvaluator();
                 if (paramFrame.Source is null)
                 {
-                    paramFrame = new EvaluationFrame(
-                        Row.Empty,
-                        variableStore,
-                        variableStore,
-                        frame.Accountant,
-                        outerRow: null,
-                        sidecarRegistry: frame.SidecarRegistry,
-                        types: frame.Types,
-                        videoRegistry: frame.VideoRegistry);
+                    paramFrame = paramEvaluator.CreateFrame(Row.Empty);
                 }
                 DataValue asData = value.ToDataValue(variableStore, value.TypeId, frame.Types);
                 CastExpression cast = new(

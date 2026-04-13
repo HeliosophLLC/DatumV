@@ -1,13 +1,10 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
-using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -56,7 +53,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef pc = await BuildOrganizedColoredCloud(width: 3, height: 4);
         ValueRef result = await new PointCloudCountFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         Assert.Equal(DataKind.Int32, result.Kind);
         Assert.Equal(12, result.AsInt32());
     }
@@ -66,7 +63,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef pc = await BuildOrganizedColoredCloud(width: 5, height: 7);
         ValueRef result = await new PointCloudWidthFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         Assert.Equal(5, result.AsInt32());
     }
 
@@ -75,7 +72,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef pc = await BuildOrganizedColoredCloud(width: 5, height: 7);
         ValueRef result = await new PointCloudHeightFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         Assert.Equal(7, result.AsInt32());
     }
 
@@ -84,7 +81,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef pc = await BuildOrganizedColoredCloud(width: 4, height: 4);
         ValueRef result = await new PointCloudIsOrganizedFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         Assert.True(result.AsBoolean());
     }
 
@@ -93,7 +90,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef pc = BuildUnorganizedPositionOnlyCloud(pointCount: 10);
         ValueRef result = await new PointCloudIsOrganizedFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         Assert.False(result.AsBoolean());
     }
 
@@ -102,7 +99,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef pc = await BuildOrganizedColoredCloud(width: 2, height: 2);
         ValueRef result = await new PointCloudHasColorFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         Assert.True(result.AsBoolean());
     }
 
@@ -111,7 +108,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef pc = BuildUnorganizedPositionOnlyCloud(pointCount: 4);
         ValueRef result = await new PointCloudHasColorFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         Assert.False(result.AsBoolean());
     }
 
@@ -123,9 +120,9 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
         ValueRef pc = BuildClouedWithBbox(expectedMin, expectedMax);
 
         ValueRef minResult = await new PointCloudBboxMinFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         ValueRef maxResult = await new PointCloudBboxMaxFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
 
         Assert.Equal(DataKind.Point3D, minResult.Kind);
         Assert.Equal(DataKind.Point3D, maxResult.Kind);
@@ -140,7 +137,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     {
         ValueRef pc = await BuildOrganizedColoredCloud(width: 6, height: 5);
         ValueRef result = await new PointCloudDepthFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
 
         Assert.Equal(DataKind.Image, result.Kind);
         SKBitmap bmp = result.AsImage();
@@ -155,7 +152,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
 
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new PointCloudDepthFunction().ExecuteAsync(
-                new[] { pc }, MakeFrame(), default));
+                new[] { pc }, CreateEvaluationFrame(), default));
         Assert.Contains("unorganized", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -167,7 +164,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
         ValueRef pc = BuildOrganizedFlatZCloud(width: 4, height: 4, z: -0.5f);
 
         ValueRef result = await new PointCloudDepthFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
 
         SKBitmap bmp = result.AsImage();
         SKColor px = bmp.GetPixel(2, 2);
@@ -185,7 +182,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
         ValueRef pc = BuildOrganizedZGradientCloud(width: 4, height: 4);
 
         ValueRef result = await new PointCloudDepthFunction().ExecuteAsync(
-            new[] { pc }, MakeFrame(), default);
+            new[] { pc }, CreateEvaluationFrame(), default);
         SKBitmap bmp = result.AsImage();
 
         // Row 0 has Z = -1 (far → dark), row 3 has Z = 0 (close → bright).
@@ -200,7 +197,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     public async Task Count_NullInput_ReturnsNullInt32()
     {
         ValueRef result = await new PointCloudCountFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.PointCloud) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.PointCloud) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Int32, result.Kind);
     }
@@ -209,7 +206,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     public async Task IsOrganized_NullInput_ReturnsNullBoolean()
     {
         ValueRef result = await new PointCloudIsOrganizedFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.PointCloud) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.PointCloud) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Boolean, result.Kind);
     }
@@ -218,7 +215,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     public async Task BboxMin_NullInput_ReturnsNullPoint3D()
     {
         ValueRef result = await new PointCloudBboxMinFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.PointCloud) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.PointCloud) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Point3D, result.Kind);
     }
@@ -227,7 +224,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
     public async Task Depth_NullInput_ReturnsNullImage()
     {
         ValueRef result = await new PointCloudDepthFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.PointCloud) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.PointCloud) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Image, result.Kind);
     }
@@ -252,7 +249,7 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
         // accessors don't care about projection mode anyway.
         return await new PointCloudFromDepthOrthographicFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
     }
 
@@ -373,12 +370,5 @@ public sealed class PointCloudAccessorFunctionsTests : ServiceTestBase
         dst[13] = g;
         dst[14] = b;
         dst[15] = a;
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

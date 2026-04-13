@@ -1,4 +1,4 @@
-﻿using DatumIngest.Execution;
+using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Aggregates;
 using DatumIngest.Functions.Window;
@@ -14,9 +14,9 @@ namespace DatumIngest.Tests.Functions;
 /// </summary>
 public class WindowFunctionTests : ServiceTestBase
 {
-    private static ExpressionEvaluator CreateEvaluator()
+    private ExpressionEvaluator CreateEvaluator()
     {
-        return new ExpressionEvaluator(FunctionRegistry.CreateDefault(), store: new Arena());
+        return CreateExecutionContext().CreateEvaluator();
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
@@ -29,7 +29,7 @@ public class WindowFunctionTests : ServiceTestBase
     /// <summary>
     /// Helper that runs a window computation over a partition of rows.
     /// </summary>
-    private static async Task<DataValue[]> ComputeWindowAsync(
+    private async Task<DataValue[]> ComputeWindowAsync(
         IWindowFunction function,
         IReadOnlyList<Row> partitionRows,
         IReadOnlyList<Expression>? argumentExpressions = null,
@@ -53,7 +53,7 @@ public class WindowFunctionTests : ServiceTestBase
         return results;
     }
 
-    // ─────────────── ROW_NUMBER ───────────────
+    // --------------- ROW_NUMBER ---------------
 
     [Fact]
     public async Task RowNumber_SequentialNumbersStartingAtOne()
@@ -101,7 +101,7 @@ public class WindowFunctionTests : ServiceTestBase
         Assert.Equal(DataKind.Float32, result);
     }
 
-    // ─────────────── RANK ───────────────
+    // --------------- RANK ---------------
 
     [Fact]
     public async Task Rank_WithTies_ProducesGaps()
@@ -152,7 +152,7 @@ public class WindowFunctionTests : ServiceTestBase
         Assert.Equal(3f, results[2].AsFloat32());
     }
 
-    // ─────────────── DENSE_RANK ───────────────
+    // --------------- DENSE_RANK ---------------
 
     [Fact]
     public async Task DenseRank_WithTies_NoGaps()
@@ -180,7 +180,7 @@ public class WindowFunctionTests : ServiceTestBase
         Assert.Equal(3f, results[3].AsFloat32());
     }
 
-    // ─────────────── NTILE ───────────────
+    // --------------- NTILE ---------------
 
     [Fact]
     public async Task Ntile_EvenDistribution()
@@ -194,7 +194,7 @@ public class WindowFunctionTests : ServiceTestBase
             MakeRow(("x", DataValue.FromFloat32(4f))),
         ];
 
-        // NTILE(2) on 4 rows → buckets 1,1,2,2
+        // NTILE(2) on 4 rows ? buckets 1,1,2,2
         IReadOnlyList<Expression> arguments = [new LiteralExpression(2)];
         DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
@@ -217,7 +217,7 @@ public class WindowFunctionTests : ServiceTestBase
             MakeRow(("x", DataValue.FromFloat32(5f))),
         ];
 
-        // NTILE(3) on 5 rows → 2+2+1 distribution → buckets 1,1,2,2,3
+        // NTILE(3) on 5 rows ? 2+2+1 distribution ? buckets 1,1,2,2,3
         IReadOnlyList<Expression> arguments = [new LiteralExpression(3)];
         DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
@@ -236,7 +236,7 @@ public class WindowFunctionTests : ServiceTestBase
             function.ValidateArguments([]));
     }
 
-    // ─────────────── LAG ───────────────
+    // --------------- LAG ---------------
 
     [Fact]
     public async Task Lag_DefaultOffset_ReturnsPreviousRow()
@@ -269,7 +269,7 @@ public class WindowFunctionTests : ServiceTestBase
             MakeRow(("val", DataValue.FromFloat32(40f))),
         ];
 
-        // LAG(val, 2) — offset of 2
+        // LAG(val, 2) � offset of 2
         IReadOnlyList<Expression> arguments =
         [
             new ColumnReference("val"),
@@ -294,7 +294,7 @@ public class WindowFunctionTests : ServiceTestBase
             MakeRow(("val", DataValue.FromFloat32(20f))),
         ];
 
-        // LAG(val, 1, -1) — offset 1, default -1
+        // LAG(val, 1, -1) � offset 1, default -1
         IReadOnlyList<Expression> arguments =
         [
             new ColumnReference("val"),
@@ -308,7 +308,7 @@ public class WindowFunctionTests : ServiceTestBase
         Assert.Equal(10f, results[1].AsFloat32());
     }
 
-    // ─────────────── LEAD ───────────────
+    // --------------- LEAD ---------------
 
     [Fact]
     public async Task Lead_DefaultOffset_ReturnsNextRow()
@@ -341,7 +341,7 @@ public class WindowFunctionTests : ServiceTestBase
             MakeRow(("val", DataValue.FromFloat32(40f))),
         ];
 
-        // LEAD(val, 2) — offset of 2
+        // LEAD(val, 2) � offset of 2
         IReadOnlyList<Expression> arguments =
         [
             new ColumnReference("val"),
@@ -366,7 +366,7 @@ public class WindowFunctionTests : ServiceTestBase
             MakeRow(("val", DataValue.FromFloat32(20f))),
         ];
 
-        // LEAD(val, 1, 999) — offset 1, default 999
+        // LEAD(val, 1, 999) � offset 1, default 999
         IReadOnlyList<Expression> arguments =
         [
             new ColumnReference("val"),
@@ -380,7 +380,7 @@ public class WindowFunctionTests : ServiceTestBase
         Assert.Equal(999, results[1].AsInt32());
     }
 
-    // ─────────────── AggregateWindowAdapter ───────────────
+    // --------------- AggregateWindowAdapter ---------------
 
     [Fact]
     public async Task AggregateWindowAdapter_Sum_WholePartition()
@@ -395,7 +395,7 @@ public class WindowFunctionTests : ServiceTestBase
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
 
-        // No frame → whole partition, sum = 60 for every row
+        // No frame ? whole partition, sum = 60 for every row
         DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(60f, results[0].AsFloat32());
@@ -416,7 +416,7 @@ public class WindowFunctionTests : ServiceTestBase
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
 
-        // Frame: ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW → running total
+        // Frame: ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW ? running total
         WindowFrame frame = new(
             WindowFrameType.Rows,
             new UnboundedPrecedingBound(),
@@ -463,7 +463,7 @@ public class WindowFunctionTests : ServiceTestBase
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
 
-        // Frame: ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING → 3-row moving average
+        // Frame: ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING ? 3-row moving average
         WindowFrame frame = new(
             WindowFrameType.Rows,
             new PrecedingBound(1),
@@ -482,7 +482,7 @@ public class WindowFunctionTests : ServiceTestBase
         Assert.Equal(35.0, results[3].AsFloat64());
     }
 
-    // ─────────────── FunctionRegistry integration ───────────────
+    // --------------- FunctionRegistry integration ---------------
 
     [Fact]
     public async Task FunctionRegistry_RegistersAllWindowFunctions()
@@ -546,7 +546,7 @@ public class WindowFunctionTests : ServiceTestBase
         Assert.Contains("NTH_VALUE", names);
     }
 
-    // ─────────────── FIRST_VALUE ───────────────
+    // --------------- FIRST_VALUE ---------------
 
     [Fact]
     public async Task FirstValue_WholePartition_ReturnsFirstRow()
@@ -616,13 +616,13 @@ public class WindowFunctionTests : ServiceTestBase
 
         DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments, frame: frame);
 
-        // Row 0: frame [0,1] → first = 10
+        // Row 0: frame [0,1] ? first = 10
         Assert.Equal(10f, results[0].AsFloat32());
-        // Row 1: frame [0,2] → first = 10
+        // Row 1: frame [0,2] ? first = 10
         Assert.Equal(10f, results[1].AsFloat32());
-        // Row 2: frame [1,3] → first = 20
+        // Row 2: frame [1,3] ? first = 20
         Assert.Equal(20f, results[2].AsFloat32());
-        // Row 3: frame [2,3] → first = 30
+        // Row 3: frame [2,3] ? first = 30
         Assert.Equal(30f, results[3].AsFloat32());
     }
 
@@ -690,7 +690,7 @@ public class WindowFunctionTests : ServiceTestBase
             function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
-    // ─────────────── LAST_VALUE ───────────────
+    // --------------- LAST_VALUE ---------------
 
     [Fact]
     public async Task LastValue_WholePartition_ReturnsLastRow()
@@ -724,7 +724,7 @@ public class WindowFunctionTests : ServiceTestBase
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
 
-        // ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW — last value = current row
+        // ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW � last value = current row
         WindowFrame frame = new(
             WindowFrameType.Rows,
             new UnboundedPrecedingBound(),
@@ -783,7 +783,7 @@ public class WindowFunctionTests : ServiceTestBase
             function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
-    // ─────────────── NTH_VALUE ───────────────
+    // --------------- NTH_VALUE ---------------
 
     [Fact]
     public async Task NthValue_ReturnsNthRow()
@@ -843,7 +843,7 @@ public class WindowFunctionTests : ServiceTestBase
             MakeRow(("val", DataValue.FromFloat32(20f))),
         ];
 
-        // NTH_VALUE(val, 5) — only 2 rows
+        // NTH_VALUE(val, 5) � only 2 rows
         IReadOnlyList<Expression> arguments =
         [
             new ColumnReference("val"),
@@ -867,7 +867,7 @@ public class WindowFunctionTests : ServiceTestBase
             MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
-        // NTH_VALUE(val, 1) FROM LAST → last row = 30
+        // NTH_VALUE(val, 1) FROM LAST ? last row = 30
         IReadOnlyList<Expression> arguments =
         [
             new ColumnReference("val"),
@@ -893,7 +893,7 @@ public class WindowFunctionTests : ServiceTestBase
             MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
-        // NTH_VALUE(val, 2) FROM LAST → second-to-last = 20
+        // NTH_VALUE(val, 2) FROM LAST ? second-to-last = 20
         IReadOnlyList<Expression> arguments =
         [
             new ColumnReference("val"),
@@ -920,7 +920,7 @@ public class WindowFunctionTests : ServiceTestBase
             MakeRow(("val", DataValue.FromFloat32(20f))),
         ];
 
-        // NTH_VALUE(val, 2) IGNORE NULLS → 2nd non-null = 20
+        // NTH_VALUE(val, 2) IGNORE NULLS ? 2nd non-null = 20
         IReadOnlyList<Expression> arguments =
         [
             new ColumnReference("val"),

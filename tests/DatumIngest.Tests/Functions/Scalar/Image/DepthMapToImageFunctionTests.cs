@@ -1,4 +1,3 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Model;
@@ -13,12 +12,9 @@ namespace DatumIngest.Tests.Functions.Scalar.Image;
 /// depth bodies. Validates the min-max normalize math, grayscale pack,
 /// and resize-to-target output dimensions.
 /// </summary>
-public sealed class DepthMapToImageFunctionTests
+public sealed class DepthMapToImageFunctionTests : ServiceTestBase
 {
-    private static EvaluationFrame Frame() =>
-        new(Row.Empty, new Arena(), new Arena(), new MemoryAccountant(), types: new TypeRegistry());
-
-    private static async Task<SKBitmap> InvokeAsync(
+    private async Task<SKBitmap> InvokeAsync(
         float[] values, int sourceH, int sourceW, int targetH, int targetW)
     {
         DepthMapToImageFunction fn = new();
@@ -31,7 +27,7 @@ public sealed class DepthMapToImageFunctionTests
                 ValueRef.FromInt32(targetH),
                 ValueRef.FromInt32(targetW),
             }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
         Assert.Equal(DataKind.Image, result.Kind);
         Assert.False(result.IsNull);
         return result.AsImage();
@@ -111,7 +107,7 @@ public sealed class DepthMapToImageFunctionTests
                     ValueRef.FromInt32(4),
                     ValueRef.FromInt32(4),
                 }.AsMemory(),
-                Frame(), CancellationToken.None));
+                CreateEvaluationFrame(), CancellationToken.None));
     }
 
     [Fact]
@@ -127,7 +123,7 @@ public sealed class DepthMapToImageFunctionTests
                 ValueRef.FromInt32(2),
                 ValueRef.FromInt32(2),
             }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Image, result.Kind);
     }

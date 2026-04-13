@@ -14,7 +14,7 @@ public sealed class PointCloudFromDepthConfidenceFunctionTests : ServiceTestBase
     [Fact]
     public async Task HighConfidenceThreshold_DropsLowConfidencePixels()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ValueRef color = BuildColorImage(4, 4);
         ValueRef depth = BuildShapedFloatArray(4, 4, fillValue: 1.0f, f);
         // Half the pixels at confidence=0.2, half at confidence=0.8.
@@ -38,7 +38,7 @@ public sealed class PointCloudFromDepthConfidenceFunctionTests : ServiceTestBase
     [Fact]
     public async Task ZeroThreshold_KeepsEverything()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ValueRef color = BuildColorImage(3, 3);
         ValueRef depth = BuildShapedFloatArray(3, 3, fillValue: 2.5f, f);
         ValueRef conf = BuildShapedConfidenceArray(3, 3, lowHalf: 0.1f, highHalf: 0.9f, f);
@@ -59,7 +59,7 @@ public sealed class PointCloudFromDepthConfidenceFunctionTests : ServiceTestBase
     [Fact]
     public async Task ThresholdAboveAll_ReturnsEmpty()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ValueRef color = BuildColorImage(2, 2);
         ValueRef depth = BuildShapedFloatArray(2, 2, fillValue: 1.0f, f);
         ValueRef conf = BuildShapedConfidenceArray(2, 2, lowHalf: 0.2f, highHalf: 0.5f, f);
@@ -80,7 +80,7 @@ public sealed class PointCloudFromDepthConfidenceFunctionTests : ServiceTestBase
     [Fact]
     public async Task DepthAndConfidenceDimensionMismatch_Throws()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ValueRef color = BuildColorImage(4, 4);
         ValueRef depth = BuildShapedFloatArray(4, 4, fillValue: 1.0f, f);
         ValueRef wrongConf = BuildShapedFloatArray(2, 2, fillValue: 1.0f, f);   // mismatched
@@ -100,7 +100,7 @@ public sealed class PointCloudFromDepthConfidenceFunctionTests : ServiceTestBase
     [Fact]
     public async Task NullInput_PropagatesNull()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ValueRef color = BuildColorImage(2, 2);
 
         ValueRef result = await new PointCloudFromDepthOrthographicWithConfidenceFunction().ExecuteAsync(
@@ -115,13 +115,6 @@ public sealed class PointCloudFromDepthConfidenceFunctionTests : ServiceTestBase
             f, default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.PointCloud, result.Kind);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 
     private static ValueRef BuildColorImage(int w, int h)

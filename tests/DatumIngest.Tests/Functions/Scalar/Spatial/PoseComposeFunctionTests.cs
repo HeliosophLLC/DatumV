@@ -38,7 +38,7 @@ public sealed class PoseComposeFunctionTests : ServiceTestBase
         PoseIdentityFunction fn = new();
         ValueRef result = await fn.ExecuteAsync(
             ReadOnlyMemory<ValueRef>.Empty,
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         float[] expected =
@@ -184,7 +184,7 @@ public sealed class PoseComposeFunctionTests : ServiceTestBase
         ValueRef identity = await Identity();
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.NullArray(DataKind.Float32), identity },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         Assert.True(result.IsNull);
@@ -200,7 +200,7 @@ public sealed class PoseComposeFunctionTests : ServiceTestBase
 
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
         {
-            await fn.ExecuteAsync(new ValueRef[] { good, bad }, MakeFrame(), default);
+            await fn.ExecuteAsync(new ValueRef[] { good, bad }, CreateEvaluationFrame(), default);
         });
         Assert.Contains("16 Float32 values", ex.Message);
     }
@@ -210,7 +210,7 @@ public sealed class PoseComposeFunctionTests : ServiceTestBase
     private async Task<ValueRef> Identity()
     {
         PoseIdentityFunction fn = new();
-        return await fn.ExecuteAsync(ReadOnlyMemory<ValueRef>.Empty, MakeFrame(), default);
+        return await fn.ExecuteAsync(ReadOnlyMemory<ValueRef>.Empty, CreateEvaluationFrame(), default);
     }
 
     private async Task<ValueRef> Translate(float dx, float dy, float dz)
@@ -218,14 +218,14 @@ public sealed class PoseComposeFunctionTests : ServiceTestBase
         PoseTranslateFunction fn = new();
         return await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromFloat32(dx), ValueRef.FromFloat32(dy), ValueRef.FromFloat32(dz) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
     }
 
     private async Task<ValueRef> Compose(ValueRef a, ValueRef b)
     {
         PoseComposeFunction fn = new();
-        return await fn.ExecuteAsync(new ValueRef[] { a, b }, MakeFrame(), default);
+        return await fn.ExecuteAsync(new ValueRef[] { a, b }, CreateEvaluationFrame(), default);
     }
 
     private static ValueRef MakeRot90Y()
@@ -246,7 +246,7 @@ public sealed class PoseComposeFunctionTests : ServiceTestBase
         Assert.Equal(DataKind.Float32, actual.Kind);
         Assert.True(actual.IsArray);
 
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ReadOnlySpan<float> got = actual.ToDataValue(f.Source).AsArraySpan<float>(f.Source, f.SidecarRegistry);
         Assert.Equal(16, got.Length);
         for (int i = 0; i < 16; i++)
@@ -255,10 +255,4 @@ public sealed class PoseComposeFunctionTests : ServiceTestBase
         }
     }
 
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-    }
 }

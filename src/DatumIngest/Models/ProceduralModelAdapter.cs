@@ -1,5 +1,6 @@
 using System.Diagnostics;
 
+using DatumIngest.Catalog;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
@@ -64,6 +65,7 @@ public sealed class ProceduralModelAdapter : IModel, IDisposable
 {
     private readonly ModelDescriptor _descriptor;
     private readonly ProceduralModelFunction _function;
+    private readonly TableCatalog _catalog;
     private readonly DataKind _outputKind;
     private readonly bool _outputIsArray;
     private readonly IReadOnlyList<DataKind> _inputKinds;
@@ -93,15 +95,20 @@ public sealed class ProceduralModelAdapter : IModel, IDisposable
     }
 
     /// <summary>
-    /// Builds an adapter for <paramref name="descriptor"/>. The function
-    /// registry is the catalog's scalar registry — passed through to the
-    /// body's evaluator so nested udf/scalar calls inside the body resolve
-    /// the same way they would in a top-level expression.
+    /// Builds an adapter for <paramref name="descriptor"/>. The
+    /// <paramref name="catalog"/> is the catalog under which the model was
+    /// registered; <c>InferBatchAsync</c> uses it to construct the
+    /// per-call <see cref="DatumIngest.Execution.ExecutionContext"/> the body evaluates against
+    /// (function registry, sidecar registry, pool). Pulling these from the
+    /// catalog at call time rather than capturing each individually keeps
+    /// the adapter aligned with how every other body-evaluator builds its
+    /// ambient state.
     /// </summary>
-    public ProceduralModelAdapter(ModelDescriptor descriptor, FunctionRegistry functions)
+    public ProceduralModelAdapter(ModelDescriptor descriptor, TableCatalog catalog)
     {
         _descriptor = descriptor;
-        _function = new ProceduralModelFunction(descriptor, functions);
+        _catalog = catalog;
+        _function = new ProceduralModelFunction(descriptor, catalog.Functions);
 
         // Output kind from the descriptor's RETURNS annotation. The parser
         // already validated this string at CREATE MODEL time; the
@@ -232,16 +239,12 @@ public sealed class ProceduralModelAdapter : IModel, IDisposable
         // a MemoryAccountant. The body's residency is accounted in this
         // isolated island until the IModel API grows that parameter.
         using MemoryAccountant accountant = new();
+        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(store: arena,
+            types: typeRegistry,
+            accountant: accountant, cancellationToken: cancellationToken);
         try
         {
-            EvaluationFrame frame = new(
-                Row.Empty,
-                arena,
-                arena,
-                accountant,
-                outerRow: null,
-                sidecarRegistry: null,
-                types: typeRegistry);
+            EvaluationFrame frame = context.CreateFrame(Row.Empty, arena);
 
             // Batched path: straight-line body + multi-row batch hits the
             // columnar interpreter so any in-body call that overrides

@@ -1,12 +1,10 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Spatial;
 
@@ -24,7 +22,7 @@ public sealed class PcFilterDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await new PcFilterDepthFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(-2.0f), ValueRef.FromFloat32(0f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(2u, header.PointCount);
@@ -44,7 +42,7 @@ public sealed class PcFilterDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await new PcFilterDepthFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(-2f), ValueRef.FromFloat32(0f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(new Vector3(1f, 2f, -1.0f), header.BboxMin);
@@ -61,7 +59,7 @@ public sealed class PcFilterDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await new PcFilterDepthFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(0f), ValueRef.FromFloat32(1f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         PointCloudHeader header = PointCloudHeader.Read(result.AsPointCloud());
         Assert.Equal(0u, header.PointCount);
@@ -79,7 +77,7 @@ public sealed class PcFilterDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await new PcFilterDepthFunction().ExecuteAsync(
             new[] { pc, ValueRef.FromFloat32(-1f), ValueRef.FromFloat32(0f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         byte[] blob = result.AsPointCloud();
         Assert.Equal(200, blob[PointCloudHeader.SizeBytes + 12]);
@@ -95,7 +93,7 @@ public sealed class PcFilterDepthFunctionTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new PcFilterDepthFunction().ExecuteAsync(
                 new[] { pc, ValueRef.FromFloat32(5f), ValueRef.FromFloat32(0f) },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("min_z", ex.Message);
     }
 
@@ -104,16 +102,9 @@ public sealed class PcFilterDepthFunctionTests : ServiceTestBase
     {
         ValueRef result = await new PcFilterDepthFunction().ExecuteAsync(
             new[] { ValueRef.Null(DataKind.PointCloud), ValueRef.FromFloat32(0f), ValueRef.FromFloat32(1f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.PointCloud, result.Kind);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 
     private static ValueRef BuildColoredCloud((Vector3 pos, byte r, byte g, byte b)[] points)

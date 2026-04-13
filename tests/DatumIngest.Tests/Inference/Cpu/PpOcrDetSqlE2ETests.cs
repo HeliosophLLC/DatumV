@@ -169,12 +169,6 @@ public sealed class PpOcrDetSqlE2ETests : ServiceTestBase
         // through MIO + ProceduralModelAdapter regardless of body shape.
     }
 
-    private EvaluationFrame MakeFrame()
-    {
-        Arena arena = new();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-    }
-
     /// <summary>
     /// Round-trips PP-OCR-det's <c>Array&lt;Struct&gt;</c> output through the
     /// MIO scatter path and asserts the struct field names survive: <c>label,
@@ -267,15 +261,4 @@ public sealed class PpOcrDetSqlE2ETests : ServiceTestBase
         }
         Assert.True(sawRow, "expected at least one output row");
     }
-
-    private static float[] ImageNetMean() => [0.485f, 0.456f, 0.406f];
-    private static float[] ImageNetStd() => [0.229f, 0.224f, 0.225f];
-
-    private sealed record DetectionRecord(
-        string Label,
-        float Score,
-        float X,
-        float Y,
-        float W,
-        float H);
 }

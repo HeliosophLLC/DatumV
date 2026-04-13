@@ -104,12 +104,10 @@ public sealed class LambdaValueTests : ServiceTestBase
     public async Task EvaluateAsValueRefAsync_LambdaExpression_ProducesLambdaValueRef()
     {
         LambdaExpression ast = ParseLambda("x -> x + 1");
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        EvaluationFrame frame = new(
-            Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
+        EvaluationFrame frame = CreateEvaluationFrame();
 
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
+        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         ValueRef result = await evaluator.EvaluateAsValueRefAsync(ast, frame, default);
 
         Assert.Equal(DataKind.Lambda, result.Kind);
@@ -124,12 +122,10 @@ public sealed class LambdaValueTests : ServiceTestBase
     public async Task EvaluateAsync_LambdaExpression_ThrowsHelpfulMessage()
     {
         LambdaExpression ast = ParseLambda("x -> x + 1");
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        EvaluationFrame frame = new(
-            Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
+        EvaluationFrame frame = CreateEvaluationFrame();
 
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
+        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         // The evaluator's outer catch wraps internal failures in
         // ExpressionEvaluationException (carrying source-span info); the
         // helpful message we care about is still propagated.

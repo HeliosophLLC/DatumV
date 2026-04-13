@@ -51,16 +51,10 @@ internal sealed class QueryPlan : IQueryPlan
         // _hoistStore) can do so via the well-known ExecutionContext.Store handle.
         // Without this, hoisted string literals >16 bytes are stranded in
         // _hoistStore and unreachable to operators downstream of the planner.
-        using DatumIngest.Execution.ExecutionContext context = new(
-            cancellationToken, _functions, _catalog, _catalog.Pool,
-            store: _hoistStore)
-        {
-            // Pull the catalog-level tracer (if any) into the per-query
-            // context. Setting / clearing _catalog.ModelTracer at runtime
-            // affects subsequently planned queries; queries already
-            // running keep the tracer they captured at execution start.
-            ModelTracer = _catalog.ModelTracer,
-        };
+        // The factory snapshots the catalog's ModelTracer into the context.
+        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(
+            store: _hoistStore,
+            cancellationToken: cancellationToken);
         // Owned accountant — start 1Hz sampling so the per-query
         // MemoryProfile is populated for inspection.
         context.Accountant.StartProfiling();
@@ -84,27 +78,21 @@ internal sealed class QueryPlan : IQueryPlan
         // _hoistStore) can do so via the well-known ExecutionContext.Store handle.
         // Without this, hoisted string literals >16 bytes are stranded in
         // _hoistStore and unreachable to operators downstream of the planner.
-        using DatumIngest.Execution.ExecutionContext context = new(
-            cancellationToken, _functions, _catalog, _catalog.Pool,
+        // Factory snapshots the catalog's ModelTracer. Procedural variable
+        // substrate (VariableScope / VariableStore) is borrowed from the
+        // enclosing batch context — null when running outside a procedural
+        // batch (every existing top-level query path); references to @var
+        // in that case throw at evaluation time.
+        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(
             store: _hoistStore,
             types: batchContext?.Types,
             // Inside a procedural batch, share the batch-scoped accountant so
             // every query's residency rolls up under one budget. Standalone
             // queries get an owned accountant constructed by the context.
-            accountant: batchContext?.Accountant)
-        {
-            // Pull the catalog-level tracer (if any) into the per-query
-            // context. Setting / clearing _catalog.ModelTracer at runtime
-            // affects subsequently planned queries; queries already
-            // running keep the tracer they captured at execution start.
-            ModelTracer = _catalog.ModelTracer,
-            // Procedural variable substrate: borrowed handles from the
-            // enclosing batch context. Null when running outside a
-            // procedural batch (every existing query path); references
-            // to @var in that case throw at evaluation time.
-            VariableScope = batchContext?.VariableScope,
-            VariableStore = batchContext?.VariableStore,
-        };
+            accountant: batchContext?.Accountant,
+            variableScope: batchContext?.VariableScope,
+            variableStore: batchContext?.VariableStore,
+            cancellationToken: cancellationToken);
         // Standalone query owns its accountant — start 1Hz sampling here.
         // Inside a batch, the batch is responsible for starting sampling on
         // its shared accountant, so we don't start it twice.

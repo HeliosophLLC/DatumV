@@ -60,32 +60,30 @@ public readonly struct EvaluationFrame
     public Row? OuterRow { get; }
 
     /// <summary>
-    /// Optional sidecar registry for resolving <c>FlagInSidecar</c> DataValues. The
+    /// Sidecar registry for resolving <c>FlagInSidecar</c> DataValues. The
     /// registry maps each value's <c>storeId</c> byte to the <see cref="IBlobSource"/>
     /// that backs its bytes; multi-table queries thread the same registry through every
     /// frame so joined rows can resolve cells from different sidecars correctly.
     /// </summary>
-    public SidecarRegistry? SidecarRegistry { get; }
+    public SidecarRegistry SidecarRegistry { get; }
 
     /// <summary>
-    /// Optional per-query <see cref="TypeRegistry"/> for resolving struct-shape
+    /// Per-query <see cref="TypeRegistry"/> for resolving struct-shape
     /// metadata (field names, nested type ids) from a <see cref="DataValue.TypeId"/>.
-    /// Threaded by frame builders from <see cref="ExecutionContext.Types"/>; left
-    /// <see langword="null"/> outside the query pipeline. Functions consuming
-    /// struct values look up <see cref="TypeDescriptor"/>s here so they can find
-    /// fields by name instead of by position.
+    /// Threaded by frame builders from <see cref="ExecutionContext.Types"/>.
+    /// Functions consuming struct values look up <see cref="TypeDescriptor"/>s
+    /// here so they can find fields by name instead of by position.
     /// </summary>
-    public TypeRegistry? Types { get; }
+    public TypeRegistry Types { get; }
 
     /// <summary>
-    /// Optional per-query <see cref="TypeIdTranslationTable"/> for translating a
+    /// Per-query <see cref="TypeIdTranslationTable"/> for translating a
     /// file's on-disk struct type-ids into <see cref="Types"/> ids. Sidecar-arm
     /// readers (<see cref="DataValue.AsStructArray"/>) consult this to resolve
     /// per-element TypeIds in <c>Array&lt;Struct&gt;</c> slot bytes. Threaded
-    /// from <see cref="ExecutionContext.TypeIdTranslations"/>; absent outside
-    /// the query pipeline.
+    /// from <see cref="ExecutionContext.TypeIdTranslations"/>.
     /// </summary>
-    public TypeIdTranslationTable? TypeIdTranslations { get; }
+    public TypeIdTranslationTable TypeIdTranslations { get; }
 
     /// <summary>
     /// The currently-executing model body, when evaluation is inside a
@@ -107,11 +105,9 @@ public readonly struct EvaluationFrame
     /// Per-query registry of source videos backing <see cref="DataKind.VideoFrame"/>
     /// handles. Threaded from <see cref="ExecutionContext.VideoRegistry"/> by frame
     /// builders so scalar functions that materialise frames (e.g. <c>to_image</c>)
-    /// can route handles through the warm FFmpeg decoder. <see langword="null"/>
-    /// outside the query pipeline (ad-hoc evaluator usage without an execution
-    /// context).
+    /// can route handles through the warm FFmpeg decoder.
     /// </summary>
-    public VideoRegistry? VideoRegistry { get; }
+    public VideoRegistry VideoRegistry { get; }
 
     /// <summary>
     /// Optional handle to the evaluator-as-lambda-invoker. Set by the
@@ -125,42 +121,59 @@ public readonly struct EvaluationFrame
     public ILambdaInvoker? LambdaInvoker { get; }
 
     /// <summary>
-    /// Creates an evaluation frame. Pass the same store for <paramref name="source"/>
-    /// and <paramref name="target"/> when the distinction doesn't matter (e.g. predicates
-    /// that produce only inline boolean results and don't allocate strings). Pass
-    /// <paramref name="sidecarRegistry"/> when the query touches sidecar-bound tables
-    /// so accessors like <c>AsImage</c> can resolve sidecar-backed values. Pass
-    /// <paramref name="types"/> when struct-consuming scalar functions need to
-    /// resolve field names via the per-query <see cref="TypeRegistry"/>. Pass
-    /// <paramref name="typeIdTranslations"/> when struct values may originate
-    /// from <c>.datum</c> files whose on-disk type-ids need translation. Pass
-    /// <paramref name="currentModel"/> when evaluating inside a CREATE-MODEL
-    /// procedural body so <c>infer()</c> can resolve its session binding.
+    /// The owning <see cref="ExecutionContext"/>. Carries the ambient
+    /// query-wide state (accountant, registries, translations) that this
+    /// frame's accessors mirror.
+    /// </summary>
+    public ExecutionContext Context { get; }
+
+    /// <summary>
+    /// Creates an evaluation frame with a single arena used for both reads
+    /// and writes — the common shape, since the streaming pipeline's
+    /// read-from-input / write-to-output split is currently theoretical
+    /// (no live call site exercises it). Pulls the ambient accountant,
+    /// sidecar / type / translation / video registries from
+    /// <paramref name="context"/>.
+    /// </summary>
+    public EvaluationFrame(
+        Row row,
+        IValueStore store,
+        ExecutionContext context,
+        Row? outerRow = null,
+        ModelDescriptor? currentModel = null,
+        ILambdaInvoker? lambdaInvoker = null)
+        : this(row, store, store, context, outerRow, currentModel, lambdaInvoker)
+    {
+    }
+
+    /// <summary>
+    /// Creates an evaluation frame with distinct source/target arenas, used
+    /// when results must outlive the source row's arena (none of the
+    /// current call sites need this — kept as a future extension point).
+    /// Ambient state comes from <paramref name="context"/>.
     /// </summary>
     public EvaluationFrame(
         Row row,
         IValueStore source,
         IValueStore target,
-        MemoryAccountant accountant,
+        ExecutionContext context,
         Row? outerRow = null,
-        SidecarRegistry? sidecarRegistry = null,
-        TypeRegistry? types = null,
-        TypeIdTranslationTable? typeIdTranslations = null,
         ModelDescriptor? currentModel = null,
-        VideoRegistry? videoRegistry = null,
         ILambdaInvoker? lambdaInvoker = null)
     {
+        ArgumentNullException.ThrowIfNull(context);
         Row = row;
         Source = source;
         Target = target;
-        Accountant = accountant;
+        Accountant = context.Accountant;
         OuterRow = outerRow;
-        SidecarRegistry = sidecarRegistry;
-        Types = types;
-        TypeIdTranslations = typeIdTranslations;
+        SidecarRegistry = context.SidecarRegistry;
+        Types = context.Types;
+        TypeIdTranslations = context.TypeIdTranslations;
         CurrentModel = currentModel;
-        VideoRegistry = videoRegistry;
+        VideoRegistry = context.VideoRegistry;
         LambdaInvoker = lambdaInvoker;
+        Context = context;
     }
 
     /// <summary>
@@ -170,7 +183,7 @@ public readonly struct EvaluationFrame
     /// a derived row (e.g. a lambda body's augmented row).
     /// </summary>
     public EvaluationFrame WithRow(Row row) =>
-        new(row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, CurrentModel, VideoRegistry, LambdaInvoker);
+        new(row, Source, Target, Context, OuterRow, CurrentModel, LambdaInvoker);
 
     /// <summary>
     /// Returns a new frame with a <see cref="CurrentModel"/> binding,
@@ -179,7 +192,7 @@ public readonly struct EvaluationFrame
     /// when leaving it.
     /// </summary>
     public EvaluationFrame WithCurrentModel(ModelDescriptor? currentModel) =>
-        new(Row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, currentModel, VideoRegistry, LambdaInvoker);
+        new(Row, Source, Target, Context, OuterRow, currentModel, LambdaInvoker);
 
     /// <summary>
     /// Returns a new frame with a <see cref="LambdaInvoker"/> attached.
@@ -188,5 +201,5 @@ public readonly struct EvaluationFrame
     /// frame it dispatches through).
     /// </summary>
     public EvaluationFrame WithLambdaInvoker(ILambdaInvoker? lambdaInvoker) =>
-        new(Row, Source, Target, Accountant, OuterRow, SidecarRegistry, Types, TypeIdTranslations, CurrentModel, VideoRegistry, lambdaInvoker);
+        new(Row, Source, Target, Context, OuterRow, CurrentModel, lambdaInvoker);
 }

@@ -244,6 +244,6 @@ public class RangeFunctionTests : ServiceTestBase
     private ExecutionContext CreateContextWithToken(CancellationToken token)
     {
         Pool pool = CreatePool();
-        return new(token, FunctionRegistry.CreateDefault(), CreateCatalog(pool), pool);
+        return new(CreateCatalog(pool), cancellationToken: token);
     }
 }

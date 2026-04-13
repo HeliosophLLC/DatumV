@@ -1567,7 +1567,7 @@ internal sealed class RoutineRegistrar
         ModelCatalog? models = _catalog.Models;
         if (models is null) return;
 
-        ProceduralModelAdapter iModelAdapter = new(descriptor, _functions);
+        ProceduralModelAdapter iModelAdapter = new(descriptor, _catalog);
         // Estimate VRAM as on-disk file size × 1.2 — same heuristic the
         // C# builtin path uses (ModelResidencyManager.DefaultFileSizeMultiplier).
         // Weights dominate the resident footprint; the 20% slack covers ORT's
@@ -1997,25 +1997,14 @@ internal sealed class RoutineRegistrar
         // Scope-bound evaluator so CustomCheck expressions resolve the
         // parameter name to the just-evaluated default value (and any
         // earlier parameter to its evaluated default).
-        ExpressionEvaluator evaluator = new(
-            _functions,
-            outerRow: null,
-            sourceSchema: null,
-            letBindingExpressions: null,
+        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(
             store: scratch,
-            sidecarRegistry: _catalog.SidecarRegistry,
+            accountant: accountant,
             variableScope: checkScope,
             variableStore: scratch,
-            typeRegistry: null,
-            accountant: accountant);
-        EvaluationFrame frame = new(
-            Row.Empty,
-            scratch,
-            scratch,
-            accountant,
-            outerRow: null,
-            sidecarRegistry: _catalog.SidecarRegistry,
-            types: null);
+            cancellationToken: cancellationToken);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
+        EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, scratch);
 
         for (int i = 0; i < parameters.Count; i++)
         {

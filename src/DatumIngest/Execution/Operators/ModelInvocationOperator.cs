@@ -216,7 +216,7 @@ public sealed class ModelInvocationOperator : QueryOperator
                 "Set ExecutionContext.Models when building the context.");
         }
 
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         Pool pool = context.Pool;
         ColumnLookup? outputLookup = null;
         int[]? sourceCopySlots = null;
@@ -376,9 +376,7 @@ public sealed class ModelInvocationOperator : QueryOperator
                         int rowIdx = chunkStart + i;
                         Row row = outputBatch[rowIdx];
                         EvaluationFrame frame = new(
-                            row, outputBatch.Arena, outputBatch.Arena,
-                            context.Accountant, context.OuterRow, context.SidecarRegistry,
-                            context.Types, context.TypeIdTranslations);
+                            row, outputBatch.Arena, context, context.OuterRow);
 
                         ValueRef[] rowInputs = new ValueRef[invocation.InputExpressions.Count];
                         for (int argIdx = 0; argIdx < invocation.InputExpressions.Count; argIdx++)

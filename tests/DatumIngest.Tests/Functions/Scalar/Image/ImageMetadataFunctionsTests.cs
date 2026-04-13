@@ -2,7 +2,6 @@ using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -26,7 +25,7 @@ public sealed class ImageMetadataFunctionsTests : ServiceTestBase
         // ImageDataValueFactory stamping only happens when crossing the arena
         // boundary. So the fallback decode path fires here.
         ValueRef result = await new ImageChannelsFunction().ExecuteAsync(
-            new[] { MakeSolid(8, 8, 100, 100, 100) }, MakeFrame(), default);
+            new[] { MakeSolid(8, 8, 100, 100, 100) }, CreateEvaluationFrame(), default);
         Assert.Equal(DataKind.Int32, result.Kind);
         Assert.Equal(4, result.AsInt32()); // RGBA8888 = 4 bytes per pixel
     }
@@ -41,7 +40,7 @@ public sealed class ImageMetadataFunctionsTests : ServiceTestBase
     public async Task ImageChannels_NullPropagates()
     {
         ValueRef result = await new ImageChannelsFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Image) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Image) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Int32, result.Kind);
     }
@@ -52,7 +51,7 @@ public sealed class ImageMetadataFunctionsTests : ServiceTestBase
     public async Task PixelCount_DirectExecution_ReturnsWidthTimesHeight()
     {
         ValueRef result = await new ImagePixelCountFunction().ExecuteAsync(
-            new[] { MakeSolid(32, 24, 0, 0, 0) }, MakeFrame(), default);
+            new[] { MakeSolid(32, 24, 0, 0, 0) }, CreateEvaluationFrame(), default);
         Assert.Equal(32 * 24, result.AsInt32());
     }
 
@@ -60,7 +59,7 @@ public sealed class ImageMetadataFunctionsTests : ServiceTestBase
     public async Task PixelCount_NullPropagates()
     {
         ValueRef result = await new ImagePixelCountFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Image) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Image) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Int32, result.Kind);
     }
@@ -77,7 +76,7 @@ public sealed class ImageMetadataFunctionsTests : ServiceTestBase
     {
         ValueRef result = await new ImageDimensionsFunction().ExecuteAsync(
             new[] { MakeSolid(32, 24, 0, 0, 0), ValueRef.FromString(fmt) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         Assert.Equal(DataKind.Int32, result.Kind);
         Assert.True(result.IsArray);
         int[] actual = (int[])result.Materialized!;
@@ -90,7 +89,7 @@ public sealed class ImageMetadataFunctionsTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new ImageDimensionsFunction().ExecuteAsync(
                 new[] { MakeSolid(8, 8, 0, 0, 0), ValueRef.FromString("XYZ") },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("unknown format", ex.Message);
     }
 
@@ -99,7 +98,7 @@ public sealed class ImageMetadataFunctionsTests : ServiceTestBase
     {
         ValueRef result = await new ImageDimensionsFunction().ExecuteAsync(
             new[] { ValueRef.Null(DataKind.Image), ValueRef.FromString("HWC") },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         Assert.True(result.IsArray);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Int32, result.Kind);
@@ -115,12 +114,5 @@ public sealed class ImageMetadataFunctionsTests : ServiceTestBase
             canvas.Clear(new SKColor(r, g, b, 255));
         }
         return ValueRef.FromImage(bmp);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

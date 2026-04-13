@@ -131,7 +131,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
 
         SpillingTriggered = false;
         SortedRunCount = 0;
@@ -151,6 +151,14 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
         }
     }
 
+    private async ValueTask<DataValue[]> EvaluateKeysAsync(
+        ExpressionEvaluator evaluator,
+        Row row,
+        Arena arena,
+        CancellationToken cancellationToken)
+    => await EvaluateKeysAsync(evaluator, row, arena, arena, cancellationToken);
+
+
     /// <summary>
     /// Pre-evaluates each ORDER BY item against <paramref name="row"/>. Results live in
     /// <paramref name="targetArena"/> so they survive past the input batch's recycle.
@@ -160,12 +168,11 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
         Row row,
         Arena sourceArena,
         Arena targetArena,
-        SidecarRegistry? sidecarRegistry,
-        TypeRegistry? types,
         CancellationToken cancellationToken)
     {
         DataValue[] keys = new DataValue[_orderByItems.Count];
-        EvaluationFrame frame = new(row, sourceArena, targetArena, evaluator.Accountant, outerRow: null, sidecarRegistry, types, videoRegistry: evaluator.VideoRegistry);
+        EvaluationFrame frame = new EvaluationFrame(
+            row, sourceArena, targetArena, evaluator.Context, outerRow: null);
         for (int i = 0; i < _orderByItems.Count; i++)
         {
             keys[i] = await evaluator.EvaluateAsync(_orderByItems[i].Expression, frame, cancellationToken).ConfigureAwait(false);
@@ -218,7 +225,11 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                                 sourceRow, inputBatch.Arena, context.Store);
                             Row stableRow = new(sourceRow.ColumnLookup, copy);
                             DataValue[] keys = await EvaluateKeysAsync(
-                                evaluator, stableRow, context.Store, context.Store, sidecarRegistry, context.Types, context.CancellationToken).ConfigureAwait(false);
+                                evaluator,
+                                stableRow,
+                                context.Store,
+                                context.CancellationToken)
+                                .ConfigureAwait(false);
                             KeyedRow keyedRow = new(stableRow, keys);
                             heap.Enqueue(keyedRow, keyedRow);
                         }
@@ -232,7 +243,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                             // stabilised into context.Store. Pre-evaluate the candidate's
                             // keys against the input arena before deciding.
                             DataValue[] candidateKeys = await EvaluateKeysAsync(
-                                evaluator, sourceRow, inputBatch.Arena, context.Store, sidecarRegistry, context.Types, context.CancellationToken).ConfigureAwait(false);
+                                evaluator, sourceRow, inputBatch.Arena, context.Store, context.CancellationToken).ConfigureAwait(false);
                             KeyedRow worst = heap.Peek();
                             if (CompareKeys(
                                     candidateKeys, context.Store, sidecarRegistry,
@@ -330,9 +341,15 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
         {
             await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
+                if (inputBatch.Count == 0)
+                {
+                    context.ReturnRowBatch(inputBatch);
+                    continue;
+                }
+
                 try
                 {
-                    if (schema is null && inputBatch.Count > 0)
+                    if (bufferArena is null || schema is null)
                     {
                         schema = inputBatch.ColumnLookup;
                         // Pre-size the bufferArena to the budget. Without
@@ -361,7 +378,11 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                             sourceRow, inputBatch.Arena, bufferArena!);
                         Row stableRow = new(sourceRow.ColumnLookup, copy);
                         DataValue[] keys = await EvaluateKeysAsync(
-                            evaluator, stableRow, bufferArena!, bufferArena!, sidecarRegistry, context.Types, context.CancellationToken).ConfigureAwait(false);
+                            evaluator,
+                            stableRow,
+                            bufferArena,
+                            context.CancellationToken)
+                            .ConfigureAwait(false);
                         buffer.Add(new KeyedRow(stableRow, keys));
                         context.Accountant.NotifyMaterialized(perRowBytes);
                         residentBytesNotified += perRowBytes;
@@ -743,7 +764,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                 _currentIndex++;
                 _currentKeys = await _owner.EvaluateKeysAsync(
                     _evaluator, Current, _currentBatch.Arena, _currentBatch.Arena,
-                    _sidecarRegistry, _context.Types, _context.CancellationToken).ConfigureAwait(false);
+                    _context.CancellationToken).ConfigureAwait(false);
                 return true;
             }
 
@@ -761,8 +782,11 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                     _currentBatch = next;
                     _currentIndex = 0;
                     _currentKeys = await _owner.EvaluateKeysAsync(
-                        _evaluator, Current, _currentBatch.Arena, _currentBatch.Arena,
-                        _sidecarRegistry, _context.Types, _context.CancellationToken).ConfigureAwait(false);
+                        _evaluator,
+                        Current,
+                        _currentBatch.Arena,
+                        _context.CancellationToken)
+                        .ConfigureAwait(false);
                     return true;
                 }
                 _pool.ReturnRowBatch(next);

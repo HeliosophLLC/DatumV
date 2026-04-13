@@ -26,11 +26,7 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     private ExecutionContext CreateParallelContext(int degreeOfParallelism = 2)
     {
         Pool pool = GetService<Pool>();
-        return new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            pool)
+        return new DatumIngest.Execution.ExecutionContext(CreateCatalog())
         {
             DegreeOfParallelism = degreeOfParallelism,
             ParallelismBudget = new ParallelismBudget(degreeOfParallelism),
@@ -559,11 +555,7 @@ public sealed class ParallelOperatorTests : ServiceTestBase
 
         ParallelismBudget budget = new(4);
         Pool pool = GetService<Pool>();
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            pool)
+        ExecutionContext context = new DatumIngest.Execution.ExecutionContext(CreateCatalog())
         {
             DegreeOfParallelism = 2,
             ParallelismBudget = budget,
@@ -599,11 +591,7 @@ public sealed class ParallelOperatorTests : ServiceTestBase
 
         ParallelismBudget budget = new(4);
         Pool pool = GetService<Pool>();
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            pool)
+        ExecutionContext context = new DatumIngest.Execution.ExecutionContext(CreateCatalog())
         {
             DegreeOfParallelism = 2,
             ParallelismBudget = budget,

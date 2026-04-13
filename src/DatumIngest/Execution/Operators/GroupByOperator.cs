@@ -159,7 +159,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
     private async IAsyncEnumerable<RowBatch> ExecuteStreamingAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
 
         // Stabilize aggregate results and emit output rows into the per-query
         // Store rather than a private rented arena. See the SpillPartition
@@ -420,7 +420,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
                     int wi = workerIndex;
                     globalWorkers[wi] = Task.Run(async () =>
                     {
-                        ExpressionEvaluator workerEvaluator = new(context);
+                        ExpressionEvaluator workerEvaluator = context.CreateEvaluator();
                         AggregateArgumentBinder workerBinder = new(_aggregateColumns);
 
                         await foreach (Row row in globalChannel.Reader.ReadAllAsync(cancellationToken)
@@ -493,7 +493,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
         Pool pool,
         bool isGlobalAggregation)
     {
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
 
         IHashGroupTable? hashTable = isGlobalAggregation
             ? null

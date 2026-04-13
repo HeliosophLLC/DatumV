@@ -1,3 +1,4 @@
+using DatumIngest.Catalog;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 
@@ -43,22 +44,27 @@ namespace DatumIngest.Execution;
 /// </remarks>
 public sealed class BatchContext : IDisposable
 {
-    private bool _disposed;
-
     /// <summary>
     /// Creates a fresh batch context: allocates a new procedure-lifetime
     /// <see cref="VariableStore"/> arena (with a baseline reference), an
     /// empty <see cref="VariableScope"/> with one root frame already
     /// pushed, and a <see cref="MemoryAccountant"/> shared by every child
     /// <see cref="ExecutionContext"/> spawned for queries inside the
-    /// batch.
+    /// batch. The <paramref name="catalog"/> is captured so the body's
+    /// scalar evaluations (DECLARE / SET initialisers) can build an
+    /// <see cref="ExecutionContext"/> with the catalog's function /
+    /// sidecar / pool ambient state — every batch runs against some
+    /// catalog, so this is a structural correspondence rather than an
+    /// optional dependency.
     /// </summary>
+    /// <param name="catalog">The catalog the batch runs against.</param>
     /// <param name="memoryBudgetBytes">Spill-trigger threshold applied to
     /// the residency of <em>everything</em> in the batch: all child query
     /// state plus the bytes <see cref="VariableScope"/> bindings hold onto
     /// across queries. <c>null</c> disables the budget check.</param>
-    public BatchContext(long? memoryBudgetBytes = null)
+    public BatchContext(TableCatalog catalog, long? memoryBudgetBytes = null)
     {
+        Catalog = catalog;
         VariableStore = new Arena();
         // Baseline reference owned by this batch context. Released exactly
         // once on Dispose. Mirrors the QueryPlan._hoistStore pattern.
@@ -72,6 +78,18 @@ public sealed class BatchContext : IDisposable
         // budget across query boundaries.
         VariableScope = new VariableScope(Accountant);
     }
+
+    /// <summary>
+    /// The catalog under which this batch runs. Threaded into every
+    /// <see cref="ExecutionContext"/> that <see cref="Declare"/> /
+    /// <see cref="Set"/> spin up for binding scalars.
+    /// </summary>
+    public TableCatalog Catalog { get; }
+
+    /// <summary>
+    /// Gets or sets whether <see cref="Dispose"/> has been called on this context.
+    /// </summary>
+    public bool Disposed { get; private set; }
 
     /// <summary>
     /// Procedure-lifetime arena holding bound variable payloads. Borrowed
@@ -136,9 +154,12 @@ public sealed class BatchContext : IDisposable
         IValueStore sourceStore,
         IReadOnlyList<string>? structFieldNames = null)
     {
-        EvaluationFrame frame = new(
-            Row.Empty, sourceStore, VariableStore, Accountant,
-            outerRow: null, sidecarRegistry: null, types: Types);
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
+        using ExecutionContext context = Catalog.CreateExecutionContext(store: VariableStore,
+            types: Types,
+            accountant: Accountant);
+        EvaluationFrame frame = context.CreateFrame(Row.Empty, sourceStore, VariableStore);
         ValueRef bound = ExpressionEvaluator.ToValueRef(value, frame);
         VariableScope.Declare(name, bound, structFieldNames);
     }
@@ -151,9 +172,12 @@ public sealed class BatchContext : IDisposable
     /// </summary>
     public void Set(string name, DataValue value, IValueStore sourceStore)
     {
-        EvaluationFrame frame = new(
-            Row.Empty, sourceStore, VariableStore, Accountant,
-            outerRow: null, sidecarRegistry: null, types: Types);
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
+        using ExecutionContext context = Catalog.CreateExecutionContext(store: VariableStore,
+            types: Types,
+            accountant: Accountant);
+        EvaluationFrame frame = context.CreateFrame(Row.Empty, sourceStore, VariableStore);
         ValueRef bound = ExpressionEvaluator.ToValueRef(value, frame);
         VariableScope.Set(name, bound);
     }
@@ -166,8 +190,8 @@ public sealed class BatchContext : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Disposed) return;
+        Disposed = true;
         Accountant.Dispose();
         VariableStore.ReleaseReference();
     }

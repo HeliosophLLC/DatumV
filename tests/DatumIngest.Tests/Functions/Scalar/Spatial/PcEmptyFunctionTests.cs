@@ -17,7 +17,7 @@ public sealed class PcEmptyFunctionTests : ServiceTestBase
     public async Task ReturnsZeroPointCloud()
     {
         ValueRef result = await new PcEmptyFunction().ExecuteAsync(
-            ReadOnlyMemory<ValueRef>.Empty, MakeFrame(), default);
+            ReadOnlyMemory<ValueRef>.Empty, CreateEvaluationFrame(), default);
 
         Assert.Equal(DataKind.PointCloud, result.Kind);
         Assert.False(result.IsNull);
@@ -38,7 +38,7 @@ public sealed class PcEmptyFunctionTests : ServiceTestBase
         // 40-byte fixed header. Anything larger would be wasted bytes for
         // every SCAN tick where the accumulator starts empty.
         ValueRef result = await new PcEmptyFunction().ExecuteAsync(
-            ReadOnlyMemory<ValueRef>.Empty, MakeFrame(), default);
+            ReadOnlyMemory<ValueRef>.Empty, CreateEvaluationFrame(), default);
 
         Assert.Equal(PointCloudHeader.SizeBytes, result.AsPointCloud().Length);
     }
@@ -50,12 +50,5 @@ public sealed class PcEmptyFunctionTests : ServiceTestBase
         Assert.NotEmpty(PcEmptyFunction.Description);
         Assert.Single(PcEmptyFunction.Signatures);
         Assert.Empty(PcEmptyFunction.Signatures[0].Parameters);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

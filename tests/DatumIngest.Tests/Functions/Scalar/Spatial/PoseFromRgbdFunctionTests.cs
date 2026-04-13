@@ -53,7 +53,7 @@ public sealed class PoseFromRgbdFunctionTests : ServiceTestBase
                 depth,
                 intrinsics,
             },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         Assert.True(result.IsNull);
@@ -114,7 +114,7 @@ public sealed class PoseFromRgbdFunctionTests : ServiceTestBase
                 depth,
                 intrinsics,
             },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         // ─── Assertions ───────────────────────────────────────────────
@@ -122,7 +122,7 @@ public sealed class PoseFromRgbdFunctionTests : ServiceTestBase
         Assert.Equal(DataKind.Float32, result.Kind);
         Assert.True(result.IsArray);
 
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ReadOnlySpan<float> pose = result.ToDataValue(f.Source).AsArraySpan<float>(f.Source, f.SidecarRegistry);
         Assert.Equal(16, pose.Length);
 
@@ -199,7 +199,7 @@ public sealed class PoseFromRgbdFunctionTests : ServiceTestBase
                     depth,
                     intrinsics,
                 },
-                MakeFrame(),
+                CreateEvaluationFrame(),
                 default);
         }
         catch (FunctionArgumentException)
@@ -213,7 +213,7 @@ public sealed class PoseFromRgbdFunctionTests : ServiceTestBase
         }
 
         Assert.False(result.IsNull);
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ReadOnlySpan<float> pose = result.ToDataValue(f.Source).AsArraySpan<float>(f.Source, f.SidecarRegistry);
         Assert.Equal(16, pose.Length);
         Assert.Equal(0f, pose[12]);
@@ -290,12 +290,5 @@ public sealed class PoseFromRgbdFunctionTests : ServiceTestBase
             0f, 0f, 1f,
         ];
         return ValueRef.FromPrimitiveArray(K, DataKind.Float32);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

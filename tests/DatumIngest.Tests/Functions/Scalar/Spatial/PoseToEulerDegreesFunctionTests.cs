@@ -2,7 +2,6 @@ using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Spatial;
 
@@ -11,7 +10,7 @@ public sealed class PoseToEulerDegreesFunctionTests : ServiceTestBase
     [Fact]
     public async Task Identity_ReturnsAllZeros()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ValueRef identity = await new PoseIdentityFunction().ExecuteAsync(
             ReadOnlyMemory<ValueRef>.Empty, f, default);
 
@@ -28,7 +27,7 @@ public sealed class PoseToEulerDegreesFunctionTests : ServiceTestBase
     [Fact]
     public async Task PureTranslation_ReturnsAllZeros()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ValueRef pose = await new PoseTranslateFunction().ExecuteAsync(
             new[] { ValueRef.FromFloat32(5f), ValueRef.FromFloat32(-3f), ValueRef.FromFloat32(2f) },
             f, default);
@@ -45,7 +44,7 @@ public sealed class PoseToEulerDegreesFunctionTests : ServiceTestBase
     [Fact]
     public async Task Yaw90Degrees_ExtractsYaw90()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         // 90° yaw around Y axis (camera turns right). Row-major:
         //   r00 = cos(90) = 0,  r01 = 0,  r02 = sin(90) = 1
         //   r10 = 0,            r11 = 1,  r12 = 0
@@ -71,7 +70,7 @@ public sealed class PoseToEulerDegreesFunctionTests : ServiceTestBase
     [Fact]
     public async Task Pitch45Degrees_ExtractsPitch45()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         // 45° pitch around X axis. cos(45)=sin(45)=0.7071...
         const float c = 0.7071068f;
         const float s = 0.7071068f;
@@ -96,7 +95,7 @@ public sealed class PoseToEulerDegreesFunctionTests : ServiceTestBase
     [Fact]
     public async Task Roll30Degrees_ExtractsRoll30()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         // 30° roll around Z axis (camera tilts).
         float c = MathF.Cos(30f * MathF.PI / 180f);
         float s = MathF.Sin(30f * MathF.PI / 180f);
@@ -124,7 +123,7 @@ public sealed class PoseToEulerDegreesFunctionTests : ServiceTestBase
         ValueRef badPose = ValueRef.FromPrimitiveArray(new float[] { 1, 0, 0 }, DataKind.Float32);
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new PoseToEulerDegreesFunction().ExecuteAsync(
-                new[] { badPose }, MakeFrame(), default));
+                new[] { badPose }, CreateEvaluationFrame(), default));
         Assert.Contains("16", ex.Message);
     }
 
@@ -133,14 +132,7 @@ public sealed class PoseToEulerDegreesFunctionTests : ServiceTestBase
     {
         ValueRef result = await new PoseToEulerDegreesFunction().ExecuteAsync(
             new[] { ValueRef.NullArray(DataKind.Float32) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

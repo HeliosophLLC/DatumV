@@ -153,39 +153,6 @@ public sealed class ImageDrawBoundingBoxesFunctionTests : ServiceTestBase
         Assert.Contains("[x, y, w]", ex.Message);
     }
 
-    [Fact]
-    public async Task Execute_NoTypeRegistry_ThrowsHelpfulError()
-    {
-        // Without a TypeRegistry, the function can't resolve field names —
-        // must fail explicitly rather than silently mis-indexing.
-        using SKBitmap source = MakeWhiteBitmap(50, 50);
-        ValueRef imgArg = ValueRef.FromImage(source);
-
-        // A struct with TypeId 0 (untyped) wouldn't even satisfy the secondary
-        // check, so wire one with TypeId set but pass a frame without registry.
-        ValueRef[] fields =
-        [
-            ValueRef.FromFloat32(0f), ValueRef.FromFloat32(0f),
-            ValueRef.FromFloat32(10f), ValueRef.FromFloat32(10f),
-        ];
-        ValueRef boxesArg = ValueRef.FromArray(
-            DataKind.Struct, [ValueRef.FromStruct(fields, typeId: 1)]);
-
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        try
-        {
-            EvaluationFrame frame = new(Row.Empty, arena, arena, new MemoryAccountant());  // no Types
-
-            FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
-                await new ImageDrawBoundingBoxesFunction()
-                    .ExecuteAsync(new ValueRef[] { imgArg, boxesArg }, frame, default));
-
-            Assert.Contains("TypeRegistry", ex.Message);
-        }
-        finally { pool.Backing.TryReturn(arena); }
-    }
-
     /// <summary>
     /// Allocates a minimal opaque white <see cref="SKBitmap"/> for use as a
     /// canvas in the tests. Caller owns disposal.
@@ -220,8 +187,7 @@ public sealed class ImageDrawBoundingBoxesFunctionTests : ServiceTestBase
 
     private EvaluationFrame MakeFrame(TypeRegistry registry)
     {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: registry);
+        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(typeRegistry: registry);
+        return CreateEvaluationFrame(context);
     }
 }

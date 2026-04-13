@@ -60,7 +60,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.Null(DataKind.Image), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         Assert.True(result.IsNull);
@@ -75,7 +75,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.Null(DataKind.Image), ValueRef.FromFloat32(60f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         Assert.True(result.IsNull);
@@ -92,7 +92,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromInt32(60) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         Assert.Equal(DataKind.PointCloud, result.Kind);
@@ -108,7 +108,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.Null(DataKind.Float32) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         Assert.True(result.IsNull);
@@ -126,7 +126,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await fn.ExecuteAsync(
                 new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(fov) },
-                MakeFrame(),
+                CreateEvaluationFrame(),
                 default));
         Assert.Contains("fov_deg", ex.Message);
     }
@@ -141,7 +141,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await fn.ExecuteAsync(
                 new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-                MakeFrame(),
+                CreateEvaluationFrame(),
                 default));
         Assert.Contains("dimensions must match", ex.Message);
     }
@@ -157,7 +157,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         Assert.False(result.IsNull);
@@ -194,7 +194,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         byte[] blob = result.AsPointCloud();
@@ -217,7 +217,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         byte[] blob = result.AsPointCloud();
@@ -240,7 +240,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(45f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         byte[] blob = result.AsPointCloud();
@@ -267,7 +267,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
         color.Dispose();
 
@@ -314,7 +314,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await new PointCloudFromDepthPinholeFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         byte[] blob = result.AsPointCloud();
@@ -354,7 +354,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await new PointCloudFromDepthOrthographicFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         byte[] blob = result.AsPointCloud();
@@ -391,7 +391,7 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
 
         ValueRef result = await new PointCloudFromDepthPinholeFunction().ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(color), ValueRef.FromImage(depth), ValueRef.FromFloat32(60f) },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         byte[] blob = result.AsPointCloud();
@@ -494,12 +494,5 @@ public sealed class PointCloudFromDepthFunctionTests : ServiceTestBase
         byte b = span[offset + 14];
         byte a = span[offset + 15];
         return (new Vector3(x, y, z), r, g, b, a);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

@@ -1,8 +1,5 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -21,7 +18,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
     {
         ValueRef result = await new NoiseImageFunction().ExecuteAsync(
             new[] { MakeSolid(16, 16, 128, 128, 128), ValueRef.FromFloat32(20) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKBitmap bmp = result.AsImage();
         Assert.Equal(16, bmp.Width);
         Assert.Equal(16, bmp.Height);
@@ -33,7 +30,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
         // Stddev 50 should produce a clearly non-uniform image from a solid grey.
         ValueRef result = await new NoiseImageFunction().ExecuteAsync(
             new[] { MakeSolid(16, 16, 128, 128, 128), ValueRef.FromFloat32(50) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         Assert.True(HasPerturbation(result.AsImage(), 128));
     }
 
@@ -47,7 +44,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                 ValueRef.FromString("salt_pepper"),
                 ValueRef.FromFloat32(1.0f),  // 100% — every pixel gets flipped
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKBitmap bmp = result.AsImage();
         int extremeCount = 0;
         for (int y = 0; y < 32; y++)
@@ -70,7 +67,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                     ValueRef.FromString("uniform"),
                     ValueRef.FromFloat32(1.0f),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
     }
 
     [Fact]
@@ -92,7 +89,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                 ValueRef.FromInt32(8), ValueRef.FromInt32(8),
                 ValueRef.FromString("center"),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKBitmap bmp = result.AsImage();
         Assert.Equal(8, bmp.Width);
         Assert.Equal(8, bmp.Height);
@@ -114,7 +111,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                 ValueRef.FromInt32(8), ValueRef.FromInt32(8),
                 ValueRef.FromString("left"),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         ValueRef right = await new ResizeAndCropImageFunction().ExecuteAsync(
             new[]
             {
@@ -122,7 +119,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                 ValueRef.FromInt32(8), ValueRef.FromInt32(8),
                 ValueRef.FromString("right"),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         // Left gravity should preserve the dark side; right should preserve white.
         Assert.True(left.AsImage().GetPixel(4, 4).Red < 64);
@@ -140,7 +137,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                     ValueRef.FromInt32(4), ValueRef.FromInt32(4),
                     ValueRef.FromString("upper_left"),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("unknown gravity", ex.Message);
     }
 
@@ -158,7 +155,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                 ValueRef.FromFloat32(1), ValueRef.FromFloat32(1),
                 ValueRef.FromFloat32(0), ValueRef.FromFloat32(0),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKColor px = result.AsImage().GetPixel(4, 4);
         Assert.InRange((int)px.Red, 98, 102);
         Assert.InRange((int)px.Green, 148, 152);
@@ -176,7 +173,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                 ValueRef.FromFloat32(1), ValueRef.FromFloat32(1),
                 ValueRef.FromFloat32(0.2f), ValueRef.FromFloat32(0),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKBitmap bmp = result.AsImage();
         Assert.Equal(20, bmp.Width);
         Assert.Equal(15, bmp.Height);
@@ -194,7 +191,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                 ValueRef.FromFloat32(8),
                 ValueRef.FromFloat32(2),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKBitmap bmp = result.AsImage();
         Assert.Equal(16, bmp.Width);
         Assert.Equal(16, bmp.Height);
@@ -212,7 +209,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                 ValueRef.FromFloat32(8),
                 ValueRef.FromFloat32(2),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKColor px = result.AsImage().GetPixel(8, 8);
         Assert.Equal(100, px.Red);
         Assert.Equal(100, px.Green);
@@ -230,7 +227,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                     ValueRef.FromFloat32(8),
                     ValueRef.FromFloat32(0),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("sigma must be positive", ex.Message);
     }
 
@@ -247,7 +244,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
     {
         ValueRef result = await new PerspectiveWarpFunction().ExecuteAsync(
             new[] { MakeSolid(16, 16, 50, 50, 50), ValueRef.FromFloat32(0.1f) },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKBitmap bmp = result.AsImage();
         Assert.Equal(16, bmp.Width);
         Assert.Equal(16, bmp.Height);
@@ -266,7 +263,7 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                 ValueRef.FromFloat32(0), ValueRef.FromFloat32(1),
                 ValueRef.FromFloat32(1), ValueRef.FromFloat32(1),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKColor px = result.AsImage().GetPixel(8, 8);
         Assert.InRange((int)px.Red, 98, 102);
         Assert.InRange((int)px.Green, 148, 152);
@@ -301,12 +298,5 @@ public sealed class AugmentationTransformsTests : ServiceTestBase
                 if (System.Math.Abs(px.Red - baseline) > 5) distinct++;
             }
         return distinct > bmp.Width * bmp.Height / 4;
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

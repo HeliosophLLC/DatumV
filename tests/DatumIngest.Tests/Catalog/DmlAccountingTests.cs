@@ -26,7 +26,7 @@ public sealed class DmlAccountingTests : ServiceTestBase
             [3, "carol"]);
         UpdateStatement update = (UpdateStatement)SqlParser.ParseBatch("UPDATE t SET name = 'updated'")[0];
 
-        using BatchContext batch = new();
+        using BatchContext batch = new(catalog);
         long before = batch.Accountant.CurrentResidentBytes;
 
         await UpdateExecutor.ExecuteAsync(catalog, update, batch);
@@ -64,7 +64,7 @@ public sealed class DmlAccountingTests : ServiceTestBase
         InsertStatement insert = (InsertStatement)SqlParser.ParseBatch(
             "INSERT INTO t (id, name) VALUES (2, 'bob'), (3, 'carol'), (4, 'dave')")[0];
 
-        using BatchContext batch = new();
+        using BatchContext batch = new(catalog);
         long before = batch.Accountant.CurrentResidentBytes;
 
         await InsertExecutor.ExecuteAsync(catalog, insert, batch);
@@ -85,7 +85,7 @@ public sealed class DmlAccountingTests : ServiceTestBase
             [3, "carol"]);
         DeleteStatement delete = (DeleteStatement)SqlParser.ParseBatch("DELETE FROM t")[0];
 
-        using BatchContext batch = new();
+        using BatchContext batch = new(catalog);
         long before = batch.Accountant.CurrentResidentBytes;
 
         await DeleteExecutor.ExecuteAsync(catalog, delete, batch);

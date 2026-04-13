@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Functions.Scalar.Image;
 /// underlying resize + normalize math; tests verify both layouts produce the
 /// expected per-pixel values for a known input.
 /// </summary>
-public sealed class ImageLetterboxTensorFunctionsTests
+public sealed class ImageLetterboxTensorFunctionsTests : ServiceTestBase
 {
     private static SKBitmap SolidBitmap(int width, int height, byte r, byte g, byte b)
     {
@@ -26,22 +26,19 @@ public sealed class ImageLetterboxTensorFunctionsTests
     private static ValueRef Float32Array(params float[] values)
         => ValueRef.FromPrimitiveArray(values, DataKind.Float32);
 
-    private static EvaluationFrame Frame() =>
-        new(Row.Empty, new Arena(), new Arena(), new MemoryAccountant(), types: new TypeRegistry());
-
-    private static async Task<float[]> InvokeChwAsync(params ValueRef[] args)
+    private async Task<float[]> InvokeChwAsync(params ValueRef[] args)
     {
         ImageLetterboxTensorChwFunction fn = new();
-        ValueRef result = await fn.ExecuteAsync(args.AsMemory(), Frame(), CancellationToken.None);
+        ValueRef result = await fn.ExecuteAsync(args.AsMemory(), CreateEvaluationFrame(), CancellationToken.None);
         Assert.True(result.IsArray);
         Assert.False(result.IsNull);
         return (float[])result.Materialized!;
     }
 
-    private static async Task<float[]> InvokeHwcAsync(params ValueRef[] args)
+    private async Task<float[]> InvokeHwcAsync(params ValueRef[] args)
     {
         ImageLetterboxTensorHwcFunction fn = new();
-        ValueRef result = await fn.ExecuteAsync(args.AsMemory(), Frame(), CancellationToken.None);
+        ValueRef result = await fn.ExecuteAsync(args.AsMemory(), CreateEvaluationFrame(), CancellationToken.None);
         Assert.True(result.IsArray);
         Assert.False(result.IsNull);
         return (float[])result.Materialized!;
@@ -213,7 +210,7 @@ public sealed class ImageLetterboxTensorFunctionsTests
                 Float32Array(1f, 1f, 1f),
                 ValueRef.FromFloat32(0f),
             }.AsMemory(),
-            Frame(),
+            CreateEvaluationFrame(),
             CancellationToken.None);
 
         Assert.True(result.IsNull);

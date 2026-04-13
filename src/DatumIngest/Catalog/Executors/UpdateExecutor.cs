@@ -98,9 +98,12 @@ internal static class UpdateExecutor
         // resolves non-inline SET results against it after the scan
         // loop completes. Disposed at end of method.
         using Arena workArena = new();
-        ExpressionEvaluator evaluator = new(
-            functions: catalog.Functions,
-            sidecarRegistry: catalog.SidecarRegistry);
+        // Transient context for the frame ambient state. Borrows the
+        // BatchContext-supplied accountant; owns only its (unused) Store
+        // baseline + empty VideoRegistry.
+        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(accountant: accountant,
+            types: batchContext?.Types);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
 
         List<RowUpdateRequest> requests = new();
         long liveRowIndex = 0;
@@ -139,14 +142,7 @@ internal static class UpdateExecutor
                         // bools so target = source is fine.
                         if (update.Where is not null)
                         {
-                            EvaluationFrame predFrame = new(
-                                row,
-                                sourceArena,
-                                sourceArena,
-                                accountant!,
-                                outerRow: null,
-                                sidecarRegistry: catalog.SidecarRegistry,
-                                types: null);
+                            EvaluationFrame predFrame = new(row, sourceArena, context);
                             if (!await evaluator.EvaluateAsBooleanAsync(
                                     update.Where, predFrame, CancellationToken.None).ConfigureAwait(false))
                             {
@@ -156,14 +152,7 @@ internal static class UpdateExecutor
 
                         // SET — each expression's result lands in workArena
                         // so non-inline payloads survive past this batch.
-                        EvaluationFrame setFrame = new(
-                            row,
-                            sourceArena,
-                            workArena,
-                            accountant!,
-                            outerRow: null,
-                            sidecarRegistry: catalog.SidecarRegistry,
-                            types: null);
+                        EvaluationFrame setFrame = new(row, sourceArena, workArena, context);
 
                         Dictionary<int, DataValue> rowValues = new(setBindings.Length);
                         foreach ((int columnIndex, Expression valueExpression) in setBindings)
@@ -429,9 +418,11 @@ internal static class UpdateExecutor
             return null;
         }
 
-        ExpressionEvaluator evaluator = new(
-            functions: catalog.Functions,
-            sidecarRegistry: catalog.SidecarRegistry);
+        // Transient context shared by every frame in the merge loop below.
+        // See ExecuteSimpleAsync's analogue for the borrowed-accountant rationale.
+        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(accountant: accountant,
+            types: batchContext?.Types);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
 
         // Last-match-wins accumulator: liveRowIndex → (column → new value).
         Dictionary<long, Dictionary<int, DataValue>> matched = new();
@@ -485,14 +476,7 @@ internal static class UpdateExecutor
                         // intermediates land here briefly).
                         if (update.Where is not null)
                         {
-                            EvaluationFrame predFrame = new(
-                                joinedRow,
-                                targetArena,
-                                targetArena,
-                                accountant,
-                                outerRow: null,
-                                sidecarRegistry: catalog.SidecarRegistry,
-                                types: null);
+                            EvaluationFrame predFrame = new(joinedRow, targetArena, context);
                             if (!await evaluator.EvaluateAsBooleanAsync(
                                     update.Where, predFrame, CancellationToken.None).ConfigureAwait(false))
                             {
@@ -503,14 +487,7 @@ internal static class UpdateExecutor
                         // SET — results land in workArena so they
                         // survive past targetArena disposal at end of
                         // this batch.
-                        EvaluationFrame setFrame = new(
-                            joinedRow,
-                            targetArena,
-                            workArena,
-                            accountant,
-                            outerRow: null,
-                            sidecarRegistry: catalog.SidecarRegistry,
-                            types: null);
+                        EvaluationFrame setFrame = new(joinedRow, targetArena, workArena, context);
 
                         if (!matched.TryGetValue(liveRowIndex, out Dictionary<int, DataValue>? rowValues))
                         {
@@ -937,14 +914,9 @@ internal static class UpdateExecutor
                 : DataValueRetention.Stabilize(existingRow[c], existingStore, workArena);
         }
         Row partialRow = new(schemaLookup, partial);
-        EvaluationFrame frame = new(
-            partialRow,
-            workArena,
-            workArena,
-            evaluator.Accountant,
-            outerRow: null,
-            sidecarRegistry: sidecarRegistry,
-            types: null);
+        // evaluator is always context-built by the DML executor paths,
+        // so frame.Context flows through to scalar-function dispatches.
+        EvaluationFrame frame = new(partialRow, workArena, evaluator.Context!);
 
         foreach (int depIdx in dependentsToEval)
         {

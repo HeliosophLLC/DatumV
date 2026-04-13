@@ -96,7 +96,7 @@ public sealed class MeshSwapAxesFunctionTests : ServiceTestBase
                 ValueRef.Null(DataKind.Mesh),
                 ValueRef.FromPrimitiveArray(new int[] { 1, 2, 3 }, DataKind.Int32),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Mesh, result.Kind);
     }
@@ -141,7 +141,7 @@ public sealed class MeshSwapAxesFunctionTests : ServiceTestBase
                 ValueRef.FromMesh(mesh),
                 ValueRef.FromPrimitiveArray(axes, DataKind.Int32),
             },
-            MakeFrame(), default).AsTask();
+            CreateEvaluationFrame(), default).AsTask();
     }
 
     /// <summary>
@@ -221,12 +221,5 @@ public sealed class MeshSwapAxesFunctionTests : ServiceTestBase
             BinaryPrimitives.ReadUInt32LittleEndian(blob.AsSpan(off + 0, 4)),
             BinaryPrimitives.ReadUInt32LittleEndian(blob.AsSpan(off + 4, 4)),
             BinaryPrimitives.ReadUInt32LittleEndian(blob.AsSpan(off + 8, 4)));
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

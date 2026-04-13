@@ -2,13 +2,11 @@ using System.Buffers.Binary;
 using System.Numerics;
 using System.Text;
 
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Spatial;
 
@@ -31,7 +29,7 @@ public sealed class MeshToObjFunctionTests : ServiceTestBase
     public async Task Execute_NullInput_ReturnsNullArray()
     {
         ValueRef result = await new MeshToObjFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Mesh) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Mesh) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
     }
 
@@ -41,7 +39,7 @@ public sealed class MeshToObjFunctionTests : ServiceTestBase
         ValueRef mesh = BuildSampleQuadMesh();
 
         ValueRef result = await new MeshToObjFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
 
         string obj = Encoding.UTF8.GetString(result.AsBytes());
         string[] lines = obj.Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -61,7 +59,7 @@ public sealed class MeshToObjFunctionTests : ServiceTestBase
         ValueRef mesh = BuildSampleQuadMesh();
 
         ValueRef result = await new MeshToObjFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
 
         string obj = Encoding.UTF8.GetString(result.AsBytes());
         // Each "v X Y Z R G B" line has 7 whitespace-separated tokens
@@ -77,7 +75,7 @@ public sealed class MeshToObjFunctionTests : ServiceTestBase
         ValueRef mesh = BuildSampleQuadMesh();
 
         ValueRef result = await new MeshToObjFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
 
         string obj = Encoding.UTF8.GetString(result.AsBytes());
         string fLine = obj.Split('\n').First(l => l.StartsWith("f "));
@@ -103,7 +101,7 @@ public sealed class MeshToObjFunctionTests : ServiceTestBase
             frame: PointCloudCoordinateFrame.CameraOpenCv);
 
         ValueRef result = await new MeshToObjFunction().ExecuteAsync(
-            new[] { mesh }, MakeFrame(), default);
+            new[] { mesh }, CreateEvaluationFrame(), default);
 
         string obj = Encoding.UTF8.GetString(result.AsBytes());
         // Find the vertex line for the (1, 2, 3) point — it should now
@@ -187,12 +185,5 @@ public sealed class MeshToObjFunctionTests : ServiceTestBase
             BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(indicesBase + i * 4, 4), indices[i]);
         }
         return ValueRef.FromMesh(blob);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

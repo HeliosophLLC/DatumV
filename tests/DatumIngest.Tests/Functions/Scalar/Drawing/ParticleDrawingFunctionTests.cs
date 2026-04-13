@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Drawing;
@@ -19,13 +17,6 @@ namespace DatumIngest.Tests.Functions.Scalar.Drawing;
 /// </summary>
 public sealed class ParticleDrawingFunctionTests : ServiceTestBase
 {
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(
-            Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-    }
 
     /// <summary>A simple Drawing sprite (small filled circle) used as a particle payload.</summary>
     private static ValueRef MakeSprite() => ValueRef.FromDrawing(
@@ -37,7 +28,7 @@ public sealed class ParticleDrawingFunctionTests : ServiceTestBase
 
     private async Task<DrawingPayload> Exec(params ValueRef[] args)
     {
-        ValueRef result = await new DrawParticlesFunction().ExecuteAsync(args, MakeFrame(), default);
+        ValueRef result = await new DrawParticlesFunction().ExecuteAsync(args, CreateEvaluationFrame(), default);
         Assert.Equal(DataKind.Drawing, result.Kind);
         Assert.False(result.IsNull);
         return result.AsDrawing();
@@ -221,7 +212,7 @@ public sealed class ParticleDrawingFunctionTests : ServiceTestBase
                     ValueRef.FromFloat32(0.5f), ValueRef.FromPoint2D(0, 0), ValueRef.FromFloat32(0f),
                     MakeSprite(),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
     }
 
     [Fact]
@@ -236,7 +227,7 @@ public sealed class ParticleDrawingFunctionTests : ServiceTestBase
                     ValueRef.FromPoint2D(0, 0), ValueRef.FromFloat32(0f),
                     MakeSprite(),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
     }
 
     [Fact]
@@ -251,7 +242,7 @@ public sealed class ParticleDrawingFunctionTests : ServiceTestBase
                     ValueRef.FromFloat32(1f), ValueRef.FromPoint2D(0, 0), ValueRef.FromFloat32(0f),
                     MakeSprite(),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("cap is", ex.Message);
     }
 
@@ -344,7 +335,7 @@ public sealed class ParticleDrawingFunctionTests : ServiceTestBase
                     ValueRef.FromInt32(0),
                     ValueRef.FromFloat32(-0.1f),    // negative warmup — rejected
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
     }
 
     // ----- lambda-sprite variant -----
@@ -360,15 +351,12 @@ public sealed class ParticleDrawingFunctionTests : ServiceTestBase
         Arena arena = pool.Backing.RentArena();
         MemoryAccountant accountant = new();
         VariableScope scope = new(accountant);
-        ExpressionEvaluator evaluator = new(
-            FunctionRegistry.CreateDefault(),
-            variableScope: scope,
-            typeRegistry: new TypeRegistry(),
-            accountant: accountant);
-        EvaluationFrame frame = new(
-            Row.Empty, arena, arena, accountant,
-            types: new TypeRegistry(),
-            lambdaInvoker: evaluator);
+        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(
+            store: arena, accountant: accountant);
+        DatumIngest.Execution.ExecutionContext scoped = context.Derive(
+            variableScope: scope, variableStore: arena);
+        ExpressionEvaluator evaluator = scoped.CreateEvaluator();
+        EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, arena);
         return (frame, evaluator);
     }
 
@@ -457,7 +445,7 @@ public sealed class ParticleDrawingFunctionTests : ServiceTestBase
                 ValueRef.FromFloat32(0f),
                 ValueRef.FromDrawing(sprite),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         GroupDrawing g = Assert.IsType<GroupDrawing>(result.AsDrawing());
         foreach (DrawingPayload child in g.Children)

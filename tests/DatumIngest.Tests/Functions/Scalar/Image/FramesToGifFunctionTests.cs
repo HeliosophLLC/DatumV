@@ -1,6 +1,5 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Model;
@@ -49,18 +48,10 @@ public sealed class FramesToGifFunctionTests : ServiceTestBase
         return refs;
     }
 
-    private (EvaluationFrame Frame, Arena Arena) MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        EvaluationFrame frame = new(
-            Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-        return (frame, arena);
-    }
 
     private async Task<ValueRef> ExecuteAsync(ValueRef framesArray, float fps)
     {
-        var (frame, _) = MakeFrame();
+        var frame = CreateEvaluationFrame();
         return await new FramesToGifFunction().ExecuteAsync(
             new[] { framesArray, ValueRef.FromFloat32(fps) },
             frame, default);
@@ -232,7 +223,7 @@ public sealed class FramesToGifFunctionTests : ServiceTestBase
     public async Task Function_NullFps_ReturnsNullImage()
     {
         ValueRef arr = ValueRef.FromArray(DataKind.Image, WrapAsValueRefs(MakeColouredBitmaps(2)));
-        var (frame, _) = MakeFrame();
+        var frame = CreateEvaluationFrame();
         ValueRef result = await new FramesToGifFunction().ExecuteAsync(
             new[] { arr, ValueRef.Null(DataKind.Float32) },
             frame, default);
@@ -243,7 +234,7 @@ public sealed class FramesToGifFunctionTests : ServiceTestBase
     public async Task Function_NegativeFps_Throws()
     {
         ValueRef arr = ValueRef.FromArray(DataKind.Image, WrapAsValueRefs(MakeColouredBitmaps(2)));
-        var (frame, _) = MakeFrame();
+        var frame = CreateEvaluationFrame();
         await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
             await new FramesToGifFunction().ExecuteAsync(
                 new[] { arr, ValueRef.FromFloat32(-5) },
@@ -260,7 +251,7 @@ public sealed class FramesToGifFunctionTests : ServiceTestBase
         ValueRef arr = ValueRef.FromArray(DataKind.Image,
             new[] { ValueRef.FromImage(a), ValueRef.FromImage(b) });
 
-        var (frame, _) = MakeFrame();
+        var frame = CreateEvaluationFrame();
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
             await new FramesToGifFunction().ExecuteAsync(
                 new[] { arr, ValueRef.FromFloat32(8) },

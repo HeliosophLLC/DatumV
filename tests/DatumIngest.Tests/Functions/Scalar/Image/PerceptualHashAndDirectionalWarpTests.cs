@@ -20,7 +20,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
     public async Task PerceptualHash_Returns64ElementFloat32Array()
     {
         ValueRef result = await new PerceptualHashFunction().ExecuteAsync(
-            new[] { MakeSolid(32, 32, 128, 128, 128) }, MakeFrame(), default);
+            new[] { MakeSolid(32, 32, 128, 128, 128) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsArray);
         Assert.Equal(DataKind.Float32, result.Kind);
         Assert.Equal(64, result.GetArrayLength());
@@ -30,7 +30,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
     public async Task PerceptualHash_OnlyZerosAndOnes()
     {
         ValueRef result = await new PerceptualHashFunction().ExecuteAsync(
-            new[] { MakeHorizontalGradient(64, 64) }, MakeFrame(), default);
+            new[] { MakeHorizontalGradient(64, 64) }, CreateEvaluationFrame(), default);
         float[] bits = (float[])result.Materialized!;
         foreach (float bit in bits)
         {
@@ -43,7 +43,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
     {
         // Equal neighbouring pixels → left > right is always false → all zeros.
         ValueRef result = await new PerceptualHashFunction().ExecuteAsync(
-            new[] { MakeSolid(64, 64, 100, 100, 100) }, MakeFrame(), default);
+            new[] { MakeSolid(64, 64, 100, 100, 100) }, CreateEvaluationFrame(), default);
         float[] bits = (float[])result.Materialized!;
         Assert.All(bits, b => Assert.Equal(0f, b));
     }
@@ -60,7 +60,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
                 bmp.SetPixel(x, y, new SKColor(v, v, v, 255));
             }
         ValueRef result = await new PerceptualHashFunction().ExecuteAsync(
-            new[] { ValueRef.FromImage(bmp) }, MakeFrame(), default);
+            new[] { ValueRef.FromImage(bmp) }, CreateEvaluationFrame(), default);
         float[] bits = (float[])result.Materialized!;
         Assert.All(bits, b => Assert.Equal(1f, b));
     }
@@ -69,7 +69,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
     public async Task PerceptualHash_Null_ReturnsNullArray()
     {
         ValueRef result = await new PerceptualHashFunction().ExecuteAsync(
-            new[] { ValueRef.Null(DataKind.Image) }, MakeFrame(), default);
+            new[] { ValueRef.Null(DataKind.Image) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsArray);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Float32, result.Kind);
@@ -87,7 +87,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
                 ValueRef.FromFloat32(1), ValueRef.FromFloat32(0),
                 ValueRef.FromFloat32(0),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKColor px = result.AsImage().GetPixel(8, 8);
         Assert.Equal(100, px.Red);
         Assert.Equal(150, px.Green);
@@ -104,7 +104,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
                 ValueRef.FromFloat32(1), ValueRef.FromFloat32(0),
                 ValueRef.FromFloat32(3),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKBitmap bmp = result.AsImage();
         Assert.Equal(28, bmp.Width);
         Assert.Equal(28, bmp.Height);
@@ -122,7 +122,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
                 ValueRef.FromFloat32(1), ValueRef.FromFloat32(0.3f),
                 ValueRef.FromFloat32(4),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKColor px = result.AsImage().GetPixel(14, 14);
         Assert.Equal(80, px.Red);
         Assert.Equal(120, px.Green);
@@ -146,7 +146,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
                 ValueRef.FromFloat32(1), ValueRef.FromFloat32(0),  // shear horizontally
                 ValueRef.FromFloat32(6),                            // 6-pixel edge displacement
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKBitmap warped = result.AsImage();
 
         // After horizontal shear with direction (1, 0): top of line shifts opposite to bottom.
@@ -174,7 +174,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
                     ValueRef.FromFloat32(0), ValueRef.FromFloat32(0),
                     ValueRef.FromFloat32(1),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("zero", ex.Message);
     }
 
@@ -189,7 +189,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
                 ValueRef.FromFloat32(1), ValueRef.FromFloat32(0),
                 ValueRef.FromFloat32(3),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         ValueRef b = await new DirectionalWarpFunction().ExecuteAsync(
             new[]
             {
@@ -197,7 +197,7 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
                 ValueRef.FromFloat32(10), ValueRef.FromFloat32(0),
                 ValueRef.FromFloat32(3),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
         SKColor pa = a.AsImage().GetPixel(14, 5);
         SKColor pb = b.AsImage().GetPixel(14, 5);
         Assert.Equal(pa.Red, pb.Red);
@@ -239,12 +239,5 @@ public sealed class PerceptualHashAndDirectionalWarpTests : ServiceTestBase
             if (v > bestVal) { bestVal = v; bestX = x; }
         }
         return bestX;
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

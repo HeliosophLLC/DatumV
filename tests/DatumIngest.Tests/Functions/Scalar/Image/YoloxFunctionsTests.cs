@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Functions.Scalar.Image;
 /// (decoder + class-aware NMS + reverse letterbox) against hand-crafted
 /// inputs.
 /// </summary>
-public sealed class YoloxFunctionsTests
+public sealed class YoloxFunctionsTests : ServiceTestBase
 {
     private static SKBitmap SolidBitmap(int width, int height, byte r, byte g, byte b)
     {
@@ -24,9 +24,6 @@ public sealed class YoloxFunctionsTests
         canvas.Clear(new SKColor(r, g, b));
         return bmp;
     }
-
-    private static EvaluationFrame Frame() =>
-        new(Row.Empty, new Arena(), new Arena(), new MemoryAccountant(), types: new TypeRegistry());
 
     // ─── yolox_preprocess ────────────────────────────────────────────────────
 
@@ -40,7 +37,7 @@ public sealed class YoloxFunctionsTests
         YoloxPreprocessFunction fn = new();
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(bmp), ValueRef.FromInt32(64) }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
 
         Assert.True(result.IsArray);
         float[] data = (float[])result.Materialized!;
@@ -67,7 +64,7 @@ public sealed class YoloxFunctionsTests
         YoloxPreprocessFunction fn = new();
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.FromImage(bmp), ValueRef.FromInt32(80) }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
 
         float[] data = (float[])result.Materialized!;
         const int planeSize = 80 * 80;
@@ -88,7 +85,7 @@ public sealed class YoloxFunctionsTests
         YoloxPreprocessFunction fn = new();
         ValueRef result = await fn.ExecuteAsync(
             new ValueRef[] { ValueRef.Null(DataKind.Image), ValueRef.FromInt32(640) }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
         Assert.True(result.IsNull);
     }
 
@@ -100,7 +97,7 @@ public sealed class YoloxFunctionsTests
         await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await fn.ExecuteAsync(
                 new ValueRef[] { ValueRef.FromImage(bmp), ValueRef.FromInt32(0) }.AsMemory(),
-                Frame(), CancellationToken.None));
+                CreateEvaluationFrame(), CancellationToken.None));
     }
 
     // ─── yolox_postprocess ───────────────────────────────────────────────────
@@ -126,7 +123,7 @@ public sealed class YoloxFunctionsTests
                     ValueRef.FromFloat32(0.25f),
                     ValueRef.FromFloat32(0.45f),
                 }.AsMemory(),
-                Frame(), CancellationToken.None));
+                CreateEvaluationFrame(), CancellationToken.None));
     }
 
     [Fact]
@@ -155,7 +152,7 @@ public sealed class YoloxFunctionsTests
                 ValueRef.FromFloat32(0.25f),
                 ValueRef.FromFloat32(0.45f),
             }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
 
         Assert.True(result.IsArray);
         Assert.Equal(0, result.GetArrayElements().Length);
@@ -204,7 +201,7 @@ public sealed class YoloxFunctionsTests
                 ValueRef.FromFloat32(0.25f),
                 ValueRef.FromFloat32(0.45f),
             }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
 
         Assert.True(result.IsArray);
         ReadOnlySpan<ValueRef> elements = result.GetArrayElements();
@@ -269,7 +266,7 @@ public sealed class YoloxFunctionsTests
                 ValueRef.FromFloat32(0.25f),
                 ValueRef.FromFloat32(0.45f),
             }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
 
         ReadOnlySpan<ValueRef> elements = result.GetArrayElements();
         Assert.Equal(1, elements.Length);

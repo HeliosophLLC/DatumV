@@ -106,15 +106,7 @@ public static class CalibrationTrigger
         // Evaluate the sample row's inputs ONCE; the ramp's dispatch
         // delegate replicates these ValueRefs for each batch size.
         Row sampleRow = sampleBatch[0];
-        EvaluationFrame frame = new(
-            sampleRow,
-            sampleBatch.Arena,
-            sampleBatch.Arena,
-            context.Accountant,
-            context.OuterRow,
-            context.SidecarRegistry,
-            context.Types,
-            context.TypeIdTranslations);
+        EvaluationFrame frame = new(sampleRow, sampleBatch.Arena, context, context.OuterRow);
 
         ValueRef[] sampleInputs = new ValueRef[inputExpressions.Count];
         for (int i = 0; i < inputExpressions.Count; i++)

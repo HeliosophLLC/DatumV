@@ -55,7 +55,7 @@ public sealed class MeshFromTriplaneFunctionTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new MeshFromTriplaneFunction().ExecuteAsync(
                 BuildArgs(sessionName: "nerf"),
-                MakeFrameWithoutModel(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("CREATE MODEL body", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -81,10 +81,4 @@ public sealed class MeshFromTriplaneFunctionTests : ServiceTestBase
         ];
     }
 
-    private EvaluationFrame MakeFrameWithoutModel()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-    }
 }

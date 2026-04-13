@@ -2,7 +2,6 @@ using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Spatial;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Spatial;
 
@@ -11,7 +10,7 @@ public sealed class PoseInverseFunctionTests : ServiceTestBase
     [Fact]
     public async Task IdentityInverse_IsIdentity()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ValueRef identity = await new PoseIdentityFunction().ExecuteAsync(
             ReadOnlyMemory<ValueRef>.Empty, f, default);
 
@@ -31,7 +30,7 @@ public sealed class PoseInverseFunctionTests : ServiceTestBase
     [Fact]
     public async Task PureTranslation_InvertsSign()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ValueRef pose = await new PoseTranslateFunction().ExecuteAsync(
             new[] { ValueRef.FromFloat32(5f), ValueRef.FromFloat32(-3f), ValueRef.FromFloat32(2f) },
             f, default);
@@ -52,7 +51,7 @@ public sealed class PoseInverseFunctionTests : ServiceTestBase
     [Fact]
     public async Task PureRotation_TransposesRotation()
     {
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         // 90° rotation around Z: (x, y, z) → (-y, x, z).
         // Row-major: [0 -1 0 0, 1 0 0 0, 0 0 1 0, 0 0 0 1]
         // Transpose: [0 1 0 0, -1 0 0 0, 0 0 1 0, 0 0 0 1]
@@ -81,7 +80,7 @@ public sealed class PoseInverseFunctionTests : ServiceTestBase
     public async Task ComposingPoseWithInverse_GivesIdentity()
     {
         // pose_compose(pose_inverse(P), P) should be ≈ identity.
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
         ValueRef translation = await new PoseTranslateFunction().ExecuteAsync(
             new[] { ValueRef.FromFloat32(2f), ValueRef.FromFloat32(3f), ValueRef.FromFloat32(-1f) },
             f, default);
@@ -107,7 +106,7 @@ public sealed class PoseInverseFunctionTests : ServiceTestBase
     {
         // Verify the inverse via point round-trip: applying pose then inverse
         // returns the original position. Uses pc_transform end-to-end.
-        EvaluationFrame f = MakeFrame();
+        EvaluationFrame f = CreateEvaluationFrame();
 
         ValueRef pose = await new PoseTranslateFunction().ExecuteAsync(
             new[] { ValueRef.FromFloat32(10f), ValueRef.FromFloat32(20f), ValueRef.FromFloat32(30f) },
@@ -133,7 +132,7 @@ public sealed class PoseInverseFunctionTests : ServiceTestBase
         ValueRef badPose = ValueRef.FromPrimitiveArray(new float[] { 1, 0, 0, 0 }, DataKind.Float32);
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new PoseInverseFunction().ExecuteAsync(
-                new[] { badPose }, MakeFrame(), default));
+                new[] { badPose }, CreateEvaluationFrame(), default));
         Assert.Contains("16", ex.Message);
     }
 
@@ -141,16 +140,8 @@ public sealed class PoseInverseFunctionTests : ServiceTestBase
     public async Task NullInput_PropagatesNullArray()
     {
         ValueRef result = await new PoseInverseFunction().ExecuteAsync(
-            new[] { ValueRef.NullArray(DataKind.Float32) },
-            MakeFrame(), default);
+            new[] { ValueRef.NullArray(DataKind.Float32) }, CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 
     private static void AssertMatrixApproxEqual(float[] expected, ReadOnlySpan<float> actual)

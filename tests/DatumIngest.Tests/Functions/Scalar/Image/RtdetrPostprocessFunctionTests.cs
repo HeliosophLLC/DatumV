@@ -1,4 +1,3 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Model;
@@ -13,13 +12,10 @@ namespace DatumIngest.Tests.Functions.Scalar.Image;
 /// file — fabricated logits/boxes feed the decoder directly so we can
 /// pin exact output bounds, labels, and scores.
 /// </summary>
-public sealed class RtdetrPostprocessFunctionTests
+public sealed class RtdetrPostprocessFunctionTests : ServiceTestBase
 {
     private static SKBitmap SolidBitmap(int width, int height) =>
         new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-
-    private static EvaluationFrame Frame() =>
-        new(Row.Empty, new Arena(), new Arena(), new MemoryAccountant(), types: new TypeRegistry());
 
     private static ValueRef MakeLabels(int count)
     {
@@ -90,7 +86,7 @@ public sealed class RtdetrPostprocessFunctionTests
                 ValueRef.FromImage(img),
                 ValueRef.FromFloat32(0.5f),
             }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
 
         Assert.True(result.IsArray);
         ReadOnlySpan<ValueRef> elements = result.GetArrayElements();
@@ -131,7 +127,7 @@ public sealed class RtdetrPostprocessFunctionTests
                 ValueRef.FromImage(img),
                 ValueRef.FromFloat32(0.5f),
             }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
 
         Assert.True(result.IsArray);
         Assert.Equal(0, result.GetArrayElements().Length);
@@ -157,7 +153,7 @@ public sealed class RtdetrPostprocessFunctionTests
                 ValueRef.FromImage(img),
                 ValueRef.FromFloat32(0.5f),
             }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
 
         ReadOnlySpan<ValueRef> elements = result.GetArrayElements();
         Assert.Equal(1, elements.Length);
@@ -183,7 +179,7 @@ public sealed class RtdetrPostprocessFunctionTests
                     ValueRef.FromImage(img),
                     ValueRef.FromFloat32(0.5f),
                 }.AsMemory(),
-                Frame(), CancellationToken.None);
+                CreateEvaluationFrame(), CancellationToken.None);
         });
         Assert.Contains("not divisible", ex.Message);
     }
@@ -208,7 +204,7 @@ public sealed class RtdetrPostprocessFunctionTests
                     ValueRef.FromImage(img),
                     ValueRef.FromFloat32(0.5f),
                 }.AsMemory(),
-                Frame(), CancellationToken.None);
+                CreateEvaluationFrame(), CancellationToken.None);
         });
         Assert.Contains("boxes length", ex.Message);
     }
@@ -229,7 +225,7 @@ public sealed class RtdetrPostprocessFunctionTests
                 ValueRef.FromImage(img),
                 ValueRef.FromFloat32(0.5f),
             }.AsMemory(),
-            Frame(), CancellationToken.None);
+            CreateEvaluationFrame(), CancellationToken.None);
         Assert.True(result.IsArray);
         Assert.Equal(0, result.GetArrayElements().Length);
     }

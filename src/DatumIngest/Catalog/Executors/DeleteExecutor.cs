@@ -37,7 +37,7 @@ internal static class DeleteExecutor
             throw new InvalidOperationException(
                 $"DELETE FROM '{delete.TableName}': table is not registered in the catalog.");
         }
-        if (!provider.CanDeleteRows)
+        else if (!provider.CanDeleteRows)
         {
             throw new InvalidOperationException(
                 $"DELETE FROM '{delete.TableName}': provider type {provider.GetType().Name} " +
@@ -70,6 +70,13 @@ internal static class DeleteExecutor
         Schema schema = provider.GetSchema();
         ColumnLookup? schemaLookup = captureRows ? BuildSchemaLookup(schema) : null;
 
+        // Transient ExecutionContext for the DML's frame ambient state.
+        // Borrows the (BatchContext-supplied or fresh) accountant so the
+        // dispose at end of this method only releases the unused Store
+        // baseline + VideoRegistry it allocated.
+        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(accountant: accountant,
+            types: batchContext?.Types);
+
         // Walk the live row sequence with a running counter. The
         // provider's tombstone index space matches a fresh scan's
         // emission order (per ITableProvider.DeleteRows docs), so the
@@ -79,11 +86,7 @@ internal static class DeleteExecutor
         // particular) return the gross row count and would over-number
         // the index list when prior deletes are in play; the scan-based
         // walk stays correct without paying for predicate evaluation.
-        ExpressionEvaluator? evaluator = predicate is null
-            ? null
-            : new ExpressionEvaluator(
-                functions: catalog.Functions,
-                sidecarRegistry: catalog.SidecarRegistry);
+        ExpressionEvaluator? evaluator = predicate is null ? null : context.CreateEvaluator();
 
         List<long> matched = new();
         long rowIndex = 0;
@@ -125,15 +128,7 @@ internal static class DeleteExecutor
                         }
                         else
                         {
-                            EvaluationFrame frame = new(
-                                row,
-                                sourceArena,
-                                sourceArena,
-                                accountant!,
-                                outerRow: null,
-                                sidecarRegistry: catalog.SidecarRegistry,
-                                types: null);
-
+                            EvaluationFrame frame = new(row, sourceArena, context);
                             matches = await evaluator.EvaluateAsBooleanAsync(
                                 predicate!, frame, CancellationToken.None).ConfigureAwait(false);
                         }

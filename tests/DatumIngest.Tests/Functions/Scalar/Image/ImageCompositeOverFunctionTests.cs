@@ -1,9 +1,7 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 using SkiaSharp;
 
 namespace DatumIngest.Tests.Functions.Scalar.Image;
@@ -132,7 +130,7 @@ public sealed class ImageCompositeOverFunctionTests : ServiceTestBase
                     ValueRef.FromImage(source),
                     ValueRef.FromPrimitiveArray(new float[] { 0.5f, 0.5f }, DataKind.Float32),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("Float32[3]", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -145,7 +143,7 @@ public sealed class ImageCompositeOverFunctionTests : ServiceTestBase
                 ValueRef.Null(DataKind.Image),
                 ValueRef.FromPrimitiveArray(new float[] { 0.5f, 0.5f, 0.5f }, DataKind.Float32),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
 
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Image, result.Kind);
@@ -161,7 +159,7 @@ public sealed class ImageCompositeOverFunctionTests : ServiceTestBase
                 ValueRef.FromImage(source),
                 ValueRef.FromPrimitiveArray(bg, DataKind.Float32),
             },
-            MakeFrame(), default);
+            CreateEvaluationFrame(), default);
     }
 
     private static SKBitmap MakeSolidBitmap(int width, int height, SKColor color)
@@ -169,12 +167,5 @@ public sealed class ImageCompositeOverFunctionTests : ServiceTestBase
         SKBitmap bmp = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         bmp.Erase(color);
         return bmp;
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

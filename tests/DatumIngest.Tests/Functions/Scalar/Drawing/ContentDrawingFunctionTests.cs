@@ -1,10 +1,8 @@
 using System.Collections.Immutable;
 
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Drawing;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -17,17 +15,9 @@ namespace DatumIngest.Tests.Functions.Scalar.Drawing;
 /// </summary>
 public sealed class ContentDrawingFunctionTests : ServiceTestBase
 {
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(
-            Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-    }
-
     private async Task<DrawingPayload> Exec(IScalarFunction fn, params ValueRef[] args)
     {
-        ValueRef result = await fn.ExecuteAsync(args, MakeFrame(), default);
+        ValueRef result = await fn.ExecuteAsync(args, CreateEvaluationFrame(), default);
         Assert.Equal(DataKind.Drawing, result.Kind);
         Assert.False(result.IsNull);
         return result.AsDrawing();
@@ -74,7 +64,7 @@ public sealed class ContentDrawingFunctionTests : ServiceTestBase
         await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
             await new DrawTextFunction().ExecuteAsync(
                 new[] { ValueRef.FromString("x"), ValueRef.FromPoint2D(0, 0), ValueRef.FromFloat32(-1f), Color(0, 0, 0) },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
     }
 
     // ---------- draw_image ----------
@@ -149,7 +139,7 @@ public sealed class ContentDrawingFunctionTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
             await new DrawPathFunction().ExecuteAsync(
                 new[] { ValueRef.FromString("X 0 0"), Color(0, 0, 0), ValueRef.FromFloat32(1f) },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("unknown path command", ex.Message);
     }
 
@@ -159,7 +149,7 @@ public sealed class ContentDrawingFunctionTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
             await new DrawPathFunction().ExecuteAsync(
                 new[] { ValueRef.FromString("M 5"), Color(0, 0, 0), ValueRef.FromFloat32(1f) },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("missing coordinates", ex.Message);
     }
 
@@ -169,7 +159,7 @@ public sealed class ContentDrawingFunctionTests : ServiceTestBase
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
             await new DrawPathFunction().ExecuteAsync(
                 new[] { ValueRef.FromString("M abc def"), Color(0, 0, 0), ValueRef.FromFloat32(1f) },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("non-numeric", ex.Message);
     }
 
@@ -243,7 +233,7 @@ public sealed class ContentDrawingFunctionTests : ServiceTestBase
                         new SKPoint(0, 0), new SKSize(4, 4), Fill: SKColors.Red)),
                     ValueRef.FromString("nope"),
                 },
-                MakeFrame(), default));
+                CreateEvaluationFrame(), default));
         Assert.Contains("unknown blend mode", ex.Message);
     }
 

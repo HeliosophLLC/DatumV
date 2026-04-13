@@ -1,3 +1,4 @@
+using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
@@ -11,12 +12,14 @@ namespace DatumIngest.Tests.Execution;
 /// Confirms the core correctness property: a value bound from a transient
 /// producing arena remains readable after the producing arena is gone.
 /// </summary>
-public sealed class BatchContextTests
+public sealed class BatchContextTests : ServiceTestBase
 {
+    private BatchContext NewBatchContext() => new(CreateCatalog());
+
     [Fact]
     public void NewBatchContext_HasFreshStoreAndScope()
     {
-        using BatchContext ctx = new();
+        using BatchContext ctx = NewBatchContext();
         Assert.NotNull(ctx.VariableStore);
         Assert.NotNull(ctx.VariableScope);
         Assert.Equal(1, ctx.VariableScope.FrameCount);
@@ -36,7 +39,7 @@ public sealed class BatchContextTests
         producingArena.AddReference();
         DataValue produced = DataValue.FromString(longText, producingArena);
 
-        using BatchContext ctx = new();
+        using BatchContext ctx = NewBatchContext();
         ctx.Declare("greeting", produced, producingArena);
 
         // Drop the producing arena's reference — the binding must survive.
@@ -55,7 +58,7 @@ public sealed class BatchContextTests
         Arena producingArena = new();
         producingArena.AddReference();
 
-        using BatchContext ctx = new();
+        using BatchContext ctx = NewBatchContext();
         ctx.Declare("msg", DataValue.FromString(firstText, producingArena), producingArena);
         ctx.Set("msg", DataValue.FromString(secondText, producingArena), producingArena);
 
@@ -72,7 +75,7 @@ public sealed class BatchContextTests
         Arena producing = new();
         producing.AddReference();
 
-        using BatchContext ctx = new();
+        using BatchContext ctx = NewBatchContext();
         ctx.Declare("count", DataValue.FromInt32(42), producing);
 
         ValueRef val = ctx.VariableScope.Get("count");
@@ -82,7 +85,7 @@ public sealed class BatchContextTests
     [Fact]
     public void Dispose_IsIdempotent()
     {
-        BatchContext ctx = new();
+        BatchContext ctx = NewBatchContext();
         ctx.Dispose();
         ctx.Dispose();
         // Reaching here without throwing is the whole assertion; double-
@@ -92,7 +95,7 @@ public sealed class BatchContextTests
     [Fact]
     public void Dispose_ReleasesBaselineReference()
     {
-        BatchContext ctx = new();
+        BatchContext ctx = NewBatchContext();
         int beforeDispose = ctx.VariableStore.ReferenceCount;
         ctx.Dispose();
         int afterDispose = ctx.VariableStore.ReferenceCount;

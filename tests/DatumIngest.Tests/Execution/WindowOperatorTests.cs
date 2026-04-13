@@ -293,11 +293,7 @@ public class WindowOperatorTests : ServiceTestBase
         cancellationTokenSource.Cancel();
 
         Pool pool = GetService<Pool>();
-        ExecutionContext context = new(
-            cancellationTokenSource.Token,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            pool);
+        ExecutionContext context = new DatumIngest.Execution.ExecutionContext(CreateCatalog(), cancellationToken: cancellationTokenSource.Token);
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(window, context));

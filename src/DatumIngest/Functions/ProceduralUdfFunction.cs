@@ -175,8 +175,11 @@ public sealed class ProceduralUdfFunction : IScalarFunction
     {
         // Local variables (parameters + DECLAREd) live in the call's target
         // arena. They become unreachable when the caller's row batch
-        // recycles, so no per-call cleanup is needed.
-        IValueStore variableStore = frame.Target;
+        // recycles, so no per-call cleanup is needed. Cast to Arena because
+        // the procedural body's child ExecutionContext needs the concrete
+        // type for lifecycle management — every caller of a scalar function
+        // passes an Arena-backed frame in practice.
+        Arena variableStore = (Arena)frame.Target;
         // Procedural UDF body shares the surrounding plan's accountant via
         // frame.Accountant — DECLARE'd payloads inside this body count
         // against the outer budget the same way a top-level DECLARE would.
@@ -188,27 +191,15 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         // nested udf./scalar calls resolve identically) but a fresh,
         // private VariableScope so the procedural locals don't leak in
         // either direction. No row context — procedural bodies can't
-        // reference outer columns by name.
-        ExpressionEvaluator evaluator = new(
-            _functions,
-            outerRow: null,
-            sourceSchema: null,
-            letBindingExpressions: null,
+        // reference outer columns by name. The child context borrows
+        // ambient state from frame.Context; Store/VariableScope/VariableStore
+        // override that to point at this call's per-call arena + scope.
+        using DatumIngest.Execution.ExecutionContext bodyContext = frame.Context!.Derive(
             store: variableStore,
-            sidecarRegistry: frame.SidecarRegistry,
             variableScope: scope,
-            variableStore: variableStore,
-            typeRegistry: null,
-            accountant: frame.Accountant);
-
-        EvaluationFrame bodyFrame = new(
-            Row.Empty,
-            variableStore,
-            variableStore,
-            frame.Accountant,
-            outerRow: null,
-            sidecarRegistry: frame.SidecarRegistry,
-            types: frame.Types);
+            variableStore: variableStore);
+        ExpressionEvaluator evaluator = bodyContext.CreateEvaluator();
+        EvaluationFrame bodyFrame = evaluator.CreateFrame(Row.Empty);
 
         ReturnSignal? signal = await ExecuteStatementsAsync(_descriptor.StatementBody!, scope, evaluator, bodyFrame, cancellationToken).ConfigureAwait(false);
         if (signal is null)
@@ -254,7 +245,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
     private async ValueTask BindParametersAsync(
         ReadOnlyMemory<ValueRef> arguments,
         EvaluationFrame frame,
-        IValueStore variableStore,
+        Arena variableStore,
         VariableScope scope,
         CancellationToken cancellationToken)
     {
@@ -267,6 +258,15 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         ValueRef[] supplied = new ValueRef[suppliedCount];
         arguments.Span.CopyTo(supplied);
 
+        // Child context for parameter binding: same shape as the body's
+        // bodyContext, but built once here so checkEvaluator + paramEvaluator
+        // share it. Borrows ambient state from frame.Context; overrides
+        // Store/VariableScope/VariableStore to point at this call's arena.
+        using DatumIngest.Execution.ExecutionContext paramContext = frame.Context!.Derive(
+            store: variableStore,
+            variableScope: scope,
+            variableStore: variableStore);
+
         // Same lazy-evaluator pattern as ProceduralModelFunction — only
         // constructed when at least one CHECK fell into the CustomCheck
         // escape hatch (rare; typed checks short-circuit through
@@ -275,26 +275,8 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         EvaluationFrame checkFrame = default;
         if (_hasCustomChecks)
         {
-            checkEvaluator = new ExpressionEvaluator(
-                _functions,
-                outerRow: null,
-                sourceSchema: null,
-                letBindingExpressions: null,
-                store: variableStore,
-                sidecarRegistry: frame.SidecarRegistry,
-                variableScope: scope,
-                variableStore: variableStore,
-                typeRegistry: frame.Types,
-                accountant: frame.Accountant);
-            checkFrame = new EvaluationFrame(
-                Row.Empty,
-                variableStore,
-                variableStore,
-                frame.Accountant,
-                outerRow: null,
-                sidecarRegistry: frame.SidecarRegistry,
-                types: frame.Types,
-                videoRegistry: frame.VideoRegistry);
+            checkEvaluator = paramContext.CreateEvaluator();
+            checkFrame = checkEvaluator.CreateFrame(Row.Empty);
         }
 
         ExpressionEvaluator? paramEvaluator = null;
@@ -314,22 +296,10 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                 // against the body's frame (no parameters yet, but
                 // defaults shouldn't reference parameters anyway — they're
                 // call-site fallbacks).
-                paramEvaluator ??= new ExpressionEvaluator(
-                    _functions,
-                    store: variableStore,
-                    sidecarRegistry: frame.SidecarRegistry,
-                    accountant: frame.Accountant);
+                paramEvaluator ??= paramContext.CreateEvaluator();
                 if (paramFrame.Source is null)
                 {
-                    paramFrame = new EvaluationFrame(
-                        Row.Empty,
-                        variableStore,
-                        variableStore,
-                        frame.Accountant,
-                        outerRow: null,
-                        sidecarRegistry: frame.SidecarRegistry,
-                        types: frame.Types,
-                        videoRegistry: frame.VideoRegistry);
+                    paramFrame = paramEvaluator.CreateFrame(Row.Empty);
                 }
                 value = await paramEvaluator.EvaluateAsValueRefAsync(param.Default, paramFrame, cancellationToken).ConfigureAwait(false);
             }
@@ -357,22 +327,10 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                 && TypeAnnotationResolver.TryParse(param.TypeName, out DataKind declaredKind, out bool declaredIsArray)
                 && NeedsCoercion(value, declaredKind, declaredIsArray))
             {
-                paramEvaluator ??= new ExpressionEvaluator(
-                    _functions,
-                    store: variableStore,
-                    sidecarRegistry: frame.SidecarRegistry,
-                    accountant: frame.Accountant);
+                paramEvaluator ??= paramContext.CreateEvaluator();
                 if (paramFrame.Source is null)
                 {
-                    paramFrame = new EvaluationFrame(
-                        Row.Empty,
-                        variableStore,
-                        variableStore,
-                        frame.Accountant,
-                        outerRow: null,
-                        sidecarRegistry: frame.SidecarRegistry,
-                        types: frame.Types,
-                        videoRegistry: frame.VideoRegistry);
+                    paramFrame = paramEvaluator.CreateFrame(Row.Empty);
                 }
                 DataValue asData = value.ToDataValue(variableStore, value.TypeId, frame.Types);
                 CastExpression cast = new(

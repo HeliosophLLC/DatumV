@@ -123,7 +123,7 @@ public sealed class FoldScanOperator : QueryOperator
             }
 
             // ───── Step 3: per spec, partition + sort + fold ─────
-            ExpressionEvaluator evaluator = new(context);
+            ExpressionEvaluator evaluator = context.CreateEvaluator();
             foreach (KeyValuePair<WindowSpecificationKey, List<int>> specGroup in specGroups)
             {
                 WindowSpecification spec = _scanColumns[specGroup.Value[0]].WindowSpecification;

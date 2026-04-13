@@ -108,7 +108,9 @@ internal sealed class DmlReturningPlan : IQueryPlan
         // batch's arena (Source) and writes new ones into the corresponding
         // output batch's arena (Target). RETURNING expressions can reference
         // any captured column; outer rows / variables are not in scope.
-        ExpressionEvaluator evaluator = new(_catalog.Functions);
+        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(accountant: batchContext?.Accountant,
+            types: batchContext?.Types, cancellationToken: cancellationToken);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
 
         // Yield one output batch per captured input batch — preserves the
         // streaming shape of INSERT … SELECT (each source RowBatch becomes
@@ -125,12 +127,7 @@ internal sealed class DmlReturningPlan : IQueryPlan
                 for (int rowIdx = 0; rowIdx < capturedBatch.Count; rowIdx++)
                 {
                     Row capturedRow = capturedBatch[rowIdx];
-                    EvaluationFrame frame = new(
-                        capturedRow,
-                        source: capturedBatch.Arena,
-                        target: outArena,
-                        accountant: evaluator.Accountant,
-                        sidecarRegistry: _catalog.SidecarRegistry);
+                    EvaluationFrame frame = new(capturedRow, capturedBatch.Arena, outArena, context);
 
                     DataValue[] outRow = _catalog.Pool.RentDataValues(projection.Count);
                     for (int colIdx = 0; colIdx < projection.Count; colIdx++)

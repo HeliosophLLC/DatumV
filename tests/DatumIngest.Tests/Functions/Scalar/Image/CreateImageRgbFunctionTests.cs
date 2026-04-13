@@ -1,8 +1,6 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 using SkiaSharp;
 
@@ -26,7 +24,7 @@ public sealed class CreateImageRgbFunctionTests : ServiceTestBase
                 ValueRef.FromInt32(150),
                 ValueRef.FromInt32(200),
             },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         Assert.Equal(DataKind.Image, result.Kind);
@@ -47,7 +45,7 @@ public sealed class CreateImageRgbFunctionTests : ServiceTestBase
                 ValueRef.FromInt32(0),
                 ValueRef.FromInt32(128),
             },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
 
         SKBitmap bmp = result.AsImage();
@@ -79,7 +77,7 @@ public sealed class CreateImageRgbFunctionTests : ServiceTestBase
                     ValueRef.FromInt32(0),
                     ValueRef.FromInt32(0),
                 },
-                MakeFrame(),
+                CreateEvaluationFrame(),
                 default));
         Assert.Contains("width", ex.Message);
     }
@@ -99,7 +97,7 @@ public sealed class CreateImageRgbFunctionTests : ServiceTestBase
                     ValueRef.FromInt32(0),
                     ValueRef.FromInt32(0),
                 },
-                MakeFrame(),
+                CreateEvaluationFrame(),
                 default));
         Assert.Contains("[0, 255]", ex.Message);
     }
@@ -116,16 +114,9 @@ public sealed class CreateImageRgbFunctionTests : ServiceTestBase
                 ValueRef.FromInt32(0),
                 ValueRef.FromInt32(0),
             },
-            MakeFrame(),
+            CreateEvaluationFrame(),
             default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Image, result.Kind);
-    }
-
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
     }
 }

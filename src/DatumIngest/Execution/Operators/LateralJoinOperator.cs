@@ -86,7 +86,7 @@ public sealed class LateralJoinOperator : QueryOperator
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        ExpressionEvaluator evaluator = new(context);
+        ExpressionEvaluator evaluator = context.CreateEvaluator();
         JoinOutputWriter writer = new(context);
         Row? residualCheckRow = null;
         DataValue[]? residualCheckBuffer = null;
@@ -114,7 +114,7 @@ public sealed class LateralJoinOperator : QueryOperator
                         context.CancellationToken.ThrowIfCancellationRequested();
 
                         // Execute the right side with the current left row as correlation context.
-                        ExecutionContext lateralContext = context.WithOuterRow(leftRow);
+                        ExecutionContext lateralContext = context.Derive(outerRow: leftRow);
                         bool matched = false;
 
                         await foreach (RowBatch rightBatch in _right.ExecuteAsync(lateralContext).ConfigureAwait(false))

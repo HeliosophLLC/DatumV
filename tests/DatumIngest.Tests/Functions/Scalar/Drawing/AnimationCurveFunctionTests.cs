@@ -1,8 +1,6 @@
-using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Drawing;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Functions.Scalar.Drawing;
 
@@ -14,24 +12,16 @@ namespace DatumIngest.Tests.Functions.Scalar.Drawing;
 /// </summary>
 public sealed class AnimationCurveFunctionTests : ServiceTestBase
 {
-    private EvaluationFrame MakeFrame()
-    {
-        Pool pool = GetService<Pool>();
-        Arena arena = pool.Backing.RentArena();
-        return new EvaluationFrame(
-            Row.Empty, arena, arena, new MemoryAccountant(), types: new TypeRegistry());
-    }
-
     private async Task<float> Eval(IScalarFunction fn, params ValueRef[] args)
     {
-        ValueRef result = await fn.ExecuteAsync(args, MakeFrame(), default);
+        ValueRef result = await fn.ExecuteAsync(args, CreateEvaluationFrame(), default);
         Assert.Equal(DataKind.Float32, result.Kind);
         Assert.False(result.IsNull);
         return result.ToFloat();
     }
 
     private async Task<ValueRef> EvalRaw(IScalarFunction fn, params ValueRef[] args) =>
-        await fn.ExecuteAsync(args, MakeFrame(), default);
+        await fn.ExecuteAsync(args, CreateEvaluationFrame(), default);
 
     private static ValueRef F(float v) => ValueRef.FromFloat32(v);
     private static ValueRef I(int v) => ValueRef.FromInt32(v);
