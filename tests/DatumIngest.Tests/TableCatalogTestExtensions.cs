@@ -5,10 +5,13 @@ namespace DatumIngest.Tests;
 
 /// <summary>
 /// Sync <c>Plan(...)</c> overloads for tests. The production
-/// <see cref="TableCatalog"/> only exposes async planning
-/// (<see cref="TableCatalog.PlanAsync(string)"/> and overloads); these
-/// extensions bridge the async API for synchronous test code via
-/// <c>.GetAwaiter().GetResult()</c>.
+/// <see cref="TableCatalog"/> exposes async planning only; these extensions
+/// bridge the async API for synchronous test code via
+/// <c>.GetAwaiter().GetResult()</c>. Routes to
+/// <see cref="TableCatalog.ExecuteStatementAsync(string)"/> because most
+/// tests want eager DDL/DML application — they don't iterate the returned
+/// plan for side effects, they just want the statement to have happened by
+/// the time the sync call returns.
 /// </summary>
 /// <remarks>
 /// Lives in the test assembly so the sync-over-async bridge cannot leak
@@ -19,11 +22,11 @@ namespace DatumIngest.Tests;
 internal static class TableCatalogTestExtensions
 {
     public static IQueryPlan Plan(this TableCatalog catalog, string sql) =>
-        catalog.PlanAsync(sql).GetAwaiter().GetResult();
+        catalog.ExecuteStatementAsync(sql).GetAwaiter().GetResult();
 
     public static IQueryPlan Plan(this TableCatalog catalog, Statement statement) =>
-        catalog.PlanAsync(statement).GetAwaiter().GetResult();
+        catalog.ExecuteStatementAsync(statement).GetAwaiter().GetResult();
 
     public static IQueryPlan Plan(this TableCatalog catalog, Statement statement, string? sourceText) =>
-        catalog.PlanAsync(statement, sourceText).GetAwaiter().GetResult();
+        catalog.ExecuteStatementAsync(statement, sourceText).GetAwaiter().GetResult();
 }

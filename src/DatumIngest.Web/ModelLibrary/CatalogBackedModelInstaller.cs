@@ -82,15 +82,15 @@ internal sealed class CatalogBackedModelInstaller : IModelInstaller
                 $"Install SQL for model '{model.Id}' parsed to zero statements.");
         }
 
-        // Apply each statement in order. DDL applies as a side effect at
-        // plan time (Routines.ApplyCreateModelAsync runs inside PlanAsync),
-        // so we don't need to also ExecuteAsync the returned plan for
-        // CREATE MODEL. Throw early on the first failure — partial install
-        // would leave the catalog in an inconsistent state.
+        // Apply each statement in order. DDL applies as a side effect inside
+        // ExecuteStatementAsync (Routines.ApplyCreateModelAsync runs there),
+        // so we don't need to also iterate the returned plan for CREATE MODEL.
+        // Throw early on the first failure — partial install would leave the
+        // catalog in an inconsistent state.
         foreach ((Statement statement, string sourceText) in statements)
         {
             ct.ThrowIfCancellationRequested();
-            await _catalog.PlanAsync(statement, sourceText).ConfigureAwait(false);
+            await _catalog.ExecuteStatementAsync(statement, sourceText).ConfigureAwait(false);
         }
     }
 

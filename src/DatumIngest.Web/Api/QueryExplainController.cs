@@ -16,7 +16,7 @@ namespace DatumIngest.Web.Api;
 public sealed class QueryExplainController(TableCatalog catalog) : ControllerBase
 {
     [HttpPost("explain")]
-    public ActionResult<QueryExplainResponse> Explain([FromBody] QueryExplainRequest request)
+    public async Task<ActionResult<QueryExplainResponse>> Explain([FromBody] QueryExplainRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Sql))
         {
@@ -26,13 +26,14 @@ public sealed class QueryExplainController(TableCatalog catalog) : ControllerBas
         IQueryPlan plan;
         try
         {
+            // PlanAsync is side-effect-free for DDL/DML (returns a deferred
+            // plan that only runs the statement on iteration). EXPLAIN reads
+            // ExplainTree without iterating, so `EXPLAIN DELETE FROM users`
+            // never actually deletes — the deferral keeps this endpoint safe.
             // Planning is synchronous in practice (PlanAsync wraps a sync
-            // body in Task.FromResult) — call .GetAwaiter().GetResult on
-            // the returned Task to keep the controller signature
-            // synchronous and avoid an async state machine for the
-            // common case. Switch to async only if PlanAsync ever
-            // becomes truly async.
-            plan = catalog.PlanAsync(request.Sql).GetAwaiter().GetResult();
+            // body in Task.FromResult) — call .GetAwaiter().GetResult on the
+            // returned Task to keep the controller signature synchronous.
+            plan = await catalog.PlanAsync(request.Sql);
         }
         catch (Exception ex)
         {

@@ -44,8 +44,8 @@ internal sealed class MessageGraph : IMessageGraph
 
         Statement statement = SqlParser.ParseStatement(InsertSql);
         Statement bound = ParameterBinder.Bind(statement, parameters);
-        // PlanAsync executes INSERT inline and returns EmptyQueryPlan — no
-        // need to iterate the result.
-        await _catalog.PlanAsync(bound).ConfigureAwait(false);
+        // ExecuteStatementAsync runs INSERT inline and returns EmptyQueryPlan
+        // — no need to iterate the result.
+        await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
     }
 }

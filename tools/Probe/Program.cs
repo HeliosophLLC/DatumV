@@ -200,12 +200,11 @@ foreach (string applyPath in opts.ApplySql)
     Console.WriteLine($"Applying: {applyPath}");
     try
     {
-        // PlanAsync auto-routes CREATE MODEL to the registrar without persisting
-        // back to the catalog file when the body comes via the in-process Plan
+        // ExecuteStatementAsync auto-routes CREATE MODEL to the registrar without
+        // persisting back to the catalog file when the body comes via the in-process
         // path (caller controls persistence via the CatalogStore). The probe
-        // intentionally doesn't pin the change — it goes away when the process
-        // exits.
-        await catalog.PlanAsync(applySql);
+        // intentionally doesn't pin the change — it goes away when the process exits.
+        await catalog.ExecuteStatementAsync(applySql);
     }
     catch (Exception ex)
     {

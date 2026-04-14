@@ -259,7 +259,7 @@ public sealed class FunctionCatalogControllerTests
         TableCatalog catalog = new(pool);
         foreach (string sql in createStatements)
         {
-            catalog.PlanAsync(sql).GetAwaiter().GetResult();
+            catalog.ExecuteStatementAsync(sql).GetAwaiter().GetResult();
         }
         return catalog;
     }

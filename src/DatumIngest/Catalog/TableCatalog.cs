@@ -529,29 +529,89 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     }
 
     /// <summary>
-    /// Plans an already-parsed <see cref="Statement"/> against this catalog.
-    /// Same dispatch as <see cref="PlanAsync(string)"/> minus the parsing
-    /// step; useful for callers that have built a statement programmatically
-    /// (e.g. the procedural batch executor synthesising
-    /// <c>SELECT &lt;expr&gt;</c> for DECLARE / SET initialisers).
+    /// Plans an already-parsed <see cref="Statement"/>. Pure — no side
+    /// effects until the returned plan is iterated.
     /// </summary>
     public Task<IQueryPlan> PlanAsync(Statement statement)
         => PlanAsync(statement, sourceText: null, batchContext: null);
 
     /// <summary>
-    /// Convenience overload accepting <paramref name="sourceText"/> but no
-    /// batch context — used by standalone planners (shell, web, migrations)
-    /// that don't run inside a procedural batch.
+    /// Plans an already-parsed <see cref="Statement"/> with the original
+    /// source-text slice. Pure — no side effects until iteration.
     /// </summary>
     public Task<IQueryPlan> PlanAsync(Statement statement, string? sourceText)
         => PlanAsync(statement, sourceText, batchContext: null);
 
     /// <summary>
-    /// Async statement dispatch — the canonical planning entry point. DDL
-    /// applies as a side effect (returning <see cref="EmptyQueryPlan"/>);
-    /// queries return a plan whose batches stream on
-    /// <see cref="IQueryPlan.ExecuteAsync(CancellationToken)"/>; DML executes
-    /// inline and returns either <see cref="EmptyQueryPlan"/> or a
+    /// Canonical planning entry point. Returns an <see cref="IQueryPlan"/>
+    /// that has NOT yet executed any side effects. Iterating
+    /// <c>IQueryPlan.ExecuteAsync</c> applies them; reading
+    /// <see cref="IQueryPlan.ExplainTree"/> does not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For pure queries (<see cref="QueryStatement"/>, <see cref="CallStatement"/>)
+    /// the returned plan is a <see cref="QueryPlan"/> as before. For DDL and
+    /// DML statements the returned plan is a <see cref="DeferredStatementPlan"/>
+    /// that wraps <see cref="ExecuteStatementAsync(Statement, string?, BatchContext?)"/>
+    /// and only invokes it on iteration. This makes <c>EXPLAIN CREATE TABLE</c>
+    /// and <c>EXPLAIN DELETE</c> safe — they never iterate the plan.
+    /// </para>
+    /// <para>
+    /// Callers that want eager DDL/DML application (the historical
+    /// <c>PlanAsync</c> behaviour) should call
+    /// <see cref="ExecuteStatementAsync(Statement, string?, BatchContext?)"/>
+    /// directly. <c>BatchExecutor</c> and other row-iterating consumers
+    /// reach the same end-state through either entry point.
+    /// </para>
+    /// </remarks>
+    public Task<IQueryPlan> PlanAsync(Statement statement, string? sourceText, BatchContext? batchContext)
+    {
+        // Pure queries: plan eagerly (the planner has no side effects, just builds an operator tree).
+        if (statement is QueryStatement queryStatement)
+        {
+            return Task.FromResult<IQueryPlan>(PlanQuery(queryStatement.Query));
+        }
+        if (statement is CallStatement call)
+        {
+            return Task.FromResult<IQueryPlan>(PlanCall(call));
+        }
+        // Everything else (DDL, DML, etc.) carries a side effect — defer it.
+        return Task.FromResult<IQueryPlan>(new DeferredStatementPlan(this, statement, sourceText, batchContext));
+    }
+
+    /// <summary>
+    /// Parses and eagerly executes <paramref name="sql"/>. DDL and DML side
+    /// effects apply at call time. Returns an <see cref="IQueryPlan"/> for
+    /// any remaining row stream (empty for no-RETURNING DML and DDL; a
+    /// row-yielding plan for SELECT, CALL, and <c>… RETURNING</c>).
+    /// </summary>
+    public Task<IQueryPlan> ExecuteStatementAsync(string sql)
+    {
+        Statement statement = SqlParser.ParseStatement(sql);
+        return ExecuteStatementAsync(statement, sql);
+    }
+
+    /// <summary>
+    /// Eagerly executes an already-parsed <see cref="Statement"/>. See
+    /// <see cref="ExecuteStatementAsync(string)"/>.
+    /// </summary>
+    public Task<IQueryPlan> ExecuteStatementAsync(Statement statement)
+        => ExecuteStatementAsync(statement, sourceText: null, batchContext: null);
+
+    /// <summary>
+    /// Eagerly executes a parsed <see cref="Statement"/> with original
+    /// source-text slice for DDL persistence. See
+    /// <see cref="ExecuteStatementAsync(string)"/>.
+    /// </summary>
+    public Task<IQueryPlan> ExecuteStatementAsync(Statement statement, string? sourceText)
+        => ExecuteStatementAsync(statement, sourceText, batchContext: null);
+
+    /// <summary>
+    /// Canonical eager statement dispatch. DDL applies as a side effect
+    /// (returning <see cref="EmptyQueryPlan"/>); queries return a plan
+    /// whose batches stream on <c>IQueryPlan.ExecuteAsync</c>; DML
+    /// executes inline and returns either <see cref="EmptyQueryPlan"/> or a
     /// <c>RETURNING</c> plan.
     /// </summary>
     /// <remarks>
@@ -564,7 +624,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// have the per-statement slice; callers that built the AST
     /// programmatically pass <see langword="null"/>.
     /// </remarks>
-    public async Task<IQueryPlan> PlanAsync(Statement statement, string? sourceText, BatchContext? batchContext)
+    public async Task<IQueryPlan> ExecuteStatementAsync(Statement statement, string? sourceText, BatchContext? batchContext)
     {
         switch (statement)
         {

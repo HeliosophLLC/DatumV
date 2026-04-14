@@ -69,9 +69,9 @@ internal sealed class MigrationRunner
         foreach ((var statement, _) in SqlParser.ParseBatchWithText(sql))
         {
             ct.ThrowIfCancellationRequested();
-            // DDL applies as a side effect during PlanAsync; DML executes
-            // inline. Either way we discard the returned EmptyQueryPlan.
-            await _catalog.PlanAsync(statement).ConfigureAwait(false);
+            // DDL applies as a side effect during ExecuteStatementAsync; DML
+            // executes inline. Either way we discard the returned EmptyQueryPlan.
+            await _catalog.ExecuteStatementAsync(statement).ConfigureAwait(false);
         }
     }
 
@@ -107,7 +107,7 @@ internal sealed class MigrationRunner
         // to parameter binding.
         string escapedName = name.Replace("'", "''");
         string sql = $"INSERT INTO __schema_migrations (version, name) VALUES ({version}, '{escapedName}')";
-        return _catalog.PlanAsync(sql);
+        return _catalog.ExecuteStatementAsync(sql);
     }
 
     private static List<Migration> DiscoverMigrations()
