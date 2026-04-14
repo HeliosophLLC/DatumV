@@ -299,36 +299,6 @@
 			"hide": true
 		},
 		{
-			"label": "Debug: Build Shell",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"build",
-				"src/DatumIngest.Shell",
-				"-c", "Debug"
-			],
-			"problemMatcher": [
-				"$msCompile"
-			],
-			"group": "build",
-			"hide": true
-		},
-		{
-			"label": "Release: Build Shell",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"build",
-				"src/DatumIngest.Shell",
-				"-c", "Release"
-			],
-			"problemMatcher": [
-				"$msCompile"
-			],
-			"group": "build",
-			"hide": true
-		},
-		{
 			"label": "Debug: Build Web",
 			"type": "shell",
 			"command": "dotnet",
