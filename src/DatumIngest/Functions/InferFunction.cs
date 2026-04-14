@@ -545,7 +545,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// produces; falls back to per-element coercion for SQL-array-literal-built
     /// rows whose payload is <c>ValueRef[]</c>.
     /// </summary>
-    private static float[] MaterializeFloat32Row(ValueRef cell, int row, string modelName)
+    internal static float[] MaterializeFloat32Row(ValueRef cell, int row, string modelName)
     {
         if (cell.Materialized is float[] direct) return direct;
         ReadOnlySpan<ValueRef> elements = cell.GetArrayElements();
@@ -563,7 +563,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
     }
 
     /// <summary>Int64 sibling of <see cref="MaterializeFloat32Row"/>.</summary>
-    private static long[] MaterializeInt64Row(ValueRef cell, int row, string modelName)
+    internal static long[] MaterializeInt64Row(ValueRef cell, int row, string modelName)
     {
         if (cell.Materialized is long[] direct) return direct;
         ReadOnlySpan<ValueRef> elements = cell.GetArrayElements();
@@ -581,7 +581,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
     }
 
     /// <summary>Int32 sibling of <see cref="MaterializeFloat32Row"/>.</summary>
-    private static int[] MaterializeInt32Row(ValueRef cell, int row, string modelName)
+    internal static int[] MaterializeInt32Row(ValueRef cell, int row, string modelName)
     {
         if (cell.Materialized is int[] direct) return direct;
         ReadOnlySpan<ValueRef> elements = cell.GetArrayElements();
@@ -613,7 +613,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// spec; the 2-arg form supplies them via the explicit shape literal),
     /// which the per-form <c>TryBuildPackedShape*</c> helpers decide.
     /// </summary>
-    private static bool HasDynamicLeadingDim(TensorSpec spec)
+    internal static bool HasDynamicLeadingDim(TensorSpec spec)
     {
         return spec.Shape.Count >= 2 && spec.Shape[0] is null;
     }
@@ -623,7 +623,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// <see langword="false"/> when any non-leading dim is dynamic on the
     /// session — we have no second source for the dim and can't pack.
     /// </summary>
-    private static bool TryBuildPackedShapeFromSpec(
+    internal static bool TryBuildPackedShapeFromSpec(
         TensorSpec spec, int rowCount, [NotNullWhen(true)] out int[]? packedShape)
     {
         for (int i = 1; i < spec.Shape.Count; i++)
@@ -646,7 +646,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// Recombines the leading 1 with <paramref name="rowCount"/> to form
     /// the packed shape.
     /// </summary>
-    private static bool TryBuildPackedShapeFromExplicit(
+    internal static bool TryBuildPackedShapeFromExplicit(
         ReadOnlyMemory<ValueRef> shapeColumn, int rowCount, string modelName,
         [NotNullWhen(true)] out int[]? packedShape)
     {
@@ -1499,4 +1499,375 @@ public sealed class InferOutputsFunction : IFunction, IScalarFunction
             arguments, frame, "infer_outputs",
             InferFunction.ReadAllOutputsAsStruct,
             cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Mirrors <see cref="InferFunction.ExecuteBatchAsync"/>: packs the column
+    /// of per-row input tensors into one <c>[B, feature_dims...]</c> tensor and
+    /// runs <c>Session.Run</c> once. The output side differs — instead of
+    /// reading a single output as <c>Float32[]</c> per row, this splits EVERY
+    /// declared output across rows and assembles each row's results as a
+    /// <see cref="DataKind.Struct"/> keyed by output name (matching the per-row
+    /// <see cref="InferFunction.ReadAllOutputsAsStruct"/> shape).
+    /// </remarks>
+    public async ValueTask<ValueRef[]> ExecuteBatchAsync(
+        ReadOnlyMemory<ValueRef>[] argumentColumns,
+        int rowCount,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        // Preconditions identical to InferFunction.ExecuteBatchAsync: only the
+        // 1-arg or 2-arg form is batchable here (the named-session 3-arg form
+        // falls through to per-row, same as infer()); a current model with a
+        // default-bound session is required.
+        if (rowCount <= 1
+            || (argumentColumns.Length != 1 && argumentColumns.Length != 2)
+            || frame.CurrentModel is not { } model
+            || !model.BoundSessions.ContainsKey("default"))
+        {
+            DatumActivity.Scalars.Trace(
+                $"infer_outputs.batch fallback=preconditions rows={rowCount} args={argumentColumns.Length} "
+                + $"model={(frame.CurrentModel?.Name ?? "<none>")}");
+            return await ScalarFunctionBatchHelpers.DefaultLoop(
+                this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
+        }
+
+        IInferenceSession session = await model.BoundSessions
+            .ResolveAsync("default", cancellationToken)
+            .ConfigureAwait(false);
+
+        // Input-side gate: single packable input. Output side is checked
+        // per-output during read because heterogeneous output kinds are the
+        // whole point of infer_outputs.
+        DataKind inputKind = session.Inputs.Count > 0 ? session.Inputs[0].ElementKind : DataKind.Float32;
+        bool packableInput = inputKind is DataKind.Float32 or DataKind.Int64 or DataKind.Int32;
+        if (session.Inputs.Count != 1
+            || !packableInput
+            || !InferFunction.HasDynamicLeadingDim(session.Inputs[0]))
+        {
+            DatumActivity.Scalars.Trace(
+                $"infer_outputs.batch fallback=session-shape model={model.Name} inputs={session.Inputs.Count} "
+                + $"inputKind={(session.Inputs.Count > 0 ? session.Inputs[0].ElementKind.ToString() : "n/a")} "
+                + $"shape0={(session.Inputs.Count > 0 ? (session.Inputs[0].Shape.Count > 0 ? (session.Inputs[0].Shape[0]?.ToString() ?? "null") : "rank0") : "n/a")}");
+            return await ScalarFunctionBatchHelpers.DefaultLoop(
+                this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
+        }
+
+        int[]? packedShape;
+        if (argumentColumns.Length == 1)
+        {
+            if (!InferFunction.TryBuildPackedShapeFromSpec(session.Inputs[0], rowCount, out packedShape))
+            {
+                DatumActivity.Scalars.Trace(
+                    $"infer_outputs.batch fallback=spec-trailing-dynamic model={model.Name}");
+                return await ScalarFunctionBatchHelpers.DefaultLoop(
+                    this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            if (!InferFunction.TryBuildPackedShapeFromExplicit(
+                argumentColumns[1], rowCount, model.QualifiedName.ToString(), out packedShape))
+            {
+                DatumActivity.Scalars.Trace(
+                    $"infer_outputs.batch fallback=explicit-shape-not-uniform model={model.Name}");
+                return await ScalarFunctionBatchHelpers.DefaultLoop(
+                    this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        using Activity? batchedSpan = DatumActivity.Scalars.StartActivity(
+            $"infer_outputs.batch.run model={model.Name} shape=[{string.Join(",", packedShape)}]");
+        return await ExecuteBatchedMultiOutputAsync(
+            session, argumentColumns[0], rowCount, packedShape,
+            model.QualifiedName.ToString(), frame.Source, frame.Types, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Cross-row packing + multi-output split. Inputs are packed identically to
+    /// <see cref="InferFunction"/>'s single-output path; the divergence is that
+    /// EVERY declared output gets split into per-row slices, then assembled into
+    /// per-row <see cref="DataKind.Struct"/> values whose field set mirrors the
+    /// session's declared outputs.
+    /// </summary>
+    private static async ValueTask<ValueRef[]> ExecuteBatchedMultiOutputAsync(
+        IInferenceSession session,
+        ReadOnlyMemory<ValueRef> valueColumn,
+        int rowCount,
+        int[] packedShape,
+        string modelName,
+        IValueStore? arena,
+        TypeRegistry? types,
+        CancellationToken cancellationToken)
+    {
+        TensorSpec inputSpec = session.Inputs[0];
+        DataKind inputKind = inputSpec.ElementKind;
+
+        // Materialise rows + check homogeneous element counts (input packing
+        // is identical to InferFunction's path).
+        Array[] inputs = new Array[rowCount];
+        int perRowLen = -1;
+        ReadOnlySpan<ValueRef> col = valueColumn.Span;
+        for (int row = 0; row < rowCount; row++)
+        {
+            ValueRef cell = col[row];
+            if (cell.IsNull)
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer_outputs() input must not be null (row {row}).");
+            }
+            if (!cell.IsArray || cell.ArrayElementKind != inputKind)
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer_outputs() batched dispatch expected {inputKind}[] inputs; "
+                    + $"row {row} has {cell.Kind}{(cell.IsArray ? "[]" : "")}.");
+            }
+
+            Array rowInput = inputKind switch
+            {
+                DataKind.Float32 => InferFunction.MaterializeFloat32Row(cell, row, modelName),
+                DataKind.Int64   => InferFunction.MaterializeInt64Row(cell, row, modelName),
+                DataKind.Int32   => InferFunction.MaterializeInt32Row(cell, row, modelName),
+                _ => throw new InvalidOperationException(
+                    $"Model '{modelName}': batched packing path doesn't support input kind {inputKind}."),
+            };
+            int rowLen = rowInput.Length;
+            if (perRowLen < 0) perRowLen = rowLen;
+            else if (rowLen != perRowLen)
+            {
+                return await PerRowFallbackAsync().ConfigureAwait(false);
+            }
+            inputs[row] = rowInput;
+        }
+
+        int[] shape = new int[packedShape.Length];
+        shape[0] = rowCount;
+        for (int i = 1; i < packedShape.Length; i++) shape[i] = packedShape[i];
+
+        long expectedPerRow = 1;
+        for (int i = 1; i < shape.Length; i++) expectedPerRow *= shape[i];
+        if (expectedPerRow != perRowLen)
+        {
+            return await PerRowFallbackAsync().ConfigureAwait(false);
+        }
+
+        TensorBag inputBag = session.CreateInputBag();
+        TensorBag? outputBag = null;
+        try
+        {
+            switch (inputKind)
+            {
+                case DataKind.Float32:
+                {
+                    float[] packed = new float[(long)rowCount * perRowLen];
+                    for (int row = 0; row < rowCount; row++)
+                    {
+                        Buffer.BlockCopy(
+                            (float[])inputs[row], 0,
+                            packed, row * perRowLen * sizeof(float),
+                            perRowLen * sizeof(float));
+                    }
+                    inputBag.Add<float>(inputSpec.Name, DataKind.Float32, shape, packed);
+                    break;
+                }
+                case DataKind.Int64:
+                {
+                    long[] packed = new long[(long)rowCount * perRowLen];
+                    for (int row = 0; row < rowCount; row++)
+                    {
+                        Buffer.BlockCopy(
+                            (long[])inputs[row], 0,
+                            packed, row * perRowLen * sizeof(long),
+                            perRowLen * sizeof(long));
+                    }
+                    inputBag.Add<long>(inputSpec.Name, DataKind.Int64, shape, packed);
+                    break;
+                }
+                case DataKind.Int32:
+                {
+                    int[] packed = new int[(long)rowCount * perRowLen];
+                    for (int row = 0; row < rowCount; row++)
+                    {
+                        Buffer.BlockCopy(
+                            (int[])inputs[row], 0,
+                            packed, row * perRowLen * sizeof(int),
+                            perRowLen * sizeof(int));
+                    }
+                    inputBag.Add<int>(inputSpec.Name, DataKind.Int32, shape, packed);
+                    break;
+                }
+                default:
+                    throw new InvalidOperationException(
+                        $"Model '{modelName}': batched packing path doesn't support input kind {inputKind}.");
+            }
+
+            outputBag = await session.RunAsync(inputBag, cancellationToken).ConfigureAwait(false);
+
+            // Pre-validate every output: present, kind we can split, total
+            // element count divisible by rowCount (i.e., the output is batched).
+            // Bail to per-row dispatch if any output fails — partial batching
+            // would be inconsistent.
+            IReadOnlyList<TensorSpec> outputs = session.Outputs;
+            int outputCount = outputs.Count;
+            IInferenceTensor[] outputTensors = new IInferenceTensor[outputCount];
+            int[] perRowElementCounts = new int[outputCount];
+            int[][] perRowShapes = new int[outputCount][]; // null entries → flat array or scalar
+            for (int oi = 0; oi < outputCount; oi++)
+            {
+                TensorSpec outSpec = outputs[oi];
+                if (!outputBag.TryGet(outSpec.Name, out IInferenceTensor outTensor))
+                {
+                    throw new InvalidOperationException(
+                        $"Model '{modelName}': infer_outputs() session returned no tensor named "
+                        + $"'{outSpec.Name}' (declared output {oi}).");
+                }
+                DataKind outKind = outTensor.ElementKind;
+                if (outKind is not (DataKind.Float32 or DataKind.Int64 or DataKind.Int32))
+                {
+                    DatumActivity.Scalars.Trace(
+                        $"infer_outputs.batch fallback=unsupported-output-kind model={modelName} "
+                        + $"output={outSpec.Name} kind={outKind}");
+                    return await PerRowFallbackAsync().ConfigureAwait(false);
+                }
+
+                long total = 1;
+                foreach (int dim in outTensor.Shape) total *= dim;
+                if (rowCount == 0 || total % rowCount != 0)
+                {
+                    DatumActivity.Scalars.Trace(
+                        $"infer_outputs.batch fallback=output-not-row-divisible model={modelName} "
+                        + $"output={outSpec.Name} total={total} rows={rowCount}");
+                    return await PerRowFallbackAsync().ConfigureAwait(false);
+                }
+                perRowElementCounts[oi] = (int)(total / rowCount);
+                outputTensors[oi] = outTensor;
+
+                // Per-row shape preserves the FULL tensor rank, replacing the
+                // leading batch dim with 1. This mirrors per-row dispatch: a
+                // per-row call invokes the session with a batch=1 input, and
+                // ONNX returns a tensor of shape [1, ...trailing]. Downstream
+                // code (array_get, multi-dim bracket access) expects that exact
+                // rank — dropping the leading dim would silently break every
+                // SQL body that indexes the output with the rank declared in
+                // the model's RETURNS annotation.
+                int rank = outTensor.Shape.Count;
+                if (rank >= 2)
+                {
+                    int[] perRowShape = new int[rank];
+                    perRowShape[0] = 1;
+                    for (int i = 1; i < rank; i++) perRowShape[i] = outTensor.Shape[i];
+                    perRowShapes[oi] = perRowShape;
+                }
+                // rank == 1 (output is [N]): per-row data is a single element
+                // per row → handled as a scalar below (perRow == 1 branch in
+                // SliceRowAsValueRef); no per-row shape stored.
+            }
+
+            // Build the struct TypeId once. Field is "array of K" when the
+            // per-row element count is > 1 — matches per-row dispatch's rule
+            // (product == 1 → scalar, else → array/multi-dim).
+            ushort typeId = 0;
+            if (types is not null)
+            {
+                StructFieldDescriptor[] descriptors = new StructFieldDescriptor[outputCount];
+                for (int oi = 0; oi < outputCount; oi++)
+                {
+                    DataKind outKind = outputTensors[oi].ElementKind;
+                    bool isArray = perRowElementCounts[oi] > 1;
+                    int fieldTypeId = isArray
+                        ? types.InternArrayType(outKind)
+                        : (int)outKind;
+                    descriptors[oi] = new StructFieldDescriptor(outputs[oi].Name, fieldTypeId);
+                }
+                typeId = (ushort)types.InternStructType(descriptors);
+            }
+
+            _ = arena; // managed-payload path — arena materialisation happens at ToDataValue.
+
+            // Assemble per-row structs: for each row, build a ValueRef[outputCount]
+            // by slicing each output tensor at that row's offset.
+            ValueRef[] results = new ValueRef[rowCount];
+            for (int row = 0; row < rowCount; row++)
+            {
+                ValueRef[] fields = new ValueRef[outputCount];
+                for (int oi = 0; oi < outputCount; oi++)
+                {
+                    IInferenceTensor t = outputTensors[oi];
+                    int perRow = perRowElementCounts[oi];
+                    int[]? perRowShape = perRowShapes[oi];
+                    fields[oi] = SliceRowAsValueRef(t, row, perRow, perRowShape);
+                }
+                results[row] = ValueRef.FromStruct(fields, typeId);
+            }
+            return results;
+        }
+        finally
+        {
+            inputBag.Dispose();
+            outputBag?.Dispose();
+        }
+
+        // Local fallback — re-runs the column through the per-row default
+        // loop. Captures (valueColumn, rowCount, cancellationToken) from the
+        // outer scope. Any work done above this point on packing was wasted,
+        // matching the InferFunction sibling's behaviour.
+        ValueTask<ValueRef[]> PerRowFallbackAsync()
+        {
+            return ScalarFunctionBatchHelpers.DefaultLoop(
+                Instance, [valueColumn], rowCount, default!, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Extracts one row's slice from a batched output tensor and wraps it as a
+    /// <see cref="ValueRef"/>: scalar if the tensor's per-row element count is
+    /// one with no surviving per-row shape; multi-dim primitive if the per-row
+    /// rank is ≥ 2; flat array otherwise.
+    /// </summary>
+    private static ValueRef SliceRowAsValueRef(
+        IInferenceTensor tensor, int row, int perRow, int[]? perRowShape)
+    {
+        DataKind kind = tensor.ElementKind;
+        int offset = row * perRow;
+
+        // perRow == 1 always wins as a scalar — mirrors per-row dispatch's
+        // ReadOutputTensor rule that "product == 1 → scalar" regardless of
+        // tensor shape. A [N, 1] output gives every row a scalar, not a
+        // shape-[1, 1] multi-dim array.
+        switch (kind)
+        {
+            case DataKind.Float32:
+            {
+                ReadOnlySpan<float> span = tensor.AsSpan<float>().Slice(offset, perRow);
+                if (perRow == 1) return ValueRef.FromFloat32(span[0]);
+                if (perRowShape is not null) return ValueRef.FromPrimitiveMultiDimArray(span.ToArray(), perRowShape, DataKind.Float32);
+                return ValueRef.FromPrimitiveArray(span.ToArray(), DataKind.Float32);
+            }
+            case DataKind.Int64:
+            {
+                ReadOnlySpan<long> span = tensor.AsSpan<long>().Slice(offset, perRow);
+                if (perRow == 1) return ValueRef.FromInt64(span[0]);
+                if (perRowShape is not null) return ValueRef.FromPrimitiveMultiDimArray(span.ToArray(), perRowShape, DataKind.Int64);
+                return ValueRef.FromPrimitiveArray(span.ToArray(), DataKind.Int64);
+            }
+            case DataKind.Int32:
+            {
+                ReadOnlySpan<int> span = tensor.AsSpan<int>().Slice(offset, perRow);
+                if (perRow == 1) return ValueRef.FromInt32(span[0]);
+                if (perRowShape is not null) return ValueRef.FromPrimitiveMultiDimArray(span.ToArray(), perRowShape, DataKind.Int32);
+                return ValueRef.FromPrimitiveArray(span.ToArray(), DataKind.Int32);
+            }
+            default:
+                // Caller's pre-validation gates by kind; reaching this is a bug.
+                throw new InvalidOperationException(
+                    $"infer_outputs() batched split reached unsupported output kind {kind}.");
+        }
+    }
+
+    /// <summary>
+    /// Singleton for the per-row fallback closure — <see cref="InferOutputsFunction"/>
+    /// is stateless so one instance suffices across every dispatch site.
+    /// </summary>
+    private static readonly InferOutputsFunction Instance = new();
 }

@@ -1483,6 +1483,188 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     }
 
     /// <summary>
+    /// <c>infer_outputs()</c> against a multi-output session with a dynamic
+    /// leading dim batches across rows: ONE <c>Session.Run</c> with packed
+    /// <c>[N, ...]</c> inputs returns one batched output bag whose tensors are
+    /// split back into per-row slices. Each row's result is a Struct of every
+    /// declared output, identical in shape to the per-row dispatch path.
+    /// Regression guard for the depth-anything / RT-DETR / RoBERTa-QA / BlazeFace
+    /// calibration win — without this batching, every "batch size" the
+    /// calibrator probes runs N sequential Session.Run calls and the curve is
+    /// meaningless (uniform VRAM across batch sizes).
+    /// </summary>
+    [Fact]
+    public async Task BatchedInferOutputs_MultiOutputDynamicBatch_RunsOnce_SplitsAcrossRows()
+    {
+        int runCallCount = 0;
+        int[]? observedInputShape = null;
+
+        // Dual scalar-per-row outputs (shape [batch]): exercises the perRow == 1
+        // → scalar branch in the batched-split path, which mirrors per-row
+        // dispatch's "product == 1 → scalar" rule. Values are deterministic
+        // (2*v from logits, 10*v from boxes) so each row's struct slice can be
+        // asserted by value.
+        StubSession session = new(
+            inputs: [new TensorSpec("input", DataKind.Float32, new int?[] { null, 1 })],
+            outputs:
+            [
+                new TensorSpec("logits", DataKind.Float32, new int?[] { null }),
+                new TensorSpec("boxes",  DataKind.Float32, new int?[] { null }),
+            ],
+            run: bag =>
+            {
+                runCallCount++;
+                IInferenceTensor incoming = bag["input"];
+                observedInputShape = incoming.Shape.ToArray();
+                ReadOnlySpan<float> data = incoming.AsSpan<float>();
+                int batchN = incoming.Shape[0];
+
+                float[] logits = new float[batchN];
+                float[] boxes  = new float[batchN];
+                for (int row = 0; row < batchN; row++)
+                {
+                    float v = data[row];
+                    logits[row] = v * 2f;
+                    boxes[row]  = v * 10f;
+                }
+
+                StubTensorBag output = new();
+                output.Add<float>("logits", DataKind.Float32, [batchN], logits.AsSpan());
+                output.Add<float>("boxes",  DataKind.Float32, [batchN], boxes.AsSpan());
+                return output;
+            });
+
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        dispatcher.NextSession = session;
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"],
+            [
+                new object?[] { new float[] { 1f } },
+                new object?[] { new float[] { 2f } },
+                new object?[] { new float[] { 3f } },
+                new object?[] { new float[] { 4f } },
+            ]));
+
+        // Body pulls the 'boxes' field by name — proves the per-row struct
+        // exposes EVERY output, not just the first, even on the batched path.
+        catalog.Plan(
+            $"CREATE MODEL detector(x Float32[]) RETURNS Float32 "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN "
+            + "  DECLARE outputs Struct = infer_outputs(x); "
+            + "  RETURN outputs['boxes'] "
+            + "END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.detector(v) FROM data");
+
+        List<float> values = [];
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][0].AsFloat32());
+            }
+        }
+
+        Assert.Equal(4, values.Count);
+        Assert.Equal(1, runCallCount); // payoff: ONE Session.Run for 4 rows
+        Assert.Equal(new[] { 4, 1 }, observedInputShape);
+        // boxes for each row = v * 10.
+        Assert.Equal([10f, 20f, 30f, 40f], values);
+    }
+
+    /// <summary>
+    /// Multi-dim per-row shape preservation: with a batched output shape
+    /// <c>[N, 1, 3, 3]</c> (the depth-anything intrinsics export shape — the
+    /// SQL author writes <c>array_get(intrinsics, 1, 1, 1, 1)</c> assuming
+    /// rank 4), each row's slice must be a rank-4 multi-dim array
+    /// <c>[1, 1, 3, 3]</c>, NOT a stripped rank-3 <c>[1, 3, 3]</c>. Dropping
+    /// the leading batch dim would silently break every downstream
+    /// <c>array_get</c> that indexes with the rank declared in the model's
+    /// RETURNS annotation. Regression guard.
+    /// </summary>
+    [Fact]
+    public async Task BatchedInferOutputs_RankPreservingSplit_KeepsLeadingBatchOneDim()
+    {
+        int runCallCount = 0;
+
+        // Session output [batch, 1, 3, 3] — once batched, the per-row split
+        // must surface each row as a rank-4 [1, 1, 3, 3] multi-dim array.
+        // Per-row dispatch with batch=1 input would have produced exactly
+        // that shape from ONNX; the batched path has to match byte-for-byte.
+        StubSession session = new(
+            inputs: [new TensorSpec("input", DataKind.Float32, new int?[] { null, 1 })],
+            outputs: [new TensorSpec("intrinsics", DataKind.Float32, new int?[] { null, 1, 3, 3 })],
+            run: bag =>
+            {
+                runCallCount++;
+                IInferenceTensor incoming = bag["input"];
+                int batchN = incoming.Shape[0];
+                ReadOnlySpan<float> data = incoming.AsSpan<float>();
+
+                // Per-row K matrix where the [0,0] entry encodes the input
+                // scalar — gives the assertion a deterministic target.
+                float[] intrinsics = new float[batchN * 1 * 3 * 3];
+                for (int row = 0; row < batchN; row++)
+                {
+                    float v = data[row];
+                    int rowBase = row * 9;
+                    intrinsics[rowBase + 0] = v * 100f; // [0,0]
+                }
+
+                StubTensorBag output = new();
+                output.Add<float>("intrinsics", DataKind.Float32, [batchN, 1, 3, 3], intrinsics.AsSpan());
+                return output;
+            });
+
+        TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
+        dispatcher.NextSession = session;
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
+
+        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+            CreatePool(), "data", ["v"],
+            [
+                new object?[] { new float[] { 1f } },
+                new object?[] { new float[] { 2f } },
+                new object?[] { new float[] { 3f } },
+            ]));
+
+        // 4-index array_get matches the rank-4 [1, 1, 3, 3] per-row shape.
+        // If the batched-split path were to strip the leading batch dim, this
+        // would surface as a rank-3 array and the body would error
+        // "array is 3-dimensional but 4 indices were supplied".
+        catalog.Plan(
+            $"CREATE MODEL k_picker(x Float32[]) RETURNS Float32 "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN "
+            + "  DECLARE outputs Struct = infer_outputs(x); "
+            + "  DECLARE intr Float32[] = outputs['intrinsics']; "
+            + "  RETURN array_get(intr, 1, 1, 1, 1) "
+            + "END");
+
+        IQueryPlan plan = catalog.Plan("SELECT models.k_picker(v) FROM data");
+
+        List<float> values = [];
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][0].AsFloat32());
+            }
+        }
+
+        Assert.Equal(3, values.Count);
+        Assert.Equal(1, runCallCount);
+        Assert.Equal([100f, 200f, 300f], values);
+    }
+
+    /// <summary>
     /// The 2-arg <c>infer(value, shape)</c> form with a uniform <c>[1, ...]</c>
     /// shape literal across rows (the SQL-author idiom mirrored by midas-small
     /// and yolox bodies) also batches: <c>InferFunction.ExecuteBatchAsync</c>

@@ -21,9 +21,22 @@ namespace DatumIngest.Model;
 /// <para>
 /// Data is appended via typed methods (<see cref="AppendString(string)"/>,
 /// <see cref="AppendFloats"/>, <see cref="AppendBytes(ReadOnlySpan{byte})"/>)
-/// and later retrieved by offset and length. The backing storage is an anonymous
-/// memory-mapped region managed by the OS. Growth allocates a new mapping and
-/// copies existing data.
+/// and later retrieved by offset and length.
+/// </para>
+/// <para>
+/// <strong>Anonymous backing.</strong> A large virtual-address range (see
+/// <see cref="MaxAnonymousReservation"/>) is reserved up front via
+/// <see cref="VirtualMemory.Reserve"/>; pages within that range are committed
+/// on demand as the arena grows. The base pointer is stable for the arena's
+/// lifetime — no remap, no memcpy, no dangling spans. This is what makes
+/// parallel scalar dispatch safe to read through a growing arena.
+/// </para>
+/// <para>
+/// <strong>File-backed</strong> arenas (<see cref="CreateFileBacked"/>) use
+/// memory-mapped files instead so that bytes persist on disk and the OS can
+/// page cold pages out of working set under memory pressure. File-backed
+/// growth still remaps; concurrent reads of file-backed arenas are NOT safe
+/// against concurrent writes for that reason.
 /// </para>
 /// <para>
 /// All writes are serialized via an internal lock, making concurrent appends
@@ -33,12 +46,25 @@ namespace DatumIngest.Model;
 /// </remarks>
 public sealed class Arena : IValueStore, IDisposable
 {
-    private const int DefaultCapacity = 1024 * 1024; // 1 MB — OS demand-pages, so unused capacity costs nothing
+    private const int DefaultCapacity = 1024 * 1024; // 1 MB — initial commit; grows on demand within the reservation.
+
+    // Default virtual-address reservation per anonymous arena. The reservation is cheap
+    // (VA only — no RAM, no commit charge) and lets the base pointer stay stable across
+    // every grow. 8 GB is a hard per-arena cap; on 64-bit hosts with 128 TB user VA we
+    // can comfortably reserve thousands of these concurrently. Bump if a single arena
+    // ever needs more than 8 GB.
+    private const long MaxAnonymousReservation = 8L * 1024 * 1024 * 1024;
 
     private readonly Lock _writeLock = new();
     private readonly string? _backingFilePath;
+
+    // File-backed only.
     private MemoryMappedFile? _mmf;
     private MemoryMappedViewAccessor? _accessor;
+
+    // Anonymous only — null when file-backed; for file-backed _pointer is reused for the MMF view base.
+    private long _reservedBytes;
+
     private unsafe byte* _pointer;
     private long _initialCapacity;
     private long _capacity;
@@ -100,8 +126,8 @@ public sealed class Arena : IValueStore, IDisposable
         return new Arena(initialCapacity, filePath);
     }
 
-    /// <summary>Whether the backing memory-mapped region has been allocated.</summary>
-    public bool IsAllocated => _mmf is not null;
+    /// <summary>Whether the backing memory region has been allocated.</summary>
+    public unsafe bool IsAllocated => _backingFilePath is null ? _pointer != null : _mmf is not null;
 
     /// <summary>
     /// Whether this arena's bytes live in a backing file (<see cref="CreateFileBacked"/>) rather
@@ -663,14 +689,12 @@ public sealed class Arena : IValueStore, IDisposable
 
     // ───────────────────────── Memory-mapped backing ─────────────────────────
 
-    private static unsafe void CreateMapping(
-        string? backingFilePath, long capacity, FileMode fileMode,
+    private static unsafe void CreateFileMapping(
+        string backingFilePath, long capacity, FileMode fileMode,
         out MemoryMappedFile mmf, out MemoryMappedViewAccessor accessor, out byte* pointer)
     {
-        mmf = backingFilePath is null
-            ? MemoryMappedFile.CreateNew(null, capacity, MemoryMappedFileAccess.ReadWrite)
-            : MemoryMappedFile.CreateFromFile(
-                backingFilePath, fileMode, mapName: null, capacity, MemoryMappedFileAccess.ReadWrite);
+        mmf = MemoryMappedFile.CreateFromFile(
+            backingFilePath, fileMode, mapName: null, capacity, MemoryMappedFileAccess.ReadWrite);
 
         accessor = mmf.CreateViewAccessor(0, capacity, MemoryMappedFileAccess.ReadWrite);
         pointer = null;
@@ -679,35 +703,115 @@ public sealed class Arena : IValueStore, IDisposable
 
     private unsafe void ReleaseMapping()
     {
-        if (_pointer != null)
+        if (_backingFilePath is null)
         {
-            _accessor!.SafeMemoryMappedViewHandle.ReleasePointer();
-            _pointer = null;
+            // Anonymous: release the entire VA reservation. Pointer becomes invalid.
+            if (_pointer != null)
+            {
+                VirtualMemory.Release(_pointer, _reservedBytes);
+                _pointer = null;
+            }
+            _reservedBytes = 0;
+            _capacity = 0;
         }
-
-        _accessor?.Dispose();
-        _mmf?.Dispose();
-        _accessor = null;
-        _mmf = null;
+        else
+        {
+            if (_pointer != null)
+            {
+                _accessor!.SafeMemoryMappedViewHandle.ReleasePointer();
+                _pointer = null;
+            }
+            _accessor?.Dispose();
+            _mmf?.Dispose();
+            _accessor = null;
+            _mmf = null;
+        }
     }
 
     /// <summary>
-    /// Allocates or grows the backing mapping. Must be called under <see cref="_writeLock"/>.
-    /// On the first call, creates the initial mapping lazily. Anonymous and file-backed
-    /// arenas share the rent path but diverge on grow: anonymous allocates a fresh mapping
-    /// and memcpys the prior contents; file-backed unmaps, resizes the file in place, and
-    /// remaps (Windows refuses <see cref="FileStream.SetLength"/> on a mapped file, so the
-    /// unmap window is mandatory — it's safe because <see cref="_writeLock"/> serializes us).
+    /// Allocates or grows backing storage to fit an additional write. Must be called under
+    /// <see cref="_writeLock"/>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Anonymous arenas</strong> reserve a large VA range on first write and commit
+    /// pages on demand. The base pointer is stable for the arena's lifetime — grows never
+    /// move <see cref="_pointer"/>. This is what lets parallel scalar dispatch hold spans
+    /// across calls without dangling on a concurrent grow.
+    /// </para>
+    /// <para>
+    /// <strong>File-backed arenas</strong> still unmap / SetLength / remap on grow, because
+    /// the bytes have to live in the file. Concurrent reads of a file-backed arena that's
+    /// being written are NOT safe — but file-backed mode is single-writer-spill-style and
+    /// doesn't share that contract.
+    /// </para>
+    /// </remarks>
     private unsafe void EnsureCapacity(long additionalBytes)
     {
         long required = _position + additionalBytes;
 
-        // First allocation — deferred from constructor.
+        if (_backingFilePath is null)
+        {
+            EnsureAnonymousCapacity(required);
+        }
+        else
+        {
+            EnsureFileBackedCapacity(required);
+        }
+    }
+
+    private unsafe void EnsureAnonymousCapacity(long required)
+    {
+        // First write: reserve the full range and commit the initial slice.
+        if (_pointer == null)
+        {
+            long initial = Math.Max(_initialCapacity, required);
+            if (initial > MaxAnonymousReservation)
+            {
+                throw new InvalidOperationException(
+                    $"Arena[#{Id}] initial capacity {initial:N0} exceeds per-arena reservation cap " +
+                    $"{MaxAnonymousReservation:N0}. Bump MaxAnonymousReservation if a single arena truly needs more.");
+            }
+
+            _pointer = VirtualMemory.Reserve(MaxAnonymousReservation);
+            _reservedBytes = MaxAnonymousReservation;
+
+            long initialCommit = VirtualMemory.RoundUpToPage(initial);
+            VirtualMemory.Commit(_pointer, 0, initialCommit);
+            _capacity = initialCommit;
+
+            DatumDiagnostics.RecordArenaInitialMapping(_capacity);
+            return;
+        }
+
+        if (required <= _capacity) return;
+
+        // Grow: commit more pages within the existing reservation. Pointer does NOT move.
+        long oldCapacity = _capacity;
+        long target = Math.Max(_capacity * 2, required);
+        if (target > _reservedBytes)
+        {
+            throw new InvalidOperationException(
+                $"Arena[#{Id}] needs {target:N0} bytes but reservation is {_reservedBytes:N0}. " +
+                $"Bump MaxAnonymousReservation if a single arena truly needs more than 8 GB.");
+        }
+
+        long newCapacity = VirtualMemory.RoundUpToPage(target);
+        VirtualMemory.Commit(_pointer, _capacity, newCapacity - _capacity);
+        _capacity = newCapacity;
+
+        // bytesCopied is 0 — VA grow never copies. The counter still fires so diagnostics
+        // see the "growth event" but it accurately reflects "no copy happened."
+        DatumDiagnostics.RecordArenaGrow(oldCapacity, newCapacity, bytesCopied: 0);
+    }
+
+    private unsafe void EnsureFileBackedCapacity(long required)
+    {
+        // First write: create the file and map it.
         if (_mmf is null)
         {
             long capacity = Math.Max(_initialCapacity, required);
-            CreateMapping(_backingFilePath, capacity, FileMode.CreateNew,
+            CreateFileMapping(_backingFilePath!, capacity, FileMode.CreateNew,
                 out _mmf, out _accessor, out _pointer);
             _capacity = capacity;
             DatumDiagnostics.RecordArenaInitialMapping(capacity);
@@ -716,54 +820,20 @@ public sealed class Arena : IValueStore, IDisposable
 
         if (required <= _capacity) return;
 
+        // File-backed: bytes already persisted on disk. Unmap → SetLength → remap. No memcpy.
         long oldCapacity = _capacity;
-        long bytesCopied = _position;
         long newCapacity = Math.Max(_capacity * 2, required);
 
-        if (_backingFilePath is null)
+        ReleaseMapping();
+        using (FileStream fs = File.Open(_backingFilePath!, FileMode.Open, FileAccess.ReadWrite))
         {
-            // Anonymous: build new mapping, memcpy prior contents, release old.
-            // Span<byte> is capped at int.MaxValue (2GB); for arenas growing past
-            // that, copy in 2GB-1 chunks rather than a single CopyTo.
-            CreateMapping(null, newCapacity, FileMode.CreateNew,
-                out var newMmf, out var newAccessor, out var newPointer);
-            CopyMappedRegion(_pointer, newPointer, _position);
-            ReleaseMapping();
-            _mmf = newMmf;
-            _accessor = newAccessor;
-            _pointer = newPointer;
+            fs.SetLength(newCapacity);
         }
-        else
-        {
-            // File-backed: bytes already persisted. Unmap → SetLength → remap. No memcpy.
-            ReleaseMapping();
-            using (FileStream fs = File.Open(_backingFilePath, FileMode.Open, FileAccess.ReadWrite))
-            {
-                fs.SetLength(newCapacity);
-            }
-            CreateMapping(_backingFilePath, newCapacity, FileMode.Open,
-                out _mmf, out _accessor, out _pointer);
-        }
+        CreateFileMapping(_backingFilePath!, newCapacity, FileMode.Open,
+            out _mmf, out _accessor, out _pointer);
 
         _capacity = newCapacity;
-
-        DatumDiagnostics.RecordArenaGrow(oldCapacity, newCapacity, bytesCopied);
-    }
-
-    /// <summary>
-    /// Byte-copy from one raw memory region to another in <c>int.MaxValue</c>-sized
-    /// chunks, since <see cref="Span{T}"/> length is capped at <see cref="int.MaxValue"/>.
-    /// Required for anonymous-arena growth past 2GB.
-    /// </summary>
-    private static unsafe void CopyMappedRegion(byte* src, byte* dst, long byteCount)
-    {
-        long copied = 0;
-        while (copied < byteCount)
-        {
-            int chunk = (int)Math.Min(byteCount - copied, int.MaxValue);
-            new ReadOnlySpan<byte>(src + copied, chunk).CopyTo(new Span<byte>(dst + copied, chunk));
-            copied += chunk;
-        }
+        DatumDiagnostics.RecordArenaGrow(oldCapacity, newCapacity, bytesCopied: 0);
     }
 
     private unsafe Span<byte> GetSpanForWrite(long offset, int length)

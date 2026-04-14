@@ -20,31 +20,22 @@ internal static class ScalarFunctionBatchHelpers
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <strong>Why sequential.</strong> An earlier revision parallelised
-    /// this loop via <c>Parallel.ForAsync</c> for batches at or above 4,
-    /// on the theory that pure scalar functions can be
-    /// dispatched independently. The theory is correct for the function
-    /// surface but not for the shared <see cref="Arena"/> they read
-    /// through: when one parallel worker writes to the arena (managed
-    /// payload → arena copy inside <c>ValueRef.ToDataValue</c>) and the
-    /// arena grows, the old mmap region gets unmapped. Any other worker
-    /// holding a <see cref="System.Span{T}"/> into the old region now
-    /// dangles, and the next index triggers
-    /// <see cref="System.AccessViolationException"/>. The parallel path
-    /// was latent until the calibration auto-trigger started dispatching
-    /// at batch sizes ≥ 4 in production; the crashes appeared
-    /// immediately. Restoring parallelism requires either making arena
-    /// growth span-safe (keep old mmaps pinned until outstanding spans
-    /// drop) or removing the managed-payload-to-arena round-trip
-    /// entirely. Both are filed as follow-ups; until they land,
-    /// sequential is the safe default.
+    /// <strong>Why sequential (currently).</strong> The Arena now uses
+    /// reserve-once-commit-on-demand so its base pointer is stable across grows —
+    /// the original span-dangling AVE that forced sequentialisation is fixed. A
+    /// first attempt at re-enabling parallel dispatch (via
+    /// <c>Parallel.ForAsync</c> at threshold 4) crashed depth-anything-v3-large
+    /// calibration with a native-level fault (Windows 0xC0000409). The arena
+    /// itself isn't suspect — the basic concurrent-reads-across-grow scenario
+    /// passes its unit test cleanly — but something else in the scalar pipeline
+    /// or model-body composition is not parallel-safe. Kept sequential while
+    /// that's investigated.
     /// </para>
     /// <para>
-    /// <strong>Thread-safety contract.</strong> Scalar functions are
-    /// still expected to be pure with respect to the
-    /// <see cref="EvaluationFrame"/> they receive — they read it, produce
-    /// a <see cref="ValueRef"/>, and don't mutate shared state. Future
-    /// re-parallelisation depends on that contract holding.
+    /// <strong>Thread-safety contract.</strong> Scalar functions are expected to
+    /// be pure with respect to the <see cref="EvaluationFrame"/> they receive —
+    /// they read it, produce a <see cref="ValueRef"/>, and don't mutate shared
+    /// state.
     /// </para>
     /// </remarks>
     public static async ValueTask<ValueRef[]> DefaultLoop(
