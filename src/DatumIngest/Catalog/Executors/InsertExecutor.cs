@@ -155,146 +155,171 @@ internal static class InsertExecutor
         // Build a single batch covering every VALUES row. INSERT VALUES
         // is bounded — users don't write 10M rows inline — so a one-shot
         // batch beats per-row session writes.
+        // OWNERSHIP: the batch + its arena are rented from the pool here;
+        // RentRowBatch incremented the arena's refcount. The try/finally
+        // below returns the batch to the pool when ownership isn't
+        // transferred to the caller (no RETURNING, or exception before
+        // hand-off). Pool.ReturnRowBatch releases the arena reference too.
         Arena arena = new();
         ColumnLookup lookup = BuildTargetLookup(targetSchema);
         RowBatch batch = catalog.Pool.RentRowBatch(lookup, capacity: values.Rows.Count, arena: arena);
+        bool batchOwnershipTransferred = false;
         // Account the batch's GC-resident skeleton against the surrounding
         // batch's budget: DataValue cells (~20 bytes each) plus a ~24-byte
         // per-row header. Arena payload bytes are file-backed mmap and don't
         // count. Released after session.WriteAsync flushes the batch.
         long valuesBatchBytes = (long)values.Rows.Count * (targetSchema.Columns.Count * 20L + 24L);
         if (valuesBatchBytes > 0) accountant.NotifyMaterialized(valuesBatchBytes);
-
-        // Tableless evaluator: VALUES expressions can use binary operators,
-        // function calls, and array / struct literals; they cannot reference
-        // columns (no source row). Same arena for source and target so array
-        // payloads materialised by array(...) land directly in the batch's
-        // arena and ConvertSourceValue can pass them through without copy.
-        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(store: arena,
-            accountant: accountant);
-        ExpressionEvaluator evaluator = context.CreateEvaluator();
-        ColumnLookup emptyLookup = new(Array.Empty<string>());
-        Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
-        EvaluationFrame frame = new(emptyRow, arena, context);
-
-        for (int rowIndex = 0; rowIndex < values.Rows.Count; rowIndex++)
+        try
         {
-            IReadOnlyList<Expression> sourceRow = values.Rows[rowIndex];
-            if (sourceRow.Count != plan.SourceColumnCount)
-            {
-                throw new InvalidOperationException(
-                    $"INSERT INTO '{provider.QualifiedName}': VALUES row {rowIndex + 1} has " +
-                    $"{sourceRow.Count} value(s), but the column list expects {plan.SourceColumnCount}.");
-            }
 
-            DataValue[] targetRow = catalog.Pool.RentDataValues(targetSchema.Columns.Count);
-            for (int targetIndex = 0; targetIndex < targetSchema.Columns.Count; targetIndex++)
-            {
-                ColumnInfo target = targetSchema.Columns[targetIndex];
-                int sourceIndex = plan.SourceIndexForTarget[targetIndex];
+            // Tableless evaluator: VALUES expressions can use binary operators,
+            // function calls, and array / struct literals; they cannot reference
+            // columns (no source row). Same arena for source and target so array
+            // payloads materialised by array(...) land directly in the batch's
+            // arena and ConvertSourceValue can pass them through without copy.
+            using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(store: arena,
+                accountant: accountant);
+            ExpressionEvaluator evaluator = context.CreateEvaluator();
+            ColumnLookup emptyLookup = new(Array.Empty<string>());
+            Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
+            EvaluationFrame frame = new(emptyRow, arena, context);
 
-                if (sourceIndex >= 0)
+            for (int rowIndex = 0; rowIndex < values.Rows.Count; rowIndex++)
+            {
+                IReadOnlyList<Expression> sourceRow = values.Rows[rowIndex];
+                if (sourceRow.Count != plan.SourceColumnCount)
                 {
-                    Expression sourceExpr = sourceRow[sourceIndex];
-                    if (sourceExpr is DefaultValueExpression)
+                    throw new InvalidOperationException(
+                        $"INSERT INTO '{provider.QualifiedName}': VALUES row {rowIndex + 1} has " +
+                        $"{sourceRow.Count} value(s), but the column list expects {plan.SourceColumnCount}.");
+                }
+
+                DataValue[] targetRow = catalog.Pool.RentDataValues(targetSchema.Columns.Count);
+                for (int targetIndex = 0; targetIndex < targetSchema.Columns.Count; targetIndex++)
+                {
+                    ColumnInfo target = targetSchema.Columns[targetIndex];
+                    int sourceIndex = plan.SourceIndexForTarget[targetIndex];
+
+                    if (sourceIndex >= 0)
                     {
-                        // PG `DEFAULT` keyword inside VALUES — route this
-                        // slot through the same resolution path an omitted
-                        // column would use (IDENTITY → DEFAULT expr →
-                        // NULL → throw). Note: for IDENTITY columns this
-                        // fires the counter regardless of ALWAYS / BY
-                        // DEFAULT — DEFAULT keyword means "let the column
-                        // generate the value".
-                        targetRow[targetIndex] = await ResolveDefaultKeywordSlotAsync(
-                            target, arena, session, evaluator, frame,
-                            CancellationToken.None).ConfigureAwait(false);
+                        Expression sourceExpr = sourceRow[sourceIndex];
+                        if (sourceExpr is DefaultValueExpression)
+                        {
+                            // PG `DEFAULT` keyword inside VALUES — route this
+                            // slot through the same resolution path an omitted
+                            // column would use (IDENTITY → DEFAULT expr →
+                            // NULL → throw). Note: for IDENTITY columns this
+                            // fires the counter regardless of ALWAYS / BY
+                            // DEFAULT — DEFAULT keyword means "let the column
+                            // generate the value".
+                            targetRow[targetIndex] = await ResolveDefaultKeywordSlotAsync(
+                                target, arena, session, evaluator, frame,
+                                CancellationToken.None).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            // Explicit (non-DEFAULT) value supplied. Computed
+                            // columns reject any explicit value — only the
+                            // `DEFAULT` keyword (handled above) is accepted,
+                            // matching PostgreSQL's GENERATED-column semantics.
+                            // Without this guard the second-pass computed
+                            // evaluation would silently overwrite the user's
+                            // value.
+                            if (target.ComputedExpression is not null)
+                            {
+                                throw new InvalidOperationException(
+                                    $"INSERT into target column '{target.Name}': column is GENERATED " +
+                                    "ALWAYS AS (computed). Supply `DEFAULT` in this VALUES slot, drop " +
+                                    "the column from the INSERT column list, or omit it from the " +
+                                    "positional row — the catalog will compute the value from its " +
+                                    "expression.");
+                            }
+                            // GENERATED ALWAYS AS IDENTITY (and legacy bare
+                            // IDENTITY) rejects explicit values per row — the
+                            // only way to fill an ALWAYS IDENTITY slot from a
+                            // column-listed VALUES row is the `DEFAULT` keyword
+                            // (handled above). GENERATED BY DEFAULT accepts as-is.
+                            IdentitySpec? id = target.Identity;
+                            if (id is not null && !id.AcceptUserValues)
+                            {
+                                throw new InvalidOperationException(
+                                    $"INSERT into '{target.Name}': cannot supply an explicit value for " +
+                                    "a GENERATED ALWAYS AS IDENTITY column. Use the `DEFAULT` keyword " +
+                                    "in this VALUES slot, omit the column from the column list, or " +
+                                    "declare the column as GENERATED BY DEFAULT AS IDENTITY.");
+                            }
+
+                            // Pre-fold any scalar subqueries — VALUES expressions can
+                            // contain `(SELECT x FROM y LIMIT 1)` and the tableless
+                            // evaluator only handles literal/binary/function shapes.
+                            // Mirrors BatchExecutor.PrefoldSubqueriesAsync for the
+                            // INSERT-VALUES path.
+                            sourceExpr = await PrefoldSubqueriesAsync(
+                                sourceExpr, catalog, CancellationToken.None).ConfigureAwait(false);
+
+                            ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
+                                sourceExpr, frame, CancellationToken.None).ConfigureAwait(false);
+                            targetRow[targetIndex] = ComputedColumnEvaluator.ConvertValueRefToTarget(
+                                evaluated, target, arena, target.Name);
+                        }
                     }
                     else
                     {
-                        // Explicit (non-DEFAULT) value supplied. Computed
-                        // columns reject any explicit value — only the
-                        // `DEFAULT` keyword (handled above) is accepted,
-                        // matching PostgreSQL's GENERATED-column semantics.
-                        // Without this guard the second-pass computed
-                        // evaluation would silently overwrite the user's
-                        // value.
-                        if (target.ComputedExpression is not null)
-                        {
-                            throw new InvalidOperationException(
-                                $"INSERT into target column '{target.Name}': column is GENERATED " +
-                                "ALWAYS AS (computed). Supply `DEFAULT` in this VALUES slot, drop " +
-                                "the column from the INSERT column list, or omit it from the " +
-                                "positional row — the catalog will compute the value from its " +
-                                "expression.");
-                        }
-                        // GENERATED ALWAYS AS IDENTITY (and legacy bare
-                        // IDENTITY) rejects explicit values per row — the
-                        // only way to fill an ALWAYS IDENTITY slot from a
-                        // column-listed VALUES row is the `DEFAULT` keyword
-                        // (handled above). GENERATED BY DEFAULT accepts as-is.
-                        IdentitySpec? id = target.Identity;
-                        if (id is not null && !id.AcceptUserValues)
-                        {
-                            throw new InvalidOperationException(
-                                $"INSERT into '{target.Name}': cannot supply an explicit value for " +
-                                "a GENERATED ALWAYS AS IDENTITY column. Use the `DEFAULT` keyword " +
-                                "in this VALUES slot, omit the column from the column list, or " +
-                                "declare the column as GENERATED BY DEFAULT AS IDENTITY.");
-                        }
-
-                        // Pre-fold any scalar subqueries — VALUES expressions can
-                        // contain `(SELECT x FROM y LIMIT 1)` and the tableless
-                        // evaluator only handles literal/binary/function shapes.
-                        // Mirrors BatchExecutor.PrefoldSubqueriesAsync for the
-                        // INSERT-VALUES path.
-                        sourceExpr = await PrefoldSubqueriesAsync(
-                            sourceExpr, catalog, CancellationToken.None).ConfigureAwait(false);
-
-                        ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
-                            sourceExpr, frame, CancellationToken.None).ConfigureAwait(false);
-                        targetRow[targetIndex] = ComputedColumnEvaluator.ConvertValueRefToTarget(
-                            evaluated, target, arena, target.Name);
+                        // Omitted column: fill from the per-row evaluator path
+                        // (Default expression / IDENTITY reservation), or place
+                        // a NULL slot for the second-pass Computed eval.
+                        targetRow[targetIndex] = await ResolveOmittedFillAsync(
+                            plan, targetIndex, target, arena, session,
+                            evaluator, frame, CancellationToken.None).ConfigureAwait(false);
                     }
                 }
-                else
-                {
-                    // Omitted column: fill from the per-row evaluator path
-                    // (Default expression / IDENTITY reservation), or place
-                    // a NULL slot for the second-pass Computed eval.
-                    targetRow[targetIndex] = await ResolveOmittedFillAsync(
-                        plan, targetIndex, target, arena, session,
-                        evaluator, frame, CancellationToken.None).ConfigureAwait(false);
-                }
+
+                // Computed columns evaluate after every other slot is filled —
+                // they can reference any non-computed column in the row, and
+                // catalog validation forbids computed-to-computed dependencies
+                // so a single pass is sufficient.
+                await EvaluateComputedColumnsAsync(
+                    catalog, targetSchema, lookup, plan, targetRow, arena).ConfigureAwait(false);
+
+                pkChecker?.EnsureUnique(targetRow, targetSchema.Columns, arena);
+                batch.Add(targetRow);
             }
 
-            // Computed columns evaluate after every other slot is filled —
-            // they can reference any non-computed column in the row, and
-            // catalog validation forbids computed-to-computed dependencies
-            // so a single pass is sufficient.
-            await EvaluateComputedColumnsAsync(
-                catalog, targetSchema, lookup, plan, targetRow, arena).ConfigureAwait(false);
+            await session.WriteAsync(batch).ConfigureAwait(false);
+            await session.CommitAsync().ConfigureAwait(false);
 
-            pkChecker?.EnsureUnique(targetRow, targetSchema.Columns, arena);
-            batch.Add(targetRow);
+            // The session has flushed the batch's rows into the table. The
+            // in-memory batch is about to be returned to the pool (or captured
+            // for RETURNING — but RETURNING capture is already accounted at the
+            // SELECT plan layer for SELECT-source INSERTs; for VALUES the capture
+            // is the same batch we just notified about, so a single release is
+            // correct).
+            if (valuesBatchBytes > 0) accountant.NotifyReleased(valuesBatchBytes);
+
+            // Capture the resolved batch for RETURNING. The arena holds the
+            // string / blob payloads for non-inline DataValues, so the plan
+            // must keep both alive until the caller has iterated. RETURNING
+            // is post-commit semantics — yielding only happens after a
+            // successful CommitAsync, so an aborted INSERT yields nothing.
+            if (captureRows)
+            {
+                batchOwnershipTransferred = true;
+                return batch;
+            }
+            return null;
         }
-
-        await session.WriteAsync(batch).ConfigureAwait(false);
-        await session.CommitAsync().ConfigureAwait(false);
-
-        // The session has flushed the batch's rows into the table. The
-        // in-memory batch is about to be returned to the pool (or captured
-        // for RETURNING — but RETURNING capture is already accounted at the
-        // SELECT plan layer for SELECT-source INSERTs; for VALUES the capture
-        // is the same batch we just notified about, so a single release is
-        // correct).
-        if (valuesBatchBytes > 0) accountant.NotifyReleased(valuesBatchBytes);
-
-        // Capture the resolved batch for RETURNING. The arena holds the
-        // string / blob payloads for non-inline DataValues, so the plan
-        // must keep both alive until the caller has iterated. RETURNING
-        // is post-commit semantics — yielding only happens after a
-        // successful CommitAsync, so an aborted INSERT yields nothing.
-        return captureRows ? batch : null;
+        finally
+        {
+            // Return the batch to the pool unless it escaped to the
+            // DmlReturningPlan above. Covers both the no-RETURNING path
+            // (success, batch never leaves this method) and any throw
+            // before ownership transfer.
+            if (!batchOwnershipTransferred)
+            {
+                catalog.Pool.ReturnRowBatch(batch);
+            }
+        }
     }
 
     /// <summary>
@@ -358,7 +383,12 @@ internal static class InsertExecutor
                 Arena targetArena = new();
                 RowBatch targetBatch = catalog.Pool.RentRowBatch(
                     targetLookup, capacity: sourceBatch.Count, arena: targetArena);
-
+                // Tracks whether targetBatch ownership has been transferred
+                // to the captured list. If anything below throws before the
+                // hand-off, the finally returns the batch to the pool.
+                bool targetBatchOwnershipTransferred = false;
+                try
+                {
                 // Tableless evaluator + empty frame for the per-row DEFAULT
                 // evaluation path. Built per batch because targetArena is
                 // batch-scoped; reused across every row in the batch.
@@ -421,12 +451,28 @@ internal static class InsertExecutor
 
                 // After WriteAsync, the target batch's arena is no longer
                 // needed by the writer — encoded bytes are in the file
-                // (or in-memory store). For RETURNING we keep the batch
-                // alive so the projection can read from it post-commit;
-                // otherwise it goes out of scope and gets GC'd as before.
+                // (or in-memory store). For RETURNING we hand the batch
+                // off to the captured list (DmlReturningPlan returns it
+                // to the pool after iteration). Without RETURNING the
+                // finally below returns it to the pool — otherwise the
+                // rented arena's refcount stays >0 and the pool's
+                // rent/return counters drift.
                 if (capturedBatches is not null)
                 {
                     capturedBatches.Add(targetBatch);
+                    targetBatchOwnershipTransferred = true;
+                }
+                }
+                finally
+                {
+                    // Return the batch to the pool unless we successfully
+                    // handed it off to the captured list. Covers both the
+                    // no-RETURNING path (success, batch never escapes this
+                    // iteration) and any throw before the hand-off.
+                    if (!targetBatchOwnershipTransferred)
+                    {
+                        catalog.Pool.ReturnRowBatch(targetBatch);
+                    }
                 }
             }
 
