@@ -75,6 +75,14 @@ internal static class CteSchemaResolver
         SelectStatement? root = ExtractRootStatement(query);
         if (root is null) return Empty;
 
+        // Collect DECLAREd variables visible across the whole batch so a
+        // LET binding's RHS that references one (e.g.
+        // `LET sx = width::Float32 / model_in_w`) can resolve `model_in_w`
+        // to its declared kind instead of unknown. Without this, the LS
+        // would mis-promote the binary expression by treating the unknown
+        // operand as null and returning only the known side's kind.
+        Dictionary<string, string?> declaredVariables = CollectDeclaredVariables(parseResult);
+
         Dictionary<string, IReadOnlyList<TableColumnEntry>> schemas =
             new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, string> fromAliasToCte =
@@ -86,7 +94,7 @@ internal static class CteSchemaResolver
         {
             foreach (CommonTableExpression cte in root.CommonTableExpressions)
             {
-                IReadOnlyList<TableColumnEntry>? columns = ResolveCteColumns(cte, manifest, schemas, letKinds);
+                IReadOnlyList<TableColumnEntry>? columns = ResolveCteColumns(cte, manifest, schemas, letKinds, declaredVariables);
                 if (columns is not null)
                 {
                     schemas[cte.Name] = columns;
@@ -97,7 +105,7 @@ internal static class CteSchemaResolver
         // Capture LET bindings on the outer (top-level) SELECT too —
         // queries without CTEs still use LET, and the hover path needs to
         // resolve them by name.
-        CollectLetKinds(root, manifest, schemas, letKinds);
+        CollectLetKinds(root, manifest, schemas, letKinds, declaredVariables);
 
         // Record `FROM <cte_name> [AS] <alias>` aliases so qualified column
         // lookups like `f1.frame_index` can route to the CTE's schema.
@@ -130,12 +138,14 @@ internal static class CteSchemaResolver
         CommonTableExpression cte,
         LanguageServerManifest manifest,
         IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> earlierCtes,
-        Dictionary<string, string> letKinds)
+        Dictionary<string, string> letKinds,
+        IReadOnlyDictionary<string, string?> declaredVariables)
     {
         SelectStatement? inner = ExtractRootStatement(cte.Body);
         if (inner is null) return null;
 
-        InnerScope scope = BuildInnerScope(inner, manifest, earlierCtes);
+        InnerScope scope = BuildInnerScope(inner, manifest, earlierCtes)
+            with { DeclaredVariables = declaredVariables };
 
         // Snapshot every LET binding's resolved kind into the global
         // `letKinds` map so the hover provider can surface kinds for
@@ -251,9 +261,97 @@ internal static class CteSchemaResolver
                 return ResolveFunctionCallKind(functionCall, manifest);
             case IndexAccessExpression indexAccess:
                 return ResolveIndexAccessKind(indexAccess, scope, manifest);
+            case BinaryExpression binary:
+                return ResolveBinaryKind(binary, scope, manifest);
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Resolves a binary expression's result kind, mirroring the runtime's
+    /// promotion rules well enough to cover the common arithmetic shapes a
+    /// user writes in a LET body (<c>width::Float32 / model_in_w</c>,
+    /// <c>height / model_in_w</c>, …). Comparisons and logical ops always
+    /// produce <c>Boolean</c>; arithmetic delegates to a minimal numeric-
+    /// promotion routine in <see cref="PromoteArithmeticKind"/>. Returns
+    /// <see langword="null"/> for combinations the LS doesn't model
+    /// (temporal, non-numeric strings, unresolved operands), keeping the
+    /// caller's existing <c>"?"</c> fallback for the uncertain cases.
+    /// </summary>
+    private static string? ResolveBinaryKind(
+        BinaryExpression binary, InnerScope scope, LanguageServerManifest manifest)
+    {
+        if (IsBooleanResultOperator(binary.Operator)) return "Boolean";
+
+        string? leftKind = ResolveExpressionKind(binary.Left, scope, manifest);
+        string? rightKind = ResolveExpressionKind(binary.Right, scope, manifest);
+        if (leftKind is null && rightKind is null) return null;
+        // One operand resolved: surface its kind. Matches the engine's
+        // "promote the known side" fallback in TryPromoteArithmeticKind.
+        if (leftKind is null) return rightKind;
+        if (rightKind is null) return leftKind;
+
+        return PromoteArithmeticKind(leftKind, rightKind, binary.Operator);
+    }
+
+    private static bool IsBooleanResultOperator(BinaryOperator op) =>
+        op is BinaryOperator.Equal
+            or BinaryOperator.NotEqual
+            or BinaryOperator.LessThan
+            or BinaryOperator.GreaterThan
+            or BinaryOperator.LessThanOrEqual
+            or BinaryOperator.GreaterThanOrEqual
+            or BinaryOperator.And
+            or BinaryOperator.Or
+            or BinaryOperator.Like
+            or BinaryOperator.ILike
+            or BinaryOperator.Regexp;
+
+    /// <summary>
+    /// Minimal numeric promotion mirroring the runtime's
+    /// <c>ExpressionEvaluator.PromoteArithmeticKind</c> for the kinds a LET
+    /// body realistically touches. Divide is float-flavoured (SQL ergonomics
+    /// — <c>5 / 2 → 2.5</c>); Decimal beats float; Float64 beats Float32;
+    /// small integers widen to Int32. Returns <see langword="null"/> for
+    /// shapes outside this set so the caller surfaces <c>"?"</c> rather
+    /// than a wrong guess.
+    /// </summary>
+    private static string? PromoteArithmeticKind(string leftKind, string rightKind, BinaryOperator op)
+    {
+        bool leftNum = IsNumericKind(leftKind, out bool leftIsDecimal, out bool leftIsFloat64, out bool leftIsFloat32);
+        bool rightNum = IsNumericKind(rightKind, out bool rightIsDecimal, out bool rightIsFloat64, out bool rightIsFloat32);
+        if (!leftNum || !rightNum) return null;
+
+        if (op == BinaryOperator.Divide)
+        {
+            if (leftIsDecimal || rightIsDecimal) return "Decimal";
+            return (leftIsFloat64 || rightIsFloat64) ? "Float64" : "Float32";
+        }
+
+        if (op == BinaryOperator.Power)
+        {
+            if (leftIsDecimal || rightIsDecimal || leftIsFloat64 || rightIsFloat64) return "Float64";
+            return "Float32";
+        }
+
+        if (leftIsDecimal || rightIsDecimal) return "Decimal";
+        if (leftIsFloat64 || rightIsFloat64) return "Float64";
+        if (leftIsFloat32 || rightIsFloat32) return "Float32";
+        // Both small integers: widen to Int32, matching engine behaviour.
+        return "Int32";
+    }
+
+    private static bool IsNumericKind(
+        string kind, out bool isDecimal, out bool isFloat64, out bool isFloat32)
+    {
+        isDecimal = string.Equals(kind, "Decimal", StringComparison.OrdinalIgnoreCase);
+        isFloat64 = string.Equals(kind, "Float64", StringComparison.OrdinalIgnoreCase);
+        isFloat32 = string.Equals(kind, "Float32", StringComparison.OrdinalIgnoreCase);
+        if (isDecimal || isFloat64 || isFloat32) return true;
+        return kind is "Int8" or "Int16" or "Int32" or "Int64" or "Int128"
+            or "UInt8" or "UInt16" or "UInt32" or "UInt64" or "UInt128"
+            or "Float16";
     }
 
     /// <summary>
@@ -435,6 +533,17 @@ internal static class CteSchemaResolver
                     return c.Kind;
                 }
             }
+        }
+
+        // Final fallback: DECLAREd variable visible across the whole batch.
+        // The engine evaluator checks variable scope before the row schema
+        // when unqualified, so a name not matching any column here that does
+        // match a DECLARE resolves to the declared type — letting binary
+        // expressions like `width::Float32 / model_in_w` promote correctly.
+        if (scope.DeclaredVariables is { } declared
+            && declared.TryGetValue(colRef.ColumnName, out string? declaredKind))
+        {
+            return declaredKind;
         }
         return null;
     }
@@ -667,16 +776,68 @@ internal static class CteSchemaResolver
         SelectStatement statement,
         LanguageServerManifest manifest,
         IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> earlierCtes,
-        Dictionary<string, string> letKinds)
+        Dictionary<string, string> letKinds,
+        IReadOnlyDictionary<string, string?> declaredVariables)
     {
         if (statement.LetBindings is not { Count: > 0 }) return;
-        InnerScope scope = BuildInnerScope(statement, manifest, earlierCtes);
+        InnerScope scope = BuildInnerScope(statement, manifest, earlierCtes)
+            with { DeclaredVariables = declaredVariables };
         if (scope.LetBindings is null) return;
         foreach (KeyValuePair<string, Expression> binding in scope.LetBindings)
         {
             if (letKinds.ContainsKey(binding.Key)) continue;
             string? kind = ResolveExpressionKind(binding.Value, scope, manifest);
             if (kind is not null) letKinds[binding.Key] = kind;
+        }
+    }
+
+    /// <summary>
+    /// Walks <see cref="ParseResult.Statements"/> and collects every
+    /// <see cref="DeclareStatement"/>'s variable name → declared type so
+    /// LET-RHS expressions can resolve references to DECLAREd variables.
+    /// Recurses into block / if / loop / try bodies; first declaration
+    /// wins on collision (matches the outer-scope-shadowing rule).
+    /// </summary>
+    private static Dictionary<string, string?> CollectDeclaredVariables(ParseResult parseResult)
+    {
+        Dictionary<string, string?> result = new(StringComparer.OrdinalIgnoreCase);
+        if (parseResult.Statements is null) return result;
+        foreach (Statement statement in parseResult.Statements)
+        {
+            CollectDeclares(statement, result);
+        }
+        return result;
+
+        static void CollectDeclares(Statement statement, Dictionary<string, string?> sink)
+        {
+            switch (statement)
+            {
+                case DeclareStatement decl:
+                    if (!sink.ContainsKey(decl.VariableName))
+                        sink[decl.VariableName] = decl.TypeName;
+                    break;
+                case BlockStatement block:
+                    foreach (Statement child in block.Statements) CollectDeclares(child, sink);
+                    break;
+                case IfStatement ifStmt:
+                    CollectDeclares(ifStmt.Then, sink);
+                    if (ifStmt.Else is not null) CollectDeclares(ifStmt.Else, sink);
+                    break;
+                case WhileStatement whileStmt:
+                    CollectDeclares(whileStmt.Body, sink);
+                    break;
+                case ForCounterStatement forCtr:
+                    CollectDeclares(forCtr.Body, sink);
+                    break;
+                case ForInStatement forIn:
+                    CollectDeclares(forIn.Body, sink);
+                    break;
+                case TryStatement tryStmt:
+                    CollectDeclares(tryStmt.TryBody, sink);
+                    if (tryStmt.CatchBody is not null) CollectDeclares(tryStmt.CatchBody, sink);
+                    if (tryStmt.FinallyBody is not null) CollectDeclares(tryStmt.FinallyBody, sink);
+                    break;
+            }
         }
     }
 }
@@ -706,4 +867,5 @@ internal sealed record CteSchemaResult(
 /// </summary>
 internal sealed record InnerScope(
     IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> AliasToColumns,
-    IReadOnlyDictionary<string, Expression>? LetBindings = null);
+    IReadOnlyDictionary<string, Expression>? LetBindings = null,
+    IReadOnlyDictionary<string, string?>? DeclaredVariables = null);

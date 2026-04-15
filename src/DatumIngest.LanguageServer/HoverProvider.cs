@@ -55,6 +55,12 @@ public sealed class HoverProvider
         // TVF alias map. A bare CTE name or a FROM alias bound to a CTE
         // resolves to the CTE's derived output columns.
         CteSchemaResult cteSchemas = CteSchemaResolver.Resolve(sql, _manifest);
+        // DECLAREd variables visible anywhere in the batch — covers both the
+        // declaration site and downstream references (engine resolves these
+        // by name through the variable scope before the row schema, so the
+        // user expects hover on a bare `model_in_w` to surface its type even
+        // when the reference site sits inside a CTE expression).
+        Dictionary<string, string?> declaredVariables = BuildDeclaredVariableMap(sql);
         // Active lambda parameter scopes at the cursor — innermost last.
         // Used by ResolveIdentifierHover to recognise `t` / `x` / etc. as
         // lambda parameters before falling through to column lookup.
@@ -64,7 +70,7 @@ public sealed class HoverProvider
 
         string? markdown = hit.Kind switch
         {
-            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, tvfAliases, cteSchemas, lambdaScopes, out docKey),
+            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, tvfAliases, cteSchemas, lambdaScopes, declaredVariables, out docKey),
             SqlToken.TypeKeyword => TypeDescriptions.TryGetValue(hit.Text, out string? typeDesc) ? typeDesc : null,
             SqlToken.Arrow => "**`->`** Lambda arrow — separates parameter(s) from the body expression.\n\n" +
                 "Usage: `x -> expr` or `(a, b) -> expr` inside higher-order functions " +
@@ -116,6 +122,7 @@ public sealed class HoverProvider
         Dictionary<string, FunctionSignature> tvfAliases,
         CteSchemaResult cteSchemas,
         IReadOnlyList<LambdaScope> lambdaScopes,
+        Dictionary<string, string?> declaredVariables,
         out string? docKey)
     {
         docKey = null;
@@ -170,6 +177,24 @@ public sealed class HoverProvider
                     if (declHover is not null) return declHover;
                 }
             }
+        }
+
+        // DECLAREd variable — surfaced before the function-call / column
+        // checks so an identifier whose name matches a top-level
+        // `DECLARE name TYPE = ...` always renders the declared kind. The
+        // engine evaluates variables ahead of row columns when both share
+        // a name, so hover mirrors runtime resolution. Skips the lookup
+        // when the identifier is followed by `(` — that's a call site,
+        // never a scalar variable reference.
+        int callPeekIndex = tokens.IndexOf(currentToken);
+        bool followedByCall = callPeekIndex >= 0
+            && callPeekIndex + 1 < tokens.Count
+            && tokens[callPeekIndex + 1].Kind == SqlToken.LeftParen;
+        if (!followedByCall
+            && declaredVariables.TryGetValue(name, out string? declaredKind))
+        {
+            string kindLabel = declaredKind ?? "?";
+            return $"**{name}**: `{kindLabel}`\n\n*DECLAREd variable*";
         }
 
         // If followed by '(' it's a function call.
@@ -645,6 +670,77 @@ public sealed class HoverProvider
     /// caching layer yet. If hover latency ever becomes an issue, hash the
     /// SQL and memoise on the last seen hash.
     /// </remarks>
+    /// <summary>
+    /// Walks <paramref name="sql"/>'s parsed statement list and collects
+    /// every <see cref="DeclareStatement"/>'s name → declared type pair.
+    /// Used by hover so a reference to a DECLAREd variable — wherever it
+    /// occurs, including inside a CTE expression nested below the
+    /// declaration — surfaces the variable's type. Recurses into block /
+    /// if / loop / try bodies so nested DECLAREs are still found; first
+    /// declaration wins on name collision (mirrors the engine's
+    /// outer-scope-shadowing rule).
+    /// </summary>
+    private static Dictionary<string, string?> BuildDeclaredVariableMap(string sql)
+    {
+        Dictionary<string, string?> result = new(StringComparer.OrdinalIgnoreCase);
+        ParseResult parseResult;
+        try
+        {
+            parseResult = SqlParser.TryParseRecovering(sql);
+        }
+        catch
+        {
+            return result;
+        }
+        if (parseResult.Statements is null) return result;
+        foreach (Statement statement in parseResult.Statements)
+        {
+            CollectDeclaredVariables(statement, result);
+        }
+        return result;
+    }
+
+    private static void CollectDeclaredVariables(
+        Statement statement,
+        Dictionary<string, string?> sink)
+    {
+        switch (statement)
+        {
+            case DeclareStatement decl:
+                if (!sink.ContainsKey(decl.VariableName))
+                {
+                    sink[decl.VariableName] = decl.TypeName;
+                }
+                break;
+            case BlockStatement block:
+                foreach (Statement child in block.Statements)
+                {
+                    CollectDeclaredVariables(child, sink);
+                }
+                break;
+            case IfStatement ifStmt:
+                CollectDeclaredVariables(ifStmt.Then, sink);
+                if (ifStmt.Else is not null) CollectDeclaredVariables(ifStmt.Else, sink);
+                break;
+            case WhileStatement whileStmt:
+                CollectDeclaredVariables(whileStmt.Body, sink);
+                break;
+            case ForCounterStatement forCtr:
+                CollectDeclaredVariables(forCtr.Body, sink);
+                break;
+            case ForInStatement forIn:
+                CollectDeclaredVariables(forIn.Body, sink);
+                break;
+            case TryStatement tryStmt:
+                CollectDeclaredVariables(tryStmt.TryBody, sink);
+                if (tryStmt.CatchBody is not null)
+                    CollectDeclaredVariables(tryStmt.CatchBody, sink);
+                if (tryStmt.FinallyBody is not null)
+                    CollectDeclaredVariables(tryStmt.FinallyBody, sink);
+                break;
+        }
+    }
+
     private Dictionary<string, FunctionSignature> BuildTvfAliasMap(string sql)
     {
         Dictionary<string, FunctionSignature> result = new(StringComparer.OrdinalIgnoreCase);

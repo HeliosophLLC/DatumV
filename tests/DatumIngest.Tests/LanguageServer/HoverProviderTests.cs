@@ -399,6 +399,169 @@ public sealed class HoverProviderTests : ServiceTestBase
     }
 
     [Fact]
+    public void GetHover_DeclaredVariable_AtDeclarationSite_ShowsType()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql = "DECLARE model_in_w Float32 = 518.0::Float32";
+        int offset = sql.IndexOf("model_in_w", StringComparison.Ordinal);
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("model_in_w", result.Contents);
+        Assert.Contains("Float32", result.Contents);
+        Assert.Contains("DECLAREd variable", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_DeclaredVariable_ReferencedInsideCte_ShowsType()
+    {
+        // Regression: when a DECLAREd variable is referenced inside a CTE's
+        // SELECT expression, hover should resolve it through the variable
+        // map built from the batch's Statements list. Without the lookup,
+        // the identifier falls through to GetColumnHover and returns null.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "video_frame_to_image",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "frame", Kind = "VideoFrame" },
+                        new ParameterSignature { Name = "width", Kind = "Float32" },
+                    ],
+                    ReturnType = "Image",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "video_unnest_frames",
+                    Parameters = [new ParameterSignature { Name = "source", Kind = "String" }],
+                    ReturnType = "table(frame_index Int32, frame VideoFrame)",
+                    IsTableValued = true,
+                    OutputColumns =
+                    [
+                        new TableColumnEntry { Name = "frame", Kind = "VideoFrame", Nullable = false },
+                    ],
+                },
+            ],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql =
+            "DECLARE model_in_w Float32 = 518.0::Float32;\n" +
+            "WITH frames AS (SELECT " +
+            "  LET img = video_frame_to_image(vid.frame, model_in_w), " +
+            "  frame " +
+            "FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT frame FROM frames";
+
+        // Cursor on the inner reference to model_in_w (inside the CTE's
+        // SELECT-list expression), not the declaration.
+        int offset = sql.LastIndexOf("model_in_w", StringComparison.Ordinal);
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("model_in_w", result.Contents);
+        Assert.Contains("Float32", result.Contents);
+        Assert.Contains("DECLAREd variable", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_LetBinding_BinaryDivide_PromotesToFloat()
+    {
+        // Regression: `LET sx = width::Float32 / model_in_w` where width is
+        // Int32 (a CTE column) and model_in_w is a DECLAREd Float32. The
+        // CTE resolver used to fall through BinaryExpression to `?`, so
+        // hover on `sx` returned nothing. Now the resolver promotes the
+        // arithmetic (Float32 / Float32 → Float32) and reads model_in_w's
+        // kind from the batch's DECLARE map.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "image_width",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Int32",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "image_height",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Int32",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "video_frame_to_image",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "frame", Kind = "VideoFrame" },
+                        new ParameterSignature { Name = "width", Kind = "Float32" },
+                    ],
+                    ReturnType = "Image",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "video_unnest_frames",
+                    Parameters = [new ParameterSignature { Name = "source", Kind = "String" }],
+                    ReturnType = "table(frame_index Int32, frame VideoFrame)",
+                    IsTableValued = true,
+                    OutputColumns =
+                    [
+                        new TableColumnEntry { Name = "frame", Kind = "VideoFrame", Nullable = false },
+                    ],
+                },
+            ],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql =
+            "DECLARE model_in_w Float32 = 518.0::Float32;\n" +
+            "WITH frames AS (SELECT " +
+            "  LET img = video_frame_to_image(vid.frame, model_in_w), " +
+            "  LET width = image_width(img), " +
+            "  LET height = image_height(img), " +
+            "  LET sx = width::Float32 / model_in_w, " +
+            "  LET sy = height / model_in_w, " +
+            "  frame " +
+            "FROM video_unnest_frames('x.mp4') vid) " +
+            "SELECT frame FROM frames";
+
+        // Hover on `sx`: Float32 / Float32 → Float32.
+        int sxOffset = sql.IndexOf("LET sx", StringComparison.Ordinal) + "LET ".Length;
+        HoverResult? sxResult = provider.GetHover(sql, sxOffset);
+        Assert.NotNull(sxResult);
+        Assert.Contains("sx", sxResult.Contents);
+        Assert.Contains("Float32", sxResult.Contents);
+
+        // Hover on `sy`: Int32 / Float32 → Float32 (engine promotion rule).
+        int syOffset = sql.IndexOf("LET sy", StringComparison.Ordinal) + "LET ".Length;
+        HoverResult? syResult = provider.GetHover(sql, syOffset);
+        Assert.NotNull(syResult);
+        Assert.Contains("sy", syResult.Contents);
+        Assert.Contains("Float32", syResult.Contents);
+    }
+
+    [Fact]
     public void GetHover_UnprojectedLetStructFieldAccess_ResolvesField()
     {
         // `LET curr_depth = ...` then `curr_depth.depth` — the LET isn't
