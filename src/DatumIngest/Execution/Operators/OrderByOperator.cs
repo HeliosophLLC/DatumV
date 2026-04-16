@@ -1,4 +1,5 @@
 using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Execution.Operators.Ordering;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -117,16 +118,6 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
         };
     }
 
-    /// <summary>
-    /// A buffered row with its pre-evaluated sort keys. Keys are stabilised into the
-    /// same arena as the row's payload, so they share the row's lifetime.
-    /// </summary>
-    private readonly struct KeyedRow(Row row, DataValue[] keys)
-    {
-        public Row Row { get; } = row;
-        public DataValue[] Keys { get; } = keys;
-    }
-
     /// <inheritdoc/>
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
@@ -151,35 +142,6 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
         }
     }
 
-    private async ValueTask<DataValue[]> EvaluateKeysAsync(
-        ExpressionEvaluator evaluator,
-        Row row,
-        Arena arena,
-        CancellationToken cancellationToken)
-    => await EvaluateKeysAsync(evaluator, row, arena, arena, cancellationToken);
-
-
-    /// <summary>
-    /// Pre-evaluates each ORDER BY item against <paramref name="row"/>. Results live in
-    /// <paramref name="targetArena"/> so they survive past the input batch's recycle.
-    /// </summary>
-    private async ValueTask<DataValue[]> EvaluateKeysAsync(
-        ExpressionEvaluator evaluator,
-        Row row,
-        Arena sourceArena,
-        Arena targetArena,
-        CancellationToken cancellationToken)
-    {
-        DataValue[] keys = new DataValue[_orderByItems.Count];
-        EvaluationFrame frame = new EvaluationFrame(
-            row, sourceArena, targetArena, evaluator.Context, outerRow: null);
-        for (int i = 0; i < _orderByItems.Count; i++)
-        {
-            keys[i] = await evaluator.EvaluateAsync(_orderByItems[i].Expression, frame, cancellationToken).ConfigureAwait(false);
-        }
-        return keys;
-    }
-
     // ───────── Top-N path ─────────
 
     private async IAsyncEnumerable<RowBatch> ExecuteTopNAsync(
@@ -188,17 +150,13 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
         // Heap rows live in context.Store: stabilised at insertion so input batches can
         // return to the pool immediately. The heap is a max-heap (reverse comparison)
         // — its peek is the worst-of-the-best, which is what gets evicted on overflow.
-        //
-        // Previous design used a private rented arena; that broke the one-arena-per-query
-        // invariant — the emitted batches' Arena was the private one, but downstream
-        // operators that splice values without re-stabilizing (e.g.
-        // JoinSchema.CombinePooledValues) read offsets against context.Store, getting
-        // garbage. See SpillPartition's docstring for the full bug write-up.
         SidecarRegistry? sidecarRegistry = context.SidecarRegistry;
+        SortKeyComparer comparer = new(_orderByItems);
+        SortKeyEvaluator keyEvaluator = new(_orderByItems, evaluator);
         ColumnLookup? schema = null;
         PriorityQueue<KeyedRow, KeyedRow> heap = new(
             Comparer<KeyedRow>.Create((left, right) =>
-                -CompareKeys(
+                -comparer.Compare(
                     left.Keys, context.Store, sidecarRegistry,
                     right.Keys, context.Store, sidecarRegistry)));
         RowBatch? outputBatch = null;
@@ -224,28 +182,24 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                             DataValue[] copy = pool.RentAndCopyDataValues(
                                 sourceRow, inputBatch.Arena, context.Store);
                             Row stableRow = new(sourceRow.ColumnLookup, copy);
-                            DataValue[] keys = await EvaluateKeysAsync(
-                                evaluator,
-                                stableRow,
-                                context.Store,
-                                context.CancellationToken)
+                            DataValue[] keys = await keyEvaluator
+                                .EvaluateAsync(stableRow, context.Store, context.CancellationToken)
                                 .ConfigureAwait(false);
                             KeyedRow keyedRow = new(stableRow, keys);
                             heap.Enqueue(keyedRow, keyedRow);
                         }
                         else
                         {
-                            // Compare without allocating: peek the worst, decide if the
-                            // new row beats it. If so, evict the worst (return its array
-                            // to the pool) and insert the new row (rented + stabilised).
-                            // Asymmetric arenas: the source row's payloads live in the
-                            // input batch's arena, while the heap row was already
-                            // stabilised into context.Store. Pre-evaluate the candidate's
-                            // keys against the input arena before deciding.
-                            DataValue[] candidateKeys = await EvaluateKeysAsync(
-                                evaluator, sourceRow, inputBatch.Arena, context.Store, context.CancellationToken).ConfigureAwait(false);
+                            // Compare without allocating: peek the worst, decide if the new
+                            // row beats it. Asymmetric arenas: the source row's payloads live
+                            // in the input batch's arena, the heap row in context.Store —
+                            // pre-evaluate the candidate's keys against the input arena and
+                            // materialise them into context.Store so they survive eviction.
+                            DataValue[] candidateKeys = await keyEvaluator
+                                .EvaluateAsync(sourceRow, inputBatch.Arena, context.Store, context.CancellationToken)
+                                .ConfigureAwait(false);
                             KeyedRow worst = heap.Peek();
-                            if (CompareKeys(
+                            if (comparer.Compare(
                                     candidateKeys, context.Store, sidecarRegistry,
                                     worst.Keys, context.Store, sidecarRegistry) < 0)
                             {
@@ -277,7 +231,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                 sorted.Add(heap.Dequeue());
             }
             sorted.Sort((left, right) =>
-                CompareKeys(
+                comparer.Compare(
                     left.Keys, context.Store, sidecarRegistry,
                     right.Keys, context.Store, sidecarRegistry));
 
@@ -330,11 +284,14 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
         long perRowBytes = 0;
         long residentBytesNotified = 0;
 
+        SortKeyComparer comparer = new(_orderByItems);
+        SortKeyEvaluator keyEvaluator = new(_orderByItems, evaluator);
+        SortedRunSpiller spiller = new(context);
+
         Arena? bufferArena = null;
         SidecarRegistry? sidecarRegistry = context.SidecarRegistry;
         ColumnLookup? schema = null;
         List<KeyedRow> buffer = [];
-        List<SpillReaderWriter> sortedRuns = [];
         RowBatch? outputBatch = null;
 
         try
@@ -352,16 +309,13 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                     if (bufferArena is null || schema is null)
                     {
                         schema = inputBatch.ColumnLookup;
-                        // Pre-size the bufferArena to the budget. Without
-                        // this, the arena grows from 1 MB → ~budget through
-                        // ~10 power-of-two doublings each spill cycle; each
-                        // doubling creates a fresh pagefile-backed mmap and
-                        // releases the old, leaving the OS to reclaim pages
-                        // that haven't been needed yet. For a 12-spill query
-                        // that's ~10 GB of transient commit charge. Sizing
-                        // up-front means one mmap allocation per cycle.
-                        // Arena now uses long internally — pass the budget through
-                        // without clamping. Use a 64 MB default when no budget is configured.
+                        // Pre-size the bufferArena to the budget. Without this, the arena
+                        // grows from 1 MB → ~budget through ~10 power-of-two doublings each
+                        // spill cycle; each doubling creates a fresh pagefile-backed mmap
+                        // and releases the old, leaving the OS to reclaim pages that haven't
+                        // been needed yet. For a 12-spill query that's ~10 GB of transient
+                        // commit charge. Sizing up-front means one mmap allocation per cycle.
+                        // 64 MB default when no budget is configured.
                         long bufferArenaCapacity = context.Accountant.MemoryBudgetBytes ?? 64L * 1024 * 1024;
                         bufferArena = pool.RentArena(bufferArenaCapacity);
                         // 20 bytes per DataValue cell (overhead) × (field + key) cells
@@ -377,44 +331,35 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                         DataValue[] copy = pool.RentAndCopyDataValues(
                             sourceRow, inputBatch.Arena, bufferArena!);
                         Row stableRow = new(sourceRow.ColumnLookup, copy);
-                        DataValue[] keys = await EvaluateKeysAsync(
-                            evaluator,
-                            stableRow,
-                            bufferArena,
-                            context.CancellationToken)
+                        DataValue[] keys = await keyEvaluator
+                            .EvaluateAsync(stableRow, bufferArena, context.CancellationToken)
                             .ConfigureAwait(false);
                         buffer.Add(new KeyedRow(stableRow, keys));
                         context.Accountant.NotifyMaterialized(perRowBytes);
                         residentBytesNotified += perRowBytes;
 
-                        // Adding this row may have pushed the plan-wide
-                        // residency over the budget. Spill the current
-                        // sorted chunk to disk and reset — the spilled
-                        // rows release their accounted bytes.
+                        // Adding this row may have pushed the plan-wide residency over the
+                        // budget. Spill the current sorted chunk to disk and reset — the
+                        // spilled rows release their accounted bytes.
                         if (context.Accountant.WouldExceedBudget())
                         {
                             buffer.Sort((left, right) =>
-                                CompareKeys(
+                                comparer.Compare(
                                     left.Keys, bufferArena!, sidecarRegistry,
                                     right.Keys, bufferArena!, sidecarRegistry));
-                            SpillReaderWriter run = SpillSortedBuffer(
-                                pool, schema!, context, bufferArena!, buffer);
-                            sortedRuns.Add(run);
+                            spiller.Spill(schema!, bufferArena!, buffer);
                             SpillingTriggered = true;
-                            SortedRunCount++;
+                            SortedRunCount = spiller.Count;
 
-                            // Reset for next chunk: fresh arena, fresh
-                            // buffer, accounted bytes released. Buffer rows'
-                            // DataValue[]s were transferred to the run batch
-                            // and consumed by the spiller's Write (which
-                            // returned them to the pool); the buffer's list
-                            // entries are now stale slot references.
+                            // Reset for next chunk: fresh arena, fresh buffer, accounted
+                            // bytes released. Buffer rows' DataValue[]s were transferred
+                            // to the run batch and consumed by the spiller's Write (which
+                            // returned them to the pool); the buffer's list entries are
+                            // now stale slot references.
                             buffer.Clear();
                             context.Accountant.NotifyReleased(residentBytesNotified);
                             residentBytesNotified = 0;
                             pool.ReturnArena(bufferArena!);
-                            // Pre-size the fresh arena (see schema-init
-                            // comment above for the budget rationale).
                             long postSpillBudget = context.Accountant.MemoryBudgetBytes ?? 64L * 1024 * 1024;
                             bufferArena = pool.RentArena(postSpillBudget);
                         }
@@ -426,19 +371,18 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                 }
             }
 
-            if (sortedRuns.Count == 0)
+            if (spiller.Count == 0)
             {
                 // Everything fit in memory. Sort buffer and emit.
                 buffer.Sort((left, right) =>
-                    CompareKeys(
+                    comparer.Compare(
                         left.Keys, bufferArena!, sidecarRegistry,
                         right.Keys, bufferArena!, sidecarRegistry));
 
-                // Emit batches backed by context.Store so downstream operators
-                // that splice values without re-stabilizing (e.g.
-                // JoinSchema.CombinePooledValues) resolve offsets against the
-                // same arena the bytes live in. Re-stabilize each value from
-                // bufferArena into context.Store on copy-out — bufferArena
+                // Emit batches backed by context.Store so downstream operators that splice
+                // values without re-stabilizing (e.g. JoinSchema.CombinePooledValues)
+                // resolve offsets against the same arena the bytes live in. Re-stabilize
+                // each value from bufferArena into context.Store on copy-out — bufferArena
                 // is private to this operator and will be released below.
                 for (int i = 0; i < buffer.Count; i++)
                 {
@@ -469,16 +413,13 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
             if (buffer.Count > 0)
             {
                 buffer.Sort((left, right) =>
-                    CompareKeys(
+                    comparer.Compare(
                         left.Keys, bufferArena!, sidecarRegistry,
                         right.Keys, bufferArena!, sidecarRegistry));
-                SpillReaderWriter finalRun = SpillSortedBuffer(
-                    pool, schema!, context, bufferArena!, buffer);
-                sortedRuns.Add(finalRun);
-                SortedRunCount++;
+                spiller.Spill(schema!, bufferArena!, buffer);
+                SortedRunCount = spiller.Count;
                 buffer.Clear();
-                // Final chunk's rows are on disk; release the bytes we
-                // notified for them.
+                // Final chunk's rows are on disk; release the bytes we notified for them.
                 if (residentBytesNotified > 0)
                 {
                     context.Accountant.NotifyReleased(residentBytesNotified);
@@ -493,14 +434,11 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
             }
 
             // K-way merge across all sorted runs. Output rows are stabilised into
-            // context.Store via RentAndCopyToOutput, so downstream operators that
-            // splice values without re-stabilizing (e.g. JoinSchema.CombinePooledValues)
-            // resolve offsets against the same arena the bytes live in. The previous
-            // design used a private outputArena rented from the pool — that broke
-            // the one-arena-per-query invariant; see SpillPartition's docstring for
-            // the full bug write-up.
+            // context.Store via RentAndCopyToOutput, so downstream operators that splice
+            // values without re-stabilizing resolve offsets against the same arena the
+            // bytes live in.
             await foreach (RowBatch mergedBatch in MergeSortedRunsAsync(
-                sortedRuns, schema!, evaluator, context, pool).ConfigureAwait(false))
+                spiller.Runs, schema!, evaluator, context, pool).ConfigureAwait(false))
             {
                 yield return mergedBatch;
             }
@@ -514,185 +452,56 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
             }
             buffer.Clear();
 
-            // Release any residency we notified for in-memory buffer rows
-            // that didn't go through the spill release path (the all-in-
-            // memory emit case + cancellation / error early exits).
+            // Release any residency we notified for in-memory buffer rows that didn't go
+            // through the spill release path (the all-in-memory emit + cancellation paths).
             if (residentBytesNotified > 0)
             {
                 context.Accountant.NotifyReleased(residentBytesNotified);
             }
 
             if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
-            foreach (SpillReaderWriter run in sortedRuns)
-            {
-                run.Dispose();
-            }
+            spiller.Dispose();
             if (bufferArena is not null) pool.ReturnArena(bufferArena);
-            // No outputArena release: merge phase emitted into context.Store, owned by the query.
         }
     }
 
     /// <summary>
-    /// Wraps a sorted in-memory buffer as a single-partition <see cref="SpillReaderWriter"/>
-    /// run: bundles the buffer's rows into a <see cref="RowBatch"/> over the buffer's
-    /// arena, hands it to the spiller (which stabilises payloads into its own
-    /// consolidated arena and returns the input batch — releasing all the rented
-    /// <see cref="DataValue"/>[]s back to the pool). The spiller is the caller's to
-    /// dispose later.
-    /// </summary>
-    private static SpillReaderWriter SpillSortedBuffer(
-        Pool pool, ColumnLookup schema, ExecutionContext context, Arena bufferArena, List<KeyedRow> sortedBuffer)
-    {
-        SpillReaderWriter run = new SpillReaderWriter(
-            pool, schema, context.SpillDirectory, partitionCount: 1);
-
-        RowBatch runBatch = pool.RentRowBatch(schema, sortedBuffer.Count, bufferArena);
-        foreach (KeyedRow keyedRow in sortedBuffer)
-        {
-            runBatch.Add(keyedRow.Row.RawValues);
-        }
-
-        run.Write(runBatch, partition: 0);
-        return run;
-    }
-
-    /// <summary>
-    /// K-way merge of pre-sorted runs. Each run's <c>ReplayPartitionAsync</c>
-    /// stream is wrapped in a <see cref="RunReader"/> exposing the current row + a
-    /// <c>ReadNextAsync</c> that advances within a batch (no I/O on intra-batch step)
-    /// or pulls the next batch from the run.
+    /// Builds a <see cref="SortedRunReader"/> per sorted run (advancing each to its first
+    /// row) and delegates the k-way merge to <see cref="KWayMerger.MergeAsync"/>. Empty
+    /// runs are disposed immediately rather than handed to the merger.
     /// </summary>
     private async IAsyncEnumerable<RowBatch> MergeSortedRunsAsync(
-        List<SpillReaderWriter> runs,
+        IReadOnlyList<SpillReaderWriter> runs,
         ColumnLookup schema,
         ExpressionEvaluator evaluator,
         ExecutionContext context,
         Pool pool)
     {
-        List<RunReader> readers = new(runs.Count);
-        SidecarRegistry? sidecarRegistry = context.SidecarRegistry;
-        RowBatch? outputBatch = null;
+        SortKeyComparer comparer = new(_orderByItems);
+        SortKeyEvaluator keyEvaluator = new(_orderByItems, evaluator);
 
-        try
+        List<SortedRunReader> readers = new(runs.Count);
+        foreach (SpillReaderWriter run in runs)
         {
-            foreach (SpillReaderWriter run in runs)
+            SortedRunReader reader = new(run, schema, context, keyEvaluator);
+            if (await reader.ReadNextAsync().ConfigureAwait(false))
             {
-                RunReader reader = new(run, schema, context, pool, this, evaluator);
-                if (await reader.ReadNextAsync().ConfigureAwait(false))
-                {
-                    readers.Add(reader);
-                }
-                else
-                {
-                    await reader.DisposeAsync().ConfigureAwait(false);
-                }
+                readers.Add(reader);
             }
-
-            if (readers.Count == 0) yield break;
-
-            PriorityQueue<RunReader, RunReader> heap = new(
-                Comparer<RunReader>.Create((a, b) =>
-                    CompareKeys(
-                        a.CurrentKeys, a.CurrentBatch.Arena, sidecarRegistry,
-                        b.CurrentKeys, b.CurrentBatch.Arena, sidecarRegistry)));
-            foreach (RunReader r in readers)
+            else
             {
-                heap.Enqueue(r, r);
-            }
-
-            while (heap.Count > 0)
-            {
-                context.CancellationToken.ThrowIfCancellationRequested();
-
-                RunReader winner = heap.Dequeue();
-
-                outputBatch ??= context.RentRowBatch(schema);
-                pool.RentAndCopyToOutput(winner.CurrentBatch, winner.CurrentIndex, outputBatch);
-
-                if (outputBatch.IsFull)
-                {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
-                }
-
-                if (await winner.ReadNextAsync().ConfigureAwait(false))
-                {
-                    heap.Enqueue(winner, winner);
-                }
-                else
-                {
-                    await winner.DisposeAsync().ConfigureAwait(false);
-                }
-            }
-
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
-        }
-        finally
-        {
-            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
-            foreach (RunReader r in readers)
-            {
-                await r.DisposeAsync().ConfigureAwait(false);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Compares two pre-evaluated sort-key arrays element-by-element. Direction is
-    /// applied per-key from <see cref="OrderByItem.Direction"/>. First non-equal key
-    /// determines the result; all-equal returns 0.
-    /// </summary>
-    private int CompareKeys(
-        DataValue[] left, IValueStore leftStore, SidecarRegistry? leftRegistry,
-        DataValue[] right, IValueStore rightStore, SidecarRegistry? rightRegistry)
-    {
-        for (int i = 0; i < _orderByItems.Count; i++)
-        {
-            int comparison = CompareDataValues(
-                left[i], leftStore, leftRegistry,
-                right[i], rightStore, rightRegistry);
-
-            if (_orderByItems[i].Direction == SortDirection.Descending)
-            {
-                comparison = -comparison;
-            }
-
-            if (comparison != 0)
-            {
-                return comparison;
+                await reader.DisposeAsync().ConfigureAwait(false);
             }
         }
 
-        return 0;
-    }
+        if (readers.Count == 0) yield break;
 
-    /// <summary>
-    /// Compares two <see cref="DataValue"/> instances for ordering across all three storage
-    /// tiers (inline / arena-backed / sidecar-backed). Nulls sort last.
-    /// </summary>
-    /// <param name="left">Left value.</param>
-    /// <param name="leftStore">Arena backing <paramref name="left"/> when arena-backed.</param>
-    /// <param name="leftRegistry">Sidecar registry resolving <paramref name="left"/> when sidecar-backed.</param>
-    /// <param name="right">Right value.</param>
-    /// <param name="rightStore">Arena backing <paramref name="right"/> when arena-backed.</param>
-    /// <param name="rightRegistry">Sidecar registry resolving <paramref name="right"/> when sidecar-backed.</param>
-    internal static int CompareDataValues(
-        DataValue left, IValueStore leftStore, SidecarRegistry? leftRegistry,
-        DataValue right, IValueStore rightStore, SidecarRegistry? rightRegistry)
-    {
-        if (left.IsNull && right.IsNull) return 0;
-        if (left.IsNull) return 1;
-        if (right.IsNull) return -1;
-
-        return DataValueComparer.Compare(
-            left, leftStore, leftRegistry,
-            right, rightStore, rightRegistry);
+        await foreach (RowBatch batch in KWayMerger
+            .MergeAsync(readers, schema, comparer, context)
+            .ConfigureAwait(false))
+        {
+            yield return batch;
+        }
     }
 
     /// <inheritdoc />
@@ -705,107 +514,5 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
     /// </remarks>
     public void Dispose()
     {
-    }
-
-    /// <summary>
-    /// Streams rows from a single sorted run via <c>SpillReaderWriter.ReplayPartitionAsync</c>,
-    /// exposing a <c>Current</c>+<c>ReadNextAsync</c> interface for the k-way merge
-    /// heap. Each batch is held until exhausted (intra-batch advance is just an index
-    /// bump, no I/O); when it's exhausted we return the batch to the pool and pull
-    /// the next from the underlying enumerator. Sort keys are recomputed against the
-    /// live current row each advance — runs spill DataValue[]s without keys, so the
-    /// merge phase re-evaluates against each batch's arena.
-    /// </summary>
-    private sealed class RunReader : IAsyncDisposable
-    {
-        private readonly SpillReaderWriter _run;
-        private readonly Pool _pool;
-        private readonly IAsyncEnumerator<RowBatch> _enumerator;
-        private readonly OrderByOperator _owner;
-        private readonly ExpressionEvaluator _evaluator;
-        private readonly ExecutionContext _context;
-        private readonly SidecarRegistry? _sidecarRegistry;
-        private RowBatch? _currentBatch;
-        private int _currentIndex;
-        private DataValue[] _currentKeys;
-        private bool _disposed;
-
-        public RunReader(
-            SpillReaderWriter run,
-            ColumnLookup schema,
-            ExecutionContext context,
-            Pool pool,
-            OrderByOperator owner,
-            ExpressionEvaluator evaluator)
-        {
-            _run = run;
-            _pool = pool;
-            _enumerator = run.ReplayPartitionAsync(context, schema, partition: 0).GetAsyncEnumerator(context.CancellationToken);
-            _currentIndex = -1;
-            _owner = owner;
-            _evaluator = evaluator;
-            _context = context;
-            _sidecarRegistry = context.SidecarRegistry;
-            _currentKeys = Array.Empty<DataValue>();
-        }
-
-        public Row Current => _currentBatch![_currentIndex];
-
-        public RowBatch CurrentBatch => _currentBatch!;
-
-        public int CurrentIndex => _currentIndex;
-
-        public DataValue[] CurrentKeys => _currentKeys;
-
-        public async ValueTask<bool> ReadNextAsync()
-        {
-            if (_currentBatch is not null && _currentIndex + 1 < _currentBatch.Count)
-            {
-                _currentIndex++;
-                _currentKeys = await _owner.EvaluateKeysAsync(
-                    _evaluator, Current, _currentBatch.Arena, _currentBatch.Arena,
-                    _context.CancellationToken).ConfigureAwait(false);
-                return true;
-            }
-
-            if (_currentBatch is not null)
-            {
-                _pool.ReturnRowBatch(_currentBatch);
-                _currentBatch = null;
-            }
-
-            while (await _enumerator.MoveNextAsync().ConfigureAwait(false))
-            {
-                RowBatch next = _enumerator.Current;
-                if (next.Count > 0)
-                {
-                    _currentBatch = next;
-                    _currentIndex = 0;
-                    _currentKeys = await _owner.EvaluateKeysAsync(
-                        _evaluator,
-                        Current,
-                        _currentBatch.Arena,
-                        _context.CancellationToken)
-                        .ConfigureAwait(false);
-                    return true;
-                }
-                _pool.ReturnRowBatch(next);
-            }
-
-            return false;
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            if (_disposed) return;
-            _disposed = true;
-
-            if (_currentBatch is not null)
-            {
-                _pool.ReturnRowBatch(_currentBatch);
-                _currentBatch = null;
-            }
-            await _enumerator.DisposeAsync().ConfigureAwait(false);
-        }
     }
 }

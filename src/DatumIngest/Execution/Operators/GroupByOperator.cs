@@ -4,6 +4,7 @@ using System.Threading.Channels;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution.Operators.GroupBy;
+using DatumIngest.Execution.Operators.Ordering;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -711,7 +712,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
                 ReadOnlySpan<DataValue> sortB = buffer.GetSortKeys(b);
                 for (int sortIndex = 0; sortIndex < orderByItems.Count; sortIndex++)
                 {
-                    int comparison = OrderByOperator.CompareDataValues(
+                    int comparison = SortKeyComparer.CompareDataValues(
                         sortA[sortIndex], sortKeyStore, sortKeyRegistry,
                         sortB[sortIndex], sortKeyStore, sortKeyRegistry);
 
