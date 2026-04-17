@@ -194,37 +194,37 @@ public sealed class FullTextSearchOperator : QueryOperator
         // Stream matching rows through a seek session. Mirrors ScanOperator's
         // exact-seek path.
         using ISeekSession seekSession = _provider.OpenSeekSession(_requiredColumns, context.Store);
-        RowBatch? outputBatch = null;
+        RowCopyOutputWriter writer = new(context);
 
-        foreach (long rowPosition in positions)
+        try
         {
-            await foreach (RowBatch inputBatch in seekSession.SeekAsync(
-                rowPosition, 1, cancellationToken).ConfigureAwait(false))
+            foreach (long rowPosition in positions)
             {
-                try
+                await foreach (RowBatch inputBatch in seekSession.SeekAsync(
+                    rowPosition, 1, cancellationToken).ConfigureAwait(false))
                 {
-                    for (int i = 0; i < inputBatch.Count; i++)
+                    try
                     {
-                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
-                        context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
-                        if (outputBatch.IsFull)
+                        for (int i = 0; i < inputBatch.Count; i++)
                         {
-                            RowBatch toYield = outputBatch;
-                            outputBatch = null;
-                            yield return toYield;
+                            RowBatch? full = writer.Add(inputBatch, i);
+                            if (full is not null) yield return full;
                         }
                     }
-                }
-                finally
-                {
-                    context.ReturnRowBatch(inputBatch);
+                    finally
+                    {
+                        context.ReturnRowBatch(inputBatch);
+                    }
                 }
             }
-        }
 
-        if (outputBatch is not null)
+            RowBatch? trailing = writer.Flush();
+            if (trailing is not null) yield return trailing;
+        }
+        finally
         {
-            yield return outputBatch;
+            RowBatch? leftover = writer.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 }

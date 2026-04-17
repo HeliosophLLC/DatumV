@@ -1,5 +1,4 @@
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -90,47 +89,36 @@ public sealed class StratifiedSampleOperator : QueryOperator
 
         Random random = _seed.HasValue ? new Random(_seed.Value) : Random.Shared;
         double threshold = _percentage / 100.0;
+        RowCopyOutputWriter writer = new(context);
 
-        Pool pool = context.Pool;
-        RowBatch? outputBatch = null;
-
-        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
+        try
         {
-            try
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
+                try
                 {
-                    Row row = inputBatch[batchIndex];
-
-                    if (random.NextDouble() < threshold)
+                    for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
                     {
-                        // Copy values out of the input batch's arena into the per-query
-                        // store before adding to the output batch — the input batch is
-                        // returned to the pool below, which would alias-recycle the
-                        // DataValue[] arrays the output batch holds otherwise.
-                        outputBatch ??= context.RentRowBatch(row.ColumnLookup);
-                        outputBatch.Add(pool.RentAndCopyDataValues(row, inputBatch.Arena, context.Store));
-
-                        if (outputBatch.IsFull)
+                        if (random.NextDouble() < threshold)
                         {
-                            RowBatch toYield = outputBatch;
-                            outputBatch = null;
-                            yield return toYield;
+                            RowBatch? full = writer.Add(inputBatch, batchIndex);
+                            if (full is not null) yield return full;
                         }
                     }
                 }
+                finally
+                {
+                    context.ReturnRowBatch(inputBatch);
+                }
             }
-            finally
-            {
-                context.ReturnRowBatch(inputBatch);
-            }
-        }
 
-        if (outputBatch is not null)
+            RowBatch? trailing = writer.Flush();
+            if (trailing is not null) yield return trailing;
+        }
+        finally
         {
-            RowBatch toYield = outputBatch;
-            outputBatch = null;
-            yield return toYield;
+            RowBatch? leftover = writer.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 }

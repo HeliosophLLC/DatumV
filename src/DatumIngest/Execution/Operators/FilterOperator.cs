@@ -1,6 +1,5 @@
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -57,14 +56,7 @@ public sealed class FilterOperator : QueryOperator
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = context.CreateEvaluator();
-        Pool pool = context.Pool;
-        // Invariant: outputBatch != null ⟺ producer still owns it. Yielding transfers
-        // ownership, so we null the local *before* yield. The outer finally cleans up
-        // only the not-yet-yielded leftover, closing the leak window for mid-fill
-        // exceptions and upstream throws during the next MoveNextAsync. Post-yield
-        // assignment alone wouldn't help — that statement runs on resumption, not on
-        // iterator disposal.
-        RowBatch? outputBatch = null;
+        RowCopyOutputWriter writer = new(context);
 
         try
         {
@@ -85,16 +77,8 @@ public sealed class FilterOperator : QueryOperator
 
                         if (!await evaluator.EvaluateAsBooleanAsync(Predicate, frame, context.CancellationToken).ConfigureAwait(false)) continue;
 
-                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
-
-                        pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
-
-                        if (outputBatch.IsFull)
-                        {
-                            RowBatch toYield = outputBatch;
-                            outputBatch = null;
-                            yield return toYield;
-                        }
+                        RowBatch? full = writer.Add(inputBatch, index);
+                        if (full is not null) yield return full;
                     }
                 }
                 finally
@@ -103,19 +87,13 @@ public sealed class FilterOperator : QueryOperator
                 }
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
+            RowBatch? trailing = writer.Flush();
+            if (trailing is not null) yield return trailing;
         }
         finally
         {
-            if (outputBatch is not null)
-            {
-                context.ReturnRowBatch(outputBatch);
-            }
+            RowBatch? leftover = writer.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 }

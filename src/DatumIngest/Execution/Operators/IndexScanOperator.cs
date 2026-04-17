@@ -122,7 +122,11 @@ public sealed class IndexScanOperator : QueryOperator
         List<ValueIndexEntry> indexEntries = new();
         int currentChunkIndex = -1;
         long indexScanRowsYielded = 0;
-        RowBatch? outputBatch = null;
+        RowCopyOutputWriter writer = new(context);
+        // FlushIndexEntriesAsync's seek source may yield batches with distinct per-batch
+        // ColumnLookup refs across chunk boundaries. Pin the output shape to the first
+        // seen row's lookup so the writer's shape-stability assertion doesn't trip.
+        ColumnLookup? outputLookup = null;
 
         if (DatumActivity.Operators.HasListeners())
         {
@@ -130,15 +134,45 @@ public sealed class IndexScanOperator : QueryOperator
                 $"IndexScan  start  table={TableProvider.QualifiedName}  totalEntries={_columnIndex.EntryCount:N0}");
         }
 
-        foreach (ValueIndexEntry entry in traversal)
+        try
         {
-            if (indexEntries.Count > 0
-                && (entry.ChunkIndex != currentChunkIndex
-                    || indexEntries.Count >= MaxIndexEntriesPerFlush))
+            foreach (ValueIndexEntry entry in traversal)
             {
-                // Chunk boundary or size cap: flush the accumulated entries.
-                await foreach (Row row in FlushIndexEntriesAsync(
-                    seekSession, indexEntries, context, cancellationToken).ConfigureAwait(false))
+                if (indexEntries.Count > 0
+                    && (entry.ChunkIndex != currentChunkIndex
+                        || indexEntries.Count >= MaxIndexEntriesPerFlush))
+                {
+                    // Chunk boundary or size cap: flush the accumulated entries.
+                    await foreach (Row row in FlushIndexEntriesAsync(
+                        seekSession, indexEntries, context, cancellationToken).ConfigureAwait(false))
+                    {
+                        if (DatumActivity.Operators.HasListeners())
+                        {
+                            indexScanRowsYielded++;
+
+                            if (indexScanRowsYielded % 1_000_000 == 0)
+                            {
+                                DatumActivity.Operators.Trace(
+                                    $"IndexScan  {TableProvider.QualifiedName}  yielded {indexScanRowsYielded:N0} rows");
+                            }
+                        }
+
+                        outputLookup ??= row.ColumnLookup;
+                        RowBatch? full = writer.Adopt(outputLookup, row);
+                        if (full is not null) yield return full;
+                    }
+
+                    indexEntries.Clear();
+                }
+
+                indexEntries.Add(entry);
+                currentChunkIndex = entry.ChunkIndex;
+            }
+
+            // Flush any remaining entries.
+            if (indexEntries.Count > 0)
+            {
+                await foreach (Row row in FlushIndexEntriesAsync(seekSession, indexEntries, context, cancellationToken).ConfigureAwait(false))
                 {
                     if (DatumActivity.Operators.HasListeners())
                     {
@@ -151,63 +185,25 @@ public sealed class IndexScanOperator : QueryOperator
                         }
                     }
 
-                    outputBatch ??= context.RentRowBatch(row.ColumnLookup);
-                    outputBatch.Add(row.RawValues);
-
-                    if (outputBatch.IsFull)
-                    {
-                        RowBatch toYield = outputBatch;
-                        outputBatch = null;
-                        yield return toYield;
-                    }
+                    outputLookup ??= row.ColumnLookup;
+                    RowBatch? full = writer.Adopt(outputLookup, row);
+                    if (full is not null) yield return full;
                 }
-
-                indexEntries.Clear();
             }
 
-            indexEntries.Add(entry);
-            currentChunkIndex = entry.ChunkIndex;
-        }
+            RowBatch? trailing = writer.Flush();
+            if (trailing is not null) yield return trailing;
 
-        // Flush any remaining entries.
-        if (indexEntries.Count > 0)
-        {
-            await foreach (Row row in FlushIndexEntriesAsync(seekSession, indexEntries, context, cancellationToken).ConfigureAwait(false))
+            if (DatumActivity.Operators.HasListeners())
             {
-                if (DatumActivity.Operators.HasListeners())
-                {
-                    indexScanRowsYielded++;
-
-                    if (indexScanRowsYielded % 1_000_000 == 0)
-                    {
-                        DatumActivity.Operators.Trace(
-                            $"IndexScan  {TableProvider.QualifiedName}  yielded {indexScanRowsYielded:N0} rows");
-                    }
-                }
-
-                outputBatch ??= context.RentRowBatch(row.ColumnLookup);
-                outputBatch.Add(row.RawValues);
-
-                if (outputBatch.IsFull)
-                {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
-                }
+                DatumActivity.Operators.Trace(
+                    $"IndexScan  done  table={TableProvider.QualifiedName}  totalYielded={indexScanRowsYielded:N0}");
             }
         }
-
-        if (outputBatch is not null)
+        finally
         {
-            RowBatch toYield = outputBatch;
-            outputBatch = null;
-            yield return toYield;
-        }
-
-        if (DatumActivity.Operators.HasListeners())
-        {
-            DatumActivity.Operators.Trace(
-                $"IndexScan  done  table={TableProvider.QualifiedName}  totalYielded={indexScanRowsYielded:N0}");
+            RowBatch? leftover = writer.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 

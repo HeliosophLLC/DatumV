@@ -166,11 +166,7 @@ public sealed class LimitOperator : QueryOperator
 
         int skipped = 0;
         int emitted = 0;
-        // Invariant: outputBatch != null ⟺ producer still owns it. Yielding transfers
-        // ownership, so we null the local *before* yield. The outer finally cleans up
-        // only the not-yet-yielded leftover, closing the leak window for mid-fill
-        // exceptions and upstream throws during the next MoveNextAsync.
-        RowBatch? outputBatch = null;
+        RowCopyOutputWriter writer = new(context);
 
         try
         {
@@ -190,10 +186,10 @@ public sealed class LimitOperator : QueryOperator
                 int take = Math.Min(inputBatch.Count - startIndex, Limit - emitted);
 
                 // Fast path 2: no partial start, whole batch fits inside the remaining limit,
-                // and nothing pending in outputBatch that we'd have to merge with — pass the
-                // input batch straight through to the consumer without touching the arena.
-                // The branch guard guarantees outputBatch is null, so no leak window here.
-                if (outputBatch is null && startIndex == 0 && take == inputBatch.Count)
+                // and the writer has nothing pending — pass the input batch straight through
+                // to the consumer without touching the arena. HasPendingBatch guard preserves
+                // batch-boundary semantics (no extra small flush before the full batch).
+                if (!writer.HasPendingBatch && startIndex == 0 && take == inputBatch.Count)
                 {
                     emitted += take;
                     yield return inputBatch;
@@ -202,25 +198,15 @@ public sealed class LimitOperator : QueryOperator
                     continue;
                 }
 
-                // Mixed path: copy the [startIndex, startIndex + take) slice into outputBatch,
-                // stabilising each row into the output arena.
+                // Mixed path: copy the [startIndex, startIndex + take) slice into outputBatch.
                 try
                 {
                     int end = startIndex + take;
                     for (int index = startIndex; index < end; index++)
                     {
-                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
-
-                        context.Pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
-
+                        RowBatch? full = writer.Add(inputBatch, index);
                         emitted++;
-
-                        if (outputBatch.IsFull)
-                        {
-                            RowBatch toYield = outputBatch;
-                            outputBatch = null;
-                            yield return toYield;
-                        }
+                        if (full is not null) yield return full;
                     }
                 }
                 finally
@@ -230,29 +216,19 @@ public sealed class LimitOperator : QueryOperator
 
                 if (emitted >= Limit)
                 {
-                    if (outputBatch is not null)
-                    {
-                        RowBatch toYield = outputBatch;
-                        outputBatch = null;
-                        yield return toYield;
-                    }
+                    RowBatch? trailing = writer.Flush();
+                    if (trailing is not null) yield return trailing;
                     yield break;
                 }
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
+            RowBatch? remaining = writer.Flush();
+            if (remaining is not null) yield return remaining;
         }
         finally
         {
-            if (outputBatch is not null)
-            {
-                context.ReturnRowBatch(outputBatch);
-            }
+            RowBatch? leftover = writer.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 

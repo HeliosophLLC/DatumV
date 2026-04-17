@@ -45,8 +45,8 @@ public sealed class SkipOperator : QueryOperator
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         long skipped = 0;
-        RowBatch? outputBatch = null;
         ColumnLookup? columnLookup = null;
+        RowCopyOutputWriter writer = new(context);
 
         try
         {
@@ -54,43 +54,31 @@ public sealed class SkipOperator : QueryOperator
             {
                 for (int i = 0; i < inputBatch.Count; i++)
                 {
-                    Row row = inputBatch[i];
-
                     if (skipped < _count)
                     {
                         skipped++;
                         continue;
                     }
 
+                    // Pin the output shape to the first post-skip batch's lookup so any
+                    // mid-stream lookup-ref churn from the source doesn't trip the writer's
+                    // shape-stability assertion (matches pre-migration semantics).
                     columnLookup ??= inputBatch.ColumnLookup;
-                    outputBatch ??= context.RentRowBatch(columnLookup);
 
-                    context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
-
-                    if (outputBatch.IsFull)
-                    {
-                        RowBatch toYield = outputBatch;
-                        outputBatch = null;
-                        yield return toYield;
-                    }
+                    RowBatch? full = writer.Add(columnLookup, inputBatch, i);
+                    if (full is not null) yield return full;
                 }
 
                 context.ReturnRowBatch(inputBatch);
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
+            RowBatch? trailing = writer.Flush();
+            if (trailing is not null) yield return trailing;
         }
         finally
         {
-            if (outputBatch is not null)
-            {
-                context.ReturnRowBatch(outputBatch);
-            }
+            RowBatch? leftover = writer.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 }

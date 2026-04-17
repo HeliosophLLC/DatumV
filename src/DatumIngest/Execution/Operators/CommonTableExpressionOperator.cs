@@ -154,48 +154,28 @@ internal sealed class CommonTableExpressionOperator : QueryOperator, IDisposable
             yield break;
         }
 
-        // Replay cached rows by copying values into fresh output batches whose arena is the
-        // cached batch's arena (so arena-backed values resolve without an extra copy).
-        // Invariant: outputBatch != null ⟺ the producer still owns it. Yielding transfers
-        // ownership, so we null the local *before* yield. The finally then only fires for
-        // a not-yet-yielded leftover, which protects against mid-fill exceptions (e.g. a
-        // Stabilize NotSupportedException) and consumer cancellation. The post-yield
-        // assignment trick wouldn't help — that statement only runs on resumption (next
-        // MoveNextAsync), not on iterator disposal.
-        RowBatch? outputBatch = null;
+        // Replay cached rows via RowCopyOutputWriter: source's per-batch lookup may differ
+        // from the captured outputLookup (CTE rebinds column names), so we use the explicit-
+        // output-lookup overload to keep the writer's shape-stability assertion correct.
+        RowCopyOutputWriter writer = new(context);
         try
         {
             foreach (RowBatch cachedBatch in _materializedBatches)
             {
                 for (int i = 0; i < cachedBatch.Count; i++)
                 {
-                    outputBatch ??= context.RentRowBatch(outputLookup);
-                    pool.RentAndCopyToOutput(cachedBatch, i, outputBatch);
-                    if (outputBatch.IsFull)
-                    {
-                        RowBatch toYield = outputBatch;
-                        outputBatch = null;
-                        yield return toYield;
-                    }
+                    RowBatch? full = writer.Add(outputLookup, cachedBatch, i);
+                    if (full is not null) yield return full;
                 }
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
+            RowBatch? trailing = writer.Flush();
+            if (trailing is not null) yield return trailing;
         }
         finally
         {
-            // Only fires for a partially-filled batch that was never yielded — typically
-            // a mid-fill exception. The consumer doesn't know about it, so we own its
-            // cleanup. After a successful yield the local is null and this is a no-op.
-            if (outputBatch is not null)
-            {
-                context.ReturnRowBatch(outputBatch);
-            }
+            RowBatch? leftover = writer.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 

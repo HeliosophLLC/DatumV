@@ -161,35 +161,38 @@ public sealed class BalancedSampleOperator : QueryOperator
 
         // --- Pass 2: Emit all reservoirs in class-first order ---
         // Each reservoir row already owns its DataValue[] (pool-rented during pass 1),
-        // so handing it to outputBatch transfers ownership cleanly — when the consumer
-        // returns the output batch the array goes back to the pool exactly once.
+        // so we use Adopt — the writer transfers ownership without re-renting. When the
+        // consumer returns the output batch the array goes back to the pool exactly once.
 
-        RowBatch? outputBatch = null;
+        RowCopyOutputWriter writer = new(context);
+        // Reservoir rows preserve each source row's per-batch ColumnLookup reference, so
+        // a source like UNION ALL could feed us rows with logically identical schemas but
+        // distinct lookup refs. Pin the output shape to the first seen ref so the writer's
+        // shape-stability assertion doesn't trip — matches pre-migration semantics.
+        ColumnLookup? outputLookup = null;
 
-        foreach (CompositeKey key in classOrder)
+        try
         {
-            Reservoir reservoir = reservoirs[key];
-
-            for (int i = 0; i < reservoir.Count; i++)
+            foreach (CompositeKey key in classOrder)
             {
-                Row row = reservoir.Rows[i];
-                outputBatch ??= context.RentRowBatch(row.ColumnLookup);
-                outputBatch.Add(row.RawValues);
+                Reservoir reservoir = reservoirs[key];
 
-                if (outputBatch.IsFull)
+                for (int i = 0; i < reservoir.Count; i++)
                 {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
+                    Row row = reservoir.Rows[i];
+                    outputLookup ??= row.ColumnLookup;
+                    RowBatch? full = writer.Adopt(outputLookup, row);
+                    if (full is not null) yield return full;
                 }
             }
-        }
 
-        if (outputBatch is not null)
+            RowBatch? trailing = writer.Flush();
+            if (trailing is not null) yield return trailing;
+        }
+        finally
         {
-            RowBatch toYield = outputBatch;
-            outputBatch = null;
-            yield return toYield;
+            RowBatch? leftover = writer.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 

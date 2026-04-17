@@ -126,38 +126,28 @@ internal sealed class RecursiveCommonTableExpressionOperator : QueryOperator, ID
             yield break;
         }
 
-        // Replay cached rows by copying values into fresh output batches whose arena is the
-        // cached batch's arena. Same null-before-yield + outer try-finally pattern as the
-        // regular CTE — protects against mid-fill exceptions and consumer cancellation.
-        Pool pool = context.Pool;
-        RowBatch? outputBatch = null;
+        // Replay cached rows via RowCopyOutputWriter. Cached batches may carry per-batch
+        // ColumnLookup refs that differ from the captured outputLookup, so we pass it
+        // explicitly to the writer's shape-stable Add.
+        RowCopyOutputWriter writer = new(context);
         try
         {
             foreach (RowBatch cached in _allBatches)
             {
                 for (int i = 0; i < cached.Count; i++)
                 {
-                    outputBatch ??= context.RentRowBatch(outputLookup);
-                    pool.RentAndCopyToOutput(cached, i, outputBatch);
-                    if (outputBatch.IsFull)
-                    {
-                        RowBatch toYield = outputBatch;
-                        outputBatch = null;
-                        yield return toYield;
-                    }
+                    RowBatch? full = writer.Add(outputLookup, cached, i);
+                    if (full is not null) yield return full;
                 }
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
+            RowBatch? trailing = writer.Flush();
+            if (trailing is not null) yield return trailing;
         }
         finally
         {
-            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
+            RowBatch? leftover = writer.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 
@@ -344,7 +334,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : QueryOperator, ID
         // RowBatch references are still owned by us (refcount-shared).
         int count = _allBatches!.Count - startBatchIndex;
         IReadOnlyList<RowBatch> snapshot = _allBatches.GetRange(startBatchIndex, count);
-        return new InMemoryWorkingTableOperator(_pool!, schema, snapshot);
+        return new InMemoryWorkingTableOperator(schema, snapshot);
     }
 
     /// <summary>
@@ -394,7 +384,6 @@ internal sealed class RecursiveCommonTableExpressionOperator : QueryOperator, ID
     /// before the recursive CTE transitions to spill mode.
     /// </summary>
     private sealed class InMemoryWorkingTableOperator(
-        Pool pool,
         ColumnLookup schema,
         IReadOnlyList<RowBatch> batches) : QueryOperator
     {
@@ -407,37 +396,29 @@ internal sealed class RecursiveCommonTableExpressionOperator : QueryOperator, ID
 
         protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
         {
-            // Same null-before-yield + outer try-finally pattern as CTE replay. The cached
-            // batches stay owned by the outer recursive CTE; we yield COPIES that share the
-            // cached arena, so the consumer can dispose its received batches normally.
-            RowBatch? outputBatch = null;
+            // The cached batches stay owned by the outer recursive CTE; we yield COPIES that
+            // share the cached arena, so the consumer can dispose its received batches normally.
+            // Use the explicit-output-lookup overload — cached batches may have different
+            // per-batch ColumnLookup refs.
+            RowCopyOutputWriter writer = new(context);
             try
             {
                 foreach (RowBatch cached in batches)
                 {
                     for (int i = 0; i < cached.Count; i++)
                     {
-                        outputBatch ??= context.RentRowBatch(schema);
-                        pool.RentAndCopyToOutput(cached, i, outputBatch);
-                        if (outputBatch.IsFull)
-                        {
-                            RowBatch toYield = outputBatch;
-                            outputBatch = null;
-                            yield return toYield;
-                        }
+                        RowBatch? full = writer.Add(schema, cached, i);
+                        if (full is not null) yield return full;
                     }
                 }
 
-                if (outputBatch is not null)
-                {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
-                }
+                RowBatch? trailing = writer.Flush();
+                if (trailing is not null) yield return trailing;
             }
             finally
             {
-                if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
+                RowBatch? leftover = writer.Flush();
+                if (leftover is not null) context.ReturnRowBatch(leftover);
             }
             await Task.CompletedTask;
         }
