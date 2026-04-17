@@ -63,11 +63,15 @@ public static class DiagnosticsProvider
         }
 
         // Run semantic analysis on the (possibly partial) AST if a manifest
-        // is available and the parser produced a tree.
-        if (manifest is not null && parseResult.Query is not null)
+        // is available and the parser produced a tree. EffectiveQuery (vs
+        // Query) so a DECLARE preceding the SELECT still gets unknown-
+        // column/table/function checks — Query is intentionally null for
+        // multi-statement batches.
+        QueryExpression? analyzed = parseResult.EffectiveQuery;
+        if (manifest is not null && analyzed is not null)
         {
             SemanticAnalyzer analyzer = new(manifest);
-            Diagnostic[] semanticDiagnostics = analyzer.Analyze(parseResult.Query);
+            Diagnostic[] semanticDiagnostics = analyzer.Analyze(analyzed);
             diagnostics.AddRange(semanticDiagnostics);
         }
 

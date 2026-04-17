@@ -439,13 +439,14 @@ public sealed class CompletionProvider
     {
         // Empty list = "FROM scope was extracted and there's nothing in it" —
         // surfacing every catalog column would be the bug we're fixing.
-        // Exception: an empty table scope with TVF aliases or CTE schemas
-        // present means the only sources are TVFs / CTEs; we still want
-        // those columns.
+        // Exception: an empty table scope with TVF aliases, CTE schemas, or
+        // LET bindings present means there's still per-query content to
+        // surface; we still emit those.
         bool tablesEmpty = tablesInScope is { Count: 0 };
         bool tvfEmpty = tvfAliases is null or { Count: 0 };
         bool cteEmpty = cteSchemas.Schemas.Count == 0;
-        if (tablesEmpty && tvfEmpty && cteEmpty) return;
+        bool letEmpty = cteSchemas.LetBindingKinds.Count == 0;
+        if (tablesEmpty && tvfEmpty && cteEmpty && letEmpty) return;
 
         foreach (TableSchemaEntry table in _manifest.Tables)
         {
@@ -471,6 +472,35 @@ public sealed class CompletionProvider
 
         AddTvfColumns(items, tvfAliases);
         AddCteColumns(items, tablesInScope, cteSchemas);
+        AddLetBindings(items, cteSchemas);
+    }
+
+    /// <summary>
+    /// Surfaces every LET-bound name captured by
+    /// <see cref="CteSchemaResult.LetBindingKinds"/> as a completion item.
+    /// LETs are synthesised columns on the augmented row, so they're
+    /// usable in any expression position columns are — same zone reach as
+    /// the column path. Per-CTE scoping isn't tracked yet
+    /// (the map is flat across every CTE + top-level SELECT), matching
+    /// the same simplification the column / CTE-column paths use; once a
+    /// real per-cursor scope arrives the same restriction applies to all.
+    /// </summary>
+    private static void AddLetBindings(List<CompletionItem> items, CteSchemaResult cteSchemas)
+    {
+        if (cteSchemas.LetBindingKinds.Count == 0) return;
+        foreach (KeyValuePair<string, string> entry in cteSchemas.LetBindingKinds)
+        {
+            items.Add(new CompletionItem
+            {
+                Label = entry.Key,
+                Kind = CompletionItemKind.Variable,
+                Detail = $"{entry.Value} — LET binding",
+                // SortOrder 0 keeps LET names ahead of columns in popup
+                // order — same bucket as procedural variables, since LETs
+                // are query-local bindings rather than persistent schema.
+                SortOrder = 0,
+            });
+        }
     }
 
     /// <summary>

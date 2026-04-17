@@ -180,6 +180,25 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     }
 
     [Fact]
+    public void Analyze_UnknownColumn_AfterLeadingDeclare_StillReturnsWarning()
+    {
+        // Regression: DiagnosticsProvider used to guard semantic analysis on
+        // parseResult.Query, which is null for multi-statement batches.
+        // A DECLARE preceding the SELECT silenced every unknown-column /
+        // unknown-table warning. EffectiveQuery restores the diagnostic.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("users", "id", "name")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "DECLARE threshold Int32 = 10;\nSELECT missing_col FROM users",
+            manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("missing_col"));
+    }
+
+    [Fact]
     public void Analyze_UnknownQualifiedColumn_ReturnsWarning()
     {
         LanguageServerManifest manifest = CreateManifest(

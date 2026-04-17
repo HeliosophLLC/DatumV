@@ -561,6 +561,238 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.Contains("Float32", syResult.Contents);
     }
 
+    [Theory]
+    [InlineData("x BETWEEN 0 AND 10")]
+    [InlineData("x IN (1, 2, 3)")]
+    [InlineData("x IS NULL")]
+    [InlineData("name LIKE 'a%'")]
+    [InlineData("NOT (x = 0)")]
+    public void GetHover_LetBinding_BooleanResultExpressions_ResolveToBoolean(string boolExpr)
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry
+                {
+                    Name = "t",
+                    Columns =
+                    [
+                        new TableColumnEntry { Name = "x", Kind = "Int32", Nullable = false },
+                        new TableColumnEntry { Name = "name", Kind = "String", Nullable = false },
+                    ],
+                },
+            ],
+            Functions = [],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        string sql = $"WITH cte AS (SELECT LET flag = {boolExpr}, x FROM t) SELECT flag FROM cte";
+        int offset = sql.IndexOf("LET flag", StringComparison.Ordinal) + "LET ".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("flag", result.Contents);
+        Assert.Contains("Boolean", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_LetBinding_UnaryNegate_PreservesOperandKind()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry
+                {
+                    Name = "t",
+                    Columns =
+                    [
+                        new TableColumnEntry { Name = "amount", Kind = "Float32", Nullable = false },
+                    ],
+                },
+            ],
+            Functions = [],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql =
+            "WITH cte AS (SELECT LET neg = -amount, amount FROM t) SELECT neg FROM cte";
+        int offset = sql.IndexOf("LET neg", StringComparison.Ordinal) + "LET ".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("neg", result.Contents);
+        Assert.Contains("Float32", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_LetBinding_Case_ResolvesViaFirstBranch()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry
+                {
+                    Name = "t",
+                    Columns =
+                    [
+                        new TableColumnEntry { Name = "score", Kind = "Int32", Nullable = false },
+                    ],
+                },
+            ],
+            Functions = [],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql =
+            "WITH cte AS (SELECT LET grade = CASE WHEN score > 90 THEN 'A' ELSE 'B' END, score FROM t) " +
+            "SELECT grade FROM cte";
+        int offset = sql.IndexOf("LET grade", StringComparison.Ordinal) + "LET ".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("grade", result.Contents);
+        Assert.Contains("String", result.Contents);
+    }
+
+    // ───────────────────── Procedural variable hover ─────────────────────
+
+    [Fact]
+    public void GetHover_ForCounterVariable_ResolvesToInt32()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        // Counter variable name is `idx`; cursor lands on its reference
+        // inside the loop body, not the declaration.
+        const string sql = "FOR idx = 1 TO 10 SELECT idx";
+        int offset = sql.LastIndexOf("idx", StringComparison.Ordinal);
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("idx", result.Contents);
+        Assert.Contains("Int32", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_CatchErrorVariable_ResolvesToString()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql = "TRY SELECT 1 CATCH err SELECT err";
+        int offset = sql.LastIndexOf("err", StringComparison.Ordinal);
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("err", result.Contents);
+        Assert.Contains("String", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_CreateProcedureParameter_ResolvesToDeclaredType()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql = "CREATE PROCEDURE inc(p Int32) AS BEGIN SET p = p + 1 END";
+        // Cursor on the reference to `p` inside the body, not the parameter
+        // declaration.
+        int offset = sql.IndexOf("SET p", StringComparison.Ordinal) + "SET ".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("p", result.Contents);
+        Assert.Contains("Int32", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_CreateFunctionParameter_ResolvesToDeclaredType()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        // Macro UDF body — cursor on the first `x` in `x * x` (the body
+        // expression). Parameter map is walked across the whole batch so
+        // body refs resolve through the same path as DECLAREs.
+        const string sql = "CREATE FUNCTION square(x Int32) RETURNS Int32 AS x * x";
+        int offset = sql.IndexOf("AS x", StringComparison.Ordinal) + "AS ".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("x", result.Contents);
+        Assert.Contains("Int32", result.Contents);
+    }
+
+    // ───────────────────── Literal token hover ─────────────────────
+
+    [Theory]
+    [InlineData("42", "Int8")]      // narrows to sbyte
+    [InlineData("300", "Int16")]    // outside sbyte, fits short
+    [InlineData("100000", "Int32")] // outside short, fits int
+    [InlineData("3.14", "Float64")] // float roundtrip not exact
+    [InlineData("1.0", "Int8")]     // whole fractional narrows through integer ladder
+    public void GetHover_NumberLiteral_ReportsNarrowedKind(string literal, string expectedKind)
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [], Functions = [], Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        string sql = $"SELECT {literal}";
+        int offset = sql.IndexOf(literal, StringComparison.Ordinal);
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("Numeric literal", result.Contents);
+        Assert.Contains(expectedKind, result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_StringLiteral_ReportsKindAndPreview()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [], Functions = [], Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql = "SELECT 'hello world'";
+        int offset = sql.IndexOf('\'');
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("String literal", result.Contents);
+        Assert.Contains("String", result.Contents);
+        Assert.Contains("hello world", result.Contents);
+    }
+
     [Fact]
     public void GetHover_UnprojectedLetStructFieldAccess_ResolvesField()
     {

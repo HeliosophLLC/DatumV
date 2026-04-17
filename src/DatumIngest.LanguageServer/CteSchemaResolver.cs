@@ -263,9 +263,60 @@ internal static class CteSchemaResolver
                 return ResolveIndexAccessKind(indexAccess, scope, manifest);
             case BinaryExpression binary:
                 return ResolveBinaryKind(binary, scope, manifest);
+            // Unconditionally boolean-result shapes.
+            case LikeExpression:
+            case BetweenExpression:
+            case IsNullExpression:
+            case InExpression:
+            case InSubqueryExpression:
+            case ExistsExpression:
+                return "Boolean";
+            case UnaryExpression unary:
+                return ResolveUnaryKind(unary, scope, manifest);
+            case CaseExpression caseExpr:
+                return ResolveCaseKind(caseExpr, scope, manifest);
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Resolves a CASE expression's kind by inspecting each branch result
+    /// in declaration order (WHEN-THEN bodies plus ELSE). First branch
+    /// whose result kind we can derive wins; mismatched branches across a
+    /// CASE are a runtime concern, not a hover concern. Returns
+    /// <see langword="null"/> if no branch resolves so the caller's
+    /// <c>"?"</c> fallback covers ambiguous shapes.
+    /// </summary>
+    private static string? ResolveCaseKind(
+        CaseExpression caseExpr, InnerScope scope, LanguageServerManifest manifest)
+    {
+        foreach (WhenClause when in caseExpr.WhenClauses)
+        {
+            string? branchKind = ResolveExpressionKind(when.Result, scope, manifest);
+            if (branchKind is not null) return branchKind;
+        }
+        if (caseExpr.ElseResult is not null)
+        {
+            return ResolveExpressionKind(caseExpr.ElseResult, scope, manifest);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// <c>NOT</c> always produces <c>Boolean</c>; negate preserves the
+    /// operand's kind. Mirrors the engine's <c>ResolveUnary</c> rules
+    /// without reaching into the engine assembly.
+    /// </summary>
+    private static string? ResolveUnaryKind(
+        UnaryExpression unary, InnerScope scope, LanguageServerManifest manifest)
+    {
+        return unary.Operator switch
+        {
+            UnaryOperator.Not => "Boolean",
+            UnaryOperator.Negate => ResolveExpressionKind(unary.Operand, scope, manifest),
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -813,8 +864,7 @@ internal static class CteSchemaResolver
             switch (statement)
             {
                 case DeclareStatement decl:
-                    if (!sink.ContainsKey(decl.VariableName))
-                        sink[decl.VariableName] = decl.TypeName;
+                    AddIfNew(sink, decl.VariableName, decl.TypeName);
                     break;
                 case BlockStatement block:
                     foreach (Statement child in block.Statements) CollectDeclares(child, sink);
@@ -827,17 +877,40 @@ internal static class CteSchemaResolver
                     CollectDeclares(whileStmt.Body, sink);
                     break;
                 case ForCounterStatement forCtr:
+                    // `FOR i = start TO end` introduces i in the loop scope.
+                    AddIfNew(sink, forCtr.VariableName, "Int32");
                     CollectDeclares(forCtr.Body, sink);
                     break;
                 case ForInStatement forIn:
+                    // Cursor-FOR variables are struct-shaped — out of scope
+                    // for now; recurse so nested DECLAREs aren't lost.
                     CollectDeclares(forIn.Body, sink);
                     break;
                 case TryStatement tryStmt:
                     CollectDeclares(tryStmt.TryBody, sink);
-                    if (tryStmt.CatchBody is not null) CollectDeclares(tryStmt.CatchBody, sink);
+                    AddIfNew(sink, tryStmt.ErrorVariableName, "String");
+                    CollectDeclares(tryStmt.CatchBody, sink);
                     if (tryStmt.FinallyBody is not null) CollectDeclares(tryStmt.FinallyBody, sink);
                     break;
+                case CreateProcedureStatement createProc:
+                    foreach (UdfParameter p in createProc.Parameters)
+                        AddIfNew(sink, p.Name, p.TypeName);
+                    CollectDeclares(createProc.Body, sink);
+                    break;
+                case CreateFunctionStatement createFn:
+                    foreach (UdfParameter p in createFn.Parameters)
+                        AddIfNew(sink, p.Name, p.TypeName);
+                    if (createFn.StatementBody is { } stmtBody)
+                    {
+                        foreach (Statement child in stmtBody) CollectDeclares(child, sink);
+                    }
+                    break;
             }
+        }
+
+        static void AddIfNew(Dictionary<string, string?> sink, string name, string? kind)
+        {
+            if (!sink.ContainsKey(name)) sink[name] = kind;
         }
     }
 }

@@ -83,6 +83,8 @@ public sealed class HoverProvider
             SqlToken.TemplateString => "**Template string** — backtick-delimited string with `${expression}` interpolation.\n\n" +
                 "Lowers to a `concat(literal_chunks, splice_exprs…)` call at parse time. " +
                 "Splices may contain any scalar expression, including model invocations and other UDFs.",
+            SqlToken.NumberLiteral => GetNumberLiteralHover(hit.Text),
+            SqlToken.StringLiteral => GetStringLiteralHover(hit.Text),
             _ when IsKeywordToken(hit.Kind) => GetKeywordHover(hit.Kind, hit.Text, out docKey),
             _ => null,
         };
@@ -707,10 +709,7 @@ public sealed class HoverProvider
         switch (statement)
         {
             case DeclareStatement decl:
-                if (!sink.ContainsKey(decl.VariableName))
-                {
-                    sink[decl.VariableName] = decl.TypeName;
-                }
+                AddIfNew(sink, decl.VariableName, decl.TypeName);
                 break;
             case BlockStatement block:
                 foreach (Statement child in block.Statements)
@@ -726,18 +725,57 @@ public sealed class HoverProvider
                 CollectDeclaredVariables(whileStmt.Body, sink);
                 break;
             case ForCounterStatement forCtr:
+                // `FOR i = start TO end` introduces i in the loop scope.
+                // Kind is the engine's loop-counter contract — Int32 (matches
+                // BatchExecutor's counter binding).
+                AddIfNew(sink, forCtr.VariableName, "Int32");
                 CollectDeclaredVariables(forCtr.Body, sink);
                 break;
             case ForInStatement forIn:
+                // `FOR row IN (SELECT …)` binds a struct of the source row's
+                // columns. Surfacing a concrete struct annotation would
+                // require resolving the source query's projected schema —
+                // out of scope for this slice. Recurse for any nested
+                // DECLAREs so we don't lose those.
                 CollectDeclaredVariables(forIn.Body, sink);
                 break;
             case TryStatement tryStmt:
                 CollectDeclaredVariables(tryStmt.TryBody, sink);
-                if (tryStmt.CatchBody is not null)
-                    CollectDeclaredVariables(tryStmt.CatchBody, sink);
+                // `CATCH err` binds the exception message — always String.
+                AddIfNew(sink, tryStmt.ErrorVariableName, "String");
+                CollectDeclaredVariables(tryStmt.CatchBody, sink);
                 if (tryStmt.FinallyBody is not null)
                     CollectDeclaredVariables(tryStmt.FinallyBody, sink);
                 break;
+            case CreateProcedureStatement createProc:
+                // Parameter names are visible throughout the procedure body.
+                // No per-body scoping yet — a flat map is fine because the
+                // engine itself only allows one procedure per name at a
+                // time, so cross-procedure collisions are rare in practice.
+                foreach (UdfParameter p in createProc.Parameters)
+                {
+                    AddIfNew(sink, p.Name, p.TypeName);
+                }
+                CollectDeclaredVariables(createProc.Body, sink);
+                break;
+            case CreateFunctionStatement createFn:
+                foreach (UdfParameter p in createFn.Parameters)
+                {
+                    AddIfNew(sink, p.Name, p.TypeName);
+                }
+                if (createFn.StatementBody is { } stmtBody)
+                {
+                    foreach (Statement child in stmtBody)
+                    {
+                        CollectDeclaredVariables(child, sink);
+                    }
+                }
+                break;
+        }
+
+        static void AddIfNew(Dictionary<string, string?> sink, string name, string? kind)
+        {
+            if (!sink.ContainsKey(name)) sink[name] = kind;
         }
     }
 
@@ -1139,6 +1177,84 @@ public sealed class HoverProvider
 
         string nullable = column.Nullable ? " *(nullable)*" : "";
         return $"**{tableQualifier}.{column.Name}**: `{column.Kind}`{nullable}";
+    }
+
+    /// <summary>
+    /// Hover for a numeric literal token. Reports the narrowest kind the
+    /// engine's literal parser would resolve to so what hover shows
+    /// matches what the value carries at execution time. Mirrors
+    /// <c>SqlParser.ParseNumericLiteral</c>'s narrowing ladder.
+    /// </summary>
+    private static string GetNumberLiteralHover(string text)
+    {
+        string kind = ClassifyNumericLiteralKind(text);
+        return $"**Numeric literal** `{text}`: `{kind}`";
+    }
+
+    private static string ClassifyNumericLiteralKind(string text)
+    {
+        bool fractional = text.IndexOf('.') >= 0
+            || text.IndexOf('e') >= 0
+            || text.IndexOf('E') >= 0;
+
+        System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
+        System.Globalization.NumberStyles style = System.Globalization.NumberStyles.None;
+
+        if (fractional)
+        {
+            if (!double.TryParse(text, System.Globalization.NumberStyles.Float, culture, out double d))
+            {
+                return "?";
+            }
+            // Whole-valued fractional literal (1.0, 1e3) narrows through
+            // the integer ladder — same shape as the engine's parser.
+            // ReSharper disable once CompareOfFloatsByEqualityOperator
+            if (!double.IsInfinity(d) && d == System.Math.Truncate(d)
+                && d >= long.MinValue && d <= long.MaxValue)
+            {
+                return NarrowSignedIntKind((long)d);
+            }
+            float f = (float)d;
+            // ReSharper disable once CompareOfFloatsByEqualityOperator
+            return (double)f == d ? "Float32" : "Float64";
+        }
+
+        if (sbyte.TryParse(text, style, culture, out _)) return "Int8";
+        if (short.TryParse(text, style, culture, out _)) return "Int16";
+        if (int.TryParse(text, style, culture, out _)) return "Int32";
+        if (long.TryParse(text, style, culture, out _)) return "Int64";
+        if (ulong.TryParse(text, style, culture, out _)) return "UInt64";
+        if (Int128.TryParse(text, style, culture, out _)) return "Int128";
+        if (UInt128.TryParse(text, style, culture, out _)) return "UInt128";
+        return "?";
+    }
+
+    private static string NarrowSignedIntKind(long value)
+    {
+        if (value >= sbyte.MinValue && value <= sbyte.MaxValue) return "Int8";
+        if (value >= short.MinValue && value <= short.MaxValue) return "Int16";
+        if (value >= int.MinValue && value <= int.MaxValue) return "Int32";
+        return "Int64";
+    }
+
+    /// <summary>
+    /// Hover for a string-literal token. Renders kind and length;
+    /// previews the value when short enough to fit comfortably in the
+    /// popup. Token text retains its surrounding quotes — strip them so
+    /// the preview shows the literal payload.
+    /// </summary>
+    private static string GetStringLiteralHover(string text)
+    {
+        string payload = text;
+        if (payload.Length >= 2 && payload[0] == '\'' && payload[^1] == '\'')
+        {
+            payload = payload[1..^1];
+        }
+        const int maxPreview = 60;
+        string preview = payload.Length <= maxPreview
+            ? payload
+            : payload[..maxPreview] + "…";
+        return $"**String literal**: `String` ({payload.Length} chars)\n\n`'{preview}'`";
     }
 
     private static string? GetKeywordHover(SqlToken kind, string text, out string? docKey)

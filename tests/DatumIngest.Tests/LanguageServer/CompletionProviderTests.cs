@@ -111,6 +111,25 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     [Fact]
+    public void GetCompletions_AfterWhere_IncludesLetBindingFromSameSelect()
+    {
+        // Regression for item-7: a LET binding declared earlier in the
+        // same SELECT must surface in any expression-context completion
+        // zone the way columns do. Cursor lands inside the WHERE clause
+        // of a SELECT that defines `LET my_calc = id + 1`.
+        CompletionProvider provider = CreateProvider();
+
+        const string sql = "SELECT LET my_calc = id + 1, id FROM users WHERE ";
+        CompletionItem[] items = provider.GetCompletions(sql, sql.Length);
+
+        CompletionItem? hit = System.Linq.Enumerable.FirstOrDefault(
+            items, item => item.Label == "my_calc");
+        Assert.NotNull(hit);
+        Assert.Equal(CompletionItemKind.Variable, hit.Kind);
+        Assert.Contains("LET binding", hit.Detail ?? "");
+    }
+
+    [Fact]
     public void GetCompletions_AfterSelectWithPrefix_FiltersByPrefix()
     {
         CompletionProvider provider = CreateProvider();
