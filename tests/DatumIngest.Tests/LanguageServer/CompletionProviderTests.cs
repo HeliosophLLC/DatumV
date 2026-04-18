@@ -111,6 +111,66 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     [Fact]
+    public void GetCompletions_InsideTemplateSplice_OffersOuterFromColumns()
+    {
+        // Cursor lands inside `${…}` of a template string. Pre-fix the
+        // existing splice-aware classifier returned an Expression zone
+        // but with empty TablesInScope (because the recursion classified
+        // only the splice text), so column completions were missing.
+        // Now the outer FROM scope is re-extracted and overlaid onto the
+        // splice's classified zone — `users`'s columns surface.
+        //
+        // The splice is closed (editor auto-insert of `}` is typical) so
+        // the full-SQL tokenization succeeds and ExtractTablesInScope
+        // sees `users`. Cursor sits between `na` and the `}`.
+        CompletionProvider provider = CreateProvider();
+
+        const string sql = "SELECT `User: ${na}` FROM users";
+        int cursor = sql.IndexOf("${na", System.StringComparison.Ordinal) + "${na".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, item =>
+            item.Label == "name" && item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
+    public void GetCompletions_InsideUnterminatedSplice_StillOffersOuterFromColumns()
+    {
+        // Regression for the repair pass: user is mid-typing inside a
+        // `${…}` splice with no closing `}` (auto-close disabled or
+        // mid-paste). Pre-repair the whole-SQL tokenization failed on
+        // the unterminated template, so the outer-scope overlay returned
+        // empty TablesInScope and no columns surfaced. TokenizeRepair
+        // appends `}` + `` ` `` so the tokenizer succeeds; column
+        // completions now work. Diagnostics still flag the unterminated
+        // template independently because they run on the raw input.
+        CompletionProvider provider = CreateProvider();
+
+        const string sql = "SELECT `User: ${na FROM users";
+        int cursor = sql.IndexOf("${na", System.StringComparison.Ordinal) + "${na".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, item =>
+            item.Label == "name" && item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
+    public void GetCompletions_InsideTemplateSplice_OffersScalarFunctions()
+    {
+        // Splice content is an expression — scalar functions should
+        // surface alongside columns. Same closed-splice shape as the
+        // previous test.
+        CompletionProvider provider = CreateProvider();
+
+        const string sql = "SELECT `Value: ${ab}` FROM users";
+        int cursor = sql.IndexOf("${ab", System.StringComparison.Ordinal) + "${ab".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, item =>
+            item.Label == "abs" && item.Kind == CompletionItemKind.Function);
+    }
+
+    [Fact]
     public void GetCompletions_AfterWhere_IncludesLetBindingFromSameSelect()
     {
         // Regression for item-7: a LET binding declared earlier in the

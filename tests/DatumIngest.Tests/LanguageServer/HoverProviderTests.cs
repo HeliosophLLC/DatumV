@@ -749,6 +749,142 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.Contains("Int32", result.Contents);
     }
 
+    // ───────────────────── Template-string splice hover ─────────────────────
+
+    [Fact]
+    public void GetHover_IdentifierInsideTemplateSplice_ResolvesAsColumn()
+    {
+        // Cursor on `id` inside a `${…}` splice — splice-aware hover
+        // re-tokenizes the body and runs the regular identifier
+        // resolution against the column visible in the outer FROM scope.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry
+                {
+                    Name = "users",
+                    Columns =
+                    [
+                        new TableColumnEntry { Name = "id", Kind = "Int32", Nullable = false },
+                    ],
+                },
+            ],
+            Functions = [],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql = "SELECT `User: ${id}` FROM users";
+        // Cursor on the `i` of `id` inside the splice.
+        int offset = sql.IndexOf("${id}", System.StringComparison.Ordinal) + 2;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("id", result.Contents);
+        Assert.Contains("Int32", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_OutsideSpliceOnLiteralChunk_ReturnsGenericTemplateBlurb()
+    {
+        // Cursor on a literal chunk of a template string (between
+        // splices, or before the first splice). Falls through to the
+        // generic template-string hover, not the splice-internal path.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [], Functions = [], Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql = "SELECT `prefix ${col} suffix`";
+        int offset = sql.IndexOf("prefix", System.StringComparison.Ordinal);
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("Template string", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_InsideUnterminatedSplice_StillResolvesIdentifier()
+    {
+        // Regression for the repair pass on the hover path. The user is
+        // mid-typing inside `${id` with no closing `}` (auto-close
+        // disabled, partial paste, etc.). Pre-repair, outer-SQL
+        // tokenization failed on the unterminated template, no
+        // TemplateString token was produced, and hover returned null.
+        // With TokenizeRepair appending `}` + `` ` ``, the outer
+        // tokenizer succeeds, the TemplateString hit is found, the
+        // locator points at the splice body, and the inner resolver
+        // surfaces `id`'s manifest kind.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry
+                {
+                    Name = "users",
+                    Columns =
+                    [
+                        new TableColumnEntry { Name = "id", Kind = "Int32", Nullable = false },
+                    ],
+                },
+            ],
+            Functions = [],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql = "SELECT `User: ${id FROM users";
+        int offset = sql.IndexOf("id", System.StringComparison.Ordinal);
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("Int32", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_MultiLineSpliceIdentifier_TranslatesPositionToOuterCoordinates()
+    {
+        // Splice spans multiple lines. The inner tokenizer reports
+        // splice-local 0-based positions; the hover translates back to
+        // outer-SQL coordinates so Monaco's highlight lands on the right
+        // characters. Assert the reported StartLine/StartColumn are
+        // consistent with the actual outer-SQL position of `id`.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry
+                {
+                    Name = "users",
+                    Columns = [new TableColumnEntry { Name = "id", Kind = "Int32", Nullable = false }],
+                },
+            ],
+            Functions = [],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql = "SELECT `\n  prefix ${\n    id\n  } suffix\n` FROM users";
+        // Cursor on `id` (line 2 of sql, 0-based).
+        int idOffset = sql.IndexOf("id", System.StringComparison.Ordinal);
+        HoverResult? result = provider.GetHover(sql, idOffset);
+
+        Assert.NotNull(result);
+        Assert.Contains("Int32", result.Contents);
+        // Derive expected (line, column) from the absolute offset and
+        // compare with what hover reported.
+        int line = 0, col = 0;
+        for (int i = 0; i < idOffset; i++)
+        {
+            if (sql[i] == '\n') { line++; col = 0; }
+            else col++;
+        }
+        Assert.Equal(line, result.StartLine);
+        Assert.Equal(col, result.StartColumn);
+    }
+
     // ───────────────────── Literal token hover ─────────────────────
 
     [Theory]

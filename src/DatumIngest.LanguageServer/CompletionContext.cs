@@ -43,7 +43,38 @@ public static class CompletionContext
                 // expression — Expression-zone completions (columns, scalar
                 // functions, keywords) are what the user wants.
                 string spliceTextToCursor = textToCursor[context.SpliceStartOffset..];
-                return ClassifyExpressionContext(spliceTextToCursor);
+                CompletionZone spliceZone = ClassifyExpressionContext(spliceTextToCursor);
+
+                // The synthetic re-classify above sees `SELECT <splice>` in
+                // isolation, so its TablesInScope / TvfAliasesInScope /
+                // VariablesInScope are empty — but the splice physically
+                // lives inside the outer SQL, which DOES have a FROM/JOIN
+                // scope and procedural bindings the user expects to see.
+                // Re-extract those from the outer text and overlay them
+                // onto the splice's classified zone.
+                //
+                // Cursor-aware repair: when the FULL sql is unterminated
+                // (splice has no closing `}` anywhere downstream) AND there
+                // is post-cursor text, close the splice AT THE CURSOR so
+                // the post-cursor FROM/JOIN/etc. tokenizes normally rather
+                // than being absorbed into the splice body by an EOF
+                // repair. When the full sql already closes the splice
+                // (e.g. editor auto-inserted `}`), no repair needed —
+                // the post-cursor text is already correct.
+                string outerSqlForScope = sql;
+                if (cursorOffset < sql.Length
+                    && TokenizeRepair.ComputeRepairSuffix(sql) is not null
+                    && TokenizeRepair.ComputeRepairSuffix(textToCursor) is { } cursorRepair)
+                {
+                    outerSqlForScope = textToCursor + cursorRepair + sql[cursorOffset..];
+                }
+                List<TokenInfo> outerTokens = TokenizeSafely(outerSqlForScope);
+                return spliceZone with
+                {
+                    VariablesInScope = ExtractVariablesInScope(outerTokens),
+                    TablesInScope = ExtractTablesInScope(outerTokens),
+                    TvfAliasesInScope = ExtractTvfAliasesInScope(outerTokens),
+                };
 
             case CursorContextKind.Code:
             default:
@@ -354,40 +385,59 @@ public static class CompletionContext
     /// </remarks>
     private static List<TokenInfo> TokenizeSafely(string text)
     {
-        List<TokenInfo> result = new();
-        try
+        if (TryTokenize(text, out List<TokenInfo>? primary))
         {
-            TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(text);
-            foreach (Token<SqlToken> token in tokens)
-            {
-                result.Add(new TokenInfo(token.Kind, token.ToStringValue(), token.Position));
-            }
-            return result;
-        }
-        catch
-        {
-            // First pass failed — likely partial input. Try the sigil-strip
-            // recovery below; if that also fails, fall through with an
-            // empty result, which the classifier handles cleanly.
+            return primary;
         }
 
-        if (text.Length > 0 && text[^1] == '$')
+        // Recovery #1: template / splice repair. When the input ends
+        // inside an unterminated `${…}` or backtick template, append the
+        // minimal close sequence and retry. Lets users mid-typing inside
+        // a splice still get scope-extraction tokens — the unrepaired
+        // text is what diagnostics see, so the "unterminated" warning
+        // still surfaces in the editor.
+        string? repairSuffix = TokenizeRepair.ComputeRepairSuffix(text);
+        if (repairSuffix is not null
+            && TryTokenize(text + repairSuffix, out List<TokenInfo>? repaired))
+        {
+            return repaired;
+        }
+
+        // Recovery #2: trailing-sigil strip. The tokenizer rejects a
+        // bare trailing `$` (Parameter / Variable need a following
+        // letter); strip it and retry so the classifier still sees the
+        // preceding tokens. Without this the user typing "WHERE x = $"
+        // would land at the empty-tokens early-return branch and miss
+        // parameter-context completions.
+        if (text.Length > 0 && text[^1] == '$'
+            && TryTokenize(text[..^1], out List<TokenInfo>? stripped))
+        {
+            return stripped;
+        }
+
+        return new List<TokenInfo>();
+
+        static bool TryTokenize(
+            string input,
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out List<TokenInfo>? tokens)
         {
             try
             {
-                TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(text[..^1]);
-                foreach (Token<SqlToken> token in tokens)
+                TokenList<SqlToken> raw = SqlTokenizer.Instance.Tokenize(input);
+                List<TokenInfo> collected = new();
+                foreach (Token<SqlToken> token in raw)
                 {
-                    result.Add(new TokenInfo(token.Kind, token.ToStringValue(), token.Position));
+                    collected.Add(new TokenInfo(token.Kind, token.ToStringValue(), token.Position));
                 }
+                tokens = collected;
+                return true;
             }
             catch
             {
-                // Still failing — leave the result empty.
+                tokens = null;
+                return false;
             }
         }
-
-        return result;
     }
 
     /// <summary>

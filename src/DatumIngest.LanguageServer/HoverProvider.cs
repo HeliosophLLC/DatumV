@@ -68,26 +68,25 @@ public sealed class HoverProvider
 
         string? docKey = null;
 
-        string? markdown = hit.Kind switch
+        // Splice-aware hover dispatch. When the cursor lands on a template
+        // string AND the locator says it's inside a `${…}` body, re-run
+        // the hover pipeline against the splice body so identifiers,
+        // columns, function calls, and literals inside the splice get
+        // the same treatment as if they were typed in plain SQL. Outside
+        // a splice (literal chunks, `${`, `}`) the outer TemplateString
+        // arm of the switch keeps surfacing the generic blurb.
+        if (hit.Kind == SqlToken.TemplateString
+            && TemplateSpliceLocator.TryLocate(sql, cursorOffset, out var splice))
         {
-            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, tvfAliases, cteSchemas, lambdaScopes, declaredVariables, out docKey),
-            SqlToken.TypeKeyword => TypeDescriptions.TryGetValue(hit.Text, out string? typeDesc) ? typeDesc : null,
-            SqlToken.Arrow => "**`->`** Lambda arrow — separates parameter(s) from the body expression.\n\n" +
-                "Usage: `x -> expr` or `(a, b) -> expr` inside higher-order functions " +
-                "such as `array_transform` and `array_filter`.",
-            // Splice-aware hover (resolving identifiers inside ${…} as columns/
-            // functions) needs precise multi-line offset accounting that the
-            // current approximate hover positioning doesn't support cleanly.
-            // For now, surface a single descriptive hover on the whole template;
-            // an identifier outside the template still gets per-token hover.
-            SqlToken.TemplateString => "**Template string** — backtick-delimited string with `${expression}` interpolation.\n\n" +
-                "Lowers to a `concat(literal_chunks, splice_exprs…)` call at parse time. " +
-                "Splices may contain any scalar expression, including model invocations and other UDFs.",
-            SqlToken.NumberLiteral => GetNumberLiteralHover(hit.Text),
-            SqlToken.StringLiteral => GetStringLiteralHover(hit.Text),
-            _ when IsKeywordToken(hit.Kind) => GetKeywordHover(hit.Kind, hit.Text, out docKey),
-            _ => null,
-        };
+            HoverResult? spliceHover = ResolveSpliceHover(
+                sql, cursorOffset, splice, tvfAliases, cteSchemas, declaredVariables);
+            if (spliceHover is not null) return spliceHover;
+            // Locator hit but inner dispatch produced nothing — fall
+            // through to the generic template hover so the user still
+            // gets some context for the click.
+        }
+
+        string? markdown = ResolveHoverMarkdown(hit, tokens, tvfAliases, cteSchemas, lambdaScopes, declaredVariables, out docKey);
 
         if (markdown is null)
         {
@@ -106,6 +105,132 @@ public sealed class HoverProvider
             EndColumn = hit.Column + hit.Text.Length,
             DocumentationUri = docKey,
         };
+    }
+
+    /// <summary>
+    /// Core token → hover-markdown dispatch, shared by the outer
+    /// <see cref="GetHover"/> and the splice-aware inner dispatch in
+    /// <see cref="ResolveSpliceHover"/>. Factored out so both call sites
+    /// behave identically — anything that's added to the outer token
+    /// hover automatically lights up inside a splice too.
+    /// </summary>
+    private string? ResolveHoverMarkdown(
+        TokenHit hit,
+        List<TokenHit> tokens,
+        Dictionary<string, FunctionSignature> tvfAliases,
+        CteSchemaResult cteSchemas,
+        IReadOnlyList<LambdaScope> lambdaScopes,
+        Dictionary<string, string?> declaredVariables,
+        out string? docKey)
+    {
+        docKey = null;
+        return hit.Kind switch
+        {
+            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, tvfAliases, cteSchemas, lambdaScopes, declaredVariables, out docKey),
+            SqlToken.TypeKeyword => TypeDescriptions.TryGetValue(hit.Text, out string? typeDesc) ? typeDesc : null,
+            SqlToken.Arrow => "**`->`** Lambda arrow — separates parameter(s) from the body expression.\n\n" +
+                "Usage: `x -> expr` or `(a, b) -> expr` inside higher-order functions " +
+                "such as `array_transform` and `array_filter`.",
+            // Hit on a template-string token outside any splice body —
+            // surface the generic blurb. Splice-internal identifiers /
+            // calls are handled by ResolveSpliceHover before this switch.
+            SqlToken.TemplateString => "**Template string** — backtick-delimited string with `${expression}` interpolation.\n\n" +
+                "Lowers to a `concat(literal_chunks, splice_exprs…)` call at parse time. " +
+                "Splices may contain any scalar expression, including model invocations and other UDFs.",
+            SqlToken.NumberLiteral => GetNumberLiteralHover(hit.Text),
+            SqlToken.StringLiteral => GetStringLiteralHover(hit.Text),
+            _ when IsKeywordToken(hit.Kind) => GetKeywordHover(hit.Kind, hit.Text, out docKey),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Dispatches hover for a cursor that sits inside a <c>${…}</c>
+    /// splice body. Re-tokenizes the splice text in isolation, runs
+    /// <see cref="FindTokenAtOffset"/> against the translated cursor,
+    /// and reuses the same resolver path the outer hover uses. The
+    /// returned span is re-anchored back to outer-SQL line/column
+    /// coordinates so Monaco paints the highlight on the right token,
+    /// not somewhere inside the splice body's local frame.
+    /// </summary>
+    /// <remarks>
+    /// Scope objects passed in (<paramref name="tvfAliases"/>,
+    /// <paramref name="cteSchemas"/>, <paramref name="declaredVariables"/>)
+    /// are computed off the outer SQL once — splices live inline in the
+    /// outer SQL so the same maps are valid inside them. Lambda scopes
+    /// are recomputed against the splice's own token list because lambda
+    /// detection looks back to the nearest enclosing arrow, and that
+    /// search must run in the splice's local token frame to surface a
+    /// splice-internal lambda parameter correctly.
+    /// </remarks>
+    private HoverResult? ResolveSpliceHover(
+        string sql,
+        int cursorOffset,
+        TemplateSpliceLocator.SpliceLocation splice,
+        Dictionary<string, FunctionSignature> tvfAliases,
+        CteSchemaResult cteSchemas,
+        Dictionary<string, string?> declaredVariables)
+    {
+        List<TokenHit> innerTokens = TokenizeWithSpans(splice.Body);
+        int innerCursor = cursorOffset - splice.BodyStart;
+        TokenHit? innerHit = FindTokenAtOffset(innerTokens, innerCursor);
+        if (innerHit is null) return null;
+
+        IReadOnlyList<LambdaScope> innerLambdaScopes =
+            LambdaScopeWalker.FindActiveScopes(innerTokens, innerCursor);
+
+        string? markdown = ResolveHoverMarkdown(
+            innerHit, innerTokens, tvfAliases, cteSchemas, innerLambdaScopes,
+            declaredVariables, out string? docKey);
+
+        if (markdown is null) return null;
+        markdown = AppendDocLink(markdown, docKey);
+
+        // Translate the inner token's 0-based (line, column) — which are
+        // relative to the splice body — back to outer-SQL coordinates.
+        // The splice body starts at a specific absolute offset; map that
+        // offset to (line, column) in the outer SQL once, then offset the
+        // inner token's position by it (column-only on the body's first
+        // line; line-shifted only on subsequent lines).
+        (int outerLine, int outerColumn) = OffsetToLineColumn(sql, splice.BodyStart);
+        int finalLine = innerHit.Line == 0 ? outerLine : outerLine + innerHit.Line;
+        int finalColumn = innerHit.Line == 0
+            ? outerColumn + innerHit.Column
+            : innerHit.Column;
+
+        return new HoverResult
+        {
+            Contents = markdown,
+            StartLine = finalLine,
+            StartColumn = finalColumn,
+            EndLine = finalLine,
+            EndColumn = finalColumn + innerHit.Text.Length,
+            DocumentationUri = docKey,
+        };
+    }
+
+    /// <summary>
+    /// Maps an absolute character offset in <paramref name="sql"/> to a
+    /// 0-based <c>(line, column)</c> pair. Used by splice-aware hover to
+    /// re-anchor inner-token spans back to outer-SQL coordinates so
+    /// Monaco's highlight lands on the right characters.
+    /// </summary>
+    private static (int Line, int Column) OffsetToLineColumn(string sql, int absoluteOffset)
+    {
+        int clamped = absoluteOffset < 0 ? 0
+            : absoluteOffset > sql.Length ? sql.Length
+            : absoluteOffset;
+        int line = 0;
+        int lastLineStart = 0;
+        for (int i = 0; i < clamped; i++)
+        {
+            if (sql[i] == '\n')
+            {
+                line++;
+                lastLineStart = i + 1;
+            }
+        }
+        return (line, clamped - lastLineStart);
     }
 
     /// <summary>
@@ -1416,33 +1541,57 @@ public sealed class HoverProvider
     /// </summary>
     private static List<TokenHit> TokenizeWithSpans(string sql)
     {
-        List<TokenHit> result = new();
-        try
+        if (TryTokenize(sql, out List<TokenHit>? primary))
         {
-            TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
-            foreach (Token<SqlToken> token in tokens)
-            {
-                string text = token.ToStringValue();
-                // Superpower's Position is 1-based for Line/Column and
-                // already 0-based for Absolute. We need:
-                //   - Line/Column (0-based) for the hover range Monaco
-                //     paints around the token,
-                //   - Absolute (0-based) to match the cursor offset Monaco
-                //     supplies — line+column alone would only land on
-                //     line-1 tokens, leaving everything below silently
-                //     unhoverable.
-                int line = token.Position.Line - 1;
-                int column = token.Position.Column - 1;
-                int absolute = token.Position.Absolute;
-                result.Add(new TokenHit(token.Kind, text, line, column, absolute));
-            }
-        }
-        catch
-        {
-            // Partial tokenization is acceptable.
+            return primary;
         }
 
-        return result;
+        // Template / splice repair fallback: when the user is mid-typing
+        // inside an unterminated `${…}` splice or backtick template, the
+        // raw tokenizer fails on the whole input and we'd lose hover for
+        // everything in the file. The repair appends the minimal close
+        // sequence so tokenization succeeds; the appended characters sit
+        // past the user's cursor and never produce a hit. The unrepaired
+        // text is what diagnostics see, so the "unterminated" warning
+        // still surfaces in the editor independently.
+        string? repairSuffix = TokenizeRepair.ComputeRepairSuffix(sql);
+        if (repairSuffix is not null
+            && TryTokenize(sql + repairSuffix, out List<TokenHit>? repaired))
+        {
+            return repaired;
+        }
+
+        return new List<TokenHit>();
+
+        static bool TryTokenize(
+            string input,
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out List<TokenHit>? tokens)
+        {
+            try
+            {
+                TokenList<SqlToken> raw = SqlTokenizer.Instance.Tokenize(input);
+                List<TokenHit> collected = new();
+                foreach (Token<SqlToken> token in raw)
+                {
+                    // Superpower's Position is 1-based for Line/Column
+                    // and 0-based for Absolute. We need 0-based
+                    // Line/Column for the hover range Monaco paints, and
+                    // 0-based Absolute to match the cursor offset.
+                    int line = token.Position.Line - 1;
+                    int column = token.Position.Column - 1;
+                    int absolute = token.Position.Absolute;
+                    collected.Add(new TokenHit(
+                        token.Kind, token.ToStringValue(), line, column, absolute));
+                }
+                tokens = collected;
+                return true;
+            }
+            catch
+            {
+                tokens = null;
+                return false;
+            }
+        }
     }
 
     /// <summary>
