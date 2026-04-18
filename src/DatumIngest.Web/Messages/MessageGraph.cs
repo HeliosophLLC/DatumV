@@ -13,8 +13,8 @@ namespace DatumIngest.Web.Messages;
 internal sealed class MessageGraph : IMessageGraph
 {
     private const string InsertSql =
-        "INSERT INTO messages (role, content, model, input_tokens, output_tokens) " +
-        "VALUES ($role, $content, $model, $input_tokens, $output_tokens)";
+        "INSERT INTO messages (conversation_id, kind, role, content, model, input_tokens, output_tokens) " +
+        "VALUES ($conversation_id, $kind, $role, $content, $model, $input_tokens, $output_tokens)";
 
     private readonly TableCatalog _catalog;
 
@@ -23,12 +23,14 @@ internal sealed class MessageGraph : IMessageGraph
         _catalog = catalog;
     }
 
-    public async Task AppendAsync(MessageDraft draft, CancellationToken ct)
+    public async Task AppendAsync(long conversationId, MessageDraft draft, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
         Dictionary<string, ParameterValue> parameters = new()
         {
+            ["conversation_id"] = new InlineParameter(DataValue.FromInt64(conversationId)),
+            ["kind"] = new StringParameter(draft.Kind),
             ["role"] = new StringParameter(draft.Role),
             ["content"] = new StringParameter(draft.Content),
             ["model"] = draft.Model is null

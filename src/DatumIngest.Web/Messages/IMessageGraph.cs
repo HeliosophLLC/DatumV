@@ -7,12 +7,16 @@ namespace DatumIngest.Web.Messages;
 // rehydration arrives, GetAllAsync / WalkAncestorsAsync grow alongside.
 public interface IMessageGraph
 {
-    Task AppendAsync(MessageDraft draft, CancellationToken ct);
+    Task AppendAsync(long conversationId, MessageDraft draft, CancellationToken ct);
 }
 
+// `Kind` defaults to "turn"; checkpoint rows (compaction summaries) and
+// hidden rows use the other two values. The agent today only writes turns;
+// compaction will add checkpoint inserts in a later step.
 public sealed record MessageDraft(
     string Role,
     string Content,
     string? Model = null,
     int? InputTokens = null,
-    int? OutputTokens = null);
+    int? OutputTokens = null,
+    string Kind = "turn");

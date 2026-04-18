@@ -132,6 +132,7 @@ public static class WebHostExtensions
                 services.AddSingleton<LlmDriverHolder>();
 
                 services.AddSingleton<Messages.IMessageGraph, Messages.MessageGraph>();
+                services.AddSingleton<Conversation.IConversationRegistry, Conversation.ConversationRegistry>();
                 services.AddSingleton<Conversation.IConversationAgent, Conversation.ConversationAgent>();
             }
         }

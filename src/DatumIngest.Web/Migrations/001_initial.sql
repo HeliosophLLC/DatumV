@@ -1,8 +1,8 @@
--- v1 chat schema: just enough to persist back-and-forth turns and validate
--- the conversation loop end-to-end. Graph links (message_links), uploads,
--- files, streaming status, and titles are all deferred until their
--- workflows are concrete. See project_message_graph_design + project_files_become_tables
--- memories for the rationale and target shape.
+-- v1 chat schema: persisted conversations + turns + per-app key/value
+-- settings. Graph links (message_links), uploads, and files are still
+-- deferred; the conversations and settings tables exist now because
+-- multi-conversation + a persisted default-LLM setting are landing
+-- together.
 
 CREATE TABLE __schema_migrations (
     version Int32 PRIMARY KEY,
@@ -10,12 +10,32 @@ CREATE TABLE __schema_migrations (
     applied_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
+CREATE TABLE conversations (
+    id Int64 GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    title String,
+    model String,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
 CREATE TABLE messages (
     id Int64 GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    conversation_id Int64 NOT NULL,
+    -- 'turn'       — ordinary user / assistant message.
+    -- 'checkpoint' — compaction summary; prompt builder uses the most
+    --                recent one as a synthetic system message and skips
+    --                turns with smaller ids.
+    -- 'hidden'     — soft-deleted; UI shows but the prompt builder skips.
+    kind String NOT NULL DEFAULT 'turn',
     role String NOT NULL,
     content String NOT NULL,
     model String,
     input_tokens Int32,
     output_tokens Int32,
     created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE TABLE settings (
+    name String PRIMARY KEY,
+    value String
 );

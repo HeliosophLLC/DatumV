@@ -38,15 +38,22 @@ internal sealed class ConversationAgent : IConversationAgent
 
     private readonly LlmDriverHolder _holder;
     private readonly IMessageGraph _graph;
+    private readonly IConversationRegistry _registry;
     private readonly string _systemPrompt;
     private readonly object _accumulatorLock = new();
     private string? _accumulator;
+    private long? _conversationId;
     private CancellationTokenSource? _activeCts;
 
-    public ConversationAgent(LlmDriverHolder holder, IMessageGraph graph, WebHostOptions options)
+    public ConversationAgent(
+        LlmDriverHolder holder,
+        IMessageGraph graph,
+        IConversationRegistry registry,
+        WebHostOptions options)
     {
         _holder = holder;
         _graph = graph;
+        _registry = registry;
         _systemPrompt = options.SystemPrompt ?? BuiltInSystemPrompt;
     }
 
@@ -59,6 +66,15 @@ internal sealed class ConversationAgent : IConversationAgent
         // driver and return immediately.
         ILlmDriver driver = await _holder.GetAsync(ct).ConfigureAwait(false);
         Models.Llama.LlamaChatTemplate template = driver.Template;
+
+        // Resolve the conversation id once per process. The hub doesn't
+        // expose a conversation picker yet, so every turn lands on the
+        // default conversation (newest if any exist, else freshly created).
+        // When the UI threads a conversationId through SendAsync the cache
+        // here goes away — until then, this keeps persistence well-defined
+        // without an eager registry call at startup.
+        long conversationId = _conversationId
+            ??= await _registry.EnsureDefaultAsync(ct).ConfigureAwait(false);
 
         // Link the caller's token with our own internal CTS so CancelActive
         // and ConnectionAborted both terminate the same enumeration. The
@@ -80,7 +96,10 @@ internal sealed class ConversationAgent : IConversationAgent
         // Persist the user turn before we start generating. The user turn
         // is durable even if generation is cancelled or fails — we'd rather
         // have an orphan user message than lose the input.
-        await _graph.AppendAsync(new MessageDraft("user", userContent), linked.Token).ConfigureAwait(false);
+        await _graph.AppendAsync(
+            conversationId,
+            new MessageDraft("user", userContent),
+            linked.Token).ConfigureAwait(false);
 
         StringBuilder assistantBuilder = new();
         bool wasCancelled = false;
@@ -115,9 +134,15 @@ internal sealed class ConversationAgent : IConversationAgent
             }
 
             await _graph.AppendAsync(
+                conversationId,
                 new MessageDraft("assistant", assistantContent, driver.ModelName),
                 CancellationToken.None).ConfigureAwait(false);
         }
+
+        // Bump updated_at so the history list (next commit) sorts by recency.
+        // Best-effort: persistence already succeeded, a missed touch is just
+        // a slightly stale sort key.
+        await _registry.TouchAsync(conversationId, CancellationToken.None).ConfigureAwait(false);
 
         if (wasCancelled)
         {
