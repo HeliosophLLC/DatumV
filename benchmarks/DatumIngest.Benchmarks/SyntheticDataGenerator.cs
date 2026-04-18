@@ -67,9 +67,9 @@ public static class SyntheticDataGenerator
     /// <summary>
     /// Generates in-memory rows with mixed column types for execution benchmarks.
     /// </summary>
-    public static Row[] GenerateRows(int rowCount)
+    public static Row[] GenerateRows(int rowCount, int seed = 42)
     {
-        Random random = new(42);
+        Random random = new(seed);
         string[] categories = ["alpha", "beta", "gamma", "delta", "epsilon"];
         Row[] rows = new Row[rowCount];
 

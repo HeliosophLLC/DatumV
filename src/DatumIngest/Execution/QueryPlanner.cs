@@ -1083,14 +1083,53 @@ public sealed class QueryPlanner
             assertions = resolvedAssertions;
         }
 
-        // PIVOT / UNPIVOT support deleted alongside RowSerializer (the only remaining
-        // legacy spill consumer). Re-add when a demo demands it; the parser still
-        // recognises the tokens but the planner rejects them here.
-        if (statement.Pivot is not null || statement.Unpivot is not null)
+        // PIVOT and UNPIVOT are mutually exclusive in valid SQL.
+        // PIVOT is currently in-memory only — spill against SpillReaderWriter is a follow-up.
+        if (statement.Pivot is not null)
         {
-            throw new NotSupportedException(
-                "PIVOT / UNPIVOT are not currently supported. The operators were removed "
-                + "during the spill-format consolidation; re-add when a query needs them.");
+            PivotClause pivot = statement.Pivot;
+            List<AggregateColumn> pivotAggregates = new(pivot.Aggregates.Count);
+            foreach (FunctionCallExpression call in pivot.Aggregates)
+            {
+                IAggregateFunction? aggregateFunction = _functionRegistry.TryGetAggregate(call.CallName);
+                if (aggregateFunction is null)
+                {
+                    throw new QueryPlanException(
+                        $"PIVOT aggregate '{call.CallName}' is not a registered aggregate function.");
+                }
+
+                bool isCountStar = IsCountStarCall(call);
+                IReadOnlyList<Expression> arguments = isCountStar
+                    ? Array.Empty<Expression>()
+                    : call.Arguments;
+                string outputName = QueryExplainer.FormatExpression(call);
+
+                pivotAggregates.Add(new AggregateColumn(
+                    aggregateFunction, arguments, outputName, isCountStar, call.Distinct));
+            }
+
+            source = new Operators.PivotOperator(
+                source,
+                pivotAggregates,
+                pivot.PivotColumn,
+                pivot.ValueList);
+        }
+
+        if (statement.Unpivot is not null)
+        {
+            UnpivotClause unpivot = statement.Unpivot;
+            string[] sourceColumnNames = new string[unpivot.SourceColumns.Count];
+            for (int i = 0; i < unpivot.SourceColumns.Count; i++)
+            {
+                sourceColumnNames[i] = unpivot.SourceColumns[i].ColumnName;
+            }
+
+            source = new Operators.UnpivotOperator(
+                source,
+                unpivot.ValueColumnName,
+                unpivot.NameColumnName,
+                sourceColumnNames,
+                unpivot.IncludeNulls);
         }
 
         // 4. Apply SELECT projection (with LET bindings for memoized evaluation).
