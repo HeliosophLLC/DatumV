@@ -4,5 +4,7 @@
   "stop": "Stop",
   "hint": "Press Enter to send · Shift+Enter for a new line",
   "thinking": "Thinking…",
-  "errorPrefix": "Something went wrong: {message}"
+  "errorPrefix": "Something went wrong: {message}",
+  "reload": "Reload",
+  "reloadHint": "Re-read this conversation from the database"
 }

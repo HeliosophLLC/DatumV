@@ -50,4 +50,40 @@ internal sealed class MessageGraph : IMessageGraph
         // — no need to iterate the result.
         await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
     }
+
+    public async Task<IReadOnlyList<MessageRecord>> ReadHistoryAsync(
+        long conversationId,
+        CancellationToken ct)
+    {
+        Dictionary<string, ParameterValue> parameters = new()
+        {
+            ["conversation_id"] = new InlineParameter(DataValue.FromInt64(conversationId)),
+        };
+        Statement statement = SqlParser.ParseStatement(
+            "SELECT id, conversation_id, kind, role, content, model, " +
+            "       input_tokens, output_tokens, created_at " +
+            "FROM messages WHERE conversation_id = $conversation_id ORDER BY id ASC");
+        Statement bound = ParameterBinder.Bind(statement, parameters);
+
+        IQueryPlan plan = await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
+        List<MessageRecord> results = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(ct).ConfigureAwait(false))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                Row row = batch[i];
+                results.Add(new MessageRecord(
+                    Id: row[0].AsInt64(),
+                    ConversationId: row[1].AsInt64(),
+                    Kind: row[2].AsString(),
+                    Role: row[3].AsString(),
+                    Content: row[4].AsString(),
+                    Model: row[5].IsNull ? null : row[5].AsString(),
+                    InputTokens: row[6].IsNull ? null : row[6].AsInt32(),
+                    OutputTokens: row[7].IsNull ? null : row[7].AsInt32(),
+                    CreatedAt: row[8].AsTimestamp()));
+            }
+        }
+        return results;
+    }
 }

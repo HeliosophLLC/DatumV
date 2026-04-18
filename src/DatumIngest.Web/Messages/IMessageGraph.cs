@@ -8,6 +8,13 @@ namespace DatumIngest.Web.Messages;
 public interface IMessageGraph
 {
     Task AppendAsync(long conversationId, MessageDraft draft, CancellationToken ct);
+
+    // Reads every message for the conversation in id order. Used by both
+    // the agent's accumulator rebuild (post-reload, post-restart) and the
+    // client's history fetch. Hidden rows are returned too — filtering is
+    // the caller's job since "show in UI but skip in prompt" is the
+    // expected semantic divide.
+    Task<IReadOnlyList<MessageRecord>> ReadHistoryAsync(long conversationId, CancellationToken ct);
 }
 
 // `Kind` defaults to "turn"; checkpoint rows (compaction summaries) and
@@ -20,3 +27,14 @@ public sealed record MessageDraft(
     int? InputTokens = null,
     int? OutputTokens = null,
     string Kind = "turn");
+
+public sealed record MessageRecord(
+    long Id,
+    long ConversationId,
+    string Kind,
+    string Role,
+    string Content,
+    string? Model,
+    int? InputTokens,
+    int? OutputTokens,
+    DateTime CreatedAt);

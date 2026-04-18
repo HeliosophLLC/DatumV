@@ -6,18 +6,21 @@ namespace DatumIngest.Web.Conversation;
 public interface IConversationAgent
 {
     // Persists the user turn, calls the LLM, streams response chunks back to
-    // the caller, persists the final assistant turn. Yielded strings are raw
-    // model output fragments — consumers concatenate to recover the full
-    // response. Cancellation honored between chunks. On cancellation, the
-    // partial assistant response collected so far is still persisted and
-    // appended to the accumulator — the conversation captures "I started
-    // saying X but you stopped me" rather than pretending the turn never
-    // happened.
-    IAsyncEnumerable<string> SendAsync(string userContent, CancellationToken ct);
+    // the caller, persists the final assistant turn against the given
+    // conversation. Yielded strings are raw model output fragments —
+    // consumers concatenate to recover the full response. Cancellation
+    // honored between chunks. On cancellation, the partial assistant
+    // response collected so far is still persisted and appended to the
+    // accumulator.
+    IAsyncEnumerable<string> SendAsync(long conversationId, string userContent, CancellationToken ct);
 
-    // Cancels the active SendAsync if any. No-op when no send is in flight.
-    // Idempotent — calling twice during the same send still results in one
-    // cancellation. Returns synchronously; the SendAsync caller observes
-    // the cancellation on its next iterator step.
-    void CancelActive();
+    // Cancels the active SendAsync on the given conversation if any. No-op
+    // when no send is in flight for that id. Idempotent.
+    void CancelActive(long conversationId);
+
+    // Discards the in-memory accumulator for the given conversation. The
+    // next SendAsync rebuilds it from the persisted message history — so
+    // hand-edits made to the messages table (or earlier checkpoints) take
+    // effect on the following turn.
+    Task ReloadAsync(long conversationId, CancellationToken ct);
 }

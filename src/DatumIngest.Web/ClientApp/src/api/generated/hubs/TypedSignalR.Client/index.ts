@@ -113,12 +113,16 @@ class IStreamHub_HubProxy implements IStreamHub {
         return await this.connection.invoke("Ping", message);
     }
 
-    public readonly sendMessage = async (content: string): Promise<void> => {
-        return await this.connection.invoke("SendMessage", content);
+    public readonly sendMessage = async (conversationId: number, content: string): Promise<void> => {
+        return await this.connection.invoke("SendMessage", conversationId, content);
     }
 
-    public readonly cancelMessage = async (): Promise<void> => {
-        return await this.connection.invoke("CancelMessage");
+    public readonly cancelMessage = async (conversationId: number): Promise<void> => {
+        return await this.connection.invoke("CancelMessage", conversationId);
+    }
+
+    public readonly reloadConversation = async (conversationId: number): Promise<void> => {
+        return await this.connection.invoke("ReloadConversation", conversationId);
     }
 }
 

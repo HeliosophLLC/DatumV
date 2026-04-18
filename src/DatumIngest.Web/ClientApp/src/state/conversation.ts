@@ -13,14 +13,11 @@ import {
 // `messages` and clear it. `status` drives view affordances (input
 // disabled while awaiting / streaming, enabled with banner on error).
 //
-// No DB rehydration on launch — see project_message_graph_design memory.
-// Fresh each session; persistence happens server-side for inspectability
-// and future rehydration.
-//
-// Event wiring lives at module scope: the hub's dispatcher fans events out
-// to anyone who subscribed. We register at import time so subscriptions
-// are in place before the first sendMessage call, regardless of view
-// mount order.
+// Conversations: on boot we fetch the default conversation id from the
+// server (lazy-creating one if needed) and hydrate `messages` from its
+// persisted history. `reloadConversation` re-fetches both the server's
+// in-memory accumulator (cleared) and our `messages` list — pair with a
+// hand-edit to the messages table to test reload semantics.
 
 export type Role = 'user' | 'assistant';
 
@@ -33,6 +30,7 @@ export interface ChatMessage {
 export type ChatStatus = 'idle' | 'awaiting' | 'streaming' | 'error';
 
 interface ConversationState {
+  conversationId: number | null;
   messages: ChatMessage[];
   streaming: string;
   status: ChatStatus;
@@ -40,11 +38,79 @@ interface ConversationState {
 }
 
 export const conversationState = proxy<ConversationState>({
+  conversationId: null,
   messages: [],
   streaming: '',
   status: 'idle',
   error: null,
 });
+
+interface MessageDto {
+  id: number;
+  conversationId: number;
+  kind: string;
+  role: string;
+  content: string;
+  model: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  createdAt: string;
+}
+
+interface ConversationDto {
+  id: number;
+  title: string | null;
+  model: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Filters server messages down to the shape the UI renders. Non-turn rows
+// (checkpoints, hidden) are skipped here; future commits may render
+// checkpoint dividers, at which point this widens.
+function toChatMessages(messages: MessageDto[]): ChatMessage[] {
+  return messages
+    .filter((m) => m.kind !== 'hidden' && (m.role === 'user' || m.role === 'assistant'))
+    .map((m) => ({
+      id: String(m.id),
+      role: m.role as Role,
+      content: m.content,
+    }));
+}
+
+async function fetchDefaultConversation(): Promise<ConversationDto> {
+  const res = await fetch('/api/conversations/default');
+  if (!res.ok) throw new Error(`GET /api/conversations/default → ${res.status}`);
+  return res.json() as Promise<ConversationDto>;
+}
+
+async function fetchMessages(conversationId: number): Promise<MessageDto[]> {
+  const res = await fetch(`/api/conversations/${conversationId}/messages`);
+  if (!res.ok) throw new Error(`GET messages for ${conversationId} → ${res.status}`);
+  return res.json() as Promise<MessageDto[]>;
+}
+
+// Fire-and-forget init: resolve the default conversation id and hydrate
+// its history. Errors are swallowed onto `status: 'error'` so the chat
+// surface can still render a banner instead of a blank screen.
+let initPromise: Promise<void> | null = null;
+function ensureInitialized(): Promise<void> {
+  if (initPromise) return initPromise;
+  initPromise = (async () => {
+    try {
+      const conv = await fetchDefaultConversation();
+      conversationState.conversationId = conv.id;
+      const messages = await fetchMessages(conv.id);
+      conversationState.messages = toChatMessages(messages);
+    } catch (err) {
+      conversationState.status = 'error';
+      conversationState.error =
+        err instanceof Error ? err.message : String(err);
+    }
+  })();
+  return initPromise;
+}
+void ensureInitialized();
 
 onChatToken((content) => {
   conversationState.streaming += content;
@@ -104,6 +170,10 @@ export async function sendMessage(content: string): Promise<void> {
     return;
   }
 
+  await ensureInitialized();
+  const conversationId = conversationState.conversationId;
+  if (conversationId === null) return;
+
   conversationState.messages.push({
     id: crypto.randomUUID(),
     role: 'user',
@@ -115,7 +185,7 @@ export async function sendMessage(content: string): Promise<void> {
 
   try {
     const hub = await acquireStreamHub();
-    await hub.sendMessage(trimmed);
+    await hub.sendMessage(conversationId, trimmed);
   } catch (err) {
     // If the server-side method threw or the connection failed during
     // invoke, surface as error state. If the connection-closed handler
@@ -131,11 +201,35 @@ export async function cancelMessage(): Promise<void> {
   if (conversationState.status !== 'awaiting' && conversationState.status !== 'streaming') {
     return;
   }
+  const conversationId = conversationState.conversationId;
+  if (conversationId === null) return;
   try {
     const hub = await acquireStreamHub();
-    await hub.cancelMessage();
+    await hub.cancelMessage(conversationId);
   } catch {
     // Best-effort; the server may have already finished. The OnComplete
     // path will reset status normally.
+  }
+}
+
+// Drops the server's accumulator for the active conversation and replaces
+// our local message list with whatever is in the database now. Use after
+// hand-editing the messages table via the SQL panel.
+export async function reloadConversation(): Promise<void> {
+  const conversationId = conversationState.conversationId;
+  if (conversationId === null) return;
+  try {
+    const hub = await acquireStreamHub();
+    await hub.reloadConversation(conversationId);
+    const messages = await fetchMessages(conversationId);
+    conversationState.messages = toChatMessages(messages);
+    conversationState.streaming = '';
+    if (conversationState.status === 'error') {
+      conversationState.status = 'idle';
+      conversationState.error = null;
+    }
+  } catch (err) {
+    conversationState.status = 'error';
+    conversationState.error = err instanceof Error ? err.message : String(err);
   }
 }

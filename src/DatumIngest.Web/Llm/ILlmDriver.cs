@@ -21,4 +21,13 @@ public interface ILlmDriver
     // fragment of the response (typically one or a few tokens). Concatenate
     // to recover the full response. Cancellation honored between chunks.
     IAsyncEnumerable<string> StreamAsync(string prompt, CancellationToken ct);
+
+    // Best-effort token count for `text` against this model's tokenizer.
+    // Used to populate input_tokens / output_tokens on persisted messages
+    // and (later) to surface "context X% full" hints in the UI. Today's
+    // LLamaSharp wrapper doesn't expose its tokenizer through IModel, so
+    // this is a chars/4 estimate — close enough for English chat, off by
+    // up to ~30% for code or other languages. Replace with a real
+    // tokenizer when we plumb llama_tokenize through.
+    int CountTokens(string text);
 }

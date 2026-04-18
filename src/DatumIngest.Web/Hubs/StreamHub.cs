@@ -22,12 +22,12 @@ public sealed class StreamHub : Hub<IStreamHubClient>, IStreamHub
     // when the client disconnects, which propagates through the agent's
     // SendAsync and stops generation. We don't need to push anything on
     // disconnect — there's no one listening.
-    public async Task SendMessage(string content)
+    public async Task SendMessage(long conversationId, string content)
     {
         CancellationToken ct = Context.ConnectionAborted;
         try
         {
-            await foreach (string token in _agent.SendAsync(content, ct).ConfigureAwait(false))
+            await foreach (string token in _agent.SendAsync(conversationId, content, ct).ConfigureAwait(false))
             {
                 await Clients.Caller.OnToken(token).ConfigureAwait(false);
             }
@@ -61,9 +61,16 @@ public sealed class StreamHub : Hub<IStreamHubClient>, IStreamHub
         }
     }
 
-    public Task CancelMessage()
+    public Task CancelMessage(long conversationId)
     {
-        _agent.CancelActive();
+        _agent.CancelActive(conversationId);
         return Task.CompletedTask;
     }
+
+    // Drops the in-memory accumulator for the conversation so the next
+    // SendAsync rebuilds from the messages table. Use this after editing
+    // rows directly (e.g. via the SQL panel) so the model sees the new
+    // state on the following turn.
+    public Task ReloadConversation(long conversationId) =>
+        _agent.ReloadAsync(conversationId, Context.ConnectionAborted);
 }

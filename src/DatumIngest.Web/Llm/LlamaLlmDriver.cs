@@ -44,6 +44,15 @@ internal sealed class LlamaLlmDriver : ILlmDriver, IDisposable
         }
     }
 
+    public int CountTokens(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        // chars/4 with a floor of 1 — see ILlmDriver.CountTokens for why
+        // this is a deliberate placeholder rather than the model's real
+        // tokenizer.
+        return Math.Max(1, text.Length / 4);
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

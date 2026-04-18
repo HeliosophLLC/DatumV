@@ -20,14 +20,21 @@ export type IStreamHub = {
     */
     ping(message: string): Promise<void>;
     /**
+    * @param conversationId Transpiled from long
     * @param content Transpiled from string
     * @returns Transpiled from System.Threading.Tasks.Task
     */
-    sendMessage(content: string): Promise<void>;
+    sendMessage(conversationId: number, content: string): Promise<void>;
     /**
+    * @param conversationId Transpiled from long
     * @returns Transpiled from System.Threading.Tasks.Task
     */
-    cancelMessage(): Promise<void>;
+    cancelMessage(conversationId: number): Promise<void>;
+    /**
+    * @param conversationId Transpiled from long
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    reloadConversation(conversationId: number): Promise<void>;
 }
 
 export type ICatalogHubClient = {
