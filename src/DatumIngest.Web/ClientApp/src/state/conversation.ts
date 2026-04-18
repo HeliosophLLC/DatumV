@@ -156,8 +156,10 @@ function summarise(dto: ConversationDto): ConversationSummary {
 }
 
 // Fire-and-forget init: resolve the default conversation id and hydrate
-// its history. Errors are swallowed onto `status: 'error'` so the chat
-// surface can still render a banner instead of a blank screen.
+// its history. The cache is cleared when the inner work fails so the
+// next call retries from scratch — otherwise a transient 500 at boot
+// would leave the surface stuck "loaded" with no conversation id and an
+// empty list until the page reloads.
 let initPromise: Promise<void> | null = null;
 function ensureInitialized(): Promise<void> {
   if (initPromise) return initPromise;
@@ -175,6 +177,13 @@ function ensureInitialized(): Promise<void> {
       conversationState.status = 'error';
       conversationState.error =
         err instanceof Error ? err.message : String(err);
+      // Drop the cache asynchronously so a follow-up sendMessage / open-
+      // popover / explicit retry hits the network again. Done in a
+      // microtask so the current `await ensureInitialized()` resolves
+      // first (it just resolved into the catch).
+      queueMicrotask(() => {
+        initPromise = null;
+      });
     }
   })();
   return initPromise;

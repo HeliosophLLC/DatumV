@@ -6,6 +6,7 @@ import {
   compactConversation,
   conversationState,
   newConversation,
+  refreshConversations,
   reloadConversation,
   switchConversation,
   type ConversationSummary,
@@ -62,7 +63,13 @@ export function ChatToolbar() {
       <ToolbarButton
         icon={<History className="size-3.5" />}
         label={t('history')}
-        onClick={() => setHistoryOpen((v) => !v)}
+        onClick={() => {
+          // Refresh on open so a transient boot-time fetch failure (or
+          // a row added via the SQL panel) doesn't leave the user
+          // staring at a stale empty list.
+          if (!historyOpen) void refreshConversations();
+          setHistoryOpen((v) => !v);
+        }}
         disabled={busy}
         ariaExpanded={historyOpen}
       />
