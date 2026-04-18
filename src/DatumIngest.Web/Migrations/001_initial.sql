@@ -1,8 +1,7 @@
--- v1 chat schema: persisted conversations + turns + per-app key/value
--- settings. Graph links (message_links), uploads, and files are still
--- deferred; the conversations and settings tables exist now because
--- multi-conversation + a persisted default-LLM setting are landing
--- together.
+-- v1 chat schema: persisted conversations + turns. Graph links
+-- (message_links), uploads, and files are still deferred. User-facing
+-- preferences (theme, default LLM, …) live in settings.json via
+-- ISettingsService — not here.
 
 CREATE TABLE __schema_migrations (
     version Int32 PRIMARY KEY,
@@ -33,9 +32,4 @@ CREATE TABLE messages (
     input_tokens Int32,
     output_tokens Int32,
     created_at TIMESTAMP NOT NULL DEFAULT now()
-);
-
-CREATE TABLE settings (
-    name String PRIMARY KEY,
-    value String
 );
