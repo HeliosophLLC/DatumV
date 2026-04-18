@@ -162,7 +162,10 @@ public sealed class CalibrationCoordinatorTests : IDisposable
         {
             int now = Interlocked.Increment(ref concurrentRamps);
             lock (syncLock) maxConcurrent = Math.Max(maxConcurrent, now);
-            await Task.Delay(10);
+            // Scale with batch so per-row time stays flat across the ramp;
+            // a fixed sleep makes msPerRow halve at every doubling, which
+            // lets ordinary OS timer jitter trip the spill detector.
+            await Task.Delay(10 * batch);
             Interlocked.Decrement(ref concurrentRamps);
         }
 
