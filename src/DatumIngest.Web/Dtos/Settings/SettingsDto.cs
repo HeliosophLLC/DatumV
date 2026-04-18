@@ -27,7 +27,12 @@ public sealed record SettingsDto(
     // registry's `kindKey`; values are mode ids registered for that kind.
     // Missing keys fall back to the registry's `defaultMode`. The client
     // owns the registry — server is just persistence.
-    IReadOnlyDictionary<string, string> ColumnDisplayModeDefaults);
+    IReadOnlyDictionary<string, string> ColumnDisplayModeDefaults,
+    // Catalog name of the LLM the chat surface should prefer when one
+    // exists. Null means "auto" — ModelSelector picks the largest model
+    // that fits in the VRAM budget. The chat driver reads this once on
+    // first load; runtime changes require a restart to apply.
+    string? DefaultLlmModel = null);
 
 // Partial document for PATCH /api/settings. All fields nullable; null means
 // "don't change this field." Server merges with the current document and
@@ -50,4 +55,9 @@ public sealed record SettingsPatchDto(
     // every persisted mode; null leaves the existing dict alone. Per-kind
     // upserts are done client-side by reading the current dict, mutating,
     // and re-sending — keeps the server's merge logic uniform.
-    IReadOnlyDictionary<string, string>? ColumnDisplayModeDefaults = null);
+    IReadOnlyDictionary<string, string>? ColumnDisplayModeDefaults = null,
+    // Catalog name of the preferred LLM. Mirrors SettingsDto.DefaultLlmModel.
+    // Null on the patch means "don't change" — use ClearDefaultLlmModel to
+    // explicitly fall back to auto-pick.
+    string? DefaultLlmModel = null,
+    bool ClearDefaultLlmModel = false);

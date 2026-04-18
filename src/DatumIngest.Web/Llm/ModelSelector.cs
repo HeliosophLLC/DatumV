@@ -20,7 +20,11 @@ internal static class ModelSelector
     // bumping into the limit.
     public const long ChatHeadroomBytes = 2L * 1024 * 1024 * 1024;
 
-    public static ModelSelection Select(ModelCatalog catalog)
+    // Returns the selection, or null when no installed LLM fits. When
+    // `preferred` is non-null and that model is installed and fits, it
+    // wins regardless of size; otherwise the largest-fits-the-budget rule
+    // applies. Pass null for `preferred` to skip the override path.
+    public static ModelSelection? TrySelect(ModelCatalog catalog, string? preferred = null)
     {
         long budget = catalog.VramBudgetBytes;
         long usableBudget = budget == ModelResidencyManager.UnlimitedBudget
@@ -42,12 +46,21 @@ internal static class ModelSelector
             candidates.Add(new Candidate(entry, estimated));
         }
 
-        if (candidates.Count == 0)
+        if (candidates.Count == 0) return null;
+
+        // User-pinned model wins when it's in the candidate set. A pinned
+        // name that doesn't match any installed-and-fitting LLM silently
+        // falls through to the auto-pick — the picker UI gates "uninstall
+        // the selected model" upstream, so this is a defensive case.
+        if (!string.IsNullOrEmpty(preferred))
         {
-            throw new InvalidOperationException(
-                $"No LLM available that fits in {FormatBytes(usableBudget)} of usable VRAM " +
-                $"(catalog budget {FormatBytes(budget)} − {FormatBytes(ChatHeadroomBytes)} chat headroom). " +
-                "Either drop a smaller LLM GGUF into the models directory, or raise the VRAM budget.");
+            foreach (Candidate c in candidates)
+            {
+                if (string.Equals(c.Entry.Name, preferred, StringComparison.OrdinalIgnoreCase))
+                {
+                    return new ModelSelection(c.Entry, c.EstimatedBytes, usableBudget);
+                }
+            }
         }
 
         // Largest model that fits wins. Ties broken by name for determinism.
@@ -58,6 +71,43 @@ internal static class ModelSelector
         });
         Candidate chosen = candidates[0];
         return new ModelSelection(chosen.Entry, chosen.EstimatedBytes, usableBudget);
+    }
+
+    // Lists every catalog entry that's both an LLM and present on disk —
+    // i.e. every model the picker can offer. Used by /api/llm/available
+    // to populate the Settings dropdown. Returned in the same order
+    // TrySelect would prefer (largest first, then alphabetical), so
+    // "auto" UI text can show the top entry as the projected pick.
+    public static IReadOnlyList<InstalledLlm> ListInstalled(ModelCatalog catalog)
+    {
+        long budget = catalog.VramBudgetBytes;
+        long usableBudget = budget == ModelResidencyManager.UnlimitedBudget
+            ? long.MaxValue
+            : Math.Max(0, budget - ChatHeadroomBytes);
+
+        List<InstalledLlm> results = new();
+        foreach (KeyValuePair<string, ModelCatalogEntry> kv in catalog.Entries)
+        {
+            ModelCatalogEntry entry = kv.Value;
+            if (!IsLlm(entry)) continue;
+            if (!IsFilePresent(entry, catalog.ModelDirectory)) continue;
+
+            long estimated = entry.EstimatedVramBytes
+                ?? EstimateFromFile(entry, catalog.ModelDirectory);
+            bool fits = estimated > 0 && estimated <= usableBudget;
+            results.Add(new InstalledLlm(
+                Name: entry.Name,
+                DisplayName: entry.DisplayName ?? entry.Name,
+                EstimatedVramBytes: estimated,
+                FitsInBudget: fits));
+        }
+
+        results.Sort((a, b) =>
+        {
+            int byBytes = b.EstimatedVramBytes.CompareTo(a.EstimatedVramBytes);
+            return byBytes != 0 ? byBytes : string.CompareOrdinal(a.Name, b.Name);
+        });
+        return results;
     }
 
     private static bool IsLlm(ModelCatalogEntry entry)
@@ -112,3 +162,23 @@ internal sealed record ModelSelection(
     ModelCatalogEntry Entry,
     long EstimatedBytes,
     long UsableBudgetBytes);
+
+public sealed record InstalledLlm(
+    string Name,
+    string DisplayName,
+    long EstimatedVramBytes,
+    bool FitsInBudget);
+
+// Thrown by LlmDriverHolder when no installed LLM satisfies the VRAM
+// budget. The hub surfaces the Message verbatim and the client checks for
+// a specific marker substring to switch the chat surface into the
+// "install an LLM" empty state instead of the generic error banner.
+public sealed class NoLlmInstalledException : InvalidOperationException
+{
+    public const string Marker = "NoLlmInstalled";
+
+    public NoLlmInstalledException(string detail)
+        : base($"{Marker}: {detail}")
+    {
+    }
+}

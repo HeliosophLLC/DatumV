@@ -593,6 +593,51 @@ export class LanguageClient {
     }
 }
 
+export class LlmClient {
+    private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
+    private baseUrl: string;
+    protected jsonParseReviver: ((key: string, value: any) => any) | undefined = undefined;
+
+    constructor(baseUrl?: string, http?: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> }) {
+        this.http = http ? http : window as any;
+        this.baseUrl = baseUrl ?? "";
+    }
+
+    available(signal?: AbortSignal): Promise<InstalledLlm[]> {
+        let url_ = this.baseUrl + "/api/llm/available";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processAvailable(_response);
+        });
+    }
+
+    protected processAvailable(response: Response): Promise<InstalledLlm[]> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as InstalledLlm[];
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<InstalledLlm[]>(null as any);
+    }
+}
+
 export class ModelCatalogClient {
     private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
     private baseUrl: string;
@@ -1591,6 +1636,13 @@ export interface LangSqlRequest {
     sql?: string;
 }
 
+export interface InstalledLlm {
+    name?: string;
+    displayName?: string;
+    estimatedVramBytes?: number;
+    fitsInBudget?: boolean;
+}
+
 export interface CatalogManifest {
     schemaVersion?: number;
     licenses?: { [key: string]: CatalogLicense; };
@@ -1760,6 +1812,7 @@ export interface SettingsDto {
     openLeftPanel?: string | undefined;
     openRightPanel?: string | undefined;
     columnDisplayModeDefaults?: { [key: string]: string; };
+    defaultLlmModel?: string | undefined;
 }
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -1779,6 +1832,8 @@ export interface SettingsPatchDto {
     clearOpenLeftPanel?: boolean;
     clearOpenRightPanel?: boolean;
     columnDisplayModeDefaults?: { [key: string]: string; } | undefined;
+    defaultLlmModel?: string | undefined;
+    clearDefaultLlmModel?: boolean;
 }
 
 export interface FileResponse {

@@ -2,6 +2,7 @@ import {
   FunctionCatalogClient,
   HealthClient,
   LanguageClient,
+  LlmClient,
   ModelCatalogClient,
   ModelRuntimeClient,
   QueryExplainClient,
@@ -35,6 +36,7 @@ export function createApi(baseUrl = '') {
     functionCatalog: new FunctionCatalogClient(baseUrl, http),
     schemaCatalog: new SchemaCatalogClient(baseUrl, http),
     queryExplain: new QueryExplainClient(baseUrl, http),
+    llm: new LlmClient(baseUrl, http),
   };
 }
 

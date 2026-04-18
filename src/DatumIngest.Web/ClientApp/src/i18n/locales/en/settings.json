@@ -30,6 +30,15 @@
     "directoryHint": "Changes apply on next launch.",
     "directorySaved": "Saved — restart the app to use the new directory."
   },
+  "chat": {
+    "title": "Chat",
+    "llm": "Language model",
+    "llmAuto": "Auto (largest fitting)",
+    "llmHint": "Restart the app for the change to apply.",
+    "llmEmpty": "No LLMs installed yet.",
+    "llmOpenModels": "Open Models",
+    "llmDoesntFit": "(may not fit in VRAM)"
+  },
   "about": {
     "title": "About",
     "version": "Version",

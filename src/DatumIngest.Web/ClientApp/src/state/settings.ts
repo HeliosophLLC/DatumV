@@ -39,6 +39,10 @@ interface SettingsState {
   // back to the registry baseline. Per-column chip overrides happen
   // client-side in CellTable and don't persist.
   columnDisplayModeDefaults: Record<string, string>;
+  // Catalog name of the preferred chat LLM. Null = "auto" (largest
+  // model fitting in the VRAM budget). The server reads this once on
+  // first chat load — runtime changes apply after a restart.
+  defaultLlmModel: string | null;
 }
 
 export const settingsState = proxy<SettingsState>({
@@ -52,6 +56,7 @@ export const settingsState = proxy<SettingsState>({
   openLeftPanel: null,
   openRightPanel: null,
   columnDisplayModeDefaults: {},
+  defaultLlmModel: null,
 });
 
 function applyDto(dto: SettingsDto): void {
@@ -71,6 +76,7 @@ function applyDto(dto: SettingsDto): void {
   // NSwag may type the dict as `{ [key: string]: string } | undefined`;
   // empty-object fallback keeps every read site safe to index.
   settingsState.columnDisplayModeDefaults = (dto.columnDisplayModeDefaults ?? {}) as Record<string, string>;
+  settingsState.defaultLlmModel = dto.defaultLlmModel ?? null;
 }
 
 export async function refreshSettings(): Promise<void> {
@@ -101,6 +107,17 @@ export function setAnimations(animations: boolean): Promise<void> {
 
 export function setModelsDirectory(modelsDirectory: string): Promise<void> {
   return updateSettings({ modelsDirectory });
+}
+
+// `null` reverts the chat surface to the auto-pick (largest installed
+// LLM that fits VRAM). The server flips the persisted slot back to null
+// via the explicit clear flag — sending `defaultLlmModel: null` alone
+// would be ignored as a no-op patch.
+export function setDefaultLlmModel(name: string | null): Promise<void> {
+  if (name === null) {
+    return updateSettings({ clearDefaultLlmModel: true });
+  }
+  return updateSettings({ defaultLlmModel: name });
 }
 
 /**

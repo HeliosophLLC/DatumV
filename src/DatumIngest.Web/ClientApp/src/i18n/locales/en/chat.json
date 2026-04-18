@@ -6,5 +6,8 @@
   "thinking": "Thinking…",
   "errorPrefix": "Something went wrong: {message}",
   "reload": "Reload",
-  "reloadHint": "Re-read this conversation from the database"
+  "reloadHint": "Re-read this conversation from the database",
+  "noLlmTitle": "No LLM installed",
+  "noLlmDescription": "Install an LLM from the Models tab to start chatting.",
+  "noLlmOpenModels": "Open Models"
 }

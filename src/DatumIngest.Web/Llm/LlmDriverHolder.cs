@@ -1,6 +1,8 @@
 using DatumIngest.Catalog;
 using DatumIngest.Models;
 using DatumIngest.Models.Llama;
+using DatumIngest.Web.Hosting;
+using DatumIngest.Web.Settings;
 using Microsoft.Extensions.Logging;
 
 namespace DatumIngest.Web.Llm;
@@ -19,14 +21,19 @@ namespace DatumIngest.Web.Llm;
 internal sealed class LlmDriverHolder : IAsyncDisposable
 {
     private readonly TableCatalog _tableCatalog;
+    private readonly WebHostOptions _options;
     private readonly ILogger<LlmDriverHolder> _logger;
     private readonly object _gate = new();
     private Task<ILlmDriver>? _loadTask;
     private ILlmDriver? _loaded;
 
-    public LlmDriverHolder(TableCatalog tableCatalog, ILogger<LlmDriverHolder> logger)
+    public LlmDriverHolder(
+        TableCatalog tableCatalog,
+        WebHostOptions options,
+        ILogger<LlmDriverHolder> logger)
     {
         _tableCatalog = tableCatalog;
+        _options = options;
         _logger = logger;
     }
 
@@ -60,7 +67,23 @@ internal sealed class LlmDriverHolder : IAsyncDisposable
                 "No ModelCatalog attached to TableCatalog — chat surface is unavailable. " +
                 "Set WebHostOptions.RegisterBuiltinModels = true to attach the standard zoo.");
 
-        ModelSelection selection = ModelSelector.Select(modelCatalog);
+        // Read the user's pinned LLM at load time so settings → restart →
+        // load picks up changes without a second redeploy hop. The setting
+        // file path is the same one ISettingsService writes to; reading it
+        // directly avoids the scoped-from-singleton plumbing.
+        string? preferred = !string.IsNullOrWhiteSpace(_options.CatalogRootPath)
+            ? StartupSettingsLoader.LoadDefaultLlm(_options.CatalogRootPath)
+            : null;
+
+        ModelSelection? maybeSelection = ModelSelector.TrySelect(modelCatalog, preferred);
+        if (maybeSelection is null)
+        {
+            throw new NoLlmInstalledException(
+                "No LLM is installed that fits the current VRAM budget. " +
+                "Install an LLM from the Models tab to enable chat.");
+        }
+
+        ModelSelection selection = maybeSelection;
         _logger.LogInformation(
             "Selected LLM '{Name}' ({Display}, ~{Bytes} estimated VRAM, usable budget {Budget}).",
             selection.Entry.Name,

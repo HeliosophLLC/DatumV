@@ -6,6 +6,13 @@ import {
   onChatToken,
   onConnectionClosed,
 } from '@/api/hub';
+import { refreshAvailableLlms } from './llm';
+
+// Server-side sentinel (DatumIngest.Web.Llm.NoLlmInstalledException.Marker).
+// When an OnError message starts with this token we suppress the generic
+// "something went wrong" banner — the chat surface renders its own empty
+// state via llmState.available being empty.
+const NO_LLM_MARKER = 'NoLlmInstalled';
 
 // Mirrors the server's reactive loop. `messages` is the persisted turns
 // list; `streaming` accumulates the in-flight assistant turn token by
@@ -126,6 +133,22 @@ onChatComplete(() => {
 });
 
 onChatError((message) => {
+  if (message.includes(NO_LLM_MARKER)) {
+    // Don't show the generic error banner — the chat surface will render
+    // a dedicated empty state once llmState refreshes (which the server
+    // confirms: no LLM is loadable right now). Drop the optimistic user
+    // turn that was pushed before the send too, so the user's input
+    // doesn't linger as if it were accepted.
+    if (conversationState.messages.length > 0) {
+      const last = conversationState.messages[conversationState.messages.length - 1];
+      if (last.role === 'user') conversationState.messages.pop();
+    }
+    conversationState.status = 'idle';
+    conversationState.error = null;
+    conversationState.streaming = '';
+    void refreshAvailableLlms();
+    return;
+  }
   conversationState.status = 'error';
   conversationState.error = message;
   conversationState.streaming = '';

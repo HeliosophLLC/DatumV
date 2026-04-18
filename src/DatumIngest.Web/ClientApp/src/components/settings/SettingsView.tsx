@@ -6,12 +6,15 @@ import {
   setAnimations,
   setChromeStyle,
   setColumnDisplayModeDefault,
+  setDefaultLlmModel,
   setModelsDirectory,
   type ChromeStyle,
   type ThemePreference,
 } from '@/state/settings';
 import { setTheme } from '@/state/theme';
 import { healthState, refreshHealth } from '@/state/health';
+import { llmState } from '@/state/llm';
+import { MODELS_TAB_ID, selectTab } from '@/state/tabs';
 import {
   COLUMN_MODE_REGISTRY,
   type ColumnDisplayModeDef,
@@ -96,6 +99,10 @@ export function SettingsView() {
             persistedValue={settings.modelsDirectory}
             effectivePath={health?.modelsDirectory ?? null}
           />
+        </Section>
+
+        <Section title={t('chat.title')}>
+          <ChatLlmField persistedValue={settings.defaultLlmModel} />
         </Section>
 
         <Section title={t('columnModes.title')}>
@@ -271,6 +278,61 @@ function ColumnModeDefaultField({
           });
         }}
       />
+    </Field>
+  );
+}
+
+function ChatLlmField({ persistedValue }: { persistedValue: string | null }) {
+  const { t } = useTranslation('settings');
+  const { available, loading } = useSnapshot(llmState);
+  const isEmpty = !loading && available.length === 0;
+  const currentValue = persistedValue ?? '';
+
+  if (isEmpty) {
+    return (
+      <Field label={t('chat.llm')}>
+        <div className="flex flex-col gap-2 sm:items-end">
+          <select
+            disabled
+            value=""
+            className="rounded-xs border bg-background px-2 py-1 text-xs opacity-50"
+          >
+            <option value="">{t('chat.llmEmpty')}</option>
+          </select>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => selectTab(MODELS_TAB_ID)}
+          >
+            {t('chat.llmOpenModels')}
+          </Button>
+        </div>
+      </Field>
+    );
+  }
+
+  return (
+    <Field label={t('chat.llm')}>
+      <div className="flex flex-col gap-1 sm:items-end">
+        <select
+          value={currentValue}
+          onChange={(e) =>
+            void setDefaultLlmModel(e.target.value === '' ? null : e.target.value)
+          }
+          disabled={loading}
+          className="rounded-xs border bg-background px-2 py-1 text-xs"
+        >
+          <option value="">{t('chat.llmAuto')}</option>
+          {available.map((m) => (
+            <option key={m.name} value={m.name}>
+              {m.displayName}
+              {!m.fitsInBudget ? ` ${t('chat.llmDoesntFit')}` : ''}
+            </option>
+          ))}
+        </select>
+        <span className="text-muted-foreground text-xs">{t('chat.llmHint')}</span>
+      </div>
     </Field>
   );
 }

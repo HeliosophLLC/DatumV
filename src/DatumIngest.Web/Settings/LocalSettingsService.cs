@@ -41,7 +41,8 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
         DockRightItems: DefaultDockRightItems,
         OpenLeftPanel: null,
         OpenRightPanel: null,
-        ColumnDisplayModeDefaults: DefaultColumnDisplayModeDefaults);
+        ColumnDisplayModeDefaults: DefaultColumnDisplayModeDefaults,
+        DefaultLlmModel: null);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -104,7 +105,13 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
             OpenRightPanel: patch.ClearOpenRightPanel
                 ? null
                 : patch.OpenRightPanel ?? current.OpenRightPanel,
-            ColumnDisplayModeDefaults: patch.ColumnDisplayModeDefaults ?? current.ColumnDisplayModeDefaults);
+            ColumnDisplayModeDefaults: patch.ColumnDisplayModeDefaults ?? current.ColumnDisplayModeDefaults,
+            // Clear flag wins over a present value, matching the OpenPanel
+            // pattern above — clients shouldn't send both, but if they do
+            // the explicit clear semantically dominates.
+            DefaultLlmModel: patch.ClearDefaultLlmModel
+                ? null
+                : patch.DefaultLlmModel ?? current.DefaultLlmModel);
 
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
 
