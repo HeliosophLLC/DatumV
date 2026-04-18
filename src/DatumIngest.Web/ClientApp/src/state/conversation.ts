@@ -175,10 +175,13 @@ onChatComplete(() => {
   // Includes the cancellation path — server emits OnComplete after
   // persisting whatever partial response it captured.
   finalizeStreamingTurn();
-  // Refresh the popover list so updated_at re-sorts and any title the
-  // server has set is reflected. Fire-and-forget; popover failures are
-  // cosmetic.
+  // Refresh the popover list so updated_at re-sorts. The first refresh
+  // catches the just-updated row. The second one picks up the auto-
+  // generated title, which is produced fire-and-forget by the agent
+  // after OnComplete fires — a delay is the cheap alternative to
+  // wiring a dedicated hub push for the title.
   void refreshConversations();
+  window.setTimeout(() => void refreshConversations(), 4000);
 });
 
 onChatError((message) => {

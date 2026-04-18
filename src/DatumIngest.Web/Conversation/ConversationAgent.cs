@@ -151,10 +151,76 @@ internal sealed class ConversationAgent : IConversationAgent
 
         await _registry.TouchAsync(conversationId, CancellationToken.None).ConfigureAwait(false);
 
+        // Fire-and-forget: when the conversation is still untitled,
+        // generate a short title in the background using the same driver.
+        // We don't block the user's OnComplete on title generation.
+        if (assistantContent.Length > 0)
+        {
+            _ = Task.Run(() => MaybeAutoTitleAsync(conversationId, userContent, driver, template));
+        }
+
         if (wasCancelled)
         {
             ct.ThrowIfCancellationRequested();
             throw new OperationCanceledException();
+        }
+    }
+
+    private async Task MaybeAutoTitleAsync(
+        long conversationId,
+        string firstUserMessage,
+        ILlmDriver driver,
+        LlamaChatTemplate template)
+    {
+        try
+        {
+            ConversationSummary? summary = await _registry
+                .GetAsync(conversationId, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (summary is null || !string.IsNullOrWhiteSpace(summary.Title))
+            {
+                return;
+            }
+
+            string titlePrompt =
+                template.Open
+                + template.WrapMessage("system",
+                    "You produce conversation titles. Output a short title of "
+                    + "3 to 6 words that summarizes the user's message. No quotes, "
+                    + "no punctuation, no trailing period, no preamble — just the title.")
+                + template.WrapMessage("user", firstUserMessage)
+                + template.AssistantTurn;
+
+            StringBuilder builder = new();
+            await foreach (string chunk in driver.StreamAsync(titlePrompt, CancellationToken.None)
+                .ConfigureAwait(false))
+            {
+                builder.Append(chunk);
+                // Guard against a misbehaving model running away — titles are
+                // short by definition, and the stop sequences should catch
+                // most cases anyway.
+                if (builder.Length > 240) break;
+            }
+
+            string title = builder.ToString();
+            foreach (string stop in template.StopSequences)
+            {
+                if (stop.Length == 0) continue;
+                int idx = title.IndexOf(stop, StringComparison.Ordinal);
+                if (idx >= 0) title = title[..idx];
+            }
+            title = title.Trim().Trim('"', '\'', '.', ' ');
+            if (title.Length > 80) title = title[..80].TrimEnd();
+            if (title.Length == 0) return;
+
+            await _registry.SetTitleAsync(conversationId, title, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            // Title generation is best-effort. Network blips, model unloads
+            // mid-call, etc. all silently leave the conversation untitled
+            // and the next send retries on the same condition.
         }
     }
 

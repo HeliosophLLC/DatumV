@@ -23,6 +23,12 @@ public interface IConversationRegistry
     // Bumps `updated_at` to now. Called by the agent after each turn so the
     // history list can sort by recency without a per-row JOIN against messages.
     Task TouchAsync(long id, CancellationToken ct);
+
+    // Sets the conversation's title. Used today only by the auto-title
+    // path after the first assistant turn; the UI doesn't yet expose a
+    // rename action. A null `title` clears the field — kept symmetric
+    // with the column being nullable.
+    Task SetTitleAsync(long id, string? title, CancellationToken ct);
 }
 
 public sealed record ConversationSummary(

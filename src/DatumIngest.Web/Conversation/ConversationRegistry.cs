@@ -105,6 +105,22 @@ internal sealed class ConversationRegistry : IConversationRegistry
         return null;
     }
 
+    public async Task SetTitleAsync(long id, string? title, CancellationToken ct)
+    {
+        Dictionary<string, ParameterValue> parameters = new()
+        {
+            ["id"] = new InlineParameter(DataValue.FromInt64(id)),
+            ["title"] = title is null
+                ? new InlineParameter(DataValue.Null(DataKind.String))
+                : new StringParameter(title),
+        };
+        Statement statement = SqlParser.ParseStatement(
+            "UPDATE conversations SET title = $title, updated_at = now() WHERE id = $id");
+        Statement bound = ParameterBinder.Bind(statement, parameters);
+        await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
+        _ = ct;
+    }
+
     public async Task TouchAsync(long id, CancellationToken ct)
     {
         Dictionary<string, ParameterValue> parameters = new()
