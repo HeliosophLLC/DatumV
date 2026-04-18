@@ -230,6 +230,26 @@ public sealed class UpdateExecutorTests : ServiceTestBase, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Update_DatumFile_SetLongStringSpillsToSidecar()
+    {
+        // Regression: SET to a string longer than the in-memory inline cap
+        // (27 bytes) put the new value in workArena. CoerceForUpdate's slow
+        // path was reading the bytes back through the batch arena (often
+        // empty for tables that don't eager-decode), throwing
+        // "Arena[#N] has not been allocated". Reproduces the user-reported
+        // failure on `UPDATE messages SET content = '<34 bytes>' WHERE id = 46`.
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (id Int32, content String)");
+        catalog.Plan("INSERT INTO t VALUES (1, 'short'), (2, 'short'), (3, 'short')");
+
+        const string longValue = "test test test test test test test"; // 35 bytes UTF-8
+        catalog.Plan($"UPDATE t SET content = '{longValue}' WHERE id = 2");
+
+        var rows = await ScanAsTuples(catalog["t"]);
+        Assert.Equal(new[] { (1, "short"), (2, longValue), (3, "short") }, rows);
+    }
+
+    [Fact]
     public async Task Update_DatumFile_AfterDelete_LiveIndexMaps()
     {
         // Verifies that UPDATE's live-row indexing skips tombstoned rows
@@ -256,6 +276,8 @@ public sealed class UpdateExecutorTests : ServiceTestBase, IAsyncLifetime
 
     private static async Task<List<(int, string)>> ScanAsTuples(ITableProvider provider)
     {
+        DatumIngest.DatumFile.Sidecar.SidecarRegistry? registry =
+            (provider as DatumIngest.Catalog.Providers.DatumFileTableProviderV2)?.SidecarRegistry;
         List<(int, string)> rows = new();
         await foreach (RowBatch batch in provider.ScanAsync(null, null, null, CancellationToken.None))
         {
@@ -265,7 +287,7 @@ public sealed class UpdateExecutorTests : ServiceTestBase, IAsyncLifetime
                 for (int r = 0; r < batch.Count; r++)
                 {
                     Row row = batch[r];
-                    rows.Add((row[0].AsInt32(), row[1].AsString(arena)));
+                    rows.Add((row[0].AsInt32(), row[1].AsString(arena, registry)));
                 }
             }
             finally { batch.Dispose(); }

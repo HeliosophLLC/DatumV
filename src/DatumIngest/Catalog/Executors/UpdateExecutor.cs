@@ -705,7 +705,16 @@ internal static class UpdateExecutor
                 "Struct, typed arrays, Image / Audio / ByteArray — land in a follow-up).");
         }
 
-        object scalar = source.ToObject(sourceStore, sidecarRegistry)!;
+        // Arena-backed source values (the only kind that reaches here for variable-
+        // length data) live in targetArena, not sourceStore: the SET evaluator's
+        // frame is built with Source=batch arena, Target=workArena=targetArena, and
+        // every materialising expression (literals, scalar functions, …) writes to
+        // frame.Target. Column pass-through (e.g. `SET col = col`) returns the
+        // existing column value, which the scan emits as inline or sidecar — both
+        // handled by the fast path above — so arena-backed source values arriving
+        // here are always in targetArena. Reading them out of sourceStore (the
+        // batch arena, often empty) throws "Arena[#N] has not been allocated".
+        object scalar = source.ToObject(targetArena, sidecarRegistry)!;
         return LiteralCoercion.Coerce(scalar, target, targetArena, target.Name);
     }
 
