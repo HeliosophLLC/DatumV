@@ -58,23 +58,14 @@ export function ChatToolbar() {
   }
 
   return (
-    <div className="flex items-center justify-end gap-1 border-b px-3 py-1">
-      <div ref={popoverRef} className="relative">
-        <ToolbarButton
-          icon={<History className="size-3.5" />}
-          label={t('history')}
-          onClick={() => setHistoryOpen((v) => !v)}
-          disabled={busy}
-          ariaExpanded={historyOpen}
-        />
-        {historyOpen && (
-          <HistoryPopover
-            conversations={conversations}
-            activeId={conversationId}
-            onSelect={onSelect}
-          />
-        )}
-      </div>
+    <div ref={popoverRef} className="relative flex items-center justify-end gap-1 border-b px-3 py-1">
+      <ToolbarButton
+        icon={<History className="size-3.5" />}
+        label={t('history')}
+        onClick={() => setHistoryOpen((v) => !v)}
+        disabled={busy}
+        ariaExpanded={historyOpen}
+      />
       <ToolbarButton
         icon={<Plus className="size-3.5" />}
         label={t('newConversation')}
@@ -95,6 +86,13 @@ export function ChatToolbar() {
         onClick={reloadConversation}
         disabled={busy}
       />
+      {historyOpen && (
+        <HistoryPopover
+          conversations={conversations}
+          activeId={conversationId}
+          onSelect={onSelect}
+        />
+      )}
     </div>
   );
 }
@@ -148,9 +146,13 @@ function HistoryPopover({
   return (
     <div
       role="listbox"
+      // Anchored to the toolbar's right edge with the same `px-3` inset
+      // as the buttons. Width caps at 20rem but shrinks to fit narrow
+      // panels via the max-w calc, so the popover never overflows the
+      // chat surface horizontally.
       className={cn(
-        'bg-popover text-popover-foreground absolute right-0 top-full z-50 mt-1',
-        'min-w-[14rem] max-w-[20rem] max-h-[24rem] overflow-y-auto',
+        'bg-popover text-popover-foreground absolute right-3 top-full z-50 mt-1',
+        'w-[20rem] max-w-[calc(100%-1.5rem)] max-h-[60vh] overflow-y-auto',
         'rounded-xs border shadow-md',
       )}
     >
@@ -160,25 +162,31 @@ function HistoryPopover({
         </div>
       ) : (
         <ul className="py-1">
-          {conversations.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                onClick={() => onSelect(c.id)}
-                aria-selected={c.id === activeId}
-                className={cn(
-                  'w-full px-3 py-1.5 text-left text-xs',
-                  'hover:bg-muted',
-                  c.id === activeId && 'bg-muted/70 font-medium',
-                )}
-              >
-                <div className="truncate">{c.title ?? t('historyUntitled')}</div>
-                <div className="text-muted-foreground text-[10px]">
-                  {formatTimestamp(c.updatedAt)}
-                </div>
-              </button>
-            </li>
-          ))}
+          {conversations.map((c) => {
+            const isActive = c.id === activeId;
+            return (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(c.id)}
+                  aria-selected={isActive}
+                  disabled={isActive}
+                  className={cn(
+                    'w-full px-3 py-1.5 text-left text-xs',
+                    'hover:bg-muted',
+                    isActive
+                      ? 'bg-muted/70 font-medium cursor-default'
+                      : 'cursor-pointer',
+                  )}
+                >
+                  <div className="truncate">{c.title ?? t('historyUntitled')}</div>
+                  <div className="text-muted-foreground text-[10px]">
+                    {formatTimestamp(c.updatedAt)}
+                  </div>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
