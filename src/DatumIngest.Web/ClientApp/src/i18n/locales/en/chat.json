@@ -11,6 +11,9 @@
   "historyEmpty": "No conversations yet.",
   "historyUntitled": "Untitled conversation",
   "newConversation": "New",
+  "compact": "Compact",
+  "compactHint": "Summarize earlier turns so the model has more room to think",
+  "checkpointLabel": "Compacted",
   "noLlmTitle": "No LLM installed",
   "noLlmDescription": "Install an LLM from the Models tab to start chatting.",
   "noLlmOpenModels": "Open Models"

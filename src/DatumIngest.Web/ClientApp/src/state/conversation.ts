@@ -30,7 +30,12 @@ export type Role = 'user' | 'assistant';
 
 export interface ChatMessage {
   id: string;
-  role: Role;
+  // 'turn' rows are user/assistant exchanges. 'checkpoint' rows are
+  // compaction summaries — the UI renders a labeled divider with the
+  // summary text underneath; the model sees them as a synthetic system
+  // message during prompt assembly.
+  kind: 'turn' | 'checkpoint';
+  role: Role | 'system';
   content: string;
 }
 
@@ -47,6 +52,11 @@ interface ConversationState {
   streaming: string;
   status: ChatStatus;
   error: string | null;
+  // True while a compaction pass is running on the server. The toolbar
+  // disables actions and shows a spinner during this window. Separate
+  // from `status` because compaction doesn't block the user from reading
+  // history — only from kicking off another mutation.
+  compacting: boolean;
 }
 
 export interface ConversationSummary {
@@ -62,6 +72,7 @@ export const conversationState = proxy<ConversationState>({
   streaming: '',
   status: 'idle',
   error: null,
+  compacting: false,
 });
 
 interface MessageDto {
@@ -84,17 +95,32 @@ interface ConversationDto {
   updatedAt: string;
 }
 
-// Filters server messages down to the shape the UI renders. Non-turn rows
-// (checkpoints, hidden) are skipped here; future commits may render
-// checkpoint dividers, at which point this widens.
+// Filters server messages down to the shape the UI renders. Hidden rows
+// are skipped; checkpoint rows are surfaced so the UI can show a divider
+// at the compaction point. Anything else (unknown roles / kinds from a
+// future schema) is dropped silently.
 function toChatMessages(messages: MessageDto[]): ChatMessage[] {
-  return messages
-    .filter((m) => m.kind !== 'hidden' && (m.role === 'user' || m.role === 'assistant'))
-    .map((m) => ({
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    if (m.kind === 'hidden') continue;
+    if (m.kind === 'checkpoint') {
+      out.push({
+        id: String(m.id),
+        kind: 'checkpoint',
+        role: 'system',
+        content: m.content,
+      });
+      continue;
+    }
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    out.push({
       id: String(m.id),
-      role: m.role as Role,
+      kind: 'turn',
+      role: m.role,
       content: m.content,
-    }));
+    });
+  }
+  return out;
 }
 
 async function fetchDefaultConversation(): Promise<ConversationDto> {
@@ -227,6 +253,7 @@ function finalizeStreamingTurn() {
   if (conversationState.streaming.length > 0) {
     conversationState.messages.push({
       id: crypto.randomUUID(),
+      kind: 'turn',
       role: 'assistant',
       content: conversationState.streaming,
     });
@@ -251,6 +278,7 @@ export async function sendMessage(content: string): Promise<void> {
 
   conversationState.messages.push({
     id: crypto.randomUUID(),
+    kind: 'turn',
     role: 'user',
     content: trimmed,
   });
@@ -333,6 +361,39 @@ export async function switchConversation(id: number): Promise<void> {
   } catch (err) {
     conversationState.status = 'error';
     conversationState.error = err instanceof Error ? err.message : String(err);
+  }
+}
+
+// Runs the server's compaction pass on the active conversation: a
+// summary checkpoint row is inserted at the tail and the next send
+// rebuilds the prompt around it. The UI shows the full history; the
+// LLM only sees system + summary + post-checkpoint turns.
+//
+// `compacting` flips to true for the duration of the call so the
+// toolbar can show a spinner. Returns the number of turns compacted —
+// caller code doesn't currently consume the value but it's useful for
+// future "compacted N messages" toasts.
+export async function compactConversation(): Promise<number> {
+  const conversationId = conversationState.conversationId;
+  if (conversationId === null) return 0;
+  if (conversationState.status === 'awaiting' || conversationState.status === 'streaming') {
+    return 0;
+  }
+  conversationState.compacting = true;
+  try {
+    const hub = await acquireStreamHub();
+    const count = await hub.compactConversation(conversationId);
+    if (count > 0) {
+      const messages = await fetchMessages(conversationId);
+      conversationState.messages = toChatMessages(messages);
+    }
+    return count;
+  } catch (err) {
+    conversationState.status = 'error';
+    conversationState.error = err instanceof Error ? err.message : String(err);
+    return 0;
+  } finally {
+    conversationState.compacting = false;
   }
 }
 

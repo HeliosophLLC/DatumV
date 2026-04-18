@@ -243,6 +243,101 @@ internal sealed class ConversationAgent : IConversationAgent
         return Task.CompletedTask;
     }
 
+    public async Task<int> CompactAsync(long conversationId, CancellationToken ct)
+    {
+        // Refuse compaction while a send is in flight on this conversation —
+        // the accumulator and message rows would race. The caller (hub /
+        // controller) surfaces the no-op to the client by inspecting the
+        // returned count.
+        if (_sessions.TryGetValue(conversationId, out Session? existing)
+            && existing.ActiveCts is not null)
+        {
+            return 0;
+        }
+
+        ILlmDriver driver = await _holder.GetAsync(ct).ConfigureAwait(false);
+        LlamaChatTemplate template = driver.Template;
+
+        IReadOnlyList<MessageRecord> history = await _graph
+            .ReadHistoryAsync(conversationId, ct)
+            .ConfigureAwait(false);
+
+        // Find the last checkpoint id; only messages after it are
+        // candidates for the new summary. Older history is already
+        // captured by the prior checkpoint and isn't re-summarised here
+        // (the two-stage cascade is deferred).
+        long checkpointBoundary = 0;
+        foreach (MessageRecord m in history)
+        {
+            if (m.Kind == "checkpoint" && m.Id > checkpointBoundary)
+            {
+                checkpointBoundary = m.Id;
+            }
+        }
+
+        List<MessageRecord> toSummarise = new();
+        foreach (MessageRecord m in history)
+        {
+            if (m.Id <= checkpointBoundary) continue;
+            if (m.Kind != "turn") continue;
+            if (m.Role != "user" && m.Role != "assistant") continue;
+            toSummarise.Add(m);
+        }
+
+        if (toSummarise.Count == 0) return 0;
+
+        StringBuilder body = new();
+        foreach (MessageRecord m in toSummarise)
+        {
+            body.Append(m.Role == "user" ? "User: " : "Assistant: ");
+            body.Append(m.Content);
+            body.Append("\n\n");
+        }
+
+        string prompt =
+            template.Open
+            + template.WrapMessage("system",
+                "Summarize the following conversation so the assistant can pick up "
+                + "where it left off without the full history. Capture intent, "
+                + "decisions, code or data shown, and open questions. Aim for "
+                + "150–300 words. Output the summary only — no preamble.")
+            + template.WrapMessage("user", body.ToString().TrimEnd())
+            + template.AssistantTurn;
+
+        StringBuilder summaryBuilder = new();
+        await foreach (string chunk in driver.StreamAsync(prompt, ct).ConfigureAwait(false))
+        {
+            summaryBuilder.Append(chunk);
+        }
+
+        string summary = summaryBuilder.ToString();
+        foreach (string stop in template.StopSequences)
+        {
+            if (stop.Length == 0) continue;
+            int idx = summary.IndexOf(stop, StringComparison.Ordinal);
+            if (idx >= 0) summary = summary[..idx];
+        }
+        summary = summary.Trim();
+        if (summary.Length == 0) return 0;
+
+        await _graph.AppendAsync(
+            conversationId,
+            new MessageDraft(
+                Role: "system",
+                Content: summary,
+                Model: driver.ModelName,
+                OutputTokens: driver.CountTokens(summary),
+                Kind: "checkpoint"),
+            CancellationToken.None).ConfigureAwait(false);
+
+        // Drop the session so the next send rebuilds the prompt with
+        // the new checkpoint summary in effect.
+        _sessions.TryRemove(conversationId, out _);
+        await _registry.TouchAsync(conversationId, CancellationToken.None).ConfigureAwait(false);
+
+        return toSummarise.Count;
+    }
+
     private async Task<string> BuildAccumulatorFromHistoryAsync(
         long conversationId,
         LlamaChatTemplate template,

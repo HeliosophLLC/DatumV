@@ -25,4 +25,11 @@ public interface IStreamHub
     // Pair with hand-edits to the messages table when you want the model
     // to see the new state on the following turn.
     Task ReloadConversation(long conversationId);
+
+    // Runs the LLM-driven compaction pass: summarises every turn since
+    // the latest checkpoint, persists the summary as a new checkpoint
+    // row, drops the in-memory accumulator. Returns the number of turns
+    // compacted (0 = no-op — there was nothing new to summarise or a
+    // send is in flight).
+    Task<int> CompactConversation(long conversationId);
 }

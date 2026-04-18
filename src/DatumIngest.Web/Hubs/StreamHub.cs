@@ -73,4 +73,7 @@ public sealed class StreamHub : Hub<IStreamHubClient>, IStreamHub
     // state on the following turn.
     public Task ReloadConversation(long conversationId) =>
         _agent.ReloadAsync(conversationId, Context.ConnectionAborted);
+
+    public Task<int> CompactConversation(long conversationId) =>
+        _agent.CompactAsync(conversationId, Context.ConnectionAborted);
 }

@@ -124,6 +124,10 @@ class IStreamHub_HubProxy implements IStreamHub {
     public readonly reloadConversation = async (conversationId: number): Promise<void> => {
         return await this.connection.invoke("ReloadConversation", conversationId);
     }
+
+    public readonly compactConversation = async (conversationId: number): Promise<number> => {
+        return await this.connection.invoke("CompactConversation", conversationId);
+    }
 }
 
 

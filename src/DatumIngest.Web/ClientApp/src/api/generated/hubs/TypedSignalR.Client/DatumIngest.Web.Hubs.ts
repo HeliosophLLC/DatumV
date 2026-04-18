@@ -35,6 +35,11 @@ export type IStreamHub = {
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     reloadConversation(conversationId: number): Promise<void>;
+    /**
+    * @param conversationId Transpiled from long
+    * @returns Transpiled from System.Threading.Tasks.Task<int>
+    */
+    compactConversation(conversationId: number): Promise<number>;
 }
 
 export type ICatalogHubClient = {

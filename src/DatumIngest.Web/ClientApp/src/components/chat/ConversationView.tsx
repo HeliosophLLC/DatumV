@@ -40,9 +40,18 @@ export function ConversationView() {
     <div className="flex h-full flex-col">
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-6">
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 py-6">
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} id={msg.id} role={msg.role} content={msg.content} />
-          ))}
+          {messages.map((msg) =>
+            msg.kind === 'checkpoint' ? (
+              <CheckpointDivider key={msg.id} content={msg.content} />
+            ) : (
+              <MessageBubble
+                key={msg.id}
+                id={msg.id}
+                role={msg.role as 'user' | 'assistant'}
+                content={msg.content}
+              />
+            ),
+          )}
           {showStreamingBubble && (
             <MessageBubble
               id="__streaming__"
@@ -66,6 +75,26 @@ export function ConversationView() {
             isStreaming={isStreaming}
           />
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Renders a compacted-here divider with the summary text underneath. The
+// LLM sees this summary as a synthetic system message; the divider is
+// purely a UX affordance so the user can tell where the in-context tail
+// starts.
+function CheckpointDivider({ content }: { content: string }) {
+  const { t } = useTranslation('chat');
+  return (
+    <div className="flex flex-col gap-2 py-2">
+      <div className="text-muted-foreground flex items-center gap-3 text-xs uppercase tracking-wide">
+        <span className="bg-border h-px flex-1" />
+        <span>{t('checkpointLabel')}</span>
+        <span className="bg-border h-px flex-1" />
+      </div>
+      <div className="text-muted-foreground text-xs whitespace-pre-wrap px-1">
+        {content}
       </div>
     </div>
   );

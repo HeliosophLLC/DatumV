@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { History, Plus, RotateCw } from 'lucide-react';
+import { History, Plus, RotateCw, Scissors } from 'lucide-react';
 import {
+  compactConversation,
   conversationState,
   newConversation,
   reloadConversation,
@@ -23,9 +24,14 @@ import { cn } from '@/lib/utils';
 // switching during a stream is ambiguous).
 export function ChatToolbar() {
   const { t } = useTranslation('chat');
-  const { conversations, conversationId, status } = useSnapshot(conversationState);
+  const { conversations, conversationId, messages, status, compacting } =
+    useSnapshot(conversationState);
   const [historyOpen, setHistoryOpen] = useState(false);
   const isStreaming = status === 'awaiting' || status === 'streaming';
+  const busy = isStreaming || compacting;
+  // Compaction only makes sense when there's something to summarise —
+  // disable the button on empty conversations.
+  const hasTurns = messages.some((m) => m.kind === 'turn');
   const popoverRef = useRef<HTMLDivElement>(null);
 
   // Close the popover on outside click. Mouse-down beats click so the
@@ -58,7 +64,7 @@ export function ChatToolbar() {
           icon={<History className="size-3.5" />}
           label={t('history')}
           onClick={() => setHistoryOpen((v) => !v)}
-          disabled={isStreaming}
+          disabled={busy}
           ariaExpanded={historyOpen}
         />
         {historyOpen && (
@@ -73,14 +79,21 @@ export function ChatToolbar() {
         icon={<Plus className="size-3.5" />}
         label={t('newConversation')}
         onClick={onNew}
-        disabled={isStreaming}
+        disabled={busy}
+      />
+      <ToolbarButton
+        icon={<Scissors className="size-3.5" />}
+        label={t('compact')}
+        title={t('compactHint')}
+        onClick={() => void compactConversation()}
+        disabled={busy || !hasTurns}
       />
       <ToolbarButton
         icon={<RotateCw className="size-3.5" />}
         label={t('reload')}
         title={t('reloadHint')}
         onClick={reloadConversation}
-        disabled={isStreaming}
+        disabled={busy}
       />
     </div>
   );

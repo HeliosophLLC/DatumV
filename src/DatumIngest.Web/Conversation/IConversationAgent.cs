@@ -23,4 +23,12 @@ public interface IConversationAgent
     // hand-edits made to the messages table (or earlier checkpoints) take
     // effect on the following turn.
     Task ReloadAsync(long conversationId, CancellationToken ct);
+
+    // Generates a summary of every turn since the latest checkpoint (or
+    // every turn, if none), persists it as a new checkpoint row, and
+    // drops the session so the next send rebuilds the prompt with the
+    // checkpoint summary in effect. The user still sees the full history
+    // in the UI; the LLM only sees system + summary + post-checkpoint
+    // turns. Returns the number of turns compacted (0 = nothing to do).
+    Task<int> CompactAsync(long conversationId, CancellationToken ct);
 }
