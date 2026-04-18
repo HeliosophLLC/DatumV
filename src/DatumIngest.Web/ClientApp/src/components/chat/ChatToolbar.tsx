@@ -188,7 +188,7 @@ function HistoryPopover({
                 >
                   <div className="truncate">{c.title ?? t('historyUntitled')}</div>
                   <div className="text-muted-foreground text-[10px]">
-                    {formatTimestamp(c.updatedAt)}
+                    {formatTimestamp(c.createdAt)}
                   </div>
                 </button>
               </li>

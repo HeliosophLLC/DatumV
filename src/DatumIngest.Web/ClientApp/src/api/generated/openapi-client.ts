@@ -1377,7 +1377,6 @@ export interface ConversationDto {
     title?: string | undefined;
     model?: string | undefined;
     createdAt?: Date;
-    updatedAt?: Date;
 }
 
 export interface MessageDto {

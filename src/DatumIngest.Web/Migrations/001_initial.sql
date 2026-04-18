@@ -13,8 +13,7 @@ CREATE TABLE conversations (
     id Int64 GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     title String,
     model String,
-    created_at TIMESTAMP NOT NULL DEFAULT now(),
-    updated_at TIMESTAMP NOT NULL DEFAULT now()
+    created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
 CREATE TABLE messages (

@@ -20,10 +20,6 @@ public interface IConversationRegistry
 
     Task<ConversationSummary?> GetAsync(long id, CancellationToken ct);
 
-    // Bumps `updated_at` to now. Called by the agent after each turn so the
-    // history list can sort by recency without a per-row JOIN against messages.
-    Task TouchAsync(long id, CancellationToken ct);
-
     // Sets the conversation's title. Used today only by the auto-title
     // path after the first assistant turn; the UI doesn't yet expose a
     // rename action. A null `title` clears the field — kept symmetric
@@ -31,9 +27,12 @@ public interface IConversationRegistry
     Task SetTitleAsync(long id, string? title, CancellationToken ct);
 }
 
+// CreatedAt doubles as the recency sort key — the v1 schema doesn't
+// track an updated_at column, so a "last touched" notion would need a
+// follow-up migration. Id ordering is monotonic via IDENTITY, which
+// matches "newest first by insertion" perfectly fine for the popover.
 public sealed record ConversationSummary(
     long Id,
     string? Title,
     string? Model,
-    DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime CreatedAt);

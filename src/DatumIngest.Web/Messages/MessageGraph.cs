@@ -69,16 +69,21 @@ internal sealed class MessageGraph : IMessageGraph
         List<MessageRecord> results = new();
         await foreach (RowBatch batch in plan.ExecuteAsync(ct).ConfigureAwait(false))
         {
+            // Strings only stay inline when they fit in the DataValue
+            // struct (~27 bytes UTF-8). Message content is variable-length
+            // and routinely overflows into the batch arena — pass it to
+            // the AsString overload so the long path resolves cleanly.
+            Arena arena = batch.Arena;
             for (int i = 0; i < batch.Count; i++)
             {
                 Row row = batch[i];
                 results.Add(new MessageRecord(
                     Id: row[0].AsInt64(),
                     ConversationId: row[1].AsInt64(),
-                    Kind: row[2].AsString(),
-                    Role: row[3].AsString(),
-                    Content: row[4].AsString(),
-                    Model: row[5].IsNull ? null : row[5].AsString(),
+                    Kind: row[2].AsString(arena),
+                    Role: row[3].AsString(arena),
+                    Content: row[4].AsString(arena),
+                    Model: row[5].IsNull ? null : row[5].AsString(arena),
                     InputTokens: row[6].IsNull ? null : row[6].AsInt32(),
                     OutputTokens: row[7].IsNull ? null : row[7].AsInt32(),
                     CreatedAt: row[8].AsTimestamp()));

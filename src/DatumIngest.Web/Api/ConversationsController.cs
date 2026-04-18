@@ -73,11 +73,10 @@ public sealed record ConversationDto(
     long Id,
     string? Title,
     string? Model,
-    DateTime CreatedAt,
-    DateTime UpdatedAt)
+    DateTime CreatedAt)
 {
     public static ConversationDto From(ConversationSummary s) =>
-        new(s.Id, s.Title, s.Model, s.CreatedAt, s.UpdatedAt);
+        new(s.Id, s.Title, s.Model, s.CreatedAt);
 }
 
 public sealed record MessageDto(

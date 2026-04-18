@@ -149,8 +149,6 @@ internal sealed class ConversationAgent : IConversationAgent
                 CancellationToken.None).ConfigureAwait(false);
         }
 
-        await _registry.TouchAsync(conversationId, CancellationToken.None).ConfigureAwait(false);
-
         // Fire-and-forget: when the conversation is still untitled,
         // generate a short title in the background using the same driver.
         // We don't block the user's OnComplete on title generation.
@@ -333,8 +331,6 @@ internal sealed class ConversationAgent : IConversationAgent
         // Drop the session so the next send rebuilds the prompt with
         // the new checkpoint summary in effect.
         _sessions.TryRemove(conversationId, out _);
-        await _registry.TouchAsync(conversationId, CancellationToken.None).ConfigureAwait(false);
-
         return toSummarise.Count;
     }
 

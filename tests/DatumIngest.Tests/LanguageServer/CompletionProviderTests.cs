@@ -171,6 +171,46 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     [Fact]
+    public void GetCompletions_AfterUpdateSet_OnlyOffersTargetTableColumns()
+    {
+        // Regression: `UPDATE conversations SET |` was passing
+        // tablesInScope=null to AddColumns, which surfaced columns from
+        // every catalog table. The UPDATE target IS in zone.TablesInScope
+        // via the DML-target detection — feed it through.
+        CompletionProvider provider = CreateProvider();
+
+        const string sql = "UPDATE users SET ";
+        CompletionItem[] items = provider.GetCompletions(sql, sql.Length);
+
+        // `users` columns surface.
+        Assert.Contains(items, item =>
+            item.Label == "name" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item =>
+            item.Label == "email" && item.Kind == CompletionItemKind.Column);
+        // `orders` columns must NOT surface — different table.
+        Assert.DoesNotContain(items, item =>
+            item.Label == "order_id" && item.Kind == CompletionItemKind.Column);
+        Assert.DoesNotContain(items, item =>
+            item.Label == "total" && item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterInsertTable_OnlyOffersTargetTableColumns()
+    {
+        // Symmetric to the UPDATE SET case: `INSERT INTO users (|` should
+        // suggest columns from `users`, not every table.
+        CompletionProvider provider = CreateProvider();
+
+        const string sql = "INSERT INTO users (";
+        CompletionItem[] items = provider.GetCompletions(sql, sql.Length);
+
+        Assert.Contains(items, item =>
+            item.Label == "name" && item.Kind == CompletionItemKind.Column);
+        Assert.DoesNotContain(items, item =>
+            item.Label == "order_id" && item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
     public void GetCompletions_AfterWhere_IncludesLetBindingFromSameSelect()
     {
         // Regression for item-7: a LET binding declared earlier in the
@@ -1043,7 +1083,11 @@ public sealed class CompletionProviderTests : ServiceTestBase
     {
         CompletionProvider provider = CreateProvider();
 
-        CompletionItem[] items = provider.GetCompletions("UPDATE #t SET ", 14);
+        // `users` is in the test manifest; the column-scoping pass now
+        // restricts results to the UPDATE target, so this exercises the
+        // augmented-tables-in-scope path (UPDATE x feeds the same lookup
+        // FROM x would).
+        CompletionItem[] items = provider.GetCompletions("UPDATE users SET ", 17);
 
         Assert.Contains(items, item => item.Label == "id" && item.Kind == CompletionItemKind.Column);
         Assert.Contains(items, item => item.Label == "WHERE" && item.Kind == CompletionItemKind.Keyword);

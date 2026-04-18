@@ -253,11 +253,12 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterInsertTable:
-                // INSERT INTO t (...) — `t` is in scope but the FROM/JOIN
-                // extractor doesn't see it. Pass null so columns from every
-                // table are still surfaced; tightening this is a separate
-                // task once INSERT/UPDATE scope extraction lands.
-                AddColumns(items, tablesInScope: null);
+                // INSERT INTO t (...) — `t` is in scope via
+                // ExtractTablesInScope's DML-target detection (UPDATE x /
+                // INSERT INTO x / DELETE FROM x), the same path that feeds
+                // AfterReturning. Scope-filter to that target so columns
+                // from unrelated tables don't pollute the popup.
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -266,9 +267,10 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterUpdateSet:
-                // Same caveat as AfterInsertTable: target table comes from
-                // UPDATE rather than FROM, so leave columns un-scoped here.
-                AddColumns(items, tablesInScope: null);
+                // Same DML-target scoping as AfterInsertTable — the UPDATE
+                // target lands in zone.TablesInScope so columns surface
+                // only for that table, not every catalog table.
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));

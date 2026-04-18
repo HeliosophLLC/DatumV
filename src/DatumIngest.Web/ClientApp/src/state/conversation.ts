@@ -62,7 +62,7 @@ interface ConversationState {
 export interface ConversationSummary {
   id: number;
   title: string | null;
-  updatedAt: string;
+  createdAt: string;
 }
 
 export const conversationState = proxy<ConversationState>({
@@ -92,7 +92,6 @@ interface ConversationDto {
   title: string | null;
   model: string | null;
   createdAt: string;
-  updatedAt: string;
 }
 
 // Filters server messages down to the shape the UI renders. Hidden rows
@@ -152,7 +151,7 @@ async function postConversation(): Promise<ConversationDto> {
 }
 
 function summarise(dto: ConversationDto): ConversationSummary {
-  return { id: dto.id, title: dto.title, updatedAt: dto.updatedAt };
+  return { id: dto.id, title: dto.title, createdAt: dto.createdAt };
 }
 
 // Fire-and-forget init: resolve the default conversation id and hydrate

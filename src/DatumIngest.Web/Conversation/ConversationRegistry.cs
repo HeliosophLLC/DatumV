@@ -9,9 +9,12 @@ namespace DatumIngest.Web.Conversation;
 // Reads / writes against the `conversations` table. INSERTs use RETURNING
 // so we get the IDENTITY-assigned id back without a follow-up SELECT.
 //
-// EnsureDefaultAsync is the only path the agent exercises today: it picks
-// the most-recently-touched row if any exist, otherwise creates a fresh
-// one. The UI in the next commits will start calling CreateAsync / ListAsync.
+// EnsureDefaultAsync is the only path the agent exercises by default: it
+// picks the newest conversation by id if any exist, otherwise creates a
+// fresh one. Id is monotonic via IDENTITY, so "highest id = newest" —
+// the v1 schema doesn't carry an updated_at column, which means "most
+// recently used" isn't surfaced today. A future migration can add the
+// column back and switch the ordering here.
 internal sealed class ConversationRegistry : IConversationRegistry
 {
     private readonly TableCatalog _catalog;
@@ -24,7 +27,7 @@ internal sealed class ConversationRegistry : IConversationRegistry
     public async Task<long> EnsureDefaultAsync(CancellationToken ct)
     {
         IQueryPlan selectPlan = await _catalog
-            .PlanAsync("SELECT id FROM conversations ORDER BY updated_at DESC LIMIT 1")
+            .PlanAsync("SELECT id FROM conversations ORDER BY id DESC LIMIT 1")
             .ConfigureAwait(false);
 
         await foreach (RowBatch batch in selectPlan.ExecuteAsync(ct).ConfigureAwait(false))
@@ -71,16 +74,17 @@ internal sealed class ConversationRegistry : IConversationRegistry
     {
         IQueryPlan plan = await _catalog
             .PlanAsync(
-                "SELECT id, title, model, created_at, updated_at FROM conversations " +
-                "ORDER BY updated_at DESC")
+                "SELECT id, title, model, created_at FROM conversations " +
+                "ORDER BY id DESC")
             .ConfigureAwait(false);
 
         List<ConversationSummary> results = new();
         await foreach (RowBatch batch in plan.ExecuteAsync(ct).ConfigureAwait(false))
         {
+            Arena arena = batch.Arena;
             for (int i = 0; i < batch.Count; i++)
             {
-                results.Add(ReadSummary(batch[i]));
+                results.Add(ReadSummary(batch[i], arena));
             }
         }
         return results;
@@ -93,14 +97,14 @@ internal sealed class ConversationRegistry : IConversationRegistry
             ["id"] = new InlineParameter(DataValue.FromInt64(id)),
         };
         Statement statement = SqlParser.ParseStatement(
-            "SELECT id, title, model, created_at, updated_at FROM conversations WHERE id = $id");
+            "SELECT id, title, model, created_at FROM conversations WHERE id = $id");
         Statement bound = ParameterBinder.Bind(statement, parameters);
 
         IQueryPlan plan = await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
         await foreach (RowBatch batch in plan.ExecuteAsync(ct).ConfigureAwait(false))
         {
             if (batch.Count == 0) continue;
-            return ReadSummary(batch[0]);
+            return ReadSummary(batch[0], batch.Arena);
         }
         return null;
     }
@@ -115,32 +119,18 @@ internal sealed class ConversationRegistry : IConversationRegistry
                 : new StringParameter(title),
         };
         Statement statement = SqlParser.ParseStatement(
-            "UPDATE conversations SET title = $title, updated_at = now() WHERE id = $id");
+            "UPDATE conversations SET title = $title WHERE id = $id");
         Statement bound = ParameterBinder.Bind(statement, parameters);
         await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
         _ = ct;
     }
 
-    public async Task TouchAsync(long id, CancellationToken ct)
-    {
-        Dictionary<string, ParameterValue> parameters = new()
-        {
-            ["id"] = new InlineParameter(DataValue.FromInt64(id)),
-        };
-        Statement statement = SqlParser.ParseStatement(
-            "UPDATE conversations SET updated_at = now() WHERE id = $id");
-        Statement bound = ParameterBinder.Bind(statement, parameters);
-        await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
-        _ = ct;
-    }
-
-    private static ConversationSummary ReadSummary(Row row)
+    private static ConversationSummary ReadSummary(Row row, Arena arena)
     {
         long id = row[0].AsInt64();
-        string? title = row[1].IsNull ? null : row[1].AsString();
-        string? model = row[2].IsNull ? null : row[2].AsString();
+        string? title = row[1].IsNull ? null : row[1].AsString(arena);
+        string? model = row[2].IsNull ? null : row[2].AsString(arena);
         DateTime createdAt = row[3].AsTimestamp();
-        DateTime updatedAt = row[4].AsTimestamp();
-        return new ConversationSummary(id, title, model, createdAt, updatedAt);
+        return new ConversationSummary(id, title, model, createdAt);
     }
 }
