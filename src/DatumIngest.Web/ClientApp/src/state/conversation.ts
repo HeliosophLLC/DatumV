@@ -38,14 +38,26 @@ export type ChatStatus = 'idle' | 'awaiting' | 'streaming' | 'error';
 
 interface ConversationState {
   conversationId: number | null;
+  // Snapshot of every conversation surfaced in the history popover. Sorted
+  // newest-first by updated_at; kept in sync with the server via
+  // refreshConversations() — called on boot, after creating a new
+  // conversation, and after each send (since updated_at is bumped).
+  conversations: ConversationSummary[];
   messages: ChatMessage[];
   streaming: string;
   status: ChatStatus;
   error: string | null;
 }
 
+export interface ConversationSummary {
+  id: number;
+  title: string | null;
+  updatedAt: string;
+}
+
 export const conversationState = proxy<ConversationState>({
   conversationId: null,
+  conversations: [],
   messages: [],
   streaming: '',
   status: 'idle',
@@ -97,6 +109,26 @@ async function fetchMessages(conversationId: number): Promise<MessageDto[]> {
   return res.json() as Promise<MessageDto[]>;
 }
 
+async function fetchConversations(): Promise<ConversationDto[]> {
+  const res = await fetch('/api/conversations');
+  if (!res.ok) throw new Error(`GET /api/conversations → ${res.status}`);
+  return res.json() as Promise<ConversationDto[]>;
+}
+
+async function postConversation(): Promise<ConversationDto> {
+  const res = await fetch('/api/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: null, model: null }),
+  });
+  if (!res.ok) throw new Error(`POST /api/conversations → ${res.status}`);
+  return res.json() as Promise<ConversationDto>;
+}
+
+function summarise(dto: ConversationDto): ConversationSummary {
+  return { id: dto.id, title: dto.title, updatedAt: dto.updatedAt };
+}
+
 // Fire-and-forget init: resolve the default conversation id and hydrate
 // its history. Errors are swallowed onto `status: 'error'` so the chat
 // surface can still render a banner instead of a blank screen.
@@ -107,8 +139,12 @@ function ensureInitialized(): Promise<void> {
     try {
       const conv = await fetchDefaultConversation();
       conversationState.conversationId = conv.id;
-      const messages = await fetchMessages(conv.id);
+      const [messages, list] = await Promise.all([
+        fetchMessages(conv.id),
+        fetchConversations(),
+      ]);
       conversationState.messages = toChatMessages(messages);
+      conversationState.conversations = list.map(summarise);
     } catch (err) {
       conversationState.status = 'error';
       conversationState.error =
@@ -118,6 +154,15 @@ function ensureInitialized(): Promise<void> {
   return initPromise;
 }
 void ensureInitialized();
+
+export async function refreshConversations(): Promise<void> {
+  try {
+    const list = await fetchConversations();
+    conversationState.conversations = list.map(summarise);
+  } catch {
+    // Non-fatal: the popover will show the stale list until next refresh.
+  }
+}
 
 onChatToken((content) => {
   conversationState.streaming += content;
@@ -130,6 +175,10 @@ onChatComplete(() => {
   // Includes the cancellation path — server emits OnComplete after
   // persisting whatever partial response it captured.
   finalizeStreamingTurn();
+  // Refresh the popover list so updated_at re-sorts and any title the
+  // server has set is reflected. Fire-and-forget; popover failures are
+  // cosmetic.
+  void refreshConversations();
 });
 
 onChatError((message) => {
@@ -251,6 +300,54 @@ export async function reloadConversation(): Promise<void> {
       conversationState.status = 'idle';
       conversationState.error = null;
     }
+  } catch (err) {
+    conversationState.status = 'error';
+    conversationState.error = err instanceof Error ? err.message : String(err);
+  }
+}
+
+// Switches the active conversation. The server-side accumulator for the
+// new id is dropped before the fetch so the next send rebuilds from DB
+// (cheap and uniform with reload semantics). No-op when the requested id
+// is already active.
+export async function switchConversation(id: number): Promise<void> {
+  if (conversationState.conversationId === id) return;
+  // Refuse the switch while mid-send to avoid leaving the streaming
+  // bubble attached to the wrong conversation in the UI.
+  if (conversationState.status === 'awaiting' || conversationState.status === 'streaming') {
+    return;
+  }
+  conversationState.conversationId = id;
+  conversationState.messages = [];
+  conversationState.streaming = '';
+  conversationState.status = 'idle';
+  conversationState.error = null;
+  try {
+    const hub = await acquireStreamHub();
+    await hub.reloadConversation(id);
+    const messages = await fetchMessages(id);
+    conversationState.messages = toChatMessages(messages);
+  } catch (err) {
+    conversationState.status = 'error';
+    conversationState.error = err instanceof Error ? err.message : String(err);
+  }
+}
+
+// Creates a fresh conversation on the server, switches to it, and
+// refreshes the popover list so it shows up. The new conversation has
+// no messages, so the surface flips back to HomePage.
+export async function newConversation(): Promise<void> {
+  if (conversationState.status === 'awaiting' || conversationState.status === 'streaming') {
+    return;
+  }
+  try {
+    const conv = await postConversation();
+    conversationState.conversationId = conv.id;
+    conversationState.messages = [];
+    conversationState.streaming = '';
+    conversationState.status = 'idle';
+    conversationState.error = null;
+    await refreshConversations();
   } catch (err) {
     conversationState.status = 'error';
     conversationState.error = err instanceof Error ? err.message : String(err);

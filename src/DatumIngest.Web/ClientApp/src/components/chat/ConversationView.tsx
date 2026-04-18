@@ -1,13 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { Loader2, RotateCw } from 'lucide-react';
-import {
-  cancelMessage,
-  conversationState,
-  reloadConversation,
-  sendMessage,
-} from '@/state/conversation';
+import { Loader2 } from 'lucide-react';
+import { cancelMessage, conversationState, sendMessage } from '@/state/conversation';
 import { ChatInput } from './ChatInput';
 import { cn } from '@/lib/utils';
 
@@ -43,24 +38,6 @@ export function ConversationView() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-end px-6 pt-2">
-        <button
-          type="button"
-          onClick={reloadConversation}
-          disabled={isStreaming}
-          title={t('reloadHint')}
-          aria-label={t('reload')}
-          className={cn(
-            'inline-flex items-center gap-1.5 rounded-xs px-2 py-1 text-xs',
-            'text-muted-foreground hover:text-foreground hover:bg-muted',
-            'disabled:cursor-not-allowed disabled:opacity-40',
-            'transition-colors cursor-pointer',
-          )}
-        >
-          <RotateCw className="size-3.5" />
-          {t('reload')}
-        </button>
-      </div>
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-6">
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 py-6">
           {messages.map((msg) => (
