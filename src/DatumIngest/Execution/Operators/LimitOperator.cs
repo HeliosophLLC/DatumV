@@ -160,7 +160,6 @@ public sealed class LimitOperator : QueryOperator
                 MaxRecursionDepth = context.MaxRecursionDepth,
                 RowLimit = Limit + Offset,
                 DegreeOfParallelism = context.DegreeOfParallelism,
-                ParallelismBudget = context.ParallelismBudget,
             };
         }
 

@@ -4,7 +4,6 @@ using DatumIngest.Functions;
 using DatumIngest.Functions.Aggregates;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
@@ -25,11 +24,9 @@ public sealed class ParallelOperatorTests : ServiceTestBase
 
     private ExecutionContext CreateParallelContext(int degreeOfParallelism = 2)
     {
-        Pool pool = GetService<Pool>();
         return new DatumIngest.Execution.ExecutionContext(CreateCatalog())
         {
             DegreeOfParallelism = degreeOfParallelism,
-            ParallelismBudget = new ParallelismBudget(degreeOfParallelism),
         };
     }
 
@@ -533,78 +530,6 @@ public sealed class ParallelOperatorTests : ServiceTestBase
         // Total sum of all values: 0+1+...+99 = 4950.
         float totalSum = results.Sum(r => r["SUM(value)"].AsFloat32());
         Assert.Equal(4950f, totalSum);
-    }
-
-    /// <summary>
-    /// Verifies that the parallelism budget is properly released after execution.
-    /// </summary>
-    [Fact]
-    public async Task ParallelAggregate_ReleasesBudget()
-    {
-        MockOperator source = CreateMockOperator(XColumns,
-            [1f],
-            [2f]);
-
-        GroupByOperator groupBy = new(
-            source,
-            groupByExpressions: [],
-            aggregateColumns:
-            [
-                new AggregateColumn(new CountFunction(), [], "COUNT(*)", IsCountStar: true),
-            ]);
-
-        ParallelismBudget budget = new(4);
-        Pool pool = GetService<Pool>();
-        ExecutionContext context = new DatumIngest.Execution.ExecutionContext(CreateCatalog())
-        {
-            DegreeOfParallelism = 2,
-            ParallelismBudget = budget,
-        };
-
-        List<Row> results = await CollectAsync(groupBy, context);
-
-        Assert.Single(results);
-
-        // Budget should be fully released after execution completes.
-        Assert.Equal(4, budget.AvailableWorkers);
-
-        budget.Dispose();
-    }
-
-    /// <summary>
-    /// Verifies that the join parallel probe releases budget slots after execution.
-    /// </summary>
-    [Fact]
-    public async Task ParallelProbe_ReleasesBudget()
-    {
-        MockOperator left = CreateMockOperator(LeftNameColumns,
-            [1f, "Alice"]);
-
-        MockOperator right = CreateMockOperator(RightScoreColumns,
-            [1f, 95f]);
-
-        JoinOperator join = new(left, right, JoinType.Inner,
-            new BinaryExpression(
-                new ColumnReference("l", "id"),
-                BinaryOperator.Equal,
-                new ColumnReference("r", "id")));
-
-        ParallelismBudget budget = new(4);
-        Pool pool = GetService<Pool>();
-        ExecutionContext context = new DatumIngest.Execution.ExecutionContext(CreateCatalog())
-        {
-            DegreeOfParallelism = 2,
-            ParallelismBudget = budget,
-        };
-
-        List<Row> rows = await CollectAsync(join, context);
-
-        Assert.Single(rows);
-
-        // Budget should be fully released after execution completes.
-        Assert.Equal(4, budget.AvailableWorkers);
-
-        budget.Dispose();
     }
 
     // ═══════════════════════════════════════════════════════════════════

@@ -2,7 +2,6 @@ using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
@@ -21,7 +20,6 @@ public sealed class ExecutionContextTests : ServiceTestBase
     public void Derive_WithOuterRow_PropagatesAllProperties()
     {
         Row outerRow = MakeRow(["x"], DataValue.FromFloat32(1f));
-        using ParallelismBudget budget = new(4);
         ExecutionContext original = new DatumIngest.Execution.ExecutionContext(
             CreateCatalog(),
             memoryBudgetBytes: 512)
@@ -29,7 +27,6 @@ public sealed class ExecutionContextTests : ServiceTestBase
             MaxRecursionDepth = 42,
             RowLimit = 10,
             DegreeOfParallelism = 8,
-            ParallelismBudget = budget,
         };
 
         ExecutionContext cloned = original.Derive(outerRow: outerRow);
@@ -41,7 +38,6 @@ public sealed class ExecutionContextTests : ServiceTestBase
         Assert.Same(original.FunctionRegistry, cloned.FunctionRegistry);
         Assert.Same(original.Catalog, cloned.Catalog);
         Assert.Equal(8, cloned.DegreeOfParallelism);
-        Assert.Same(budget, cloned.ParallelismBudget);
     }
 
     /// <summary>

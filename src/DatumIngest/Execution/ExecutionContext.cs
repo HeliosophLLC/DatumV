@@ -323,15 +323,6 @@ public sealed class ExecutionContext : IDisposable
     public int DegreeOfParallelism { get; init; } = 1;
 
     /// <summary>
-    /// Optional global concurrency budget that bounds the total number of parallel
-    /// operator workers across all concurrent queries. When <see langword="null"/>,
-    /// operators may spawn up to <see cref="DegreeOfParallelism"/> workers without
-    /// limit — appropriate for single-query CLI usage. On the server, a shared
-    /// <see cref="ParallelismBudget"/> prevents thread pool oversubscription.
-    /// </summary>
-    public ParallelismBudget? ParallelismBudget { get; init; }
-
-    /// <summary>
     /// Maximum number of rows per <see cref="Model.RowBatch"/>. Operators fill
     /// batches up to this size before yielding. Defaults to
     /// <see cref="DatumFormatV2.DefaultPageSize"/> so in-memory batches align
@@ -437,7 +428,6 @@ public sealed class ExecutionContext : IDisposable
             RowLimit = RowLimit,
             MaxRecursionDepth = MaxRecursionDepth,
             DegreeOfParallelism = DegreeOfParallelism,
-            ParallelismBudget = ParallelismBudget,
             BatchSize = BatchSize,
             AssertionDiagnostics = AssertionDiagnostics,
             MaxStratifyClasses = MaxStratifyClasses,

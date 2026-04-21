@@ -308,12 +308,10 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
         bool isGlobalAggregation = _groupByExpressions.Count == 0;
         CancellationToken cancellationToken = context.CancellationToken;
 
-        // Acquire worker slots from the optional global budget.
         int desiredWorkers = context.DegreeOfParallelism;
-        int acquiredFromBudget = 0;
 
         // Spilled DISTINCT sets cannot be deduplicated across parallel workers
-        // during merge, so DISTINCT-with-budget falls back to single-threaded.
+        // during merge, so DISTINCT falls back to single-threaded when spilling.
         bool hasDistinctWithBudget = context.MemoryBudgetBytes.HasValue
             && _aggregateColumns.Any(column => column.Distinct);
         if (hasDistinctWithBudget)
@@ -334,142 +332,125 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
             desiredWorkers = 1;
         }
 
-        if (context.ParallelismBudget is ParallelismBudget budget)
+        int workerCount = desiredWorkers;
+
+        // ----------------------------------------------------------------
+        // Single-worker fast path: read input batches synchronously into
+        // one hash table without channel marshalling. Avoids the per-row
+        // race where the parallel feeder returns input batches before
+        // workers finish reading rows from the channel (Row in channel
+        // references DataValue[] owned by the returned batch).
+        // ----------------------------------------------------------------
+        if (workerCount == 1)
         {
-            acquiredFromBudget = budget.TryAcquire(desiredWorkers);
-            desiredWorkers = Math.Max(1, acquiredFromBudget);
+            await foreach (RowBatch fastPathBatch in ExecuteHashSingleWorkerAsync(
+                context, pool, isGlobalAggregation).ConfigureAwait(false))
+            {
+                yield return fastPathBatch;
+            }
+            yield break;
         }
 
-        try
+        // ----------------------------------------------------------------
+        // Global aggregation path: no GROUP BY key to route on.
+        // Distribute rows round-robin across all workers so each accumulates
+        // a partial global result, then merge into worker 0 at the end.
+        // ----------------------------------------------------------------
+        if (isGlobalAggregation)
         {
-            int workerCount = desiredWorkers;
-
-            // ----------------------------------------------------------------
-            // Single-worker fast path: read input batches synchronously into
-            // one hash table without channel marshalling. Avoids the per-row
-            // race where the parallel feeder returns input batches before
-            // workers finish reading rows from the channel (Row in channel
-            // references DataValue[] owned by the returned batch).
-            // ----------------------------------------------------------------
-            if (workerCount == 1)
-            {
-                await foreach (RowBatch fastPathBatch in ExecuteHashSingleWorkerAsync(
-                    context, pool, isGlobalAggregation).ConfigureAwait(false))
+            Channel<Row> globalChannel = Channel.CreateBounded<Row>(
+                new BoundedChannelOptions(workerCount * 64)
                 {
-                    yield return fastPathBatch;
-                }
-                yield break;
+                    SingleWriter = true,
+                    SingleReader = false,
+                });
+
+            // Worker accumulator state lives in context.Store (per-query, long-lived);
+            // worker-side Source is filled in per-row from each batch's arena before
+            // the channel hop, but the worker reads from context.Store after the
+            // batch is returned, so we use context.Store for both.
+            InvocationFrame workerAccumFrame = InvocationFrame.Symmetric(
+                context.Store, context.SidecarRegistry);
+
+            GroupStateFactory globalGroupStateFactory = new(
+                pool, context, _aggregateColumns,
+                memoryBudget: context.MemoryBudgetBytes,
+                estimatedSourceRowCount: null,
+                isGlobalAggregation: true);
+
+            GroupState[] workerGlobalGroups = new GroupState[workerCount];
+            for (int i = 0; i < workerCount; i++)
+            {
+                workerGlobalGroups[i] = globalGroupStateFactory.Create(in workerAccumFrame);
             }
 
-            // ----------------------------------------------------------------
-            // Global aggregation path: no GROUP BY key to route on.
-            // Distribute rows round-robin across all workers so each accumulates
-            // a partial global result, then merge into worker 0 at the end.
-            // ----------------------------------------------------------------
-            if (isGlobalAggregation)
+            Task globalFeeder = Task.Run(async () =>
             {
-                Channel<Row> globalChannel = Channel.CreateBounded<Row>(
-                    new BoundedChannelOptions(workerCount * 64)
-                    {
-                        SingleWriter = true,
-                        SingleReader = false,
-                    });
-
-                // Worker accumulator state lives in context.Store (per-query, long-lived);
-                // worker-side Source is filled in per-row from each batch's arena before
-                // the channel hop, but the worker reads from context.Store after the
-                // batch is returned, so we use context.Store for both.
-                InvocationFrame workerAccumFrame = InvocationFrame.Symmetric(
-                    context.Store, context.SidecarRegistry);
-
-                GroupStateFactory globalGroupStateFactory = new(
-                    pool, context, _aggregateColumns,
-                    memoryBudget: context.MemoryBudgetBytes,
-                    estimatedSourceRowCount: null,
-                    isGlobalAggregation: true);
-
-                GroupState[] workerGlobalGroups = new GroupState[workerCount];
-                for (int i = 0; i < workerCount; i++)
+                try
                 {
-                    workerGlobalGroups[i] = globalGroupStateFactory.Create(in workerAccumFrame);
-                }
-
-                Task globalFeeder = Task.Run(async () =>
-                {
-                    try
+                    await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
                     {
-                        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
+                        for (int i = 0; i < inputBatch.Count; i++)
                         {
-                            for (int i = 0; i < inputBatch.Count; i++)
-                            {
-                                await globalChannel.Writer.WriteAsync(inputBatch[i], cancellationToken)
-                                    .ConfigureAwait(false);
-                            }
-
-                            context.ReturnRowBatch(inputBatch);
+                            await globalChannel.Writer.WriteAsync(inputBatch[i], cancellationToken)
+                                .ConfigureAwait(false);
                         }
+
+                        context.ReturnRowBatch(inputBatch);
                     }
-                    finally
+                }
+                finally
+                {
+                    globalChannel.Writer.Complete();
+                }
+            }, cancellationToken);
+
+            Task[] globalWorkers = new Task[workerCount];
+            for (int workerIndex = 0; workerIndex < workerCount; workerIndex++)
+            {
+                int wi = workerIndex;
+                globalWorkers[wi] = Task.Run(async () =>
+                {
+                    ExpressionEvaluator workerEvaluator = context.CreateEvaluator();
+                    AggregateArgumentBinder workerBinder = new(_aggregateColumns);
+
+                    await foreach (Row row in globalChannel.Reader.ReadAllAsync(cancellationToken)
+                        .ConfigureAwait(false))
                     {
-                        globalChannel.Writer.Complete();
+                        await workerBinder.EvaluateAsync(
+                            workerEvaluator, row, cancellationToken).ConfigureAwait(false);
+                        workerBinder.AccumulateInto(workerGlobalGroups[wi], context, in workerAccumFrame);
+                        // Row values extracted — batch-level ReturnBatch handles array return.
                     }
                 }, cancellationToken);
-
-                Task[] globalWorkers = new Task[workerCount];
-                for (int workerIndex = 0; workerIndex < workerCount; workerIndex++)
-                {
-                    int wi = workerIndex;
-                    globalWorkers[wi] = Task.Run(async () =>
-                    {
-                        ExpressionEvaluator workerEvaluator = context.CreateEvaluator();
-                        AggregateArgumentBinder workerBinder = new(_aggregateColumns);
-
-                        await foreach (Row row in globalChannel.Reader.ReadAllAsync(cancellationToken)
-                            .ConfigureAwait(false))
-                        {
-                            await workerBinder.EvaluateAsync(
-                                workerEvaluator, row, cancellationToken).ConfigureAwait(false);
-                            workerBinder.AccumulateInto(workerGlobalGroups[wi], context, in workerAccumFrame);
-                            // Row values extracted — batch-level ReturnBatch handles array return.
-                        }
-                    }, cancellationToken);
-                }
-
-                await globalFeeder.ConfigureAwait(false);
-                await Task.WhenAll(globalWorkers).ConfigureAwait(false);
-
-                for (int i = 1; i < workerCount; i++)
-                {
-                    await MergeGroupStateAsync(workerGlobalGroups[0], workerGlobalGroups[i], workerAccumFrame).ConfigureAwait(false);
-                }
-
-                bool globalHasOrderedAggregates = _aggregateColumns.Any(
-                    column => column.OrderBy is not null);
-
-                InvocationFrame globalEmitFrame = new(
-                    context.Store, context.Store, context.SidecarRegistry);
-
-                if (globalHasOrderedAggregates)
-                {
-                    FlushOrderedBuffers([workerGlobalGroups[0]], context, in globalEmitFrame);
-                }
-
-                OutputBatchWriter globalWriter = new(_groupByExpressions, _aggregateColumns, context);
-                if (await globalWriter.AddAsync(workerGlobalGroups[0], isGlobalAggregation: true, globalEmitFrame).ConfigureAwait(false) is RowBatch globalReady)
-                    yield return globalReady;
-                if (globalWriter.Flush() is RowBatch globalTrailing)
-                    yield return globalTrailing;
-
-                yield break;
             }
 
-        }
-        finally
-        {
-            if (acquiredFromBudget > 0)
+            await globalFeeder.ConfigureAwait(false);
+            await Task.WhenAll(globalWorkers).ConfigureAwait(false);
+
+            for (int i = 1; i < workerCount; i++)
             {
-                context.ParallelismBudget!.Release(acquiredFromBudget);
+                await MergeGroupStateAsync(workerGlobalGroups[0], workerGlobalGroups[i], workerAccumFrame).ConfigureAwait(false);
             }
+
+            bool globalHasOrderedAggregates = _aggregateColumns.Any(
+                column => column.OrderBy is not null);
+
+            InvocationFrame globalEmitFrame = new(
+                context.Store, context.Store, context.SidecarRegistry);
+
+            if (globalHasOrderedAggregates)
+            {
+                FlushOrderedBuffers([workerGlobalGroups[0]], context, in globalEmitFrame);
+            }
+
+            OutputBatchWriter globalWriter = new(_groupByExpressions, _aggregateColumns, context);
+            if (await globalWriter.AddAsync(workerGlobalGroups[0], isGlobalAggregation: true, globalEmitFrame).ConfigureAwait(false) is RowBatch globalReady)
+                yield return globalReady;
+            if (globalWriter.Flush() is RowBatch globalTrailing)
+                yield return globalTrailing;
+
+            yield break;
         }
     }
 

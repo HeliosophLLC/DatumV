@@ -635,15 +635,7 @@ public sealed class JoinOperator : QueryOperator
             nullBuildCache.Initialize(buildRows[0]);
         }
 
-        // Acquire worker slots from the optional global budget.
         int desiredWorkers = context.DegreeOfParallelism;
-        int acquiredFromBudget = 0;
-
-        if (context.ParallelismBudget is ParallelismBudget budget)
-        {
-            acquiredFromBudget = budget.TryAcquire(desiredWorkers);
-            desiredWorkers = Math.Max(1, acquiredFromBudget);
-        }
 
         try
         {
@@ -830,11 +822,6 @@ public sealed class JoinOperator : QueryOperator
         }
         finally
         {
-            if (acquiredFromBudget > 0)
-            {
-                context.ParallelismBudget!.Release(acquiredFromBudget);
-            }
-
             nullBuildCache.Return();
         }
     }
