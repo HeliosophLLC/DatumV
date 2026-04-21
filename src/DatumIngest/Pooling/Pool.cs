@@ -135,16 +135,6 @@ public sealed class Pool
     }
 
     /// <summary>
-    /// Rents a <see cref="ColumnBatch"/> with the specified column lookup and row capacity.
-    /// </summary>
-    /// <param name="columnLookup">The column lookup for the batch.</param>
-    /// <param name="rowCapacity">The row capacity for the batch.</param>
-    /// <param name="arena">An optional arena to use for the batch; if null, a new arena will be created.</param>
-    /// <returns>A rented <see cref="ColumnBatch"/>.</returns>
-    public ColumnBatch RentColumnBatch(ColumnLookup columnLookup, int rowCapacity, Arena? arena = null)
-        => Backing.RentColumnBatch(columnLookup, rowCapacity, arena);
-
-    /// <summary>
     /// Rents an <see cref="Arena"/> from the pool, optionally with an initial-capacity hint
     /// for freshly-allocated arenas. Pooled arenas keep their existing capacity; the hint
     /// only matters when no pooled arena is available and a new one has to be constructed.
@@ -205,13 +195,6 @@ public sealed class Pool
     /// </summary>
     /// <param name="rowBatch">The row batch to return.</param>
     public void ReturnRowBatch(RowBatch rowBatch) => Backing.Return(rowBatch);
-
-    /// <summary>
-    /// Returns the <paramref name="columnBatch"/> and all its contained buffers to the pool for reuse.
-    /// </summary>
-    /// <param name="columnBatch">The column batch to return.</param>
-    public void ReturnColumnBatch(ColumnBatch columnBatch) => Backing.Return(columnBatch);
-
 
     /// <summary>
     /// Returns the <paramref name="groupState"/> and all its contained buffers to the pool for reuse.

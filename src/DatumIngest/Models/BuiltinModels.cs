@@ -257,7 +257,7 @@ public static class BuiltinModels
     /// Default filename for the Llama 3.1 8B Instruct GGUF (Q4_K_M
     /// imatrix-quantized variant from bartowski's HuggingFace repo).
     /// </summary>
-    public const string Llama31_8BDefaultFilename = "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf";
+    public const string Llama31_8BDefaultFilename = "llama-3.1-8b-instruct-gguf/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf";
 
     /// <summary>
     /// Registers Llama 3.1 8B Instruct under the catalog name

@@ -14,11 +14,6 @@ namespace DatumIngest.Model;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Each <see cref="ColumnBatch"/> owns an <see cref="Arena"/> so that all
-/// string, vector, matrix, tensor, image, and byte-array columns share one
-/// contiguous buffer rather than individual heap-allocated arrays.
-/// </para>
-/// <para>
 /// Data is appended via typed methods (<see cref="AppendString(string)"/>,
 /// <see cref="AppendFloats"/>, <see cref="AppendBytes(ReadOnlySpan{byte})"/>)
 /// and later retrieved by offset and length.

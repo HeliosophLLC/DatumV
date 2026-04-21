@@ -231,34 +231,6 @@ public sealed class PoolBacking
     }
 
     /// <summary>
-    /// Rents a <see cref="ColumnBatch"/> with the specified column lookup and row capacity.
-    /// </summary>
-    /// <param name="columnLookup">The column lookup for the batch.</param>
-    /// <param name="rowCapacity">The row capacity for the batch.</param>
-    /// <param name="arena">An optional <see cref="Arena"/> if an arena should not be rented from the pool; if null, a new arena will be rented for the batch.</param>
-    /// <returns>A rented <see cref="ColumnBatch"/>.</returns>
-    public ColumnBatch RentColumnBatch(ColumnLookup columnLookup, int rowCapacity, Arena? arena = null)
-    {
-        DataValue[][] columns = ArrayPool<DataValue[]>.Shared.Rent(columnLookup.Count);
-        for (int i = 0; i < columnLookup.Count; i++)
-        {
-            columns[i] = RentDataValues(rowCapacity);
-        }
-
-        if (arena != null)
-        {
-            arena.AddReference();
-        }
-        else
-        {
-            arena = RentArena();
-        }
-
-        DatumDiagnostics.RecordPoolColumnBatchRent();
-        return new ColumnBatch(columnLookup, columns, arena);
-    }
-
-    /// <summary>
     /// Rents an <see cref="Arena"/>. When <paramref name="initialCapacity"/> is supplied,
     /// freshly-allocated arenas use that as their initial backing-region size — useful when
     /// the caller knows roughly how many bytes will be appended and wants to avoid the
@@ -416,25 +388,6 @@ public sealed class PoolBacking
 
         batch.Dispose();
         DatumDiagnostics.RecordPoolRowBatchReturn();
-    }
-
-    /// <summary>
-    /// Returns a <see cref="ColumnBatch"/> to the pool, including all its backing buffers and arena.
-    /// The batch is disposed after return; callers must not access any properties or methods
-    /// of the batch after calling this method.
-    /// </summary>
-    /// <param name="batch"></param>
-    public void Return(ColumnBatch batch)
-    {
-        for (int column = 0; column < batch.ColumnCount; column++)
-        {
-            Return(batch.GetColumnBuffer(column));
-        }
-
-        TryReturn(batch.Arena);
-
-        batch.Dispose();
-        DatumDiagnostics.RecordPoolColumnBatchReturn();
     }
 
     /// <summary>
