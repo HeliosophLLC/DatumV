@@ -28,4 +28,21 @@
     <PackageReference Include="Superpower" Version="3.1.0" />
   </ItemGroup>
 
+  <!--
+    SqlParser is split across partial files. Static field initialization order
+    across partials is implementation-defined per the C# spec, but Roslyn
+    follows source-file compile order. Pin the load order to dependency order
+    so cross-partial TokenListParser field initializers see their dependencies
+    already initialized.
+  -->
+  <ItemGroup>
+    <Compile Remove="SqlParser.cs;SqlParser.Expressions.cs;SqlParser.Select.cs;SqlParser.Ddl.cs;SqlParser.Procedural.cs;SqlParser.Recovery.cs" />
+    <Compile Include="SqlParser.cs" />
+    <Compile Include="SqlParser.Expressions.cs" />
+    <Compile Include="SqlParser.Select.cs" />
+    <Compile Include="SqlParser.Ddl.cs" />
+    <Compile Include="SqlParser.Procedural.cs" />
+    <Compile Include="SqlParser.Recovery.cs" />
+  </ItemGroup>
+
 </Project>
