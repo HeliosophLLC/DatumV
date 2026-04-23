@@ -168,7 +168,7 @@ internal static class InsertExecutor
         // batch's budget: DataValue cells (~20 bytes each) plus a ~24-byte
         // per-row header. Arena payload bytes are file-backed mmap and don't
         // count. Released after session.WriteAsync flushes the batch.
-        long valuesBatchBytes = (long)values.Rows.Count * (targetSchema.Columns.Count * 20L + 24L);
+        long valuesBatchBytes = (long)values.Rows.Count * (targetSchema.Columns.Count * DataValue.SizeBytes + 24L);
         if (valuesBatchBytes > 0) accountant.NotifyMaterialized(valuesBatchBytes);
         try
         {

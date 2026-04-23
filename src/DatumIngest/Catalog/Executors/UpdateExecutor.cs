@@ -384,7 +384,7 @@ internal static class UpdateExecutor
         // Per-source-row cost: DataValue[] header + sourceColumnCount cells
         // (~20 bytes each). Arena-backed payloads live in workArena (mmap)
         // and aren't budgeted.
-        long sourceRowBytes = 24L + sourceColumnCount * 20L;
+        long sourceRowBytes = 24L + sourceColumnCount * DataValue.SizeBytes;
         await foreach (RowBatch batch in source.ScanAsync(
             requiredColumns: null,
             filterHint: null,

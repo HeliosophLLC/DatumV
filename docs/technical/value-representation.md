@@ -14,7 +14,7 @@ values cross between them.
 
 | | `DataValue` | `ValueRef` |
 |---|---|---|
-| Size | 20 bytes (struct, no heap) | 20-byte tag + optional managed object reference |
+| Size | 32 bytes (struct, no heap) | 20-byte tag + optional managed object reference |
 | Storage | Inline payload OR arena offset OR sidecar offset | Inline payload OR managed payload (`string`, `byte[]`, `ValueRef[]`) |
 | Where it lives | `Row`, `RowBatch`, `.datum` files, scan outputs, operator I/O | Expression evaluator, scalar function bodies, model `IModel.InferBatchAsync` |
 | Lifetime | Bound to its arena (or to a sidecar registry) | GC-managed |
@@ -22,7 +22,7 @@ values cross between them.
 
 ## `DataValue`: the row-layer currency
 
-`DataValue` is a fixed 20-byte struct ([`src/DatumIngest/Model/DataValue.cs`](../../src/DatumIngest/Model/DataValue.cs)) that tags a value
+`DataValue` is a fixed 32-byte struct ([`src/DatumIngest/Model/DataValue.cs`](../../src/DatumIngest/Model/DataValue.cs)) that tags a value
 with its `DataKind` and one of three storage shapes:
 
 | Storage | When | Resolution |

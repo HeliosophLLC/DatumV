@@ -73,9 +73,9 @@ internal sealed class MaterializedInput : IDisposable
                 if (SourceLookup is null && batch.Count > 0)
                 {
                     SourceLookup = batch.ColumnLookup;
-                    // ~20 bytes per DataValue cell + ~32 bytes for the Row + List<Row> slot.
+                    // DataValue.SizeBytes (32) per cell + ~32 bytes for the Row + List<Row> slot.
                     // Arena payloads live in context.Store (mmap, OS-paged) and aren't budgeted.
-                    _perRowBytes = 20L * SourceLookup.Count + 32L;
+                    _perRowBytes = DataValue.SizeBytes * (long)SourceLookup.Count + 32L;
                 }
 
                 for (int i = 0; i < batch.Count; i++)

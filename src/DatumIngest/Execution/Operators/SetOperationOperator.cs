@@ -213,7 +213,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         if (!keys.IsInitialized)
                         {
                             keys.Initialize(row.FieldCount);
-                            perRowBytes = 20L * row.FieldCount + 48L;
+                            perRowBytes = DataValue.SizeBytes * (long)row.FieldCount + 48L;
                         }
 
                         // Once spilling, route to spill-only: skip in-memory set Add and
@@ -374,7 +374,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                             rightSet.Initialize(row.FieldCount);
                             emittedSet = new DedupKeySet(context.Pool, rightSet.Comparer, rightSet.Scratch);
                             emittedSet.Initialize(row.FieldCount);
-                            perRowBytes = 20L * row.FieldCount + 48L;
+                            perRowBytes = DataValue.SizeBytes * (long)row.FieldCount + 48L;
                         }
 
                         if (rightSpiller.IsActive)
@@ -575,7 +575,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         if (!rightCounts.IsInitialized)
                         {
                             rightCounts.Initialize(row.FieldCount);
-                            perRowBytes = 20L * row.FieldCount + 48L;
+                            perRowBytes = DataValue.SizeBytes * (long)row.FieldCount + 48L;
                         }
 
                         if (rightSpiller.IsActive)
@@ -764,7 +764,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                             rightSet.Initialize(row.FieldCount);
                             emittedSet = new DedupKeySet(context.Pool, rightSet.Comparer, rightSet.Scratch);
                             emittedSet.Initialize(row.FieldCount);
-                            perRowBytes = 20L * row.FieldCount + 48L;
+                            perRowBytes = DataValue.SizeBytes * (long)row.FieldCount + 48L;
                         }
 
                         if (rightSpiller.IsActive)
@@ -815,7 +815,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                             rightSet.Initialize(row.FieldCount);
                             emittedSet = new DedupKeySet(context.Pool, rightSet.Comparer, rightSet.Scratch);
                             emittedSet.Initialize(row.FieldCount);
-                            perRowBytes = 20L * row.FieldCount + 48L;
+                            perRowBytes = DataValue.SizeBytes * (long)row.FieldCount + 48L;
                         }
 
                         int hashCode = rightSet.GetKeyHash(row);
@@ -963,7 +963,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         if (!rightCounts.IsInitialized)
                         {
                             rightCounts.Initialize(row.FieldCount);
-                            perRowBytes = 20L * row.FieldCount + 48L;
+                            perRowBytes = DataValue.SizeBytes * (long)row.FieldCount + 48L;
                         }
 
                         if (rightSpiller.IsActive)
@@ -1011,7 +1011,7 @@ internal sealed class SetOperationOperator : QueryOperator, IDisposable
                         if (!rightCounts.IsInitialized)
                         {
                             rightCounts.Initialize(row.FieldCount);
-                            perRowBytes = 20L * row.FieldCount + 48L;
+                            perRowBytes = DataValue.SizeBytes * (long)row.FieldCount + 48L;
                         }
 
                         int hashCode = rightCounts.GetKeyHash(row);

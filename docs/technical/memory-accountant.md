@@ -16,7 +16,7 @@ The accountant exposes two distinct numbers in every sample:
 
 **GC-resident** structures that pin .NET heap memory and can OOM the process. Includes:
 
-- `DataValue[]` cells in operator hash tables, sort buffers, and materialized caches (~20 bytes per cell).
+- `DataValue[]` cells in operator hash tables, sort buffers, and materialized caches (~32 bytes per cell).
 - Dictionary slot overhead (~48 bytes per entry) for hash-based operators.
 - Managed payloads (`float[]`, `byte[]`, `SKBitmap`) held by `VariableScope` bindings across procedural-batch query boundaries.
 - DML buffers (UPDATE `RowUpdateRequest` lists, DELETE matched-index lists, INSERT VALUES batches).
@@ -118,7 +118,7 @@ Each call uses a structural per-row delta — a constant the operator computes f
 
 ```csharp
 _perGroupBytes =
-    DataValueOverheadBytes * groupByKeyCount    // 20 × keyCount
+    DataValueOverheadBytes * groupByKeyCount    // 32 × keyCount
     + PerGroupOverheadBytes                     // 64 (Dict slot + GroupState)
     + PerAccumulatorBytes * aggregateCount;     // 32 × aggregateCount
 ```
@@ -170,11 +170,11 @@ The accountant deliberately excludes some byte sources to keep the model honest:
 
 - **Arena payload bytes.** As described above: mmap-backed, OS-paged, can't be spilled.
 - **`SpillPartition` internal arenas.** Spill operators stage rows through their own `_arenaPool` arena before flushing to disk. Those bytes are transient (per-batch) and rolled into the spiller's consolidated arena, which is file-backed. Not budgeted.
-- **Operator-local `bufferArena` instances** (e.g. OrderBy's sort buffer). These hold the stable copies of buffered rows during sort + spill, and are file-backed too. The DataValue cells referencing them *are* budgeted (the 20 bytes × fieldCount × rowCount); the bytes the cells point to in the arena are not.
-- **Pool-rented `Row` and `DataValue[]` arrays.** These are GC-resident but amortized via the pool. A held row reports its DataValue overhead (the 20 × fieldCount) but doesn't separately account for the array's `byte[]` storage — that's pool infrastructure.
+- **Operator-local `bufferArena` instances** (e.g. OrderBy's sort buffer). These hold the stable copies of buffered rows during sort + spill, and are file-backed too. The DataValue cells referencing them *are* budgeted (the 32 bytes × fieldCount × rowCount); the bytes the cells point to in the arena are not.
+- **Pool-rented `Row` and `DataValue[]` arrays.** These are GC-resident but amortized via the pool. A held row reports its DataValue overhead (the 32 × fieldCount) but doesn't separately account for the array's `byte[]` storage — that's pool infrastructure.
 - **Per-cell streaming response buffers** (the NDJSON writer's buffer in the Web stream service). Negligible and per-batch.
 
-If a future operator needs to budget bytes that fall outside this model, it should add explicit `Notify*` calls at the materialization point and document the per-row cost. The `DistinctAccumulatorDecorator` is one example — it tracks HashSet slot overhead for DISTINCT-modified aggregates using the same structural estimate (`20 + 48` per entry).
+If a future operator needs to budget bytes that fall outside this model, it should add explicit `Notify*` calls at the materialization point and document the per-row cost. The `DistinctAccumulatorDecorator` is one example — it tracks HashSet slot overhead for DISTINCT-modified aggregates using the same structural estimate (`32 + 48` per entry).
 
 ## Configuration
 

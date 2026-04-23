@@ -251,7 +251,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : QueryOperator, ID
             // arena (mmap, OS-paged) and aren't budgeted.
             if (_perRowBytes == 0)
             {
-                _perRowBytes = 20L * schema.Count + 32L;
+                _perRowBytes = DataValue.SizeBytes * (long)schema.Count + 32L;
             }
             long batchBytes = _perRowBytes * cached.Count;
             _accountant!.NotifyMaterialized(batchBytes);

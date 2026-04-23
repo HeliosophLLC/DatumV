@@ -42,11 +42,11 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
 
     /// <summary>
     /// Conservative per-entry overhead estimate for the <see cref="HashSet{T}"/>.
-    /// Combines the <see cref="DataValue"/> struct size (~20 bytes) with the
+    /// Combines the <see cref="DataValue"/> struct size (~32 bytes) with the
     /// hash set's internal entry bookkeeping (~48 bytes: hash code, next
     /// pointer, value reference).
     /// </summary>
-    private const long EstimatedBytesPerHashSetEntry = 20L + 48L;
+    private const long EstimatedBytesPerHashSetEntry = DataValue.SizeBytes + 48L;
 
     private readonly IAggregateAccumulator _inner;
     private readonly int _argumentCount;

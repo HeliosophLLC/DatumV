@@ -318,9 +318,9 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                         // 64 MB default when no budget is configured.
                         long bufferArenaCapacity = context.Accountant.MemoryBudgetBytes ?? 64L * 1024 * 1024;
                         bufferArena = pool.RentArena(bufferArenaCapacity);
-                        // 20 bytes per DataValue cell (overhead) × (field + key) cells
+                        // DataValue.SizeBytes (32) per cell × (field + key) cells
                         // plus a ~64-byte KeyedRow / List slot per row.
-                        perRowBytes = 20L * schema.Count + 20L * _orderByItems.Count + 64L;
+                        perRowBytes = DataValue.SizeBytes * (long)schema.Count + DataValue.SizeBytes * (long)_orderByItems.Count + 64L;
                     }
 
                     for (int i = 0; i < inputBatch.Count; i++)

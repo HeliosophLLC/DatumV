@@ -123,7 +123,7 @@ internal sealed class DistinctOperator : QueryOperator, IDisposable
                         if (!keys.IsInitialized)
                         {
                             keys.Initialize(row.FieldCount);
-                            perRowBytes = 20L * row.FieldCount + 48L;
+                            perRowBytes = DataValue.SizeBytes * (long)row.FieldCount + 48L;
                         }
 
                         // Once spilling, route to spill-only: skip the in-memory set Add

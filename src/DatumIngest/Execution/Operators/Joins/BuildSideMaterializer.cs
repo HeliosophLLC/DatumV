@@ -61,7 +61,7 @@ internal sealed class BuildSideMaterializer
             {
                 if (_perRowBytes == 0 && batch.Count > 0)
                 {
-                    _perRowBytes = 20L * batch[0].FieldCount + 32L;
+                    _perRowBytes = DataValue.SizeBytes * (long)batch[0].FieldCount + 32L;
                 }
                 for (int i = 0; i < batch.Count; i++)
                 {

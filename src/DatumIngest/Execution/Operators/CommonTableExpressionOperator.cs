@@ -221,7 +221,7 @@ internal sealed class CommonTableExpressionOperator : QueryOperator, IDisposable
 
             if (perRowBytes == 0)
             {
-                perRowBytes = 20L * _materializedSchema.Count + 32L;
+                perRowBytes = DataValue.SizeBytes * (long)_materializedSchema.Count + 32L;
             }
             long batchBytes = perRowBytes * cacheBatch.Count;
             context.Accountant.NotifyMaterialized(batchBytes);

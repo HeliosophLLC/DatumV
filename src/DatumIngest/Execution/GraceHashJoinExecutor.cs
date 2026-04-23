@@ -254,7 +254,7 @@ internal sealed class GraceHashJoinExecutor
                         inMemoryRowCount++;
                         if (perRowBytes == 0)
                         {
-                            perRowBytes = 20L * buildRow.FieldCount + 32L;
+                            perRowBytes = DataValue.SizeBytes * (long)buildRow.FieldCount + 32L;
                         }
                         context.Accountant.NotifyMaterialized(perRowBytes);
                         residentBytesNotified += perRowBytes;
@@ -763,7 +763,7 @@ internal sealed class GraceHashJoinExecutor
 
                 if (perRowBytes == 0)
                 {
-                    perRowBytes = 20L * buildRow.FieldCount + 32L;
+                    perRowBytes = DataValue.SizeBytes * (long)buildRow.FieldCount + 32L;
                 }
                 context.Accountant.NotifyMaterialized(perRowBytes);
                 partitionResidentBytes += perRowBytes;
@@ -1080,7 +1080,7 @@ internal sealed class GraceHashJoinExecutor
 
                 if (perRowBytes == 0)
                 {
-                    perRowBytes = 20L * buildRow.FieldCount + 32L;
+                    perRowBytes = DataValue.SizeBytes * (long)buildRow.FieldCount + 32L;
                 }
                 if (!subPartitions[partitionIndex].IsBuildSpilled)
                 {
