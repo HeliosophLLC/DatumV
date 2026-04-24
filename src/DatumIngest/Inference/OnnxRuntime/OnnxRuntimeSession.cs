@@ -177,6 +177,8 @@ internal sealed class OnnxRuntimeSession : IInferenceSession
         if (t == typeof(long))      return Microsoft.ML.OnnxRuntime.Tensors.TensorElementType.Int64;
         if (t == typeof(bool))      return Microsoft.ML.OnnxRuntime.Tensors.TensorElementType.Bool;
         if (t == typeof(Half))      return Microsoft.ML.OnnxRuntime.Tensors.TensorElementType.Float16;
+        // ORT exposes its own Float16 wrapper type here, not System.Half.
+        if (t == typeof(Microsoft.ML.OnnxRuntime.Float16)) return Microsoft.ML.OnnxRuntime.Tensors.TensorElementType.Float16;
         if (t == typeof(double))    return Microsoft.ML.OnnxRuntime.Tensors.TensorElementType.Double;
         if (t == typeof(uint))      return Microsoft.ML.OnnxRuntime.Tensors.TensorElementType.UInt32;
         if (t == typeof(ulong))     return Microsoft.ML.OnnxRuntime.Tensors.TensorElementType.UInt64;

@@ -203,173 +203,197 @@ public sealed class CalibrationCoordinator
             DatumActivity.Calibration.Trace($"ramp-start '{modelName}' fingerprint={fingerprint}");
             _catalog.NotifyRampStarted(modelName, fingerprint);
 
-            // Clean-room measurement: evict every other unpinned model
-            // before the ramp so weight_cost and per-batch total VRAM
-            // numbers reflect ONLY this model's footprint. Without this
-            // step, calibration measurements bake in whatever happened
-            // to be co-resident at ramp time — making the curve
-            // unreusable in other configurations and inflating the
-            // weight_cost estimate. Pinned models (those a concurrent
-            // query is actively dispatching) stay put; the ramp's
-            // measurements will be noisier in that case but not wrong.
-            EvictOthersForCleanRoom(modelName);
-
-            double bestMsPerRow = 0;
-            long lastTotal = 0;
-
-            foreach (int batchSize in DefaultRampBatchSizes)
+            // Track the last batch size we attempted so a dispatch throw
+            // can report it through OnRampHalted. Zero means we threw
+            // before measuring anything.
+            int lastAttemptedBatch = 0;
+            try
             {
-                // Evict the target model itself between ramp steps so
-                // the next dispatch forces ORT to load fresh and grow
-                // its CUDA arena to fit THIS batch's activations. Without
-                // this, the arena allocated for batch=N memoises and the
-                // dispatch at batch=2N sees zero net change in NVML
-                // (the pool already covers it). Recorded totals come
-                // out wrong — usually as 0 at every batch above the
-                // first — and PickLargestFitting then can't distinguish
-                // "small batch" from "the arena was already that big."
-                // The eviction cost (~5-10s reload per step for large
-                // models) is paid once per (host, model, ORT version)
-                // and persisted; the alternative is recalibrating from
-                // scratch every process restart with broken data.
-                //
-                // Pinned models (concurrent query holds a lease) can't
-                // be evicted; in that rare case the dispatch runs
-                // against the existing arena and the measurement is
-                // tainted but still an upper bound — the policy stays
-                // safe, just possibly conservative.
-                ModelResidencyManager.EvictResult evictOutcome =
-                    _catalog.ResidencyManager.TryEvictUnpinned(
-                        modelName, EvictionReason.Calibration);
-                if (evictOutcome == ModelResidencyManager.EvictResult.Pinned)
+                // Clean-room measurement: evict every other unpinned model
+                // before the ramp so weight_cost and per-batch total VRAM
+                // numbers reflect ONLY this model's footprint. Without this
+                // step, calibration measurements bake in whatever happened
+                // to be co-resident at ramp time — making the curve
+                // unreusable in other configurations and inflating the
+                // weight_cost estimate. Pinned models (those a concurrent
+                // query is actively dispatching) stay put; the ramp's
+                // measurements will be noisier in that case but not wrong.
+                EvictOthersForCleanRoom(modelName);
+
+                double bestMsPerRow = 0;
+                long lastTotal = 0;
+
+                foreach (int batchSize in DefaultRampBatchSizes)
                 {
-                    DatumActivity.Calibration.Trace(
-                        $"ramp-cant-evict '{modelName}' batch={batchSize} — "
-                        + "pinned by concurrent lease; measurement may be tainted");
-                }
-
-                bool measured = TryMeasureBefore(out long vramBefore);
-
-                // Track the PEAK observed VRAM during this dispatch. We
-                // record peak as the absolute total (weights +
-                // activations) rather than peak - vramBefore. With the
-                // eviction above, the model loads fresh during the
-                // dispatch delegate, so peak reflects exactly what this
-                // batch size needs on a clean device.
-                long peak = vramBefore;
-                using CancellationTokenSource samplerCts = new();
-                Task sampler = measured
-                    ? Diagnostics.VramPeakSampler.StartAsync(
-                        samplerCts.Token,
-                        observed => peak = Math.Max(peak, observed))
-                    : Task.CompletedTask;
-
-                long startTimestamp = Stopwatch.GetTimestamp();
-                try
-                {
-                    await dispatch(batchSize).ConfigureAwait(false);
-                }
-                finally
-                {
-                    samplerCts.Cancel();
-                    try { await sampler.ConfigureAwait(false); }
-                    catch (OperationCanceledException) { }
-                }
-                double dispatchMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
-
-                long total = measured ? peak : 0;
-                calibration.Record(batchSize, total, DateTimeOffset.UtcNow);
-
-                DatumActivity.Calibration.Trace(
-                    $"ramp-step '{modelName}' batch={batchSize} total-peak={total}B dispatchMs={dispatchMs:F1}");
-                _catalog.NotifyRampStep(modelName, batchSize, total, dispatchMs);
-
-                // Spill detection by duration: if per-row time jumped
-                // non-linearly past 2× the best observed, the cliff is
-                // between the prior step and this one. Drop the offending
-                // entry and everything above (RecordSpill does both),
-                // mark Stale, exit the ramp. Below the
-                // MinDispatchMsForSpillDetection threshold, sub-ms jitter
-                // dominates and we skip the check — keeps test / synthetic
-                // harnesses from tripping it spuriously.
-                double currentMsPerRow = batchSize > 0 ? dispatchMs / batchSize : 0;
-                if (bestMsPerRow > 0
-                    && dispatchMs >= MinDispatchMsForSpillDetection
-                    && currentMsPerRow > bestMsPerRow * SpillDetectionMultiplier)
-                {
-                    DatumActivity.Calibration.Trace(
-                        $"ramp-spill '{modelName}' batch={batchSize} msPerRow={currentMsPerRow:F1} " +
-                        $"best={bestMsPerRow:F1} -> halt");
-                    calibration.RecordSpill(batchSize);
-                    _catalog.NotifyRampHalted(modelName, batchSize, HaltReason.DurationSpill);
-                    return;
-                }
-                // Only update best from measurable dispatches. Sub-ms
-                // readings would lock in a noise-dominated floor that
-                // makes every subsequent legitimate dispatch look like a
-                // spill.
-                if (dispatchMs >= MinDispatchMsForSpillDetection
-                    && (bestMsPerRow == 0 || currentMsPerRow < bestMsPerRow))
-                {
-                    bestMsPerRow = currentMsPerRow;
-                }
-
-                // ── Look-ahead growth check ──
-                // Before doubling the batch, project the next step's
-                // total VRAM and stop if it won't fit. We project on
-                // activations (total - weight_cost) since the weights
-                // contribute a constant baseline that doesn't grow with
-                // the batch — projecting on totals directly would
-                // converge slowly for small models where weights
-                // dominate.
-                //
-                // For LINEAR models (act ≈ 2× per doubling) project 2×
-                // the last activation; for SUPER-LINEAR models the
-                // observed ratio rules. Floor the multiplier at 2× even
-                // for sub-linear models — a smaller-than-2× growth
-                // might just mean the arena absorbed some of the cost,
-                // so we don't get cocky.
-                // Only project when the dispatch actually allocated
-                // VRAM — i.e. peak > vramBefore. With absolute-totals
-                // semantics, `total` equals `peak`, which can equal
-                // vramBefore on synthetic / test dispatches (no real
-                // GPU work) OR on warm-pool dispatches where the
-                // allocator absorbed the growth. In neither case is
-                // total a meaningful number for projecting next-batch
-                // cost — it's just whatever the device was using when
-                // we sampled. Skipping the halt here keeps the ramp
-                // running through real batches; the per-step records
-                // still log whatever total we read.
-                if (measured && total > vramBefore
-                    && Diagnostics.VramProbe.TryGetUsage(out long curUsed, out long curTotal))
-                {
-                    RampProjection projection = ProjectNextRampStep(
-                        total, lastTotal, calibration.WeightCostBytes, curUsed, curTotal);
-                    if (projection.ShouldHalt)
+                    lastAttemptedBatch = batchSize;
+                    // Evict the target model itself between ramp steps so
+                    // the next dispatch forces ORT to load fresh and grow
+                    // its CUDA arena to fit THIS batch's activations. Without
+                    // this, the arena allocated for batch=N memoises and the
+                    // dispatch at batch=2N sees zero net change in NVML
+                    // (the pool already covers it). Recorded totals come
+                    // out wrong — usually as 0 at every batch above the
+                    // first — and PickLargestFitting then can't distinguish
+                    // "small batch" from "the arena was already that big."
+                    // The eviction cost (~5-10s reload per step for large
+                    // models) is paid once per (host, model, ORT version)
+                    // and persisted; the alternative is recalibrating from
+                    // scratch every process restart with broken data.
+                    //
+                    // Pinned models (concurrent query holds a lease) can't
+                    // be evicted; in that rare case the dispatch runs
+                    // against the existing arena and the measurement is
+                    // tainted but still an upper bound — the policy stays
+                    // safe, just possibly conservative.
+                    ModelResidencyManager.EvictResult evictOutcome =
+                        _catalog.ResidencyManager.TryEvictUnpinned(
+                            modelName, EvictionReason.Calibration);
+                    if (evictOutcome == ModelResidencyManager.EvictResult.Pinned)
                     {
                         DatumActivity.Calibration.Trace(
-                            $"ramp-halt '{modelName}' batch={batchSize} total={total}B "
-                            + $"growth-multiplier={projection.GrowthMultiplier:F2}x "
-                            + $"projected-next-total={projection.ProjectedNext}B "
-                            + $"avail={projection.ProjectedAvailable}B");
-                        _catalog.NotifyRampHalted(modelName, batchSize, HaltReason.LookAheadProjection);
-                        break;
+                            $"ramp-cant-evict '{modelName}' batch={batchSize} — "
+                            + "pinned by concurrent lease; measurement may be tainted");
                     }
+
+                    bool measured = TryMeasureBefore(out long vramBefore);
+
+                    // Track the PEAK observed VRAM during this dispatch. We
+                    // record peak as the absolute total (weights +
+                    // activations) rather than peak - vramBefore. With the
+                    // eviction above, the model loads fresh during the
+                    // dispatch delegate, so peak reflects exactly what this
+                    // batch size needs on a clean device.
+                    long peak = vramBefore;
+                    using CancellationTokenSource samplerCts = new();
+                    Task sampler = measured
+                        ? Diagnostics.VramPeakSampler.StartAsync(
+                            samplerCts.Token,
+                            observed => peak = Math.Max(peak, observed))
+                        : Task.CompletedTask;
+
+                    long startTimestamp = Stopwatch.GetTimestamp();
+                    try
+                    {
+                        await dispatch(batchSize).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        samplerCts.Cancel();
+                        try { await sampler.ConfigureAwait(false); }
+                        catch (OperationCanceledException) { }
+                    }
+                    double dispatchMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+
+                    long total = measured ? peak : 0;
+                    calibration.Record(batchSize, total, DateTimeOffset.UtcNow);
+
+                    DatumActivity.Calibration.Trace(
+                        $"ramp-step '{modelName}' batch={batchSize} total-peak={total}B dispatchMs={dispatchMs:F1}");
+                    _catalog.NotifyRampStep(modelName, batchSize, total, dispatchMs);
+
+                    // Spill detection by duration: if per-row time jumped
+                    // non-linearly past 2× the best observed, the cliff is
+                    // between the prior step and this one. Drop the offending
+                    // entry and everything above (RecordSpill does both),
+                    // mark Stale, exit the ramp. Below the
+                    // MinDispatchMsForSpillDetection threshold, sub-ms jitter
+                    // dominates and we skip the check — keeps test / synthetic
+                    // harnesses from tripping it spuriously.
+                    double currentMsPerRow = batchSize > 0 ? dispatchMs / batchSize : 0;
+                    if (bestMsPerRow > 0
+                        && dispatchMs >= MinDispatchMsForSpillDetection
+                        && currentMsPerRow > bestMsPerRow * SpillDetectionMultiplier)
+                    {
+                        DatumActivity.Calibration.Trace(
+                            $"ramp-spill '{modelName}' batch={batchSize} msPerRow={currentMsPerRow:F1} " +
+                            $"best={bestMsPerRow:F1} -> halt");
+                        calibration.RecordSpill(batchSize);
+                        _catalog.NotifyRampHalted(modelName, batchSize, HaltReason.DurationSpill);
+                        return;
+                    }
+                    // Only update best from measurable dispatches. Sub-ms
+                    // readings would lock in a noise-dominated floor that
+                    // makes every subsequent legitimate dispatch look like a
+                    // spill.
+                    if (dispatchMs >= MinDispatchMsForSpillDetection
+                        && (bestMsPerRow == 0 || currentMsPerRow < bestMsPerRow))
+                    {
+                        bestMsPerRow = currentMsPerRow;
+                    }
+
+                    // ── Look-ahead growth check ──
+                    // Before doubling the batch, project the next step's
+                    // total VRAM and stop if it won't fit. We project on
+                    // activations (total - weight_cost) since the weights
+                    // contribute a constant baseline that doesn't grow with
+                    // the batch — projecting on totals directly would
+                    // converge slowly for small models where weights
+                    // dominate.
+                    //
+                    // For LINEAR models (act ≈ 2× per doubling) project 2×
+                    // the last activation; for SUPER-LINEAR models the
+                    // observed ratio rules. Floor the multiplier at 2× even
+                    // for sub-linear models — a smaller-than-2× growth
+                    // might just mean the arena absorbed some of the cost,
+                    // so we don't get cocky.
+                    // Only project when the dispatch actually allocated
+                    // VRAM — i.e. peak > vramBefore. With absolute-totals
+                    // semantics, `total` equals `peak`, which can equal
+                    // vramBefore on synthetic / test dispatches (no real
+                    // GPU work) OR on warm-pool dispatches where the
+                    // allocator absorbed the growth. In neither case is
+                    // total a meaningful number for projecting next-batch
+                    // cost — it's just whatever the device was using when
+                    // we sampled. Skipping the halt here keeps the ramp
+                    // running through real batches; the per-step records
+                    // still log whatever total we read.
+                    if (measured && total > vramBefore
+                        && Diagnostics.VramProbe.TryGetUsage(out long curUsed, out long curTotal))
+                    {
+                        RampProjection projection = ProjectNextRampStep(
+                            total, lastTotal, calibration.WeightCostBytes, curUsed, curTotal);
+                        if (projection.ShouldHalt)
+                        {
+                            DatumActivity.Calibration.Trace(
+                                $"ramp-halt '{modelName}' batch={batchSize} total={total}B "
+                                + $"growth-multiplier={projection.GrowthMultiplier:F2}x "
+                                + $"projected-next-total={projection.ProjectedNext}B "
+                                + $"avail={projection.ProjectedAvailable}B");
+                            _catalog.NotifyRampHalted(modelName, batchSize, HaltReason.LookAheadProjection);
+                            break;
+                        }
+                    }
+
+                    lastTotal = total;
                 }
 
-                lastTotal = total;
+                calibration.MarkCalibrated();
+                DatumActivity.Calibration.Trace(
+                    $"ramp-complete '{modelName}' entries={calibration.Curve.Count}");
+                _catalog.NotifyRampCompleted(modelName, calibration.Curve.Count);
+
+                // Flush immediately. A successful ramp is expensive (tens of
+                // seconds + several model loads); the 1-minute background
+                // timer is too coarse to protect that work against an
+                // unclean shutdown that fires before the next tick.
+                _catalog.SaveCalibrationNow();
             }
-
-            calibration.MarkCalibrated();
-            DatumActivity.Calibration.Trace(
-                $"ramp-complete '{modelName}' entries={calibration.Curve.Count}");
-            _catalog.NotifyRampCompleted(modelName, calibration.Curve.Count);
-
-            // Flush immediately. A successful ramp is expensive (tens of
-            // seconds + several model loads); the 1-minute background
-            // timer is too coarse to protect that work against an
-            // unclean shutdown that fires before the next tick.
-            _catalog.SaveCalibrationNow();
+            catch (Exception ex)
+            {
+                // The dispatch delegate threw (almost always: the query
+                // that triggered calibration errored). Without this
+                // catch, RunCalibrationAsync would unwind past every
+                // observer notification, leaving the UI chip stuck in
+                // its "Calibrating" state with no event to clear
+                // activeRamp. Fire a halt so observers see the symmetric
+                // close, then rethrow so the awaiting query still
+                // surfaces the original error.
+                DatumActivity.Calibration.Trace(
+                    $"ramp-error '{modelName}' batch={lastAttemptedBatch} "
+                    + $"{ex.GetType().Name}: {ex.Message}");
+                _catalog.NotifyRampHalted(modelName, lastAttemptedBatch, HaltReason.DispatchError);
+                throw;
+            }
         }
         finally
         {

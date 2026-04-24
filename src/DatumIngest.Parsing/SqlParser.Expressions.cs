@@ -907,10 +907,15 @@ public static partial class SqlParser
             Span: ToSpan(open, close));
 
     /// <summary>
-    /// A single struct field: <c>name: expr</c>.
+    /// A single struct field: <c>name: expr</c>. Field names may collide
+    /// with type-keyword tokens (<c>image</c>, <c>audio</c>, <c>video</c>,
+    /// …) because ONNX inputs commonly use those exact names; we accept
+    /// <see cref="SqlToken.TypeKeyword"/> in name position so struct
+    /// literals like <c>{ image: tensor, num_tokens: n }</c> parse.
     /// </summary>
     private static readonly TokenListParser<SqlToken, StructField> StructFieldParser =
         from name in Token.EqualTo(SqlToken.Identifier)
+            .Or(Token.EqualTo(SqlToken.TypeKeyword))
         from colon in Token.EqualTo(SqlToken.Colon)
         from value in SP.Ref(() => ExpressionParser!)
         select new StructField(GetTokenText(name), value);

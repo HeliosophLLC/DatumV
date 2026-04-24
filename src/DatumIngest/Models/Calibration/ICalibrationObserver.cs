@@ -84,4 +84,14 @@ public enum HaltReason
     /// <see cref="ModelCalibration.State.Stale"/>.
     /// </summary>
     DurationSpill,
+
+    /// <summary>
+    /// The caller's dispatch delegate threw — typically because the
+    /// query that triggered calibration errored mid-ramp. The curve is
+    /// sealed at whatever batches measured cleanly before the throw;
+    /// the underlying exception is re-thrown to the awaiting query
+    /// after observers are notified, so the chip can clear without
+    /// swallowing the error.
+    /// </summary>
+    DispatchError,
 }

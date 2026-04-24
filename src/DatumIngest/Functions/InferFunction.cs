@@ -945,12 +945,23 @@ public sealed class InferFunction : IFunction, IScalarFunction
                     int shapeIdx = shapesDesc.FindFieldIndex(inputSpec.Name);
                     if (shapeIdx < 0)
                     {
-                        throw new InvalidOperationException(
-                            $"Model '{modelName}': multi-input infer() shapes struct has no field "
-                            + $"matching session input '{inputSpec.Name}'. Available fields: "
-                            + $"{string.Join(", ", shapesDesc.Fields!.Select(f => f.Name))}.");
+                        // Rank-0 (scalar) inputs have an unambiguous shape `[]`,
+                        // so an omitted shape entry is fine — SQL has no clean
+                        // empty-array literal anyway. Any other missing entry
+                        // is still a real authoring error.
+                        if (inputSpec.Shape.Count != 0)
+                        {
+                            throw new InvalidOperationException(
+                                $"Model '{modelName}': multi-input infer() shapes struct has no field "
+                                + $"matching session input '{inputSpec.Name}'. Available fields: "
+                                + $"{string.Join(", ", shapesDesc.Fields!.Select(f => f.Name))}.");
+                        }
+                        explicitShape = [];
                     }
-                    explicitShape = ReadShapeArray(shapeFields![shapeIdx], modelName);
+                    else
+                    {
+                        explicitShape = ReadShapeArray(shapeFields![shapeIdx], modelName);
+                    }
                 }
 
                 AddInputTensor(inputBag, inputSpec, inputFields[fieldIdx], modelName, explicitShape);
@@ -1022,6 +1033,9 @@ public sealed class InferFunction : IFunction, IScalarFunction
             case DataKind.Float32:
                 AddFloat32Tensor(bag, spec, arg, modelName, explicitShape);
                 break;
+            case DataKind.Float16:
+                AddFloat16Tensor(bag, spec, arg, modelName, explicitShape);
+                break;
             case DataKind.Int64:
                 AddInt64Tensor(bag, spec, arg, modelName, explicitShape);
                 break;
@@ -1031,7 +1045,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
             default:
                 throw new NotSupportedException(
                     $"Model '{modelName}': infer() v1 supports input element kinds "
-                    + $"Float32, Int32, Int64. Session declares '{spec.Name}' as "
+                    + $"Float32, Float16, Int32, Int64. Session declares '{spec.Name}' as "
                     + $"{spec.ElementKind}; extend AddInputTensor to add a marshaler.");
         }
     }
@@ -1055,6 +1069,51 @@ public sealed class InferFunction : IFunction, IScalarFunction
         {
             throw new InvalidOperationException(
                 $"Model '{modelName}': infer() expected a numeric scalar or Float32 array "
+                + $"for input '{spec.Name}', got {arg.Kind}{(arg.IsArray ? "[]" : "")}.");
+        }
+    }
+
+    /// <summary>
+    /// Marshals a Float32 or Float16 source into a Float16 (System.Half)
+    /// input tensor. Bodies typically produce Float32 from
+    /// <c>image_to_tensor_chw</c>; we cast element-wise to Half so the
+    /// SQL author doesn't need to know the underlying session is fp16.
+    /// </summary>
+    private static void AddFloat16Tensor(
+        TensorBag bag, TensorSpec spec, ValueRef arg, string modelName, int[]? explicitShape)
+    {
+        if (arg.IsArray)
+        {
+            Half[] data;
+            if (arg.ArrayElementKind == DataKind.Float16)
+            {
+                data = ExtractPrimitiveArray<Half>(arg, DataKind.Float16, modelName);
+            }
+            else if (arg.ArrayElementKind == DataKind.Float32)
+            {
+                float[] source = ExtractPrimitiveArray<float>(arg, DataKind.Float32, modelName);
+                data = new Half[source.Length];
+                for (int i = 0; i < source.Length; i++) data[i] = (Half)source[i];
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer() expected a Float32 or Float16 array "
+                    + $"for Float16 input '{spec.Name}', got {arg.ArrayElementKind}[].");
+            }
+            int[] shape = explicitShape ?? ResolveShape(spec, data.Length);
+            ValidateShapeMatchesElements(shape, data.Length, modelName, "Float16");
+            bag.Add<Half>(spec.Name, DataKind.Float16, shape, data);
+        }
+        else if (arg.TryToFloat(out float scalar))
+        {
+            int[] shape = explicitShape ?? ResolveShape(spec, 1);
+            bag.Add<Half>(spec.Name, DataKind.Float16, shape, [(Half)scalar]);
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}': infer() expected a numeric scalar or Float32/Float16 array "
                 + $"for input '{spec.Name}', got {arg.Kind}{(arg.IsArray ? "[]" : "")}.");
         }
     }
@@ -1299,6 +1358,16 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 ReadOnlySpan<float> f32 = tensor.AsSpan<float>();
                 if (product == 1) return ValueRef.FromFloat32(f32[0]);
                 return MaybeMultiDim(f32, tensor.Shape, DataKind.Float32, arena);
+            case DataKind.Float16:
+                // Upcast fp16 outputs to Float32 at the boundary so downstream
+                // functions (depth_map_to_image, array_resize_2d, …) stay
+                // Float32-clean. Cheap: one cast per element on a buffer that
+                // already left the EP.
+                ReadOnlySpan<Half> f16 = tensor.AsSpan<Half>();
+                if (product == 1) return ValueRef.FromFloat32((float)f16[0]);
+                float[] upcast = new float[f16.Length];
+                for (int i = 0; i < f16.Length; i++) upcast[i] = (float)f16[i];
+                return MaybeMultiDim<float>(upcast, tensor.Shape, DataKind.Float32, arena);
             case DataKind.Int64:
                 ReadOnlySpan<long> i64 = tensor.AsSpan<long>();
                 if (product == 1) return ValueRef.FromInt64(i64[0]);
@@ -1310,7 +1379,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
             default:
                 throw new NotSupportedException(
                     $"Model '{modelName}': infer() v1 supports output element kinds "
-                    + $"Float32, Int32, Int64. Session declares output as "
+                    + $"Float32, Float16, Int32, Int64. Session declares output as "
                     + $"{tensor.ElementKind}; extend ReadOutputTensor to add a converter.");
         }
     }

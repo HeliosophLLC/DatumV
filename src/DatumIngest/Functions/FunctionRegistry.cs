@@ -864,6 +864,12 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthOrthographicWithConfidenceFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthPinholeIntrinsicsFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthPinholeWithConfidenceFunction>();
+        // Point-map constructor (MoGe-2 / VGGT / DUSt3R) — bypasses the
+        // depth-then-unproject pipeline since these models emit camera-space
+        // xyz per pixel directly.
+        registry.RegisterScalar<Scalar.Spatial.PointCloudFromPointsFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointsToDepthImageFunction>();
+        registry.RegisterScalar<Scalar.Spatial.NormalToImageFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcEmptyFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcFuseFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcTransformFunction>();
