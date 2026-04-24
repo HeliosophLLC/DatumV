@@ -26,6 +26,7 @@ export type CalibrationRampStepEvent = {
 export enum CalibrationHaltReason {
     LookAheadProjection = 0,
     DurationSpill = 1,
+    DispatchError = 2,
 }
 
 /** Transpiled from DatumIngest.Web.Hubs.CalibrationRampHaltedEvent */

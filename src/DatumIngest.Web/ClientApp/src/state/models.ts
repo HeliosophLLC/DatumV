@@ -3,6 +3,7 @@ import { api } from '@/api';
 import type {
   CatalogManifest,
   CatalogModel,
+  CatalogTaskInfo,
 } from '@/api/generated/openapi-client';
 
 // Snapshot<> deep-readonlys nested arrays/objects, which means a function
@@ -11,6 +12,7 @@ import type {
 // pure reads, so we type them against the snapshot view explicitly.
 export type CatalogManifestSnapshot = Snapshot<CatalogManifest>;
 export type CatalogModelSnapshot = Snapshot<CatalogModel>;
+export type CatalogTaskInfoSnapshot = Snapshot<CatalogTaskInfo>;
 
 // State for the Models surface. The manifest is fetched once per app
 // session (small JSON, doesn't change without a redeploy); install state
@@ -23,14 +25,36 @@ export type CatalogModelSnapshot = Snapshot<CatalogModel>;
 
 export type TierFilter = 'all' | 'starter' | 'recommended';
 
+// Family ordering for the faceted task filter UI. The server-side enum
+// values arrive as PascalCase strings ("Text" / "Image" / …); the list
+// here drives display order on the filter panel so the section headers
+// stay stable across catalog reshuffles.
+export const TASK_FAMILY_ORDER: readonly string[] = [
+  'Text',
+  'Image',
+  'Audio',
+  'Video',
+  'Multimodal',
+  'Structured',
+];
+
 interface ModelsState {
   manifest: CatalogManifest | null;
+  // TaskTypeRegistry mirror, fetched alongside the manifest. Used by the
+  // filter panel to (a) group task chips by family and (b) translate
+  // task-name strings on model cards into family-coloured badges.
+  tasks: readonly CatalogTaskInfo[] | null;
   loading: boolean;
   error: string | null;
   tier: TierFilter;
-  // Free-text search term; matched against id + displayName + description.
-  // Empty string = no search filter.
+  // Free-text search term; matched against id + displayName + summary +
+  // description. Empty string = no search filter.
   query: string;
+  // Multi-select task chip filter. Each entry is a task name from
+  // TaskTypeRegistry (e.g. "TextEmbedder"). When non-empty, a model
+  // matches if any of its tasks appear here (OR semantics — picking
+  // "ImageCaptioner" and "TextEmbedder" widens the result set).
+  selectedTasks: ReadonlySet<string>;
   // Id of the model whose detail pane is showing in the right column.
   // Null = no selection (show the empty/prompt state).
   selectedId: string | null;
@@ -38,21 +62,28 @@ interface ModelsState {
 
 export const modelsState = proxy<ModelsState>({
   manifest: null,
+  tasks: null,
   loading: false,
   error: null,
   tier: 'all',
   query: '',
+  selectedTasks: new Set<string>(),
   selectedId: null,
 });
 
 export async function loadModelsCatalog(): Promise<void> {
   if (modelsState.loading) return;
-  if (modelsState.manifest !== null) return; // already cached
+  if (modelsState.manifest !== null && modelsState.tasks !== null) return; // already cached
   modelsState.loading = true;
   modelsState.error = null;
   try {
-    const manifest = await api.modelCatalog.getManifest();
+    // Parallel fetch — the two endpoints are independent and small.
+    const [manifest, tasks] = await Promise.all([
+      api.modelCatalog.getManifest(),
+      api.modelCatalog.getTasks(),
+    ]);
     modelsState.manifest = ref(manifest);
+    modelsState.tasks = ref(tasks);
   } catch (err) {
     modelsState.error = err instanceof Error ? err.message : String(err);
   } finally {
@@ -72,9 +103,22 @@ export function setSelectedId(id: string | null): void {
   modelsState.selectedId = id;
 }
 
+export function toggleTask(taskName: string): void {
+  const next = new Set(modelsState.selectedTasks);
+  if (next.has(taskName)) next.delete(taskName);
+  else next.add(taskName);
+  modelsState.selectedTasks = next;
+}
+
+export function clearSelectedTasks(): void {
+  if (modelsState.selectedTasks.size === 0) return;
+  modelsState.selectedTasks = new Set<string>();
+}
+
 export function clearFilters(): void {
   modelsState.tier = 'all';
   modelsState.query = '';
+  modelsState.selectedTasks = new Set<string>();
 }
 
 // Pure filter — applied at render time. Doesn't mutate state. Caller passes
@@ -83,12 +127,19 @@ export function filterModels(
   manifest: CatalogManifestSnapshot,
   tier: TierFilter,
   query: string,
+  selectedTasks: ReadonlySet<string>,
 ): readonly CatalogModelSnapshot[] {
   const models = manifest.models ?? [];
   const tierIds = tier === 'all'
     ? null
     : new Set(manifest.tiers?.[tier] ?? []);
   const needle = query.trim().toLowerCase();
+  // Case-insensitive task match so manifest typo-mixing (e.g. "textembedder"
+  // vs "TextEmbedder") doesn't drop matches. The TS Set is case-sensitive
+  // so we lower-case both sides.
+  const taskNeedles = selectedTasks.size === 0
+    ? null
+    : new Set([...selectedTasks].map((t) => t.toLowerCase()));
 
   return models.filter((m) => {
     if (tierIds && !tierIds.has(m.id ?? '')) return false;
@@ -96,10 +147,49 @@ export function filterModels(
       const hay = [
         m.id ?? '',
         m.displayName ?? '',
+        m.summary ?? '',
         m.description ?? '',
       ].join(' ').toLowerCase();
       if (!hay.includes(needle)) return false;
     }
+    if (taskNeedles) {
+      const modelTasks = m.tasks ?? [];
+      const hit = modelTasks.some((t) => taskNeedles.has(t.toLowerCase()));
+      if (!hit) return false;
+    }
     return true;
   });
+}
+
+// Groups the task vocabulary into family → ordered-task-list buckets for
+// the filter panel. Families appear in TASK_FAMILY_ORDER; unknown families
+// (added server-side before the front-end catches up) trail at the end so
+// nothing is silently dropped.
+export function groupTasksByFamily(
+  tasks: readonly CatalogTaskInfoSnapshot[],
+): readonly { family: string; tasks: readonly CatalogTaskInfoSnapshot[] }[] {
+  const buckets = new Map<string, CatalogTaskInfoSnapshot[]>();
+  for (const t of tasks) {
+    const family = t.family ?? 'Other';
+    let bucket = buckets.get(family);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(family, bucket);
+    }
+    bucket.push(t);
+  }
+  const ordered: { family: string; tasks: readonly CatalogTaskInfoSnapshot[] }[] = [];
+  for (const family of TASK_FAMILY_ORDER) {
+    const bucket = buckets.get(family);
+    if (bucket) {
+      ordered.push({ family, tasks: bucket });
+      buckets.delete(family);
+    }
+  }
+  // Any leftover families (server added new ones) tail-appended in
+  // insertion order so nothing disappears silently.
+  for (const [family, bucket] of buckets) {
+    ordered.push({ family, tasks: bucket });
+  }
+  return ordered;
 }

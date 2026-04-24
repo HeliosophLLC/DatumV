@@ -20,9 +20,10 @@ namespace DatumIngest.Catalog.Providers;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Schema (4 columns):
+/// Schema (5 columns):
 /// <list type="table">
 ///   <item><term>name</term><description>Canonical contract identifier (<c>"ImageClassifier"</c>, <c>"TextEmbedder"</c>, …).</description></item>
+///   <item><term>family</term><description>Coarse grouping — <c>"Text"</c>, <c>"Image"</c>, <c>"Audio"</c>, <c>"Video"</c>, <c>"Multimodal"</c>, <c>"Structured"</c>. Used by the model-browser filter UI.</description></item>
 ///   <item><term>input_signature</term><description>Parenthesised, comma-separated input slot list — e.g. <c>"(Image)"</c>, <c>"(Image, Array&lt;String&gt;)"</c>.</description></item>
 ///   <item><term>return_signature</term><description>The return slot — e.g. <c>"ScoredClass"</c>, <c>"Array&lt;OcrLine&gt;"</c>, <c>"Float32"</c>.</description></item>
 ///   <item><term>description</term><description>One-line human summary.</description></item>
@@ -83,9 +84,10 @@ internal sealed class TasksTableProvider : NonSeekableTableProviderBase
 
             DataValue[] cells = Pool.RentDataValues(_schema.Columns.Count);
             cells[0] = DataValue.FromString(contract.Name, batch.Arena);
-            cells[1] = DataValue.FromString(inputSig, batch.Arena);
-            cells[2] = DataValue.FromString(contract.ReturnKind.ToString(), batch.Arena);
-            cells[3] = DataValue.FromString(contract.Description, batch.Arena);
+            cells[1] = DataValue.FromString(contract.Family.ToString(), batch.Arena);
+            cells[2] = DataValue.FromString(inputSig, batch.Arena);
+            cells[3] = DataValue.FromString(contract.ReturnKind.ToString(), batch.Arena);
+            cells[4] = DataValue.FromString(contract.Description, batch.Arena);
             batch.Add(cells);
 
             if (batch.IsFull) { yield return batch; batch = null; }
@@ -99,6 +101,7 @@ internal sealed class TasksTableProvider : NonSeekableTableProviderBase
     private static Schema BuildSchema() => new(
     [
         new ColumnInfo("name",             DataKind.String, nullable: false),
+        new ColumnInfo("family",           DataKind.String, nullable: false),
         new ColumnInfo("input_signature",  DataKind.String, nullable: false),
         new ColumnInfo("return_signature", DataKind.String, nullable: false),
         new ColumnInfo("description",      DataKind.String, nullable: false),

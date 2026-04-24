@@ -7,7 +7,16 @@
     "tierAll": "All",
     "tierStarter": "Starter",
     "tierRecommended": "Recommended",
-    "clear": "Clear filters"
+    "clear": "Clear filters",
+    "tasksToggle": "Task",
+    "tasksToggleWithCount": "Task ({count})",
+    "tasksClear": "Clear",
+    "familyText": "Text",
+    "familyImage": "Image",
+    "familyAudio": "Audio",
+    "familyVideo": "Video",
+    "familyMultimodal": "Multimodal",
+    "familyStructured": "Structured"
   },
   "search": {
     "placeholder": "Search models"
@@ -18,7 +27,9 @@
     "size": "~{size} MB",
     "attributions": "Credits:",
     "hardwareCpu": "CPU",
-    "hardwareGpu": "GPU",
+    "hardwareCuda": "NVIDIA CUDA",
+    "hardwareDirectMl": "DirectML",
+    "hardwareCoreMl": "Apple CoreML",
     "hardwareAny": "CPU/GPU",
     "comingSoon": "Coming soon",
     "gated": "HF login required",

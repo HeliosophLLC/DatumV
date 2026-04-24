@@ -682,6 +682,40 @@ export class ModelCatalogClient {
         return Promise.resolve<CatalogManifest>(null as any);
     }
 
+    getTasks(signal?: AbortSignal): Promise<CatalogTaskInfo[]> {
+        let url_ = this.baseUrl + "/api/model-catalog/tasks";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processGetTasks(_response);
+        });
+    }
+
+    protected processGetTasks(response: Response): Promise<CatalogTaskInfo[]> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as CatalogTaskInfo[];
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<CatalogTaskInfo[]>(null as any);
+    }
+
     getLicenseText(id: string, signal?: AbortSignal): Promise<string> {
         let url_ = this.baseUrl + "/api/model-catalog/licenses/{id}/text";
         if (id === undefined || id === null)
@@ -1666,8 +1700,9 @@ export interface CatalogTiers {
 export interface CatalogModel {
     id?: string;
     displayName?: string;
+    summary?: string;
     description?: string;
-    task?: string;
+    tasks?: string[];
     tags?: string[];
     licenseIds?: string[];
     attributions?: string[];
@@ -1725,6 +1760,12 @@ export interface CatalogModelSignature {
     outputKind?: string;
     isDeterministic?: boolean;
     optionalArgKinds?: string[] | undefined;
+}
+
+export interface CatalogTaskInfo {
+    name?: string;
+    family?: string;
+    description?: string;
 }
 
 export type ModelInstallState = "notDownloaded" | "partial" | "downloaded" | "installed";

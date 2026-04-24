@@ -53,11 +53,11 @@ export interface ActiveRamp {
 
 export interface RecentCompletion {
   modelName: string;
-  // 'completed' | 'halted-projection' | 'halted-spill'. Distinct
-  // strings rather than nested enum because the chip's only consumer
-  // is a colour decision; an enum would force a Tapper-generated
-  // import for two values.
-  outcome: 'completed' | 'halted-projection' | 'halted-spill';
+  // 'completed' | 'halted-projection' | 'halted-spill' | 'halted-error'.
+  // Distinct strings rather than nested enum because the chip's only
+  // consumer is a colour decision; an enum would force a
+  // Tapper-generated import for a handful of values.
+  outcome: 'completed' | 'halted-projection' | 'halted-spill' | 'halted-error';
   finishedAt: number;
 }
 
@@ -191,7 +191,9 @@ onCalibrationRampHalted((ev) => {
     outcome:
       ev.reason === CalibrationHaltReason.DurationSpill
         ? 'halted-spill'
-        : 'halted-projection',
+        : ev.reason === CalibrationHaltReason.DispatchError
+          ? 'halted-error'
+          : 'halted-projection',
     finishedAt: Date.now(),
   });
   if (calibrationState.activeRamp?.modelName === ev.modelName) {

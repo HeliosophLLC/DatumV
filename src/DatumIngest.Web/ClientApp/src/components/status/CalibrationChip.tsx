@@ -172,16 +172,20 @@ function RecentCompletionsList({ recent }: { recent: readonly RecentCompletion[]
               className={
                 r.outcome === 'halted-spill'
                   ? 'text-amber-700 dark:text-amber-500'
-                  : r.outcome === 'halted-projection'
-                    ? 'text-muted-foreground'
-                    : 'text-blue-700 dark:text-blue-400'
+                  : r.outcome === 'halted-error'
+                    ? 'text-red-700 dark:text-red-500'
+                    : r.outcome === 'halted-projection'
+                      ? 'text-muted-foreground'
+                      : 'text-blue-700 dark:text-blue-400'
               }
             >
               {r.outcome === 'completed'
                 ? t('calibrationChip.outcomeCompleted')
                 : r.outcome === 'halted-spill'
                   ? t('calibrationChip.outcomeHaltedSpill')
-                  : t('calibrationChip.outcomeHaltedProjection')}
+                  : r.outcome === 'halted-error'
+                    ? t('calibrationChip.outcomeHaltedError')
+                    : t('calibrationChip.outcomeHaltedProjection')}
             </span>
           </li>
         ))}

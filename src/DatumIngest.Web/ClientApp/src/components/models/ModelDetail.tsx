@@ -33,8 +33,6 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
   const activeDownload = downloads.active[modelId];
   const installing = downloads.installing[modelId] === true;
   const error = downloads.errors[modelId];
-  const hasInstallSql = typeof model.installSql === 'string' && model.installSql.length > 0;
-
   // Python install sub-step. The venv-install step is model-scoped (keyed
   // by catalog id), so it appears only on the card that triggered it. The
   // uv-download + python-install steps are machine-scoped — surface them
@@ -70,11 +68,21 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
             )}
           </div>
         </div>
-        <p className="text-muted-foreground text-sm">{model.description}</p>
+        {model.summary && (
+          <p className="text-foreground text-sm leading-relaxed">{model.summary}</p>
+        )}
+        {model.description && (
+          <p className="text-muted-foreground text-xs leading-relaxed">{model.description}</p>
+        )}
         <p className="text-muted-foreground text-xs font-mono">{modelId}</p>
       </header>
 
       <div className="flex flex-wrap gap-1.5">
+        {(model.tasks ?? []).map((task) => (
+          <Badge key={task} variant="secondary">
+            {task}
+          </Badge>
+        ))}
         {typeof model.approxSizeMb === 'number' && (
           <Badge variant="outline">
             {t('card.size', { size: model.approxSizeMb })}
@@ -84,7 +92,7 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
           <Badge variant="outline">{hardwareLabel(t, model.hardware.preferred)}</Badge>
         )}
         {(model.licenseIds ?? []).map((id) => (
-          <Badge key={id} variant="secondary">
+          <Badge key={id} variant="outline">
             {id}
           </Badge>
         ))}
@@ -113,7 +121,6 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
         downloaded={installState === 'downloaded'}
         downloading={!!activeDownload}
         installing={installing}
-        hasInstallSql={hasInstallSql}
         partialBytes={downloads.partials[modelId] ?? 0}
         installStep={activeStep}
       />
@@ -250,7 +257,6 @@ function DetailActions({
   downloaded,
   downloading,
   installing,
-  hasInstallSql,
   partialBytes,
   installStep,
 }: {
@@ -261,7 +267,6 @@ function DetailActions({
   downloaded: boolean;
   downloading: boolean;
   installing: boolean;
-  hasInstallSql: boolean;
   partialBytes: number;
   installStep: PythonInstallStep | null;
 }) {
@@ -296,8 +301,11 @@ function DetailActions({
 
   // Files-are-there-but-install-didn't-run path. Most common after a
   // process restart (ModelRegistry is in-memory and resets) — the user
-  // has the bytes but needs to re-register the SQL-defined model.
-  if (downloaded && hasInstallSql) {
+  // has the bytes but needs to re-register the model. Holds for both
+  // SQL-defined models (re-runs installSql) and built-in IModel entries
+  // (re-runs the catalog-driven registrar) — either way the bytes-only
+  // state needs an "Install" affordance, not "Download".
+  if (downloaded) {
     return (
       <div className="flex justify-end gap-2">
         <Button
@@ -413,7 +421,9 @@ function hardwareLabel(
   preferred: string,
 ): string {
   if (preferred === 'cpu') return t('card.hardwareCpu');
-  if (preferred === 'gpu') return t('card.hardwareGpu');
+  if (preferred === 'cuda') return t('card.hardwareCuda');
+  if (preferred === 'directml') return t('card.hardwareDirectMl');
+  if (preferred === 'coreml') return t('card.hardwareCoreMl');
   if (preferred === 'any') return t('card.hardwareAny');
   return preferred;
 }

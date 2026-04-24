@@ -1,7 +1,17 @@
+using DatumIngest.Catalog.Registries;
 using DatumIngest.ModelLibrary;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DatumIngest.Web.Api;
+
+// Lightweight DTO describing one task contract for the front-end filter UI.
+// Family is stringified (e.g. "Text") so the JSON wire form matches the
+// `family` column of datum_catalog.tasks and the locale-file keys
+// (`families.text`, …) on the client.
+public sealed record CatalogTaskInfo(
+    string Name,
+    string Family,
+    string Description);
 
 [ApiController]
 [Route("api/model-catalog")]
@@ -15,6 +25,25 @@ public sealed class ModelCatalogController(
     // to-refresh patterns later; for v1 a manual reload covers updates.
     [HttpGet]
     public CatalogManifest GetManifest() => store.Manifest;
+
+    // GET /api/model-catalog/tasks — the engine-defined task vocabulary
+    // (name + family + one-line description), one entry per
+    // <see cref="TaskTypeRegistry"/> contract. Front-end fetches once at
+    // startup to drive the faceted task-filter chips grouped by family.
+    // Mirrors the contents of the `datum_catalog.tasks` virtual table over
+    // HTTP so the model browser doesn't have to issue SQL.
+    [HttpGet("tasks")]
+    public IReadOnlyList<CatalogTaskInfo> GetTasks()
+    {
+        var contracts = TaskTypeRegistry.Entries;
+        var result = new CatalogTaskInfo[contracts.Count];
+        for (int i = 0; i < contracts.Count; i++)
+        {
+            var c = contracts[i];
+            result[i] = new CatalogTaskInfo(c.Name, c.Family.ToString(), c.Description);
+        }
+        return result;
+    }
 
     // GET /api/model-catalog/licenses/{id}/text — raw license text for
     // acceptance UI. Returns 404 if id unknown or textFile missing.

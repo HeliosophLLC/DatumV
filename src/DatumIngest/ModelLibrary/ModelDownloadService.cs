@@ -444,6 +444,42 @@ internal sealed class ModelDownloadService : IModelDownloadService
             SourceFile file = files[i];
             string destPath = Path.Combine(modelDir, file.Path);
 
+            // Skip files already present at the expected size — the user
+            // hit Install on a `Downloaded` model whose bytes are already
+            // on disk; re-fetching from the source would burn bandwidth
+            // and time for no gain. Mirrors the heuristic ProbeAsync uses
+            // when classifying a model as `Downloaded`: a file is present
+            // iff it exists and (when the inventory reports a size) the
+            // on-disk length matches. Hash verification is intentionally
+            // skipped on the skip-path — re-hashing multi-GB GGUF files
+            // on every Install click would defeat the purpose; the
+            // hash check below still runs on freshly-downloaded files.
+            if (File.Exists(destPath))
+            {
+                bool sizeMatches = file.Size == 0 ||
+                    new FileInfo(destPath).Length == file.Size;
+                if (sizeMatches)
+                {
+                    long countedSize = file.Size > 0 ? file.Size : 0;
+                    bytesAcrossModel += countedSize;
+                    // Emit a synthetic per-file progress event so the UI's
+                    // overall progress bar advances to reflect the skipped
+                    // file as already-complete. Without this, an Install on
+                    // a fully-downloaded model would jump from 0 → 100 only
+                    // at the very end of the loop.
+                    _ = _reporter.OnProgressAsync(new ModelDownloadProgress(
+                        ModelId: model.Id,
+                        CurrentFile: file.Path,
+                        FileIndex: i + 1,
+                        FileCount: files.Count,
+                        BytesReadInFile: countedSize,
+                        BytesTotalInFile: countedSize,
+                        BytesReadTotal: bytesAcrossModel,
+                        BytesTotalAcrossModel: totalBytes), ct).AsTask();
+                    continue;
+                }
+            }
+
             int index = i;
             long fileSize = file.Size;
             long bytesAtStart = bytesAcrossModel;

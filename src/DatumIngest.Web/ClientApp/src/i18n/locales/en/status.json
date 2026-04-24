@@ -26,6 +26,7 @@
     "outcomeCompleted": "completed",
     "outcomeHaltedProjection": "halted (projection)",
     "outcomeHaltedSpill": "halted (spill)",
+    "outcomeHaltedError": "halted (error)",
     "curveTableTitle": "Curves",
     "curveTableEmpty": "No curves yet",
     "curveColumnBatch": "Batch",

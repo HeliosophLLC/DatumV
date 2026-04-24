@@ -62,7 +62,7 @@ public static class NamedTypeRegistry
         Func<TypeRegistry, IReadOnlyDictionary<string, int>, int> Build);
 
     /// <summary>
-    /// The 16-entry vocabulary, ordered topologically: primitives
+    /// The 17-entry vocabulary, ordered topologically: primitives
     /// composed into composites are listed before the composites that
     /// reference them (<c>BoundingBox</c> before <c>ScoredDetection</c>,
     /// etc.). The <see cref="TypeRegistry"/> constructor iterates this
@@ -231,6 +231,17 @@ public static class NamedTypeRegistry
                 new("bbox", byName["BoundingBox"]),
                 new("text", reg.InternScalarType(DataKind.String)),
                 new("score", reg.InternScalarType(DataKind.Float32)),
+            ])),
+
+        // ─── multimodal embedding pair (CLIP-style dual encoder) ─────────
+
+        new(
+            "DualEmbedding",
+            "Struct<image: Array<Float32>, text: Array<Float32>>",
+            (reg, _) => reg.InternStructType(
+            [
+                new("image", reg.InternArrayType(DataKind.Float32)),
+                new("text", reg.InternArrayType(DataKind.Float32)),
             ])),
     ];
 }

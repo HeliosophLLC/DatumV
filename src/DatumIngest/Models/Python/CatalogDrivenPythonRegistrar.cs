@@ -146,7 +146,10 @@ public static class CatalogDrivenPythonRegistrar
             DisplayName: entry.DisplayName,
             License: license,
             SourceUrl: null,
-            Category: entry.Task,
+            // Tasks is non-empty (manifest validation guarantees it); the
+            // first entry is by convention the model's primary use, which
+            // is the natural fit for a single-string Category.
+            Category: entry.Tasks[0],
             Files: []));
     }
 

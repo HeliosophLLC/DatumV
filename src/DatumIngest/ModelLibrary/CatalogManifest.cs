@@ -33,8 +33,21 @@ public sealed record CatalogTiers(
 public sealed record CatalogModel(
     string Id,
     string DisplayName,
+    // Plain-English "what does this do and why would I use it" summary —
+    // the headline shown above the technical Description on the model
+    // card. Authored for non-experts; complements (not replaces) the more
+    // technical Description below. Required so the front-end never has to
+    // fall back on Description for the headline copy.
+    string Summary,
     string Description,
-    string Task,
+    // Task contracts this model implements, by name from
+    // <see cref="DatumIngest.Catalog.Registries.TaskTypeRegistry"/>.
+    // Most models implement exactly one; multi-task models (Florence-2,
+    // CLIP, SAM) declare every contract they cover so the model browser's
+    // task filter matches the model for each. Validated at catalog-load
+    // time — unknown names fail loudly. Order is "primary use first" so
+    // single-task consumers reading `Tasks[0]` get the model's main role.
+    IReadOnlyList<string> Tasks,
     IReadOnlyList<string> Tags,
     IReadOnlyList<string> LicenseIds,
     // Copyright holders / contributors the upstream license requires us
@@ -130,7 +143,23 @@ public sealed record CatalogModelSignature(
 public sealed record CatalogHardware(
     int MinRamMb,
     int MinVramMb,
-    // Free-form for now: "cpu" | "gpu" | "any" — informational, not enforced.
+    // The execution provider the model is optimized for. One of:
+    // <list type="bullet">
+    // <item><c>"cpu"</c> — works on ONNX Runtime's CPU EP; no accelerator
+    //   required.</item>
+    // <item><c>"cuda"</c> — NVIDIA GPU via ORT's CUDA EP. Catalog entries
+    //   whose <i>weights</i> are CUDA-quantized (e.g. <c>onnxruntime-genai</c>
+    //   CUDA INT4 builds) won't fall back to CPU; generic ONNX entries
+    //   tagged "cuda" still run on CPU EP, just much slower.</item>
+    // <item><c>"directml"</c> — Any DirectX 12 GPU (AMD / Intel / NVIDIA)
+    //   via ORT's DirectML EP. Reserved — no catalog entries today.</item>
+    // <item><c>"coreml"</c> — Apple Silicon / Mac via ORT's CoreML EP.
+    //   Reserved — no catalog entries today.</item>
+    // <item><c>"any"</c> — runs on whichever EP the host has; informational
+    //   default when no provider is clearly preferred.</item>
+    // </list>
+    // Validated at catalog-load time. Aligns with the runtime
+    // <see cref="DatumIngest.Inference.InferenceDevice"/> enum's EP names.
     string Preferred);
 
 // Discriminated union over source channels. JSON wire form carries a

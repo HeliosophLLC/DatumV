@@ -57,6 +57,7 @@ internal sealed class SignalRCalibrationObserver(
     {
         HaltReason.LookAheadProjection => CalibrationHaltReason.LookAheadProjection,
         HaltReason.DurationSpill => CalibrationHaltReason.DurationSpill,
+        HaltReason.DispatchError => CalibrationHaltReason.DispatchError,
         _ => CalibrationHaltReason.LookAheadProjection,
     };
 }

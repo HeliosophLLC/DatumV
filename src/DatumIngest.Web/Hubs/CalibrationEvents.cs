@@ -31,6 +31,7 @@ public enum CalibrationHaltReason
 {
     LookAheadProjection,
     DurationSpill,
+    DispatchError,
 }
 
 [TranspilationSource]

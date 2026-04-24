@@ -5,6 +5,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using DatumIngest.Catalog.Registries;
+
 using Microsoft.Extensions.Logging;
 
 namespace DatumIngest.ModelLibrary;
@@ -75,22 +77,62 @@ internal sealed class ManifestStore : IManifestStore
     }
 
     /// <summary>
-    /// Sanity-checks every entry's Kind / Python invariant at load time
-    /// so a manifest typo surfaces as one clear startup error instead of
-    /// a confusing failure mid-install. Today's rules:
+    /// Sanity-checks every entry's Kind / Python / Tasks / Summary
+    /// invariants at load time so a manifest typo surfaces as one clear
+    /// startup error instead of a confusing failure mid-install. Today's
+    /// rules:
     /// <list type="bullet">
     /// <item><c>Kind == "python"</c> requires a non-null <see cref="CatalogPythonSpec"/>;
     /// every other kind requires it to be null.</item>
     /// <item>Python entries must declare a non-empty WorkerScript and PythonVersion.</item>
+    /// <item><c>Tasks</c> must be non-empty and every entry must match a
+    /// contract registered in <see cref="TaskTypeRegistry"/> (case-insensitive).</item>
+    /// <item><c>Summary</c> must be a non-blank, plain-English line for
+    /// the model-browser card.</item>
+    /// <item><c>Hardware.Preferred</c> must name an allowed execution
+    /// provider (cpu / cuda / directml / coreml / any).</item>
     /// </list>
     /// Loose validation on purpose — the registrar layer will type-check
     /// the signature kinds against the runtime <c>DataKind</c> enum
     /// later. This pass only catches the cross-field invariants.
     /// </summary>
+    private static readonly HashSet<string> AllowedPreferredProviders =
+        new(StringComparer.OrdinalIgnoreCase) { "cpu", "cuda", "directml", "coreml", "any" };
+
     private static void ValidateModels(CatalogManifest manifest, string manifestPath)
     {
         foreach (CatalogModel m in manifest.Models)
         {
+            if (!AllowedPreferredProviders.Contains(m.Hardware.Preferred))
+            {
+                throw new InvalidOperationException(
+                    $"Catalog entry '{m.Id}' in {manifestPath} has unknown hardware.preferred "
+                    + $"'{m.Hardware.Preferred}'. Allowed: cpu, cuda, directml, coreml, any.");
+            }
+            if (string.IsNullOrWhiteSpace(m.Summary))
+            {
+                throw new InvalidOperationException(
+                    $"Catalog entry '{m.Id}' in {manifestPath} has summary missing or blank. "
+                    + "Every catalog entry needs a plain-English summary for the model card.");
+            }
+            else if (m.Tasks is null || m.Tasks.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"Catalog entry '{m.Id}' in {manifestPath} has an empty tasks array. "
+                    + "Every catalog entry must declare at least one task from datum_catalog.tasks.");
+            }
+            
+            foreach (string task in m.Tasks)
+            {
+                if (TaskTypeRegistry.TryGet(task) is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Catalog entry '{m.Id}' in {manifestPath} declares unknown task '{task}'. "
+                        + "Tasks must match a contract from TaskTypeRegistry "
+                        + "(see `SELECT name FROM datum_catalog.tasks`).");
+                }
+            }
+
             bool isPython = string.Equals(m.Kind, "python", StringComparison.OrdinalIgnoreCase);
             if (isPython && m.Python is null)
             {

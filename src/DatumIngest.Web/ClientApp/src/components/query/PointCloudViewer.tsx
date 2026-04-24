@@ -170,9 +170,9 @@ export function PointCloudViewerBody({
             <span>{t('pointCloudVoxelSize')}</span>
             <input
               type="range"
-              min={defaultVoxelSize * 0.25}
+              min={defaultVoxelSize * 0.015}
               max={defaultVoxelSize * 4}
-              step={defaultVoxelSize * 0.05}
+              step={defaultVoxelSize * 0.005}
               value={effectiveVoxelSize}
               onChange={(e) => setVoxelSize(Number(e.target.value))}
               className="w-24"
