@@ -362,7 +362,11 @@ internal sealed partial class RoutineRegistrar
         _catalog.Models?.Unregister(removed.Name);
         // Evict the residency cache so any newly-acquired lease that races
         // the disposal below doesn't latch onto the stale ProceduralModelAdapter.
-        _catalog.Models?.ResidencyManager.Evict(removed.Name);
+        // EvictAlways defers the IModel disposal until any in-flight lease
+        // drains — without that, an in-flight Session.Run would crash with
+        // 0xC0000005 when the registrar disposes the descriptor's sessions
+        // immediately below.
+        _catalog.Models?.ResidencyManager.EvictAlways(removed.Name);
 
         _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
 
@@ -510,8 +514,9 @@ internal sealed partial class RoutineRegistrar
             // ProceduralModelAdapter whose descriptor's sessions are about
             // to be disposed by DisposeSessions(displaced) — every
             // subsequent invocation would then fault inside Session.Run
-            // with "Cannot access a disposed object".
-            models.ResidencyManager.Evict(descriptor.Name);
+            // with "Cannot access a disposed object". EvictAlways defers
+            // the displaced IModel's disposal until in-flight leases drain.
+            models.ResidencyManager.EvictAlways(descriptor.Name);
         }
         models.Register(entry);
     }

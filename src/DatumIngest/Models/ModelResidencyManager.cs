@@ -44,6 +44,22 @@ public sealed class ModelResidencyManager : IDisposable
 
     private readonly object _lock = new();
     private readonly Dictionary<string, Resident> _resident = new(StringComparer.OrdinalIgnoreCase);
+
+    // Entries removed from _resident by EvictAlways while still leased.
+    // The IModel inside stays alive until the last lease drains so an
+    // in-flight Session.Run doesn't crash with 0xC0000005. Once
+    // ActiveRefs hits zero the entry is disposed and dropped from this
+    // list. Lookups go by Generation rather than name — multiple loads
+    // of the same identifier can coexist here transiently if DROP/CREATE
+    // OR REPLACE churn fires during in-flight queries.
+    private readonly List<Resident> _pendingDisposal = [];
+
+    // Monotonically increasing under _lock — stamps each Resident so
+    // ModelLease can find its origin entry even after EvictAlways moves
+    // it into _pendingDisposal (or after a successor entry takes the
+    // same name in _resident).
+    private long _nextGeneration;
+
     private readonly CalibrationRegistry? _calibrationRegistry;
 
     // Serialises concurrent loader invocations so two different models
@@ -72,6 +88,11 @@ public sealed class ModelResidencyManager : IDisposable
     private sealed class Resident
     {
         public required Task<IModel> ModelTask { get; init; }
+        // Stable identity for this load. ModelLease records it at acquire
+        // time so Release can find the correct entry across the
+        // _resident → _pendingDisposal transition and across same-name
+        // successor loads.
+        public required long Generation { get; init; }
         // Mutable so post-load reconciliation can replace the heuristic
         // admit-time estimate with the calibration-registry's measured
         // weight cost. See RecordWeightCost.
@@ -181,6 +202,7 @@ public sealed class ModelResidencyManager : IDisposable
 
             Task<IModel> modelTask;
             TaskCompletionSource<IModel>? loaderTcs = null;
+            long generation;
 
             lock (_lock)
             {
@@ -194,6 +216,7 @@ public sealed class ModelResidencyManager : IDisposable
                     int newRefs = ++cached.ActiveRefs;
                     cached.LastUsed = DateTimeOffset.UtcNow;
                     modelTask = cached.ModelTask;
+                    generation = cached.Generation;
                     DatumActivity.Operators.Trace($"[residency] acquire-hit '{entry.Name}' refs={newRefs}");
                     // Coalesce on the busy edge: only fan out the
                     // 0→1 transition (idle → in-use). Mid-burst N→N+1
@@ -210,9 +233,11 @@ public sealed class ModelResidencyManager : IDisposable
                     // double-counting.
                     loaderTcs = new TaskCompletionSource<IModel>(
                         TaskCreationOptions.RunContinuationsAsynchronously);
+                    generation = ++_nextGeneration;
                     _resident[entry.Name] = new Resident
                     {
                         ModelTask = loaderTcs.Task,
+                        Generation = generation,
                         Bytes = estimatedBytes,
                         LastUsed = DateTimeOffset.UtcNow,
                         ActiveRefs = 1,
@@ -275,8 +300,24 @@ public sealed class ModelResidencyManager : IDisposable
                         catch (OperationCanceledException) { }
                         lock (_lock)
                         {
-                            _resident.Remove(entry.Name);
-                            _vramUsedBytes -= estimatedBytes;
+                            // Common case: our Resident is still in _resident.
+                            // Roll back the admission reservation. Generation
+                            // check guards against a successor that took our
+                            // name after EvictAlways moved us to pending — we
+                            // must not remove the successor.
+                            if (_resident.TryGetValue(entry.Name, out Resident? r)
+                                && r.Generation == generation)
+                            {
+                                _resident.Remove(entry.Name);
+                                _vramUsedBytes -= estimatedBytes;
+                            }
+                            else if (TryFindPendingIndex(generation, out int pendingIdx))
+                            {
+                                // EvictAlways moved us mid-load; VRAM
+                                // accounting was decremented there, so just
+                                // drop the pending slot.
+                                _pendingDisposal.RemoveAt(pendingIdx);
+                            }
                         }
                         loaderTcs.SetException(ex);
                         _ = loaderTcs.Task.Exception; // observe so it cannot surface as UnobservedTaskException when no follower is waiting
@@ -287,7 +328,7 @@ public sealed class ModelResidencyManager : IDisposable
                     try { await sampler.ConfigureAwait(false); }
                     catch (OperationCanceledException) { }
 
-                    RecordWeightCost(entry, modelDirectory, vramBefore, peakVram, vramAvailable);
+                    RecordWeightCost(entry, modelDirectory, vramBefore, peakVram, vramAvailable, generation);
                 }
                 finally
                 {
@@ -302,7 +343,17 @@ public sealed class ModelResidencyManager : IDisposable
                 {
                     if (_disposed)
                     {
-                        _resident.Remove(entry.Name);
+                        // Remove ourselves from whichever container holds us;
+                        // generation guard avoids touching a same-name successor.
+                        if (_resident.TryGetValue(entry.Name, out Resident? r0)
+                            && r0.Generation == generation)
+                        {
+                            _resident.Remove(entry.Name);
+                        }
+                        else if (TryFindPendingIndex(generation, out int pendingIdx))
+                        {
+                            _pendingDisposal.RemoveAt(pendingIdx);
+                        }
                         (loadedModel as IDisposable)?.Dispose();
                         ObjectDisposedException disposedEx = new(nameof(ModelResidencyManager));
                         loaderTcs.SetException(disposedEx);
@@ -318,8 +369,12 @@ public sealed class ModelResidencyManager : IDisposable
                     // estimatedBytes with the measured value; read the
                     // resident's current Bytes for the observer payload
                     // so the UI sees the same number system.models does.
-                    long observedBytes = _resident.TryGetValue(entry.Name, out Resident? r)
-                        ? r.Bytes : estimatedBytes;
+                    // Generation guard: if EvictAlways moved us to pending
+                    // mid-load, a successor entry may now hold our name —
+                    // its Bytes don't represent the model we just loaded.
+                    long observedBytes = estimatedBytes;
+                    if (_resident.TryGetValue(entry.Name, out Resident? r) && r.Generation == generation)
+                        observedBytes = r.Bytes;
                     long observedUsed = _vramUsedBytes;
                     Catalog?.NotifyModelLoaded(entry.Name, observedBytes, observedUsed);
                     // The loader's own bump is the 0→1 transition for
@@ -327,7 +382,7 @@ public sealed class ModelResidencyManager : IDisposable
                     Catalog?.NotifyModelActiveChanged(entry.Name, 1);
                 }
                 loaderTcs.SetResult(loadedModel);
-                return new ModelLease(this, entry.Name, loadedModel);
+                return new ModelLease(this, entry.Name, loadedModel, generation);
             }
 
             // ---- I'm a follower. The loader is or has been working on this
@@ -336,7 +391,7 @@ public sealed class ModelResidencyManager : IDisposable
             try
             {
                 IModel model = await modelTask.WaitAsync(cancellationToken).ConfigureAwait(false);
-                return new ModelLease(this, entry.Name, model);
+                return new ModelLease(this, entry.Name, model, generation);
             }
             catch
             {
@@ -344,10 +399,27 @@ public sealed class ModelResidencyManager : IDisposable
                 // TryGetValue will miss and the decrement is a no-op.
                 // Cancellation → entry still exists, decrement my bump so
                 // the loader's own ref isn't stranded one above zero.
+                // Generation guard handles the EvictAlways-during-load case:
+                // our bumped Resident may have moved into _pendingDisposal,
+                // and a same-name successor may now occupy _resident.
                 lock (_lock)
                 {
-                    if (_resident.TryGetValue(entry.Name, out Resident? r) && r.ActiveRefs > 0)
+                    if (_resident.TryGetValue(entry.Name, out Resident? r)
+                        && r.Generation == generation && r.ActiveRefs > 0)
+                    {
                         r.ActiveRefs--;
+                    }
+                    else if (TryFindPendingIndex(generation, out int pendingIdx))
+                    {
+                        Resident pending = _pendingDisposal[pendingIdx];
+                        if (pending.ActiveRefs > 0) pending.ActiveRefs--;
+                        if (pending.ActiveRefs == 0)
+                        {
+                            _pendingDisposal.RemoveAt(pendingIdx);
+                            if (pending.ModelTask.IsCompletedSuccessfully)
+                                (pending.ModelTask.Result as IDisposable)?.Dispose();
+                        }
+                    }
                 }
                 throw;
             }
@@ -373,19 +445,47 @@ public sealed class ModelResidencyManager : IDisposable
 
     /// <summary>
     /// Releases the lease's ref. Called by <see cref="ModelLease.Dispose"/>;
-    /// not generally called directly.
+    /// not generally called directly. The <paramref name="generation"/>
+    /// identifies which <c>Resident</c> the lease originated from so
+    /// concurrent <see cref="EvictAlways"/> + same-name reload churn
+    /// doesn't route the decrement to the wrong entry.
     /// </summary>
-    internal void Release(string modelName)
+    internal void Release(string modelName, long generation)
     {
         int? newRefs = null;
         lock (_lock)
         {
-            if (_resident.TryGetValue(modelName, out Resident? r))
+            // Common case: the entry is still in _resident under our name and
+            // our generation matches — straight decrement.
+            if (_resident.TryGetValue(modelName, out Resident? r) && r.Generation == generation)
             {
                 if (r.ActiveRefs > 0) r.ActiveRefs--;
                 r.LastUsed = DateTimeOffset.UtcNow;
                 newRefs = r.ActiveRefs;
                 DatumActivity.Operators.Trace($"[residency] release '{modelName}' refs={r.ActiveRefs}");
+            }
+            else if (TryFindPendingIndex(generation, out int pendingIdx))
+            {
+                // Our Resident was moved to _pendingDisposal by EvictAlways
+                // while we held the lease. Drain our ref; if we were the
+                // last lease holder, dispose the model now — the whole point
+                // of the lazy-disposal path.
+                Resident pending = _pendingDisposal[pendingIdx];
+                if (pending.ActiveRefs > 0) pending.ActiveRefs--;
+                DatumActivity.Operators.Trace(
+                    $"[residency] release-pending '{modelName}' refs={pending.ActiveRefs}");
+                if (pending.ActiveRefs == 0)
+                {
+                    _pendingDisposal.RemoveAt(pendingIdx);
+                    if (pending.ModelTask.IsCompletedSuccessfully)
+                        (pending.ModelTask.Result as IDisposable)?.Dispose();
+                    DatumActivity.Operators.Trace(
+                        $"[residency] dispose-after-drain '{modelName}'");
+                }
+                // No idle-edge notification: observers already saw the
+                // ModelEvicted event when EvictAlways ran. A second
+                // active-changed event for the same logical entry would
+                // confuse UI listeners.
             }
         }
         // Idle edge: fire only on N→0 transitions. Same coalescing
@@ -396,20 +496,47 @@ public sealed class ModelResidencyManager : IDisposable
     }
 
     /// <summary>
-    /// Drops the cached <see cref="IModel"/> for <paramref name="modelName"/> if
-    /// one is resident, disposing it when it implements <see cref="IDisposable"/>
-    /// and freeing its VRAM accounting. Used by <c>CREATE OR REPLACE MODEL</c>
-    /// and <c>DROP MODEL</c> so subsequent acquires don't keep handing out the
-    /// stale model whose underlying ONNX sessions the registrar is about to
-    /// dispose. In-flight queries already holding a lease are left to finish
-    /// against the now-removed entry — the registrar tears down sessions
-    /// synchronously today, same race as <c>OR REPLACE</c> for UDFs.
+    /// Locates the index of a pending-disposal entry by its generation
+    /// stamp. Caller holds <see cref="_lock"/>.
+    /// </summary>
+    private bool TryFindPendingIndex(long generation, out int index)
+    {
+        for (int i = 0; i < _pendingDisposal.Count; i++)
+        {
+            if (_pendingDisposal[i].Generation == generation)
+            {
+                index = i;
+                return true;
+            }
+        }
+        index = -1;
+        return false;
+    }
+
+    /// <summary>
+    /// Drops the cached <see cref="IModel"/> for <paramref name="modelName"/>
+    /// from the resident set immediately so subsequent acquires fall through
+    /// to a fresh load. The underlying <see cref="IModel"/> is disposed
+    /// synchronously when no leases are active, or held alive in a side list
+    /// and disposed when the last lease drains. Used by <c>DROP MODEL</c>
+    /// and <c>CREATE OR REPLACE MODEL</c>: the registrar tears down the
+    /// descriptor's bound sessions immediately after this returns, but
+    /// in-flight queries already holding a lease keep dispatching against
+    /// the now-removed entry until their <see cref="ModelLease"/> disposes —
+    /// no <c>Session.Run</c> against a disposed handle, no 0xC0000005.
     /// </summary>
     /// <returns>
-    /// <see langword="true"/> if an entry was evicted; <see langword="false"/>
-    /// when no model was cached under that name.
+    /// <see langword="true"/> if an entry was removed from the resident set;
+    /// <see langword="false"/> when no model was cached under that name.
     /// </returns>
-    public bool Evict(string modelName)
+    /// <remarks>
+    /// VRAM accounting and the resident-lookup map are both updated
+    /// synchronously: a fresh acquire of the same name immediately after
+    /// <see cref="EvictAlways"/> sees an empty slot and full budget, even
+    /// if the prior load's IModel is still alive draining leases in the
+    /// background.
+    /// </remarks>
+    public bool EvictAlways(string modelName)
     {
         long evictedBytes;
         lock (_lock)
@@ -418,10 +545,28 @@ public sealed class ModelResidencyManager : IDisposable
             _resident.Remove(modelName);
             _vramUsedBytes -= r.Bytes;
             evictedBytes = r.Bytes;
-            if (r.ModelTask.IsCompletedSuccessfully)
-                (r.ModelTask.Result as IDisposable)?.Dispose();
-            DatumActivity.Operators.Trace(
-                $"[residency] evict-explicit '{modelName}' bytes={r.Bytes} used={_vramUsedBytes}");
+
+            if (r.ActiveRefs == 0)
+            {
+                // No outstanding leases — same semantics as the old eager Evict:
+                // dispose now, no side-list bookkeeping needed.
+                if (r.ModelTask.IsCompletedSuccessfully)
+                    (r.ModelTask.Result as IDisposable)?.Dispose();
+                DatumActivity.Operators.Trace(
+                    $"[residency] evict-always '{modelName}' bytes={r.Bytes} " +
+                    $"disposed=sync used={_vramUsedBytes}");
+            }
+            else
+            {
+                // Park the entry until its last lease releases. The lease's
+                // generation stamp is what Release uses to find it again
+                // here — name lookup wouldn't work because a fresh acquire
+                // is free to claim this name immediately.
+                _pendingDisposal.Add(r);
+                DatumActivity.Operators.Trace(
+                    $"[residency] evict-always '{modelName}' bytes={r.Bytes} " +
+                    $"refs={r.ActiveRefs} disposed=deferred used={_vramUsedBytes}");
+            }
         }
         Catalog?.NotifyModelEvicted(modelName, evictedBytes, EvictionReason.Explicit);
         return true;
@@ -445,20 +590,23 @@ public sealed class ModelResidencyManager : IDisposable
     }
 
     /// <summary>
-    /// Safe variant of <see cref="Evict"/> for the user-typed
-    /// <c>EVICT MODEL</c> surface: refuses to evict (and refuses to
-    /// dispose the underlying <see cref="IModel"/>) when any query holds
-    /// an active lease. Returns <see cref="EvictResult.Pinned"/> in that
-    /// case so the caller can surface a "model is in use" error rather
-    /// than crashing the active query mid-dispatch.
+    /// User-facing variant of <see cref="EvictAlways"/>: refuses to evict
+    /// (and refuses to dispose the underlying <see cref="IModel"/>) when
+    /// any query holds an active lease. Returns
+    /// <see cref="EvictResult.Pinned"/> in that case so the caller can
+    /// surface a "model is in use" error rather than silently deferring
+    /// the eviction.
     /// </summary>
     /// <remarks>
-    /// Distinct from the existing <see cref="Evict"/> which intentionally
-    /// disposes regardless of active refs — that's the synchronous
-    /// tear-down path used by <c>DROP MODEL</c> / <c>CREATE OR REPLACE
-    /// MODEL</c> at the registrar level, with the same race semantics as
-    /// UDF replacement. A future lease-draining + lazy-disposal variant
-    /// can subsume both call sites.
+    /// Distinct from <see cref="EvictAlways"/> which always removes the
+    /// entry from the resident set and parks it for lazy disposal when
+    /// leases are still active — the right semantics for the engine-
+    /// internal <c>DROP MODEL</c> / <c>CREATE OR REPLACE MODEL</c>
+    /// teardown paths, where the registrar is about to dispose the
+    /// underlying sessions and a refusal would leave the catalog in an
+    /// inconsistent state. The user-typed <c>EVICT MODEL</c> surface
+    /// prefers the refuse-on-pin behaviour because it's a hint, not a
+    /// teardown.
     /// </remarks>
     public EvictResult TryEvictUnpinned(
         string modelName, EvictionReason reason = EvictionReason.UserRequested)
@@ -639,7 +787,8 @@ public sealed class ModelResidencyManager : IDisposable
         string modelDirectory,
         long vramBefore,
         long peakVram,
-        bool vramAvailable)
+        bool vramAvailable,
+        long generation)
     {
         if (_calibrationRegistry is null) return;
 
@@ -689,7 +838,13 @@ public sealed class ModelResidencyManager : IDisposable
         {
             lock (_lock)
             {
-                if (_resident.TryGetValue(entry.Name, out Resident? r) && r.Bytes != weightCost)
+                // Generation match: don't reconcile a successor entry that
+                // took our name after EvictAlways moved us to pending. The
+                // pending entry's Bytes is moot — its model is on its way
+                // out, and _vramUsedBytes was already decremented.
+                if (_resident.TryGetValue(entry.Name, out Resident? r)
+                    && r.Generation == generation
+                    && r.Bytes != weightCost)
                 {
                     long oldBytes = r.Bytes;
                     long delta = weightCost - oldBytes;
@@ -733,6 +888,16 @@ public sealed class ModelResidencyManager : IDisposable
                     (r.ModelTask.Result as IDisposable)?.Dispose();
             }
             _resident.Clear();
+            // Drain the lazy-disposal side list too. Same in-flight-load
+            // caveat as above: pending entries with a not-yet-complete
+            // ModelTask are owned by their loader's post-load _disposed
+            // check, which scans both containers and removes itself.
+            foreach (Resident r in _pendingDisposal)
+            {
+                if (r.ModelTask.IsCompletedSuccessfully)
+                    (r.ModelTask.Result as IDisposable)?.Dispose();
+            }
+            _pendingDisposal.Clear();
             _vramUsedBytes = 0;
         }
         // Intentionally not disposing _loadGate — SemaphoreSlim only
@@ -753,15 +918,17 @@ public sealed class ModelLease : IDisposable
 {
     private readonly ModelResidencyManager _manager;
     private readonly string _modelName;
+    private readonly long _generation;
     private bool _released;
 
     /// <summary>The model the lease holds.</summary>
     public IModel Model { get; }
 
-    internal ModelLease(ModelResidencyManager manager, string modelName, IModel model)
+    internal ModelLease(ModelResidencyManager manager, string modelName, IModel model, long generation)
     {
         _manager = manager;
         _modelName = modelName;
+        _generation = generation;
         Model = model;
     }
 
@@ -773,6 +940,6 @@ public sealed class ModelLease : IDisposable
     {
         if (_released) return;
         _released = true;
-        _manager.Release(_modelName);
+        _manager.Release(_modelName, _generation);
     }
 }

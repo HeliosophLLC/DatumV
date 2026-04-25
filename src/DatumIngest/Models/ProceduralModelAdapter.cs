@@ -295,9 +295,9 @@ public sealed class ProceduralModelAdapter : IModel, IDisposable
     /// VRAM they hold. The descriptor + path map stay intact so the next
     /// <c>InferBatchAsync</c> call can reload from disk through the
     /// adapter's loader path. Called by
-    /// <see cref="ModelResidencyManager.Evict"/> when this adapter is
-    /// the resident <see cref="IModel"/> being evicted to make room for
-    /// a sibling.
+    /// <see cref="ModelResidencyManager.EvictAlways"/> when this adapter
+    /// is the resident <see cref="IModel"/> being evicted to make room
+    /// for a sibling.
     /// </summary>
     public void Dispose()
     {

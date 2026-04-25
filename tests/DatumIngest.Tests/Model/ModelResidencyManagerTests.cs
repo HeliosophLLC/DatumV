@@ -599,6 +599,159 @@ public sealed class ModelResidencyManagerTests
             () => mgr.AcquireAsync(honestEntry, "", CancellationToken.None));
     }
 
+    // ---- Group 4b: EvictAlways lazy-disposal --------------------------------
+
+    /// <summary>
+    /// Baseline: EvictAlways on an unpinned model behaves like the old eager
+    /// Evict — dispose synchronously, clear VRAM accounting, return true.
+    /// </summary>
+    [Fact]
+    public async Task EvictAlways_NoActiveRefs_DisposesSynchronously()
+    {
+        using ModelResidencyManager mgr = new(ModelResidencyManager.UnlimitedBudget);
+        FakeModel loaded;
+        using (ModelLease lease = await mgr.AcquireAsync(
+            MakeEntry("a", 1024), "", CancellationToken.None))
+        {
+            loaded = (FakeModel)lease.Model;
+        }
+
+        bool result = mgr.EvictAlways("a");
+
+        Assert.True(result);
+        Assert.True(loaded.Disposed);
+        Assert.Empty(mgr.Snapshot());
+        Assert.Equal(0, mgr.VramUsedBytes);
+    }
+
+    /// <summary>
+    /// Core lazy-disposal invariant. EvictAlways while a lease is active
+    /// removes the entry from the resident set + frees VRAM accounting
+    /// immediately, but DEFERS disposing the IModel until the lease drains.
+    /// The lease's Model handle stays valid in the interim — an in-flight
+    /// Session.Run must not crash with 0xC0000005.
+    /// </summary>
+    [Fact]
+    public async Task EvictAlways_ActiveLease_DefersDisposalUntilRelease()
+    {
+        using ModelResidencyManager mgr = new(ModelResidencyManager.UnlimitedBudget);
+        ModelLease lease = await mgr.AcquireAsync(
+            MakeEntry("a", 1024), "", CancellationToken.None);
+        FakeModel loaded = (FakeModel)lease.Model;
+
+        bool result = mgr.EvictAlways("a");
+
+        // Immediate side effects: gone from resident set, VRAM freed.
+        Assert.True(result);
+        Assert.Empty(mgr.Snapshot());
+        Assert.Equal(0, mgr.VramUsedBytes);
+        // Deferred side effect: model still alive because lease is active.
+        Assert.False(loaded.Disposed,
+            "EvictAlways must not dispose the IModel while a lease is active — " +
+            "in-flight Session.Run would crash with 0xC0000005.");
+
+        lease.Dispose();
+
+        // Lease drain → model disposed.
+        Assert.True(loaded.Disposed,
+            "Releasing the last lease after EvictAlways must dispose the IModel.");
+    }
+
+    /// <summary>
+    /// VRAM accounting is decremented synchronously by EvictAlways so a
+    /// fresh acquire of the same name immediately afterward fits within
+    /// budget even while the old model is still draining leases. This is
+    /// the load-bearing property for the version-switch path: the new
+    /// version's load can't be blocked by the old version's tail leases.
+    /// </summary>
+    [Fact]
+    public async Task EvictAlways_FreesVramSynchronouslyForReload()
+    {
+        // Budget holds exactly one 100-byte model.
+        using ModelResidencyManager mgr = new(vramBudgetBytes: 100);
+        ModelLease oldLease = await mgr.AcquireAsync(
+            MakeEntry("a", 100), "", CancellationToken.None);
+
+        // Without EvictAlways' synchronous VRAM decrement, the next acquire
+        // would fail admission control (budget exhausted + entry pinned).
+        mgr.EvictAlways("a");
+
+        // Reload same name with a fresh entry — must succeed despite oldLease
+        // still holding the old IModel alive in pending disposal.
+        using ModelLease newLease = await mgr.AcquireAsync(
+            MakeEntry("a", 100), "", CancellationToken.None);
+
+        Assert.NotSame(oldLease.Model, newLease.Model);
+        Assert.Equal(100, mgr.VramUsedBytes);
+
+        oldLease.Dispose();
+        // Disposing oldLease drains pending entry but doesn't touch the new
+        // resident — accounting stays at 100, new lease still usable.
+        Assert.Equal(100, mgr.VramUsedBytes);
+        Assert.True(((FakeModel)oldLease.Model).Disposed);
+        Assert.False(((FakeModel)newLease.Model).Disposed);
+    }
+
+    /// <summary>
+    /// EvictAlways on a name that isn't resident returns false without
+    /// touching state. Matches the contract DROP MODEL relies on.
+    /// </summary>
+    [Fact]
+    public void EvictAlways_UnknownName_ReturnsFalse()
+    {
+        using ModelResidencyManager mgr = new(ModelResidencyManager.UnlimitedBudget);
+        Assert.False(mgr.EvictAlways("never-loaded"));
+        Assert.Equal(0, mgr.VramUsedBytes);
+        Assert.Empty(mgr.Snapshot());
+    }
+
+    /// <summary>
+    /// Multiple active leases on the same model: EvictAlways defers
+    /// disposal until the LAST lease drains, not the first.
+    /// </summary>
+    [Fact]
+    public async Task EvictAlways_MultipleLeases_DisposesOnLastRelease()
+    {
+        using ModelResidencyManager mgr = new(ModelResidencyManager.UnlimitedBudget);
+        ModelCatalogEntry entry = MakeEntry("a", 1024);
+        ModelLease l1 = await mgr.AcquireAsync(entry, "", CancellationToken.None);
+        ModelLease l2 = await mgr.AcquireAsync(entry, "", CancellationToken.None);
+        FakeModel loaded = (FakeModel)l1.Model;
+
+        mgr.EvictAlways("a");
+        Assert.False(loaded.Disposed);
+
+        l1.Dispose();
+        Assert.False(loaded.Disposed,
+            "Disposal must wait for the LAST lease to drain, not the first.");
+
+        l2.Dispose();
+        Assert.True(loaded.Disposed);
+    }
+
+    /// <summary>
+    /// Manager.Dispose drains pending-disposal entries too — leases that
+    /// outlived their EvictAlways but never got their final Release must
+    /// still see their IModel torn down when the manager goes away.
+    /// </summary>
+    [Fact]
+    public async Task Dispose_DrainsPendingDisposalEntries()
+    {
+        ModelResidencyManager mgr = new(ModelResidencyManager.UnlimitedBudget);
+        ModelLease leakedLease = await mgr.AcquireAsync(
+            MakeEntry("a", 1024), "", CancellationToken.None);
+        FakeModel loaded = (FakeModel)leakedLease.Model;
+        mgr.EvictAlways("a");
+        // Intentionally do NOT dispose leakedLease — exercise the manager-
+        // dispose-while-pending path.
+        Assert.False(loaded.Disposed);
+
+        mgr.Dispose();
+
+        Assert.True(loaded.Disposed,
+            "Manager.Dispose must drain _pendingDisposal so leaked-lease entries don't leak the IModel.");
+    }
+
     // ---- Group 5: Dispose race -----------------------------------------------
 
     /// <summary>
