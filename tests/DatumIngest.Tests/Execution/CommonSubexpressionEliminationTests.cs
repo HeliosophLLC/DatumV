@@ -57,11 +57,7 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         Assert.Equal("__cse_0", col1.ColumnName);
     }
 
-    [Fact(Skip = "Uses placeholder array_transform(), which isn't a registered " +
-        "function. PlanTimeFunctionGate now rejects unknown function names at plan " +
-        "time, so this test needs to either (a) wait on a real array_transform " +
-        "function landing, or (b) be rewritten against a registered higher-order " +
-        "function like animate_frames with a type-valid lambda body.")]
+    [Fact]
     public void DuplicateInsideLambdaBody_NotHoisted()
     {
         // Regression: CSE used to descend into lambda bodies, hoisting

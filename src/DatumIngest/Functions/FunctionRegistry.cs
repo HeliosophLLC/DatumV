@@ -742,6 +742,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Arrays.ArrayLengthFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayConcatFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayRepeatFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayTransformFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayShapeFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayGetFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayNdimsFunction>();
