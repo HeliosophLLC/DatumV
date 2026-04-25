@@ -50,8 +50,14 @@ public sealed class ErrorRecoveryTests : ServiceTestBase
     {
         ParseResult result = SqlParser.TryParseRecovering("SELEKT x FROM t");
 
+        // `SELEKT` is an identifier, not a SELECT keyword, so the input is
+        // routed as a non-SELECT statement. The diagnostic correctly pins
+        // at the offending token rather than fabricating an "Expected
+        // SELECT" message — keyword-suggestion is a separate UX feature.
         Assert.False(result.IsSuccess);
-        Assert.Contains(result.Errors, e => e.Message.Contains("SELECT"));
+        Assert.NotEmpty(result.Errors);
+        Assert.Equal(1, result.Errors[0].Line);
+        Assert.Equal(1, result.Errors[0].Column);
     }
 
     [Fact]
@@ -59,10 +65,11 @@ public sealed class ErrorRecoveryTests : ServiceTestBase
     {
         ParseResult result = SqlParser.TryParseRecovering("SELEKT x FROM t");
 
-        // Without valid SELECT columns, the partial AST cannot be built,
-        // but the recovery parser still detects and reports the error.
+        // See MisspelledSelect_ReportsError — the misspelled keyword is now
+        // diagnosed at its actual position rather than via the SELECT-only
+        // recovery walker.
         Assert.False(result.IsSuccess);
-        Assert.Contains(result.Errors, e => e.Message.Contains("SELECT"));
+        Assert.NotEmpty(result.Errors);
     }
 
     // ───────────────────── Incomplete SELECT (no columns) ─────────────────────
@@ -316,6 +323,64 @@ public sealed class ErrorRecoveryTests : ServiceTestBase
     public void IncompleteStringLiteral_ReportsErrorWithoutThrowing()
     {
         ParseResult result = SqlParser.TryParseRecovering("SELECT 'unterminated");
+
+        Assert.False(result.IsSuccess);
+        Assert.Single(result.Errors);
+    }
+
+    // ───────────── Malformed non-SELECT statements pin at the real position ─────────────
+    //
+    // Regression coverage for the LanguageServer diagnostic dispatch: when
+    // the batch parser commits to a CREATE-* / DML / procedural branch and
+    // fails deep inside, TryParseRecovering must surface that deep position
+    // rather than falling through to the SELECT-only clause walker (which
+    // would emit "Expected SELECT keyword" at line 1, column 1 and underline
+    // the leading CREATE/INSERT/etc. token in the editor).
+
+    [Fact]
+    public void MalformedCreateModelBody_ReportsErrorAtDeepPosition()
+    {
+        // Bad return-type annotation buried two lines into a CREATE MODEL.
+        // Should NOT collapse to line 1 / "Expected SELECT keyword".
+        string sql = "CREATE MODEL m(img Image)\n"
+                   + "RETURNS Struct<bad syntax\n"
+                   + "USING 'x.onnx' AS BEGIN END";
+
+        ParseResult result = SqlParser.TryParseRecovering(sql);
+
+        Assert.False(result.IsSuccess);
+        ParseError error = Assert.Single(result.Errors);
+        Assert.DoesNotContain("Expected SELECT", error.Message);
+        Assert.True(error.Line > 1, $"expected error past line 1, got line {error.Line}: {error.Message}");
+    }
+
+    [Theory]
+    [InlineData("CREATE TABLE t (id INT,\nname BOGUS_TYPE_NAME 12345)")]
+    [InlineData("INSERT INTO #t (id)\nVALUES (1, , 3)")]
+    [InlineData("UPDATE #t\nSET = 'x' WHERE id = 1")]
+    [InlineData("DELETE FROM #t\nWHERE id GARBAGE 1")]
+    [InlineData("ALTER TABLE #t\nADD COLUMN BOGUS")]
+    public void MalformedNonSelectStatement_DoesNotCollapseToSelectError(string sql)
+    {
+        ParseResult result = SqlParser.TryParseRecovering(sql);
+
+        Assert.False(result.IsSuccess);
+        Assert.NotEmpty(result.Errors);
+        // The hallmark of the old behavior: "Expected SELECT keyword" at column 1.
+        Assert.DoesNotContain(result.Errors, e =>
+            e.Message.Contains("Expected SELECT", StringComparison.OrdinalIgnoreCase)
+            && e.Line == 1
+            && e.Column == 1);
+    }
+
+    [Fact]
+    public void MalformedCreateModel_DiagnosticHasSinglePinnedError()
+    {
+        // The batch parser produces one deep error; we surface exactly that
+        // rather than amassing a list of clause-recovery errors that would
+        // confuse the squiggle target.
+        ParseResult result = SqlParser.TryParseRecovering(
+            "CREATE MODEL m(img Image) RETURNS Struct<bad");
 
         Assert.False(result.IsSuccess);
         Assert.Single(result.Errors);

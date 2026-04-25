@@ -360,10 +360,35 @@ public static partial class SqlParser
             return new ParseResult(batchResult.Value);
         }
 
-        // Recovery path: parse clause-by-clause, collecting errors.
-        // This only handles SELECT queries — DDL/DML that failed the fast path
-        // will produce an "Expected SELECT keyword." error, which is appropriate
-        // since the DDL/DML itself was syntactically invalid.
+        // The batch parser failed. Two diagnostic paths from here:
+        //
+        // (1) SELECT/WITH inputs — fall through to ParseWithRecovery, the
+        //     clause-by-clause walker that can surface multiple errors
+        //     per query (missing FROM, malformed WHERE, etc.).
+        //
+        // (2) Anything else (CREATE, INSERT, UPDATE, DELETE, ALTER, ANALYZE,
+        //     REINDEX, DROP, CALL, DECLARE, BEGIN, IF, WHILE, FOR, …) —
+        //     surface batchResult's error directly. SingleStatementParser
+        //     commits to the matching CREATE-* / DML / procedural branch on
+        //     a unique prefix and propagates committed failures with the
+        //     deepest Remainder.Position, so batchResult.ErrorPosition
+        //     already points at the real problem. Routing these through
+        //     ParseWithRecovery instead produces a misleading "Expected
+        //     SELECT keyword" diagnostic at column 1, which used to make
+        //     malformed CREATE MODEL / RETURNS Struct<…> bodies hostile
+        //     to debug from the LanguageServer's squiggle alone.
+        if (!IsSelectLikeStart(tokens))
+        {
+            return new ParseResult(
+                query: null,
+                [new ParseError
+                {
+                    Message = batchResult.ToString(),
+                    Line = batchResult.ErrorPosition.Line,
+                    Column = batchResult.ErrorPosition.Column,
+                }]);
+        }
+
         try
         {
             return ParseWithRecovery(tokens);
@@ -379,6 +404,22 @@ public static partial class SqlParser
                     Column = ex.ErrorPosition.Column,
                 }]);
         }
+    }
+
+    /// <summary>
+    /// True when the token stream's first significant token is one the
+    /// clause-by-clause SELECT recovery walker can usefully process —
+    /// a bare <c>SELECT</c>, a <c>WITH</c>-CTE that wraps a SELECT, or
+    /// a parenthesized subquery. Returns <see langword="false"/> for
+    /// statement-starters like <c>CREATE</c>, <c>INSERT</c>, etc., for
+    /// which the batch parser's deep-position error is the right
+    /// diagnostic to surface.
+    /// </summary>
+    private static bool IsSelectLikeStart(TokenList<SqlToken> tokens)
+    {
+        if (tokens.IsAtEnd) return false;
+        SqlToken kind = tokens.ConsumeToken().Value.Kind;
+        return kind is SqlToken.Select or SqlToken.With or SqlToken.LeftParen;
     }
 
     // ───────────────────── Helpers ─────────────────────
