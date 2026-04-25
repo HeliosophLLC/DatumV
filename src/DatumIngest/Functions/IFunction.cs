@@ -40,8 +40,9 @@ public interface IFunction
     /// Procedural context required for the function to be callable.
     /// Defaults to <see cref="BodyScopeRequirement.None"/> (callable
     /// anywhere); body-scoped functions like <c>infer()</c> override to
-    /// <see cref="BodyScopeRequirement.ModelBody"/> so the plan-time gate
-    /// can refuse out-of-context call sites.
+    /// <see cref="BodyScopeRequirement.ModelBody"/> so
+    /// <see cref="DatumIngest.Execution.PlanTimeFunctionGate"/> can refuse
+    /// out-of-context call sites at plan time.
     /// </summary>
     static virtual BodyScopeRequirement BodyScope => BodyScopeRequirement.None;
 

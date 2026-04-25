@@ -217,7 +217,7 @@ Three pieces:
 
 ### Plan-time gate
 
-[`BodyScopeGate`](../../src/DatumIngest/Execution/BodyScopeGate.cs) — a dedicated AST walker invoked at the top of `QueryPlanner.Plan(QueryExpression)`. Walks every reachable `FunctionCallExpression` (SELECT / WHERE / Having / Qualify / OrderBy / GroupBy / LET / Joins / From / SubqueryExpression / Insert subqueries) and throws on the first body-scoped call.
+[`PlanTimeFunctionGate`](../../src/DatumIngest/Execution/PlanTimeFunctionGate.cs) — a dedicated AST walker invoked at the top of `QueryPlanner.Plan(QueryExpression)`. Walks every reachable `FunctionCallExpression` (SELECT / WHERE / Having / Qualify / OrderBy / GroupBy / LET / Joins / From / SubqueryExpression / Insert subqueries) and throws on the first body-scoped call (it also rejects unknown function names so a typo can't survive into the operator tree).
 
 The gate is **unconditional** — no "am I in a model body?" context flag — because the planner is only ever entered for top-level queries. Model bodies are interpreted by `ProceduralModelFunction` directly and never reach `QueryPlanner`. So a positive match for `BodyScopeRequirement.ModelBody` here is always wrong, and the error message is unconditional.
 

@@ -55,14 +55,14 @@ public sealed class QueryPlanner
         // paths that call the planner directly.
         query = NamedArgPermuter.Permute(query, _functionRegistry, _catalog.Udfs, _catalog.SearchPath);
 
-        // Body-scope gate. The planner is only entered for top-level queries —
-        // procedural UDF / model bodies are interpreted by their respective
-        // adapters (`ProceduralUdfFunction`, `ProceduralModelFunction`) and
-        // never reach here. So any function call we find with a non-`None`
-        // body-scope requirement is unambiguously out of context: refuse it
-        // with a clear, source-pointing error before any operator is built
-        // (and before any rows are scanned).
-        BodyScopeGate.EnforceForQuery(query, _functionRegistry);
+        // Plan-time function gate. The planner is only entered for top-level
+        // queries — procedural UDF / model bodies are interpreted by their
+        // respective adapters (`ProceduralUdfFunction`, `ProceduralModelFunction`)
+        // and never reach here. The gate walks every reachable function call
+        // and refuses unknown names (so a typo can't survive long enough to
+        // warm an ONNX session in a neighboring projection) plus body-scoped
+        // calls out of context.
+        PlanTimeFunctionGate.EnforceForQuery(query, _functionRegistry, _catalog.Models);
 
         QueryOperator op = query switch
         {

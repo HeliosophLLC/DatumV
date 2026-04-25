@@ -168,24 +168,37 @@ public class UdfIntegrationTests : ServiceTestBase
     }
 
     [Fact]
-    public async Task Execute_QueryReferencingUnknownUdf_Throws()
+    public void Plan_QueryReferencingUnknownFunction_ThrowsAtPlanTime()
     {
-        // Post-S7d unknown functions don't fail at plan time — the
-        // inliner only inlines registered macros and lets everything else
-        // pass through. The scalar dispatch path at evaluation time
-        // surfaces "Unknown function" wrapped in ExpressionEvaluationException.
+        // PlanTimeFunctionGate rejects unknown function names before any
+        // operator is built. The runtime "Unknown function" path stays as a
+        // backstop, but users hit the diagnostic instantly — before a
+        // neighbor projection like `models.X(...)` warms an ONNX session.
         TableCatalog catalog = CreateCatalog("orders",
             columns: ["id", "name"],
             new object[] { 1, "alice" });
 
-        IQueryPlan plan = catalog.Plan("SELECT never_defined(name) FROM orders");
-
-        Exception ex = await Assert.ThrowsAnyAsync<Exception>(
-            async () =>
-            {
-                await foreach (DatumIngest.Model.RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
-            });
+        Exception ex = Assert.ThrowsAny<Exception>(
+            () => catalog.Plan("SELECT never_defined(name) FROM orders"));
         Assert.Contains("never_defined", ex.Message);
+        Assert.Contains("Unknown function", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Plan_ScalarPositionTableValuedFunction_RedirectsToFromClause()
+    {
+        // A TVF used as a scalar expression should get the same helpful
+        // "use it in a FROM clause" nudge the runtime evaluator gives.
+        // `range` is registered as a TVF (FunctionRegistry.CreateDefault).
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id"],
+            new object[] { 1 });
+
+        Exception ex = Assert.ThrowsAny<Exception>(
+            () => catalog.Plan("SELECT range(10) FROM orders"));
+        Assert.Contains("range", ex.Message);
+        Assert.Contains("table-valued function", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("FROM clause", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

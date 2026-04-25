@@ -221,10 +221,10 @@ public static class NamedArgPermuter
             FunctionDescriptor? descriptor = _functions.TryGetScalarDescriptor(call.CallName);
             if (descriptor is null)
             {
-                // Unknown function name. Don't reject here — let the
-                // evaluator's "Unknown function" path produce the
-                // standard diagnostic with source context; we'd just be
-                // duplicating the message.
+                // Unknown function name. Don't reject here — the
+                // downstream PlanTimeFunctionGate produces the standard
+                // "Unknown function" diagnostic with source context;
+                // we'd just be duplicating the message.
                 return call;
             }
 

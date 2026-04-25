@@ -50,8 +50,8 @@ public sealed class MeshFromTriplaneFunctionTests : ServiceTestBase
     {
         // frame.CurrentModel is null on the bare evaluation frame -- mirrors
         // the runtime path when a UDF outside any CREATE MODEL body somehow
-        // invokes this. BodyScopeGate catches it at plan time too, but this
-        // is the defense-in-depth at the function boundary.
+        // invokes this. PlanTimeFunctionGate catches it at plan time too,
+        // but this is the defense-in-depth at the function boundary.
         FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
             async () => await new MeshFromTriplaneFunction().ExecuteAsync(
                 BuildArgs(sessionName: "nerf"),
