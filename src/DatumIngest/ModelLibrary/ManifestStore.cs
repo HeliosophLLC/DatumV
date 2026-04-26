@@ -117,6 +117,17 @@ internal sealed class ManifestStore : IManifestStore
         // some entry's declared set.
         Dictionary<string, CatalogModel> declaredIdentifierOwner = new(StringComparer.OrdinalIgnoreCase);
 
+        // Tracks every materialised pinnedAs string across the whole
+        // catalog so cross-entry collisions surface at load. The
+        // per-version uniqueness check inside the inner loop catches
+        // collisions within one cut; this catches the case where two
+        // entries (or two versions of one entry) happen to materialise
+        // the same `<bare>@<digits>` form. Value is the (entryId,
+        // versionString, identifier) that first claimed it so the
+        // diagnostic can name both colliders.
+        Dictionary<string, (string EntryId, string Version, string Identifier)> globalPinnedAs =
+            new(StringComparer.OrdinalIgnoreCase);
+
         foreach (CatalogModel m in manifest.Models)
         {
             if (m.Versions is null || m.Versions.Count == 0)
@@ -210,6 +221,16 @@ internal sealed class ManifestStore : IManifestStore
                                 $"yields duplicate pinnedAs '{effective}'. Override one of the colliding " +
                                 "identifiers' pinnedAs explicitly.");
                         }
+                        if (globalPinnedAs.TryGetValue(effective, out (string EntryId, string Version, string Identifier) prior))
+                        {
+                            throw new InvalidOperationException(
+                                $"pinnedAs '{effective}' is claimed by both " +
+                                $"'{prior.EntryId}' version '{prior.Version}' identifier '{prior.Identifier}' " +
+                                $"and '{m.Id}' version '{v.Version}' identifier '{vm.Identifier}' " +
+                                $"in {manifestPath}. Pinned-version SQL syntax requires a globally unique " +
+                                "pinnedAs; override one explicitly.");
+                        }
+                        globalPinnedAs[effective] = (m.Id, v.Version, vm.Identifier);
                     }
                 }
             }

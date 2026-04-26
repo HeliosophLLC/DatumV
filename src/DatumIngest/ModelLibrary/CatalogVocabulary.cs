@@ -43,6 +43,15 @@ public interface ICatalogVocabulary
     // installing for a `tasks.x(...)` call.
     IReadOnlyDictionary<string, string> RecommendedByTask { get; }
 
+    // Reverse index over every materialised `pinnedAs` name. The parser
+    // maps `models.foo@<digits>` to the (entry × version × bare identifier)
+    // record by looking up the suffixed form here. Empty when no version
+    // declares any models[] array. Values reference back into the same
+    // <see cref="CatalogVocabularyEntry"/> instances exposed by
+    // <see cref="ByIdentifier"/> so consumers can chase identifiers,
+    // versions, and owner metadata from one hit.
+    IReadOnlyDictionary<string, CatalogPinnedReference> ByPinnedAs { get; }
+
     // All catalog-declared candidates implementing a given task contract.
     // One entry per (catalog model declaring the contract × every
     // identifier that model's versions declare). Used by the
@@ -83,6 +92,16 @@ public sealed record CatalogVocabularyVersion(
     // `models.foo@<version>` references.
     string PinnedAs);
 
+// One hit from <see cref="ICatalogVocabulary.ByPinnedAs"/>. Resolves a
+// suffixed pin form like `foo@20260529` to the (catalog entry × version
+// × bare identifier) tuple the engine needs for pinned-install + pinned
+// dispatch.
+public sealed record CatalogPinnedReference(
+    string PinnedAs,
+    string Identifier,
+    CatalogVocabularyEntry Entry,
+    CatalogVocabularyVersion Version);
+
 // One (taskContract × candidateModelIdentifier) pair surfaced by
 // <see cref="ICatalogVocabulary.CandidatesForTask"/>. Powers the
 // `system.tasks` rows and pre-flight's alternative-candidates listing.
@@ -100,6 +119,7 @@ internal sealed class CatalogVocabulary : ICatalogVocabulary
     public IReadOnlyDictionary<string, CatalogVocabularyEntry> ByIdentifier { get; }
     public IReadOnlyDictionary<string, IReadOnlySet<string>> IdentifiersByEntry { get; }
     public IReadOnlyDictionary<string, string> RecommendedByTask { get; }
+    public IReadOnlyDictionary<string, CatalogPinnedReference> ByPinnedAs { get; }
 
     private readonly IReadOnlyDictionary<string, IReadOnlyList<CatalogTaskCandidate>> _candidatesByTask;
 
@@ -153,6 +173,21 @@ internal sealed class CatalogVocabulary : ICatalogVocabulary
                 versions);
         }
         ByIdentifier = byIdentifier;
+
+        // Reverse index: every materialised pinnedAs → its (entry,
+        // version, identifier) tuple. ManifestStore.ValidateModels
+        // already guarantees global uniqueness so the dictionary is
+        // unambiguous.
+        Dictionary<string, CatalogPinnedReference> byPinnedAs = new(StringComparer.OrdinalIgnoreCase);
+        foreach (CatalogVocabularyEntry entry in byIdentifier.Values)
+        {
+            foreach (CatalogVocabularyVersion vv in entry.Versions)
+            {
+                byPinnedAs[vv.PinnedAs] = new CatalogPinnedReference(
+                    vv.PinnedAs, entry.Identifier, entry, vv);
+            }
+        }
+        ByPinnedAs = byPinnedAs;
         IdentifiersByEntry = identifiersByEntry.ToDictionary(
             kvp => kvp.Key,
             kvp => (IReadOnlySet<string>)kvp.Value,

@@ -201,6 +201,13 @@ public sealed class QueryStreamService
             catch { /* response stream may already be closed by the abort */ }
             errorEmitted = true;
         }
+        catch (PreFlightRequiredException ex)
+        {
+            await WriteEventAsync(
+                output, jsonOptions, writeLock,
+                ToPreFlightEvent(ex), ct).ConfigureAwait(false);
+            errorEmitted = true;
+        }
         catch (Exception ex)
         {
             await WriteEventAsync(output, jsonOptions, writeLock, new ErrorEvent("error", null, ex.Message, ex.ToString()), ct).ConfigureAwait(false);
@@ -428,6 +435,33 @@ public sealed class QueryStreamService
     // client's JSON.parse rejects with "Unexpected non-whitespace
     // character after JSON". Lock is null when tracing is off (only
     // the BatchExecutor-serialised path writes, so no contention).
+    private static PreFlightRequiredEvent ToPreFlightEvent(PreFlightRequiredException ex)
+    {
+        List<PreFlightModelRequirementWire> models = new(ex.Requirements.Models.Count);
+        foreach (PreFlightModelRequirement r in ex.Requirements.Models)
+        {
+            models.Add(new PreFlightModelRequirementWire(
+                r.TypedReference,
+                r.Identifier,
+                r.CatalogEntryId,
+                r.Version,
+                r.VersionPinned,
+                r.Reason.ToString(),
+                r.ApproxSizeMb,
+                r.SiblingIdentifiers,
+                r.EntryDeprecated,
+                r.SupersededBy,
+                r.VersionDeprecated,
+                r.VersionDeprecationReason));
+        }
+        List<PreFlightSuggestionWire> suggestions = new(ex.Requirements.Suggestions.Count);
+        foreach (PreFlightSuggestion s in ex.Requirements.Suggestions)
+        {
+            suggestions.Add(new PreFlightSuggestionWire(s.TypedName, s.Suggestion));
+        }
+        return new PreFlightRequiredEvent("preflight_required", ex.Message, models, suggestions);
+    }
+
     private static async ValueTask WriteEventAsync(
         Stream output,
         JsonSerializerOptions jsonOptions,

@@ -178,7 +178,16 @@ public sealed class ModelCatalog : IDisposable
         {
             return Path.GetFullPath(path);
         }
-        return Path.GetFullPath(models.PathResolver.ResolveIdPrefixedPath(path));
+        // If an install is currently running on this async flow,
+        // `ModelInstallContext.CurrentVersionPin` names the version the
+        // resolver should pin USING paths to — bypasses `<id>/active`
+        // (which doesn't flip until the install fully succeeds, so
+        // mid-install resolution would otherwise pick up the prior
+        // version's bytes or fall back to the flat layout). When no
+        // install is in flight (the common case), the value is null
+        // and the resolver reverts to active-pointer indirection.
+        string? versionPin = ModelInstallContext.CurrentVersionPin;
+        return Path.GetFullPath(models.PathResolver.ResolveIdPrefixedPath(path, versionPin));
     }
 
     /// <summary>

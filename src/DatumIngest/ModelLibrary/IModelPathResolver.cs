@@ -79,6 +79,16 @@ public interface IModelPathResolver
     string ResolveIdPrefixedPath(string idPrefixedRelativePath, string? versionPin = null);
 
     /// <summary>
+    /// True when <c>&lt;root&gt;/&lt;modelId&gt;/&lt;version&gt;/</c> exists
+    /// on disk. Used by pre-flight (to decide whether a pinned reference
+    /// like <c>models.foo@20260529</c> is downloaded) and by the install
+    /// cross-check's revert path. The flat resolver returns
+    /// <see langword="false"/> for any version argument because it has
+    /// no version concept.
+    /// </summary>
+    bool IsVersionOnDisk(string modelId, string version);
+
+    /// <summary>
     /// Sets the active version pointer for <paramref name="modelId"/>.
     /// Atomic at the filesystem level — the new pointer is written to a
     /// temporary file in the model's folder and then renamed over the
@@ -195,6 +205,13 @@ internal sealed class VersionedModelPathResolver : IModelPathResolver
         return Path.Combine(GetModelRoot(id, versionPin), rest);
     }
 
+    public bool IsVersionOnDisk(string modelId, string version)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(modelId);
+        ArgumentException.ThrowIfNullOrEmpty(version);
+        return Directory.Exists(Path.Combine(ModelsRoot, modelId, version));
+    }
+
     public void SetActiveVersion(string modelId, string version)
     {
         ArgumentException.ThrowIfNullOrEmpty(modelId);
@@ -279,6 +296,8 @@ internal sealed class FlatModelPathResolver : IModelPathResolver
         string rest = idPrefixedRelativePath[(slash + 1)..];
         return Path.Combine(ModelsRoot, id, rest);
     }
+
+    public bool IsVersionOnDisk(string modelId, string version) => false;
 
     public void SetActiveVersion(string modelId, string version)
     {

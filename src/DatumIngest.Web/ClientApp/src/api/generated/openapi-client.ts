@@ -1728,7 +1728,7 @@ export interface CatalogVersion {
     version?: string;
     sources?: CatalogSource[];
     installSql?: string | undefined;
-    models?: string[] | undefined;
+    models?: CatalogVersionModel[] | undefined;
     deprecated?: boolean;
     deprecationReason?: string | undefined;
 }
@@ -1756,6 +1756,11 @@ export interface HttpsSource extends CatalogSource {
 export interface HttpsFile {
     url?: string;
     destFile?: string;
+}
+
+export interface CatalogVersionModel {
+    identifier?: string;
+    pinnedAs?: string | undefined;
 }
 
 export interface CatalogPythonSpec {

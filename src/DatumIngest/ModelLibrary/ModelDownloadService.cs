@@ -166,7 +166,67 @@ internal sealed class ModelDownloadService : IModelDownloadService
         // immediately; progress is pushed over SignalR. Failures are reported
         // via OnModelDownloadFailed; we don't surface them through the HTTP
         // response since by the time the upload finishes the request is gone.
-        _ = Task.Run(() => RunDownloadAsync(model, cts.Token), CancellationToken.None);
+        _ = Task.Run(
+            () => RunDownloadAsync(model, model.Versions[0], pinnedMode: false, cts.Token),
+            CancellationToken.None);
+    }
+
+    public async Task InstallPinnedAsync(string modelId, string version, CancellationToken ct = default)
+    {
+        CatalogModel model = ResolveModel(modelId);
+        if (model.Placeholder)
+        {
+            throw new InvalidOperationException(
+                $"Model {modelId} is a placeholder — its source repo has not been uploaded yet.");
+        }
+
+        CatalogVersion? pinned = null;
+        foreach (CatalogVersion v in model.Versions)
+        {
+            if (string.Equals(v.Version, version, StringComparison.Ordinal))
+            {
+                pinned = v;
+                break;
+            }
+        }
+        if (pinned is null)
+        {
+            throw new InvalidOperationException(
+                $"Model {modelId} has no version '{version}'. Available versions: " +
+                string.Join(", ", model.Versions.Select(v => v.Version)));
+        }
+
+        // License gating mirrors the bare install path. License terms
+        // don't vary across versions — same model, same licenses — so we
+        // reuse the entry-level license set without per-version lookups.
+        foreach (string licenseId in model.LicenseIds)
+        {
+            if (!_store.Manifest.Licenses.TryGetValue(licenseId, out CatalogLicense? license))
+            {
+                throw new InvalidOperationException(
+                    $"Model {modelId} references unknown license {licenseId}.");
+            }
+            if (license.RequiresAcceptance &&
+                !await _licenses.IsAcceptedAsync(licenseId, ct).ConfigureAwait(false))
+            {
+                throw new LicenseNotAcceptedException(licenseId, license.Title);
+            }
+        }
+
+        // Single-flight guard keyed on `<modelId>@<version>` so a pinned
+        // install + a concurrent active install (or a different pinned
+        // version) don't collide. Bare installs key on the plain modelId
+        // — same model, same key, mutual exclusion holds.
+        string key = $"{modelId}@{version}";
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (!_active.TryAdd(key, cts))
+        {
+            throw new InvalidOperationException($"Model {modelId} version '{version}' is already downloading.");
+        }
+
+        _ = Task.Run(
+            () => RunDownloadAsync(model, pinned, pinnedMode: true, cts.Token),
+            CancellationToken.None);
     }
 
     public Task UninstallAsync(string modelId, CancellationToken ct = default)
@@ -280,18 +340,21 @@ internal sealed class ModelDownloadService : IModelDownloadService
     //
     // Cancellation aborts the whole loop — no point trying the next source
     // when the user pulled the plug.
-    private async Task RunDownloadAsync(CatalogModel model, CancellationToken ct)
+    private async Task RunDownloadAsync(
+        CatalogModel model,
+        CatalogVersion target,
+        bool pinnedMode,
+        CancellationToken ct)
     {
-        // Always install the catalog's currently-recommended version
-        // (versions[0]) on the install-from-modal path. Older versions
-        // get installed alongside through the model card's revert UX.
-        // Files land in <root>/<id>/<version>/ — the active pointer
-        // doesn't flip until both download + install succeed, so a
-        // partial download lives in its own folder and never gets
-        // promoted to the active install.
-        string version = model.Versions[0].Version;
+        // Bare installs target versions[0]; pinned installs target a
+        // specific older cut. Either way the bytes land in
+        // <root>/<id>/<version>/ — the per-version folder is the unit of
+        // atomicity; partials never get promoted, and a pinned install
+        // doesn't disturb the active one.
+        string version = target.Version;
         string modelDir = _paths.GetModelRoot(model.Id, version);
         Directory.CreateDirectory(modelDir);
+        string activeKey = pinnedMode ? $"{model.Id}@{version}" : model.Id;
 
         StringBuilder failureLog = new();
         // Models with no file sources are valid for kind="python" entries
@@ -302,14 +365,14 @@ internal sealed class ModelDownloadService : IModelDownloadService
         // `anySourceSucceeded` true when there are no sources so the
         // post-loop "no sources, treat as failure" branch doesn't fire
         // for these intentionally file-less entries.
-        bool anySourceSucceeded = model.Sources.Count == 0;
+        bool anySourceSucceeded = target.Sources.Count == 0;
 
         // Always emit OnStarted so the UI's install dialog opens, even
         // when there's nothing to download (kind="python" with no
         // files). FileCount + TotalBytes are zero in that case; the
         // install dialog renders a determinate-but-instantly-complete
         // download bar and proceeds to the venv-install phase.
-        if (model.Sources.Count == 0)
+        if (target.Sources.Count == 0)
         {
             await _reporter.OnStartedAsync(
                 new ModelDownloadStarted(model.Id, FileCount: 0, TotalBytes: 0),
@@ -318,11 +381,11 @@ internal sealed class ModelDownloadService : IModelDownloadService
 
         try
         {
-            for (int sourceIndex = 0; sourceIndex < model.Sources.Count; sourceIndex++)
+            for (int sourceIndex = 0; sourceIndex < target.Sources.Count; sourceIndex++)
             {
                 ct.ThrowIfCancellationRequested();
 
-                CatalogSource source = model.Sources[sourceIndex];
+                CatalogSource source = target.Sources[sourceIndex];
                 IModelSourceClient client;
                 try
                 {
@@ -368,27 +431,15 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 new ModelDownloadComplete(model.Id), CancellationToken.None)
                 .ConfigureAwait(false);
 
-            // Flip the active pointer here, BEFORE installSql runs. The
-            // installSql contains CREATE MODEL statements whose USING
-            // clauses resolve through IModelPathResolver — without an
-            // active pointer in place the resolver falls back to flat
-            // <root>/<id>/<file>, which doesn't exist any more because
-            // the bytes downloaded to <root>/<id>/<version>/<file>. So
-            // CREATE MODEL fails with "file not found" before the user
-            // ever gets a chance to call it.
-            //
-            // Atomicity of the *download* still holds (a partial source
-            // download throws inside TryDownloadFromSourceAsync above
-            // and we never reach this line). What this DOES sacrifice
-            // is "pointer flips only after installSql succeeds" — a
-            // failed installSql now leaves the pointer pointing at a
-            // version whose SQL identifiers may not be registered.
-            // That's recoverable: installSql uses CREATE OR REPLACE
-            // MODEL, so a retry re-registers idempotently. The bytes
-            // stay on disk for the retry, matching the existing
-            // "don't delete on failure, re-trying install is cheaper"
-            // pragma below.
-            _paths.SetActiveVersion(model.Id, version);
+            // The `<id>/active` pointer is left untouched until both
+            // installSql and the declared/observed cross-check succeed.
+            // Mid-install USING-path resolution flows through
+            // `ModelInstallContext.CurrentVersionPin` instead, which
+            // names the version-being-installed independently of the
+            // active pointer. Effect: in-flight queries observe one
+            // consistent active pointer throughout the install (either
+            // the prior version's pointer or — on success — the new
+            // one); a cross-check failure has nothing to revert.
 
             // Python venv install step. Runs for kind="python" entries
             // after the file download completes — sets up the engine-
@@ -422,17 +473,59 @@ internal sealed class ModelDownloadService : IModelDownloadService
             // usable until both halves succeed. We deliberately don't
             // delete the downloaded files on install failure: the bytes
             // are valid and re-trying install is cheaper than re-downloading.
-            if (!string.IsNullOrEmpty(model.InstallSql))
+            if (!string.IsNullOrEmpty(target.InstallSql))
             {
                 await _reporter.OnInstallingAsync(
                     new ModelInstalling(model.Id), CancellationToken.None)
                     .ConfigureAwait(false);
 
-                await _installer.InstallAsync(model, ct).ConfigureAwait(false);
+                // Ambient version pin steers `ModelCatalog.ResolveFilePath`
+                // at every `USING` resolution that runs inside the
+                // installer's parsed CREATE MODEL statements. Cleared in
+                // the finally so it never leaks past this install. Pinned
+                // installs need the same pin so id-prefixed USING paths
+                // resolve to the pinned version's folder, not active.
+                string? previousPin = ModelInstallContext.CurrentVersionPin;
+                IReadOnlyList<string> observed;
+                ModelInstallContext.CurrentVersionPin = version;
+                try
+                {
+                    observed = await _installer.InstallAsync(
+                        model, target, pinnedMode, ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    ModelInstallContext.CurrentVersionPin = previousPin;
+                }
+
+                if (target.Models is { Count: > 0 } expectedDeclarations)
+                {
+                    string mismatch = CrossCheckObservedIdentifiers(
+                        expectedDeclarations, observed, target.Version, pinnedMode);
+                    if (mismatch.Length > 0)
+                    {
+                        // Partial install: drop everything the installer
+                        // actually registered so the catalog matches its
+                        // pre-install state. Active pointer was never
+                        // flipped, so there's nothing to revert.
+                        await _installer.DropModelsAsync(observed, CancellationToken.None)
+                            .ConfigureAwait(false);
+                        throw new InvalidOperationException(mismatch);
+                    }
+                }
 
                 await _reporter.OnInstalledAsync(
                     new ModelInstalled(model.Id), CancellationToken.None)
                     .ConfigureAwait(false);
+            }
+
+            // Cross-check passed (or there was no installSql); flip the
+            // active pointer last. Pinned installs don't disturb the
+            // active install — their identifier already lives under the
+            // suffixed `<bare>@<digits>` form and resolves directly.
+            if (!pinnedMode)
+            {
+                _paths.SetActiveVersion(model.Id, version);
             }
         }
         catch (OperationCanceledException)
@@ -453,9 +546,48 @@ internal sealed class ModelDownloadService : IModelDownloadService
         }
         finally
         {
-            _active.TryRemove(model.Id, out _);
+            _active.TryRemove(activeKey, out _);
         }
     }
+
+    // Cross-check declared identifiers from catalog.json against the
+    // identifiers the installer actually registered. Returns an empty
+    // string when the sets match; otherwise a one-line error message
+    // identifying the missing / extra identifiers. Used by both the
+    // active and pinned install paths — the only difference is the
+    // expected identifier form (bare vs `<bare>@<digits>`).
+    private static string CrossCheckObservedIdentifiers(
+        IReadOnlyList<CatalogVersionModel> declared,
+        IReadOnlyList<string> observed,
+        string versionString,
+        bool pinnedMode)
+    {
+        HashSet<string> expected = new(StringComparer.OrdinalIgnoreCase);
+        foreach (CatalogVersionModel vm in declared)
+        {
+            expected.Add(pinnedMode ? vm.EffectivePinnedAs(versionString) : vm.Identifier);
+        }
+
+        HashSet<string> actual = new(observed, StringComparer.OrdinalIgnoreCase);
+
+        List<string> missing = [];
+        foreach (string id in expected)
+        {
+            if (!actual.Contains(id)) { missing.Add(id); }
+        }
+        List<string> extra = [];
+        foreach (string id in actual)
+        {
+            if (!expected.Contains(id)) { extra.Add(id); }
+        }
+        if (missing.Count == 0 && extra.Count == 0) { return string.Empty; }
+
+        List<string> parts = [];
+        if (missing.Count > 0) { parts.Add($"missing [{string.Join(", ", missing)}]"); }
+        if (extra.Count > 0) { parts.Add($"unexpected [{string.Join(", ", extra)}]"); }
+        return $"installSql identifier set does not match catalog.json declaration: {string.Join("; ", parts)}.";
+    }
+
 
     // Single-source download attempt. Throws on any failure — the outer
     // loop catches and advances to the next source.

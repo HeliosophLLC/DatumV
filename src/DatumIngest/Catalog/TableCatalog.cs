@@ -341,6 +341,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public Models.ModelCatalog? Models { get; set; }
 
     /// <summary>
+    /// Catalog-declared model vocabulary used by parse-time pre-flight to
+    /// distinguish "this identifier is in the catalog, just not installed
+    /// yet" from "this identifier is a typo." <see langword="null"/>
+    /// when the host did not ship a catalog manifest; pre-flight then
+    /// degrades to function-name typo hints only.
+    /// </summary>
+    public ModelLibrary.ICatalogVocabulary? CatalogVocabulary { get; set; }
+
+    /// <summary>
     /// Process-scoped registry of SQL-defined models — entries created by
     /// <c>CREATE MODEL</c>. Parallel to <see cref="UdfRegistry"/>; surfaced
     /// separately so <c>system.models</c> stays distinct from
@@ -626,6 +635,22 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </remarks>
     public async Task<IQueryPlan> ExecuteStatementAsync(Statement statement, string? sourceText, BatchContext? batchContext)
     {
+        // Parse-time pre-flight covers DML shapes (INSERT / UPDATE /
+        // DELETE) that don't flow through PlanQuery. Pure queries skip
+        // the walk here — PlanQuery runs the same gate downstream and
+        // we'd double-walk otherwise. Other top-level shapes (DDL,
+        // CALL, CREATE bodies) return an empty result from WalkStatement
+        // so the no-op cost is one type test.
+        if (statement is InsertStatement or UpdateStatement or DeleteStatement)
+        {
+            PreFlightRequirements preflight = PreFlightWalker.WalkStatement(
+                statement, Models, CatalogVocabulary, Functions);
+            if (preflight.Models.Count > 0 || preflight.Suggestions.Count > 0)
+            {
+                throw new PreFlightRequiredException(preflight);
+            }
+        }
+
         switch (statement)
         {
             case QueryStatement queryStatement:
@@ -747,6 +772,20 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // canonical positional shape before UdfInliner / planner passes,
         // which all assume positional argument lists.
         QueryExpression permuted = NamedArgPermuter.Permute(query, Functions, Udfs, SearchPath);
+
+        // Parse-time pre-flight: walk the top-level statement for
+        // catalog-model references that need a download or a typo fix
+        // before we build any operator tree. Runs pre-UdfInliner so UDF
+        // bodies stay opaque (their models.* references aren't surfaced
+        // until the user names the model directly). Empty result == no
+        // blocker.
+        PreFlightRequirements preflight = PreFlightWalker.Walk(
+            permuted, Models, CatalogVocabulary, Functions);
+        if (preflight.Models.Count > 0 || preflight.Suggestions.Count > 0)
+        {
+            throw new PreFlightRequiredException(preflight);
+        }
+
         QueryExpression inlined = UdfInliner.Inline(permuted, Udfs, SearchPath, Procedures);
         QueryPlanner planner = new(this, Functions);
         QueryOperator op = planner.Plan(inlined);

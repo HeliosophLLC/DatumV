@@ -234,6 +234,7 @@ public static class BuiltinModels
         ICatalogVocabulary? vocabulary = catalogManifest is null
             ? null
             : new CatalogVocabulary(catalogManifest);
+        tableCatalog.CatalogVocabulary = vocabulary;
 
         tableCatalog.Add(new ModelsTableProvider(
             tableCatalog.Pool, modelCatalog, tableCatalog.DeclaredModels, vocabulary));

@@ -11,10 +11,22 @@ namespace DatumIngest.ModelLibrary;
 /// <see cref="NullModelInstaller"/> by default and skip the install step.
 /// </summary>
 /// <remarks>
-/// The <see cref="CatalogModel.InstallSql"/> field is the contract — when
+/// <para>
+/// The <see cref="CatalogVersion.InstallSql"/> field is the contract — when
 /// it's null the installer is never invoked. When set, it's a path relative
 /// to the manifest directory (where catalog.json lives), resolved by the
 /// installer implementation through <see cref="IManifestStore.ManifestDirectory"/>.
+/// </para>
+/// <para>
+/// <see cref="InstallAsync"/> returns the identifiers actually observed
+/// during install so <see cref="ModelDownloadService"/> can cross-check
+/// them against the catalog's declared
+/// <see cref="CatalogVersion.Models"/> set. A mismatch (the installSql
+/// registered an identifier the JSON didn't declare, or omitted one it
+/// did) is fatal at install time — the active pointer reverts and the
+/// install fails before SQL clients can take a dependency on a
+/// half-registered cut.
+/// </para>
 /// </remarks>
 public interface IModelInstaller
 {
@@ -27,22 +39,67 @@ public interface IModelInstaller
     ValueTask<bool> IsInstalledAsync(CatalogModel model, CancellationToken ct);
 
     /// <summary>
-    /// Reads the SQL file referenced by <paramref name="model"/>'s
-    /// <see cref="CatalogModel.InstallSql"/> and executes it against the
-    /// host's catalog. Implementations are responsible for resolving the
-    /// path (relative to manifest dir), parsing, and running each statement
-    /// in the file — a single file may contain multiple CREATE MODEL
-    /// statements. Throws if execution fails; callers translate to
-    /// <see cref="ModelDownloadFailed"/> events.
+    /// Reads the SQL file referenced by <paramref name="version"/>'s
+    /// <see cref="CatalogVersion.InstallSql"/> and executes it against the
+    /// host's catalog, returning the identifiers the installSql actually
+    /// registered. Implementations are responsible for resolving the
+    /// install-SQL path (relative to manifest dir), parsing, and running
+    /// each statement in the file — a single file may contain multiple
+    /// CREATE MODEL statements. Throws if execution fails; callers
+    /// translate to <see cref="ModelDownloadFailed"/> events.
     /// </summary>
-    ValueTask InstallAsync(CatalogModel model, CancellationToken ct);
+    /// <param name="model">The catalog entry being installed.</param>
+    /// <param name="version">
+    /// The version cut to install. The active-install path passes
+    /// <c>model.Versions[0]</c>; the pinned-install path passes the
+    /// specific version the caller requested.
+    /// </param>
+    /// <param name="pinnedMode">
+    /// When <see langword="true"/>, the installer rewrites
+    /// <c>CREATE [OR REPLACE] MODEL &lt;Identifier&gt;</c> to the
+    /// materialised <see cref="CatalogVersionModel.PinnedAs"/> name and
+    /// pre-resolves <c>USING</c> paths to absolute <c>file://</c> URIs
+    /// rooted at the pinned version's folder. Active installs keep the
+    /// authored identifier + relative USING path and rely on the
+    /// <c>&lt;id&gt;/active</c> indirection.
+    /// </param>
+    /// <param name="ct">Cancellation token for the install.</param>
+    /// <returns>
+    /// The identifiers actually observed at registration time (the
+    /// rewritten pinned names when <paramref name="pinnedMode"/> is
+    /// true, otherwise the authored bare names).
+    /// </returns>
+    ValueTask<IReadOnlyList<string>> InstallAsync(
+        CatalogModel model,
+        CatalogVersion version,
+        bool pinnedMode,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Drops the supplied registered model identifiers from the host's
+    /// catalog. Used by <see cref="ModelDownloadService"/> when the
+    /// install-time cross-check finds a declared/observed mismatch — the
+    /// service issues <c>DROP MODEL</c> for every identifier the partial
+    /// install registered before reverting the active pointer so the
+    /// substrate's invariant "active pointer reflects a fully-registered
+    /// version or no version at all" is preserved.
+    /// </summary>
+    /// <remarks>
+    /// Implementations should treat missing identifiers as no-ops
+    /// (idempotent <c>DROP MODEL IF EXISTS</c>). Errors on individual
+    /// drops should be swallowed and logged — the caller is already
+    /// unwinding a failed install and a follow-on exception would mask
+    /// the original mismatch diagnostic.
+    /// </remarks>
+    ValueTask DropModelsAsync(IReadOnlyList<string> identifiers, CancellationToken ct);
 }
 
 /// <summary>
 /// Default <see cref="IModelInstaller"/> for hosts that don't run a SQL
 /// catalog. <see cref="IsInstalledAsync"/> always returns true so probes
 /// stop at <see cref="ModelInstallState.Downloaded"/> and surface as
-/// "installed" to the UI; <see cref="InstallAsync"/> is a no-op.
+/// "installed" to the UI; <see cref="InstallAsync"/> is a no-op that
+/// returns an empty observed-identifier list.
 /// </summary>
 public sealed class NullModelInstaller : IModelInstaller
 {
@@ -52,6 +109,13 @@ public sealed class NullModelInstaller : IModelInstaller
     public ValueTask<bool> IsInstalledAsync(CatalogModel model, CancellationToken ct)
         => ValueTask.FromResult(true);
 
-    public ValueTask InstallAsync(CatalogModel model, CancellationToken ct)
+    public ValueTask<IReadOnlyList<string>> InstallAsync(
+        CatalogModel model,
+        CatalogVersion version,
+        bool pinnedMode,
+        CancellationToken ct)
+        => ValueTask.FromResult<IReadOnlyList<string>>([]);
+
+    public ValueTask DropModelsAsync(IReadOnlyList<string> identifiers, CancellationToken ct)
         => ValueTask.CompletedTask;
 }

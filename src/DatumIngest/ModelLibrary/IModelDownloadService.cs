@@ -22,6 +22,16 @@ public interface IModelDownloadService
     //     accepted
     Task InstallAsync(string modelId, CancellationToken ct = default);
 
+    // Installs a specific catalog version alongside whatever's currently
+    // active. Downloads the version's files into `<id>/<version>/`, then
+    // runs the version's installSql in pinned mode — the installer
+    // rewrites `CREATE OR REPLACE MODEL <bare>` to the suffixed pinnedAs
+    // form so the registered identifier resolves from
+    // `models.<bare>@<digits>` SQL syntax. Does NOT flip the `<id>/active`
+    // pointer; the active install keeps serving bare `models.<bare>`
+    // references unchanged.
+    Task InstallPinnedAsync(string modelId, string version, CancellationToken ct = default);
+
     // Best-effort: deletes the model's directory on disk.
     Task UninstallAsync(string modelId, CancellationToken ct = default);
 

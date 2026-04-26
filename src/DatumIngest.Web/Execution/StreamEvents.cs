@@ -21,6 +21,35 @@ internal sealed record CellCompletedEvent(string Type, string Cell, double Elaps
 internal sealed record CompleteEvent(string Type, double ElapsedMs);
 internal sealed record ErrorEvent(string Type, string? Cell, string Message, string? Detail);
 
+// Emitted in place of an error event when the parse-time pre-flight pass
+// blocks execution — typically because a query references catalog model
+// identifiers that aren't installed yet (the user is offered a
+// download flow), or contains likely typos against the function /
+// identifier surface. Carries a structured payload so the UI can
+// render the install modal + typo hints without re-parsing the
+// error message.
+internal sealed record PreFlightRequiredEvent(
+    string Type,
+    string Message,
+    IReadOnlyList<PreFlightModelRequirementWire> Models,
+    IReadOnlyList<PreFlightSuggestionWire> Suggestions);
+
+internal sealed record PreFlightModelRequirementWire(
+    string TypedReference,
+    string Identifier,
+    string CatalogEntryId,
+    string? Version,
+    bool VersionPinned,
+    string Reason,
+    int? ApproxSizeMb,
+    IReadOnlyList<string> SiblingIdentifiers,
+    bool EntryDeprecated,
+    string? SupersededBy,
+    bool VersionDeprecated,
+    string? VersionDeprecationReason);
+
+internal sealed record PreFlightSuggestionWire(string TypedName, string Suggestion);
+
 // One 1Hz memory-residency sample for the running cell. `rowBytes` is the
 // budgeted in-RAM total (operator state + variable-scope payloads + DML
 // buffers); `arenaBytes` is informational (mmap, OS-paged); `budgetBytes`

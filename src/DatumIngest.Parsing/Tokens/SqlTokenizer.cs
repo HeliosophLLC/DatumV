@@ -196,6 +196,30 @@ public static class SqlTokenizer
         from rest in Character.LetterOrDigit.Or(Character.EqualTo('_')).IgnoreMany()
         select Unit.Value;
 
+    /// <summary>
+    /// Recognizes a catalog-model identifier with an optional <c>@&lt;digits&gt;</c>
+    /// version-pin suffix: <c>foo</c>, <c>foo_meters</c>, <c>foo@20260529</c>.
+    /// The <c>@</c> is allowed only when followed by at least one digit so
+    /// stand-alone <c>@</c> remains unrecognised at this layer (preserving
+    /// future room for a session-variable form). Emitted as a single
+    /// <see cref="SqlToken.Identifier"/> so call sites that consume the
+    /// identifier text (function-name resolution, the pre-flight model
+    /// reference walk, catalog vocabulary lookups) see one suffixed
+    /// string and don't need to round-trip through the parser to
+    /// reassemble the pin.
+    /// </summary>
+    private static readonly TextParser<Unit> IdentifierPinSuffix =
+        (from at in Character.EqualTo('@')
+         from digit0 in Character.Digit
+         from digits in Character.Digit.IgnoreMany()
+         select Unit.Value).Try();
+
+    private static readonly TextParser<Unit> IdentifierWithPinToken =
+        from first in Character.Letter.Or(Character.EqualTo('_'))
+        from rest in Character.LetterOrDigit.Or(Character.EqualTo('_')).IgnoreMany()
+        from pin in IdentifierPinSuffix.OptionalOrDefault()
+        select Unit.Value;
+
     /// <summary>The singleton tokenizer instance.</summary>
     public static Tokenizer<SqlToken> Instance { get; } =
         new TokenizerBuilder<SqlToken>()
@@ -466,8 +490,11 @@ public static class SqlTokenizer
             // Numeric literals
             .Match(NumberToken, SqlToken.NumberLiteral, requireDelimiters: true)
 
-            // Generic identifiers — last, so keywords take priority
-            .Match(Identifier.CStyle, SqlToken.Identifier, requireDelimiters: true)
+            // Generic identifiers — last, so keywords take priority. The
+            // pin-suffix variant accepts an optional `@<digits>` tail so a
+            // catalog-model version pin (`foo@20260529`) tokenises as one
+            // identifier rather than splitting at the `@`.
+            .Match(IdentifierWithPinToken, SqlToken.Identifier, requireDelimiters: true)
 
             .Build();
 }
