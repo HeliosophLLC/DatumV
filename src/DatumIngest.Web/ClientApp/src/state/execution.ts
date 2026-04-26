@@ -1,5 +1,7 @@
 import { proxy } from 'valtio';
 import { postNdjson, postNdjsonMultipart } from './ndjson';
+import { installModel } from './downloads';
+import { openDialog } from './dialogs';
 
 // Per-tab execution state. Lives in a side store rather than on the tab
 // itself because results / abort handles / status churn at a different
@@ -158,6 +160,43 @@ export type ExecutionStatus =
   | 'error'
   | 'cancelled';
 
+// Mirrors DatumIngest.Execution.PreFlightReason (camelCased for JSON wire).
+export type PreFlightReason =
+  | 'modelNotInstalled'
+  | 'pinnedVersionNotInstalled'
+  | 'pinnedVersionUnknown';
+
+// One catalog-known model reference the user wrote that isn't ready to run.
+// Mirrors PreFlightModelRequirementWire on the server.
+export interface PreFlightModelRequirement {
+  typedReference: string;
+  identifier: string;
+  catalogEntryId: string;
+  version: string | null;
+  versionPinned: boolean;
+  reason: PreFlightReason;
+  approxSizeMb: number | null;
+  siblingIdentifiers: string[];
+  entryDeprecated: boolean;
+  supersededBy: string | null;
+  versionDeprecated: boolean;
+  versionDeprecationReason: string | null;
+}
+
+// One likely-typo function reference the user wrote.
+export interface PreFlightSuggestion {
+  typedName: string;
+  suggestion: string;
+}
+
+// Structured payload received via the `preflight_required` NDJSON event.
+// Drives the install / typo-fix modal in the results pane.
+export interface PreFlightBlock {
+  message: string;
+  models: PreFlightModelRequirement[];
+  suggestions: PreFlightSuggestion[];
+}
+
 export interface TabExecution {
   status: ExecutionStatus;
   cells: CellResult[];
@@ -173,6 +212,13 @@ export interface TabExecution {
    * `events`/`dropped`/`completed` reset on each run.
    */
   trace: TraceState;
+  /**
+   * Set by the `preflight_required` event when plan-time pre-flight
+   * blocks the run (models need install or function reference is a
+   * likely typo). Non-null pins the results pane to the pre-flight
+   * modal; cleared via {@link dismissPreFlight} or the next run start.
+   */
+  preFlight: PreFlightBlock | null;
 }
 
 // AbortControllers don't go in the proxy — they're non-serialisable and
@@ -299,6 +345,7 @@ function freshExecution(): TabExecution {
     elapsedMs: null,
     memoryProfile: null,
     trace: freshTraceState(),
+    preFlight: null,
   };
 }
 
@@ -352,6 +399,99 @@ export function getExecution(tabId: string): TabExecution {
   return executionsState.byTabId[tabId] ?? freshExecution();
 }
 
+// Map the server's PascalCase reason enum to the camelCase wire form
+// the UI uses. The JSON serializer emits the enum name as a string;
+// defensively lower-camel the first letter so a future server-side
+// rename doesn't silently strand us on `undefined`.
+function normalisePreFlightReason(raw: string): PreFlightReason {
+  const camel = raw.length > 0 ? raw[0].toLowerCase() + raw.slice(1) : raw;
+  switch (camel) {
+    case 'modelNotInstalled':
+    case 'pinnedVersionNotInstalled':
+    case 'pinnedVersionUnknown':
+      return camel;
+    default:
+      // Unknown reason — fall back to the closest UX (offer install).
+      // Logged once so a new server enum value doesn't silently behave
+      // as ModelNotInstalled forever.
+      console.warn('[execution] unknown PreFlightReason', raw);
+      return 'modelNotInstalled';
+  }
+}
+
+/**
+ * Clears the pre-flight block for `tabId` and returns the tab to idle.
+ * Backs the Cancel button on the install modal — the editor's text is
+ * untouched, the user can fix typos / cancel outright / re-run after a
+ * separate install kicked off out-of-band.
+ */
+export function dismissPreFlight(tabId: string): void {
+  const exec = executionsState.byTabId[tabId];
+  if (!exec || !exec.preFlight) return;
+  exec.preFlight = null;
+  exec.error = null;
+  exec.status = 'idle';
+}
+
+async function presentPreFlightDialog(
+  tabId: string,
+  block: PreFlightBlock,
+): Promise<void> {
+  // Electron IPC uses structured clone, which can't serialise the
+  // Valtio-tracked object that lands on `exec.preFlight`. Round-trip
+  // through JSON before handing it across the IPC boundary so the
+  // dialog renderer receives a fresh plain payload.
+  const cloneable: PreFlightBlock = JSON.parse(JSON.stringify(block));
+  const { result } = openDialog<{ install: boolean }>({
+    kind: 'preflightRequired',
+    payload: { block: cloneable },
+  });
+  const decision = await result;
+  // The per-tab block may have been cleared in the meantime (user
+  // navigated away, tab closed, fresh run started, or a newer
+  // pre-flight dialog already resolved). Only act when the slot is
+  // still ours.
+  const exec = executionsState.byTabId[tabId];
+  if (!exec?.preFlight) return;
+  if (decision?.install) {
+    installPreFlightModels(tabId);
+  } else {
+    dismissPreFlight(tabId);
+  }
+}
+
+/**
+ * Kicks off bare installs for every catalog entry flagged
+ * `ModelNotInstalled` in the pre-flight payload (deduplicated by
+ * catalog entry id) and dismisses the modal immediately. Downloads
+ * run in the background via the existing model-download SignalR hub;
+ * the user observes progress through the status bar / models view
+ * and re-submits the query when ready.
+ *
+ * Pinned-version requirements (`PinnedVersionNotInstalled` /
+ * `PinnedVersionUnknown`) are intentionally NOT auto-installed here:
+ * the HTTP surface for pinned installs isn't wired yet, and bare
+ * installing the recommended version would leave the user's pinned
+ * reference still unresolved on the next submit. Those rows render
+ * informationally in the modal; the user installs them from the
+ * model card's previous-versions disclosure when that ships.
+ */
+export function installPreFlightModels(tabId: string): void {
+  const exec = executionsState.byTabId[tabId];
+  if (!exec?.preFlight) return;
+  const seen = new Set<string>();
+  for (const m of exec.preFlight.models) {
+    if (m.reason !== 'modelNotInstalled') continue;
+    if (seen.has(m.catalogEntryId)) continue;
+    seen.add(m.catalogEntryId);
+    // Fire-and-forget. installModel writes to downloadsState so the
+    // status bar / model card pick up progress; failures land on
+    // downloadsState.errors for the same surfaces.
+    void installModel(m.catalogEntryId);
+  }
+  dismissPreFlight(tabId);
+}
+
 // ────────── NDJSON event types ──────────
 
 // Mirror DatumIngest.Web.Execution event records (camelCase via the JSON
@@ -396,6 +536,25 @@ type StreamEvent =
       cell: string;
       totalEntries: number;
       totalDropped: number;
+    }
+  | {
+      type: 'preflight_required';
+      message: string;
+      models: {
+        typedReference: string;
+        identifier: string;
+        catalogEntryId: string;
+        version: string | null;
+        versionPinned: boolean;
+        reason: string;
+        approxSizeMb: number | null;
+        siblingIdentifiers: string[];
+        entryDeprecated: boolean;
+        supersededBy: string | null;
+        versionDeprecated: boolean;
+        versionDeprecationReason: string | null;
+      }[];
+      suggestions: { typedName: string; suggestion: string }[];
     };
 
 // ────────── Actions ──────────
@@ -476,6 +635,7 @@ export async function runTab(
       dropped: 0,
       completed: false,
     },
+    preFlight: null,
   };
 
   // Wire-shape trace argument. Mirrors server-side TraceOptionsJson:
@@ -718,6 +878,32 @@ function applyEvent(tabId: string, event: StreamEvent): void {
       // whole state in run()).
       exec.trace.dropped = event.totalDropped;
       exec.trace.completed = true;
+      break;
+    }
+
+    case 'preflight_required': {
+      // Plan-time pre-flight blocked the run. The server emits this in
+      // place of an error event (followed by complete), so we have to
+      // pin status='error' here — otherwise the terminal-status branch
+      // in runTab would flip to 'done' and the pane would show the
+      // empty-results hint instead of the pre-flight modal.
+      const block: PreFlightBlock = {
+        message: event.message,
+        models: event.models.map((m) => ({
+          ...m,
+          reason: normalisePreFlightReason(m.reason),
+        })),
+        suggestions: event.suggestions.map((s) => ({ ...s })),
+      };
+      exec.preFlight = block;
+      exec.status = 'error';
+      exec.error = event.message;
+      // Spawn the modal Electron child window. We fire-and-forget here
+      // (applyEvent is synchronous) and dispatch install / dismiss on
+      // the resolved choice. The dialog runs in its own renderer, so it
+      // can't reach downloadsState directly — kick the installs from
+      // this side via installPreFlightModels.
+      void presentPreFlightDialog(tabId, block);
       break;
     }
 

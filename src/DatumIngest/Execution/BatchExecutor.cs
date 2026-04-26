@@ -724,6 +724,19 @@ public sealed class BatchExecutor
                 .ConfigureAwait(false);
             throw;
         }
+        catch (PreFlightRequiredException)
+        {
+            // Plan-time pre-flight blocks the cell before any rows /
+            // operators come into being. Hosts catch this at the outer
+            // boundary and project it to a structured `preflight_required`
+            // wire event (install modal / typo suggestions). Emitting a
+            // per-cell CellFailedBatchEvent here would race that path —
+            // QueryStreamService's CellFailedBatchEvent handler writes
+            // a generic error event and flips its cellErrorEmitted gate,
+            // which then swallows the propagating exception before the
+            // typed PreFlightRequiredException catch runs.
+            throw;
+        }
         catch (Exception ex)
         {
             await onEvent(new CellFailedBatchEvent(cellId, ex)).ConfigureAwait(false);

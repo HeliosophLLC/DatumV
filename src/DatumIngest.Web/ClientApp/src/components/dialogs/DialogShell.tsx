@@ -1,8 +1,10 @@
 import { useEffect, useMemo } from 'react';
 import { WindowChrome } from '@/components/window/WindowChrome';
 import { LicenseDialog } from './LicenseDialog';
+import { PreFlightDialog } from './PreFlightDialog';
 import { resolveDialog } from '@/state/dialogs';
 import { refreshSettings } from '@/state/settings';
+import type { PreFlightBlock } from '@/state/execution';
 
 // Mount root for dialog windows. main.tsx renders <DialogShell /> instead
 // of <App /> when window.location.hash starts with '#/dialog/'. The shell
@@ -19,6 +21,24 @@ interface ParsedHash {
   kind: string;
   requestId: string;
   params: Record<string, string>;
+}
+
+function parsePreFlightBlock(raw: string | undefined): PreFlightBlock | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as PreFlightBlock;
+    if (
+      !parsed ||
+      typeof parsed.message !== 'string' ||
+      !Array.isArray(parsed.models) ||
+      !Array.isArray(parsed.suggestions)
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function parseDialogHash(hash: string): ParsedHash | null {
@@ -81,6 +101,30 @@ function renderDialogBody({ kind, requestId, params }: ParsedHash): React.ReactN
           informational={params.informational === 'true'}
         />
       );
+    case 'preflightRequired': {
+      // The block payload is JSON-stringified by main.ts when packing
+      // non-string values into URL query params. Parse it back; if the
+      // payload is malformed or absent, fall through to a manual close
+      // (a render-time resolveDialog would be a render-side-effect).
+      const block = parsePreFlightBlock(params.block);
+      if (!block) {
+        return (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-sm">
+            <p className="text-foreground font-medium">
+              Malformed pre-flight payload.
+            </p>
+            <button
+              type="button"
+              className="text-primary text-xs underline"
+              onClick={() => resolveDialog(requestId, { install: false })}
+            >
+              close
+            </button>
+          </div>
+        );
+      }
+      return <PreFlightDialog requestId={requestId} block={block} />;
+    }
     default:
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-sm">

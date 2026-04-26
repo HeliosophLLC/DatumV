@@ -7,5 +7,28 @@
     "decline": "Decline",
     "close": "Close",
     "unknownLicense": "Unknown license: {id}"
+  },
+  "preflight": {
+    "title": {
+      "install": "Install {count, plural, one {# model} other {# models}} to run this query",
+      "typo": "Check your query"
+    },
+    "totalSize": "About {size} to download",
+    "section": {
+      "install": "Will install",
+      "pinned": "Pinned version not on disk",
+      "unknown": "Pinned version not in catalog",
+      "suggestions": "Did you mean…?"
+    },
+    "versionLabel": "version {version}",
+    "siblings": "Also registers: {list}",
+    "entryDeprecated": "This model is deprecated.",
+    "entryDeprecatedSuperseded": "This model is deprecated. Successor: {successor}.",
+    "versionDeprecated": "This version is deprecated.",
+    "versionDeprecatedReason": "This version is deprecated: {reason}",
+    "pinnedHint": "Install this specific version from the model card's previous-versions list.",
+    "unknownPinHint": "The catalog has no version matching this pin. Pin to an available version or remove the @… suffix.",
+    "install": "{count, plural, one {Install} other {Install #}}",
+    "cancel": "Cancel"
   }
 }
