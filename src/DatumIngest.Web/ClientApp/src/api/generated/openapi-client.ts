@@ -1574,6 +1574,13 @@ export interface HealthDto {
 export interface CompletionItem {
     /** The display text for this completion. */
     label?: string;
+    /** Optional muted text rendered inline right after Label,
+visible in the suggestion row without the user having to highlight
+the item. Maps to Monaco's label.detail (LSP
+CompletionItemLabelDetails.detail). Used to flag in-row state
+the user needs to see at a glance — today: (not installed)
+on catalog-declared models whose weights aren't on disk. */
+    labelSuffix?: string | undefined;
     /** The kind of completion (keyword, table, column, function). */
     kind?: CompletionItemKind;
     /** A short detail string shown alongside the label (e.g. type information). */

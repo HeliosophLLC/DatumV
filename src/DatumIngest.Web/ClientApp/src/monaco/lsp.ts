@@ -116,7 +116,15 @@ function registerCompletionProvider(): void {
 
       return {
         suggestions: items.map<monaco.languages.CompletionItem>((item) => ({
-          label: item.label ?? '',
+          // When the server emits a LabelSuffix, render it as Monaco's
+          // structured label so the muted suffix shows inline in the row
+          // (e.g. "depth_anything_v3_large (not installed)") without the
+          // user having to highlight the item. Filter matching still
+          // targets the bare name — Monaco indexes on the `label.label`
+          // field, not the suffix.
+          label: item.labelSuffix
+            ? { label: item.label ?? '', detail: ` ${item.labelSuffix}` }
+            : item.label ?? '',
           kind: completionKindToMonaco(item.kind),
           insertText: item.insertText ?? item.label ?? '',
           detail: item.detail,

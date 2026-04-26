@@ -1112,21 +1112,70 @@ public sealed class CompletionProvider
 
         foreach (ModelEntry model in _manifest.Models)
         {
-            // Hide uninstalled (Missing) and externally-gated (Bridge) entries
-            // from the `models.` autocomplete list — users should see only
-            // what they can actually call right now. The Model Manager UI is
-            // the discovery surface for everything else; `system.models`
-            // remains the introspection view of all catalogued entries.
-            if (model.Status != ModelInstallStatus.Available) continue;
+            // Show callable models (Available) and catalog-declared but
+            // not-yet-installed models (Discovered). Missing/Bridge entries
+            // are still hidden — Missing means a registration exists in
+            // ModelCatalog but the active version's weights are gone (a
+            // partial-install / post-uninstall anomaly the user can't
+            // actually call); Bridge means an external runtime gate the
+            // catalog alone can't validate. Calling a Discovered model
+            // trips parse-time pre-flight and prompts the install modal.
+            if (model.Status != ModelInstallStatus.Available &&
+                model.Status != ModelInstallStatus.Discovered) continue;
+
+            bool discovered = model.Status == ModelInstallStatus.Discovered;
 
             string parameters = model.Parameters is null
                 ? ""
                 : string.Join(", ", model.Parameters.Select(FormatParameter));
             string signature = $"models.{model.Name}({parameters})";
-            string returnInfo = $" → {model.OutputKind ?? "?"}";
-            string detail = model.Category is not null
-                ? $"[{model.Category}] {signature}{returnInfo}"
-                : $"{signature}{returnInfo}";
+
+            // Bracket prefix on Detail: prefer task contract(s) over the
+            // looser Category bucket. Engine-only builtins (the hardcoded
+            // C# registrations not in the catalog vocabulary) have Tasks
+            // null and fall back to Category so they still render with
+            // something useful.
+            string? bracketLabel = model.Tasks is { Count: > 0 } taskList
+                ? string.Join(", ", taskList)
+                : model.Category;
+
+            string detail;
+            if (discovered)
+            {
+                // Discovered rows have no live signature / output shape —
+                // installSql hasn't run yet. Surface the catalog-card
+                // headline (DisplayName) and an explicit `· installable`
+                // tail to mirror the LabelSuffix state.
+                string headline = model.DisplayName is not null
+                    ? $"{model.DisplayName} — "
+                    : "";
+                string prefix = bracketLabel is not null ? $"[{bracketLabel}] " : "";
+                detail = $"{prefix}{headline}{signature} · installable";
+            }
+            else
+            {
+                string returnInfo = $" → {model.OutputKind ?? "?"}";
+                detail = bracketLabel is not null
+                    ? $"[{bracketLabel}] {signature}{returnInfo}"
+                    : $"{signature}{returnInfo}";
+            }
+
+            // LabelSuffix renders muted inline beside the label, visible in
+            // the suggestion row without selection. Order is `installable`
+            // first (so the install-state stays visible even when a long
+            // task list overflows / gets truncated), then the joined task
+            // contracts. Items with neither stay null and render no suffix.
+            string? labelSuffix = null;
+            List<string> suffixParts = [];
+            if (discovered) suffixParts.Add("installable");
+            if (model.Tasks is { Count: > 0 } suffixTasks)
+            {
+                suffixParts.Add(string.Join(", ", suffixTasks));
+            }
+            if (suffixParts.Count > 0)
+            {
+                labelSuffix = string.Join(" · ", suffixParts);
+            }
 
             string? doc = model.DisplayName is not null && model.Backend is not null
                 ? $"{model.DisplayName} ({model.Backend})"
@@ -1135,11 +1184,14 @@ public sealed class CompletionProvider
             items.Add(new CompletionItem
             {
                 Label = model.Name,
+                LabelSuffix = labelSuffix,
                 Kind = CompletionItemKind.Function,
                 Detail = detail,
                 InsertText = $"{model.Name}(",
                 Documentation = doc,
-                SortOrder = 1,
+                // Discovered models sort after callable ones so the popup's
+                // top of the list stays "what the user can run right now".
+                SortOrder = discovered ? 2 : 1,
             });
         }
     }
@@ -1159,6 +1211,13 @@ public sealed class CompletionProvider
 
         foreach (ModelEntry model in _manifest.Models)
         {
+            // DROP MODEL / EVICT MODEL / RESET CALIBRATION target live
+            // registrations only. Discovered (catalog-declared but
+            // uninstalled) names have no registration to act on, so
+            // suppress them here even though they surface in `models.`
+            // call-site completions.
+            if (model.Status == ModelInstallStatus.Discovered) continue;
+
             string detail = model.Category is not null
                 ? $"[{model.Category}] models.{model.Name}"
                 : $"models.{model.Name}";

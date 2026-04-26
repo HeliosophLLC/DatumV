@@ -183,7 +183,12 @@
               ]
             }
           ],
-          "installSql": "sql/all-minilm-l6-v2/2026-05-29.sql"
+          "installSql": "sql/all-minilm-l6-v2/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "all_minilm_l6_v2"
+            }
+          ]
         }
       ],
       "approxSizeMb": 90
@@ -226,7 +231,12 @@
               ]
             }
           ],
-          "installSql": "sql/bge-small-en-v1.5/2026-05-29.sql"
+          "installSql": "sql/bge-small-en-v1.5/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "bge_small_en_v1_5"
+            }
+          ]
         }
       ],
       "approxSizeMb": 130
@@ -269,7 +279,12 @@
               ]
             }
           ],
-          "installSql": "sql/jina-embeddings-v2-base-en/2026-05-29.sql"
+          "installSql": "sql/jina-embeddings-v2-base-en/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "jina_embeddings_v2_base_en"
+            }
+          ]
         }
       ],
       "approxSizeMb": 330
@@ -312,7 +327,12 @@
               ]
             }
           ],
-          "installSql": "sql/bge-reranker-base/2026-05-29.sql"
+          "installSql": "sql/bge-reranker-base/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "bge_reranker_base"
+            }
+          ]
         }
       ],
       "approxSizeMb": 280
@@ -356,7 +376,12 @@
               ]
             }
           ],
-          "installSql": "sql/twitter-roberta-sentiment/2026-05-29.sql"
+          "installSql": "sql/twitter-roberta-sentiment/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "twitter_roberta_sentiment"
+            }
+          ]
         }
       ],
       "approxSizeMb": 500
@@ -400,7 +425,12 @@
               ]
             }
           ],
-          "installSql": "sql/toxic-bert/2026-05-29.sql"
+          "installSql": "sql/toxic-bert/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "toxic_bert"
+            }
+          ]
         }
       ],
       "approxSizeMb": 440
@@ -449,7 +479,21 @@
               ]
             }
           ],
-          "installSql": "sql/florence-2-base-ft-fp16/2026-05-29.sql"
+          "installSql": "sql/florence-2-base-ft-fp16/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "florence2_caption"
+            },
+            {
+              "identifier": "florence2_detailed_caption"
+            },
+            {
+              "identifier": "florence2_more_detailed_caption"
+            },
+            {
+              "identifier": "florence2_ocr_with_region"
+            }
+          ]
         }
       ],
       "approxSizeMb": 523
@@ -499,7 +543,21 @@
               ]
             }
           ],
-          "installSql": "sql/florence-2-base-ft-quantized/2026-05-29.sql"
+          "installSql": "sql/florence-2-base-ft-quantized/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "florence2_caption_q8"
+            },
+            {
+              "identifier": "florence2_detailed_caption_q8"
+            },
+            {
+              "identifier": "florence2_more_detailed_caption_q8"
+            },
+            {
+              "identifier": "florence2_ocr_with_region_q8"
+            }
+          ]
         }
       ],
       "approxSizeMb": 266
@@ -542,7 +600,12 @@
               ]
             }
           ],
-          "installSql": "sql/vit-gpt2-image-captioning/2026-05-29.sql"
+          "installSql": "sql/vit-gpt2-image-captioning/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "vit_gpt2_caption"
+            }
+          ]
         }
       ],
       "approxSizeMb": 1100
@@ -681,7 +744,12 @@
               ]
             }
           ],
-          "installSql": "sql/moondream2/2026-05-29.sql"
+          "installSql": "sql/moondream2/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "moondream2"
+            }
+          ]
         }
       ],
       "approxSizeMb": 2000
@@ -724,7 +792,12 @@
               ]
             }
           ],
-          "installSql": "sql/yolox-s/2026-05-29.sql"
+          "installSql": "sql/yolox-s/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "yolox_s"
+            }
+          ]
         }
       ],
       "approxSizeMb": 35
@@ -767,7 +840,12 @@
               ]
             }
           ],
-          "installSql": "sql/yolox-nano/2026-05-29.sql"
+          "installSql": "sql/yolox-nano/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "yolox_nano"
+            }
+          ]
         }
       ],
       "approxSizeMb": 4
@@ -810,7 +888,12 @@
               ]
             }
           ],
-          "installSql": "sql/yolox-x/2026-05-29.sql"
+          "installSql": "sql/yolox-x/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "yolox_x"
+            }
+          ]
         }
       ],
       "approxSizeMb": 378
@@ -853,7 +936,12 @@
               ]
             }
           ],
-          "installSql": "sql/yolox-tiny/2026-05-29.sql"
+          "installSql": "sql/yolox-tiny/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "yolox_tiny"
+            }
+          ]
         }
       ],
       "approxSizeMb": 20
@@ -895,7 +983,12 @@
               ]
             }
           ],
-          "installSql": "sql/yolox-m/2026-05-29.sql"
+          "installSql": "sql/yolox-m/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "yolox_m"
+            }
+          ]
         }
       ],
       "approxSizeMb": 97
@@ -938,7 +1031,12 @@
               ]
             }
           ],
-          "installSql": "sql/yolox-l/2026-05-29.sql"
+          "installSql": "sql/yolox-l/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "yolox_l"
+            }
+          ]
         }
       ],
       "approxSizeMb": 207
@@ -981,7 +1079,12 @@
               ]
             }
           ],
-          "installSql": "sql/yolox-darknet/2026-05-29.sql"
+          "installSql": "sql/yolox-darknet/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "yolox_darknet"
+            }
+          ]
         }
       ],
       "approxSizeMb": 244
@@ -1028,7 +1131,12 @@
               ]
             }
           ],
-          "installSql": "sql/rtdetr-r18/2026-05-29.sql"
+          "installSql": "sql/rtdetr-r18/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "rtdetr_r18"
+            }
+          ]
         }
       ],
       "approxSizeMb": 80
@@ -1076,7 +1184,12 @@
               ]
             }
           ],
-          "installSql": "sql/rtdetr-r18-fp16/2026-05-29.sql"
+          "installSql": "sql/rtdetr-r18-fp16/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "rtdetr_r18_fp16"
+            }
+          ]
         }
       ],
       "approxSizeMb": 41
@@ -1125,7 +1238,12 @@
               ]
             }
           ],
-          "installSql": "sql/rtdetr-r18-int8/2026-05-29.sql"
+          "installSql": "sql/rtdetr-r18-int8/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "rtdetr_r18_int8"
+            }
+          ]
         }
       ],
       "approxSizeMb": 22
@@ -1215,7 +1333,12 @@
               ]
             }
           ],
-          "installSql": "sql/u2netp/2026-05-29.sql"
+          "installSql": "sql/u2netp/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "u2netp"
+            }
+          ]
         }
       ],
       "approxSizeMb": 5
@@ -1258,7 +1381,12 @@
               ]
             }
           ],
-          "installSql": "sql/u2net/2026-05-29.sql"
+          "installSql": "sql/u2net/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "u2net"
+            }
+          ]
         }
       ],
       "approxSizeMb": 170
@@ -1300,7 +1428,12 @@
               ]
             }
           ],
-          "installSql": "sql/dpt-large/2026-05-29.sql"
+          "installSql": "sql/dpt-large/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "dpt_large"
+            }
+          ]
         }
       ],
       "approxSizeMb": 1300
@@ -1342,7 +1475,12 @@
               ]
             }
           ],
-          "installSql": "sql/midas-small/2026-05-29.sql"
+          "installSql": "sql/midas-small/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "midas_small"
+            }
+          ]
         }
       ],
       "approxSizeMb": 80
@@ -1389,7 +1527,12 @@
               ]
             }
           ],
-          "installSql": "sql/depth-anything-v2-small/2026-05-29.sql"
+          "installSql": "sql/depth-anything-v2-small/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "depth_anything_v2_small"
+            }
+          ]
         }
       ],
       "approxSizeMb": 100
@@ -1435,7 +1578,12 @@
               ]
             }
           ],
-          "installSql": "sql/depth-anything-v2-base/2026-05-29.sql"
+          "installSql": "sql/depth-anything-v2-base/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "depth_anything_v2_base"
+            }
+          ]
         }
       ],
       "approxSizeMb": 400
@@ -1483,7 +1631,18 @@
               ]
             }
           ],
-          "installSql": "sql/depth-anything-v3-large/2026-05-29.sql"
+          "installSql": "sql/depth-anything-v3-large/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "depth_anything_v3_large"
+            },
+            {
+              "identifier": "depth_anything_v3_large_meters"
+            },
+            {
+              "identifier": "depth_anything_v3_large_full"
+            }
+          ]
         }
       ],
       "approxSizeMb": 1400
@@ -1532,7 +1691,18 @@
               ]
             }
           ],
-          "installSql": "sql/metric3d-v2-small/2026-05-29.sql"
+          "installSql": "sql/metric3d-v2-small/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "metric3d_v2_small"
+            },
+            {
+              "identifier": "metric3d_v2_small_meters"
+            },
+            {
+              "identifier": "metric3d_v2_small_full"
+            }
+          ]
         }
       ],
       "approxSizeMb": 151
@@ -1582,7 +1752,18 @@
               ]
             }
           ],
-          "installSql": "sql/metric3d-v2-small-fp16/2026-05-29.sql"
+          "installSql": "sql/metric3d-v2-small-fp16/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "metric3d_v2_small_fp16"
+            },
+            {
+              "identifier": "metric3d_v2_small_fp16_meters"
+            },
+            {
+              "identifier": "metric3d_v2_small_fp16_full"
+            }
+          ]
         }
       ],
       "approxSizeMb": 151
@@ -1630,7 +1811,18 @@
               ]
             }
           ],
-          "installSql": "sql/metric3d-v2-large/2026-05-29.sql"
+          "installSql": "sql/metric3d-v2-large/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "metric3d_v2_large"
+            },
+            {
+              "identifier": "metric3d_v2_large_meters"
+            },
+            {
+              "identifier": "metric3d_v2_large_full"
+            }
+          ]
         }
       ],
       "approxSizeMb": 1600
@@ -1679,7 +1871,18 @@
               ]
             }
           ],
-          "installSql": "sql/metric3d-v2-large-fp16/2026-05-29.sql"
+          "installSql": "sql/metric3d-v2-large-fp16/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "metric3d_v2_large_fp16"
+            },
+            {
+              "identifier": "metric3d_v2_large_fp16_meters"
+            },
+            {
+              "identifier": "metric3d_v2_large_fp16_full"
+            }
+          ]
         }
       ],
       "approxSizeMb": 825
@@ -1729,7 +1932,18 @@
               ]
             }
           ],
-          "installSql": "sql/metric3d-v2-giant/2026-05-29.sql"
+          "installSql": "sql/metric3d-v2-giant/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "metric3d_v2_giant"
+            },
+            {
+              "identifier": "metric3d_v2_giant_meters"
+            },
+            {
+              "identifier": "metric3d_v2_giant_full"
+            }
+          ]
         }
       ],
       "approxSizeMb": 5500
@@ -1779,7 +1993,18 @@
               ]
             }
           ],
-          "installSql": "sql/metric3d-v2-giant-fp16/2026-05-29.sql"
+          "installSql": "sql/metric3d-v2-giant-fp16/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "metric3d_v2_giant_fp16"
+            },
+            {
+              "identifier": "metric3d_v2_giant_fp16_meters"
+            },
+            {
+              "identifier": "metric3d_v2_giant_fp16_full"
+            }
+          ]
         }
       ],
       "approxSizeMb": 2700
@@ -1825,7 +2050,15 @@
               ]
             }
           ],
-          "installSql": "sql/zoedepth-nyu-kitti/2026-05-29.sql"
+          "installSql": "sql/zoedepth-nyu-kitti/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "zoedepth_nyu_kitti"
+            },
+            {
+              "identifier": "zoedepth_nyu_kitti_meters"
+            }
+          ]
         }
       ],
       "approxSizeMb": 1310
@@ -1872,7 +2105,15 @@
               ]
             }
           ],
-          "installSql": "sql/zoedepth-nyu-kitti-fp16/2026-05-29.sql"
+          "installSql": "sql/zoedepth-nyu-kitti-fp16/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "zoedepth_nyu_kitti_fp16"
+            },
+            {
+              "identifier": "zoedepth_nyu_kitti_fp16_meters"
+            }
+          ]
         }
       ],
       "approxSizeMb": 660
@@ -1920,7 +2161,12 @@
               ]
             }
           ],
-          "installSql": "sql/triposr/2026-05-29.sql"
+          "installSql": "sql/triposr/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "triposr"
+            }
+          ]
         }
       ],
       "approxSizeMb": 3360
@@ -1965,7 +2211,15 @@
               ]
             }
           ],
-          "installSql": "sql/glpn-nyu/2026-05-29.sql"
+          "installSql": "sql/glpn-nyu/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "glpn_nyu"
+            },
+            {
+              "identifier": "glpn_nyu_meters"
+            }
+          ]
         }
       ],
       "approxSizeMb": 200
@@ -2010,7 +2264,12 @@
               ]
             }
           ],
-          "installSql": "sql/mediapipe-face/2026-05-29.sql"
+          "installSql": "sql/mediapipe-face/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "mediapipe_face"
+            }
+          ]
         }
       ],
       "approxSizeMb": 3
@@ -2057,7 +2316,12 @@
               ]
             }
           ],
-          "installSql": "sql/mediapipe-face-int8/2026-05-29.sql"
+          "installSql": "sql/mediapipe-face-int8/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "mediapipe_face_int8"
+            }
+          ]
         }
       ],
       "approxSizeMb": 2
@@ -2100,7 +2364,12 @@
               ]
             }
           ],
-          "installSql": "sql/paddleocr-v4-det/2026-05-29.sql"
+          "installSql": "sql/paddleocr-v4-det/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "paddleocr_v4_det"
+            }
+          ]
         }
       ],
       "approxSizeMb": 5
@@ -2154,7 +2423,12 @@
               ]
             }
           ],
-          "installSql": "sql/trocr-base-printed/2026-05-29.sql"
+          "installSql": "sql/trocr-base-printed/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "trocr_printed"
+            }
+          ]
         }
       ],
       "approxSizeMb": 1400
@@ -2209,7 +2483,12 @@
               ]
             }
           ],
-          "installSql": "sql/trocr-base-printed-fp16/2026-05-29.sql"
+          "installSql": "sql/trocr-base-printed-fp16/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "trocr_printed_fp16"
+            }
+          ]
         }
       ],
       "approxSizeMb": 700
@@ -2251,7 +2530,12 @@
               ]
             }
           ],
-          "installSql": "sql/realesrgan-x4v3/2026-05-29.sql"
+          "installSql": "sql/realesrgan-x4v3/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "realesrgan_x4v3"
+            }
+          ]
         }
       ],
       "approxSizeMb": 5
@@ -2295,7 +2579,12 @@
               ]
             }
           ],
-          "installSql": "sql/swinir-realsr-x4/2026-05-29.sql"
+          "installSql": "sql/swinir-realsr-x4/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "swinir_realsr_x4"
+            }
+          ]
         }
       ],
       "approxSizeMb": 110
@@ -2338,7 +2627,12 @@
               ]
             }
           ],
-          "installSql": "sql/swinir-denoising-color-25/2026-05-29.sql"
+          "installSql": "sql/swinir-denoising-color-25/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "swinir_denoising_color_25"
+            }
+          ]
         }
       ],
       "approxSizeMb": 45
@@ -2383,7 +2677,12 @@
               ]
             }
           ],
-          "installSql": "sql/scunet-color-real-psnr/2026-05-29.sql"
+          "installSql": "sql/scunet-color-real-psnr/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "scunet_color_real_psnr"
+            }
+          ]
         }
       ],
       "approxSizeMb": 73
@@ -2429,7 +2728,12 @@
               ]
             }
           ],
-          "installSql": "sql/scunet-color-real-gan/2026-05-29.sql"
+          "installSql": "sql/scunet-color-real-gan/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "scunet_color_real_gan"
+            }
+          ]
         }
       ],
       "approxSizeMb": 73
@@ -2481,7 +2785,12 @@
               ]
             }
           ],
-          "installSql": "sql/scunet-color-15/2026-05-29.sql"
+          "installSql": "sql/scunet-color-15/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "scunet_color_15"
+            }
+          ]
         }
       ],
       "approxSizeMb": 73
@@ -2533,7 +2842,12 @@
               ]
             }
           ],
-          "installSql": "sql/scunet-color-25/2026-05-29.sql"
+          "installSql": "sql/scunet-color-25/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "scunet_color_25"
+            }
+          ]
         }
       ],
       "approxSizeMb": 73
@@ -2585,7 +2899,12 @@
               ]
             }
           ],
-          "installSql": "sql/scunet-color-50/2026-05-29.sql"
+          "installSql": "sql/scunet-color-50/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "scunet_color_50"
+            }
+          ]
         }
       ],
       "approxSizeMb": 73
@@ -2638,7 +2957,12 @@
               ]
             }
           ],
-          "installSql": "sql/scunet-gray-15/2026-05-29.sql"
+          "installSql": "sql/scunet-gray-15/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "scunet_gray_15"
+            }
+          ]
         }
       ],
       "approxSizeMb": 73
@@ -2691,7 +3015,12 @@
               ]
             }
           ],
-          "installSql": "sql/scunet-gray-25/2026-05-29.sql"
+          "installSql": "sql/scunet-gray-25/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "scunet_gray_25"
+            }
+          ]
         }
       ],
       "approxSizeMb": 73,
@@ -2745,7 +3074,12 @@
               ]
             }
           ],
-          "installSql": "sql/scunet-gray-50/2026-05-29.sql"
+          "installSql": "sql/scunet-gray-50/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "scunet_gray_50"
+            }
+          ]
         }
       ],
       "approxSizeMb": 73,
@@ -2791,7 +3125,12 @@
               ]
             }
           ],
-          "installSql": "sql/mobilenetv2/2026-05-29.sql"
+          "installSql": "sql/mobilenetv2/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "mobilenetv2"
+            }
+          ]
         }
       ],
       "approxSizeMb": 14
@@ -3705,7 +4044,15 @@
               ]
             }
           ],
-          "installSql": "sql/clip-vit-base-patch32/2026-05-29.sql"
+          "installSql": "sql/clip-vit-base-patch32/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "clip_image_embed"
+            },
+            {
+              "identifier": "clip_text_embed"
+            }
+          ]
         }
       ],
       "approxSizeMb": 600

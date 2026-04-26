@@ -9,6 +9,16 @@ public sealed class CompletionItem
     /// <summary>The display text for this completion.</summary>
     public required string Label { get; init; }
 
+    /// <summary>
+    /// Optional muted text rendered inline right after <see cref="Label"/>,
+    /// visible in the suggestion row without the user having to highlight
+    /// the item. Maps to Monaco's <c>label.detail</c> (LSP
+    /// <c>CompletionItemLabelDetails.detail</c>). Used to flag in-row state
+    /// the user needs to see at a glance — today: <c>(not installed)</c>
+    /// on catalog-declared models whose weights aren't on disk.
+    /// </summary>
+    public string? LabelSuffix { get; init; }
+
     /// <summary>The kind of completion (keyword, table, column, function).</summary>
     public required CompletionItemKind Kind { get; init; }
 

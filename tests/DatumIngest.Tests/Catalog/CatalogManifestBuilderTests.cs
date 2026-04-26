@@ -6,6 +6,7 @@ using DatumIngest.Functions.Scalar.Drawing;
 using DatumIngest.Functions.Scalar.Strings;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.ModelLibrary;
 using DatumIngest.Models;
 
 namespace DatumIngest.Tests.Catalog;
@@ -169,6 +170,73 @@ public sealed class CatalogManifestBuilderTests : ServiceTestBase
         Assert.Equal("option2", model.Parameters[2].Name);
         Assert.Equal("Int32", model.Parameters[2].Kind);
         Assert.True(model.Parameters[2].IsOptional);
+    }
+
+    [Fact]
+    public void Build_CatalogVocabulary_SurfacesDiscoveredIdentifiersAlongsideRegistered()
+    {
+        // Two catalog-declared identifiers: one already registered in the
+        // live ModelCatalog ("registered_llm") and one that exists only in
+        // the catalog manifest ("discovered_llm"). Both should appear in
+        // the manifest's Models list — registered with Status=Available,
+        // catalog-only with Status=Discovered. Without this union, the
+        // language-server autocomplete would only see installed models
+        // and uninstalled catalog entries would be invisible until first
+        // download.
+        TableCatalog catalog = CreateCatalog();
+
+        ModelCatalog modelCatalog = new();
+        modelCatalog.Register(new ModelCatalogEntry(
+            Name: "registered_llm",
+            Backend: "stub",
+            RelativePath: null,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: false,
+            Loader: _ => throw new InvalidOperationException("stub — never loaded in this test"),
+            Category: "llm",
+            DisplayName: "Registered LLM"));
+        catalog.Models = modelCatalog;
+
+        CatalogVersion v = new(
+            Version: "2026-05-30",
+            Sources: [new HuggingFaceSource("repo", "main", [])],
+            InstallSql: "sql/entry-a/2026-05-30.sql",
+            Models: [
+                new CatalogVersionModel("registered_llm"),
+                new CatalogVersionModel("discovered_llm")]);
+        CatalogModel entry = new(
+            Id: "entry-a",
+            DisplayName: "Entry A",
+            Summary: "test.",
+            Description: "test.",
+            Tasks: ["TextEmbedder"],
+            Tags: [],
+            LicenseIds: [],
+            Attributions: [],
+            Hardware: new CatalogHardware(MinRamMb: 0, MinVramMb: 0, Preferred: "cpu"),
+            Versions: [v],
+            ApproxSizeMb: 100);
+        CatalogManifest manifest = new(
+            SchemaVersion: 2,
+            Licenses: new Dictionary<string, CatalogLicense>(),
+            Tiers: new CatalogTiers([], []),
+            Models: [entry]);
+        catalog.CatalogVocabulary = new CatalogVocabulary(manifest);
+
+        LanguageServerManifest result = CatalogManifestBuilder.Build(catalog, new FunctionRegistry());
+
+        Assert.NotNull(result.Models);
+        ModelEntry registered = Assert.Single(
+            result.Models, m => m.Name == "registered_llm");
+        Assert.Equal(ModelInstallStatus.Available, registered.Status);
+
+        ModelEntry discovered = Assert.Single(
+            result.Models, m => m.Name == "discovered_llm");
+        Assert.Equal(ModelInstallStatus.Discovered, discovered.Status);
+        Assert.Equal("Entry A", discovered.DisplayName);
+        Assert.NotNull(discovered.Parameters);
+        Assert.Empty(discovered.Parameters);
     }
 
     [Fact]

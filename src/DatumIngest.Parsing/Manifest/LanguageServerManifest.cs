@@ -142,21 +142,24 @@ public sealed class UdfEntry
 /// </summary>
 /// <summary>
 /// Install-state of a model entry on the current host. Mirrors the
-/// three-state <c>status</c> column on <c>system.models</c> so a single
-/// concept governs both the runtime introspection view and the language
-/// server's behaviour. Used by <c>CompletionProvider</c> to hide
-/// unavailable models from the <c>models.</c> autocomplete list — users
-/// see only what they can actually call right now; the Model Manager UI
-/// remains the discovery surface for everything else.
+/// <c>residency</c> + <c>status</c> columns on <c>system.models</c> so
+/// a single concept governs the runtime introspection view, the language
+/// server's completion behaviour, and the install modal's call-to-action.
+/// <see cref="Discovered"/> rows appear in <c>models.</c> autocomplete
+/// as dimmed suggestions so users can see what the catalog ships before
+/// installing; calling one trips parse-time pre-flight and prompts an
+/// install.
 /// </summary>
 public enum ModelInstallStatus
 {
     /// <summary>Backend files present + runnable. Native backends (ONNX, LlamaSharp, synthetic) ready to load.</summary>
     Available,
-    /// <summary>Anchor file absent on disk. The model is catalogued but not downloaded.</summary>
+    /// <summary>Anchor file absent on disk. The model is catalogued and registered in the live <c>ModelCatalog</c> but the active version's weights aren't on disk — partial install or post-uninstall anomaly.</summary>
     Missing,
     /// <summary>Files present but requires an external runtime (e.g. Python venv) we can't validate from the catalog alone.</summary>
     Bridge,
+    /// <summary>Catalog-declared identifier with no live registration in <c>ModelCatalog</c> — weights have not been downloaded. Surfaces in autocomplete as a dimmed suggestion; calling one trips pre-flight.</summary>
+    Discovered,
 }
 
 /// <summary>
@@ -215,6 +218,15 @@ public sealed class ModelEntry
     /// opaque bare <c>RETURNS Struct</c> models.
     /// </summary>
     public IReadOnlyList<StructFieldSignature>? OutputStructFields { get; init; }
+
+    /// <summary>
+    /// TaskTypeRegistry contract names the owning catalog entry declares
+    /// it implements (e.g. <c>"TextEmbedder"</c>, <c>"DepthEstimatorMetric"</c>).
+    /// Sourced from the catalog vocabulary, so engine-only builtins without
+    /// a vocabulary entry have this <see langword="null"/>. Used by
+    /// completion to surface "what kind of model is this" in the row.
+    /// </summary>
+    public IReadOnlyList<string>? Tasks { get; init; }
 }
 
 /// <summary>

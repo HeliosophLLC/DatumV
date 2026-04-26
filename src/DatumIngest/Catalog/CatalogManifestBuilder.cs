@@ -134,6 +134,7 @@ public static class CatalogManifestBuilder
         {
             DatumIngest.ModelLibrary.IModelPathResolver pathResolver = catalog.Models.PathResolver;
             List<ModelEntry> modelEntries = new(catalog.Models.Entries.Count);
+            HashSet<string> seenIdentifiers = new(StringComparer.OrdinalIgnoreCase);
             foreach (KeyValuePair<string, Models.ModelCatalogEntry> entry in catalog.Models.Entries)
             {
                 // Output shape: preserve the array marker the catalog
@@ -147,6 +148,17 @@ public static class CatalogManifestBuilder
                 IReadOnlyList<StructFieldSignature>? structFields =
                     BuildModelOutputStructFieldSignatures(entry.Value);
                 ModelInstallStatus status = ResolveInstallStatus(entry.Value, pathResolver);
+                // Pull task contracts from the vocabulary when the identifier
+                // is catalog-declared. Engine-only builtins (the 22 hardcoded
+                // C# registrations not in catalog.json) have no vocab entry
+                // and surface with Tasks=null — completion falls back to
+                // [Category] rendering for them.
+                IReadOnlyList<string>? tasks = null;
+                if (catalog.CatalogVocabulary is { } vocabForRegistered
+                    && vocabForRegistered.ByIdentifier.TryGetValue(entry.Value.Name, out ModelLibrary.CatalogVocabularyEntry? vocabRegEntry))
+                {
+                    tasks = vocabRegEntry.Owner.Tasks;
+                }
                 modelEntries.Add(new ModelEntry
                 {
                     Name = entry.Value.Name,
@@ -157,8 +169,34 @@ public static class CatalogManifestBuilder
                     DisplayName = entry.Value.DisplayName,
                     Parameters = BuildModelParameters(entry.Value),
                     OutputStructFields = structFields,
+                    Tasks = tasks,
                 });
+                seenIdentifiers.Add(entry.Value.Name);
             }
+
+            // Union in catalog-declared identifiers with no live registration
+            // — the "discovered" tier from system.models. Lets autocomplete
+            // surface every model the catalog ships, dimmed, before its
+            // weights are on disk. Calling one trips parse-time pre-flight
+            // and prompts an install. Parameters / output shape are
+            // unavailable until installSql runs, so they stay empty here;
+            // the install modal carries enough metadata to drive the UX.
+            if (catalog.CatalogVocabulary is { } vocab)
+            {
+                foreach ((string identifier, ModelLibrary.CatalogVocabularyEntry vocabEntry) in vocab.ByIdentifier)
+                {
+                    if (seenIdentifiers.Contains(identifier)) continue;
+                    modelEntries.Add(new ModelEntry
+                    {
+                        Name = identifier,
+                        Status = ModelInstallStatus.Discovered,
+                        DisplayName = vocabEntry.Owner.DisplayName,
+                        Parameters = Array.Empty<ParameterSignature>(),
+                        Tasks = vocabEntry.Owner.Tasks,
+                    });
+                }
+            }
+
             models = modelEntries;
 
             // Back-fill OutputStructFields onto the model's scalar-function
