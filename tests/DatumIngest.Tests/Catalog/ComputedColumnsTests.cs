@@ -70,6 +70,36 @@ public sealed class ComputedColumnsTests : ServiceTestBase, IAsyncLifetime
         Assert.Contains("duplicate", ex.Message);
     }
 
+    [Fact]
+    public void CreateTable_ComputedExpressionWithBadArity_ThrowsAtDdlTime()
+    {
+        // `concat(...)` requires at least 2 arguments. Before Tier 2 of
+        // plan-time arg validation, this was accepted at CREATE TABLE and
+        // only surfaced on the first INSERT — possibly after the table
+        // had been persisted and reloaded. The DDL gate should catch it
+        // before any row work happens.
+        using TableCatalog catalog = CreateCatalog();
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("CREATE TEMP TABLE t (a String, b String AS (concat(a)))"));
+        Assert.Contains("GENERATED ALWAYS AS", ex.Message);
+        Assert.Contains("'b'", ex.Message);
+        Assert.Contains("concat", ex.Message);
+    }
+
+    [Fact]
+    public void AlterTable_AddComputedColumnWithBadArity_ThrowsAtDdlTime()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (a String)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("ALTER TABLE t ADD COLUMN b String AS (concat(a))"));
+        Assert.Contains("GENERATED ALWAYS AS", ex.Message);
+        Assert.Contains("'b'", ex.Message);
+        Assert.Contains("concat", ex.Message);
+    }
+
     // ──────────────────── INSERT materialisation ────────────────────
 
     [Fact]

@@ -103,6 +103,17 @@ internal sealed partial class RoutineRegistrar
         // the registries.
         ValidateBodyReturnShape(create);
 
+        // Arity / kind gate over the body's reachable function calls,
+        // tracking DECLAREs so the typical model-body shape (chain
+        // through Struct locals) gets covered. Fires here so a bad
+        // inner call surfaces at CREATE MODEL rather than at the
+        // first row through the dispatch path.
+        ProceduralBodyArityGate.Enforce(
+            create.StatementBody,
+            create.Parameters,
+            _functions,
+            $"model {ModelsSchema}.{create.Name}");
+
         // Slice-D registration-time pre-flight: a CHECK that the parameter's
         // default value already violates should fail CREATE MODEL, not wait
         // for the first call site that happens to omit the override. Runs

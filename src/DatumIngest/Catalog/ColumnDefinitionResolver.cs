@@ -153,7 +153,21 @@ internal static class ColumnDefinitionResolver
         // workload needs it.
         ValidateNoComputedToComputedReferences(columns);
 
-        return new Schema(columns, pkSchemaIndices);
+        Schema schema = new(columns, pkSchemaIndices);
+
+        // Drive ExpressionTypeResolver over every GENERATED ALWAYS AS body
+        // so that arity / kind errors inside the expression (e.g. a typo'd
+        // `brighten(image)` missing the `intensity` argument) surface here
+        // instead of at the first INSERT/UPDATE — which could be far away
+        // in time from the DDL that introduced the bug.
+        foreach (ColumnInfo column in columns)
+        {
+            if (column.ComputedExpression is null) continue;
+            ValidateComputedExpression(
+                catalog.Functions, column.ComputedExpression, schema, column.Name);
+        }
+
+        return schema;
     }
 
     /// <summary>
@@ -233,6 +247,41 @@ internal static class ColumnDefinitionResolver
             throw new InvalidOperationException(
                 $"DEFAULT for column '{columnName}' ({kind}{(isArray ? "[]" : "")}) is not " +
                 $"compatible with the column type: {inner.Message}",
+                inner);
+        }
+    }
+
+    /// <summary>
+    /// Walks the GENERATED ALWAYS AS expression with
+    /// <see cref="ExpressionTypeResolver.ResolveType"/> against the table's
+    /// schema. The resolver eagerly calls
+    /// <see cref="IScalarFunction.ValidateArguments"/> at every function
+    /// call site, so arity / kind mismatches inside the expression (e.g.
+    /// <c>brighten(image)</c> missing the required <c>intensity</c>
+    /// argument) throw here at <c>CREATE TABLE</c> / <c>ALTER TABLE ADD
+    /// COLUMN</c> time. The result kind is intentionally discarded — the
+    /// runtime per-row evaluator's
+    /// <see cref="ComputedColumnEvaluator.ConvertValueRefToTarget"/> still
+    /// handles coercion against the declared column kind, and DEFAULT
+    /// expressions already cover the "result doesn't fit the column" case
+    /// for the rowless probe path. This validator's job is the inner-call
+    /// arity gate.
+    /// </summary>
+    public static void ValidateComputedExpression(
+        FunctionRegistry functions, Expression expression, Schema sourceSchema, string columnName)
+    {
+        try
+        {
+            _ = ExpressionTypeResolver.ResolveType(expression, sourceSchema, functions);
+        }
+        catch (Exception inner)
+            when (inner is InvalidOperationException
+                  or NotSupportedException
+                  or ArgumentException
+                  or FunctionArgumentException)
+        {
+            throw new InvalidOperationException(
+                $"GENERATED ALWAYS AS for column '{columnName}': {inner.Message}",
                 inner);
         }
     }

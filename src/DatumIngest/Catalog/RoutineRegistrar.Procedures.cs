@@ -39,6 +39,13 @@ internal sealed partial class RoutineRegistrar
                 $"CREATE PROCEDURE {qn}: {ex.Message}", ex);
         }
 
+        // Arity / kind gate over the body's reachable function calls. Runs
+        // after the udf-inliner walker (above) so a bad inner-call surfaces
+        // at CREATE PROCEDURE rather than at the first CALL. Wraps the
+        // routine name onto the error so it's immediately attributable.
+        ProceduralBodyArityGate.Enforce(
+            [create.Body], create.Parameters, _functions, $"procedure {qn}");
+
         // When the source text isn't available (e.g. registered via the AST-only
         // BatchExecutor path), store a placeholder so the procedure can still run
         // and persist. The display in system_procedures.source_text will show this

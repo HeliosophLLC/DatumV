@@ -115,6 +115,13 @@ internal sealed partial class RoutineRegistrar
         {
             IReadOnlyList<Statement> rewrittenBody = RewriteBodyWithInlinedMacros(
                 create.StatementBody!, qn.Schema);
+            // Walk the post-inlining body so arity / kind errors inside
+            // RETURN / SET / IF predicates / DECLARE initializers surface
+            // here rather than at the first call site. Runs on the
+            // rewritten body so any macro-inlined call expressions are
+            // also checked.
+            ProceduralBodyArityGate.Enforce(
+                rewrittenBody, create.Parameters, _functions, $"udf.{qn.Name}");
             finalDescriptor = initial with { StatementBody = rewrittenBody };
             _udfs.Register(finalDescriptor, replace: true);
         }

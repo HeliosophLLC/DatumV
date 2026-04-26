@@ -168,6 +168,39 @@ public class UdfIntegrationTests : ServiceTestBase
     }
 
     [Fact]
+    public void CreateFunction_ProceduralBody_BadArity_ThrowsAtDdlTime()
+    {
+        // ProceduralBodyArityGate walks RETURN / SET / IF predicates and
+        // DECLARE initializers. A `concat(text)` call (single arg, needs
+        // ≥2) inside the body should now fail at CREATE FUNCTION rather
+        // than at the first call site.
+        TableCatalog catalog = CreateCatalog();
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("CREATE FUNCTION mash(text String) RETURNS String AS BEGIN RETURN concat(text) END"));
+        Assert.Contains("udf.mash", ex.Message);
+        Assert.Contains("concat", ex.Message);
+    }
+
+    [Fact]
+    public void CreateFunction_ProceduralBody_GoodArityWithLocal_Succeeds()
+    {
+        // Locals introduced via DECLARE get tracked into the scope so a
+        // subsequent `concat(local, 'x')` call resolves and validates
+        // cleanly. This is the realistic body shape — params get massaged
+        // into locals before they hit further function calls.
+        TableCatalog catalog = CreateCatalog();
+
+        catalog.Plan(
+            "CREATE FUNCTION decorate(text String) RETURNS String AS BEGIN " +
+            "DECLARE prefix String = 'hello-'; " +
+            "RETURN concat(prefix, text) " +
+            "END");
+
+        Assert.True(catalog.Udfs.TryGet("decorate", out _));
+    }
+
+    [Fact]
     public void Plan_QueryReferencingUnknownFunction_ThrowsAtPlanTime()
     {
         // PlanTimeFunctionGate rejects unknown function names before any

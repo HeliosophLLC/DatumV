@@ -134,6 +134,14 @@ internal static class AlterTableExecutor
                     }
                 }
             }
+
+            // Same arity/kind probe CREATE TABLE runs. Resolves the
+            // expression against the existing schema (the new column
+            // being added can only reference siblings that already
+            // exist) so a bad call like `brighten(image)` missing
+            // `intensity` surfaces here rather than at first INSERT.
+            ColumnDefinitionResolver.ValidateComputedExpression(
+                catalog.Functions, computedExpr, existingSchema, alter.ColumnName);
         }
 
         // PRIMARY KEY validation — only one PK per table, and on a
