@@ -106,11 +106,10 @@ public static class CatalogDrivenPythonRegistrar
         // Closure captures spec by reference. PythonBackedModel ctor
         // copies the values it needs, so the closure can be invoked
         // multiple times (after evictions) and produce equivalent
-        // model instances. ctx.ModelDirectory is the top-level models
-        // directory ($DATUM_MODELS); the per-model dir is constructed
-        // here using the catalog id (the same name
-        // ModelDownloadService used when creating the dir at install
-        // time).
+        // model instances. The per-model directory is resolved through
+        // the load context's path resolver so the catalog substrate's
+        // future per-version layout flips through without touching this
+        // registrar.
         IModel Loader(ModelLoadContext ctx) => new PythonBackedModel(
             name: modelName,
             inputKinds: inputKinds,
@@ -128,7 +127,7 @@ public static class CatalogDrivenPythonRegistrar
             scriptArgs: spec.ScaffoldArgs,
             readyTimeout: null,
             preferredBatchSize: 1,
-            modelDirectory: Path.Combine(ctx.ModelDirectory, entry.Id));
+            modelDirectory: ctx.Paths.GetModelRoot(entry.Id));
 
         catalog.Register(new ModelCatalogEntry(
             Name: modelName,

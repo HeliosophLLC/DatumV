@@ -1822,7 +1822,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             dir = dir.Parent;
         }
         Assert.NotNull(dir);
-        string sqlPath = Path.Combine(dir!.FullName, "models", "sql", "glpn-nyu.sql");
+        // Per-entry folder + dated filename layout under the catalog
+        // substrate. Picks the newest cut so this test follows future
+        // bumps without needing to be touched.
+        string entrySqlDir = Path.Combine(dir!.FullName, "models", "sql", "glpn-nyu");
+        string sqlPath = Directory.EnumerateFiles(entrySqlDir, "*.sql")
+            .OrderByDescending(p => p)
+            .First();
         string source = File.ReadAllText(sqlPath);
 
         // Substitute the relative USING path with our temp file — the

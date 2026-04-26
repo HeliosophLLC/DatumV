@@ -1681,6 +1681,7 @@ export interface CatalogManifest {
     licenses?: { [key: string]: CatalogLicense; };
     tiers?: CatalogTiers;
     models?: CatalogModel[];
+    tasks?: CatalogTaskRecommendations | undefined;
 }
 
 export interface CatalogLicense {
@@ -1707,19 +1708,29 @@ export interface CatalogModel {
     licenseIds?: string[];
     attributions?: string[];
     hardware?: CatalogHardware;
-    sources?: CatalogSource[];
+    versions?: CatalogVersion[];
     approxSizeMb?: number;
     placeholder?: boolean;
     requiresHfLogin?: boolean;
-    installSql?: string | undefined;
     kind?: string;
     python?: CatalogPythonSpec | undefined;
+    deprecated?: boolean;
+    supersededBy?: string | undefined;
 }
 
 export interface CatalogHardware {
     minRamMb?: number;
     minVramMb?: number;
     preferred?: string;
+}
+
+export interface CatalogVersion {
+    version?: string;
+    sources?: CatalogSource[];
+    installSql?: string | undefined;
+    models?: string[] | undefined;
+    deprecated?: boolean;
+    deprecationReason?: string | undefined;
 }
 
 export interface CatalogSource {
@@ -1760,6 +1771,10 @@ export interface CatalogModelSignature {
     outputKind?: string;
     isDeterministic?: boolean;
     optionalArgKinds?: string[] | undefined;
+}
+
+export interface CatalogTaskRecommendations {
+    recommended?: { [key: string]: string; };
 }
 
 export interface CatalogTaskInfo {

@@ -132,7 +132,7 @@ public static class CatalogManifestBuilder
         IReadOnlyList<ModelEntry>? models = null;
         if (catalog.Models is not null)
         {
-            string modelDirectory = catalog.Models.ModelDirectory;
+            DatumIngest.ModelLibrary.IModelPathResolver pathResolver = catalog.Models.PathResolver;
             List<ModelEntry> modelEntries = new(catalog.Models.Entries.Count);
             foreach (KeyValuePair<string, Models.ModelCatalogEntry> entry in catalog.Models.Entries)
             {
@@ -146,7 +146,7 @@ public static class CatalogManifestBuilder
                 string outputKindLabel = BuildModelOutputKindLabel(entry.Value);
                 IReadOnlyList<StructFieldSignature>? structFields =
                     BuildModelOutputStructFieldSignatures(entry.Value);
-                ModelInstallStatus status = ResolveInstallStatus(entry.Value, modelDirectory);
+                ModelInstallStatus status = ResolveInstallStatus(entry.Value, pathResolver);
                 modelEntries.Add(new ModelEntry
                 {
                     Name = entry.Value.Name,
@@ -476,7 +476,7 @@ public static class CatalogManifestBuilder
     /// so completion + introspection agree on what's installed.
     /// </summary>
     private static ModelInstallStatus ResolveInstallStatus(
-        Models.ModelCatalogEntry entry, string modelDirectory)
+        Models.ModelCatalogEntry entry, DatumIngest.ModelLibrary.IModelPathResolver pathResolver)
     {
         // Synthetic backends declare no RelativePath (EchoModel and friends);
         // they're always loadable.
@@ -486,7 +486,10 @@ public static class CatalogManifestBuilder
                 ? ModelInstallStatus.Bridge
                 : ModelInstallStatus.Available;
         }
-        string resolved = System.IO.Path.Combine(modelDirectory, entry.RelativePath);
+        // RelativePath is id-prefixed; route through the resolver so the
+        // status check sees the active-version folder rather than the
+        // version-less <root>/<id>/ that doesn't hold weights any more.
+        string resolved = pathResolver.ResolveIdPrefixedPath(entry.RelativePath);
         if (!System.IO.File.Exists(resolved))
         {
             return ModelInstallStatus.Missing;

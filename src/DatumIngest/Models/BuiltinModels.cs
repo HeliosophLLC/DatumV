@@ -312,7 +312,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                string modelPath = ctx.Paths.ResolveIdPrefixedPath(modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Llama31, contextSize, maxTokens, temperature);
             },
             // Trailing optional positional args:
@@ -387,7 +387,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                string modelPath = ctx.Paths.ResolveIdPrefixedPath(modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Phi3, contextSize, maxTokens, temperature);
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
@@ -452,7 +452,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                string modelPath = ctx.Paths.ResolveIdPrefixedPath(modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Phi3, contextSize, maxTokens, temperature);
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
@@ -494,7 +494,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                string modelPath = ctx.Paths.ResolveIdPrefixedPath(modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Zephyr, contextSize, maxTokens, temperature);
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
@@ -538,7 +538,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                string modelPath = ctx.Paths.ResolveIdPrefixedPath(modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Gemma, contextSize, maxTokens, temperature);
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
@@ -589,7 +589,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                string modelPath = ctx.Paths.ResolveIdPrefixedPath(modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.ChatML, contextSize, maxTokens, temperature);
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
@@ -701,7 +701,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                string modelPath = ctx.Paths.ResolveIdPrefixedPath(modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Granite, contextSize, maxTokens, temperature);
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
@@ -744,7 +744,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                string modelPath = ctx.Paths.ResolveIdPrefixedPath(modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.ChatML, contextSize, maxTokens, temperature);
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
@@ -792,7 +792,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                string modelPath = ctx.Paths.ResolveIdPrefixedPath(modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Mistral, contextSize, maxTokens, temperature);
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
@@ -876,7 +876,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                string modelDirectory = ctx.Paths.GetModelRoot(folder);
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Stable Diffusion Turbo",
@@ -958,7 +958,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                string modelDirectory = ctx.Paths.GetModelRoot(folder);
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Realistic Vision V6 + Hyper-SD",
@@ -1039,7 +1039,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                string modelDirectory = ctx.Paths.GetModelRoot(folder);
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "DreamShaper 8 + Hyper-SD",
@@ -1121,7 +1121,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                string modelDirectory = ctx.Paths.GetModelRoot(folder);
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "epiCRealism + Hyper-SD",
@@ -1202,7 +1202,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                string modelDirectory = ctx.Paths.GetModelRoot(folder);
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Openjourney v4 + Hyper-SD",
@@ -1291,7 +1291,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                string modelDirectory = ctx.Paths.GetModelRoot(folder);
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Mo Di Diffusion + Hyper-SD",
@@ -1373,7 +1373,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                string modelDirectory = ctx.Paths.GetModelRoot(folder);
                 return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "AbsoluteReality + Hyper-SD",
@@ -1443,7 +1443,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                string modelDirectory = ctx.Paths.GetModelRoot(folder);
                 return new SdxlTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Stable Diffusion XL Turbo",
@@ -1508,7 +1508,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                string modelDirectory = ctx.Paths.GetModelRoot(folder);
                 return new SdxlTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Juggernaut XL Lightning",
@@ -1568,7 +1568,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                string modelDirectory = ctx.Paths.GetModelRoot(folder);
                 return new MusicGenModel(modelName, modelDirectory, maxNewTokens, seed);
             },
             DisplayName: "MusicGen Small",
@@ -1612,7 +1612,7 @@ public static class BuiltinModels
             IsDeterministic: false,
             Loader: ctx =>
             {
-                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                string modelDirectory = ctx.Paths.GetModelRoot(folder);
                 return new MusicGenModel(modelName, modelDirectory, maxNewTokens, seed);
             },
             DisplayName: "MusicGen Medium",
@@ -1706,8 +1706,8 @@ public static class BuiltinModels
             IsDeterministic: true,
             Loader: ctx =>
             {
-                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
-                string decoderPath = Path.Combine(ctx.ModelDirectory, decoderRelativePath);
+                string encoderPath = ctx.Paths.ResolveIdPrefixedPath(encoderRelativePath);
+                string decoderPath = ctx.Paths.ResolveIdPrefixedPath(decoderRelativePath);
                 return new MobileSamModel(modelName, encoderPath, decoderPath, MobileSamMode.Prompted);
             },
             DisplayName: "MobileSAM (prompted segmentation)",
@@ -1759,8 +1759,8 @@ public static class BuiltinModels
             IsDeterministic: true,
             Loader: ctx =>
             {
-                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
-                string decoderPath = Path.Combine(ctx.ModelDirectory, decoderRelativePath);
+                string encoderPath = ctx.Paths.ResolveIdPrefixedPath(encoderRelativePath);
+                string decoderPath = ctx.Paths.ResolveIdPrefixedPath(decoderRelativePath);
                 return new MobileSamModel(
                     modelName, encoderPath, decoderPath,
                     MobileSamMode.Everything, defaultGridSize);
@@ -1893,7 +1893,7 @@ public static class BuiltinModels
             IsDeterministic: true,
             Loader: ctx =>
             {
-                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
+                string encoderPath = ctx.Paths.ResolveIdPrefixedPath(encoderRelativePath);
                 return new WhisperOnnxModel(modelName, encoderPath, maxTokens);
             },
             DisplayName: displayName,
@@ -1990,7 +1990,7 @@ public static class BuiltinModels
             IsDeterministic: true,
             Loader: ctx =>
             {
-                string anchorPath = Path.Combine(ctx.ModelDirectory, Phi35VisionAnchor);
+                string anchorPath = ctx.Paths.ResolveIdPrefixedPath(Phi35VisionAnchor);
                 string bundleDirectory = Path.GetDirectoryName(anchorPath)!;
                 return new Phi35VisionModel(modelName, bundleDirectory, maxTokens);
             },
@@ -2103,8 +2103,8 @@ public static class BuiltinModels
             IsDeterministic: true,
             Loader: ctx =>
             {
-                string onnxPath = Path.Combine(ctx.ModelDirectory, onnxFilename);
-                string resolvedVoicesPath = Path.Combine(ctx.ModelDirectory, voicesPath);
+                string onnxPath = ctx.Paths.ResolveIdPrefixedPath(onnxFilename);
+                string resolvedVoicesPath = ctx.Paths.ResolveIdPrefixedPath(voicesPath);
                 return new PythonBackedModel(
                     name: modelName,
                     inputKinds: [DataKind.String],

@@ -30,17 +30,22 @@ public sealed class SqlModelFilesParseTests
     public static IEnumerable<object[]> SqlFiles()
     {
         string sqlDir = ResolveModelsDir();
-        foreach (string path in Directory.EnumerateFiles(sqlDir, "*.sql"))
+        // After the catalog substrate's per-entry SQL layout (sql/<id>/<version>.sql),
+        // recurse so every dated cut across every entry's folder gets parsed.
+        foreach (string path in Directory.EnumerateFiles(sqlDir, "*.sql", SearchOption.AllDirectories))
         {
-            yield return new object[] { Path.GetFileName(path) };
+            // Use the path relative to sql/ as the test-case label so a
+            // failure points at "florence-2-base-ft-fp16/2026-05-29.sql"
+            // not just "2026-05-29.sql".
+            yield return new object[] { Path.GetRelativePath(sqlDir, path) };
         }
     }
 
     [Theory]
     [MemberData(nameof(SqlFiles))]
-    public void EachShippedModelSql_ParsesCleanly(string fileName)
+    public void EachShippedModelSql_ParsesCleanly(string relativePath)
     {
-        string sqlPath = Path.Combine(ResolveModelsDir(), fileName);
+        string sqlPath = Path.Combine(ResolveModelsDir(), relativePath);
         string source = File.ReadAllText(sqlPath);
 
         // Use ParseBatch so multi-statement bundles (Florence-2 fp16 / Q8

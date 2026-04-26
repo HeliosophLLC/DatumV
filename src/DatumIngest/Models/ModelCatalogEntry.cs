@@ -1,4 +1,5 @@
 using DatumIngest.Model;
+using DatumIngest.ModelLibrary;
 
 namespace DatumIngest.Models;
 
@@ -235,4 +236,25 @@ public sealed record ModelStructFieldInfo(string Name, DataKind Kind, bool IsArr
 /// </summary>
 /// <param name="Entry">The catalog row that triggered the load.</param>
 /// <param name="ModelDirectory">Absolute path to the catalog's models directory.</param>
-public sealed record ModelLoadContext(ModelCatalogEntry Entry, string ModelDirectory);
+/// <param name="PathResolver">
+/// Resolver for per-model on-disk paths. Loaders prefer this over
+/// hand-composing <see cref="ModelDirectory"/> + relative segments so the
+/// catalog substrate's per-version folder flip is a one-line resolver swap
+/// rather than a per-loader rewrite. <see langword="null"/> only for legacy
+/// test fixtures that constructed a <see cref="ModelLoadContext"/> directly
+/// — loaders should null-coalesce to the flat-layout fallback in that case.
+/// </param>
+public sealed record ModelLoadContext(
+    ModelCatalogEntry Entry,
+    string ModelDirectory,
+    IModelPathResolver? PathResolver = null)
+{
+    /// <summary>
+    /// Always-non-null view of <see cref="PathResolver"/>; falls back to a
+    /// flat-layout resolver rooted at <see cref="ModelDirectory"/> for the
+    /// handful of legacy test fixtures that constructed a load context
+    /// without supplying a resolver. Loaders should prefer this over
+    /// composing paths from <see cref="ModelDirectory"/> directly.
+    /// </summary>
+    public IModelPathResolver Paths => PathResolver ?? new FlatModelPathResolver(ModelDirectory);
+}

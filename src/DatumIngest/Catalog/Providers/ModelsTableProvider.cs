@@ -173,7 +173,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         }
         rows.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
 
-        string modelDirectory = _modelCatalog.ModelDirectory;
+        DatumIngest.ModelLibrary.IModelPathResolver pathResolver = _modelCatalog.PathResolver;
         CalibrationRegistry calibrationRegistry = _modelCatalog.CalibrationRegistry;
 
         // requiredColumns / filterHint are advisory; we materialise the full row
@@ -193,11 +193,11 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
             DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
             if (entry.IsBuiltin)
             {
-                FillRow(values, entry.Entry!, modelDirectory, batch.Arena);
+                FillRow(values, entry.Entry!, pathResolver, batch.Arena);
             }
             else
             {
-                FillRowFromDescriptor(values, entry.Descriptor!, modelDirectory, batch.Arena);
+                FillRowFromDescriptor(values, entry.Descriptor!, pathResolver, batch.Arena);
             }
             FillCalibrationCells(values, calibrationRegistry.Get(entry.Name), batch.Arena);
             batch.Add(values);
@@ -223,11 +223,14 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     /// reflect current disk state.
     /// </summary>
     private static void FillRow(
-        DataValue[] cells, ModelCatalogEntry entry, string modelDirectory, Arena arena)
+        DataValue[] cells, ModelCatalogEntry entry, DatumIngest.ModelLibrary.IModelPathResolver pathResolver, Arena arena)
     {
+        // RelativePath is id-prefixed (e.g. "all-minilm-l6-v2/model.onnx");
+        // route through the resolver so per-version installs surface as
+        // "available" rather than "missing".
         string? resolvedPath = entry.RelativePath is null
             ? null
-            : Path.Combine(modelDirectory, entry.RelativePath);
+            : pathResolver.ResolveIdPrefixedPath(entry.RelativePath);
 
         bool fileExists;
         long? fileSize;
@@ -298,9 +301,9 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     /// is still callable.
     /// </summary>
     private static void FillRowFromDescriptor(
-        DataValue[] cells, ModelDescriptor descriptor, string modelDirectory, Arena arena)
+        DataValue[] cells, ModelDescriptor descriptor, DatumIngest.ModelLibrary.IModelPathResolver pathResolver, Arena arena)
     {
-        long? fileSize = TryStatUsingPath(descriptor.UsingPath, modelDirectory);
+        long? fileSize = TryStatUsingPath(descriptor.UsingPath, pathResolver);
 
         cells[0]  = DataValue.FromString(descriptor.Name, arena);
         cells[1]  = DataValue.Null(DataKind.String);          // display_name
@@ -340,16 +343,23 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     /// model directory) and stat-s the result. Returns <see langword="null"/>
     /// when the file is gone or the path can't be resolved.
     /// </summary>
-    private static long? TryStatUsingPath(string usingPath, string modelDirectory)
+    private static long? TryStatUsingPath(string usingPath, DatumIngest.ModelLibrary.IModelPathResolver pathResolver)
     {
         string resolved;
         if (usingPath.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
         {
             resolved = usingPath["file://".Length..];
         }
+        else if (Path.IsPathRooted(usingPath))
+        {
+            resolved = Path.GetFullPath(usingPath);
+        }
         else
         {
-            resolved = Path.GetFullPath(Path.Combine(modelDirectory, usingPath));
+            // Same id-prefixed resolution as ModelCatalog.ResolveFilePath —
+            // SQL-defined models register against the active-version
+            // folder under the per-version layout.
+            resolved = Path.GetFullPath(pathResolver.ResolveIdPrefixedPath(usingPath));
         }
 
         FileInfo info = new(resolved);

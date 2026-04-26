@@ -1,4 +1,5 @@
 using DatumIngest.Diagnostics;
+using DatumIngest.ModelLibrary;
 using DatumIngest.Models.Calibration;
 
 namespace DatumIngest.Models;
@@ -169,7 +170,8 @@ public sealed class ModelResidencyManager : IDisposable
     /// or the model becomes un-evictable.
     /// </summary>
     /// <param name="entry">Catalog entry describing the model.</param>
-    /// <param name="modelDirectory">Catalog's model directory; used to resolve <see cref="ModelCatalogEntry.RelativePath"/> for the loader and the file-size heuristic.</param>
+    /// <param name="modelDirectory">Catalog's model directory; passed through to the loader via <see cref="ModelLoadContext.ModelDirectory"/>.</param>
+    /// <param name="pathResolver">Per-model path resolver used by the file-size heuristic and the calibration weight-cost recorder. <see langword="null"/> falls back to a flat-layout resolver rooted at <paramref name="modelDirectory"/>.</param>
     /// <param name="cancellationToken">Honoured during admission-timeout polling.</param>
     /// <returns>A lease wrapping the loaded model.</returns>
     /// <exception cref="InvalidOperationException">
@@ -179,9 +181,16 @@ public sealed class ModelResidencyManager : IDisposable
     public async Task<ModelLease> AcquireAsync(
         ModelCatalogEntry entry,
         string modelDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IModelPathResolver? pathResolver = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+
+        // Resolver should always be supplied by ModelCatalog; null-fallback
+        // keeps a couple of older test fixtures that called AcquireAsync
+        // directly with just (entry, modelDirectory, ct) working — they get
+        // the flat layout, which is what they tested against anyway.
+        pathResolver ??= new FlatModelPathResolver(modelDirectory);
 
         // Prefer the measured weight cost from a prior calibration over
         // any heuristic. After the first successful load on this host,
@@ -193,7 +202,7 @@ public sealed class ModelResidencyManager : IDisposable
         // to the file-size × 1.2 default.
         long estimatedBytes = TryGetCalibratedWeightCost(entry.Name)
             ?? entry.EstimatedVramBytes
-            ?? EstimateFromFile(entry, modelDirectory);
+            ?? EstimateFromFile(entry, pathResolver);
 
         DateTimeOffset deadline = DateTimeOffset.UtcNow + AdmissionTimeout;
         while (true)
@@ -291,7 +300,7 @@ public sealed class ModelResidencyManager : IDisposable
 
                     try
                     {
-                        loadedModel = entry.Loader(new ModelLoadContext(entry, modelDirectory));
+                        loadedModel = entry.Loader(new ModelLoadContext(entry, modelDirectory, pathResolver));
                     }
                     catch (Exception ex)
                     {
@@ -328,7 +337,7 @@ public sealed class ModelResidencyManager : IDisposable
                     try { await sampler.ConfigureAwait(false); }
                     catch (OperationCanceledException) { }
 
-                    RecordWeightCost(entry, modelDirectory, vramBefore, peakVram, vramAvailable, generation);
+                    RecordWeightCost(entry, pathResolver, vramBefore, peakVram, vramAvailable, generation);
                 }
                 finally
                 {
@@ -702,7 +711,7 @@ public sealed class ModelResidencyManager : IDisposable
         return false;
     }
 
-    private static long EstimateFromFile(ModelCatalogEntry entry, string modelDirectory)
+    private static long EstimateFromFile(ModelCatalogEntry entry, IModelPathResolver pathResolver)
     {
         // Prefer summing all declared files — multi-file models (SDXL, Florence-2,
         // Whisper, etc.) store their graph in a small .onnx and their weights in a
@@ -720,7 +729,7 @@ public sealed class ModelResidencyManager : IDisposable
         List<string>? missing = null;
         foreach (string rel in paths)
         {
-            string p = Path.Combine(modelDirectory, rel);
+            string p = pathResolver.ResolveIdPrefixedPath(rel);
             if (File.Exists(p))
                 total += new FileInfo(p).Length;
             else
@@ -737,7 +746,7 @@ public sealed class ModelResidencyManager : IDisposable
         {
             throw new InvalidOperationException(
                 $"Model '{entry.Name}' declares {paths.Count} file(s) but {missing.Count} are " +
-                $"missing from '{modelDirectory}': {string.Join(", ", missing)}. " +
+                $"missing from '{pathResolver.ModelsRoot}': {string.Join(", ", missing)}. " +
                 $"Re-download from ModelCatalogEntry.SourceUrl ({entry.SourceUrl ?? "<unset>"}) " +
                 "or set ModelCatalogEntry.EstimatedVramBytes explicitly to bypass the file-size heuristic.");
         }
@@ -784,7 +793,7 @@ public sealed class ModelResidencyManager : IDisposable
     /// </summary>
     private void RecordWeightCost(
         ModelCatalogEntry entry,
-        string modelDirectory,
+        IModelPathResolver pathResolver,
         long vramBefore,
         long peakVram,
         bool vramAvailable,
@@ -793,15 +802,16 @@ public sealed class ModelResidencyManager : IDisposable
         if (_calibrationRegistry is null) return;
 
         // Resolve the fingerprintable absolute path. Builtins set
-        // RelativePath (relative to modelDirectory); SQL-defined models
-        // set FingerprintPath to the descriptor's already-absolute
-        // ResolvedUsingPath. Synthetic backends (EchoModel) have
-        // neither and skip recording — no fingerprintable identity
-        // means no cross-restart calibration anyway.
+        // RelativePath (id-prefixed, relative to the models root);
+        // SQL-defined models set FingerprintPath to the descriptor's
+        // already-absolute ResolvedUsingPath. Synthetic backends
+        // (EchoModel) have neither and skip recording — no
+        // fingerprintable identity means no cross-restart calibration
+        // anyway.
         string? absolutePath = entry.FingerprintPath
             ?? (string.IsNullOrEmpty(entry.RelativePath)
                 ? null
-                : Path.GetFullPath(Path.Combine(modelDirectory, entry.RelativePath)));
+                : Path.GetFullPath(pathResolver.ResolveIdPrefixedPath(entry.RelativePath)));
         if (absolutePath is null) return;
 
         string? fingerprint = ModelFileFingerprint.TryCompute(absolutePath);

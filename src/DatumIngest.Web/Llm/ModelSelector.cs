@@ -36,10 +36,10 @@ internal static class ModelSelector
         {
             ModelCatalogEntry entry = kv.Value;
             if (!IsLlm(entry)) continue;
-            if (!IsFilePresent(entry, catalog.ModelDirectory)) continue;
+            if (!IsFilePresent(entry, catalog.PathResolver)) continue;
 
             long estimated = entry.EstimatedVramBytes
-                ?? EstimateFromFile(entry, catalog.ModelDirectory);
+                ?? EstimateFromFile(entry, catalog.PathResolver);
             if (estimated == 0) continue;
             if (estimated > usableBudget) continue;
 
@@ -90,10 +90,10 @@ internal static class ModelSelector
         {
             ModelCatalogEntry entry = kv.Value;
             if (!IsLlm(entry)) continue;
-            if (!IsFilePresent(entry, catalog.ModelDirectory)) continue;
+            if (!IsFilePresent(entry, catalog.PathResolver)) continue;
 
             long estimated = entry.EstimatedVramBytes
-                ?? EstimateFromFile(entry, catalog.ModelDirectory);
+                ?? EstimateFromFile(entry, catalog.PathResolver);
             bool fits = estimated > 0 && estimated <= usableBudget;
             results.Add(new InstalledLlm(
                 Name: entry.Name,
@@ -113,34 +113,37 @@ internal static class ModelSelector
     private static bool IsLlm(ModelCatalogEntry entry)
         => string.Equals(entry.Category, "llm", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsFilePresent(ModelCatalogEntry entry, string modelDirectory)
+    private static bool IsFilePresent(ModelCatalogEntry entry, DatumIngest.ModelLibrary.IModelPathResolver paths)
     {
+        // RelativePath / Files are id-prefixed under the catalog substrate
+        // (e.g. "llama-3.1-8b-instruct-gguf/...gguf"); route through the
+        // resolver so the per-version folder layout is honoured.
         if (entry.Files is { Count: > 0 })
         {
             foreach (string rel in entry.Files)
             {
-                if (!File.Exists(Path.Combine(modelDirectory, rel))) return false;
+                if (!File.Exists(paths.ResolveIdPrefixedPath(rel))) return false;
             }
             return true;
         }
         if (entry.RelativePath is null) return false;
-        return File.Exists(Path.Combine(modelDirectory, entry.RelativePath));
+        return File.Exists(paths.ResolveIdPrefixedPath(entry.RelativePath));
     }
 
-    private static long EstimateFromFile(ModelCatalogEntry entry, string modelDirectory)
+    private static long EstimateFromFile(ModelCatalogEntry entry, DatumIngest.ModelLibrary.IModelPathResolver paths)
     {
         long total = 0;
         if (entry.Files is { Count: > 0 })
         {
             foreach (string rel in entry.Files)
             {
-                string p = Path.Combine(modelDirectory, rel);
+                string p = paths.ResolveIdPrefixedPath(rel);
                 if (File.Exists(p)) total += new FileInfo(p).Length;
             }
         }
         else if (entry.RelativePath is not null)
         {
-            string p = Path.Combine(modelDirectory, entry.RelativePath);
+            string p = paths.ResolveIdPrefixedPath(entry.RelativePath);
             if (File.Exists(p)) total = new FileInfo(p).Length;
         }
         return (long)(total * 1.2);

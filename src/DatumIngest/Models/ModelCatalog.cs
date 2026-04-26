@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 
 using DatumIngest.Diagnostics;
+using DatumIngest.ModelLibrary;
 using DatumIngest.Models.Calibration;
 
 namespace DatumIngest.Models;
@@ -63,6 +64,17 @@ public sealed class ModelCatalog : IDisposable
     public string ModelDirectory { get; }
 
     /// <summary>
+    /// Per-model on-disk path resolver. Loaders and the residency manager
+    /// consult this instead of composing <see cref="ModelDirectory"/> +
+    /// relative segments by hand so the catalog substrate's per-version
+    /// folder layout can be introduced by swapping the resolver rather
+    /// than rewriting every callsite. Initial implementation is the flat
+    /// layout — behaviourally identical to today's <c>Path.Combine</c>
+    /// patterns.
+    /// </summary>
+    public IModelPathResolver PathResolver { get; }
+
+    /// <summary>
     /// The residency manager that owns the loaded <see cref="IModel"/>
     /// instances and enforces the VRAM budget. Created with the catalog;
     /// budget defaults to <see cref="ModelResidencyManager.UnlimitedBudget"/>
@@ -123,8 +135,16 @@ public sealed class ModelCatalog : IDisposable
     /// </summary>
     /// <param name="path">
     /// The user-supplied path. A leading <c>file://</c> marks an absolute path
-    /// (anywhere on disk); without that prefix the path is treated as relative
-    /// to <paramref name="models"/>' <see cref="ModelDirectory"/>.
+    /// (anywhere on disk); without that prefix the path is treated as an
+    /// id-prefixed relative path resolved through the catalog's
+    /// <see cref="PathResolver"/> — for catalog-installed entries the leading
+    /// segment names an entry whose <c>active</c> pointer selects the version
+    /// folder, so <c>'all-minilm-l6-v2/model.onnx'</c> resolves to
+    /// <c>&lt;root&gt;/all-minilm-l6-v2/&lt;active-version&gt;/model.onnx</c>.
+    /// Paths whose leading segment has no <c>active</c> pointer (user-owned
+    /// subfolders, freshly-downloaded entries that haven't activated yet,
+    /// test fixtures) fall back to <c>&lt;root&gt;/&lt;leading&gt;/&lt;rest&gt;</c>
+    /// — the flat layout the engine used before the catalog substrate.
     /// </param>
     /// <param name="models">
     /// The host's model catalog, or <see langword="null"/> when none is wired.
@@ -150,7 +170,15 @@ public sealed class ModelCatalog : IDisposable
                 "TableCatalog.Models before invoking.");
         }
 
-        return Path.GetFullPath(Path.Combine(models.ModelDirectory, path));
+        // Route through the path resolver so SQL `USING` clauses inherit the
+        // catalog substrate's active-version indirection without the SQL
+        // itself naming a version. Rooted absolute paths short-circuit early
+        // and don't get the id-prefix treatment.
+        if (Path.IsPathRooted(path))
+        {
+            return Path.GetFullPath(path);
+        }
+        return Path.GetFullPath(models.PathResolver.ResolveIdPrefixedPath(path));
     }
 
     /// <summary>
@@ -210,9 +238,11 @@ public sealed class ModelCatalog : IDisposable
         long vramBudgetBytes,
         TimeSpan? admissionTimeout,
         CalibrationStore? calibrationStore,
-        HostFingerprint? hostFingerprint)
+        HostFingerprint? hostFingerprint,
+        IModelPathResolver? pathResolver = null)
     {
         ModelDirectory = modelDirectory ?? DefaultModelDirectory;
+        PathResolver = pathResolver ?? new VersionedModelPathResolver(ModelDirectory);
         ResidencyManager = new ModelResidencyManager(vramBudgetBytes, admissionTimeout, CalibrationRegistry);
         ResidencyManager.Catalog = this;
         _calibrationStore = calibrationStore;
@@ -478,7 +508,7 @@ public sealed class ModelCatalog : IDisposable
             ?? throw new InvalidOperationException(
                 $"No model registered as '{name}'. Register it via ModelCatalog.Register before referencing it from SQL.");
 
-        return ResidencyManager.AcquireAsync(entry, ModelDirectory, cancellationToken);
+        return ResidencyManager.AcquireAsync(entry, ModelDirectory, cancellationToken, PathResolver);
     }
 
     /// <summary>

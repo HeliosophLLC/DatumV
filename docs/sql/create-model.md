@@ -110,6 +110,62 @@ The file must exist at `CREATE MODEL` time — load is eager. If the file
 is missing or the file isn't a valid ONNX model the runtime supports,
 the error surfaces immediately rather than at the first call site.
 
+### Version-agnostic paths for catalog-installed models
+
+Models installed through the catalog (the Models panel or the REST
+install endpoint) live in per-version folders on disk:
+
+```
+<models-dir>\all-minilm-l6-v2\
+  2026-05-29\
+    model.onnx
+    vocab.txt
+  active            ← one-line text file: "2026-05-29"
+```
+
+The runtime keeps an `active` text file next to each installed model
+that names the currently-active version. **Author your `USING` string
+as if the model lives at one stable, version-less location** —
+relative paths whose leading segment names an installed catalog entry
+are rewritten transparently with the active version segment injected:
+
+```sql
+-- The author writes (and what you see in models/sql/all-minilm-l6-v2/<date>.sql):
+USING 'all-minilm-l6-v2/model.onnx'
+
+-- The runtime resolves to:
+<models-dir>\all-minilm-l6-v2\2026-05-29\model.onnx
+```
+
+When the user later updates the catalog entry and the active pointer
+flips to a newer version, the same `CREATE MODEL` registration starts
+serving from the new folder on the next planner resolution — no
+re-issued DDL required. Reverting via the model card flips the pointer
+back; calibration data keyed on the model identifier survives both
+directions because the identifier never changed.
+
+Paths whose leading segment **isn't** a catalog-installed entry fall
+back to flat resolution under the models directory. Three concrete
+patterns where the fallback applies, with no behavioural difference
+from the pre-catalog layout:
+
+- **User-side experiments** — `USING 'my-experiments/x.onnx'` resolves
+  to `<models-dir>\my-experiments\x.onnx` whether or not the engine
+  knows about `my-experiments`. Drop files in, run CREATE MODEL.
+- **Pre-catalog single-file drops** — `USING 'mobilenet.onnx'` (no
+  slash) resolves to `<models-dir>\mobilenet.onnx`. Mirrors how
+  built-in GGUF entries are loaded today.
+- **Freshly-downloaded but not-yet-activated installs** — between the
+  download completing and the `active` pointer being written, the
+  resolver falls back to the version-less folder; the install isn't
+  callable until the pointer flips.
+
+To deliberately bypass the active-version indirection — for example,
+to pin a CREATE MODEL registration to a side-loaded weight file
+outside the catalog — use `file://` or a fully-rooted absolute path.
+Those forms short-circuit path resolution entirely and write the
+exact string into the registration.
+
 The runtime currently uses ONNX Runtime 1.20.1, which supports IR
 versions ≤ 10 and opsets ≤ 21 (for the `ai.onnx` domain). Newer ONNX
 exports may need to be re-saved with an older `ir_version` /

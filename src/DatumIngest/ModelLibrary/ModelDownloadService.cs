@@ -19,8 +19,8 @@ internal sealed class ModelDownloadService : IModelDownloadService
     private readonly IDownloadProgressReporter _reporter;
     private readonly IModelInstaller _installer;
     private readonly IPythonEnvironmentManager _python;
+    private readonly IModelPathResolver _paths;
     private readonly ILogger<ModelDownloadService> _logger;
-    private readonly string _modelsDirectory;
 
     // Prevents two concurrent installs of the same modelId. The value is a
     // CancellationTokenSource so a future "cancel download" RPC can flip
@@ -34,7 +34,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
         IDownloadProgressReporter reporter,
         IModelInstaller installer,
         IPythonEnvironmentManager python,
-        ModelLibraryOptions options,
+        IModelPathResolver paths,
         ILogger<ModelDownloadService> logger)
     {
         _store = store;
@@ -43,7 +43,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
         _installer = installer;
         _python = python;
         _logger = logger;
-        _modelsDirectory = options.ModelsDirectory;
+        _paths = paths;
 
         // Build the per-type dispatch table once. Multiple clients with the
         // same SupportedType is a DI misconfig — let it surface immediately
@@ -72,7 +72,13 @@ internal sealed class ModelDownloadService : IModelDownloadService
         // change the fact that there's nothing to compare against.
         if (model.Placeholder) return ModelInstallState.NotDownloaded;
 
-        string modelDir = Path.Combine(_modelsDirectory, model.Id);
+        // Probe the recommended version's folder explicitly — pinning the
+        // version means the probe is "is the catalog's current cut
+        // installed?" rather than "is something installed?" When the
+        // user reverts to an older version through the model card, that
+        // version's folder gets its own state transition.
+        string recommendedVersion = model.Versions[0].Version;
+        string modelDir = _paths.GetModelRoot(model.Id, recommendedVersion);
         if (!Directory.Exists(modelDir)) return ModelInstallState.NotDownloaded;
 
         // Probe uses the first source's inventory as authoritative — for
@@ -166,8 +172,13 @@ internal sealed class ModelDownloadService : IModelDownloadService
     public Task UninstallAsync(string modelId, CancellationToken ct = default)
     {
         CatalogModel model = ResolveModel(modelId);
-        string modelDir = Path.Combine(_modelsDirectory, model.Id);
-        if (Directory.Exists(modelDir)) Directory.Delete(modelDir, recursive: true);
+        // Wipe the whole <id>/ tree — every version folder + the active
+        // pointer. Per-version uninstall lives on the model card's
+        // "Previous versions" disclosure, not on this top-level
+        // surface.
+        string idRoot = Path.Combine(_paths.ModelsRoot, model.Id);
+        if (Directory.Exists(idRoot)) Directory.Delete(idRoot, recursive: true);
+        _paths.InvalidateActiveVersionCache(model.Id);
         return Task.CompletedTask;
     }
 
@@ -201,7 +212,10 @@ internal sealed class ModelDownloadService : IModelDownloadService
     public Task<long> GetPartialBytesAsync(string modelId, CancellationToken ct = default)
     {
         CatalogModel model = ResolveModel(modelId);
-        string modelDir = Path.Combine(_modelsDirectory, model.Id);
+        // Walk the whole <id>/ tree (every version folder) — partial
+        // downloads live in whichever version is currently being
+        // installed, which may not be the active one yet.
+        string modelDir = Path.Combine(_paths.ModelsRoot, model.Id);
         if (!Directory.Exists(modelDir)) return Task.FromResult(0L);
 
         long total = 0;
@@ -233,7 +247,8 @@ internal sealed class ModelDownloadService : IModelDownloadService
     public Task DeletePartialsAsync(string modelId, CancellationToken ct = default)
     {
         CatalogModel model = ResolveModel(modelId);
-        string modelDir = Path.Combine(_modelsDirectory, model.Id);
+        // Walk the whole <id>/ tree; see GetPartialBytesAsync for the rationale.
+        string modelDir = Path.Combine(_paths.ModelsRoot, model.Id);
         if (!Directory.Exists(modelDir)) return Task.CompletedTask;
 
         foreach (string file in Directory.EnumerateFiles(modelDir, "*.part", SearchOption.AllDirectories))
@@ -267,7 +282,15 @@ internal sealed class ModelDownloadService : IModelDownloadService
     // when the user pulled the plug.
     private async Task RunDownloadAsync(CatalogModel model, CancellationToken ct)
     {
-        string modelDir = Path.Combine(_modelsDirectory, model.Id);
+        // Always install the catalog's currently-recommended version
+        // (versions[0]) on the install-from-modal path. Older versions
+        // get installed alongside through the model card's revert UX.
+        // Files land in <root>/<id>/<version>/ — the active pointer
+        // doesn't flip until both download + install succeed, so a
+        // partial download lives in its own folder and never gets
+        // promoted to the active install.
+        string version = model.Versions[0].Version;
+        string modelDir = _paths.GetModelRoot(model.Id, version);
         Directory.CreateDirectory(modelDir);
 
         StringBuilder failureLog = new();
@@ -344,6 +367,28 @@ internal sealed class ModelDownloadService : IModelDownloadService
             await _reporter.OnCompleteAsync(
                 new ModelDownloadComplete(model.Id), CancellationToken.None)
                 .ConfigureAwait(false);
+
+            // Flip the active pointer here, BEFORE installSql runs. The
+            // installSql contains CREATE MODEL statements whose USING
+            // clauses resolve through IModelPathResolver — without an
+            // active pointer in place the resolver falls back to flat
+            // <root>/<id>/<file>, which doesn't exist any more because
+            // the bytes downloaded to <root>/<id>/<version>/<file>. So
+            // CREATE MODEL fails with "file not found" before the user
+            // ever gets a chance to call it.
+            //
+            // Atomicity of the *download* still holds (a partial source
+            // download throws inside TryDownloadFromSourceAsync above
+            // and we never reach this line). What this DOES sacrifice
+            // is "pointer flips only after installSql succeeds" — a
+            // failed installSql now leaves the pointer pointing at a
+            // version whose SQL identifiers may not be registered.
+            // That's recoverable: installSql uses CREATE OR REPLACE
+            // MODEL, so a retry re-registers idempotently. The bytes
+            // stay on disk for the retry, matching the existing
+            // "don't delete on failure, re-trying install is cheaper"
+            // pragma below.
+            _paths.SetActiveVersion(model.Id, version);
 
             // Python venv install step. Runs for kind="python" entries
             // after the file download completes — sets up the engine-

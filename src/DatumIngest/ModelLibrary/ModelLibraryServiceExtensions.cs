@@ -40,6 +40,13 @@ public static class ModelLibraryServiceExtensions
         services.AddSingleton<IManifestStore, ManifestStore>();
         services.AddSingleton<ILicenseAcceptanceService, LicenseAcceptanceService>();
 
+        // Centralised "where does <id> live on disk?" lookup. The catalog
+        // substrate's per-version layout reads the active version from
+        // <root>/<id>/active and resolves <id>/<active-version>/<rest>;
+        // model installs and uninstalls flip the pointer through the
+        // resolver's SetActiveVersion / InvalidateActiveVersionCache surface.
+        services.AddSingleton<IModelPathResolver, VersionedModelPathResolver>();
+
         // Each source client gets its own typed HttpClient so handler
         // pools, BaseAddress, and default headers stay isolated.
         services.AddHttpClient<HuggingFaceSourceClient>();

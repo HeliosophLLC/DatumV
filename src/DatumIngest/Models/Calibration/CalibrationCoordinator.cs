@@ -173,14 +173,14 @@ public sealed class CalibrationCoordinator
             }
 
             // Resolve the fingerprintable absolute path. Builtins set
-            // RelativePath (relative to the catalog's model directory);
+            // RelativePath (id-prefixed, relative to the models root);
             // SQL-defined models set FingerprintPath to the descriptor's
             // already-absolute ResolvedUsingPath. Synthetic backends
             // (EchoModel) have neither and can't be calibrated.
             string? absolutePath = entry.FingerprintPath
                 ?? (string.IsNullOrEmpty(entry.RelativePath)
                     ? null
-                    : Path.GetFullPath(Path.Combine(_catalog.ModelDirectory, entry.RelativePath)));
+                    : Path.GetFullPath(_catalog.PathResolver.ResolveIdPrefixedPath(entry.RelativePath)));
             if (absolutePath is null)
             {
                 throw new InvalidOperationException(

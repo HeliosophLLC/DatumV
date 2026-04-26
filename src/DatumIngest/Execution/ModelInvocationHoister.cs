@@ -388,7 +388,11 @@ public static class ModelInvocationHoister
         // drive/user info that isn't useful to the reader.
         if (entry.RelativePath is not null)
         {
-            string resolvedPath = Path.Combine(catalog.ModelDirectory, entry.RelativePath);
+            // Route through the catalog's path resolver so the existence
+            // check sees the active-version folder under the per-version
+            // layout (<root>/<id>/<active>/<rest>) instead of the
+            // version-less <root>/<id>/<rest> that no longer holds weights.
+            string resolvedPath = catalog.PathResolver.ResolveIdPrefixedPath(entry.RelativePath);
             if (!File.Exists(resolvedPath))
             {
                 string sourceHint = entry.SourceUrl is not null

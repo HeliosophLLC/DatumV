@@ -16,7 +16,19 @@ public sealed record CatalogManifest(
     int SchemaVersion,
     IReadOnlyDictionary<string, CatalogLicense> Licenses,
     CatalogTiers Tiers,
-    IReadOnlyList<CatalogModel> Models);
+    IReadOnlyList<CatalogModel> Models,
+    // Top-level per-task recommendation map: contract name (matching a
+    // `TaskTypeRegistry` entry) → recommended model identifier (the
+    // SQL-visible snake_case name registered by some catalog entry's
+    // installSql). Powers the `tasks.<contract>(...)` dispatcher. Empty
+    // (or absent in JSON) when no recommendations are wired yet — every
+    // `tasks.x` call then fails preflight with "no recommended model
+    // for contract X."
+    CatalogTaskRecommendations? Tasks = null);
+
+public sealed record CatalogTaskRecommendations(
+    // contract name → recommended model identifier
+    IReadOnlyDictionary<string, string> Recommended);
 
 public sealed record CatalogLicense(
     string Title,
@@ -56,34 +68,23 @@ public sealed record CatalogModel(
     // the model card; HF READMEs inherit from this list.
     IReadOnlyList<string> Attributions,
     CatalogHardware Hardware,
-    // Ordered list of sources the downloader will try in sequence. The first
-    // source that can list + deliver every expected file wins. Subsequent
-    // entries are fallbacks tried on per-source failure (404, network, hash
-    // mismatch, partial file inventory). Policy is "Heliosoph-mirror first":
-    // the pinned-sha Heliosoph mirror leads for reproducibility, and (when
-    // present) the upstream channel trails as a hedge against mirror
-    // unavailability. Always at least one entry.
-    IReadOnlyList<CatalogSource> Sources,
+    // Per-entry version history. Element [0] is the currently recommended
+    // version — fresh installs and install-from-modal always pick [0].
+    // Older entries are kept so users can revert; per-version
+    // deprecation marks specific cuts as known-broken. Versioning
+    // happens HERE rather than per-source so source + installSql + the
+    // declared identifier set move together as one cut. Always at
+    // least one entry; element [0] may not be entry-level deprecated
+    // (validated at load).
+    IReadOnlyList<CatalogVersion> Versions,
     int ApproxSizeMb,
-    // Marks entries whose Source.Repo is not yet uploaded. The downloader
-    // refuses to install placeholders so a half-finished upload doesn't
-    // surface as a broken model.
+    // Marks entries whose primary source is not yet uploaded. The
+    // downloader refuses to install placeholders so a half-finished
+    // upload doesn't surface as a broken model.
     bool Placeholder = false,
-    // The HF source repo requires a logged-in token to download (gated
+    // The source repo requires a logged-in token to download (gated
     // repos like Meta-Llama). Independent of license acceptance.
     bool RequiresHfLogin = false,
-    // Path (relative to the catalog.json directory) to a .sql file that
-    // registers this model into the SQL catalog after download completes.
-    // The file may contain one or more CREATE MODEL statements; the
-    // probe convention is that the SQL registers a model whose qualified
-    // name is `public.<Id with '-' replaced by '_'>` — that name is what
-    // the installer looks up to decide "installed vs only downloaded."
-    // Additional CREATE MODEL statements in the same file are registered
-    // for the model's own use (sub-models, helpers) but aren't tracked
-    // independently by the catalog. Null for models that need no SQL
-    // glue (today: most models are still consumed via the built-in IModel
-    // path and don't need an installSql entry).
-    string? InstallSql = null,
     // Discriminator over what the engine does after files are downloaded.
     // Default "onnx" means "files-only install + optional installSql
     // registration" — the v1 behaviour every existing entry expects.
@@ -100,7 +101,64 @@ public sealed record CatalogModel(
     // worker script path, and the model's IModel-shaped signature so
     // catalog-driven registration can construct a PythonBackedModel
     // without needing an installSql sidecar.
-    CatalogPythonSpec? Python = null);
+    CatalogPythonSpec? Python = null,
+    // Entry-level deprecation: the whole concept is superseded by
+    // something newer. Pre-flight surfaces this with the
+    // <see cref="SupersededBy"/> pointer when present. `versions[0]`
+    // of a deprecated entry remains installable so existing pinned
+    // queries keep working.
+    bool Deprecated = false,
+    // Optional catalog id pointer to the successor entry, surfaced
+    // alongside <see cref="Deprecated"/>.
+    string? SupersededBy = null)
+{
+    /// <summary>
+    /// Shorthand for <c>Versions[0].Sources</c>. The catalog substrate
+    /// guarantees <c>Versions</c> is non-empty (validated at load) and
+    /// keeps the legacy "single source list per entry" API working for
+    /// consumers that don't yet care about version history.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<CatalogSource> Sources => Versions[0].Sources;
+
+    /// <summary>
+    /// Shorthand for <c>Versions[0].InstallSql</c>. See <see cref="Sources"/>
+    /// for the same compatibility rationale.
+    /// </summary>
+    [JsonIgnore]
+    public string? InstallSql => Versions[0].InstallSql;
+}
+
+// One immutable, dated cut of a catalog entry. Versions are listed newest-
+// first under CatalogModel.Versions; element [0] is "current" and gets
+// installed on fresh installs / install-from-modal. Per-version
+// deprecation marks specific cuts as known-broken without retiring the
+// entry as a whole.
+public sealed record CatalogVersion(
+    // Human-authored version identifier, opaque to the engine. The
+    // memo recommends `YYYY-MM-DD` (or `YYYYMMDD` for pin syntax)
+    // but any unique-per-entry string is acceptable.
+    string Version,
+    // Ordered list of sources the downloader will try in sequence
+    // for this cut. Same shape + fallback semantics as the
+    // pre-versions[] top-level Sources field.
+    IReadOnlyList<CatalogSource> Sources,
+    // Path (relative to the catalog.json directory) to the .sql file
+    // that registers this cut's model identifiers. Lives under the
+    // per-entry folder `sql/<catalog-id>/<version>.sql` so older
+    // versions stay byte-stable when a new cut lands.
+    string? InstallSql = null,
+    // Declared set of model identifiers this cut's installSql registers.
+    // Source of truth for version-switch DROP/CREATE OR REPLACE
+    // accounting and `tasks.recommended` validation. Cross-checked
+    // against actual registrations at install time — mismatch fails
+    // the install before <id>/active flips.
+    IReadOnlyList<string>? Models = null,
+    // Per-version deprecation: this specific cut has a known bug; the
+    // entry itself is still good. Pre-flight surfaces the reason
+    // when a query pins this version.
+    bool Deprecated = false,
+    string? DeprecationReason = null);
 
 // ───────────────────────── Python-backed model config ─────────────────────────
 
