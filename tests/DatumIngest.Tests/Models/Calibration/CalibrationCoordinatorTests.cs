@@ -154,6 +154,13 @@ public sealed class CalibrationCoordinatorTests : IDisposable
         catalog.Register(MakeEntry("delta"));
         catalog.Register(MakeEntry("epsilon"));
 
+        // Disable spill detection — under heavy parallel test load the
+        // coordinator's per-row jitter check can fire on synthetic ramps
+        // whose dispatchMs varies with OS scheduling rather than real VRAM
+        // pressure, halting the ramp and leaving Status=Stale.
+        catalog.CalibrationCoordinator.MinDispatchMsForSpillDetection =
+            double.PositiveInfinity;
+
         int concurrentRamps = 0;
         int maxConcurrent = 0;
         object syncLock = new();
@@ -162,10 +169,7 @@ public sealed class CalibrationCoordinatorTests : IDisposable
         {
             int now = Interlocked.Increment(ref concurrentRamps);
             lock (syncLock) maxConcurrent = Math.Max(maxConcurrent, now);
-            // Scale with batch so per-row time stays flat across the ramp;
-            // a fixed sleep makes msPerRow halve at every doubling, which
-            // lets ordinary OS timer jitter trip the spill detector.
-            await Task.Delay(10 * batch);
+            await Task.Delay(10);
             Interlocked.Decrement(ref concurrentRamps);
         }
 

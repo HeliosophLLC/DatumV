@@ -66,7 +66,7 @@ public sealed class CalibrationCoordinator
     public const double SpillDetectionMultiplier = 2.0;
 
     /// <summary>
-    /// Minimum total dispatch duration (milliseconds) before spill
+    /// Default minimum total dispatch duration (milliseconds) before spill
     /// detection is consulted. Below this, sub-millisecond jitter from
     /// scheduling, GC pauses, and Stopwatch resolution dominates the
     /// per-row reading — a 200μs dispatch can legitimately follow a 50μs
@@ -75,7 +75,20 @@ public sealed class CalibrationCoordinator
     /// are tens or hundreds of milliseconds even at batch=1; this
     /// threshold only suppresses detection in test / synthetic harnesses.
     /// </summary>
-    public const double MinDispatchMsForSpillDetection = 5.0;
+    public const double DefaultMinDispatchMsForSpillDetection = 5.0;
+
+    /// <summary>
+    /// Per-instance spill-detection threshold (milliseconds). Defaults to
+    /// <see cref="DefaultMinDispatchMsForSpillDetection"/>. Tests with
+    /// deliberately fast dispatch delegates can raise this (e.g. to
+    /// <see cref="double.PositiveInfinity"/>) to suppress spill detection
+    /// entirely — under heavy parallel test load even modest scheduling
+    /// jitter can produce a 2× msPerRow swing across ramp steps, halting
+    /// the ramp before <c>MarkCalibrated</c> and leaving the calibration
+    /// <see cref="ModelCalibration.State.Stale"/>.
+    /// </summary>
+    internal double MinDispatchMsForSpillDetection { get; set; } =
+        DefaultMinDispatchMsForSpillDetection;
 
     private readonly ModelCatalog _catalog;
     // Lazy<Task> rather than Task directly: ConcurrentDictionary.GetOrAdd's
