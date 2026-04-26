@@ -1,4 +1,21 @@
 {
+  "downloadsChip": {
+    "label": "Downloads",
+    "downloadingWithPercent": "Downloading · {percent}%",
+    "downloadingNoTotal": "Downloading {count, plural, one {# model} other {# models}}",
+    "installing": "Installing {count, plural, one {# model} other {# models}}",
+    "stalled": "{count, plural, one {# stalled} other {# stalled}}",
+    "failed": "{count, plural, one {# failed} other {# failed}}",
+    "popoverTitle": "Downloads",
+    "rowInstalling": "Installing",
+    "rowQueued": "Starting",
+    "rowStalled": "Stalled",
+    "rowStalledDetail": "Waiting for connection…",
+    "rowFailed": "Failed",
+    "currentFileLabel": "File {index} of {count}",
+    "retryButton": "Retry",
+    "dismissButton": "Dismiss"
+  },
   "residencyChip": {
     "label": "Residency",
     "empty": "No models loaded",

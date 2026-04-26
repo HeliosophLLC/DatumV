@@ -1,5 +1,6 @@
 import { TitleBar } from '@/components/titlebar/TitleBar';
 import { CalibrationChip } from '@/components/status/CalibrationChip';
+import { DownloadsChip } from '@/components/status/DownloadsChip';
 import { GlobalStatusBar } from '@/components/status/GlobalStatusBar';
 import { ResidencyChip } from '@/components/status/ResidencyChip';
 
@@ -36,6 +37,7 @@ export function WindowChrome({
       <div className="flex flex-1 overflow-hidden">{children}</div>
       {!dialog && (
         <GlobalStatusBar
+          leftChips={<DownloadsChip />}
           rightChips={
             <>
               <CalibrationChip />

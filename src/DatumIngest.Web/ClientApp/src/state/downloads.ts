@@ -270,6 +270,19 @@ export async function restartDownload(
   await installModel(modelId, modelDisplayName);
 }
 
+export function dismissDownloadError(modelId: string): void {
+  delete downloadsState.errors[modelId];
+}
+
+// Locally drop an in-flight active entry. Server-side cancel doesn't exist
+// today, so this only clears the UI badge — if the underlying download was
+// merely stalled (e.g. wifi blip) and bytes resume later, the next progress
+// event will re-create the entry. Useful for clearing a download whose
+// `OnModelDownloadFailed` event got swallowed by a SignalR disconnect.
+export function dismissActiveDownload(modelId: string): void {
+  delete downloadsState.active[modelId];
+}
+
 export async function uninstallModel(modelId: string): Promise<void> {
   try {
     await api.modelCatalog.uninstall(modelId);
