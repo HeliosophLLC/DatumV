@@ -460,6 +460,90 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(0, Convert.ToInt32(result.FinalBindings["ran"]));
     }
 
+    [Fact]
+    public async Task While_SilentBody_EmitsOneCellRegardlessOfIterationCount()
+    {
+        // The footgun this guards: a tight loop around SET / DECLARE used to
+        // emit a cell-pair per iteration (plus a memory_sample per cell),
+        // flooding the NDJSON stream and pinning the Electron renderer.
+        // Silent statements (SET / DECLARE / control flow) don't earn their
+        // own cell when nested, so the WHILE itself is the sole cell.
+        TableCatalog catalog = CreateCatalog();
+        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
+            "DECLARE i INT32 = 0; " +
+            "DECLARE r INT32 = 0; " +
+            "WHILE i < 1000 BEGIN " +
+            "  SET r = r + 1; " +
+            "  SET i = i + 1; " +
+            "END");
+        BatchExecutor exec = new(catalog);
+        List<CellStartedBatchEvent> starts = [];
+        await exec.RunWithEventsAsync(
+            stmts,
+            evt =>
+            {
+                if (evt is CellStartedBatchEvent s) starts.Add(s);
+                return ValueTask.CompletedTask;
+            },
+            CancellationToken.None);
+
+        // Three top-level cells: two DECLAREs + one WHILE. None of the
+        // 1000 iterations produces an extra cell.
+        Assert.Equal(3, starts.Count);
+        Assert.Equal(["declare", "declare", "while"], starts.Select(s => s.Kind));
+    }
+
+    [Fact]
+    public async Task While_ProductiveBody_EmitsOneCellPerIteration()
+    {
+        // Productive statements (SELECT, PRINT) still earn their own cell
+        // when nested — that's the "result sets streaming in as they go" UX
+        // we want to keep for a CALL / loop that yields rows. The WHILE
+        // itself also gets a top-level cell.
+        TableCatalog catalog = CreateCatalog();
+        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
+            "DECLARE i INT32 = 0; " +
+            "WHILE i < 3 BEGIN " +
+            "  PRINT i; " +
+            "  SET i = i + 1; " +
+            "END");
+        BatchExecutor exec = new(catalog);
+        List<CellStartedBatchEvent> starts = [];
+        await exec.RunWithEventsAsync(
+            stmts,
+            evt =>
+            {
+                if (evt is CellStartedBatchEvent s) starts.Add(s);
+                return ValueTask.CompletedTask;
+            },
+            CancellationToken.None);
+
+        // DECLARE + WHILE + 3 productive PRINT cells (one per iteration).
+        Assert.Equal(["declare", "while", "print", "print", "print"], starts.Select(s => s.Kind));
+    }
+
+    [Fact]
+    public async Task While_CellCap_ProductiveLoopSurfacesClearError()
+    {
+        // A productive statement inside a loop with no bound would emit
+        // unbounded cells. The per-batch CellCap stops it at a hard ceiling
+        // and surfaces a user-facing error rather than letting the UI drown.
+        TableCatalog catalog = CreateCatalog();
+        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
+            "DECLARE i INT32 = 0; " +
+            "WHILE i < 100000 BEGIN " +
+            "  PRINT i; " +
+            "  SET i = i + 1; " +
+            "END");
+        BatchExecutor exec = new(catalog);
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            exec.RunWithEventsAsync(
+                stmts,
+                _ => ValueTask.CompletedTask,
+                CancellationToken.None));
+        Assert.Contains("cells", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ───────────────────── CALL inside batch ─────────────────────
 
     [Fact]

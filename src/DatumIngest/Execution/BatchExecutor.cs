@@ -453,13 +453,27 @@ public sealed class BatchExecutor
         Func<BatchEvent, ValueTask> onEvent,
         CancellationToken ct)
     {
+        // Single counter shared by the top-level driver + every recursive
+        // call site. Enforces the per-batch cell cap so a tight loop
+        // around a productive statement (e.g. WHILE i<1M SELECT i) can't
+        // emit unbounded cell events into the response stream.
         int counter = 0;
+        string NextCellId()
+        {
+            if (counter >= CellCap)
+            {
+                throw new InvalidOperationException(
+                    $"This batch produced more than {CellCap:N0} cells — likely a tight loop around a SELECT, PRINT, or other output-producing statement. " +
+                    "Hoist the producing statement out of the loop, aggregate its output, or reduce the iteration count.");
+            }
+            return $"c{counter++}";
+        }
         try
         {
             foreach ((Statement stmt, string? sourceText) in statements)
             {
                 ct.ThrowIfCancellationRequested();
-                await ExecuteOneEventfulAsync(stmt, sourceText, batchContext, onEvent, () => $"c{counter++}", ct)
+                await ExecuteOneEventfulAsync(stmt, sourceText, batchContext, onEvent, NextCellId, currentCellId: null, ct)
                     .ConfigureAwait(false);
             }
         }
@@ -475,20 +489,43 @@ public sealed class BatchExecutor
         }
     }
 
+    // Per-batch hard cap on cell events. Productive statements (SELECT,
+    // PRINT, DML, DDL, function CALL) emit cells regardless of nesting,
+    // so a loop with thousands of iterations around one of those will
+    // hit this cap and surface a clear error instead of pinning the UI.
+    // Silent statements (SET, DECLARE, control-flow wrappers) don't
+    // count — they don't emit cells when nested.
+    private const int CellCap = 10_000;
+
     /// <summary>
-    /// Single-statement dispatch with event emission. Bracket the execution
-    /// with <see cref="CellStartedBatchEvent"/> / <see cref="CellCompletedBatchEvent"/>
-    /// (or <see cref="CellFailedBatchEvent"/>); recurses into sub-statements
-    /// for control-flow constructs so each inner iteration / branch produces
-    /// its own cell.
+    /// Single-statement dispatch. At top level (<paramref name="currentCellId"/>
+    /// null) every statement gets bracketed with
+    /// <see cref="CellStartedBatchEvent"/> / <see cref="CellCompletedBatchEvent"/>
+    /// (or <see cref="CellFailedBatchEvent"/>) so the user sees one cell per
+    /// statement they typed. In recursive (nested) calls only "productive"
+    /// statements — ones that can produce visible output (rows, PRINT text)
+    /// — get their own cell; silent control-flow wrappers
+    /// (BLOCK / IF / WHILE / FOR / TRY / CALL of a procedure / SET / DECLARE / …)
+    /// just dispatch into their body and inherit the enclosing cell id.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is what keeps a tight loop like <c>WHILE i &lt; N BEGIN SET r = r + 1 END</c>
+    /// from emitting N cells. The WHILE gets exactly one cell (at top level);
+    /// the body's SET is silent + nested so it skips bracketing entirely.
+    /// A loop body that contains a SELECT or PRINT still emits one cell
+    /// per iteration's productive child — which is the per-iteration
+    /// streaming-result UX we want — bounded by <see cref="CellCap"/>.
+    /// </para>
+    /// </remarks>
     private Task ExecuteOneEventfulAsync(
         Statement stmt,
         BatchContext batchContext,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
+        string? currentCellId,
         CancellationToken ct)
-        => ExecuteOneEventfulAsync(stmt, sourceText: null, batchContext, onEvent, nextCellId, ct);
+        => ExecuteOneEventfulAsync(stmt, sourceText: null, batchContext, onEvent, nextCellId, currentCellId, ct);
 
     private async Task ExecuteOneEventfulAsync(
         Statement stmt,
@@ -496,15 +533,27 @@ public sealed class BatchExecutor
         BatchContext batchContext,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
+        string? currentCellId,
         CancellationToken ct)
     {
-        string cellId = nextCellId();
-        Stopwatch sw = Stopwatch.StartNew();
-        await onEvent(new CellStartedBatchEvent(cellId, KindOf(stmt))).ConfigureAwait(false);
-        // Cell-entry memory sample (immediate, bypasses the sidecar's 1s
-        // wait) — gives the UI a baseline so the sparkline doesn't start
-        // blank during the first second of a cell.
-        await EmitMemorySampleAsync(batchContext, _catalog.Pool, cellId, sw, onEvent).ConfigureAwait(false);
+        bool emitBrackets = currentCellId is null || IsProductiveWhenNested(stmt);
+        string cellId;
+        Stopwatch sw;
+        if (emitBrackets)
+        {
+            cellId = nextCellId();
+            sw = Stopwatch.StartNew();
+            await onEvent(new CellStartedBatchEvent(cellId, KindOf(stmt))).ConfigureAwait(false);
+            // Cell-entry memory sample (immediate, bypasses the sidecar's 1s
+            // wait) — gives the UI a baseline so the sparkline doesn't start
+            // blank during the first second of a cell.
+            await EmitMemorySampleAsync(batchContext, _catalog.Pool, cellId, sw, onEvent).ConfigureAwait(false);
+        }
+        else
+        {
+            cellId = currentCellId!;
+            sw = Stopwatch.StartNew();
+        }
 
         try
         {
@@ -530,7 +579,7 @@ public sealed class BatchExecutor
                     if (TryGetProcedureCall(call, out ProcedureDescriptor? procDescriptor, out IReadOnlyList<Expression>? args))
                     {
                         await ExecuteProcedureCallAsync(
-                            procDescriptor, args, batchContext, onEvent, nextCellId, ct)
+                            procDescriptor, args, batchContext, onEvent, nextCellId, cellId, ct)
                             .ConfigureAwait(false);
                         break;
                     }
@@ -544,7 +593,7 @@ public sealed class BatchExecutor
                         foreach (Statement child in block.Statements)
                         {
                             ct.ThrowIfCancellationRequested();
-                            await ExecuteOneEventfulAsync(child, batchContext, onEvent, nextCellId, ct)
+                            await ExecuteOneEventfulAsync(child, batchContext, onEvent, nextCellId, cellId, ct)
                                 .ConfigureAwait(false);
                         }
                     }
@@ -560,12 +609,12 @@ public sealed class BatchExecutor
                         .ConfigureAwait(false);
                     if (predicate)
                     {
-                        await ExecuteOneEventfulAsync(ifs.Then, batchContext, onEvent, nextCellId, ct)
+                        await ExecuteOneEventfulAsync(ifs.Then, batchContext, onEvent, nextCellId, cellId, ct)
                             .ConfigureAwait(false);
                     }
                     else if (ifs.Else is not null)
                     {
-                        await ExecuteOneEventfulAsync(ifs.Else, batchContext, onEvent, nextCellId, ct)
+                        await ExecuteOneEventfulAsync(ifs.Else, batchContext, onEvent, nextCellId, cellId, ct)
                             .ConfigureAwait(false);
                     }
                     break;
@@ -588,7 +637,7 @@ public sealed class BatchExecutor
                         if (!keepGoing) break;
                         try
                         {
-                            await ExecuteOneEventfulAsync(loop.Body, batchContext, onEvent, nextCellId, ct)
+                            await ExecuteOneEventfulAsync(loop.Body, batchContext, onEvent, nextCellId, cellId, ct)
                                 .ConfigureAwait(false);
                         }
                         catch (LoopContinueSignal)
@@ -604,11 +653,11 @@ public sealed class BatchExecutor
                     break;
                 }
                 case ForCounterStatement forC:
-                    await ExecuteForCounterAsync(forC, batchContext, onEvent, nextCellId, ct)
+                    await ExecuteForCounterAsync(forC, batchContext, onEvent, nextCellId, cellId, ct)
                         .ConfigureAwait(false);
                     break;
                 case ForInStatement forIn:
-                    await ExecuteForInAsync(forIn, batchContext, onEvent, nextCellId, ct)
+                    await ExecuteForInAsync(forIn, batchContext, onEvent, nextCellId, cellId, ct)
                         .ConfigureAwait(false);
                     break;
                 case DeclareStatement decl:
@@ -631,7 +680,7 @@ public sealed class BatchExecutor
                 }
                 case TryStatement tryStmt:
                 {
-                    await ExecuteTryAsync(tryStmt, batchContext, onEvent, nextCellId, ct)
+                    await ExecuteTryAsync(tryStmt, batchContext, onEvent, nextCellId, cellId, ct)
                         .ConfigureAwait(false);
                     break;
                 }
@@ -701,27 +750,37 @@ public sealed class BatchExecutor
                     }
             }
 
-            // Cell-end memory sample (always emitted, bypasses throttle) — gives
-            // the UI a frozen final value so post-mortem inspection shows the
-            // last-known state.
-            await EmitMemorySampleAsync(batchContext, _catalog.Pool, cellId, sw, onEvent).ConfigureAwait(false);
-            await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
-                .ConfigureAwait(false);
+            if (emitBrackets)
+            {
+                // Cell-end memory sample (always emitted, bypasses throttle) — gives
+                // the UI a frozen final value so post-mortem inspection shows the
+                // last-known state.
+                await EmitMemorySampleAsync(batchContext, _catalog.Pool, cellId, sw, onEvent).ConfigureAwait(false);
+                await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
+                    .ConfigureAwait(false);
+            }
         }
         catch (LoopBreakSignal)
         {
             // BREAK / CONTINUE are control flow, not failures. Fire the
-            // completed event for this cell and let the signal bubble up
-            // to the enclosing loop (or to the entry point, which converts
-            // a stray signal to a clear "outside of a loop" error).
-            await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
-                .ConfigureAwait(false);
+            // completed event for this cell (only if we own the cell) and
+            // let the signal bubble up to the enclosing loop (or to the
+            // entry point, which converts a stray signal to a clear
+            // "outside of a loop" error).
+            if (emitBrackets)
+            {
+                await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
+                    .ConfigureAwait(false);
+            }
             throw;
         }
         catch (LoopContinueSignal)
         {
-            await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
-                .ConfigureAwait(false);
+            if (emitBrackets)
+            {
+                await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
+                    .ConfigureAwait(false);
+            }
             throw;
         }
         catch (PreFlightRequiredException)
@@ -739,10 +798,57 @@ public sealed class BatchExecutor
         }
         catch (Exception ex)
         {
-            await onEvent(new CellFailedBatchEvent(cellId, ex)).ConfigureAwait(false);
+            // Silent nested statements don't own a cell — let the
+            // exception propagate to the enclosing cell-owner, which
+            // emits its own CellFailedBatchEvent.
+            if (emitBrackets)
+            {
+                await onEvent(new CellFailedBatchEvent(cellId, ex)).ConfigureAwait(false);
+            }
             throw;
         }
     }
+
+    /// <summary>
+    /// A statement is "productive" when it can produce user-visible output
+    /// (rows or PRINT text), so a nested instance still earns its own cell.
+    /// Silent statements (control flow, variable mutation, assignment-form
+    /// SELECT, DDL that returns no result set) skip bracketing when nested
+    /// and let any productive children speak for themselves.
+    /// </summary>
+    private static bool IsProductiveWhenNested(Statement stmt) => stmt switch
+    {
+        // Assignment-form SELECT writes into variables, no rows.
+        QueryStatement q when TryGetAssignmentForm(q, out _) => false,
+        // Regular SELECT — produces rows.
+        QueryStatement => true,
+        // PRINT — produces a print event.
+        PrintStatement => true,
+        // CALL of a procedure is silent on its own; the body's productive
+        // children (SELECT, PRINT, …) get their own cells.
+        CallStatement => false,
+        // Control flow + variable mutation.
+        BlockStatement => false,
+        IfStatement => false,
+        WhileStatement => false,
+        ForCounterStatement => false,
+        ForInStatement => false,
+        TryStatement => false,
+        DeclareStatement => false,
+        SetStatement => false,
+        BreakStatement => false,
+        ContinueStatement => false,
+        AssertStatement => false,
+        RaiseStatement => false,
+        CreateFunctionStatement => false,
+        DropFunctionStatement => false,
+        CreateProcedureStatement => false,
+        DropProcedureStatement => false,
+        // Anything else (DDL, DML, function CALL via default arm) routes
+        // through TableCatalog.PlanAsync and may yield rows (DML RETURNING,
+        // CREATE TABLE … AS SELECT, …); treat as productive.
+        _ => true,
+    };
 
     private static string KindOf(Statement stmt) => stmt switch
     {
@@ -937,6 +1043,7 @@ public sealed class BatchExecutor
         BatchContext callerContext,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
+        string? currentCellId,
         CancellationToken ct)
     {
         if (descriptor is null || arguments is null)
@@ -1018,13 +1125,15 @@ public sealed class BatchExecutor
 
         // Run the body's statements through the same dispatch as any other
         // procedural batch. Cell IDs continue from the caller's counter so
-        // event consumers see a single coherent stream.
+        // event consumers see a single coherent stream. The body inherits
+        // the CALL's cellId — silent body statements stay quiet; productive
+        // ones (SELECT, PRINT) emit their own nested cells.
         try
         {
             foreach (Statement bodyStatement in descriptor.Body.Statements)
             {
                 ct.ThrowIfCancellationRequested();
-                await ExecuteOneEventfulAsync(bodyStatement, procContext, onEvent, nextCellId, ct)
+                await ExecuteOneEventfulAsync(bodyStatement, procContext, onEvent, nextCellId, currentCellId, ct)
                     .ConfigureAwait(false);
             }
         }
@@ -1192,6 +1301,7 @@ public sealed class BatchExecutor
         BatchContext batchContext,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
+        string? currentCellId,
         CancellationToken ct)
     {
         ExceptionDispatchInfo? pending = null;
@@ -1200,7 +1310,7 @@ public sealed class BatchExecutor
         {
             try
             {
-                await ExecuteOneEventfulAsync(tryStmt.TryBody, batchContext, onEvent, nextCellId, ct)
+                await ExecuteOneEventfulAsync(tryStmt.TryBody, batchContext, onEvent, nextCellId, currentCellId, ct)
                     .ConfigureAwait(false);
             }
             catch (LoopBreakSignal) { throw; }
@@ -1220,7 +1330,7 @@ public sealed class BatchExecutor
                     batchContext.VariableScope.Declare(tryStmt.ErrorVariableName, messageValue);
                     try
                     {
-                        await ExecuteOneEventfulAsync(tryStmt.CatchBody, batchContext, onEvent, nextCellId, ct)
+                        await ExecuteOneEventfulAsync(tryStmt.CatchBody, batchContext, onEvent, nextCellId, currentCellId, ct)
                             .ConfigureAwait(false);
                     }
                     catch (LoopBreakSignal) { throw; }
@@ -1248,7 +1358,7 @@ public sealed class BatchExecutor
             // out of this method is whichever throw won.
             if (tryStmt.FinallyBody is not null)
             {
-                await ExecuteOneEventfulAsync(tryStmt.FinallyBody, batchContext, onEvent, nextCellId, ct)
+                await ExecuteOneEventfulAsync(tryStmt.FinallyBody, batchContext, onEvent, nextCellId, currentCellId, ct)
                     .ConfigureAwait(false);
             }
         }
@@ -1264,6 +1374,7 @@ public sealed class BatchExecutor
         BatchContext batchContext,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
+        string? currentCellId,
         CancellationToken ct)
     {
         DataValue startVal = await EvaluateScalarAsync(forC.Start, batchContext, ct).ConfigureAwait(false);
@@ -1289,7 +1400,7 @@ public sealed class BatchExecutor
                 }
                 try
                 {
-                    await ExecuteOneEventfulAsync(forC.Body, batchContext, onEvent, nextCellId, ct)
+                    await ExecuteOneEventfulAsync(forC.Body, batchContext, onEvent, nextCellId, currentCellId, ct)
                         .ConfigureAwait(false);
                 }
                 catch (LoopContinueSignal)
@@ -1340,6 +1451,7 @@ public sealed class BatchExecutor
         BatchContext batchContext,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
+        string? currentCellId,
         CancellationToken ct)
     {
         QueryStatement sourceQuery = new(forIn.Source);
@@ -1404,7 +1516,7 @@ public sealed class BatchExecutor
                         forIn.VariableName, rowStruct, fieldNames);
                     try
                     {
-                        await ExecuteOneEventfulAsync(forIn.Body, batchContext, onEvent, nextCellId, ct)
+                        await ExecuteOneEventfulAsync(forIn.Body, batchContext, onEvent, nextCellId, currentCellId, ct)
                             .ConfigureAwait(false);
                     }
                     catch (LoopContinueSignal)
