@@ -4,6 +4,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Diagnostics;
 using DatumIngest.Model;
+using DatumIngest.ModelLibrary;
 using DatumIngest.Models.Llama;
 using DatumIngest.Models.Onnx;
 using DatumIngest.Models.Onnx.Whisper;
@@ -222,8 +223,25 @@ public static class BuiltinModels
         RegisterKokoro82M(modelCatalog, pythonEnvironments);
 
         tableCatalog.Models = modelCatalog;
+
+        // Build the catalog vocabulary surface once and share it with
+        // the providers that need the reverse identifier→catalog index
+        // (system.models for discovered rows + catalog_id + active_version,
+        // and system.tasks for the dispatch-state join). Standalone hosts
+        // without a manifest fall back to a null vocabulary — both
+        // providers tolerate it: system.models drops the "discovered"
+        // bucket, system.tasks isn't registered at all.
+        ICatalogVocabulary? vocabulary = catalogManifest is null
+            ? null
+            : new CatalogVocabulary(catalogManifest);
+
         tableCatalog.Add(new ModelsTableProvider(
-            tableCatalog.Pool, modelCatalog, tableCatalog.DeclaredModels));
+            tableCatalog.Pool, modelCatalog, tableCatalog.DeclaredModels, vocabulary));
+        if (vocabulary is not null)
+        {
+            tableCatalog.Add(new SystemTasksTableProvider(
+                tableCatalog.Pool, vocabulary, modelCatalog, tableCatalog.DeclaredModels));
+        }
         tableCatalog.Add(new ModelCalibrationTableProvider(
             tableCatalog.Pool, modelCatalog));
         tableCatalog.Add(new ResidencySnapshotTableProvider(

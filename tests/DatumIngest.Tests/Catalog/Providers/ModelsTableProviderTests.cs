@@ -48,7 +48,7 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
 
         Schema schema = provider.GetSchema();
 
-        Assert.Equal(19, schema.Columns.Count);
+        Assert.Equal(22, schema.Columns.Count);
 
         Assert.Equal("name", schema.Columns[0].Name);
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
@@ -107,6 +107,19 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
         Assert.Equal("weight_cost_bytes", schema.Columns[18].Name);
         Assert.Equal(DataKind.Int64, schema.Columns[18].Kind);
         Assert.True(schema.Columns[18].Nullable);
+
+        // Catalog substrate columns: catalog_id, residency, active_version.
+        Assert.Equal("catalog_id", schema.Columns[19].Name);
+        Assert.Equal(DataKind.String, schema.Columns[19].Kind);
+        Assert.True(schema.Columns[19].Nullable);
+
+        Assert.Equal("residency", schema.Columns[20].Name);
+        Assert.Equal(DataKind.String, schema.Columns[20].Kind);
+        Assert.False(schema.Columns[20].Nullable);
+
+        Assert.Equal("active_version", schema.Columns[21].Name);
+        Assert.Equal(DataKind.String, schema.Columns[21].Kind);
+        Assert.True(schema.Columns[21].Nullable);
     }
 
     /// <summary>

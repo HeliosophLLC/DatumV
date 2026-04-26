@@ -560,7 +560,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
                 + $"IMPLEMENTS NonExistentTask "
                 + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x END"));
         Assert.Contains("NonExistentTask", ex.Message);
-        Assert.Contains("datum_catalog.tasks", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("system.task_contracts", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

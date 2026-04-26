@@ -25,7 +25,7 @@ namespace DatumIngest.Tests.ModelLibrary;
 ///   FileNotFoundException before the user can ever call the model.</item>
 /// </list>
 /// </remarks>
-public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase, IDisposable
+public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
 {
     private readonly string _root;
 
@@ -36,8 +36,9 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase, IDispos
         Directory.CreateDirectory(_root);
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
+        base.Dispose();
         try { Directory.Delete(_root, recursive: true); }
         catch (IOException) { /* best-effort */ }
     }
@@ -153,6 +154,7 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase, IDispos
     {
         public CatalogManifest Manifest { get; } = manifest;
         public string ManifestDirectory { get; } = Path.GetTempPath();
+        public ICatalogVocabulary Vocabulary { get; } = new CatalogVocabulary(manifest);
         public string? GetLicenseText(string licenseId) => null;
     }
 

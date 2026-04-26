@@ -34,7 +34,7 @@ public static class TaskTypeRegistry
     /// <summary>
     /// Coarse grouping over <see cref="TaskContract"/> entries. Surfaced on
     /// the model-browser front-end as faceted-filter section headers and on
-    /// the <c>datum_catalog.tasks</c> virtual table's <c>family</c> column.
+    /// the <c>system.task_contracts</c> virtual table's <c>family</c> column.
     /// </summary>
     public enum TaskFamily
     {

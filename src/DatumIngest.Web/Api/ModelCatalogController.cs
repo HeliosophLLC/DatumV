@@ -6,7 +6,7 @@ namespace DatumIngest.Web.Api;
 
 // Lightweight DTO describing one task contract for the front-end filter UI.
 // Family is stringified (e.g. "Text") so the JSON wire form matches the
-// `family` column of datum_catalog.tasks and the locale-file keys
+// `family` column of system.task_contracts and the locale-file keys
 // (`families.text`, …) on the client.
 public sealed record CatalogTaskInfo(
     string Name,
@@ -30,7 +30,7 @@ public sealed class ModelCatalogController(
     // (name + family + one-line description), one entry per
     // <see cref="TaskTypeRegistry"/> contract. Front-end fetches once at
     // startup to drive the faceted task-filter chips grouped by family.
-    // Mirrors the contents of the `datum_catalog.tasks` virtual table over
+    // Mirrors the contents of the `system.task_contracts` virtual table over
     // HTTP so the model browser doesn't have to issue SQL.
     [HttpGet("tasks")]
     public IReadOnlyList<CatalogTaskInfo> GetTasks()

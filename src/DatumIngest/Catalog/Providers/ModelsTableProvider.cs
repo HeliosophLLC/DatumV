@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Model;
+using DatumIngest.ModelLibrary;
 using DatumIngest.Models;
 using DatumIngest.Models.Calibration;
 using DatumIngest.Parsing.Ast;
@@ -14,13 +15,30 @@ namespace DatumIngest.Catalog.Providers;
 /// Origin-of-definition discriminator for <see cref="ModelsTableProvider"/>'s
 /// <c>kind</c> column. <c>builtin</c> = engine-baked entry in
 /// <see cref="ModelCatalog"/>; <c>declared</c> = user-written
-/// <c>CREATE MODEL</c> registered in <see cref="ModelRegistry"/>. Mirrors
-/// the codebase's <c>Models</c> vs <c>DeclaredModels</c> internal naming.
+/// <c>CREATE MODEL</c> registered in <see cref="ModelRegistry"/>;
+/// <c>discovered</c> = catalog-declared but not yet installed (the
+/// vocabulary surface lets <c>models.foo(...)</c> autocomplete +
+/// pre-flight resolve identifiers before their weights land on disk).
 /// </summary>
 internal static class ModelKind
 {
     public const string Builtin = "builtin";
     public const string Declared = "declared";
+    public const string Discovered = "discovered";
+}
+
+/// <summary>
+/// Residency discriminator for <see cref="ModelsTableProvider"/>'s
+/// <c>residency</c> column. <c>callable</c> = the engine has a live
+/// registration (builtin or declared) and the identifier resolves at
+/// query time; <c>discovered</c> = the catalog knows the identifier
+/// (via a version's declared <c>models[]</c> array) but no install
+/// has registered it yet, so calling it triggers pre-flight install.
+/// </summary>
+internal static class ModelResidency
+{
+    public const string Callable = "callable";
+    public const string Discovered = "discovered";
 }
 
 /// <summary>
@@ -80,43 +98,61 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
 
     private readonly ModelCatalog _modelCatalog;
     private readonly ModelRegistry? _declaredModels;
+    private readonly ICatalogVocabulary? _vocabulary;
 
     /// <summary>
     /// Creates a provider that surfaces <paramref name="modelCatalog"/>
-    /// (engine-baked built-ins) and, optionally, <paramref name="declaredModels"/>
-    /// (SQL-defined models registered via <c>CREATE MODEL</c>) as a single
-    /// virtual table. Both registries are held by reference — entries
-    /// registered after construction are visible to subsequent scans. Pass
-    /// <see langword="null"/> for <paramref name="declaredModels"/> when
-    /// the host has no SQL-DDL surface (rare; the standard wiring at
-    /// <c>BuiltinModels.WireDefaults</c> always passes the catalog's
-    /// <see cref="TableCatalog.DeclaredModels"/>).
+    /// (engine-baked built-ins), optionally <paramref name="declaredModels"/>
+    /// (SQL-defined models registered via <c>CREATE MODEL</c>), and
+    /// optionally <paramref name="vocabulary"/> as a single virtual table.
+    /// When <paramref name="vocabulary"/> is provided, identifiers the
+    /// catalog declares but no install has registered yet surface as
+    /// <c>kind = "discovered"</c> / <c>residency = "discovered"</c> rows —
+    /// the autocomplete / pre-flight substrate that lets users type
+    /// <c>models.foo(...)</c> before its weights land on disk.
+    /// All three sources are held by reference — registrations after
+    /// construction are visible to subsequent scans.
     /// </summary>
     /// <param name="pool">Buffer pool for renting row batches.</param>
     /// <param name="modelCatalog">The built-in registry whose entries become <c>kind = "builtin"</c> rows.</param>
     /// <param name="declaredModels">Optional SQL-defined registry whose descriptors become <c>kind = "declared"</c> rows.</param>
-    public ModelsTableProvider(Pool pool, ModelCatalog modelCatalog, ModelRegistry? declaredModels = null)
+    /// <param name="vocabulary">Optional catalog vocabulary surface whose unregistered identifiers become <c>kind = "discovered"</c> rows.</param>
+    public ModelsTableProvider(Pool pool, ModelCatalog modelCatalog, ModelRegistry? declaredModels = null, ICatalogVocabulary? vocabulary = null)
         : base(pool, QualifiedTableName)
     {
         _modelCatalog = modelCatalog;
         _declaredModels = declaredModels;
+        _vocabulary = vocabulary;
     }
 
     /// <inheritdoc/>
     public override long GetRowCount()
     {
         // Mirror ScanAsync's dedup: a builtin entry shadowed by a
-        // declared entry contributes one row, not two.
-        if (_declaredModels is null) return _modelCatalog.Entries.Count;
-        HashSet<string> declaredNames = new(StringComparer.OrdinalIgnoreCase);
-        foreach (ModelDescriptor d in _declaredModels.Entries)
-            declaredNames.Add(d.Name);
+        // declared entry contributes one row, not two; and a discovered
+        // entry shadowed by either a builtin or a declared row drops out
+        // (callable subsumes discovered).
+        HashSet<string> callable = new(StringComparer.OrdinalIgnoreCase);
+        if (_declaredModels is not null)
+        {
+            foreach (ModelDescriptor d in _declaredModels.Entries)
+                callable.Add(d.Name);
+        }
         long builtinShown = 0;
         foreach (ModelCatalogEntry e in _modelCatalog.Entries.Values)
         {
-            if (!declaredNames.Contains(e.Name)) builtinShown++;
+            if (callable.Add(e.Name)) builtinShown++;
         }
-        return builtinShown + _declaredModels.Entries.Count;
+        long declaredCount = _declaredModels?.Entries.Count ?? 0;
+        long discoveredShown = 0;
+        if (_vocabulary is not null)
+        {
+            foreach (string identifier in _vocabulary.ByIdentifier.Keys)
+            {
+                if (!callable.Contains(identifier)) discoveredShown++;
+            }
+        }
+        return builtinShown + declaredCount + discoveredShown;
     }
 
     /// <inheritdoc/>
@@ -155,20 +191,36 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
                 declaredNames.Add(d.Name);
         }
 
-        var rows = new List<(string Name, bool IsBuiltin, ModelCatalogEntry? Entry, ModelDescriptor? Descriptor)>(
-            _modelCatalog.Entries.Count + (_declaredModels?.Entries.Count ?? 0));
+        var rows = new List<(string Name, RowSource Source, ModelCatalogEntry? Entry, ModelDescriptor? Descriptor, CatalogVocabularyEntry? Vocab)>(
+            _modelCatalog.Entries.Count + (_declaredModels?.Entries.Count ?? 0) + (_vocabulary?.ByIdentifier.Count ?? 0));
+        HashSet<string> seenNames = new(StringComparer.OrdinalIgnoreCase);
         foreach (ModelCatalogEntry entry in _modelCatalog.Entries.Values)
         {
             // Skip the shadow builtin row when a declared row exists
             // for the same name — see comment above.
             if (declaredNames.Contains(entry.Name)) continue;
-            rows.Add((entry.Name, IsBuiltin: true, entry, null));
+            rows.Add((entry.Name, RowSource.Builtin, entry, null, null));
+            seenNames.Add(entry.Name);
         }
         if (_declaredModels is not null)
         {
             foreach (ModelDescriptor descriptor in _declaredModels.Entries)
             {
-                rows.Add((descriptor.Name, IsBuiltin: false, null, descriptor));
+                rows.Add((descriptor.Name, RowSource.Declared, null, descriptor, null));
+                seenNames.Add(descriptor.Name);
+            }
+        }
+        if (_vocabulary is not null)
+        {
+            foreach ((string identifier, CatalogVocabularyEntry vocabEntry) in _vocabulary.ByIdentifier)
+            {
+                // Discovered = catalog-declared but not callable. When
+                // the same identifier is already callable (builtin or
+                // declared), the live registration wins — discovered
+                // rows are strictly for "users can autocomplete this
+                // but the engine has no live binding yet."
+                if (seenNames.Contains(identifier)) continue;
+                rows.Add((identifier, RowSource.Discovered, null, null, vocabEntry));
             }
         }
         rows.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
@@ -191,13 +243,17 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
             batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
 
             DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-            if (entry.IsBuiltin)
+            switch (entry.Source)
             {
-                FillRow(values, entry.Entry!, pathResolver, batch.Arena);
-            }
-            else
-            {
-                FillRowFromDescriptor(values, entry.Descriptor!, pathResolver, batch.Arena);
+                case RowSource.Builtin:
+                    FillRow(values, entry.Entry!, pathResolver, batch.Arena, _vocabulary);
+                    break;
+                case RowSource.Declared:
+                    FillRowFromDescriptor(values, entry.Descriptor!, pathResolver, batch.Arena, _vocabulary);
+                    break;
+                case RowSource.Discovered:
+                    FillDiscoveredRow(values, entry.Vocab!, pathResolver, batch.Arena);
+                    break;
             }
             FillCalibrationCells(values, calibrationRegistry.Get(entry.Name), batch.Arena);
             batch.Add(values);
@@ -218,12 +274,24 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     }
 
     /// <summary>
+    /// Internal row-source discriminator. Drives which Fill* method
+    /// materialises a row and, transitively, the row's <c>kind</c> /
+    /// <c>residency</c> column values.
+    /// </summary>
+    private enum RowSource
+    {
+        Builtin,
+        Declared,
+        Discovered,
+    }
+
+    /// <summary>
     /// Materialises a single row of <c>system_models</c> from a catalog entry.
     /// Stat-s the file at scan time so <c>status</c> + <c>file_size_bytes</c>
     /// reflect current disk state.
     /// </summary>
     private static void FillRow(
-        DataValue[] cells, ModelCatalogEntry entry, DatumIngest.ModelLibrary.IModelPathResolver pathResolver, Arena arena)
+        DataValue[] cells, ModelCatalogEntry entry, DatumIngest.ModelLibrary.IModelPathResolver pathResolver, Arena arena, ICatalogVocabulary? vocabulary)
     {
         // RelativePath is id-prefixed (e.g. "all-minilm-l6-v2/model.onnx");
         // route through the resolver so per-version installs surface as
@@ -285,6 +353,21 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         cells[13] = DataValue.FromString(ModelKind.Builtin, arena);
         cells[14] = WriteOptionalString(entry.ImplementsTaskName, arena);
         cells[15] = DataValue.FromBoolean(entry.Batchable);
+
+        // Catalog substrate columns (catalog_id + residency + active_version).
+        // A live builtin row is always callable. catalog_id surfaces when
+        // the vocabulary can map this identifier back to a catalog entry;
+        // engine-baked builtins without a catalog entry get NULL.
+        // active_version is whatever the path resolver reports for the
+        // catalog id (NULL when the resolver doesn't know).
+        string? catalogId = vocabulary?.ByIdentifier.TryGetValue(entry.Name, out CatalogVocabularyEntry? vocab) == true
+            ? vocab.CatalogEntryId
+            : null;
+        cells[19] = WriteOptionalString(catalogId, arena);
+        cells[20] = DataValue.FromString(ModelResidency.Callable, arena);
+        cells[21] = WriteOptionalString(
+            catalogId is not null ? pathResolver.GetActiveVersion(catalogId) : null,
+            arena);
     }
 
     /// <summary>
@@ -301,7 +384,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     /// is still callable.
     /// </summary>
     private static void FillRowFromDescriptor(
-        DataValue[] cells, ModelDescriptor descriptor, DatumIngest.ModelLibrary.IModelPathResolver pathResolver, Arena arena)
+        DataValue[] cells, ModelDescriptor descriptor, DatumIngest.ModelLibrary.IModelPathResolver pathResolver, Arena arena, ICatalogVocabulary? vocabulary)
     {
         long? fileSize = TryStatUsingPath(descriptor.UsingPath, pathResolver);
 
@@ -334,6 +417,68 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         cells[13] = DataValue.FromString(ModelKind.Declared, arena);
         cells[14] = WriteOptionalString(descriptor.ImplementsTaskName, arena);
         cells[15] = DataValue.FromBoolean(ProceduralModelAdapter.IsStraightLineBody(descriptor.StatementBody));
+
+        // Catalog substrate columns. A declared model rarely has a catalog
+        // entry (it was registered by a user CREATE MODEL, not by
+        // catalog installSql) — but the vocabulary check is still
+        // worth doing because catalog-driven installs do register a
+        // declared row mid-install. catalog_id and active_version
+        // surface when present; residency is always callable.
+        string? catalogId = vocabulary?.ByIdentifier.TryGetValue(descriptor.Name, out CatalogVocabularyEntry? vocab) == true
+            ? vocab.CatalogEntryId
+            : null;
+        cells[19] = WriteOptionalString(catalogId, arena);
+        cells[20] = DataValue.FromString(ModelResidency.Callable, arena);
+        cells[21] = WriteOptionalString(
+            catalogId is not null ? pathResolver.GetActiveVersion(catalogId) : null,
+            arena);
+    }
+
+    /// <summary>
+    /// Materialises a row for a catalog-declared identifier that has no
+    /// live registration in <see cref="ModelCatalog"/> or
+    /// <see cref="ModelRegistry"/>. Most runtime-derived columns
+    /// (modalities, license metadata, file presence, calibration)
+    /// surface as NULL because the catalog vocabulary alone doesn't
+    /// know them — those come from the registrar that runs at install
+    /// time. The minimal user-visible signal is the row exists at all
+    /// (so autocomplete + pre-flight can resolve the name) plus
+    /// <c>kind = "discovered"</c> + <c>residency = "discovered"</c>.
+    /// </summary>
+    private static void FillDiscoveredRow(
+        DataValue[] cells, CatalogVocabularyEntry vocab, DatumIngest.ModelLibrary.IModelPathResolver pathResolver, Arena arena)
+    {
+        CatalogModel owner = vocab.Owner;
+
+        cells[0]  = DataValue.FromString(vocab.Identifier, arena);
+        cells[1]  = WriteOptionalString(owner.DisplayName, arena);
+        cells[2]  = DataValue.Null(DataKind.String);          // category — not on catalog entry today
+        cells[3]  = DataValue.NullArrayOf(DataKind.String);   // modalities — derived at registration time
+        cells[4]  = DataValue.FromString(owner.Kind, arena);  // catalog Kind ("onnx" / "python" / …) is the closest analogue to backend
+        cells[5]  = DataValue.Null(DataKind.String);          // parameters
+        cells[6]  = DataValue.Null(DataKind.String);          // file_name — version-dependent, deferred to install time
+        cells[7]  = DataValue.NullArrayOf(DataKind.String);   // file_names
+        cells[8]  = DataValue.Null(DataKind.Int64);           // file_size_bytes
+        // Surface license from the catalog entry's first licenseId when
+        // present so SQL queries against `license` work pre-install.
+        cells[9]  = WriteOptionalString(owner.LicenseIds is { Count: > 0 } lic ? lic[0] : null, arena);
+        cells[10] = DataValue.Null(DataKind.String);          // license_holder — derived from CatalogLicense table at registration
+        cells[11] = DataValue.Null(DataKind.String);          // source_url
+        cells[12] = DataValue.FromString("discovered", arena);
+        cells[13] = DataValue.FromString(ModelKind.Discovered, arena);
+        // task surfaces the entry's primary contract so users can find
+        // discovered models via WHERE task = 'X'. Multi-task entries
+        // expose their primary; the rest is in `system.tasks`.
+        cells[14] = WriteOptionalString(owner.Tasks is { Count: > 0 } t ? t[0] : null, arena);
+        cells[15] = DataValue.FromBoolean(false);              // batchable — unknowable until registered
+        // calibration cells filled by FillCalibrationCells after this.
+        cells[19] = DataValue.FromString(owner.Id, arena);
+        cells[20] = DataValue.FromString(ModelResidency.Discovered, arena);
+        // For a discovered row, active_version is NULL by definition —
+        // the catalog hasn't been installed yet so `<id>/active` doesn't
+        // exist. The drift-surfacing UI reads this column to badge
+        // outdated installs; discovered rows are upstream of drift.
+        cells[21] = DataValue.Null(DataKind.String);
     }
 
     /// <summary>
@@ -405,6 +550,19 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         new ColumnInfo("calibration_state",    DataKind.String, nullable: false),
         new ColumnInfo("max_calibrated_batch", DataKind.Int32,  nullable: true),
         new ColumnInfo("weight_cost_bytes",    DataKind.Int64,  nullable: true),
+        // ─── Catalog substrate columns ───
+        // catalog_id: parent catalog-entry id (kebab-case) when this row
+        // resolves to a catalog entry; NULL for engine-baked builtins
+        // and user CREATE MODEL rows with no catalog presence.
+        new ColumnInfo("catalog_id",           DataKind.String, nullable: true),
+        // residency: 'callable' when the engine has a live registration
+        // for this name; 'discovered' when the catalog declares it but
+        // no install has registered it yet.
+        new ColumnInfo("residency",            DataKind.String, nullable: false),
+        // active_version: the version string the path resolver is
+        // currently routing to (catalog `<id>/active` file contents);
+        // NULL when not installed or when the row has no catalog_id.
+        new ColumnInfo("active_version",       DataKind.String, nullable: true),
     ]);
 
     /// <summary>

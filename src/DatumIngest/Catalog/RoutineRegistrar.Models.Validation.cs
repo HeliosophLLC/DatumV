@@ -32,7 +32,7 @@ internal sealed partial class RoutineRegistrar
         {
             throw new QueryPlanException(
                 $"CREATE MODEL {create.Name}: IMPLEMENTS '{taskName}' references an unknown task contract. "
-                + "See `SELECT name FROM datum_catalog.tasks` for the registered vocabulary.");
+                + "See `SELECT name FROM system.task_contracts` for the registered vocabulary.");
         }
 
         // Parameter arity check: the model's required (non-default) parameters

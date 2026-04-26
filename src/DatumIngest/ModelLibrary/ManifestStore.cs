@@ -23,6 +23,7 @@ internal sealed class ManifestStore : IManifestStore
 
     public CatalogManifest Manifest { get; }
     public string ManifestDirectory { get; }
+    public ICatalogVocabulary Vocabulary { get; }
 
     // licenseId -> resolved absolute path to the textFile. Pre-resolved at
     // load time so GetLicenseText is a plain File.ReadAllText.
@@ -48,6 +49,7 @@ internal sealed class ManifestStore : IManifestStore
 
         ValidateModels(manifest, manifestPath);
         Manifest = manifest;
+        Vocabulary = new CatalogVocabulary(manifest);
 
         _licenseTextPaths = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach ((string id, CatalogLicense license) in manifest.Licenses)
@@ -151,19 +153,63 @@ internal sealed class ManifestStore : IManifestStore
                 }
                 if (v.Models is not null)
                 {
-                    foreach (string id in v.Models)
+                    HashSet<string> identifiersThisVersion = new(StringComparer.OrdinalIgnoreCase);
+                    HashSet<string> pinnedThisVersion = new(StringComparer.OrdinalIgnoreCase);
+                    foreach (CatalogVersionModel vm in v.Models)
                     {
-                        // Track the owner of each declared identifier
-                        // so duplicate declarations across entries
-                        // surface at load.
-                        if (declaredIdentifierOwner.TryGetValue(id, out CatalogModel? prevOwner)
+                        if (string.IsNullOrWhiteSpace(vm.Identifier))
+                        {
+                            throw new InvalidOperationException(
+                                $"Catalog entry '{m.Id}' version '{v.Version}' in {manifestPath} " +
+                                "has a versions[].models entry with missing/blank identifier.");
+                        }
+                        if (!identifiersThisVersion.Add(vm.Identifier))
+                        {
+                            throw new InvalidOperationException(
+                                $"Catalog entry '{m.Id}' version '{v.Version}' in {manifestPath} " +
+                                $"declares identifier '{vm.Identifier}' twice in versions[].models. " +
+                                "Identifiers must be unique within a single version.");
+                        }
+                        // Track the owner of each declared identifier so
+                        // duplicate declarations across entries surface at load.
+                        // Multiple versions of the same entry legitimately
+                        // re-declare the same identifier, so the same-owner
+                        // case isn't a duplicate.
+                        if (declaredIdentifierOwner.TryGetValue(vm.Identifier, out CatalogModel? prevOwner)
                             && !ReferenceEquals(prevOwner, m))
                         {
                             throw new InvalidOperationException(
-                                $"Model identifier '{id}' is declared by both catalog entries '{prevOwner.Id}' " +
-                                $"and '{m.Id}' in {manifestPath}. Identifiers must be globally unique across the catalog.");
+                                $"Model identifier '{vm.Identifier}' is declared by both catalog entries " +
+                                $"'{prevOwner.Id}' and '{m.Id}' in {manifestPath}. Identifiers must be " +
+                                "globally unique across the catalog.");
                         }
-                        declaredIdentifierOwner[id] = m;
+                        declaredIdentifierOwner[vm.Identifier] = m;
+
+                        // pinnedAs validation: the suffixed identifier is the
+                        // name the installer rewrites CREATE OR REPLACE MODEL
+                        // to when this version is installed alongside a
+                        // different active version. Must be unique within the
+                        // version (alongside-version registrations would
+                        // collide) and must match the parser-recognised form
+                        // `<bareIdentifier>@<digits>` so `@<version>` SQL pin
+                        // syntax resolves cleanly. We materialise the
+                        // effective value (explicit or convention default)
+                        // for both checks.
+                        string effective = vm.EffectivePinnedAs(v.Version);
+                        if (!IsValidPinnedAs(effective, out string? pinnedErr))
+                        {
+                            throw new InvalidOperationException(
+                                $"Catalog entry '{m.Id}' version '{v.Version}' identifier '{vm.Identifier}' " +
+                                $"in {manifestPath} has pinnedAs='{effective}' which is malformed: {pinnedErr}. " +
+                                "Expected '<identifier>@<digits>'.");
+                        }
+                        if (!pinnedThisVersion.Add(effective))
+                        {
+                            throw new InvalidOperationException(
+                                $"Catalog entry '{m.Id}' version '{v.Version}' in {manifestPath} " +
+                                $"yields duplicate pinnedAs '{effective}'. Override one of the colliding " +
+                                "identifiers' pinnedAs explicitly.");
+                        }
                     }
                 }
             }
@@ -184,7 +230,7 @@ internal sealed class ManifestStore : IManifestStore
             {
                 throw new InvalidOperationException(
                     $"Catalog entry '{m.Id}' in {manifestPath} has an empty tasks array. "
-                    + "Every catalog entry must declare at least one task from datum_catalog.tasks.");
+                    + "Every catalog entry must declare at least one task from system.task_contracts.");
             }
             
             foreach (string task in m.Tasks)
@@ -194,7 +240,7 @@ internal sealed class ManifestStore : IManifestStore
                     throw new InvalidOperationException(
                         $"Catalog entry '{m.Id}' in {manifestPath} declares unknown task '{task}'. "
                         + "Tasks must match a contract from TaskTypeRegistry "
-                        + "(see `SELECT name FROM datum_catalog.tasks`).");
+                        + "(see `SELECT name FROM system.task_contracts`).");
                 }
             }
 
@@ -298,5 +344,34 @@ internal sealed class ManifestStore : IManifestStore
         throw new FileNotFoundException(
             $"models/catalog.json not found. Searched {shipPath} and parent directories. " +
             $"Ensure the models/ folder is alongside the binary or beneath the repo root.");
+    }
+
+    // Validates the `<bareIdentifier>@<digits>` shape of an effective
+    // pinnedAs string. Returns false + a one-line reason on failure so the
+    // catalog-load error can identify the bad entry without a regex dump.
+    private static bool IsValidPinnedAs(string value, out string? error)
+    {
+        int at = value.IndexOf('@');
+        if (at <= 0)
+        {
+            error = "missing '@' separator (or empty identifier before it)";
+            return false;
+        }
+        if (at == value.Length - 1)
+        {
+            error = "no version digits after '@'";
+            return false;
+        }
+        for (int i = at + 1; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (c < '0' || c > '9')
+            {
+                error = $"non-digit '{c}' after '@'; SQL pin syntax accepts only [0-9]+";
+                return false;
+            }
+        }
+        error = null;
+        return true;
     }
 }

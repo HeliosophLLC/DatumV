@@ -152,13 +152,62 @@ public sealed record CatalogVersion(
     // Source of truth for version-switch DROP/CREATE OR REPLACE
     // accounting and `tasks.recommended` validation. Cross-checked
     // against actual registrations at install time — mismatch fails
-    // the install before <id>/active flips.
-    IReadOnlyList<string>? Models = null,
+    // the install before <id>/active flips. Each entry also declares
+    // a `pinnedAs` companion name used when this version is installed
+    // alongside a different active version via `@<version>` SQL pin
+    // syntax; see <see cref="CatalogVersionModel"/>.
+    IReadOnlyList<CatalogVersionModel>? Models = null,
     // Per-version deprecation: this specific cut has a known bug; the
     // entry itself is still good. Pre-flight surfaces the reason
     // when a query pins this version.
     bool Deprecated = false,
     string? DeprecationReason = null);
+
+// One declared model identifier inside a <see cref="CatalogVersion"/>.
+// Carries both the bare identifier the installSql registers when this
+// is the active version (e.g. <c>foo</c>) and the suffixed identifier
+// the installer rewrites to when this version is installed alongside
+// a different active version via the `@&lt;version&gt;` pin syntax
+// (e.g. <c>foo@20260529</c>).
+//
+// <see cref="PinnedAs"/> is optional in JSON; when omitted the engine
+// materialises the default <c>&lt;identifier&gt;@&lt;digits-of-version&gt;</c>
+// at catalog load time (e.g. version <c>"2026-05-29"</c> yields
+// <c>foo@20260529</c>). Authors only set it explicitly to override
+// the default — useful when version strings contain non-digit
+// characters or when a legacy pin form needs preservation.
+public sealed record CatalogVersionModel(
+    string Identifier,
+    string? PinnedAs = null)
+{
+    /// <summary>
+    /// The suffixed identifier the installer registers when this version is
+    /// installed alongside a different active version. Returns
+    /// <see cref="PinnedAs"/> verbatim when explicitly set in catalog.json,
+    /// otherwise materialises the convention default
+    /// <c>&lt;Identifier&gt;@&lt;digits-of-versionString&gt;</c> by stripping
+    /// all non-digit characters from <paramref name="versionString"/>.
+    /// </summary>
+    /// <param name="versionString">
+    /// The owning <see cref="CatalogVersion.Version"/> string (e.g.
+    /// <c>"2026-05-29"</c>).
+    /// </param>
+    public string EffectivePinnedAs(string versionString)
+    {
+        if (!string.IsNullOrEmpty(PinnedAs)) { return PinnedAs; }
+        // Strip non-digits from the version string for the default suffix.
+        // YYYY-MM-DD → YYYYMMDD; the parser's `@[0-9]+` syntax accepts this
+        // form without an escape route for separators.
+        Span<char> digits = stackalloc char[versionString.Length];
+        int n = 0;
+        for (int i = 0; i < versionString.Length; i++)
+        {
+            char c = versionString[i];
+            if (c >= '0' && c <= '9') { digits[n++] = c; }
+        }
+        return $"{Identifier}@{digits[..n].ToString()}";
+    }
+}
 
 // ───────────────────────── Python-backed model config ─────────────────────────
 

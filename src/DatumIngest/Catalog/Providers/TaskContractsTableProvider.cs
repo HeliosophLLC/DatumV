@@ -10,11 +10,11 @@ namespace DatumIngest.Catalog.Providers;
 /// <summary>
 /// Virtual table surfacing the engine-defined task contract vocabulary
 /// (<see cref="TaskTypeRegistry.Entries"/>) as a SQL-queryable view at
-/// <c>datum_catalog.tasks</c>. Users discover what <c>IMPLEMENTS</c>
+/// <c>system.task_contracts</c>. Users discover what <c>IMPLEMENTS</c>
 /// accepts:
 /// <code>
 /// SELECT name, input_signature, return_signature, description
-/// FROM datum_catalog.tasks
+/// FROM system.task_contracts
 /// ORDER BY name;
 /// </code>
 /// </summary>
@@ -30,16 +30,22 @@ namespace DatumIngest.Catalog.Providers;
 /// </list>
 /// </para>
 /// <para>
-/// Lives under <c>datum_catalog.*</c> (engine-defined catalog metadata,
-/// alongside <c>datum_catalog.functions</c> and <c>datum_catalog.function_parameters</c>),
-/// not under <c>system.*</c> — task contracts are the typed interface
-/// layer for models, parallel to function signatures.
+/// Lives under <c>system.*</c> alongside <see cref="ModelsTableProvider"/>
+/// (<c>system.models</c>) and the <c>system.tasks</c> dispatch-state
+/// table. The static contract vocabulary (this table) and the dynamic
+/// dispatch state (<c>system.tasks</c>) answer different questions —
+/// "what contracts exist + their signatures" vs "what models can serve
+/// each contract right now" — so they're kept as two separate tables in
+/// the same schema rather than merged.
 /// </para>
 /// </remarks>
-internal sealed class TasksTableProvider : NonSeekableTableProviderBase
+internal sealed class TaskContractsTableProvider : NonSeekableTableProviderBase
 {
-    /// <summary>The conventional table name registered in the catalog.</summary>
-    public const string TableName = "datum_catalog.tasks";
+    /// <summary>The conventional fully-qualified table name registered in the catalog.</summary>
+    public const string TableName = "system.task_contracts";
+
+    /// <summary>The canonical <see cref="QualifiedName"/> for this provider.</summary>
+    public static readonly QualifiedName QualifiedTableName = new("system", "task_contracts");
 
     private static readonly Schema _schema = BuildSchema();
 
@@ -48,8 +54,8 @@ internal sealed class TasksTableProvider : NonSeekableTableProviderBase
     /// per-instance state — every scan walks
     /// <see cref="TaskTypeRegistry.Entries"/> directly.
     /// </summary>
-    public TasksTableProvider(Pool pool)
-        : base(pool, QualifiedName.Parse(TableName))
+    public TaskContractsTableProvider(Pool pool)
+        : base(pool, QualifiedTableName)
     {
     }
 

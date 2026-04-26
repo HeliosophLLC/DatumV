@@ -20,4 +20,10 @@ public interface IManifestStore
     // license) for the given license id. Null if the id is unknown or the
     // referenced textFile is missing on disk.
     string? GetLicenseText(string licenseId);
+
+    // Reverse identifier→catalog index built once at load time from each
+    // version's declared `models[]` arrays. Consumed by `system.models`,
+    // `system.tasks`, the `tasks.*` dispatcher, pre-flight, and the
+    // install-time cross-check. See <see cref="ICatalogVocabulary"/>.
+    ICatalogVocabulary Vocabulary { get; }
 }
