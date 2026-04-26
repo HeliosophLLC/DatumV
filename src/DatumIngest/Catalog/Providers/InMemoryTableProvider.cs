@@ -781,6 +781,27 @@ public sealed class InMemoryTableProvider : ITableProvider
             return new Projection(_fullLookup, allIndexes, allKinds);
         }
 
+        // Enforce the documented "subset of the table schema" contract, matching
+        // DatumFileTableProviderV2's behaviour. Previously InMemory iterated its own
+        // columns and silently dropped any requiredColumns entry that didn't match,
+        // which masked a planner bug (synthetic post-rewrite aliases leaking through
+        // projection pushdown — most visibly `__group_key_N_M` from correlated scalar
+        // subquery decorrelation). Strict enforcement here gives the test suite the
+        // same guard the production provider has, so future planner regressions
+        // surface at the unit-test layer instead of waiting for a .datum-backed run.
+        HashSet<string> tableColumns = new(_columns, StringComparer.OrdinalIgnoreCase);
+        foreach (string requested in requiredColumns)
+        {
+            if (!tableColumns.Contains(requested))
+            {
+                throw new InvalidOperationException(
+                    $"requiredColumns contains names not present in the table schema: [{requested}]. "
+                    + $"Table '{QualifiedName}' has columns: [{string.Join(", ", _columns)}]. "
+                    + "The projection-pushdown contract requires every name in requiredColumns to resolve to a schema column; "
+                    + "this indicates a planner bug (e.g. a synthetic name leaked through CollectAllReferencedColumns).");
+            }
+        }
+
         // Preserve source column order; include only columns present in requiredColumns.
         List<int> sourceIndexes = new();
         List<string> names = new();
