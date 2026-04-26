@@ -20,6 +20,7 @@ import {
   onPythonEnvironmentFailed,
 } from '@/api/hub';
 import { openDialog } from '@/state/dialogs';
+import { refreshActiveVersions } from '@/state/models';
 import type { ModelInstallState } from '@/api/generated/openapi-client';
 
 // Kick off the hub connection as soon as this module loads. The server
@@ -290,6 +291,9 @@ export async function uninstallModel(modelId: string): Promise<void> {
       downloadsState.state[modelId] = 'notDownloaded';
     }
     delete downloadsState.errors[modelId];
+    // Uninstall wipes the <id>/ tree including the `active` pointer.
+    // Refresh the active-version map so the drift count drops the row.
+    void refreshActiveVersions();
   } catch (err) {
     console.error('[downloads] uninstall failed', modelId, err);
     downloadsState.errors[modelId] = describeError(err);
@@ -432,6 +436,10 @@ onModelInstalled((event) => {
   if (downloadsState.state) {
     downloadsState.state[event.modelId] = 'installed';
   }
+  // Install completion flips <id>/active on disk. Pull the fresh map so
+  // any "Update available" drift badges on the Models surface clear once
+  // the new version is the active one.
+  void refreshActiveVersions();
   if (window.electronHost?.isElectron) {
     void window.electronHost.notify({
       title: 'Install complete',

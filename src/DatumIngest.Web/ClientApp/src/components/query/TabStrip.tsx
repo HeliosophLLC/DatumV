@@ -25,6 +25,7 @@ import {
   type TabKind,
 } from '@/state/tabs';
 import { executionsState } from '@/state/execution';
+import { driftedCount, modelsState } from '@/state/models';
 import { serializeFunctionForm } from '@/state/functionForm';
 import {
   TAB_DRAG_MIME,
@@ -216,6 +217,27 @@ export function TabStrip({ leafId }: { leafId: string }) {
           one click away — matches VS Code's behavior. */}
       <NewTabMenu leafId={leafId} />
     </div>
+  );
+}
+
+// Numeric pill next to the Models tab icon when one or more installed
+// models trail the catalog's newest declared version. Warn-only: clicking
+// the Models chip is still just "open the Models tab," but the badge
+// nudges the user toward the update. Suppressed at count 0 so the chip
+// stays a clean icon-only when nothing's drifted.
+function ModelsDriftBadge() {
+  const { t } = useTranslation('models');
+  const models = useSnapshot(modelsState);
+  const count = driftedCount(models.manifest, models.activeVersions);
+  if (count === 0) return null;
+  return (
+    <span
+      className="bg-muted text-muted-foreground rounded-full px-1.5 text-[10px] font-medium leading-4 tabular-nums"
+      title={t('tab.driftBadgeTooltip', { count })}
+      aria-label={t('tab.driftBadgeTooltip', { count })}
+    >
+      {count}
+    </span>
   );
 }
 
@@ -488,7 +510,10 @@ function TabChip({
         // Pinned tabs (Models / Settings / Docs) carry their own
         // distinctive icon — clicking the chip just selects the tab.
         // Run-style affordances now live in the leaf's vertical toolbar.
-        <Boxes className="text-primary size-3.5 shrink-0" />
+        <>
+          <Boxes className="text-primary size-3.5 shrink-0" />
+          <ModelsDriftBadge />
+        </>
       ) : kind === 'settings' ? (
         <SettingsIcon className="text-primary size-3.5 shrink-0" />
       ) : kind === 'docs' ? (

@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { ChevronDown, Loader2, Search, X } from 'lucide-react';
+import { ArrowUpCircle, ChevronDown, Loader2, Search, X } from 'lucide-react';
 import {
   clearFilters,
   clearSelectedTasks,
+  driftedCount,
   filterModels,
   groupTasksByFamily,
+  isDrifted,
   loadModelsCatalog,
   modelsState,
   setQuery,
@@ -28,12 +30,16 @@ import { cn } from '@/lib/utils';
 // row; it's faceted by family so users can narrow to a category (e.g.
 // Image → ObjectDetector) without scrolling a flat 60+-entry list.
 
-const TIER_OPTIONS: readonly TierFilter[] = ['all', 'starter', 'recommended'];
+const TIER_OPTIONS: readonly TierFilter[] = ['all', 'starter', 'recommended', 'updates'];
 
 export function ModelsView() {
   const { t } = useTranslation('models');
-  const { manifest, tasks, loading, error, tier, query, selectedTasks, selectedId } =
+  const { manifest, tasks, activeVersions, loading, error, tier, query, selectedTasks, selectedId } =
     useSnapshot(modelsState);
+  const driftCount = useMemo(
+    () => driftedCount(manifest, activeVersions),
+    [manifest, activeVersions],
+  );
   // Auto-open the task panel when any task is selected (e.g. after a page
   // reload or a deep-link), so the user can see what's filtering them.
   const [tasksPanelOpen, setTasksPanelOpen] = useState(false);
@@ -47,8 +53,8 @@ export function ModelsView() {
   }, []);
 
   const filtered = useMemo(
-    () => (manifest ? filterModels(manifest, tier, query, selectedTasks) : []),
-    [manifest, tier, query, selectedTasks],
+    () => (manifest ? filterModels(manifest, tier, query, selectedTasks, activeVersions) : []),
+    [manifest, tier, query, selectedTasks, activeVersions],
   );
 
   // Auto-select the first match once the manifest lands. Don't override an
@@ -102,11 +108,28 @@ export function ModelsView() {
 
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1">
-            {TIER_OPTIONS.map((opt) => (
-              <TierTab key={opt} active={tier === opt} onClick={() => setTier(opt)}>
-                {t(`filters.tier${capitalize(opt)}` as 'filters.tierAll')}
-              </TierTab>
-            ))}
+            {TIER_OPTIONS.map((opt) => {
+              // The `updates` tab is computed from runtime drift rather
+              // than a manifest tier set: render it disabled (greyed,
+              // non-clickable) when nothing is drifted, and append the
+              // count to the label when something is. Selecting it while
+              // drift exists shows only the drifted entries.
+              const isUpdates = opt === 'updates';
+              const disabled = isUpdates && driftCount === 0;
+              const label = isUpdates
+                ? t('filters.tierUpdatesWithCount', { count: driftCount })
+                : t(`filters.tier${capitalize(opt)}` as 'filters.tierAll');
+              return (
+                <TierTab
+                  key={opt}
+                  active={tier === opt}
+                  disabled={disabled}
+                  onClick={() => setTier(opt)}
+                >
+                  {label}
+                </TierTab>
+              );
+            })}
             <TasksToggle
               open={tasksPanelOpen}
               onToggle={() => setTasksPanelOpen((v) => !v)}
@@ -148,6 +171,7 @@ export function ModelsView() {
                   key={model.id}
                   model={model}
                   active={model.id === selectedId}
+                  drifted={isDrifted(model, activeVersions)}
                   onSelect={() => model.id && setSelectedId(model.id)}
                 />
               ))}
@@ -204,10 +228,12 @@ function SearchInput({
 
 function TierTab({
   active,
+  disabled = false,
   onClick,
   children,
 }: {
   active: boolean;
+  disabled?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -215,11 +241,14 @@ function TierTab({
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={cn(
         'rounded-xs px-2 py-0.5 text-xs transition-colors',
-        active
-          ? 'bg-primary/15 text-primary'
-          : 'text-muted-foreground hover:bg-primary/10 hover:text-primary',
+        disabled
+          ? 'text-muted-foreground/40 cursor-not-allowed'
+          : active
+            ? 'bg-primary/15 text-primary'
+            : 'text-muted-foreground hover:bg-primary/10 hover:text-primary cursor-pointer',
       )}
     >
       {children}
@@ -342,12 +371,15 @@ function familyLabel(
 function ModelListItem({
   model,
   active,
+  drifted,
   onSelect,
 }: {
   model: CatalogModelSnapshot;
   active: boolean;
+  drifted: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation('models');
   const downloads = useSnapshot(downloadsState);
   const modelId = model.id ?? '';
   const installState = downloads.state?.[modelId];
@@ -385,6 +417,14 @@ function ModelListItem({
           <span className="min-w-0 flex-1 truncate text-xs font-medium">
             {model.displayName}
           </span>
+          {drifted && (
+            <ArrowUpCircle
+              className="text-muted-foreground size-3 shrink-0"
+              aria-label={t('card.updateAvailable')}
+            >
+              <title>{t('card.updateAvailable')}</title>
+            </ArrowUpCircle>
+          )}
         </div>
         <span className="text-muted-foreground line-clamp-2 w-full min-w-0 break-words pl-3.5 text-xs">
           {model.summary ?? model.description}

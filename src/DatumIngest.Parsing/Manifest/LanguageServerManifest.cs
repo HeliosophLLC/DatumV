@@ -227,6 +227,24 @@ public sealed class ModelEntry
     /// completion to surface "what kind of model is this" in the row.
     /// </summary>
     public IReadOnlyList<string>? Tasks { get; init; }
+
+    /// <summary>
+    /// Version string currently active on disk for the owning catalog
+    /// entry (read from <c>&lt;DATUM_MODELS&gt;/&lt;id&gt;/active</c>).
+    /// <see langword="null"/> when the entry has never been installed or
+    /// the identifier has no owning catalog entry (engine-only builtins).
+    /// Paired with <see cref="LatestVersion"/> to drive the hover drift hint.
+    /// </summary>
+    public string? ActiveVersion { get; init; }
+
+    /// <summary>
+    /// Newest catalog-declared version (the <c>versions[0].version</c> the
+    /// catalog ships) for the owning entry. <see langword="null"/> for
+    /// engine-only builtins without a catalog entry. Drift = installed
+    /// (<see cref="ActiveVersion"/> non-null) AND
+    /// <see cref="ActiveVersion"/> != <see cref="LatestVersion"/>.
+    /// </summary>
+    public string? LatestVersion { get; init; }
 }
 
 /// <summary>

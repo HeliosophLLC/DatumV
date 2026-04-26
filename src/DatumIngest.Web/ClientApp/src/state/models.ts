@@ -23,7 +23,7 @@ export type CatalogTaskInfoSnapshot = Snapshot<CatalogTaskInfo>;
 // nested arrays/objects don't get proxied (cheaper and avoids "you can't
 // mutate this readonly array" gotchas on the generated DTOs).
 
-export type TierFilter = 'all' | 'starter' | 'recommended';
+export type TierFilter = 'all' | 'starter' | 'recommended' | 'updates';
 
 // Family ordering for the faceted task filter UI. The server-side enum
 // values arrive as PascalCase strings ("Text" / "Image" / …); the list
@@ -44,6 +44,11 @@ interface ModelsState {
   // filter panel to (a) group task chips by family and (b) translate
   // task-name strings on model cards into family-coloured badges.
   tasks: readonly CatalogTaskInfo[] | null;
+  // catalog id → version string currently active on disk (from
+  // <DATUM_MODELS>/<id>/active). Models without an entry here are not
+  // installed; treat absence as "no drift to surface". Compared against
+  // `manifest.models[i].versions[0].version` to compute drift.
+  activeVersions: Readonly<Record<string, string>>;
   loading: boolean;
   error: string | null;
   tier: TierFilter;
@@ -63,6 +68,7 @@ interface ModelsState {
 export const modelsState = proxy<ModelsState>({
   manifest: null,
   tasks: null,
+  activeVersions: {},
   loading: false,
   error: null,
   tier: 'all',
@@ -77,17 +83,33 @@ export async function loadModelsCatalog(): Promise<void> {
   modelsState.loading = true;
   modelsState.error = null;
   try {
-    // Parallel fetch — the two endpoints are independent and small.
-    const [manifest, tasks] = await Promise.all([
+    // Parallel fetch — the three endpoints are independent and small.
+    const [manifest, tasks, activeVersions] = await Promise.all([
       api.modelCatalog.getManifest(),
       api.modelCatalog.getTasks(),
+      api.modelCatalog.getActiveVersions(),
     ]);
     modelsState.manifest = ref(manifest);
     modelsState.tasks = ref(tasks);
+    modelsState.activeVersions = activeVersions;
   } catch (err) {
     modelsState.error = err instanceof Error ? err.message : String(err);
   } finally {
     modelsState.loading = false;
+  }
+}
+
+// Refresh the active-version map. Called after an install completes or
+// an uninstall lands so the drift badges flip without a manual reload.
+// Bypasses the `loading` guard — the manifest + task vocabulary don't
+// need re-fetching, only the per-id active pointer changed.
+export async function refreshActiveVersions(): Promise<void> {
+  try {
+    modelsState.activeVersions = await api.modelCatalog.getActiveVersions();
+  } catch (err) {
+    // Non-fatal: a refresh failure leaves the previous map in place, so
+    // the worst case is a stale drift badge until the next reload.
+    console.error('[models] refreshActiveVersions failed', err);
   }
 }
 
@@ -121,16 +143,51 @@ export function clearFilters(): void {
   modelsState.selectedTasks = new Set<string>();
 }
 
+// Drift = the entry is installed (active pointer exists) AND the active
+// version is older than the catalog's newest declared version
+// (versions[0]). Warn-only signal — drift never blocks. Models with no
+// `versions[]` (defensive null guard for future-proofing) or no active
+// entry simply don't surface a badge.
+export function isDrifted(
+  model: CatalogModelSnapshot,
+  activeVersions: Readonly<Record<string, string>>,
+): boolean {
+  const id = model.id;
+  if (!id) return false;
+  const active = activeVersions[id];
+  if (!active) return false; // not installed → nothing to surface
+  const latest = model.versions?.[0]?.version;
+  if (!latest) return false;
+  return active !== latest;
+}
+
+// Count of drifted installs across the whole manifest. Drives the small
+// numeric pill on the Models tab chip.
+export function driftedCount(
+  manifest: CatalogManifestSnapshot | null,
+  activeVersions: Readonly<Record<string, string>>,
+): number {
+  if (manifest === null) return 0;
+  let count = 0;
+  for (const model of manifest.models ?? []) {
+    if (isDrifted(model, activeVersions)) count++;
+  }
+  return count;
+}
+
 // Pure filter — applied at render time. Doesn't mutate state. Caller passes
-// the manifest snapshot from useSnapshot.
+// the manifest snapshot from useSnapshot. The `updates` tier is special:
+// it isn't a manifest.tiers entry but a runtime drift comparison against
+// `activeVersions`, so it short-circuits the tier-id intersection below.
 export function filterModels(
   manifest: CatalogManifestSnapshot,
   tier: TierFilter,
   query: string,
   selectedTasks: ReadonlySet<string>,
+  activeVersions: Readonly<Record<string, string>>,
 ): readonly CatalogModelSnapshot[] {
   const models = manifest.models ?? [];
-  const tierIds = tier === 'all'
+  const tierIds = tier === 'all' || tier === 'updates'
     ? null
     : new Set(manifest.tiers?.[tier] ?? []);
   const needle = query.trim().toLowerCase();
@@ -143,6 +200,7 @@ export function filterModels(
 
   return models.filter((m) => {
     if (tierIds && !tierIds.has(m.id ?? '')) return false;
+    if (tier === 'updates' && !isDrifted(m, activeVersions)) return false;
     if (needle.length > 0) {
       const hay = [
         m.id ?? '',

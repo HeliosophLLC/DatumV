@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { Download, Loader2, RotateCcw, Trash2 } from 'lucide-react';
-import type { CatalogModelSnapshot } from '@/state/models';
+import { isDrifted, modelsState, type CatalogModelSnapshot } from '@/state/models';
 import {
   computeEtaSeconds,
   computeRateBytesPerSec,
@@ -26,6 +26,7 @@ import { Progress } from '@/components/ui/progress';
 export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
   const { t } = useTranslation('models');
   const downloads = useSnapshot(downloadsState);
+  const models = useSnapshot(modelsState);
 
   const modelId = model.id ?? '';
   const modelDisplayName = model.displayName ?? modelId;
@@ -33,6 +34,13 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
   const activeDownload = downloads.active[modelId];
   const installing = downloads.installing[modelId] === true;
   const error = downloads.errors[modelId];
+  // Drift badge only renders when the entry is installed AND the active
+  // on-disk version trails the catalog's newest declared version. Warn-
+  // only — clicking Install on the card runs the latest cut (versions[0])
+  // and the badge clears once `<id>/active` flips.
+  const drifted = isDrifted(model, models.activeVersions);
+  const activeVersion = models.activeVersions[modelId];
+  const latestVersion = model.versions?.[0]?.version;
   // Python install sub-step. The venv-install step is model-scoped (keyed
   // by catalog id), so it appears only on the card that triggered it. The
   // uv-download + python-install steps are machine-scoped — surface them
@@ -62,6 +70,17 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
             )}
             {!model.placeholder && installState === 'partial' && !activeDownload && (
               <Badge variant="muted">{t('card.partial')}</Badge>
+            )}
+            {drifted && !installing && !activeDownload && (
+              <Badge
+                variant="outline"
+                title={t('card.driftTooltip', {
+                  active: activeVersion ?? '',
+                  latest: latestVersion ?? '',
+                })}
+              >
+                {t('card.updateAvailable')}
+              </Badge>
             )}
             {model.requiresHfLogin && (
               <Badge variant="outline">{t('card.gated')}</Badge>

@@ -1168,9 +1168,41 @@ public sealed class HoverProvider
 
         string categoryLine = $"*Category: {function.Category}*";
 
-        return function.Description is not null
+        // Append a drift hint for `models.X` calls where the on-disk
+        // active version trails the catalog's newest declared cut. The
+        // model surface dual-registers under FunctionRegistry, so this
+        // is the natural hook — readers hovering an identifier see the
+        // update nudge without us routing through a parallel model-
+        // specific hover path. Warn-only: never blocks, never alters
+        // the signature.
+        string? driftLine = TryGetModelDriftLine(explicitSchema, name);
+
+        string body = function.Description is not null
             ? $"{signature}\n\n{categoryLine}\n\n{function.Description}"
             : $"{signature}\n\n{categoryLine}";
+        return driftLine is not null ? $"{body}\n\n{driftLine}" : body;
+    }
+
+    // Returns a markdown line like
+    // `*Active: 2026-04-15 · Update to 2026-05-29 available*` when the
+    // schema-qualified call is `models.<name>` and the matching
+    // <see cref="ModelEntry"/> has an active on-disk version that trails
+    // its catalog-declared latest. Returns null for any other schema, for
+    // engine-only builtins (no catalog ownership, both version fields
+    // null), and for installed-and-current entries.
+    private string? TryGetModelDriftLine(string? explicitSchema, string name)
+    {
+        if (explicitSchema is null) return null;
+        if (!string.Equals(explicitSchema, "models", StringComparison.OrdinalIgnoreCase)) return null;
+        if (_manifest.Models is null) return null;
+        foreach (ModelEntry entry in _manifest.Models)
+        {
+            if (!string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase)) continue;
+            if (entry.ActiveVersion is null || entry.LatestVersion is null) return null;
+            if (string.Equals(entry.ActiveVersion, entry.LatestVersion, StringComparison.Ordinal)) return null;
+            return $"*Active: {entry.ActiveVersion} · Update to {entry.LatestVersion} available*";
+        }
+        return null;
     }
 
     private FunctionSignature? ResolveFunctionEntry(string? explicitSchema, string name)

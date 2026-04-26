@@ -18,7 +18,8 @@ public sealed record CatalogTaskInfo(
 public sealed class ModelCatalogController(
     IManifestStore store,
     ILicenseAcceptanceService licenses,
-    IModelDownloadService downloads) : ControllerBase
+    IModelDownloadService downloads,
+    IModelPathResolver paths) : ControllerBase
 {
     // GET /api/model-catalog — the full manifest. Front-end fetches once at
     // startup and caches in a Valtio proxy. Re-fetched on app focus / pull-
@@ -140,6 +141,25 @@ public sealed class ModelCatalogController(
         {
             return NotFound();
         }
+    }
+
+    // GET /api/model-catalog/active-versions — one entry per installed
+    // model, mapping catalog id → the version string written into
+    // <DATUM_MODELS>/<id>/active. Entries without an active pointer
+    // (never installed, fully uninstalled) are omitted; the front-end
+    // treats absence as "not installed" and skips drift comparison.
+    // Drift detection lives client-side: compare against
+    // models[i].versions[0].version from the manifest.
+    [HttpGet("active-versions")]
+    public IReadOnlyDictionary<string, string> GetActiveVersions()
+    {
+        Dictionary<string, string> result = new(StringComparer.OrdinalIgnoreCase);
+        foreach (CatalogModel model in store.Manifest.Models)
+        {
+            string? active = paths.GetActiveVersion(model.Id);
+            if (active is not null) result[model.Id] = active;
+        }
+        return result;
     }
 
     // GET /api/model-catalog/partial-bytes — bulk view of partial download
