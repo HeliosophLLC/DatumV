@@ -1,3 +1,4 @@
+using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Execution.Planner;
@@ -222,7 +223,8 @@ internal static class ProjectionPushdown
     /// </summary>
     public static IReadOnlySet<string>? ComputeRequiredColumns(
         string? alias,
-        HashSet<(string? TableName, string ColumnName)> allReferencedColumns)
+        HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
+        Schema? schema = null)
     {
         // Empty set means SELECT * — all columns needed.
         if (allReferencedColumns.Count == 0)
@@ -236,8 +238,20 @@ internal static class ProjectionPushdown
         {
             if (tableName is null)
             {
-                // Unqualified reference — could be from any table; include it.
-                required.Add(columnName);
+                // Unqualified reference — could come from any table OR be a post-projection
+                // alias from a planner rewrite (e.g. __group_key_N_M minted by
+                // SubqueryRewriter for correlated scalar/aggregate subqueries) OR a bad
+                // identifier that downstream resolution will flag. When a schema is
+                // supplied, filter to names that actually exist on this scan; only real
+                // columns get pushed down. Synthetic / unresolved names drop out here
+                // and get handled by their natural resolver (the join's combined row,
+                // the evaluator's "column not found" path, etc.). Without a schema we
+                // fall back to the original conservative "include and let the provider
+                // sort it out" behaviour so unrelated callers don't regress.
+                if (schema is null || schema.FindColumn(columnName) is not null)
+                {
+                    required.Add(columnName);
+                }
             }
             else if (alias is not null
                 && string.Equals(tableName, alias, StringComparison.OrdinalIgnoreCase))

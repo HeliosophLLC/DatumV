@@ -99,9 +99,15 @@ internal sealed class SourcePlanner
         ITableProvider provider = _catalog[qn.ToString()];
 
         // Projection pushdown: compute required columns for this table's alias.
+        // Pass the provider's schema so unqualified references that don't actually
+        // exist in this scan's schema (synthetic post-rewrite aliases, unresolved
+        // identifiers) are filtered before reaching the provider. Strict providers
+        // like DatumFileTableProviderV2 reject any unknown name in requiredColumns;
+        // without the schema-aware filter they crash on otherwise valid queries
+        // (correlated scalar subqueries are the classic case).
         string effectiveAlias = tableRef.Alias ?? tableRef.Name;
         IReadOnlySet<string>? requiredColumns =
-            ProjectionPushdown.ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
+            ProjectionPushdown.ComputeRequiredColumns(effectiveAlias, allReferencedColumns, provider.GetSchema());
 
         long rowCount = provider.GetRowCount();
         ScanOperator scanOperator = new(provider, requiredColumns, rowCount);
