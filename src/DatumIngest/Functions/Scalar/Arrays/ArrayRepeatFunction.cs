@@ -45,7 +45,12 @@ public sealed class ArrayRepeatFunction : IFunction, IScalarFunction
             Parameters:
             [
                 new ParameterSpec("value", DataKindMatcher.Any, IsArray: ArrayMatch.Scalar),
-                new ParameterSpec("count", DataKindMatcher.Exact(DataKind.Int32), IsArray: ArrayMatch.Scalar),
+                // count is `IntegerFamily` rather than `Exact(Int32)` so SQL
+                // literals that narrow to Int8/Int16 ("array_repeat(x, 256)")
+                // and arithmetic expressions whose operand kinds never widen
+                // to Int32 ("array_repeat(x, 2 * 128)") work without the
+                // caller having to wrap the count in CAST(... AS Int32).
+                new ParameterSpec("count", DataKindMatcher.Family(DataKindFamily.IntegerFamily), IsArray: ArrayMatch.Scalar),
             ],
             VariadicTrailing: null,
             // Result is an array of the same element kind as the value arg.
@@ -69,7 +74,11 @@ public sealed class ArrayRepeatFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.NullArray(args[0].Kind));
         }
 
-        int count = args[1].AsInt32();
+        if (!args[1].TryToInt32(out int count))
+        {
+            throw new FunctionArgumentException(Name,
+                $"count of kind {args[1].Kind} could not be widened to Int32.");
+        }
         if (count < 0)
         {
             throw new FunctionArgumentException(Name,

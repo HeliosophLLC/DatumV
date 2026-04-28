@@ -144,4 +144,23 @@ public readonly partial struct DataValue
         }
         return store.RetrieveBytes(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
     }
+
+    /// <summary>
+    /// Returns the encoded audio byte payload (raw container — WAV / MP3 /
+    /// FLAC / OGG / M4A bytes as ingested). For arena-backed values, reads
+    /// from <paramref name="store"/>; for sidecar-backed values, looks up
+    /// the value's <c>storeId</c> in <paramref name="registry"/>. Callers
+    /// feed the result to <c>AudioPcmDecoder</c> for sample extraction or
+    /// to <c>AudioHeaderParser</c> for metadata.
+    /// </summary>
+    public byte[] AsAudio(IValueStore store, SidecarRegistry? registry = null)
+    {
+        ThrowIfNullOrWrongKind(DataKind.Audio);
+
+        if (IsInSidecar)
+        {
+            return ReadSidecarBytes(registry).ToArray();
+        }
+        return store.RetrieveBytes(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
+    }
 }

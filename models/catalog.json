@@ -3790,8 +3790,8 @@
     {
       "id": "silero-vad",
       "displayName": "Silero VAD (Voice Activity Detection)",
-      "summary": "Decides whether each 30 ms audio frame contains speech. Tiny (~2 MB). Pre-filter audio before transcribing it so the speech recognizer doesn't waste cycles on silence.",
-      "description": "Tiny (~2.2 MB) voice-activity classifier. Detects speech vs silence/noise per 30ms frame at 16 kHz. Standard preprocessor in front of Whisper / STT pipelines — skips non-speech frames so the recognizer only sees audio that actually contains voice.",
+      "summary": "Emits a per-frame speech probability (one value every 32 ms at 16 kHz). Tiny (~2 MB). Pre-filter audio before transcribing it so the speech recognizer doesn't waste cycles on silence.",
+      "description": "Tiny (~2.2 MB) voice-activity classifier. Returns a Float32 probability of speech per 32 ms frame at 16 kHz (≥0.5 conventionally = speech). Standard preprocessor in front of Whisper / STT pipelines — threshold the output to skip non-speech frames so the recognizer only sees audio that actually contains voice.",
       "tasks": [
         "VoiceActivityDetector"
       ],
@@ -3824,6 +3824,12 @@
                 "onnx/model.onnx"
               ]
             }
+          ],
+          "installSql": "sql/silero-vad/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "silero_vad"
+            }
           ]
         }
       ],
@@ -3833,7 +3839,7 @@
       "id": "silero-vad-fp16",
       "displayName": "Silero VAD fp16 (Voice Activity Detection)",
       "summary": "Same voice-activity detector as Silero VAD, half the disk. Pick when bundle size matters (containers, serverless cold-start, edge).",
-      "description": "Half-precision variant of Silero VAD — ~1.15 MB on disk (vs 2.24 MB for fp32). Same voice-activity classification per 30ms frame at 16 kHz; pick this when deployment footprint matters (container images, serverless cold-start, edge bundles). On CPU runtimes that upcast fp16 → fp32 internally, expect identical latency to the fp32 variant; on GPU / NPU with native fp16, expect a modest speedup.",
+      "description": "Half-precision variant of Silero VAD — ~1.15 MB on disk (vs 2.24 MB for fp32). Same per-32 ms-frame speech-probability output at 16 kHz; pick this when deployment footprint matters (container images, serverless cold-start, edge bundles). On CPU runtimes that upcast fp16 → fp32 internally, expect identical latency to the fp32 variant; on GPU / NPU with native fp16, expect a modest speedup.",
       "tasks": [
         "VoiceActivityDetector"
       ],
@@ -3866,6 +3872,12 @@
               "include": [
                 "onnx/model_fp16.onnx"
               ]
+            }
+          ],
+          "installSql": "sql/silero-vad-fp16/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "silero_vad_fp16"
             }
           ]
         }

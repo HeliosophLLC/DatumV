@@ -778,9 +778,6 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ApplyColormapFunction>();
         registry.RegisterScalar<Scalar.Image.ImageWidthFunction>();
         registry.RegisterScalar<Scalar.Image.ImageHeightFunction>();
-        registry.RegisterScalar<Scalar.Video.VideoWidthFunction>();
-        registry.RegisterScalar<Scalar.Video.VideoHeightFunction>();
-        registry.RegisterScalar<Scalar.Audio.AudioSampleRateFunction>();
         registry.RegisterScalar<Scalar.Image.ImageResizeToStrideFunction>();
         registry.RegisterScalar<Scalar.Image.ImageToBytesFunction>();
         registry.RegisterScalar<Scalar.Image.ImageBrightnessMeanFunction>();
@@ -853,6 +850,15 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Drawing.BlendFunction>();
         registry.RegisterScalar<Scalar.Drawing.SpinXFunction>();
         registry.RegisterScalar<Scalar.Drawing.SpinYFunction>();
+
+        // Video
+        registry.RegisterScalar<Scalar.Video.VideoWidthFunction>();
+        registry.RegisterScalar<Scalar.Video.VideoHeightFunction>();
+
+        // Audio
+        registry.RegisterScalar<Scalar.Audio.AudioSampleRateFunction>();
+        registry.RegisterScalar<Scalar.Audio.AudioSamplesFunction>();
+        registry.RegisterScalar<Scalar.Audio.AudioToMonoFunction>();
 
         // Spatial — PointCloud construction + accessors. Constructors consume an
         // Image-typed depth map (output of depth_map_to_image on MiDaS/DPT-family
