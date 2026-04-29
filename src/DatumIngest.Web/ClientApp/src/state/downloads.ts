@@ -20,7 +20,7 @@ import {
   onPythonEnvironmentFailed,
 } from '@/api/hub';
 import { openDialog } from '@/state/dialogs';
-import { refreshActiveVersions } from '@/state/models';
+import { refreshActiveVersions, refreshVersionsOnDisk } from '@/state/models';
 import type { ModelInstallState } from '@/api/generated/openapi-client';
 
 // Kick off the hub connection as soon as this module loads. The server
@@ -294,8 +294,123 @@ export async function uninstallModel(modelId: string): Promise<void> {
     // Uninstall wipes the <id>/ tree including the `active` pointer.
     // Refresh the active-version map so the drift count drops the row.
     void refreshActiveVersions();
+    void refreshVersionsOnDisk();
   } catch (err) {
     console.error('[downloads] uninstall failed', modelId, err);
+    downloadsState.errors[modelId] = describeError(err);
+  }
+}
+
+// Kicks off a pinned background install of a specific catalog version.
+// Downloads into <id>/<version>/ and registers identifiers under the
+// suffixed <bare>@<digits> form. Does NOT flip the active pointer; the
+// active install keeps serving bare references unchanged. Progress flows
+// over the same SignalR channel as bare installs — the chip / progress
+// bar key on modelId, so a pinned install of an entry that's also being
+// bare-installed will look like one combined progress row. (In practice
+// the single-flight guard on the engine side prevents that overlap.)
+export async function installPinnedVersion(
+  modelId: string,
+  version: string,
+  modelDisplayName?: string,
+): Promise<void> {
+  delete downloadsState.errors[modelId];
+
+  downloadsState.active[modelId] = {
+    modelId,
+    bytesReadTotal: 0,
+    bytesTotalAcrossModel: 0,
+    fileIndex: 0,
+    fileCount: 0,
+    currentFile: '',
+    startedAt: Date.now(),
+    samples: [],
+  };
+
+  try {
+    await acquireStreamHub();
+    await api.modelCatalog.installPinned(modelId, version);
+  } catch (err) {
+    delete downloadsState.active[modelId];
+    console.error('[downloads] installPinned failed', modelId, version, err);
+    const licenseId = readLicenseRequired(err);
+    if (licenseId) {
+      // Retry path: accept the license, then re-attempt the pinned
+      // install. Mirrors installModel's flow but routes the retry
+      // through installPinnedVersion so we don't accidentally bare-
+      // install when the user clicked Install on a previous-version
+      // row.
+      await handlePinnedLicenseRequired(modelId, version, licenseId, modelDisplayName);
+      return;
+    }
+    downloadsState.errors[modelId] = describeError(err);
+  }
+}
+
+async function handlePinnedLicenseRequired(
+  modelId: string,
+  version: string,
+  licenseId: string,
+  modelDisplayName: string | undefined,
+): Promise<void> {
+  const { result } = openDialog<{ accepted: boolean }>({
+    kind: 'confirmLicense',
+    payload: {
+      licenseId,
+      modelDisplayName: modelDisplayName ?? '',
+    },
+  });
+  const decision = await result;
+  if (!decision?.accepted) {
+    downloadsState.errors[modelId] = 'License declined';
+    return;
+  }
+  try {
+    await api.modelCatalog.acceptLicense(licenseId);
+  } catch (err) {
+    console.error('[downloads] acceptLicense failed', licenseId, err);
+    downloadsState.errors[modelId] = describeError(err);
+    return;
+  }
+  await installPinnedVersion(modelId, version, modelDisplayName);
+}
+
+// Flips the active version of a model to an on-disk previous version.
+// Synchronous on the wire (the engine runs the version-switch inline);
+// surfaces error text on the model card if it fails. On success
+// refreshes the active-version map so drift badges and the disclosure's
+// "active" pill move to the newly-activated row.
+export async function activateVersion(
+  modelId: string,
+  version: string,
+): Promise<void> {
+  delete downloadsState.errors[modelId];
+  try {
+    await api.modelCatalog.activateVersion(modelId, version);
+    void refreshActiveVersions();
+    void refreshVersionsOnDisk();
+  } catch (err) {
+    console.error('[downloads] activateVersion failed', modelId, version, err);
+    downloadsState.errors[modelId] = describeError(err);
+  }
+}
+
+// Deletes one on-disk version folder + drops its registered identifiers.
+// Active-version delete also clears the <id>/active pointer; subsequent
+// path resolution falls back to the version-less folder shape until a
+// fresh install runs. Idempotent — deleting a version that's not on
+// disk is a no-op.
+export async function deleteVersion(
+  modelId: string,
+  version: string,
+): Promise<void> {
+  delete downloadsState.errors[modelId];
+  try {
+    await api.modelCatalog.deleteVersion(modelId, version);
+    void refreshActiveVersions();
+    void refreshVersionsOnDisk();
+  } catch (err) {
+    console.error('[downloads] deleteVersion failed', modelId, version, err);
     downloadsState.errors[modelId] = describeError(err);
   }
 }
@@ -438,8 +553,11 @@ onModelInstalled((event) => {
   }
   // Install completion flips <id>/active on disk. Pull the fresh map so
   // any "Update available" drift badges on the Models surface clear once
-  // the new version is the active one.
+  // the new version is the active one. Pinned installs also add a new
+  // <id>/<version>/ folder, so the previous-versions disclosure needs
+  // the on-disk map refreshed.
   void refreshActiveVersions();
+  void refreshVersionsOnDisk();
   if (window.electronHost?.isElectron) {
     void window.electronHost.notify({
       title: 'Install complete',

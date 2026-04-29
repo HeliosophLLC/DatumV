@@ -49,6 +49,12 @@ interface ModelsState {
   // installed; treat absence as "no drift to surface". Compared against
   // `manifest.models[i].versions[0].version` to compute drift.
   activeVersions: Readonly<Record<string, string>>;
+  // catalog id → list of version folders present under <DATUM_MODELS>/<id>/.
+  // Drives per-version Install / Activate / Delete affordances in the
+  // model card's "Previous versions" disclosure. Absence (no entry, or
+  // empty array) means no version folders on disk. Refreshed alongside
+  // activeVersions after install / uninstall / activate / delete.
+  versionsOnDisk: Readonly<Record<string, readonly string[]>>;
   loading: boolean;
   error: string | null;
   tier: TierFilter;
@@ -69,6 +75,7 @@ export const modelsState = proxy<ModelsState>({
   manifest: null,
   tasks: null,
   activeVersions: {},
+  versionsOnDisk: {},
   loading: false,
   error: null,
   tier: 'all',
@@ -83,15 +90,17 @@ export async function loadModelsCatalog(): Promise<void> {
   modelsState.loading = true;
   modelsState.error = null;
   try {
-    // Parallel fetch — the three endpoints are independent and small.
-    const [manifest, tasks, activeVersions] = await Promise.all([
+    // Parallel fetch — the four endpoints are independent and small.
+    const [manifest, tasks, activeVersions, versionsOnDisk] = await Promise.all([
       api.modelCatalog.getManifest(),
       api.modelCatalog.getTasks(),
       api.modelCatalog.getActiveVersions(),
+      api.modelCatalog.getOnDiskVersions(),
     ]);
     modelsState.manifest = ref(manifest);
     modelsState.tasks = ref(tasks);
     modelsState.activeVersions = activeVersions;
+    modelsState.versionsOnDisk = versionsOnDisk;
   } catch (err) {
     modelsState.error = err instanceof Error ? err.message : String(err);
   } finally {
@@ -110,6 +119,17 @@ export async function refreshActiveVersions(): Promise<void> {
     // Non-fatal: a refresh failure leaves the previous map in place, so
     // the worst case is a stale drift badge until the next reload.
     console.error('[models] refreshActiveVersions failed', err);
+  }
+}
+
+// Refresh the on-disk-versions map. Called after install / uninstall /
+// activate / delete-version so the model card's previous-versions
+// disclosure reflects which folders exist without a manual reload.
+export async function refreshVersionsOnDisk(): Promise<void> {
+  try {
+    modelsState.versionsOnDisk = await api.modelCatalog.getOnDiskVersions();
+  } catch (err) {
+    console.error('[models] refreshVersionsOnDisk failed', err);
   }
 }
 

@@ -61,6 +61,24 @@
     "updateAvailable": "Update available",
     "driftTooltip": "Active: {active} · Latest: {latest}"
   },
+  "previousVersions": {
+    "title": "Previous versions",
+    "empty": "This model has no previous versions in the catalog.",
+    "rowState": {
+      "active": "Active",
+      "onDisk": "Installed (pinned)",
+      "notOnDisk": "Not installed"
+    },
+    "rowSyntax": "Callable as models.{identifier}@{digits}",
+    "deprecated": "Deprecated",
+    "deprecationReason": "Reason: {reason}",
+    "install": "Install",
+    "activate": "Activate",
+    "delete": "Delete",
+    "deleteActiveConfirm": "Deleting the active version will leave this model with no active install. You'll need to install a version before queries against it work again.",
+    "deleteConfirm": "Delete version {version}? Its pinned identifiers (models.x@{digits}) will stop resolving until you reinstall.",
+    "activateConfirm": "Activate version {version}? Bare models.x calls will route here; the current active version remains callable via pinned syntax (models.x@{digits})."
+  },
   "tab": {
     "driftBadgeTooltip": "{count, plural, one {# model has an update available} other {# models have updates available}}"
   },

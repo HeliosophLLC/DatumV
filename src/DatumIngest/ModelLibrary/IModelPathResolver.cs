@@ -104,6 +104,17 @@ public interface IModelPathResolver
     /// file.
     /// </summary>
     void InvalidateActiveVersionCache(string? modelId = null);
+
+    /// <summary>
+    /// Deletes the <c>&lt;id&gt;/active</c> pointer file (if present) and
+    /// invalidates the in-memory cache, leaving the entry with no
+    /// active version. Used by per-version delete when the user removes
+    /// the currently-active version's folder — subsequent path
+    /// resolutions fall back to the version-less folder shape until a
+    /// fresh install (or an Activate of a remaining on-disk version)
+    /// writes a new pointer.
+    /// </summary>
+    void ClearActiveVersion(string modelId);
 }
 
 /// <summary>
@@ -242,6 +253,17 @@ internal sealed class VersionedModelPathResolver : IModelPathResolver
             _activeCache.TryRemove(modelId, out _);
         }
     }
+
+    public void ClearActiveVersion(string modelId)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(modelId);
+        string pointer = Path.Combine(ModelsRoot, modelId, ActivePointerFilename);
+        if (File.Exists(pointer))
+        {
+            File.Delete(pointer);
+        }
+        _activeCache.TryRemove(modelId, out _);
+    }
 }
 
 /// <summary>
@@ -307,5 +329,10 @@ internal sealed class FlatModelPathResolver : IModelPathResolver
     public void InvalidateActiveVersionCache(string? modelId = null)
     {
         // No-op for the flat resolver — no cache.
+    }
+
+    public void ClearActiveVersion(string modelId)
+    {
+        // No-op for the flat resolver — no active pointer to clear.
     }
 }

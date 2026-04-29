@@ -35,6 +35,29 @@ public interface IModelDownloadService
     // Best-effort: deletes the model's directory on disk.
     Task UninstallAsync(string modelId, CancellationToken ct = default);
 
+    // Flips the active version to a different on-disk version. Runs the
+    // memo's version-switch flow: DROPs the bare identifiers from the
+    // outgoing version that aren't in the incoming version's declared
+    // identifier set (the "leavers"), re-runs the incoming version's
+    // installSql in bare mode (CREATE OR REPLACE updates shared
+    // identifiers in place; new identifiers register fresh), cross-checks
+    // observed vs declared, and flips `<id>/active` last. Lazy disposal
+    // handles in-flight queries holding leases on the dropped identifiers.
+    // Throws if:
+    //   - modelId / version is unknown
+    //   - the version's folder isn't on disk
+    //   - cross-check finds a declared/observed mismatch (rare; would
+    //     indicate authoring drift between catalog JSON and installSql)
+    Task ActivateVersionAsync(string modelId, string version, CancellationToken ct = default);
+
+    // Removes a single on-disk version's folder + the identifiers that
+    // version registered. Active-version delete also clears the
+    // `<id>/active` pointer (no auto-flip to a sibling). Pinned-version
+    // delete DROPs the suffixed `<bare>@<digits>` identifiers; bare
+    // delete DROPs the bare identifiers. Idempotent — deleting a version
+    // that isn't on disk is a no-op.
+    Task DeleteVersionAsync(string modelId, string version, CancellationToken ct = default);
+
     // Bulk probe: returns the install state for every model in the manifest.
     // Cheaper for the Models view than N individual ProbeAsync calls; same
     // result. Future ship-quality version may cache, but the file-system

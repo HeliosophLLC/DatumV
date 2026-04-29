@@ -143,6 +143,121 @@ public sealed class ModelCatalogController(
         }
     }
 
+    // POST /api/model-catalog/models/{id}/install/{version} — kicks off a
+    // pinned background install for a specific catalog version. Downloads
+    // into <id>/<version>/ and registers identifiers under the suffixed
+    // <bare>@<digits> form; does NOT flip the active pointer. Returns 202
+    // immediately; progress flows over the same SignalR hub channel as
+    // bare installs (the model id is the channel key — the chip groups
+    // multi-version installs of the same entry into one row).
+    [HttpPost("models/{id}/install/{version}")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status412PreconditionFailed)]
+    public async Task<IActionResult> InstallPinned(
+        string id, string version, CancellationToken ct)
+    {
+        try
+        {
+            await downloads.InstallPinnedAsync(id, version, ct);
+            return Accepted();
+        }
+        catch (KeyNotFoundException) { return NotFound(); }
+        catch (LicenseNotAcceptedException ex)
+        {
+            return StatusCode(StatusCodes.Status412PreconditionFailed,
+                new { error = "license_not_accepted", licenseId = ex.LicenseId, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = "install_blocked", message = ex.Message });
+        }
+    }
+
+    // POST /api/model-catalog/models/{id}/activate/{version} — flips the
+    // active pointer to a non-active on-disk version. Runs the catalog
+    // substrate's version-switch: drops the outgoing version's bare
+    // identifiers, re-registers them in pinned form (best-effort, so
+    // existing call sites for `models.<bare>@<digits-of-outgoing>` keep
+    // working), runs the incoming version's installSql in bare mode,
+    // cross-checks identifiers, and flips <id>/active. Synchronous
+    // (returns 204 on success); the work is bounded by installSql
+    // parse + register, not by I/O.
+    [HttpPost("models/{id}/activate/{version}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ActivateVersion(
+        string id, string version, CancellationToken ct)
+    {
+        try
+        {
+            await downloads.ActivateVersionAsync(id, version, ct);
+            return NoContent();
+        }
+        catch (KeyNotFoundException) { return NotFound(); }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = "activate_failed", message = ex.Message });
+        }
+    }
+
+    // DELETE /api/model-catalog/models/{id}/versions/{version} — removes
+    // a single version's folder + drops the identifiers it registered.
+    // Active-version delete also clears the <id>/active pointer (no
+    // auto-flip to a sibling). Idempotent for missing versions.
+    [HttpDelete("models/{id}/versions/{version}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteVersion(
+        string id, string version, CancellationToken ct)
+    {
+        try
+        {
+            await downloads.DeleteVersionAsync(id, version, ct);
+            return NoContent();
+        }
+        catch (KeyNotFoundException) { return NotFound(); }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = "delete_failed", message = ex.Message });
+        }
+    }
+
+    // GET /api/model-catalog/on-disk-versions — bulk view of which
+    // version folders exist for each manifest entry. Used by the model
+    // card's "Previous versions" disclosure to decide which versions get
+    // an Install button (not on disk) vs Activate/Delete (on disk). Map
+    // values are the on-disk version folder names; entries with no
+    // <id>/ directory are omitted.
+    [HttpGet("on-disk-versions")]
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> GetOnDiskVersions()
+    {
+        Dictionary<string, IReadOnlyList<string>> result = new(StringComparer.OrdinalIgnoreCase);
+        foreach (CatalogModel model in store.Manifest.Models)
+        {
+            string idRoot = Path.Combine(paths.ModelsRoot, model.Id);
+            if (!Directory.Exists(idRoot)) continue;
+
+            // Filter by the declared version set so we only surface
+            // folders that match a catalog entry — stray directories
+            // from old installs don't pollute the UI list.
+            HashSet<string> declared = new(StringComparer.Ordinal);
+            foreach (CatalogVersion v in model.Versions) declared.Add(v.Version);
+
+            List<string> onDisk = [];
+            foreach (string dir in Directory.EnumerateDirectories(idRoot))
+            {
+                string name = Path.GetFileName(dir);
+                if (declared.Contains(name)) onDisk.Add(name);
+            }
+            if (onDisk.Count > 0) result[model.Id] = onDisk;
+        }
+        return result;
+    }
+
     // GET /api/model-catalog/active-versions — one entry per installed
     // model, mapping catalog id → the version string written into
     // <DATUM_MODELS>/<id>/active. Entries without an active pointer

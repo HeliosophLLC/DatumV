@@ -242,6 +242,212 @@ internal sealed class ModelDownloadService : IModelDownloadService
         return Task.CompletedTask;
     }
 
+    public async Task ActivateVersionAsync(
+        string modelId, string version, CancellationToken ct = default)
+    {
+        CatalogModel model = ResolveModel(modelId);
+        CatalogVersion target = FindVersion(model, version);
+
+        if (!_paths.IsVersionOnDisk(modelId, version))
+        {
+            throw new InvalidOperationException(
+                $"Model {modelId} version '{version}' is not on disk. Install it first.");
+        }
+
+        string? currentActive = _paths.GetActiveVersion(modelId);
+        if (string.Equals(currentActive, version, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        // Single-flight lock — concurrent activate / install / delete on
+        // the same model id would race against the install-context
+        // ambient pin and the cross-check.
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (!_active.TryAdd(modelId, cts))
+        {
+            throw new InvalidOperationException(
+                $"Model {modelId} has an install in flight; try again shortly.");
+        }
+
+        try
+        {
+            // Outgoing version: drop its bare identifiers so they stop
+            // routing through the active pointer, and re-register them in
+            // pinned form (best-effort) so callers can still reach them via
+            // `models.<bare>@<digits-of-outgoing>` syntax. The pinned
+            // re-register requires the outgoing version's files on disk;
+            // if they're not (rare — would mean a manual filesystem edit),
+            // skip the pinned step and only drop bare.
+            if (currentActive is not null)
+            {
+                CatalogVersion? outgoing = TryFindVersion(model, currentActive);
+                if (outgoing?.Models is { Count: > 0 } outgoingModels)
+                {
+                    List<string> outgoingBare = new(outgoingModels.Count);
+                    foreach (CatalogVersionModel vm in outgoingModels)
+                    {
+                        outgoingBare.Add(vm.Identifier);
+                    }
+                    await _installer.DropModelsAsync(outgoingBare, CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+
+                if (outgoing is not null
+                    && !string.IsNullOrEmpty(outgoing.InstallSql)
+                    && _paths.IsVersionOnDisk(modelId, currentActive))
+                {
+                    string? previousPin = ModelInstallContext.CurrentVersionPin;
+                    ModelInstallContext.CurrentVersionPin = currentActive;
+                    try
+                    {
+                        await _installer.InstallAsync(
+                            model, outgoing, pinnedMode: true, cts.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Pinned re-register is best-effort: failure leaves
+                        // the outgoing version unreachable via pinned
+                        // syntax, but the user can recover by hitting
+                        // Install on that version's row (which re-runs the
+                        // same path). Don't fail the whole activate.
+                        _logger.LogWarning(ex,
+                            "Activate {ModelId} {Version}: pinned re-register of outgoing {Outgoing} failed",
+                            modelId, version, currentActive);
+                    }
+                    finally
+                    {
+                        ModelInstallContext.CurrentVersionPin = previousPin;
+                    }
+                }
+            }
+
+            // Incoming version: run its installSql in bare mode. Shared
+            // identifiers with the outgoing version that survived the drop
+            // (none — we dropped them all) come back via CREATE statements;
+            // CREATE OR REPLACE in the installSql handles either case.
+            if (!string.IsNullOrEmpty(target.InstallSql))
+            {
+                string? previousPin = ModelInstallContext.CurrentVersionPin;
+                IReadOnlyList<string> observed;
+                ModelInstallContext.CurrentVersionPin = version;
+                try
+                {
+                    observed = await _installer.InstallAsync(
+                        model, target, pinnedMode: false, cts.Token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    ModelInstallContext.CurrentVersionPin = previousPin;
+                }
+
+                if (target.Models is { Count: > 0 } expectedDeclarations)
+                {
+                    string mismatch = CrossCheckObservedIdentifiers(
+                        expectedDeclarations, observed, version, pinnedMode: false);
+                    if (mismatch.Length > 0)
+                    {
+                        await _installer.DropModelsAsync(observed, CancellationToken.None)
+                            .ConfigureAwait(false);
+                        throw new InvalidOperationException(mismatch);
+                    }
+                }
+            }
+
+            _paths.SetActiveVersion(modelId, version);
+        }
+        finally
+        {
+            _active.TryRemove(modelId, out _);
+        }
+    }
+
+    public async Task DeleteVersionAsync(
+        string modelId, string version, CancellationToken ct = default)
+    {
+        CatalogModel model = ResolveModel(modelId);
+
+        // Idempotent: a version that isn't on disk has no folder to wipe
+        // and (for non-active versions) no registered identifiers to
+        // drop. Active-pointer-without-folder is a rare manual-edit
+        // case; the pointer gets cleared anyway via the active-version
+        // branch below if the user happens to point at it.
+        if (!_paths.IsVersionOnDisk(modelId, version)
+            && !string.Equals(_paths.GetActiveVersion(modelId), version, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (!_active.TryAdd(modelId, cts))
+        {
+            throw new InvalidOperationException(
+                $"Model {modelId} has an install in flight; try again shortly.");
+        }
+
+        try
+        {
+            CatalogVersion? versionEntry = TryFindVersion(model, version);
+            bool isActive = string.Equals(
+                _paths.GetActiveVersion(modelId), version, StringComparison.Ordinal);
+
+            if (versionEntry?.Models is { Count: > 0 } declaredModels)
+            {
+                // Active version's identifiers live under bare names;
+                // non-active on-disk versions' identifiers (if previously
+                // installed via pinned) live under the suffixed form.
+                List<string> toDrop = new(declaredModels.Count);
+                foreach (CatalogVersionModel vm in declaredModels)
+                {
+                    toDrop.Add(isActive ? vm.Identifier : vm.EffectivePinnedAs(version));
+                }
+                await _installer.DropModelsAsync(toDrop, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+
+            string versionDir = Path.Combine(_paths.ModelsRoot, modelId, version);
+            if (Directory.Exists(versionDir))
+            {
+                Directory.Delete(versionDir, recursive: true);
+            }
+
+            if (isActive)
+            {
+                // No auto-flip to a sibling version — that would be a
+                // surprise. The entry returns to a "no active" state;
+                // ProbeAsync surfaces it as NotDownloaded (the
+                // recommended-version folder is gone) and the UI's
+                // top-level install affordance reappears.
+                _paths.ClearActiveVersion(modelId);
+            }
+            else
+            {
+                // Cache may carry a stale "this version is on disk"
+                // implication for path resolution; cheap to invalidate.
+                _paths.InvalidateActiveVersionCache(modelId);
+            }
+        }
+        finally
+        {
+            _active.TryRemove(modelId, out _);
+        }
+    }
+
+    private static CatalogVersion FindVersion(CatalogModel model, string version)
+        => TryFindVersion(model, version)
+            ?? throw new InvalidOperationException(
+                $"Model {model.Id} has no version '{version}'. Available versions: " +
+                string.Join(", ", model.Versions.Select(v => v.Version)));
+
+    private static CatalogVersion? TryFindVersion(CatalogModel model, string version)
+    {
+        foreach (CatalogVersion v in model.Versions)
+        {
+            if (string.Equals(v.Version, version, StringComparison.Ordinal)) return v;
+        }
+        return null;
+    }
+
     public async Task<IReadOnlyDictionary<string, ModelInstallState>> ProbeAllAsync(
         CancellationToken ct = default)
     {

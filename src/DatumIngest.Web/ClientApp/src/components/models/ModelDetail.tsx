@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { Download, Loader2, RotateCcw, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, Loader2, RotateCcw, Trash2 } from 'lucide-react';
 import { isDrifted, modelsState, type CatalogModelSnapshot } from '@/state/models';
 import {
+  activateVersion,
   computeEtaSeconds,
   computeRateBytesPerSec,
+  deleteVersion,
   downloadsState,
   installModel,
+  installPinnedVersion,
   restartDownload,
   uninstallModel,
   type ActiveDownload,
@@ -142,6 +145,15 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
         installing={installing}
         partialBytes={downloads.partials[modelId] ?? 0}
         installStep={activeStep}
+      />
+
+      <PreviousVersionsDisclosure
+        model={model}
+        modelId={modelId}
+        modelDisplayName={modelDisplayName}
+        activeVersion={activeVersion}
+        versionsOnDisk={models.versionsOnDisk[modelId] ?? []}
+        busy={!!activeDownload || installing}
       />
     </article>
   );
@@ -433,6 +445,183 @@ function shortenPath(path: string): string {
   if (slash === -1) return path.slice(0, 24) + '…' + path.slice(-24);
   const tail = path.slice(slash + 1);
   return '…/' + tail;
+}
+
+function PreviousVersionsDisclosure({
+  model,
+  modelId,
+  modelDisplayName,
+  activeVersion,
+  versionsOnDisk,
+  busy,
+}: {
+  model: CatalogModelSnapshot;
+  modelId: string;
+  modelDisplayName: string;
+  activeVersion: string | undefined;
+  versionsOnDisk: readonly string[];
+  busy: boolean;
+}) {
+  const { t } = useTranslation('models');
+  const [open, setOpen] = useState(false);
+
+  const versions = model.versions ?? [];
+  // Hide entirely when there are no previous versions to act on. v1
+  // catalog entries only have versions[0] today; a 1-version entry has
+  // nothing for this disclosure to show beyond the active version
+  // itself (which is already actionable via the top-level Remove
+  // button), so we keep the card uncluttered.
+  if (versions.length <= 1) return null;
+
+  const onDiskSet = new Set(versionsOnDisk);
+  const Caret = open ? ChevronDown : ChevronRight;
+
+  return (
+    <section className="border-border/60 flex flex-col gap-2 border-t pt-3">
+      <button
+        type="button"
+        className="text-foreground hover:text-foreground/80 flex items-center gap-1.5 text-sm font-medium"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <Caret className="size-3.5" />
+        {t('previousVersions.title')}
+      </button>
+
+      {open && (
+        <ul className="flex flex-col gap-1.5">
+          {versions.map((v) => {
+            const versionString = v.version ?? '';
+            const isActive = versionString === activeVersion;
+            const isOnDisk = onDiskSet.has(versionString);
+            const rowState = isActive
+              ? 'active'
+              : isOnDisk
+                ? 'onDisk'
+                : 'notOnDisk';
+            return (
+              <PreviousVersionRow
+                key={versionString}
+                modelId={modelId}
+                modelDisplayName={modelDisplayName}
+                versionString={versionString}
+                identifiers={v.models ?? []}
+                deprecated={!!v.deprecated}
+                deprecationReason={v.deprecationReason ?? ''}
+                state={rowState}
+                busy={busy}
+              />
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+// Strip non-digit characters from a version string to derive the
+// suffix used by pinned identifiers ("2026-05-29" → "20260529"). Mirrors
+// CatalogVersionModel.EffectivePinnedAs on the engine side so the
+// hint text matches what the parser actually accepts at query time.
+function pinnedDigits(version: string): string {
+  return version.replace(/\D/g, '');
+}
+
+function PreviousVersionRow({
+  modelId,
+  modelDisplayName,
+  versionString,
+  identifiers,
+  deprecated,
+  deprecationReason,
+  state,
+  busy,
+}: {
+  modelId: string;
+  modelDisplayName: string;
+  versionString: string;
+  identifiers: readonly { identifier?: string; pinnedAs?: string }[];
+  deprecated: boolean;
+  deprecationReason: string;
+  state: 'active' | 'onDisk' | 'notOnDisk';
+  busy: boolean;
+}) {
+  const { t } = useTranslation('models');
+  const digits = pinnedDigits(versionString);
+  // First identifier is representative for the "callable as" hint —
+  // most catalog entries declare one identifier per version, and when
+  // they declare several they share the version-suffix convention so
+  // showing one example reads cleaner than a full list.
+  const firstIdentifier = identifiers[0]?.identifier ?? '';
+
+  const onInstall = () => {
+    void installPinnedVersion(modelId, versionString, modelDisplayName);
+  };
+  const onActivate = () => {
+    void activateVersion(modelId, versionString);
+  };
+  const onDelete = () => {
+    const message = state === 'active'
+      ? t('previousVersions.deleteActiveConfirm')
+      : t('previousVersions.deleteConfirm', { version: versionString, digits });
+    // window.confirm is a stopgap — fine for v1 since the action is
+    // recoverable (re-install). Promoting to a typed Electron dialog
+    // belongs with the rest of the catalog dialogs if the UX needs it.
+    if (!window.confirm(message)) return;
+    void deleteVersion(modelId, versionString);
+  };
+
+  return (
+    <li className="border-border/40 flex flex-col gap-1 rounded-md border px-2.5 py-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="font-mono">{versionString}</span>
+          {state === 'active' && (
+            <Badge>{t('previousVersions.rowState.active')}</Badge>
+          )}
+          {state === 'onDisk' && (
+            <Badge variant="muted">{t('previousVersions.rowState.onDisk')}</Badge>
+          )}
+          {state === 'notOnDisk' && (
+            <Badge variant="outline">{t('previousVersions.rowState.notOnDisk')}</Badge>
+          )}
+          {deprecated && (
+            <Badge variant="outline" title={deprecationReason || undefined}>
+              {t('previousVersions.deprecated')}
+            </Badge>
+          )}
+        </div>
+        <div className="flex shrink-0 gap-1.5">
+          {state === 'notOnDisk' && (
+            <Button variant="default" size="sm" onClick={onInstall} disabled={busy}>
+              {t('previousVersions.install')}
+            </Button>
+          )}
+          {state === 'onDisk' && (
+            <Button variant="default" size="sm" onClick={onActivate} disabled={busy}>
+              {t('previousVersions.activate')}
+            </Button>
+          )}
+          {(state === 'onDisk' || state === 'active') && (
+            <Button variant="ghost" size="sm" onClick={onDelete} disabled={busy}>
+              <Trash2 />
+              {t('previousVersions.delete')}
+            </Button>
+          )}
+        </div>
+      </div>
+      {firstIdentifier && state !== 'active' && (
+        <p className="text-muted-foreground font-mono text-xs">
+          {t('previousVersions.rowSyntax', { identifier: firstIdentifier, digits })}
+        </p>
+      )}
+      {deprecated && deprecationReason && (
+        <p className="text-muted-foreground text-xs">
+          {t('previousVersions.deprecationReason', { reason: deprecationReason })}
+        </p>
+      )}
+    </li>
+  );
 }
 
 function hardwareLabel(
