@@ -22,7 +22,7 @@ public sealed partial class ExpressionEvaluator
     /// Earlier intermediates become unreachable as soon as the next stage's
     /// result is constructed and are reclaimed by the GC.
     /// </remarks>
-    public async ValueTask<ValueRef> EvaluateAsValueRefAsync(
+    public ValueTask<ValueRef> EvaluateAsValueRefAsync(
         Expression expression, EvaluationFrame frame, CancellationToken cancellationToken = default)
     {
         // Auto-attach this evaluator as the frame's LambdaInvoker if a caller
@@ -33,46 +33,58 @@ public sealed partial class ExpressionEvaluator
             frame = frame.WithLambdaInvoker(this);
         }
 
-        // Predicate-relevant expression types route through ValueRef-native
-        // handlers so no intermediate result writes to the arena. Anything else
-        // falls back to the DataValue path and lifts via ToValueRef — those
-        // expression types either produce inline values (literals, etc.) where
-        // the lift is free, or they're rare enough in predicate contexts that
-        // the optimisation isn't worth duplicating their handlers.
+        // Sync fast path: the two arms that produce a ValueRef synchronously
+        // (procedural-variable column reads, lambda capture). No state machine
+        // is built when the call lands here.
+        if (expression is ColumnReference columnRef
+            && columnRef.TableName is null
+            && _variableScope is not null
+            && _variableScope.TryGet(columnRef.ColumnName, out ValueRef variableValue))
+        {
+            return new ValueTask<ValueRef>(variableValue);
+        }
+        if (expression is LambdaExpression lambda)
+        {
+            return new ValueTask<ValueRef>(
+                ValueRef.FromLambda(LambdaValue.Capture(lambda, frame.Row)));
+        }
+
+        // ValueRef-native handlers for predicate-hot expression kinds. They're
+        // `async ValueTask<>` themselves but may complete synchronously when
+        // their operands do — try-IsCompletedSuccessfully here would buy
+        // nothing because we still have to dispatch on the expression type
+        // first, and the inner methods already avoid arena writes when their
+        // inputs are inline.
         switch (expression)
         {
             case FunctionCallExpression functionCall:
-                return await EvaluateFunctionAsValueRefAsync(functionCall, frame, cancellationToken).ConfigureAwait(false);
+                return EvaluateFunctionAsValueRefAsync(functionCall, frame, cancellationToken);
             case InlineAccessorExpression inlineAccessor:
-                return await EvaluateInlineAccessorAsValueRefAsync(inlineAccessor, frame, cancellationToken).ConfigureAwait(false);
+                return EvaluateInlineAccessorAsValueRefAsync(inlineAccessor, frame, cancellationToken);
             case BinaryExpression binary:
-                return await EvaluateBinaryAsValueRefAsync(binary, frame, cancellationToken).ConfigureAwait(false);
+                return EvaluateBinaryAsValueRefAsync(binary, frame, cancellationToken);
             case UnaryExpression unary:
-                return await EvaluateUnaryAsValueRefAsync(unary, frame, cancellationToken).ConfigureAwait(false);
+                return EvaluateUnaryAsValueRefAsync(unary, frame, cancellationToken);
             case IsNullExpression isNull:
-                return await EvaluateIsNullAsValueRefAsync(isNull, frame, cancellationToken).ConfigureAwait(false);
-            case ColumnReference columnRef
-                when columnRef.TableName is null
-                    && _variableScope is not null
-                    && _variableScope.TryGet(columnRef.ColumnName, out ValueRef variableValue):
-                // Procedural variable read: scope holds the ValueRef directly.
-                // Return it without round-tripping through arena+ToValueRef so
-                // managed payloads (Float32 tensors, SKBitmaps, etc.) stay on
-                // the GC heap end-to-end through DECLARE → read → consume.
-                return variableValue;
-            case LambdaExpression lambda:
-                // Promote the AST node to a first-class Lambda value. The current
-                // frame's Row is snapshotted as the lambda's closure environment so
-                // free-variable references inside the body resolve consistently
-                // when the lambda is later invoked (possibly multiple times by a
-                // higher-order consumer). The materialised payload is the
-                // LambdaValue itself, which only survives in the ValueRef-path —
-                // the DataValue path throws on LambdaExpression for that reason.
-                return ValueRef.FromLambda(LambdaValue.Capture(lambda, frame.Row));
+                return EvaluateIsNullAsValueRefAsync(isNull, frame, cancellationToken);
         }
 
-        DataValue raw = await EvaluateAsync(expression, frame, cancellationToken).ConfigureAwait(false);
-        return ToValueRef(raw, frame);
+        // Fallback for every other expression kind: lower through the DataValue
+        // path and lift the result. EvaluateAsync's sync fast path means
+        // leaf-level evaluations (LiteralExpression, ColumnReference against a
+        // row column) complete synchronously here too — no state machine.
+        ValueTask<DataValue> rawTask = EvaluateAsync(expression, frame, cancellationToken);
+        if (rawTask.IsCompletedSuccessfully)
+        {
+            return new ValueTask<ValueRef>(ToValueRef(rawTask.Result, frame));
+        }
+        return AwaitToValueRefAsync(rawTask, frame);
+
+        static async ValueTask<ValueRef> AwaitToValueRefAsync(ValueTask<DataValue> pending, EvaluationFrame frame)
+        {
+            DataValue raw = await pending.ConfigureAwait(false);
+            return ToValueRef(raw, frame);
+        }
     }
 
     /// <inheritdoc cref="ILambdaInvoker.InvokeLambdaAsync"/>

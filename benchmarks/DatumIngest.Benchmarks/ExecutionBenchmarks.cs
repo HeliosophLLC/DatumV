@@ -1,6 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.DatumFile.V2;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
@@ -15,13 +16,43 @@ namespace DatumIngest.Benchmarks;
 /// <summary>
 /// Benchmarks for full query execution including scan, filter, project, and join.
 /// </summary>
+/// <remarks>
+/// Each benchmark runs twice — once against an <see cref="InMemoryTableProvider"/>
+/// (operator-isolation, no I/O) and once against a <see cref="DatumFileTableProviderV2"/>
+/// reading a real <c>.datum</c> file (end-to-end, comparable to other engines).
+/// </remarks>
 [MemoryDiagnoser]
 public class ExecutionBenchmarks
 {
+    private static readonly ColumnDescriptorV2[] DataColumns =
+    [
+        new("id", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+        new("name", DataKind.String, EncoderKind.VariableSlot, IsNullable: false),
+        new("value", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+        new("category", DataKind.String, EncoderKind.VariableSlot, IsNullable: false),
+        new("score", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+    ];
+
+    private static readonly ColumnDescriptorV2[] LookupColumns =
+    [
+        new("lookup_id", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+        new("description", DataKind.String, EncoderKind.VariableSlot, IsNullable: false),
+        new("weight", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+    ];
+
+    [Params(ProviderKind.InMemory, ProviderKind.DatumFile)]
+    public ProviderKind Provider;
+
     private Pool _pool = null!;
     private Row[] _dataRows = null!;
     private Row[] _lookupRows = null!;
     private Row[] _dataSecondRows = null!;
+
+    // Populated only when Provider == ProviderKind.DatumFile.
+    private string? _tempDir;
+    private string? _dataFilePath;
+    private string? _lookupFilePath;
+    private string? _dataSecondFilePath;
 
     [GlobalSetup]
     public void Setup()
@@ -30,19 +61,43 @@ public class ExecutionBenchmarks
         _dataRows = SyntheticDataGenerator.GenerateRows(10_000);
         _lookupRows = SyntheticDataGenerator.GenerateLookupRows(1_000);
         _dataSecondRows = SyntheticDataGenerator.GenerateRows(10_000, seed: 99);
+
+        if (Provider == ProviderKind.DatumFile)
+        {
+            _tempDir = Path.Combine(Path.GetTempPath(), $"datum_bench_exec_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(_tempDir);
+            _dataFilePath = DatumFileBenchHelper.WriteRowsToDatumFile(
+                _pool, Path.Combine(_tempDir, "data.datum"), _dataRows, DataColumns);
+            _lookupFilePath = DatumFileBenchHelper.WriteRowsToDatumFile(
+                _pool, Path.Combine(_tempDir, "lookup.datum"), _lookupRows, LookupColumns);
+            _dataSecondFilePath = DatumFileBenchHelper.WriteRowsToDatumFile(
+                _pool, Path.Combine(_tempDir, "data_b.datum"), _dataSecondRows, DataColumns);
+        }
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        if (_tempDir is not null && Directory.Exists(_tempDir))
+        {
+            try { Directory.Delete(_tempDir, recursive: true); } catch (IOException) { }
+        }
     }
 
     private TableCatalog BuildCatalog(bool withLookup = false, bool withDataSecond = false)
     {
         TableCatalog catalog = new(_pool);
-        catalog.Add(new InMemoryTableProvider(_pool, "data", _dataRows));
-        if (withLookup)
+        if (Provider == ProviderKind.InMemory)
         {
-            catalog.Add(new InMemoryTableProvider(_pool, "lookup", _lookupRows));
+            catalog.Add(new InMemoryTableProvider(_pool, "data", _dataRows));
+            if (withLookup) catalog.Add(new InMemoryTableProvider(_pool, "lookup", _lookupRows));
+            if (withDataSecond) catalog.Add(new InMemoryTableProvider(_pool, "data_b", _dataSecondRows));
         }
-        if (withDataSecond)
+        else
         {
-            catalog.Add(new InMemoryTableProvider(_pool, "data_b", _dataSecondRows));
+            catalog.Add(new TableDescriptor("data", _dataFilePath!));
+            if (withLookup) catalog.Add(new TableDescriptor("lookup", _lookupFilePath!));
+            if (withDataSecond) catalog.Add(new TableDescriptor("data_b", _dataSecondFilePath!));
         }
         return catalog;
     }

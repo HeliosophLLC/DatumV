@@ -8,9 +8,28 @@ namespace DatumIngest.Execution;
 
 public sealed partial class ExpressionEvaluator
 {
-    private async ValueTask<DataValue> EvaluateBinaryAsync(
-        BinaryExpression binary, EvaluationFrame frame, CancellationToken cancellationToken) =>
-        ToDataValue(await EvaluateBinaryAsValueRefAsync(binary, frame, cancellationToken).ConfigureAwait(false), frame);
+    /// <summary>
+    /// DataValue-returning wrapper around <see cref="EvaluateBinaryAsValueRefAsync"/>.
+    /// Sync-fast-path style: when the ValueRef evaluation completes synchronously
+    /// (the common case for predicates against inline values), the conversion to
+    /// <see cref="DataValue"/> runs without allocating a state machine.
+    /// </summary>
+    private ValueTask<DataValue> EvaluateBinaryAsync(
+        BinaryExpression binary, EvaluationFrame frame, CancellationToken cancellationToken)
+    {
+        ValueTask<ValueRef> task = EvaluateBinaryAsValueRefAsync(binary, frame, cancellationToken);
+        if (task.IsCompletedSuccessfully)
+        {
+            return new ValueTask<DataValue>(ToDataValue(task.Result, frame));
+        }
+        return AwaitToDataValue(task, frame);
+
+        static async ValueTask<DataValue> AwaitToDataValue(ValueTask<ValueRef> pending, EvaluationFrame frame)
+        {
+            ValueRef result = await pending.ConfigureAwait(false);
+            return ToDataValue(result, frame);
+        }
+    }
 
     /// <summary>
     /// ValueRef-native binary expression evaluation. Operands are pulled in as
@@ -18,28 +37,109 @@ public sealed partial class ExpressionEvaluator
     /// resulting boolean without any function-result string ever crossing the
     /// arena boundary. Result is always inline (Boolean / Float32 / Duration).
     /// </summary>
-    private async ValueTask<ValueRef> EvaluateBinaryAsValueRefAsync(
+    /// <remarks>
+    /// Sync-fast-path shape: the outer method is non-async so the all-sync
+    /// case — both operands evaluate synchronously, comparison is pure CPU —
+    /// builds no state machine. The two async tails (AND/OR short-circuit and
+    /// awaiting an operand that doesn't complete synchronously) are factored
+    /// into local methods that take only what they need to resume.
+    /// </remarks>
+    private ValueTask<ValueRef> EvaluateBinaryAsValueRefAsync(
         BinaryExpression binary, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        // Short-circuit for AND/OR — uses EvaluateAsBooleanAsync which itself routes
-        // through EvaluateAsValueRefAsync.
+        // Short-circuit AND/OR. Operands flow through EvaluateAsBooleanAsync, which
+        // is itself sync-fast-path; this branch sync-completes whenever both sides
+        // complete synchronously (almost always for analytical predicates).
         if (binary.Operator == BinaryOperator.And)
         {
-            if (!await EvaluateAsBooleanAsync(binary.Left, frame, cancellationToken).ConfigureAwait(false)) return ValueRef.FromBoolean(false);
-            if (!await EvaluateAsBooleanAsync(binary.Right, frame, cancellationToken).ConfigureAwait(false)) return ValueRef.FromBoolean(false);
-            return ValueRef.FromBoolean(true);
+            ValueTask<bool> leftBool = EvaluateAsBooleanAsync(binary.Left, frame, cancellationToken);
+            if (leftBool.IsCompletedSuccessfully)
+            {
+                if (!leftBool.Result) return new ValueTask<ValueRef>(ValueRef.FromBoolean(false));
+                ValueTask<bool> rightBool = EvaluateAsBooleanAsync(binary.Right, frame, cancellationToken);
+                if (rightBool.IsCompletedSuccessfully)
+                {
+                    return new ValueTask<ValueRef>(ValueRef.FromBoolean(rightBool.Result));
+                }
+                return AwaitRightForAnd(rightBool);
+            }
+            return AwaitAnd(binary, leftBool, frame, cancellationToken);
         }
 
         if (binary.Operator == BinaryOperator.Or)
         {
-            if (await EvaluateAsBooleanAsync(binary.Left, frame, cancellationToken).ConfigureAwait(false)) return ValueRef.FromBoolean(true);
-            if (await EvaluateAsBooleanAsync(binary.Right, frame, cancellationToken).ConfigureAwait(false)) return ValueRef.FromBoolean(true);
-            return ValueRef.FromBoolean(false);
+            ValueTask<bool> leftBool = EvaluateAsBooleanAsync(binary.Left, frame, cancellationToken);
+            if (leftBool.IsCompletedSuccessfully)
+            {
+                if (leftBool.Result) return new ValueTask<ValueRef>(ValueRef.FromBoolean(true));
+                ValueTask<bool> rightBool = EvaluateAsBooleanAsync(binary.Right, frame, cancellationToken);
+                if (rightBool.IsCompletedSuccessfully)
+                {
+                    return new ValueTask<ValueRef>(ValueRef.FromBoolean(rightBool.Result));
+                }
+                return AwaitRightForOr(rightBool);
+            }
+            return AwaitOr(binary, leftBool, frame, cancellationToken);
         }
 
-        ValueRef left = await EvaluateAsValueRefAsync(binary.Left, frame, cancellationToken).ConfigureAwait(false);
-        ValueRef right = await EvaluateAsValueRefAsync(binary.Right, frame, cancellationToken).ConfigureAwait(false);
+        // Comparison / arithmetic. Pull both operands, then dispatch through
+        // BinaryCore. Each operand goes through IsCompletedSuccessfully so the
+        // all-sync case never builds a state machine.
+        ValueTask<ValueRef> leftTask = EvaluateAsValueRefAsync(binary.Left, frame, cancellationToken);
+        if (!leftTask.IsCompletedSuccessfully)
+        {
+            return AwaitBothBinary(binary, leftTask, frame, cancellationToken);
+        }
+        ValueRef left = leftTask.Result;
 
+        ValueTask<ValueRef> rightTask = EvaluateAsValueRefAsync(binary.Right, frame, cancellationToken);
+        if (!rightTask.IsCompletedSuccessfully)
+        {
+            return AwaitRightBinary(binary, left, rightTask);
+        }
+
+        return new ValueTask<ValueRef>(BinaryCore(binary, left, rightTask.Result));
+
+        // ─────────────────── Local async helpers ───────────────────
+
+        static async ValueTask<ValueRef> AwaitRightForAnd(ValueTask<bool> rightBool) =>
+            ValueRef.FromBoolean(await rightBool.ConfigureAwait(false));
+
+        static async ValueTask<ValueRef> AwaitRightForOr(ValueTask<bool> rightBool) =>
+            ValueRef.FromBoolean(await rightBool.ConfigureAwait(false));
+
+        async ValueTask<ValueRef> AwaitAnd(BinaryExpression b, ValueTask<bool> lt, EvaluationFrame f, CancellationToken ct)
+        {
+            if (!await lt.ConfigureAwait(false)) return ValueRef.FromBoolean(false);
+            return ValueRef.FromBoolean(await EvaluateAsBooleanAsync(b.Right, f, ct).ConfigureAwait(false));
+        }
+
+        async ValueTask<ValueRef> AwaitOr(BinaryExpression b, ValueTask<bool> lt, EvaluationFrame f, CancellationToken ct)
+        {
+            if (await lt.ConfigureAwait(false)) return ValueRef.FromBoolean(true);
+            return ValueRef.FromBoolean(await EvaluateAsBooleanAsync(b.Right, f, ct).ConfigureAwait(false));
+        }
+
+        async ValueTask<ValueRef> AwaitBothBinary(BinaryExpression b, ValueTask<ValueRef> lt, EvaluationFrame f, CancellationToken ct)
+        {
+            ValueRef l = await lt.ConfigureAwait(false);
+            ValueRef r = await EvaluateAsValueRefAsync(b.Right, f, ct).ConfigureAwait(false);
+            return BinaryCore(b, l, r);
+        }
+
+        async ValueTask<ValueRef> AwaitRightBinary(BinaryExpression b, ValueRef l, ValueTask<ValueRef> rt) =>
+            BinaryCore(b, l, await rt.ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Pure synchronous core of binary comparison/arithmetic dispatch. Shared
+    /// between the sync-fast-path and async tails so the operator switch lives
+    /// in one place. Both <paramref name="left"/> and <paramref name="right"/>
+    /// must already be resolved. Instance because LIKE / ILIKE / REGEXP need
+    /// the cached pattern map on the evaluator.
+    /// </summary>
+    private ValueRef BinaryCore(BinaryExpression binary, ValueRef left, ValueRef right)
+    {
         if (left.IsNull || right.IsNull)
         {
             if (binary.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual
@@ -51,12 +151,6 @@ public sealed partial class ExpressionEvaluator
                 return ValueRef.Null(DataKind.Boolean);
             }
 
-            // Arithmetic NULL propagation. Use the promoted result kind so the
-            // null carries the same type tag the non-null path would have. For
-            // a NULL operand we still know the OTHER operand's kind (or both
-            // kinds if both are typed-NULL), so promotion is well-defined.
-            // Falls back to Float32 when promotion can't be determined — same
-            // shape the old code always emitted.
             DataKind nullKind = TryPromoteArithmeticKind(left.Kind, right.Kind, binary.Operator)
                 ?? DataKind.Float32;
             return ValueRef.Null(nullKind);
@@ -112,33 +206,91 @@ public sealed partial class ExpressionEvaluator
         };
     }
 
-    private async ValueTask<DataValue> EvaluateUnaryAsync(
-        UnaryExpression unary, EvaluationFrame frame, CancellationToken cancellationToken) =>
-        ToDataValue(await EvaluateUnaryAsValueRefAsync(unary, frame, cancellationToken).ConfigureAwait(false), frame);
+    /// <summary>
+    /// DataValue-returning wrapper around <see cref="EvaluateUnaryAsValueRefAsync"/>.
+    /// Sync-fast-path: skips state-machine setup when the ValueRef path completes synchronously.
+    /// </summary>
+    private ValueTask<DataValue> EvaluateUnaryAsync(
+        UnaryExpression unary, EvaluationFrame frame, CancellationToken cancellationToken)
+    {
+        ValueTask<ValueRef> task = EvaluateUnaryAsValueRefAsync(unary, frame, cancellationToken);
+        if (task.IsCompletedSuccessfully)
+        {
+            return new ValueTask<DataValue>(ToDataValue(task.Result, frame));
+        }
+        return AwaitToDataValue(task, frame);
+
+        static async ValueTask<DataValue> AwaitToDataValue(ValueTask<ValueRef> pending, EvaluationFrame frame)
+        {
+            ValueRef result = await pending.ConfigureAwait(false);
+            return ToDataValue(result, frame);
+        }
+    }
 
     /// <summary>
     /// ValueRef-native unary expression evaluation. Result is always inline
     /// (Boolean for NOT, Float32 for negate).
     /// </summary>
-    private async ValueTask<ValueRef> EvaluateUnaryAsValueRefAsync(
+    /// <remarks>
+    /// Sync-fast-path: outer is non-async. The operand evaluation is
+    /// <see cref="ValueTask.IsCompletedSuccessfully"/>-checked; only when the
+    /// operand or NOT's recursive boolean call doesn't complete synchronously
+    /// do we tail into a local async helper.
+    /// </remarks>
+    private ValueTask<ValueRef> EvaluateUnaryAsValueRefAsync(
         UnaryExpression unary, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        ValueRef operand = await EvaluateAsValueRefAsync(unary.Operand, frame, cancellationToken).ConfigureAwait(false);
+        ValueTask<ValueRef> operandTask = EvaluateAsValueRefAsync(unary.Operand, frame, cancellationToken);
+        if (!operandTask.IsCompletedSuccessfully)
+        {
+            return AwaitUnary(unary, operandTask, frame, cancellationToken);
+        }
+        ValueRef operand = operandTask.Result;
 
         if (operand.IsNull)
         {
-            return unary.Operator == UnaryOperator.Not
-                ? ValueRef.Null(DataKind.Boolean)
-                : ValueRef.Null(NegateResultKind(operand.Kind));
+            return new ValueTask<ValueRef>(
+                unary.Operator == UnaryOperator.Not
+                    ? ValueRef.Null(DataKind.Boolean)
+                    : ValueRef.Null(NegateResultKind(operand.Kind)));
         }
 
-        return unary.Operator switch
+        if (unary.Operator == UnaryOperator.Negate)
         {
-            UnaryOperator.Not => ValueRef.FromBoolean(!await EvaluateAsBooleanAsync(unary.Operand, frame, cancellationToken).ConfigureAwait(false)),
-            UnaryOperator.Negate => NegatePreservingKind(operand),
-            _ => throw new InvalidOperationException(
-                $"Unsupported unary operator: {unary.Operator}."),
-        };
+            return new ValueTask<ValueRef>(NegatePreservingKind(operand));
+        }
+
+        if (unary.Operator == UnaryOperator.Not)
+        {
+            ValueTask<bool> boolTask = EvaluateAsBooleanAsync(unary.Operand, frame, cancellationToken);
+            if (boolTask.IsCompletedSuccessfully)
+            {
+                return new ValueTask<ValueRef>(ValueRef.FromBoolean(!boolTask.Result));
+            }
+            return AwaitNot(boolTask);
+        }
+
+        throw new InvalidOperationException($"Unsupported unary operator: {unary.Operator}.");
+
+        async ValueTask<ValueRef> AwaitUnary(UnaryExpression u, ValueTask<ValueRef> ot, EvaluationFrame f, CancellationToken ct)
+        {
+            ValueRef op = await ot.ConfigureAwait(false);
+            if (op.IsNull)
+            {
+                return u.Operator == UnaryOperator.Not
+                    ? ValueRef.Null(DataKind.Boolean)
+                    : ValueRef.Null(NegateResultKind(op.Kind));
+            }
+            return u.Operator switch
+            {
+                UnaryOperator.Not => ValueRef.FromBoolean(!await EvaluateAsBooleanAsync(u.Operand, f, ct).ConfigureAwait(false)),
+                UnaryOperator.Negate => NegatePreservingKind(op),
+                _ => throw new InvalidOperationException($"Unsupported unary operator: {u.Operator}."),
+            };
+        }
+
+        static async ValueTask<ValueRef> AwaitNot(ValueTask<bool> bt) =>
+            ValueRef.FromBoolean(!await bt.ConfigureAwait(false));
     }
 
     /// <summary>

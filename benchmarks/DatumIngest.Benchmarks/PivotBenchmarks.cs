@@ -2,6 +2,7 @@ using BenchmarkDotNet.Attributes;
 
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.DatumFile.V2;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
@@ -28,8 +29,9 @@ namespace DatumIngest.Benchmarks;
 ///     Source for UNPIVOT benchmarks.
 ///   </description></item>
 /// </list>
-/// Rows are pre-staged in memory via <see cref="InMemoryTableProvider"/> so the benchmark
-/// measures execution, not ingestion.
+/// Each benchmark runs against both <see cref="ProviderKind.InMemory"/> and
+/// <see cref="ProviderKind.DatumFile"/>; the report shows the cost split between
+/// pure operator work and end-to-end ingestion + execute.
 /// </remarks>
 [MemoryDiagnoser]
 public class PivotBenchmarks
@@ -38,11 +40,37 @@ public class PivotBenchmarks
     private static readonly string[] WideColumns = ["group_id", "north", "south", "east", "west"];
     private static readonly string[] Regions = ["north", "south", "east", "west"];
 
+    private static readonly ColumnDescriptorV2[] LongDescriptors =
+    [
+        new("group_id", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+        new("region", DataKind.String, EncoderKind.VariableSlot, IsNullable: false),
+        new("revenue", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+    ];
+
+    private static readonly ColumnDescriptorV2[] WideDescriptors =
+    [
+        new("group_id", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+        new("north", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+        new("south", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+        new("east", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+        new("west", DataKind.Float32, EncoderKind.FixedWidth, IsNullable: false),
+    ];
+
+    [Params(ProviderKind.InMemory, ProviderKind.DatumFile)]
+    public ProviderKind Provider;
+
     private Pool _pool = null!;
     private object?[][] _long5K = null!;
     private object?[][] _long20K = null!;
     private object?[][] _wide1250 = null!;
     private object?[][] _wide5K = null!;
+
+    // Populated only when Provider == ProviderKind.DatumFile.
+    private string? _tempDir;
+    private string? _long5KFile;
+    private string? _long20KFile;
+    private string? _wide1250File;
+    private string? _wide5KFile;
 
     [GlobalSetup]
     public void Setup()
@@ -56,12 +84,42 @@ public class PivotBenchmarks
         // Wide-format: one row per group.
         _wide1250 = GenerateWide(rowCount: 1_250);
         _wide5K = GenerateWide(rowCount: 5_000);
+
+        if (Provider == ProviderKind.DatumFile)
+        {
+            _tempDir = Path.Combine(Path.GetTempPath(), $"datum_bench_pivot_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(_tempDir);
+            _long5KFile = DatumFileBenchHelper.WriteRawRowsToDatumFile(
+                _pool, Path.Combine(_tempDir, "long_5k.datum"), _long5K, LongDescriptors);
+            _long20KFile = DatumFileBenchHelper.WriteRawRowsToDatumFile(
+                _pool, Path.Combine(_tempDir, "long_20k.datum"), _long20K, LongDescriptors);
+            _wide1250File = DatumFileBenchHelper.WriteRawRowsToDatumFile(
+                _pool, Path.Combine(_tempDir, "wide_1250.datum"), _wide1250, WideDescriptors);
+            _wide5KFile = DatumFileBenchHelper.WriteRawRowsToDatumFile(
+                _pool, Path.Combine(_tempDir, "wide_5k.datum"), _wide5K, WideDescriptors);
+        }
     }
 
-    private TableCatalog BuildCatalog(object?[][] rows, string[] columns)
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        if (_tempDir is not null && Directory.Exists(_tempDir))
+        {
+            try { Directory.Delete(_tempDir, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    private TableCatalog BuildCatalog(object?[][] rows, string[] columns, string datumFilePath)
     {
         TableCatalog catalog = new(_pool);
-        catalog.Add(new InMemoryTableProvider(_pool, "data", columns, rows));
+        if (Provider == ProviderKind.InMemory)
+        {
+            catalog.Add(new InMemoryTableProvider(_pool, "data", columns, rows));
+        }
+        else
+        {
+            catalog.Add(new TableDescriptor("data", datumFilePath));
+        }
         return catalog;
     }
 
@@ -71,12 +129,12 @@ public class PivotBenchmarks
 
     [Benchmark(Description = "PIVOT explicit IN list, AVG(revenue) (5K rows → 1250 output)")]
     public Task PivotExplicitValues5K() => ExecuteQuery(
-        _long5K, LongColumns,
+        _long5K, LongColumns, _long5KFile!,
         "SELECT * FROM data PIVOT (AVG(revenue) FOR region IN ('north', 'south', 'east', 'west'))");
 
     [Benchmark(Description = "PIVOT explicit IN list, AVG(revenue) (20K rows → 5000 output)")]
     public Task PivotExplicitValues20K() => ExecuteQuery(
-        _long20K, LongColumns,
+        _long20K, LongColumns, _long20KFile!,
         "SELECT * FROM data PIVOT (AVG(revenue) FOR region IN ('north', 'south', 'east', 'west'))");
 
     // -------------------------------------------------------------------------
@@ -85,12 +143,12 @@ public class PivotBenchmarks
 
     [Benchmark(Description = "PIVOT auto-discover, AVG(revenue) (5K rows → 1250 output)")]
     public Task PivotAutoDiscover5K() => ExecuteQuery(
-        _long5K, LongColumns,
+        _long5K, LongColumns, _long5KFile!,
         "SELECT * FROM data PIVOT (AVG(revenue) FOR region)");
 
     [Benchmark(Description = "PIVOT auto-discover, AVG(revenue) (20K rows → 5000 output)")]
     public Task PivotAutoDiscover20K() => ExecuteQuery(
-        _long20K, LongColumns,
+        _long20K, LongColumns, _long20KFile!,
         "SELECT * FROM data PIVOT (AVG(revenue) FOR region)");
 
     // -------------------------------------------------------------------------
@@ -99,7 +157,7 @@ public class PivotBenchmarks
 
     [Benchmark(Description = "PIVOT two aggregates SUM+COUNT (5K rows → 1250 output, 8 value cols)")]
     public Task PivotMultipleAggregates5K() => ExecuteQuery(
-        _long5K, LongColumns,
+        _long5K, LongColumns, _long5KFile!,
         "SELECT * FROM data PIVOT (SUM(revenue), COUNT(revenue) FOR region IN ('north', 'south', 'east', 'west'))");
 
     // -------------------------------------------------------------------------
@@ -108,26 +166,26 @@ public class PivotBenchmarks
 
     [Benchmark(Description = "UNPIVOT 4 columns (1250 wide rows → 5000 output)")]
     public Task UnpivotWide1250() => ExecuteQuery(
-        _wide1250, WideColumns,
+        _wide1250, WideColumns, _wide1250File!,
         "SELECT * FROM data UNPIVOT (revenue FOR region IN (north, south, east, west))");
 
     [Benchmark(Description = "UNPIVOT 4 columns (5000 wide rows → 20K output)")]
     public Task UnpivotWide5K() => ExecuteQuery(
-        _wide5K, WideColumns,
+        _wide5K, WideColumns, _wide5KFile!,
         "SELECT * FROM data UNPIVOT (revenue FOR region IN (north, south, east, west))");
 
     [Benchmark(Description = "UNPIVOT INCLUDE NULLS 4 columns (1250 wide rows)")]
     public Task UnpivotIncludeNulls1250() => ExecuteQuery(
-        _wide1250, WideColumns,
+        _wide1250, WideColumns, _wide1250File!,
         "SELECT * FROM data UNPIVOT INCLUDE NULLS (revenue FOR region IN (north, south, east, west))");
 
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
-    private async Task ExecuteQuery(object?[][] rows, string[] columns, string sql)
+    private async Task ExecuteQuery(object?[][] rows, string[] columns, string datumFilePath, string sql)
     {
-        TableCatalog catalog = BuildCatalog(rows, columns);
+        TableCatalog catalog = BuildCatalog(rows, columns, datumFilePath);
         FunctionRegistry functions = FunctionRegistry.CreateDefault();
         QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, functions);

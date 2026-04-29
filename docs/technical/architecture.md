@@ -35,6 +35,18 @@ SELECT resize(raw_image, 224, 224) FROM (
 WHERE length(caption) > 20
 ```
 
+## Batch-evaluated fast paths
+
+`FilterOperator` and `ProjectOperator` each carry a per-row fallback path plus a per-batch fast path. On the first input batch each operator runs a try-compile step against the batch's schema: if the operator's expression tree fits a v1-supported shape, the compiler returns a batch-shaped evaluator that the operator uses for the rest of the query.
+
+- `FilterOperator` uses `IBatchPredicate` (see `Operators/BatchPredicates/`). The v1 compiler accepts `column OP literal` and `literal OP column` shapes for Float32 / Int32 / Int64 columns with the six standard comparisons. When compile succeeds, predicate evaluation runs as one monomorphic loop over the batch filling a `Span<bool>` mask — no per-row async state machine, no per-row column-name lookup, no `ValueRef` materialization.
+
+- `ProjectOperator` uses `IBatchProjector` (see `Operators/BatchProjections/`). The v1 compiler accepts pure all-`CopyOrdinal` projections — every output column is a direct source-column copy, no `LET`, no `ASSERT`, no expression evaluation. When compile succeeds, projection runs as a tight per-batch loop with source ordinals pre-resolved once.
+
+When the compiler returns `null` — function calls in predicates, computed projections, `LET` bindings, `ASSERT` clauses, any expression kind outside the v1 set — the operator falls back to the existing per-row `ExpressionEvaluator` path. The fallback is bit-for-bit equivalent to the historical behavior; tests assert this by running identical queries through both paths and comparing result sets row-by-row.
+
+The pattern is incremental: extending either operator to handle a new expression shape is a new `IBatchPredicate` / `IBatchProjector` implementation plus an arm in the compiler. The architecture also composes — a future column-vectorized scan would feed naturally into these batch-shaped operators.
+
 ## Projection and predicate pushdown
 
 The query planner analyzes column references in SELECT/WHERE/ON and passes required-column sets down to `ScanOperator`, allowing providers to skip unreferenced columns. WHERE predicates referencing only one table are pushed below JoinOperator.
@@ -107,7 +119,7 @@ DatumIngest/
     DatumIngest.Wasm/        # Blazor WebAssembly host with JSInvokable interop
     DatumIngest.Cli/         # CLI tool (query, explore, stats, schema, index commands)
   tests/
-    DatumIngest.Tests/       # 3,200+ unit tests
+    DatumIngest.Tests/       # Unit test suite
   benchmarks/
     DatumIngest.Benchmarks/  # BenchmarkDotNet performance tests
 ```

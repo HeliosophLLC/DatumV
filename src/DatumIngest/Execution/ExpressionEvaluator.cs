@@ -297,7 +297,17 @@ public sealed partial class ExpressionEvaluator : ILambdaInvoker
     /// <param name="frame">Row + arenas + outer row for this evaluation.</param>
     /// <param name="cancellationToken">Cooperative cancellation token.</param>
     /// <returns>The computed result.</returns>
-    public async ValueTask<DataValue> EvaluateAsync(
+    /// <remarks>
+    /// Hot-path optimisation: split into a non-async outer that handles every
+    /// expression kind that completes synchronously, and an <c>async</c> inner
+    /// (<see cref="EvaluateAsyncSlow"/>) for the kinds that may genuinely await.
+    /// The outer never builds a state machine, so leaf calls
+    /// (<see cref="LiteralExpression"/>, <see cref="ColumnReference"/>) — which
+    /// dominate the per-row predicate path — pay zero async-machinery overhead
+    /// per evaluation. Exception wrapping with source-span context lives in both
+    /// branches so error messages don't degrade for either path.
+    /// </remarks>
+    public ValueTask<DataValue> EvaluateAsync(
         Expression expression, EvaluationFrame frame, CancellationToken cancellationToken = default)
     {
         // Auto-attach this evaluator as the frame's LambdaInvoker if a caller
@@ -313,14 +323,83 @@ public sealed partial class ExpressionEvaluator : ILambdaInvoker
 
         try
         {
-            return expression switch
+            switch (expression)
             {
                 // Hoisted literals: produced by LiteralHoister before execution so the
                 // DataValue is already materialized. Zero-cost read compared to the
                 // switch-on-CLR-type + FromX() path taken by LiteralExpression below.
-                LiteralValueExpression hoisted => hoisted.Value,
-                LiteralExpression literal => EvaluateLiteral(literal, frame),
-                ColumnReference column => EvaluateColumn(column, frame),
+                case LiteralValueExpression hoisted:
+                    return new ValueTask<DataValue>(hoisted.Value);
+                case LiteralExpression literal:
+                    return new ValueTask<DataValue>(EvaluateLiteral(literal, frame));
+                case ColumnReference column:
+                    return new ValueTask<DataValue>(EvaluateColumn(column, frame));
+                case CurrentTimestampExpression ct:
+                    return new ValueTask<DataValue>(EvaluateTemporalConstant(ct));
+                case TypeLiteralExpression typeLiteral:
+                    return new ValueTask<DataValue>(EvaluateTypeLiteral(typeLiteral));
+
+                // Throwing arms — synchronous failures from planner contract violations
+                // or expression kinds that can't lower to DataValue. Throw inline so
+                // they share the source-span wrapping in this method's catch.
+                case WindowFunctionCallExpression window:
+                    throw new InvalidOperationException(
+                        $"Window function '{window.FunctionName}' was not rewritten by the query planner. " +
+                        "Window functions must be used with an OVER clause and are only allowed in SELECT and ORDER BY.");
+                case ScanExpression:
+                    throw new InvalidOperationException(
+                        "SCAN expression was not rewritten by the query planner. " +
+                        "SCAN expressions must appear in SELECT or LET bindings.");
+                case SubqueryExpression:
+                    throw new InvalidOperationException(
+                        "Subquery expression was not rewritten by the query planner.");
+                case InSubqueryExpression:
+                    throw new InvalidOperationException(
+                        "IN (SELECT ...) was not rewritten by the query planner into a semi-join.");
+                case ExistsExpression:
+                    throw new InvalidOperationException(
+                        "[NOT] EXISTS (SELECT ...) was not rewritten by the query planner into a semi-join.");
+                case ParameterExpression parameter:
+                    throw new InvalidOperationException(
+                        $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation.");
+                case LambdaExpression:
+                    throw new InvalidOperationException(
+                        "Lambda expressions cannot be lowered to a DataValue (lambdas carry a "
+                        + "managed-payload closure that only fits ValueRef). Call sites that "
+                        + "consume lambdas must evaluate via EvaluateAsValueRefAsync; this "
+                        + "indicates a code path that expected a non-lambda expression.");
+            }
+        }
+        catch (Exception ex) when (ex is not ExpressionEvaluationException)
+        {
+            SourceSpan? span = expression.TryGetSourceSpan();
+            if (span is not null)
+            {
+                throw new ExpressionEvaluationException(
+                    $"[Line {span.Line}, Col {span.Column}] {ex.Message}", span, ex);
+            }
+
+            throw;
+        }
+
+        // Slow path: expression kinds that may actually await (function calls,
+        // binary/unary ops with arena-backed operands, casts touching sidecars, etc).
+        return EvaluateAsyncSlow(expression, frame, cancellationToken);
+    }
+
+    /// <summary>
+    /// Async slow path for <see cref="EvaluateAsync(Expression, EvaluationFrame, CancellationToken)"/>.
+    /// Handles every expression kind whose handler may genuinely <c>await</c>.
+    /// Synchronous expression kinds are filtered out by the outer entry point
+    /// and never reach here.
+    /// </summary>
+    private async ValueTask<DataValue> EvaluateAsyncSlow(
+        Expression expression, EvaluationFrame frame, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return expression switch
+            {
                 BinaryExpression binary => await EvaluateBinaryAsync(binary, frame, cancellationToken).ConfigureAwait(false),
                 UnaryExpression unary => await EvaluateUnaryAsync(unary, frame, cancellationToken).ConfigureAwait(false),
                 FunctionCallExpression function => await EvaluateFunctionAsync(function, frame, cancellationToken).ConfigureAwait(false),
@@ -332,29 +411,8 @@ public sealed partial class ExpressionEvaluator : ILambdaInvoker
                 AtTimeZoneExpression atz => await EvaluateAtTimeZoneAsync(atz, frame, cancellationToken).ConfigureAwait(false),
                 CaseExpression caseExpr => await EvaluateCaseAsync(caseExpr, frame, cancellationToken).ConfigureAwait(false),
                 LikeExpression like => await EvaluateLikeEscapeAsync(like, frame, cancellationToken).ConfigureAwait(false),
-                WindowFunctionCallExpression window => throw new InvalidOperationException(
-                    $"Window function '{window.FunctionName}' was not rewritten by the query planner. " +
-                    "Window functions must be used with an OVER clause and are only allowed in SELECT and ORDER BY."),
-                ScanExpression => throw new InvalidOperationException(
-                    "SCAN expression was not rewritten by the query planner. " +
-                    "SCAN expressions must appear in SELECT or LET bindings."),
-                SubqueryExpression => throw new InvalidOperationException(
-                    "Subquery expression was not rewritten by the query planner."),
-                InSubqueryExpression => throw new InvalidOperationException(
-                    "IN (SELECT ...) was not rewritten by the query planner into a semi-join."),
-                ExistsExpression => throw new InvalidOperationException(
-                    "[NOT] EXISTS (SELECT ...) was not rewritten by the query planner into a semi-join."),
-                CurrentTimestampExpression ct => EvaluateTemporalConstant(ct),
-                ParameterExpression parameter => throw new InvalidOperationException(
-                    $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation."),
-                LambdaExpression => throw new InvalidOperationException(
-                    "Lambda expressions cannot be lowered to a DataValue (lambdas carry a "
-                    + "managed-payload closure that only fits ValueRef). Call sites that "
-                    + "consume lambdas must evaluate via EvaluateAsValueRefAsync; this "
-                    + "indicates a code path that expected a non-lambda expression."),
                 StructLiteralExpression structLiteral => await EvaluateStructLiteralAsync(structLiteral, frame, cancellationToken).ConfigureAwait(false),
                 IndexAccessExpression indexAccess => await EvaluateIndexAccessAsync(indexAccess, frame, cancellationToken).ConfigureAwait(false),
-                TypeLiteralExpression typeLiteral => EvaluateTypeLiteral(typeLiteral),
                 _ => throw new InvalidOperationException(
                     $"Unsupported expression type: {expression.GetType().Name}.")
             };
@@ -376,11 +434,37 @@ public sealed partial class ExpressionEvaluator : ILambdaInvoker
     /// Evaluates an expression and interprets the result as a boolean (truthy/falsy).
     /// Null is treated as false. Scalar 0 is false; non-zero is true.
     /// </summary>
-    public async ValueTask<bool> EvaluateAsBooleanAsync(
+    /// <remarks>
+    /// Sync-fast-path shape: if the inner <see cref="EvaluateAsValueRefAsync"/>
+    /// completes synchronously (overwhelmingly the case for analytical predicates
+    /// like <c>value &gt; 500</c>), the conversion to <see cref="bool"/> runs
+    /// without allocating a state machine. The async tail is only entered when
+    /// the inner call actually awaits.
+    /// </remarks>
+    public ValueTask<bool> EvaluateAsBooleanAsync(
         Expression expression, EvaluationFrame frame, CancellationToken cancellationToken = default)
     {
-        ValueRef result = await EvaluateAsValueRefAsync(expression, frame, cancellationToken).ConfigureAwait(false);
+        ValueTask<ValueRef> task = EvaluateAsValueRefAsync(expression, frame, cancellationToken);
+        if (task.IsCompletedSuccessfully)
+        {
+            return new ValueTask<bool>(ToBoolean(task.Result));
+        }
+        return AwaitToBooleanAsync(task);
 
+        static async ValueTask<bool> AwaitToBooleanAsync(ValueTask<ValueRef> pending)
+        {
+            ValueRef result = await pending.ConfigureAwait(false);
+            return ToBoolean(result);
+        }
+    }
+
+    /// <summary>
+    /// Pure synchronous boolean coercion. Shared between the fast and slow paths
+    /// of <see cref="EvaluateAsBooleanAsync(Expression, EvaluationFrame, CancellationToken)"/>
+    /// so the conversion logic lives in one place.
+    /// </summary>
+    private static bool ToBoolean(ValueRef result)
+    {
         if (result.IsNull)
         {
             return false;

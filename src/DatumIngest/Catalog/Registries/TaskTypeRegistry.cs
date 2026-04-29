@@ -354,9 +354,9 @@ public static class TaskTypeRegistry
         new("VoiceActivityDetector", TaskFamily.Audio,
             [Scalar(DataKind.Audio)],
             ArrayOf(DataKind.Float32),
-            "Audio → per-frame voice/no-voice probability vector. "
+            "Audio → per-frame P(speech) probability vector. "
             + "Standard preprocessor in front of ASR pipelines — emit one "
-            + "score per fixed-size frame (e.g. 30 ms at 16 kHz)."),
+            + "score per fixed-size frame (e.g. 32 ms at 16 kHz)."),
 
         // ─── video ──────────────────────────────────────────────────────
         new("VideoClassifier", TaskFamily.Video,

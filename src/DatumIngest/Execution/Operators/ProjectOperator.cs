@@ -1,3 +1,4 @@
+using DatumIngest.Execution.Operators.BatchProjections;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -132,6 +133,9 @@ public sealed class ProjectOperator : QueryOperator
 
         ExpressionEvaluator evaluator = context.CreateEvaluator(letBindingExpressions: letBindingExpressions);
         ProjectionSchema? schema = null;
+        ColumnLookup? outputLookup = null;
+        IBatchProjector? batchProjector = null;
+        bool compileAttempted = false;
         Pool pool = context.Pool;
         AssertionDiagnostics? assertionDiagnostics = context.AssertionDiagnostics;
 
@@ -142,51 +146,77 @@ public sealed class ProjectOperator : QueryOperator
         // during the next MoveNextAsync would still have leaked the in-flight outputBatch).
         RowBatch? outputBatch = null;
 
+        // Reused across input batches to hold output batches that filled mid-loop in
+        // the fast path. Cleared after each yield-drain. Capacity 4 covers typical
+        // 1024-in / 1024-out throughputs; the list grows if needed.
+        List<RowBatch> readyBatches = new(4);
+
         try
         {
             await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
                 try
                 {
-                    // Source arena: where the input row's non-inline values live (input batch).
-                    // Target arena: the OUTPUT batch's arena. Projected expression results
-                    // (e.g. blur(image), substr(s, 1, 5)) materialize here so their offsets
-                    // resolve against the same arena consumers see when they read batch.Arena.
-                    // The output batch's lifetime extends until the downstream consumer is done
-                    // with it, which is exactly the lifetime projected values need — using
-                    // context.Store instead would make values outlive the batch they're in but
-                    // would also strand consumers that resolve via batch.Arena (which is what
-                    // FormatValue / GetImageHandle / AsByteSpan do).
-                    IValueStore sourceArena = inputBatch.Arena;
+                    if (inputBatch.Count == 0) continue;
 
-                    for (int index = 0; index < inputBatch.Count; index++)
+                    // First-batch one-time setup: build the schema from the first row,
+                    // try to compile the v1 all-CopyOrdinal batch projector. Falls back
+                    // to per-row ProjectAsync when the projection has LET bindings, ASSERT
+                    // clauses, or any expression-evaluation slot.
+                    if (schema is null)
                     {
-                        Row row = inputBatch[index];
+                        schema = ProjectionSchema.Build(_columns, _letBindings, _assertions, inputBatch[0]);
+                        outputLookup = ProjectionSchema.BuildColumnLookup(schema);
+                    }
+                    if (!compileAttempted)
+                    {
+                        batchProjector = schema!.TryCompileBatchProjector();
+                        compileAttempted = true;
+                    }
 
-                        schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
-                        outputBatch ??= context.RentRowBatch(ProjectionSchema.BuildColumnLookup(schema));
+                    if (batchProjector is not null)
+                    {
+                        // Fast path: pure-copy batch projection. Tight per-batch loop,
+                        // no per-row async state machine. Full output batches detached
+                        // mid-loop land in readyBatches and are yielded after the input
+                        // batch has been returned to the pool.
+                        batchProjector.Project(inputBatch, context, outputLookup!, ref outputBatch, readyBatches);
+                    }
+                    else
+                    {
+                        // Fallback: per-row evaluator path. Identical to pre-batch shape.
+                        // Source arena: where the input row's non-inline values live (input batch).
+                        // Target arena: the OUTPUT batch's arena. Projected expression results
+                        // (e.g. blur(image), substr(s, 1, 5)) materialize here so their offsets
+                        // resolve against the same arena consumers see when they read batch.Arena.
+                        IValueStore sourceArena = inputBatch.Arena;
 
-                        EvaluationFrame frame = new(row, sourceArena, outputBatch.Arena, context, context.OuterRow);
-
-                        DataValue[]? projected = await schema.ProjectAsync(
-                            frame,
-                            evaluator,
-                            pool,
-                            inputBatch.Arena,
-                            outputBatch.Arena,
-                            assertionDiagnostics,
-                            context.CancellationToken).ConfigureAwait(false);
-
-                        if (projected is null)
-                            continue; // Row was skipped due to ASSERT … ON FAIL SKIP
-
-                        outputBatch.Add(projected);
-
-                        if (outputBatch.IsFull)
+                        for (int index = 0; index < inputBatch.Count; index++)
                         {
-                            RowBatch toYield = outputBatch;
-                            outputBatch = null;
-                            yield return toYield;
+                            Row row = inputBatch[index];
+                            outputBatch ??= context.RentRowBatch(outputLookup!);
+
+                            EvaluationFrame frame = new(row, sourceArena, outputBatch.Arena, context, context.OuterRow);
+
+                            DataValue[]? projected = await schema!.ProjectAsync(
+                                frame,
+                                evaluator,
+                                pool,
+                                inputBatch.Arena,
+                                outputBatch.Arena,
+                                assertionDiagnostics,
+                                context.CancellationToken).ConfigureAwait(false);
+
+                            if (projected is null)
+                                continue; // Row was skipped due to ASSERT … ON FAIL SKIP
+
+                            outputBatch.Add(projected);
+
+                            if (outputBatch.IsFull)
+                            {
+                                readyBatches.Add(outputBatch);
+                                outputBatch = null;
+                            }
                         }
                     }
                 }
@@ -194,6 +224,15 @@ public sealed class ProjectOperator : QueryOperator
                 {
                     context.ReturnRowBatch(inputBatch);
                 }
+
+                // Drain any output batches the input produced. Done outside the
+                // try/finally so the input batch is already returned to the pool
+                // before downstream consumers process the output.
+                for (int i = 0; i < readyBatches.Count; i++)
+                {
+                    yield return readyBatches[i];
+                }
+                readyBatches.Clear();
             }
 
             if (outputBatch is not null)
@@ -416,6 +455,49 @@ public sealed class ProjectOperator : QueryOperator
         /// <returns>The column lookup.</returns>
         internal static ColumnLookup BuildColumnLookup(ProjectionSchema schema) =>
             new(schema._names, schema._nameIndex);
+
+        /// <summary>
+        /// Attempts to compile this schema into a batch-shaped projector that
+        /// skips the per-row <see cref="ProjectAsync"/> state machine. v1
+        /// recognises only the all-<c>CopyOrdinal</c> case (no LET bindings,
+        /// no ASSERT clauses, every output column is a direct source-column
+        /// copy). Returns <see langword="null"/> for richer shapes — the
+        /// caller falls back to <see cref="ProjectAsync"/> per row.
+        /// </summary>
+        /// <remarks>
+        /// The compile decision is cheap: walks the slot array once. The
+        /// resulting projector caches the per-column source ordinals so the
+        /// hot loop is a tight nested integer-indexed copy with no schema
+        /// reflection.
+        /// </remarks>
+        internal IBatchProjector? TryCompileBatchProjector()
+        {
+            // LET bindings need per-row augmented evaluation — out of v1 scope.
+            if (_letExpressions is { Length: > 0 })
+            {
+                return null;
+            }
+
+            // ASSERT can skip rows mid-batch and accumulate diagnostics — out of v1 scope.
+            if (_assertions is { Count: > 0 })
+            {
+                return null;
+            }
+
+            // Every slot must be CopyOrdinal. Evaluate slots route through the
+            // expression evaluator, which the v1 batch projector doesn't host.
+            int[] sourceOrdinals = new int[_slots.Length];
+            for (int i = 0; i < _slots.Length; i++)
+            {
+                if (_slots[i].SourceOrdinal < 0)
+                {
+                    return null;
+                }
+                sourceOrdinals[i] = _slots[i].SourceOrdinal;
+            }
+
+            return new CopyOnlyBatchProjector(sourceOrdinals);
+        }
 
         /// <summary>
         /// Projects a source row using the pre-computed schema. When LET bindings

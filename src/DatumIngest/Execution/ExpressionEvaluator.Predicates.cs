@@ -177,24 +177,55 @@ public sealed partial class ExpressionEvaluator
         return DataValue.FromBoolean(inRange);
     }
 
-    private async ValueTask<DataValue> EvaluateIsNullAsync(
-        IsNullExpression isNull, EvaluationFrame frame, CancellationToken cancellationToken) =>
-        ToDataValue(await EvaluateIsNullAsValueRefAsync(isNull, frame, cancellationToken).ConfigureAwait(false), frame);
+    /// <summary>
+    /// DataValue-returning wrapper around <see cref="EvaluateIsNullAsValueRefAsync"/>.
+    /// Sync-fast-path: bypasses state-machine setup when the inner ValueRef path completes synchronously.
+    /// </summary>
+    private ValueTask<DataValue> EvaluateIsNullAsync(
+        IsNullExpression isNull, EvaluationFrame frame, CancellationToken cancellationToken)
+    {
+        ValueTask<ValueRef> task = EvaluateIsNullAsValueRefAsync(isNull, frame, cancellationToken);
+        if (task.IsCompletedSuccessfully)
+        {
+            return new ValueTask<DataValue>(ToDataValue(task.Result, frame));
+        }
+        return AwaitToDataValue(task, frame);
+
+        static async ValueTask<DataValue> AwaitToDataValue(ValueTask<ValueRef> pending, EvaluationFrame frame)
+        {
+            ValueRef result = await pending.ConfigureAwait(false);
+            return ToDataValue(result, frame);
+        }
+    }
 
     /// <summary>
     /// ValueRef-native IS NULL check. Avoids reading the inner expression's
     /// payload from the arena when the predicate only needs a null/non-null bit.
     /// </summary>
-    private async ValueTask<ValueRef> EvaluateIsNullAsValueRefAsync(
+    /// <remarks>
+    /// Sync-fast-path: the result is purely a function of the operand's
+    /// <see cref="ValueRef.IsNull"/> flag, so when the operand evaluation
+    /// completes synchronously the IS NULL test is a single instruction
+    /// with no state machine.
+    /// </remarks>
+    private ValueTask<ValueRef> EvaluateIsNullAsValueRefAsync(
         IsNullExpression isNull, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        ValueRef value = await EvaluateAsValueRefAsync(isNull.Expression, frame, cancellationToken).ConfigureAwait(false);
-        bool result = value.IsNull;
-        if (isNull.Negated)
+        ValueTask<ValueRef> task = EvaluateAsValueRefAsync(isNull.Expression, frame, cancellationToken);
+        if (task.IsCompletedSuccessfully)
         {
-            result = !result;
+            return new ValueTask<ValueRef>(ToIsNullResult(task.Result, isNull.Negated));
         }
-        return ValueRef.FromBoolean(result);
+        return AwaitIsNull(task, isNull.Negated);
+
+        static async ValueTask<ValueRef> AwaitIsNull(ValueTask<ValueRef> pending, bool negated)
+        {
+            ValueRef value = await pending.ConfigureAwait(false);
+            return ToIsNullResult(value, negated);
+        }
+
+        static ValueRef ToIsNullResult(ValueRef value, bool negated) =>
+            ValueRef.FromBoolean(negated ? !value.IsNull : value.IsNull);
     }
 
     private readonly Dictionary<string, TimeZoneInfo> _timeZoneCache = new(StringComparer.OrdinalIgnoreCase);

@@ -13,6 +13,9 @@ docs-site/.sass-cache/
 docs-site/docs/
 benchmark-output.log
 traces/
+# Profile traces produced by ProfileDriver + dotnet-trace.
+*.nettrace
+*.speedscope.json
 .claude/settings.local.json
 .venv/**
 tests/DatumIngest.Tests/TestResults/**

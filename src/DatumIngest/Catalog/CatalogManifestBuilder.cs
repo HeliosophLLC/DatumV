@@ -154,10 +154,16 @@ public static class CatalogManifestBuilder
                 // and surface with Tasks=null — completion falls back to
                 // [Category] rendering for them.
                 IReadOnlyList<string>? tasks = null;
+                string? activeVersion = null;
+                string? latestVersion = null;
+                string? catalogEntryId = null;
                 if (catalog.CatalogVocabulary is { } vocabForRegistered
                     && vocabForRegistered.ByIdentifier.TryGetValue(entry.Value.Name, out ModelLibrary.CatalogVocabularyEntry? vocabRegEntry))
                 {
                     tasks = vocabRegEntry.Owner.Tasks;
+                    activeVersion = pathResolver.GetActiveVersion(vocabRegEntry.Owner.Id);
+                    latestVersion = vocabRegEntry.Owner.Versions[0].Version;
+                    catalogEntryId = vocabRegEntry.Owner.Id;
                 }
                 modelEntries.Add(new ModelEntry
                 {
@@ -170,6 +176,9 @@ public static class CatalogManifestBuilder
                     Parameters = BuildModelParameters(entry.Value),
                     OutputStructFields = structFields,
                     Tasks = tasks,
+                    CatalogEntryId = catalogEntryId,
+                    ActiveVersion = activeVersion,
+                    LatestVersion = latestVersion,
                 });
                 seenIdentifiers.Add(entry.Value.Name);
             }
@@ -193,6 +202,9 @@ public static class CatalogManifestBuilder
                         DisplayName = vocabEntry.Owner.DisplayName,
                         Parameters = Array.Empty<ParameterSignature>(),
                         Tasks = vocabEntry.Owner.Tasks,
+                        CatalogEntryId = vocabEntry.Owner.Id,
+                        ActiveVersion = pathResolver.GetActiveVersion(vocabEntry.Owner.Id),
+                        LatestVersion = vocabEntry.Owner.Versions[0].Version,
                     });
                 }
             }
