@@ -1184,12 +1184,18 @@ public sealed class HoverProvider
     }
 
     // Returns a markdown line like
-    // `*Active: 2026-04-15 · Update to 2026-05-29 available*` when the
-    // schema-qualified call is `models.<name>` and the matching
+    // `*Active: 2026-04-15* · [Update to 2026-05-29 available](command:datum.openModelInTab?"depth-anything-v3-large")`
+    // when the schema-qualified call is `models.<name>` and the matching
     // <see cref="ModelEntry"/> has an active on-disk version that trails
     // its catalog-declared latest. Returns null for any other schema, for
     // engine-only builtins (no catalog ownership, both version fields
     // null), and for installed-and-current entries.
+    //
+    // The link uses the <c>command:</c> URI scheme; Monaco renders it as
+    // clickable only when the hover content is marked
+    // <c>isTrusted: true</c> on the client. The host registers
+    // <c>datum.openModelInTab</c> to focus the Models tab and select
+    // the catalog entry passed as the single string argument.
     private string? TryGetModelDriftLine(string? explicitSchema, string name)
     {
         if (explicitSchema is null) return null;
@@ -1200,7 +1206,18 @@ public sealed class HoverProvider
             if (!string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase)) continue;
             if (entry.ActiveVersion is null || entry.LatestVersion is null) return null;
             if (string.Equals(entry.ActiveVersion, entry.LatestVersion, StringComparison.Ordinal)) return null;
-            return $"*Active: {entry.ActiveVersion} · Update to {entry.LatestVersion} available*";
+
+            string activeLine = $"*Active: {entry.ActiveVersion}*";
+            string updateLabel = $"Update to {entry.LatestVersion} available";
+            if (entry.CatalogEntryId is null)
+            {
+                // No parent catalog entry — the link target is unknown,
+                // so render plain text. Only happens for engine-only
+                // builtins, which can't drift anyway, but defensive.
+                return $"{activeLine} · *{updateLabel}*";
+            }
+            string encodedId = Uri.EscapeDataString($"\"{entry.CatalogEntryId}\"");
+            return $"{activeLine} · [{updateLabel}](command:datum.openModelInTab?{encodedId})";
         }
         return null;
     }

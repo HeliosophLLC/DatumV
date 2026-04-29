@@ -229,6 +229,15 @@ public sealed class ModelEntry
     public IReadOnlyList<string>? Tasks { get; init; }
 
     /// <summary>
+    /// Parent catalog entry's kebab-case id (e.g. <c>"depth-anything-v3-large"</c>),
+    /// or <see langword="null"/> for engine-only builtins that have no
+    /// catalog entry. Used by the hover drift hint to build a
+    /// <c>command:</c> link that opens the Models tab and selects this
+    /// entry on click.
+    /// </summary>
+    public string? CatalogEntryId { get; init; }
+
+    /// <summary>
     /// Version string currently active on disk for the owning catalog
     /// entry (read from <c>&lt;DATUM_MODELS&gt;/&lt;id&gt;/active</c>).
     /// <see langword="null"/> when the entry has never been installed or

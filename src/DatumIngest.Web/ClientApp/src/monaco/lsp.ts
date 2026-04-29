@@ -5,6 +5,8 @@ import type {
   DiagnosticSeverity as ServerDiagnosticSeverity,
 } from '@/api/generated/openapi-client';
 import { RETOKENIZE_DUMMY_LANGUAGE_ID } from './setup';
+import { DOCS_TAB_ID, MODELS_TAB_ID, selectTab } from '@/state/tabs';
+import { setSelectedId } from '@/state/models';
 
 // SQL language wiring against the DatumIngest LSP REST endpoints. Each
 // Monaco provider translates a (model, position) call into a server
@@ -86,8 +88,32 @@ export async function initLsp(): Promise<void> {
 
   registerCompletionProvider();
   registerHoverProvider();
+  registerHoverCommands();
   registerSignatureHelpProvider();
   registerDiagnosticsPump();
+}
+
+// Commands invoked by `command:` links inside trusted hover markdown
+// emitted by the language server. Monaco parses the URI's query string
+// as JSON and passes the result positionally; both commands here take a
+// single string argument (the catalog entry id / documentation section
+// key respectively). Registered once at boot — Monaco's command registry
+// is global, not per-editor.
+function registerHoverCommands(): void {
+  monaco.editor.registerCommand('datum.openModelInTab', (_accessor, id: string) => {
+    if (typeof id !== 'string' || id.length === 0) return;
+    selectTab(MODELS_TAB_ID);
+    setSelectedId(id);
+  });
+
+  // The hover "See more" links the LS appends to function and keyword
+  // hovers. We don't currently jump to the section inside the Docs tab,
+  // so the v1 handler just focuses the tab; future work can route the
+  // sectionKey to a hash + scroll. Registering even the stub keeps the
+  // trusted-markdown link from rendering as a broken click target.
+  monaco.editor.registerCommand('datumingest.openDoc', (_accessor, _sectionKey: string) => {
+    selectTab(DOCS_TAB_ID);
+  });
 }
 
 // ────────── Completion ──────────
@@ -183,7 +209,12 @@ function registerHoverProvider(): void {
           hover.endLine,
           hover.endColumn,
         ),
-        contents: [{ value: hover.contents ?? '', isTrusted: false }],
+        // Trusted so `command:` links emitted by the language server (e.g.
+        // the drift hint's "Update to X available" → `datum.openModelInTab`,
+        // function/keyword hovers' "See more" → `datumingest.openDoc`)
+        // render as clickable instead of being stripped. The LS controls
+        // the markdown; both commands are registered in registerHoverCommands.
+        contents: [{ value: hover.contents ?? '', isTrusted: true }],
       };
     },
   });
