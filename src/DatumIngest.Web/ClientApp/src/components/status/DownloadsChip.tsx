@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
@@ -29,6 +29,23 @@ import {
 // a client-side timer to keep the user informed.
 const STALL_AFTER_MS = 15_000;
 
+// EMA smoothing factor for the rate display. Low alpha = heavy smoothing
+// → the rate readout takes ~10 samples (~10s at 1Hz) to converge but
+// stops jittering by ±20% each tick. ETA derives from the smoothed
+// rate so it stops bouncing for free.
+const RATE_SMOOTHING_ALPHA = 0.25;
+
+function applyEma(prev: number | null, current: number | null): number | null {
+  if (current == null) return prev;
+  if (prev == null) return current;
+  return RATE_SMOOTHING_ALPHA * current + (1 - RATE_SMOOTHING_ALPHA) * prev;
+}
+
+function rawPercentOf(bytesRead: number, bytesTotal: number): number | null {
+  if (bytesTotal <= 0) return null;
+  return Math.min(99, Math.floor((bytesRead / bytesTotal) * 100));
+}
+
 export function DownloadsChip() {
   const { t } = useTranslation('status');
   const snap = useSnapshot(downloadsState);
@@ -55,6 +72,12 @@ export function DownloadsChip() {
     return () => window.clearInterval(id);
   }, [hasActive]);
 
+  // Monotonic clamp for the aggregate percent (kept above the early
+  // return so the hook order stays stable across renders where the chip
+  // goes from visible to hidden). Reset to 0 whenever there are no
+  // healthy active downloads so the next batch starts fresh.
+  const monotonicAggPercentRef = useRef<number>(0);
+
   if (!hasAnything) return null;
 
   const perfNow = performance.now();
@@ -74,8 +97,23 @@ export function DownloadsChip() {
   // Cap at 99% so the chip never reads "100%" while files are still
   // moving — the transition to "Installing" or chip-disappears is the
   // real completion signal.
+  const rawAggPercent = rawPercentOf(bytesRead, bytesTotal);
+  // Apply the monotonic clamp. Percent can otherwise read backwards
+  // when bytesTotalAcrossModel revises upward mid-stream (the server
+  // learns of additional files) or when a second install joins the
+  // in-flight set and dilutes the aggregate before its bytes-read
+  // catches up. The ref itself is declared above the early return so
+  // the hook order stays stable.
+  if (healthyActiveIds.length === 0) {
+    monotonicAggPercentRef.current = 0;
+  } else if (
+    rawAggPercent != null &&
+    rawAggPercent > monotonicAggPercentRef.current
+  ) {
+    monotonicAggPercentRef.current = rawAggPercent;
+  }
   const percent =
-    bytesTotal > 0 ? Math.min(99, Math.floor((bytesRead / bytesTotal) * 100)) : null;
+    rawAggPercent != null ? monotonicAggPercentRef.current : null;
 
   const installingCount =
     new Set([...installingIds, ...venvIds]).size + (snap.pythonHostStep ? 1 : 0);
@@ -153,7 +191,7 @@ function DownloadsPopoverBody({ stalledIds }: { stalledIds: readonly string[] })
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 select-none">
       <div className="text-xs font-medium">{t('downloadsChip.popoverTitle')}</div>
       <ul className="flex flex-col gap-1">
         {rows.map((row) => (
@@ -173,23 +211,37 @@ function DownloadsPopoverBody({ stalledIds }: { stalledIds: readonly string[] })
 
 function ActiveRow({ active }: { active: ActiveDownload }) {
   const { t } = useTranslation('status');
-  const rate = computeRateBytesPerSec(active.samples);
-  const etaSec = computeEtaSeconds(active, rate);
-  const percent =
-    active.bytesTotalAcrossModel > 0
-      ? Math.min(99, Math.floor((active.bytesReadTotal / active.bytesTotalAcrossModel) * 100))
-      : null;
+  const rawRate = computeRateBytesPerSec(active.samples);
+  const rawPercent = rawPercentOf(
+    active.bytesReadTotal,
+    active.bytesTotalAcrossModel,
+  );
+
+  // Per-row stability state. Refs survive across the 1Hz forceRender
+  // ticks and survive useSnapshot mutations, but reset when the row
+  // unmounts (download complete or cancelled). Mutating during render is
+  // intentional — these are pure functions of the latest props, not
+  // independent state we want React to track.
+  const smoothedRateRef = useRef<number | null>(null);
+  smoothedRateRef.current = applyEma(smoothedRateRef.current, rawRate);
+  const monotonicPercentRef = useRef<number>(0);
+  if (rawPercent != null && rawPercent > monotonicPercentRef.current) {
+    monotonicPercentRef.current = rawPercent;
+  }
+  const smoothedRate = smoothedRateRef.current;
+  const percent = rawPercent != null ? monotonicPercentRef.current : null;
+  const etaSec = computeEtaSeconds(active, smoothedRate);
 
   return (
     <div className="flex flex-col gap-0.5 text-xs">
-      <div className="flex items-baseline justify-between font-mono">
+      <div className="flex items-baseline justify-between font-mono tabular-nums">
         <span className="truncate">{active.modelId}</span>
-        <span className="text-muted-foreground shrink-0 pl-2">
+        <span className="text-muted-foreground inline-block w-10 shrink-0 pl-2 text-right">
           {percent != null ? `${percent}%` : t('downloadsChip.rowQueued')}
         </span>
       </div>
       <ProgressBar percent={percent} tone="blue" />
-      <div className="text-muted-foreground flex justify-between gap-2 font-mono text-[10px]">
+      <div className="text-muted-foreground flex justify-between gap-2 font-mono text-[10px] tabular-nums">
         <span className="min-w-0 truncate">
           {active.fileCount > 0 &&
             t('downloadsChip.currentFileLabel', {
@@ -198,11 +250,23 @@ function ActiveRow({ active }: { active: ActiveDownload }) {
             })}
           {active.currentFile ? ` · ${active.currentFile}` : ''}
         </span>
-        <span className="shrink-0">
-          {formatBytes(active.bytesReadTotal)}
-          {active.bytesTotalAcrossModel > 0 && ` / ${formatBytes(active.bytesTotalAcrossModel)}`}
-          {rate != null && ` · ${formatBytes(rate)}/s`}
-          {etaSec != null && ` · ${formatEta(etaSec)}`}
+        {/* Each metric occupies a fixed-width right-aligned slot so the
+            digit-count changing ("1.50 MB" → "12.50 MB") doesn't shove
+            the next column sideways. Widths sized for worst-case
+            "999.9 MB / 999.9 GB", "999.9 MB/s", "99h 59m" at the row's
+            10px mono font. */}
+        <span className="flex shrink-0 items-baseline gap-1">
+          <span className="inline-block w-28 text-right">
+            {formatBytes(active.bytesReadTotal)}
+            {active.bytesTotalAcrossModel > 0 &&
+              ` / ${formatBytes(active.bytesTotalAcrossModel)}`}
+          </span>
+          <span className="inline-block w-20 text-right">
+            {smoothedRate != null ? `· ${formatBytes(smoothedRate)}/s` : ''}
+          </span>
+          <span className="inline-block w-14 text-right">
+            {etaSec != null ? `· ${formatEta(etaSec)}` : ''}
+          </span>
         </span>
       </div>
     </div>
@@ -211,23 +275,28 @@ function ActiveRow({ active }: { active: ActiveDownload }) {
 
 function StalledRow({ active }: { active: ActiveDownload }) {
   const { t } = useTranslation('status');
-  const percent =
-    active.bytesTotalAcrossModel > 0
-      ? Math.min(99, Math.floor((active.bytesReadTotal / active.bytesTotalAcrossModel) * 100))
-      : null;
+  const rawPercent = rawPercentOf(
+    active.bytesReadTotal,
+    active.bytesTotalAcrossModel,
+  );
+  const monotonicPercentRef = useRef<number>(0);
+  if (rawPercent != null && rawPercent > monotonicPercentRef.current) {
+    monotonicPercentRef.current = rawPercent;
+  }
+  const percent = rawPercent != null ? monotonicPercentRef.current : null;
 
   return (
     <div className="flex flex-col gap-1 text-xs">
-      <div className="flex items-baseline justify-between font-mono">
+      <div className="flex items-baseline justify-between font-mono tabular-nums">
         <span className="truncate">{active.modelId}</span>
         <span className="shrink-0 pl-2 text-amber-700 dark:text-amber-500">
           {t('downloadsChip.rowStalled')}
         </span>
       </div>
       <ProgressBar percent={percent} tone="amber" />
-      <div className="text-muted-foreground flex justify-between gap-2 font-mono text-[10px]">
+      <div className="text-muted-foreground flex justify-between gap-2 font-mono text-[10px] tabular-nums">
         <span className="min-w-0 truncate">{t('downloadsChip.rowStalledDetail')}</span>
-        <span className="shrink-0">
+        <span className="inline-block w-28 shrink-0 text-right">
           {formatBytes(active.bytesReadTotal)}
           {active.bytesTotalAcrossModel > 0 && ` / ${formatBytes(active.bytesTotalAcrossModel)}`}
         </span>

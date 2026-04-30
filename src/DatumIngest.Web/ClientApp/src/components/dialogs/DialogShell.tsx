@@ -41,6 +41,19 @@ function parsePreFlightBlock(raw: string | undefined): PreFlightBlock | null {
   }
 }
 
+function parseStringArray(raw: string | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((s) => typeof s === 'string')) {
+      return parsed;
+    }
+  } catch {
+    /* fall through */
+  }
+  return [];
+}
+
 function parseDialogHash(hash: string): ParsedHash | null {
   // hash example: #/dialog/confirmLicense?requestId=...&licenseId=...
   if (!hash.startsWith('#/dialog/')) return null;
@@ -123,7 +136,18 @@ function renderDialogBody({ kind, requestId, params }: ParsedHash): React.ReactN
           </div>
         );
       }
-      return <PreFlightDialog requestId={requestId} block={block} />;
+      // Snapshot of catalog entries already downloading or in their
+      // post-download installSql phase at dialog-open time. main.ts
+      // JSON-encodes non-string payload values into URL params, so
+      // this arrives as a stringified array.
+      const inFlightIds = parseStringArray(params.inFlightIds);
+      return (
+        <PreFlightDialog
+          requestId={requestId}
+          block={block}
+          inFlightIds={inFlightIds}
+        />
+      );
     }
     default:
       return (

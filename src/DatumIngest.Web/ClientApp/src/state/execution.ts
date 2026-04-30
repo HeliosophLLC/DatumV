@@ -1,6 +1,6 @@
 import { proxy } from 'valtio';
 import { postNdjson, postNdjsonMultipart } from './ndjson';
-import { installModel } from './downloads';
+import { downloadsState, installModel } from './downloads';
 import { openDialog } from './dialogs';
 
 // Per-tab execution state. Lives in a side store rather than on the tab
@@ -166,6 +166,19 @@ export type PreFlightReason =
   | 'pinnedVersionNotInstalled'
   | 'pinnedVersionUnknown';
 
+// One license a catalog entry requires the user to accept. Mirrors
+// PreFlightLicenseWire on the server. `accepted` is the acceptance state
+// at the moment the server emitted the event; the UI flips it locally
+// when the user accepts inside the modal so the Install button gates
+// without a re-fetch.
+export interface PreFlightLicense {
+  id: string;
+  title: string;
+  summary: string;
+  requiresAcceptance: boolean;
+  accepted: boolean;
+}
+
 // One catalog-known model reference the user wrote that isn't ready to run.
 // Mirrors PreFlightModelRequirementWire on the server.
 export interface PreFlightModelRequirement {
@@ -181,6 +194,7 @@ export interface PreFlightModelRequirement {
   supersededBy: string | null;
   versionDeprecated: boolean;
   versionDeprecationReason: string | null;
+  licenses: PreFlightLicense[];
 }
 
 // One likely-typo function reference the user wrote.
@@ -442,9 +456,23 @@ async function presentPreFlightDialog(
   // through JSON before handing it across the IPC boundary so the
   // dialog renderer receives a fresh plain payload.
   const cloneable: PreFlightBlock = JSON.parse(JSON.stringify(block));
-  const { result } = openDialog<{ install: boolean }>({
+  // Snapshot of catalog entries already in flight at dialog-open time.
+  // Lets the dialog render a "Downloading…" pill instead of nagging
+  // the user to install a model their previous click already started.
+  // A snapshot (rather than a live SignalR subscription) keeps the
+  // dialog window free of cross-window state wiring — the status-bar
+  // chip already owns live byte/ETA display.
+  const inFlightIds: string[] = [];
+  for (const id of Object.keys(downloadsState.active)) inFlightIds.push(id);
+  for (const id of Object.keys(downloadsState.installing)) {
+    if (!inFlightIds.includes(id)) inFlightIds.push(id);
+  }
+  const { result } = openDialog<{
+    install: boolean;
+    acceptedLicenseIds: string[];
+  }>({
     kind: 'preflightRequired',
-    payload: { block: cloneable },
+    payload: { block: cloneable, inFlightIds },
   });
   const decision = await result;
   // The per-tab block may have been cleared in the meantime (user
@@ -476,6 +504,26 @@ async function presentPreFlightDialog(
  * informationally in the modal; the user installs them from the
  * model card's previous-versions disclosure when that ships.
  */
+/**
+ * Marks `licenseId` as accepted across every model row in the tab's
+ * pre-flight block. Backs the modal's "Accept" affordance — the modal
+ * flips local state after the server's accept call succeeds so the
+ * Install button's gate falls open without a re-emission of the
+ * pre-flight event.
+ */
+export function markPreFlightLicenseAccepted(
+  tabId: string,
+  licenseId: string,
+): void {
+  const exec = executionsState.byTabId[tabId];
+  if (!exec?.preFlight) return;
+  for (const m of exec.preFlight.models) {
+    for (const l of m.licenses) {
+      if (l.id === licenseId) l.accepted = true;
+    }
+  }
+}
+
 export function installPreFlightModels(tabId: string): void {
   const exec = executionsState.byTabId[tabId];
   if (!exec?.preFlight) return;
@@ -484,6 +532,12 @@ export function installPreFlightModels(tabId: string): void {
     if (m.reason !== 'modelNotInstalled') continue;
     if (seen.has(m.catalogEntryId)) continue;
     seen.add(m.catalogEntryId);
+    // Skip entries already in flight — the user can kick off an install
+    // from the Models view (or a sibling pre-flight) before opening this
+    // dialog. Re-issuing installModel would 409 on the server (single-
+    // flight key) and stamp a spurious error on downloadsState.errors.
+    if (downloadsState.active[m.catalogEntryId]) continue;
+    if (downloadsState.installing[m.catalogEntryId]) continue;
     // Fire-and-forget. installModel writes to downloadsState so the
     // status bar / model card pick up progress; failures land on
     // downloadsState.errors for the same surfaces.
@@ -553,6 +607,13 @@ type StreamEvent =
         supersededBy: string | null;
         versionDeprecated: boolean;
         versionDeprecationReason: string | null;
+        licenses: {
+          id: string;
+          title: string;
+          summary: string;
+          requiresAcceptance: boolean;
+          accepted: boolean;
+        }[];
       }[];
       suggestions: { typedName: string; suggestion: string }[];
     };
@@ -892,6 +953,10 @@ function applyEvent(tabId: string, event: StreamEvent): void {
         models: event.models.map((m) => ({
           ...m,
           reason: normalisePreFlightReason(m.reason),
+          // Server omits the field for older clients/standalone hosts —
+          // normalise so render code can always iterate. Defensive copy
+          // each entry too so accept() mutations later stay local.
+          licenses: (m.licenses ?? []).map((l) => ({ ...l })),
         })),
         suggestions: event.suggestions.map((s) => ({ ...s })),
       };

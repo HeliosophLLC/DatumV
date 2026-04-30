@@ -114,7 +114,7 @@ function CalibrationPopoverBody() {
   );
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 select-none">
       <div className="text-xs font-medium">
         {t('calibrationChip.popoverTitle')}
       </div>

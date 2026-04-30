@@ -11,14 +11,16 @@
   "preflight": {
     "title": {
       "install": "Install {count, plural, one {# model} other {# models}} to run this query",
-      "typo": "Check your query"
+      "typo": "Check your query",
+      "allInFlight": "Waiting on downloads"
     },
     "totalSize": "About {size} to download",
     "section": {
       "install": "Will install",
       "pinned": "Pinned version not on disk",
       "unknown": "Pinned version not in catalog",
-      "suggestions": "Did you mean…?"
+      "suggestions": "Did you mean…?",
+      "licenses": "License acceptance required"
     },
     "versionLabel": "version {version}",
     "siblings": "Also registers: {list}",
@@ -29,6 +31,21 @@
     "pinnedHint": "Install this specific version from the model card's previous-versions list.",
     "unknownPinHint": "The catalog has no version matching this pin. Pin to an available version or remove the @… suffix.",
     "install": "{count, plural, one {Install} other {Install #}}",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "ok": "OK",
+    "licenses": {
+      "needsAcceptance": "{count, plural, one {# license needs acceptance before installing.} other {# licenses need acceptance before installing.}}",
+      "review": "Review & accept",
+      "accepted": "Accepted",
+      "informational": "Notice",
+      "installBlocked": "Accept the required licenses to enable Install."
+    },
+    "downloading": {
+      "pill": "Downloading…",
+      "pillWithPercent": "Downloading {percent}%",
+      "installing": "Installing…",
+      "summary": "{count, plural, one {# already downloading} other {# already downloading}}",
+      "allInFlightHint": "All required models are already downloading. Cancel and resubmit when they finish."
+    }
   }
 }

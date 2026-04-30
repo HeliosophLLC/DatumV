@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Text.Json;
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Model;
+using DatumIngest.ModelLibrary;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -34,10 +36,29 @@ namespace DatumIngest.Web.Execution;
 public sealed class QueryStreamService
 {
     private readonly TableCatalog _catalog;
+    private readonly IManifestStore? _manifestStore;
+    private readonly ILicenseAcceptanceService? _licenses;
 
     public QueryStreamService(TableCatalog catalog)
     {
         _catalog = catalog;
+    }
+
+    // Preferred ctor for the web host — wires the manifest + license-
+    // acceptance services so pre-flight events can surface license info
+    // (title/summary/accepted flag) up front, sparing the install modal
+    // from racing 412/license retries after the user clicks Install.
+    // Standalone hosts that construct the service with just the catalog
+    // (CLI, tests) still work; the pre-flight projection then skips
+    // license enrichment and emits empty Licenses arrays.
+    public QueryStreamService(
+        TableCatalog catalog,
+        IManifestStore manifestStore,
+        ILicenseAcceptanceService licenses)
+    {
+        _catalog = catalog;
+        _manifestStore = manifestStore;
+        _licenses = licenses;
     }
 
     /// <summary>
@@ -203,9 +224,10 @@ public sealed class QueryStreamService
         }
         catch (PreFlightRequiredException ex)
         {
+            PreFlightRequiredEvent payload = await BuildPreFlightEventAsync(ex, ct).ConfigureAwait(false);
             await WriteEventAsync(
                 output, jsonOptions, writeLock,
-                ToPreFlightEvent(ex), ct).ConfigureAwait(false);
+                payload, ct).ConfigureAwait(false);
             errorEmitted = true;
         }
         catch (Exception ex)
@@ -435,11 +457,62 @@ public sealed class QueryStreamService
     // client's JSON.parse rejects with "Unexpected non-whitespace
     // character after JSON". Lock is null when tracing is off (only
     // the BatchExecutor-serialised path writes, so no contention).
-    private static PreFlightRequiredEvent ToPreFlightEvent(PreFlightRequiredException ex)
+    private async Task<PreFlightRequiredEvent> BuildPreFlightEventAsync(
+        PreFlightRequiredException ex, CancellationToken ct)
     {
+        IReadOnlyDictionary<string, CatalogLicense> licenseDict =
+            _manifestStore?.Manifest.Licenses
+                ?? (IReadOnlyDictionary<string, CatalogLicense>)new Dictionary<string, CatalogLicense>();
+
+        // Pre-resolve acceptance state for the union of license ids
+        // referenced across all model requirements. Avoids re-querying the
+        // acceptance store per-row when the same license id appears on
+        // multiple models in the same batch.
+        Dictionary<string, bool> acceptedById = new(StringComparer.Ordinal);
+        if (_licenses is not null)
+        {
+            HashSet<string> seen = new(StringComparer.Ordinal);
+            foreach (PreFlightModelRequirement r in ex.Requirements.Models)
+            {
+                foreach (string id in r.LicenseIds)
+                {
+                    if (seen.Add(id))
+                    {
+                        acceptedById[id] = await _licenses.IsAcceptedAsync(id, ct).ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+
         List<PreFlightModelRequirementWire> models = new(ex.Requirements.Models.Count);
         foreach (PreFlightModelRequirement r in ex.Requirements.Models)
         {
+            List<PreFlightLicenseWire> licenses = new(r.LicenseIds.Count);
+            foreach (string id in r.LicenseIds)
+            {
+                if (!licenseDict.TryGetValue(id, out CatalogLicense? meta))
+                {
+                    // Unknown id slips through with sentinel metadata so the
+                    // UI still renders a badge and the user has something
+                    // to click on; the install-time gate would still catch
+                    // it as an error if the user proceeded.
+                    licenses.Add(new PreFlightLicenseWire(
+                        Id: id,
+                        Title: id,
+                        Summary: string.Empty,
+                        RequiresAcceptance: true,
+                        Accepted: false));
+                    continue;
+                }
+                bool accepted = acceptedById.TryGetValue(id, out bool a) && a;
+                licenses.Add(new PreFlightLicenseWire(
+                    Id: id,
+                    Title: meta.Title,
+                    Summary: meta.Summary,
+                    RequiresAcceptance: meta.RequiresAcceptance,
+                    Accepted: accepted));
+            }
+
             models.Add(new PreFlightModelRequirementWire(
                 r.TypedReference,
                 r.Identifier,
@@ -452,7 +525,8 @@ public sealed class QueryStreamService
                 r.EntryDeprecated,
                 r.SupersededBy,
                 r.VersionDeprecated,
-                r.VersionDeprecationReason));
+                r.VersionDeprecationReason,
+                licenses));
         }
         List<PreFlightSuggestionWire> suggestions = new(ex.Requirements.Suggestions.Count);
         foreach (PreFlightSuggestion s in ex.Requirements.Suggestions)

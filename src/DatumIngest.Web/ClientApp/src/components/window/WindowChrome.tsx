@@ -32,7 +32,7 @@ export function WindowChrome({
   dialog?: boolean;
 }) {
   return (
-    <div className="bg-background text-foreground border-border flex h-screen flex-col border">
+    <div className="bg-background text-foreground border-border flex h-screen flex-col border select-none">
       <TitleBar dialog={dialog} />
       <div className="flex flex-1 overflow-hidden">{children}</div>
       {!dialog && (

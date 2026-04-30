@@ -174,12 +174,12 @@ function TracePopoverBody({ tabId, trace }: TracePopoverBodyProps) {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="text-sm font-medium">{t('tracePopoverTitle')}</div>
+      <div className="text-sm font-medium select-none">{t('tracePopoverTitle')}</div>
 
       {/* Scope toggles. The Operators toggle here mirrors the status-
           bar checkbox; both write to the same state. Scalars-on is the
           much-larger trace so we keep it opt-in inside the popover. */}
-      <div className="flex flex-row gap-3">
+      <div className="flex flex-row gap-3 select-none">
         <label className="flex cursor-pointer items-center gap-1.5 text-xs">
           <input
             type="checkbox"
@@ -251,7 +251,7 @@ function TracePopoverBody({ tabId, trace }: TracePopoverBodyProps) {
         )}
       </div>
 
-      <div className="text-muted-foreground flex flex-row items-center gap-3 text-[11px]">
+      <div className="text-muted-foreground flex flex-row items-center gap-3 text-[11px] select-none">
         <span>{t('traceFooter', { count: trace.events.length })}</span>
         <button
           type="button"

@@ -353,6 +353,47 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
     }
 
     [Fact]
+    public void BareReference_PopulatesLicenseIds()
+    {
+        // Hand-rolled entry declaring two license ids. The walker should
+        // surface both on the emitted requirement so the install modal
+        // can prompt acceptance up front instead of letting per-install
+        // 412 retries race to open separate dialogs.
+        CatalogVersion v = new(
+            Version: "2026-05-29",
+            Sources: [new HuggingFaceSource("repo", "main", [])],
+            InstallSql: "sql/x.sql",
+            Models: [new CatalogVersionModel("foo", null)]);
+        CatalogModel entry = new(
+            Id: "foo-entry",
+            DisplayName: "Foo",
+            Summary: "Test entry.",
+            Description: "Test.",
+            Tasks: ["TextEmbedder"],
+            Tags: [],
+            LicenseIds: ["openrail-pp", "stability-ai-community"],
+            Attributions: [],
+            Hardware: new CatalogHardware(MinRamMb: 0, MinVramMb: 0, Preferred: "cpu"),
+            Versions: [v],
+            ApproxSizeMb: 42);
+        CatalogManifest manifest = new(
+            SchemaVersion: 2,
+            Licenses: new Dictionary<string, CatalogLicense>(),
+            Tiers: new CatalogTiers([], []),
+            Models: [entry]);
+        ICatalogVocabulary vocab = new CatalogVocabulary(manifest);
+        FunctionRegistry functions = new();
+
+        QueryExpression q = Parse("SELECT models.foo(x)");
+        PreFlightRequirements result = PreFlightWalker.Walk(q, models: null, vocab, functions);
+
+        PreFlightModelRequirement req = Assert.Single(result.Models);
+        Assert.Equal(2, req.LicenseIds.Count);
+        Assert.Contains("openrail-pp", req.LicenseIds);
+        Assert.Contains("stability-ai-community", req.LicenseIds);
+    }
+
+    [Fact]
     public void Vocabulary_ByPinnedAs_RespectsExplicitOverride()
     {
         CatalogManifest manifest = BuildManifestWithEntry(

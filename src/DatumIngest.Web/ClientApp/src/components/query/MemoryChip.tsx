@@ -168,7 +168,7 @@ function MemoryPopoverBody({ profile }: MemoryPopoverBodyProps) {
   const totalElapsedMs = profile.latest.elapsedMs;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 select-none">
       <div className="text-xs font-medium">{t('memoryPopoverTitle')}</div>
 
       <div className="flex flex-col gap-0.5">

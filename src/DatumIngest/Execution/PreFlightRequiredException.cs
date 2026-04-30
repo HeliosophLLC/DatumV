@@ -102,7 +102,15 @@ public sealed record PreFlightModelRequirement(
     bool EntryDeprecated,
     string? SupersededBy,
     bool VersionDeprecated,
-    string? VersionDeprecationReason);
+    string? VersionDeprecationReason,
+    // License ids the user must accept before the catalog entry can be
+    // installed. Empty for entries with no licenseIds or whose licenses
+    // all carry <c>requiresAcceptance=false</c>. Mirrors
+    // <see cref="DatumIngest.ModelLibrary.CatalogModel.LicenseIds"/>;
+    // pre-flight surfaces them so the install modal can prompt acceptance
+    // up front instead of letting the install-time 412 path open separate
+    // dialogs after the user clicked Install.
+    IReadOnlyList<string> LicenseIds);
 
 /// <summary>
 /// One likely-typo function reference the user wrote. The UI shows it as

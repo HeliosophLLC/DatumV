@@ -46,7 +46,23 @@ internal sealed record PreFlightModelRequirementWire(
     bool EntryDeprecated,
     string? SupersededBy,
     bool VersionDeprecated,
-    string? VersionDeprecationReason);
+    string? VersionDeprecationReason,
+    IReadOnlyList<PreFlightLicenseWire> Licenses);
+
+// One license a catalog entry requires the user to accept before
+// install. <c>Accepted</c> is the server-known acceptance state at
+// the moment of pre-flight emission — the client uses it to decide
+// whether to render the row as already-accepted vs needing a click,
+// without having to issue a separate `/licenses/accepted` request.
+// <c>RequiresAcceptance</c> mirrors the catalog's per-license flag; a
+// row with `requiresAcceptance=false` is informational only (no
+// gate, no Accept button — just a badge).
+internal sealed record PreFlightLicenseWire(
+    string Id,
+    string Title,
+    string Summary,
+    bool RequiresAcceptance,
+    bool Accepted);
 
 internal sealed record PreFlightSuggestionWire(string TypedName, string Suggestion);
 

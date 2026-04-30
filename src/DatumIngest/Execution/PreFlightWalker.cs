@@ -428,7 +428,8 @@ internal static class PreFlightWalker
                 EntryDeprecated: owner.Deprecated,
                 SupersededBy: owner.SupersededBy,
                 VersionDeprecated: recommended.Version.Deprecated,
-                VersionDeprecationReason: recommended.Version.DeprecationReason));
+                VersionDeprecationReason: recommended.Version.DeprecationReason,
+                LicenseIds: owner.LicenseIds));
         }
 
         private void EmitPinned(string typed, string bareName)
@@ -452,7 +453,8 @@ internal static class PreFlightWalker
                     EntryDeprecated: pinEntry.Owner.Deprecated,
                     SupersededBy: pinEntry.Owner.SupersededBy,
                     VersionDeprecated: vv.Version.Deprecated,
-                    VersionDeprecationReason: vv.Version.DeprecationReason));
+                    VersionDeprecationReason: vv.Version.DeprecationReason,
+                    LicenseIds: pinEntry.Owner.LicenseIds));
                 return;
             }
 
@@ -488,7 +490,8 @@ internal static class PreFlightWalker
                     EntryDeprecated: bareEntry.Owner.Deprecated,
                     SupersededBy: bareEntry.Owner.SupersededBy,
                     VersionDeprecated: false,
-                    VersionDeprecationReason: null));
+                    VersionDeprecationReason: null,
+                    LicenseIds: bareEntry.Owner.LicenseIds));
                 return;
             }
 

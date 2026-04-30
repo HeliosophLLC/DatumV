@@ -89,7 +89,7 @@ function ResidencyPopoverBody() {
 
   if (entries.length === 0) {
     return (
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 select-none">
         <div className="text-xs font-medium">
           {t('residencyChip.popoverTitle')}
         </div>
@@ -101,7 +101,7 @@ function ResidencyPopoverBody() {
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 select-none">
       <div className="text-xs font-medium">
         {t('residencyChip.popoverTitle')}
       </div>
