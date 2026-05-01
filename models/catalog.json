@@ -111,6 +111,14 @@
       "summary": "Stability AI variant of OpenRAIL-M for SDXL. Same use-based restrictions as OpenRAIL-M with tightened attribution clauses. Used by SDXL base and SDXL fine-tunes.",
       "requiresAcceptance": true
     },
+    "stability-ai-community": {
+      "title": "Stability AI Community License",
+      "spdx": "Stability-AI-Community",
+      "canonicalUrl": "https://stability.ai/community-license-agreement",
+      "textFile": "licenses/stability-ai-community.md",
+      "summary": "Source-available license from Stability AI. Free for research, individual use, and commercial use BELOW $1M annual revenue (above requires a Stability AI Enterprise License). Requires attribution and propagation of Stability's Acceptable Use Policy. Used by SD Turbo, SDXL Turbo, Stable Diffusion 3, and Stable Cascade.",
+      "requiresAcceptance": true
+    },
     "llama-3.1-community": {
       "title": "Llama 3.1 Community License",
       "spdx": "Llama-3.1-Community",
@@ -3342,6 +3350,12 @@
                 "**/*"
               ]
             }
+          ],
+          "installSql": "sql/absolute-reality-hyper/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "absolute_reality_hyper"
+            }
           ]
         }
       ],
@@ -3386,6 +3400,12 @@
               "include": [
                 "**/*"
               ]
+            }
+          ],
+          "installSql": "sql/dreamshaper-hyper/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "dreamshaper_hyper"
             }
           ]
         }
@@ -3432,6 +3452,12 @@
                 "**/*"
               ]
             }
+          ],
+          "installSql": "sql/epicrealism-hyper/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "epicrealism_hyper"
+            }
           ]
         }
       ],
@@ -3477,6 +3503,12 @@
                 "**/*"
               ]
             }
+          ],
+          "installSql": "sql/mo-di-hyper/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "mo_di_hyper"
+            }
           ]
         }
       ],
@@ -3520,6 +3552,12 @@
               "include": [
                 "**/*"
               ]
+            }
+          ],
+          "installSql": "sql/openjourney-hyper/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "openjourney_hyper"
             }
           ]
         }
@@ -3567,6 +3605,12 @@
                 "**/*"
               ]
             }
+          ],
+          "installSql": "sql/realistic-vision-hyper/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "realistic_vision_hyper"
+            }
           ]
         }
       ],
@@ -3611,6 +3655,110 @@
               "include": [
                 "**/*"
               ]
+            }
+          ],
+          "installSql": "sql/juggernaut-xl-lightning/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "juggernaut_xl_lightning"
+            }
+          ]
+        }
+      ],
+      "approxSizeMb": 13312
+    },
+    {
+      "id": "sd-turbo",
+      "displayName": "SD Turbo (1-4 step)",
+      "summary": "Stability AI's distilled SD 2.1 — 512x512 text-to-image in just 1-4 steps. The reference small-and-fast diffusion model: faster than the Hyper variants, broadly capable, no fine-tune bias.",
+      "description": "Stability AI's Adversarial Diffusion Distillation (ADD) of Stable Diffusion 2.1. Single CLIP-H text encoder (1024-dim), 512×512 latent decode, designed for 1-step inference with 4 steps as the quality sweet spot. Pick over the SD 1.5 Hyper variants when you want the canonical Stability baseline rather than a fine-tune; pick over SDXL Turbo when 512×512 is enough and you want roughly half the VRAM footprint. Subject to the Stability AI Community License — free for individuals and commercial use below $1M annual revenue.",
+      "tasks": [
+        "TextToImage"
+      ],
+      "tags": [
+        "text-to-image",
+        "sd-2.1",
+        "turbo",
+        "distilled",
+        "stability-ai"
+      ],
+      "licenseIds": [
+        "stability-ai-community"
+      ],
+      "attributions": [
+        "Stability AI — SD Turbo (Sauer, Lorenz, Blattmann, Rombach, 2023). ADD distillation of Stable Diffusion 2.1."
+      ],
+      "hardware": {
+        "minRamMb": 2048,
+        "minVramMb": 4096,
+        "preferred": "cuda"
+      },
+      "versions": [
+        {
+          "version": "2026-05-29",
+          "sources": [
+            {
+              "type": "huggingface",
+              "repo": "Heliosoph/sd-turbo-onnx",
+              "revision": "611cbf7fa293601889e84fdd2e4177bc7f4b9fab",
+              "include": [
+                "**/*"
+              ]
+            }
+          ],
+          "installSql": "sql/sd-turbo/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "sd_turbo"
+            }
+          ]
+        }
+      ],
+      "approxSizeMb": 2500
+    },
+    {
+      "id": "sdxl-turbo",
+      "displayName": "SDXL Turbo (1-4 step)",
+      "summary": "Stability AI's distilled SDXL — 512×512 text-to-image in just 1-4 steps with SDXL's stronger prompt adherence and aesthetic baseline. Heavier than SD Turbo; lighter than full SDXL.",
+      "description": "Stability AI's Adversarial Diffusion Distillation (ADD) of SDXL base. Dual text encoders (CLIP-L 768 + OpenCLIP-G 1280, combined to 2048), 512×512 latent decode (not the 1024 of full SDXL), 1-4 step distillation. Pick over SD Turbo when prompt adherence + compositional quality matter more than throughput; pick over JuggernautXL Lightning when you want the Stability baseline rather than a community fine-tune, and 512×512 is enough output size. Subject to the Stability AI Community License — same $1M-revenue commercial threshold as SD Turbo.",
+      "tasks": [
+        "TextToImage"
+      ],
+      "tags": [
+        "text-to-image",
+        "sdxl",
+        "turbo",
+        "distilled",
+        "stability-ai"
+      ],
+      "licenseIds": [
+        "stability-ai-community"
+      ],
+      "attributions": [
+        "Stability AI — SDXL Turbo (Sauer, Lorenz, Blattmann, Rombach, 2023). ADD distillation of Stable Diffusion XL."
+      ],
+      "hardware": {
+        "minRamMb": 4096,
+        "minVramMb": 8192,
+        "preferred": "cuda"
+      },
+      "versions": [
+        {
+          "version": "2026-05-29",
+          "sources": [
+            {
+              "type": "huggingface",
+              "repo": "Heliosoph/sdxl-turbo-onnx",
+              "revision": "b5182c3d2301755eef59dae6d32d8521f8a6081a",
+              "include": [
+                "**/*"
+              ]
+            }
+          ],
+          "installSql": "sql/sdxl-turbo/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "sdxl_turbo"
             }
           ]
         }

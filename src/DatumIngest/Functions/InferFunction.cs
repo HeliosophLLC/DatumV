@@ -945,18 +945,41 @@ public sealed class InferFunction : IFunction, IScalarFunction
                     int shapeIdx = shapesDesc.FindFieldIndex(inputSpec.Name);
                     if (shapeIdx < 0)
                     {
-                        // Rank-0 (scalar) inputs have an unambiguous shape `[]`,
-                        // so an omitted shape entry is fine — SQL has no clean
-                        // empty-array literal anyway. Any other missing entry
-                        // is still a real authoring error.
-                        if (inputSpec.Shape.Count != 0)
+                        // No shape entry for this input. Three cases:
+                        //   1. Rank-0 spec — unambiguously [].
+                        //   2. Spec has 0 or 1 dynamic dims — ResolveShape
+                        //      inside AddInputTensor can recover the shape
+                        //      from the value's element count alone. Covers
+                        //      SDXL's [?]-shaped timestep (dynamic batch +
+                        //      scalar value → [1]) and any other side input
+                        //      whose missing dim is determined by length.
+                        //   3. Spec has 2+ dynamic dims — actually ambiguous;
+                        //      throw with the field list.
+                        if (inputSpec.Shape.Count == 0)
                         {
-                            throw new InvalidOperationException(
-                                $"Model '{modelName}': multi-input infer() shapes struct has no field "
-                                + $"matching session input '{inputSpec.Name}'. Available fields: "
-                                + $"{string.Join(", ", shapesDesc.Fields!.Select(f => f.Name))}.");
+                            explicitShape = [];
                         }
-                        explicitShape = [];
+                        else
+                        {
+                            int dynamicCount = 0;
+                            for (int d = 0; d < inputSpec.Shape.Count; d++)
+                            {
+                                if (inputSpec.Shape[d] is null) dynamicCount++;
+                            }
+                            if (dynamicCount >= 2)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Model '{modelName}': multi-input infer() shapes struct has no field "
+                                    + $"matching session input '{inputSpec.Name}' (which has {dynamicCount} dynamic dims "
+                                    + $"[{string.Join(", ", inputSpec.Shape.Select(d => d?.ToString() ?? "?"))}]"
+                                    + $" requiring an explicit shape). Available fields: "
+                                    + $"{string.Join(", ", shapesDesc.Fields!.Select(f => f.Name))}.");
+                            }
+                            // 0 or 1 dynamic dims — leave explicitShape null so
+                            // AddInputTensor's ResolveShape consumes the spec
+                            // and absorbs the element count into the lone
+                            // dynamic dim (if any).
+                        }
                     }
                     else
                     {
@@ -1118,12 +1141,34 @@ public sealed class InferFunction : IFunction, IScalarFunction
         }
     }
 
+    /// <summary>
+    /// Marshals an Int32 or Int64 source into an Int64 input tensor.
+    /// Int32→Int64 is always safe to widen; tokenizer builtins return
+    /// Int64[] by convention but procedural-built arrays (array_repeat,
+    /// element arithmetic) often land as Int32[].
+    /// </summary>
     private static void AddInt64Tensor(
         TensorBag bag, TensorSpec spec, ValueRef arg, string modelName, int[]? explicitShape)
     {
         if (arg.IsArray)
         {
-            long[] data = ExtractPrimitiveArray<long>(arg, DataKind.Int64, modelName);
+            long[] data;
+            if (arg.ArrayElementKind == DataKind.Int64)
+            {
+                data = ExtractPrimitiveArray<long>(arg, DataKind.Int64, modelName);
+            }
+            else if (arg.ArrayElementKind == DataKind.Int32)
+            {
+                int[] source = ExtractPrimitiveArray<int>(arg, DataKind.Int32, modelName);
+                data = new long[source.Length];
+                for (int i = 0; i < source.Length; i++) data[i] = source[i];
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer() expected an Int32 or Int64 array "
+                    + $"for Int64 input '{spec.Name}', got {arg.ArrayElementKind}[].");
+            }
             int[] shape = explicitShape ?? ResolveShape(spec, data.Length);
             ValidateShapeMatchesElements(shape, data.Length, modelName, "Int64");
             bag.Add<long>(spec.Name, DataKind.Int64, shape, data);
@@ -1141,12 +1186,46 @@ public sealed class InferFunction : IFunction, IScalarFunction
         }
     }
 
+    /// <summary>
+    /// Marshals an Int32 or Int64 source into an Int32 input tensor. The
+    /// tokenizer builtins return Int64[] (the SQL canonical for token ids),
+    /// but CLIP / SAM / many image-condition exports declare Int32 input —
+    /// narrow per-element with an overflow check so the body doesn't need
+    /// a manual CAST(... AS Int32[]).
+    /// </summary>
     private static void AddInt32Tensor(
         TensorBag bag, TensorSpec spec, ValueRef arg, string modelName, int[]? explicitShape)
     {
         if (arg.IsArray)
         {
-            int[] data = ExtractPrimitiveArray<int>(arg, DataKind.Int32, modelName);
+            int[] data;
+            if (arg.ArrayElementKind == DataKind.Int32)
+            {
+                data = ExtractPrimitiveArray<int>(arg, DataKind.Int32, modelName);
+            }
+            else if (arg.ArrayElementKind == DataKind.Int64)
+            {
+                long[] source = ExtractPrimitiveArray<long>(arg, DataKind.Int64, modelName);
+                data = new int[source.Length];
+                for (int i = 0; i < source.Length; i++)
+                {
+                    long v = source[i];
+                    if (v < int.MinValue || v > int.MaxValue)
+                    {
+                        throw new InvalidOperationException(
+                            $"Model '{modelName}': infer() narrowing Int64 array to Int32 input "
+                            + $"'{spec.Name}' overflowed at element [{i}] (value {v} outside "
+                            + $"[{int.MinValue}, {int.MaxValue}]).");
+                    }
+                    data[i] = (int)v;
+                }
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}': infer() expected an Int32 or Int64 array "
+                    + $"for Int32 input '{spec.Name}', got {arg.ArrayElementKind}[].");
+            }
             int[] shape = explicitShape ?? ResolveShape(spec, data.Length);
             ValidateShapeMatchesElements(shape, data.Length, modelName, "Int32");
             bag.Add<int>(spec.Name, DataKind.Int32, shape, data);
@@ -1527,6 +1606,46 @@ public sealed class InferOutputsFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
     [
+        // Named-session forms (multi-session bundles) — mirror the four
+        // variants on InferFunction. The shared DispatchAndReadAsync core
+        // routes a String first arg through frame.CurrentModel.BoundSessions
+        // by alias regardless of which surface called it.
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("session", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("inputs",  DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("shapes",  DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Scalar),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("session", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("value",   DataKindMatcher.Any),
+                new ParameterSpec("shape",   DataKindMatcher.Family(DataKindFamily.IntegerFamily), IsArray: ArrayMatch.Array),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("session", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("inputs",  DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Scalar),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("session", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("value",   DataKindMatcher.Any),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
+
+        // Implicit-"default" forms (legacy single-session).
         new FunctionSignatureVariant(
             Parameters:
             [

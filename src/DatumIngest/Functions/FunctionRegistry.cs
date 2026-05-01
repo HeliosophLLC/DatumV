@@ -963,10 +963,22 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Tokenization.TokenizerEncodeBpeFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerEncodeBertFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerEncodeBertPairFunction>("tokenizer");
+        registry.RegisterScalar<Tokenization.TokenizerEncodeClipFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerEncodeRobertaFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerDecodeFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerDecodeBpeFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerByteLevelDecodeFunction>("tokenizer");
+
+        // Diffusion math primitives — Box-Muller noise, SD-Turbo / Hyper-SD /
+        // Lightning schedule, element-wise array math used in the Euler update
+        // and fp16-UNet clamping, and per-token hidden-dim concat for SDXL's
+        // dual text encoders. Used by the SQL-defined SD-family model bodies.
+        registry.RegisterScalar<Scalar.Diffusion.SampleNormalFunction>();
+        registry.RegisterScalar<Scalar.Diffusion.SdTurboScheduleFunction>();
+        registry.RegisterScalar<Scalar.Diffusion.ArrayAxpyFunction>();
+        registry.RegisterScalar<Scalar.Diffusion.ArrayScaleFunction>();
+        registry.RegisterScalar<Scalar.Diffusion.ArrayClampFunction>();
+        registry.RegisterScalar<Scalar.Diffusion.ArrayConcatLastDimFunction>();
 
         // Temporal — current time, date/time arithmetic, extraction.
         registry.RegisterScalar<Scalar.Temporal.NowFunction>();

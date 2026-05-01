@@ -691,6 +691,54 @@
       "licenseFiles": [
         { "name": "LICENSE", "source": "https://opensource.org/license/mit", "notes": "Use canonical MIT template — Stability didn't ship a LICENSE file at the upstream repo, just the `license: mit` declaration in the model card YAML. Author the LICENSE locally with `Copyright (c) 2024 Stability AI and Tripo AI / VAST-AI-Research` as the holders before upload." }
       ]
+    },
+    {
+      "repoSuffix": "sd-turbo-onnx",
+      "sourceFolder": "${DATUM_MODELS}/sd-turbo-onnx",
+      "expectedSizeMb": 2500,
+      "exportedBy": "scripts/export-sd-turbo.ps1 (TBD — clone optimum's SD ONNX export pattern; same flow as the SD 1.5 Hyper variants minus the Hyper-SD LoRA fuse step)",
+      "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
+      "provenance": {
+        "baseModel": "stabilityai/sd-turbo (Adversarial Diffusion Distillation of Stable Diffusion 2.1)",
+        "exportToolchain": "optimum 1.24 + diffusers 0.31 + torch 2.4 (cu124) — same toolchain as the SD 1.5 Hyper variants",
+        "precision": "fp32 (also produce fp16 sibling by passing -Fp16, matching the Hyper variants' export-script convention)",
+        "schedulerHint": "ADD: 1-4 steps (1 = design point, 4 = quality sweet spot), CFG=1, epsilon prediction",
+        "notes": "SD 2.1 architecture: single OpenCLIP-H text encoder (1024-dim embeddings, NOT the 768 of SD 1.5). UNet's encoder_hidden_states dim must match (verified in models/sql/sd-turbo/2026-05-29.sql)."
+      },
+      "license": {
+        "spdx": "Stability-AI-Community",
+        "url": "https://huggingface.co/stabilityai/sd-turbo/blob/main/LICENSE.md",
+        "confidence": "high",
+        "requiresAcceptance": true,
+        "notes": "Stability AI Community License: free for research, individuals, and commercial use BELOW $1M annual revenue. Above the threshold requires a Stability AI Enterprise License. Must propagate Stability's Acceptable Use Policy. Mirror the upstream LICENSE.md verbatim + include a NOTICE.md flagging the revenue threshold prominently."
+      },
+      "licenseFiles": [
+        { "name": "LICENSE.md", "source": "https://huggingface.co/stabilityai/sd-turbo/raw/main/LICENSE.md" }
+      ]
+    },
+    {
+      "repoSuffix": "sdxl-turbo-onnx",
+      "sourceFolder": "${DATUM_MODELS}/sdxl-turbo-onnx",
+      "expectedSizeMb": 13312,
+      "exportedBy": "scripts/export-sdxl-turbo.ps1 (TBD — clone optimum's SDXL ONNX export pattern; same flow as juggernaut-xl-lightning minus the Lightning LoRA fuse step)",
+      "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "text_encoder_2/", "tokenizer/", "tokenizer_2/", "unet/", "vae_decoder/", "vae_encoder/"],
+      "provenance": {
+        "baseModel": "stabilityai/sdxl-turbo (Adversarial Diffusion Distillation of Stable Diffusion XL base)",
+        "exportToolchain": "optimum 1.24 + diffusers 0.31 + torch 2.4 (cu124) — same toolchain as juggernaut-xl-lightning",
+        "precision": "fp32. The optimum 1.24 / torch 2.4 / opset-14 fp16 path produces a numerically broken UNet for SDXL-class models (same issue noted on juggernaut-xl-lightning); revisit fp16 when a confirmed working toolchain exists.",
+        "schedulerHint": "ADD: 1-4 steps (1 = design point, 4 = quality sweet spot), CFG=1, epsilon prediction. 512×512 target (NOT 1024 like full SDXL).",
+        "notes": "SDXL architecture: dual text encoders (CLIP-L 768 + OpenCLIP-G 1280, combined to 2048), added_cond_kwargs (text_embeds + time_ids). time_ids must encode [512, 512, 0, 0, 512, 512] — the 512 target distinguishes SDXL Turbo from full SDXL bodies that use 1024."
+      },
+      "license": {
+        "spdx": "Stability-AI-Community",
+        "url": "https://huggingface.co/stabilityai/sdxl-turbo/blob/main/LICENSE.md",
+        "confidence": "high",
+        "requiresAcceptance": true,
+        "notes": "Same Stability AI Community License terms as SD Turbo. $1M annual revenue threshold above which commercial use requires a Stability Enterprise License. Propagate the AUP."
+      },
+      "licenseFiles": [
+        { "name": "LICENSE.md", "source": "https://huggingface.co/stabilityai/sdxl-turbo/raw/main/LICENSE.md" }
+      ]
     }
   ],
   "rejected": [
@@ -703,8 +751,8 @@
       "reason": "Meta MusicGen is CC-BY-NC-4.0 (non-commercial only). Cannot mirror under Heliosoph/ without implying commercial use is OK. Catalog should reference Meta's repo directly if used at all."
     },
     {
-      "folders": ["sd-turbo-onnx", "sdxl-turbo-onnx", "sdxl-lightning-2step-onnx"],
-      "reason": "Mirroring is legally permitted under the Stability AI Community License / OpenRAIL++-M, but they're high-traffic models that benefit more from being pointed at the upstream pre-converted ONNX (when available). Revisit if upstream ONNX is missing or stale."
+      "folder": "sdxl-lightning-2step-onnx",
+      "reason": "Mirroring is legally permitted under OpenRAIL++-M, but JuggernautXL Lightning already covers the 'SDXL distilled to a few steps' slot with a stronger photoreal baseline. Add only if a real user need surfaces for the raw 2-step SDXL Lightning rather than a fine-tune of it."
     },
     {
       "folders": ["whisper-*-onnx", "clip-vit-base-patch32-onnx", "trocr-base-printed", "moondream2-onnx", "qwen2-vl-2b-onnx", "phi35-vision-onnx"],
