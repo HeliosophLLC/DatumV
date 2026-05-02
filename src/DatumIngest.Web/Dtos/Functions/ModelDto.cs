@@ -32,12 +32,14 @@ public sealed record ModelListResponse(
 /// Raw path supplied to the <c>USING</c> clause — the relative or
 /// <c>file://</c>-prefixed string the author wrote. Pair with
 /// <see cref="ResolvedUsingPath"/> when displaying both the source form
-/// and the absolute file location.
+/// and the absolute file location. <see langword="null"/> for
+/// delegating models declared without a <c>USING</c> clause.
 /// </param>
 /// <param name="ResolvedUsingPath">
 /// Absolute path the registrar resolved <see cref="UsingPath"/> to against
 /// the host's models directory. Useful for "open in file explorer" affordances
 /// and for displaying which on-disk bundle is actually bound.
+/// <see langword="null"/> when <see cref="UsingPath"/> is null.
 /// </param>
 /// <param name="ImplementsTask">
 /// Optional <c>IMPLEMENTS TaskName</c> task-contract declaration
@@ -56,7 +58,7 @@ public sealed record ModelDto(
     IReadOnlyList<ScalarFunctionParameterDto> Parameters,
     string ReturnType,
     bool ReturnIsNotNull,
-    string UsingPath,
-    string ResolvedUsingPath,
+    string? UsingPath,
+    string? ResolvedUsingPath,
     string? ImplementsTask,
     string? SourceText);

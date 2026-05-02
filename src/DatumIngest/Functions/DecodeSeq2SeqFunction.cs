@@ -238,7 +238,9 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
                 + "Aliases come from the CREATE MODEL's USING clause "
                 + "(`USING 'path' AS alias`).");
         }
-        IInferenceSession decoder = await model.BoundSessions
+        // Tensor surface required for shape introspection + RunAsync —
+        // cast from the narrow IModelSession handle.
+        IInferenceSession decoder = (IInferenceSession)await model.BoundSessions
             .ResolveAsync(sessionAlias, cancellationToken).ConfigureAwait(false);
 
         // Resolve the optional embed-tokens session here too (also between
@@ -254,7 +256,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
                     $"decode_seq2seq(): embed_tokens session alias '{embedAlias}' is not bound. "
                     + $"Available aliases: [{string.Join(", ", model.BoundSessions.Keys)}].");
             }
-            embedTokensSession = await model.BoundSessions
+            embedTokensSession = (IInferenceSession)await model.BoundSessions
                 .ResolveAsync(embedAlias, cancellationToken).ConfigureAwait(false);
             embedTokensInputIdsSpec = FindInput(embedTokensSession, "input_ids");
             if (embedTokensInputIdsSpec is null)

@@ -110,7 +110,7 @@ public sealed class OnnxInspectFunction : ITableValuedFunctionMetadata, ITableVa
             Device: InferenceDevice.OnnxRuntimeCpu,
             Optimization: InferenceOptimization.None);
 
-        using IInferenceSession session = await backend.LoadAsync(request, context.CancellationToken);
+        using IInferenceSession session = (IInferenceSession)await backend.LoadAsync(request, context.CancellationToken);
 
         RowBatch batch = context.RentRowBatch(ColumnLookupCached);
         try

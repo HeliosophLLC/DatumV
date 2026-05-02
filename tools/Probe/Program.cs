@@ -147,14 +147,15 @@ catalog.InferenceDispatcher = dispatcher;
 
 if (!opts.NoBuiltins)
 {
-    // BuiltinModels.AttachStandardModels does the nvidia-smi VRAM probe + attaches
-    // the C# IModel zoo. Slow on cold start (a few seconds for the probe) but
-    // matches the app's behaviour. Skip via --no-builtins when you only need
-    // SQL-defined models (much faster startup).
+    // ModelHost.AttachTo wires the model subsystem (catalog manifest,
+    // calibration, residency, system.* providers) and runs the nvidia-smi
+    // VRAM probe. Slow on cold start (a few seconds for the probe) but
+    // matches the app's behaviour. Skip via --no-builtins when you only
+    // need core engine startup (much faster).
     try
     {
-        BuiltinModels.AttachStandardModels(catalog, modelsDir);
-        Console.WriteLine($"Built-in models: attached ({catalog.Models?.Entries.Count ?? 0} entries)");
+        ModelHost.AttachTo(catalog, modelsDir);
+        Console.WriteLine($"Model host: attached ({catalog.Models?.Entries.Count ?? 0} entries)");
     }
     catch (Exception ex)
     {

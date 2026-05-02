@@ -78,7 +78,7 @@ public sealed class InferenceDispatcher : IInferenceDispatcher
     public IReadOnlyList<IInferenceBackend> Backends => _backends;
 
     /// <inheritdoc />
-    public async ValueTask<IReadOnlyDictionary<string, IInferenceSession>> LoadBundleAsync(
+    public async ValueTask<IReadOnlyDictionary<string, IModelSession>> LoadBundleAsync(
         BundleManifest bundle,
         InferencePreferences preferences,
         CancellationToken cancellationToken)
@@ -90,7 +90,7 @@ public sealed class InferenceDispatcher : IInferenceDispatcher
             "Dispatching bundle {Bundle} to {Backend} on {Device} ({SessionCount} sessions)",
             bundle.BundleId, backend.Id, device, bundle.Sessions.Count);
 
-        Dictionary<string, IInferenceSession> sessions = new(
+        Dictionary<string, IModelSession> sessions = new(
             bundle.Sessions.Count, StringComparer.Ordinal);
         try
         {
@@ -112,7 +112,7 @@ public sealed class InferenceDispatcher : IInferenceDispatcher
                     Optimization: InferenceOptimization.Standard,
                     DeclaredResidentBytes: declaredBytes);
 
-                IInferenceSession session = await backend.LoadAsync(request, cancellationToken)
+                IModelSession session = await backend.LoadAsync(request, cancellationToken)
                     .ConfigureAwait(false);
                 sessions[sessionName] = session;
             }
@@ -125,7 +125,7 @@ public sealed class InferenceDispatcher : IInferenceDispatcher
             // already-loaded sessions disposed. Swallowing disposal
             // exceptions in this path is deliberate — we're already
             // propagating the real error.
-            foreach (IInferenceSession partial in sessions.Values)
+            foreach (IModelSession partial in sessions.Values)
             {
                 try { partial.Dispose(); }
                 catch (Exception disposeEx)
@@ -273,12 +273,14 @@ public sealed class InferenceDispatcher : IInferenceDispatcher
     private static readonly InferenceDevice[] HighPerformanceRanking =
     {
         InferenceDevice.OnnxRuntimeCuda,      // NVIDIA dGPU — top of the heap
+        InferenceDevice.LlamaSharpCuda,       // LlamaSharp on NVIDIA dGPU
         InferenceDevice.OnnxRuntimeDirectMl,  // AMD/Intel dGPU on Windows
         InferenceDevice.OpenVinoGpu,          // Intel iGPU (or Arc dGPU)
         InferenceDevice.OnnxRuntimeCoreMl,    // Apple ANE/GPU via CoreML
         InferenceDevice.OpenVinoNpu,          // Intel NPU — fast but quantised models only
         InferenceDevice.OnnxRuntimeCpu,
         InferenceDevice.OpenVinoCpu,
+        InferenceDevice.LlamaSharpCpu,
     };
 
     /// <summary>
@@ -292,8 +294,10 @@ public sealed class InferenceDispatcher : IInferenceDispatcher
         InferenceDevice.OnnxRuntimeCoreMl,    // Apple ANE is among the most efficient accelerators
         InferenceDevice.OnnxRuntimeCpu,
         InferenceDevice.OpenVinoCpu,
+        InferenceDevice.LlamaSharpCpu,
         InferenceDevice.OnnxRuntimeDirectMl,
         InferenceDevice.OnnxRuntimeCuda,
+        InferenceDevice.LlamaSharpCuda,
     };
 
     /// <summary>
@@ -304,11 +308,13 @@ public sealed class InferenceDispatcher : IInferenceDispatcher
     private static readonly InferenceDevice[] BalancedRanking =
     {
         InferenceDevice.OnnxRuntimeCuda,
+        InferenceDevice.LlamaSharpCuda,
         InferenceDevice.OpenVinoNpu,
         InferenceDevice.OnnxRuntimeDirectMl,
         InferenceDevice.OpenVinoGpu,
         InferenceDevice.OnnxRuntimeCoreMl,
         InferenceDevice.OnnxRuntimeCpu,
         InferenceDevice.OpenVinoCpu,
+        InferenceDevice.LlamaSharpCpu,
     };
 }

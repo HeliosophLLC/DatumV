@@ -4,6 +4,7 @@ using DatumIngest.Catalog.Registries;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Model;
+using DatumIngest.Models;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Functions;
@@ -149,6 +150,53 @@ public sealed class ProceduralModelFunction : IScalarFunction
         DatumActivity.Scalars.Trace($"[model] {_descriptor.Name}: enter, depth={stack.Count}, args={arguments.Length}");
         try
         {
+            // Acquire a residency lease so the model's session loads
+            // through the residency manager (triggering weight-cost
+            // measurement + calibration auto-trigger) regardless of
+            // whether this call was hoisted into MIO. Without this,
+            // nested model calls from inside another model body — e.g.
+            // a delegating TextGenerator view calling its underlying
+            // ChatCompleter sibling — load their GGUF via the dispatcher
+            // directly, completely bypassing residency. Result: the
+            // chat model's VRAM never registers in system.residency_snapshot,
+            // the chip shows 0 B, and calibration never fires.
+            //
+            // The MIO path already calls AcquireAsync before invoking
+            // the adapter's InferBatchAsync; nested ProceduralModelFunction
+            // calls land here instead, so we mirror the acquisition.
+            // AcquireAsync is reference-counted — re-entrant from the
+            // same query holding an outer lease is safe.
+            //
+            // Catalog-less hosts (some test fixtures) skip the
+            // acquisition entirely — the registrar's ModelCatalogEntry
+            // is missing and the descriptor's BoundSessions handles
+            // session loading directly.
+            ModelCatalog? models = frame.Context?.Models;
+            if (models is not null && models.TryGetEntry(_descriptor.Name) is not null)
+            {
+                using ModelLease lease = await models
+                    .AcquireAsync(_descriptor.Name, cancellationToken)
+                    .ConfigureAwait(false);
+                return await RunBodyTracedAsync(arguments, frame, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            return await RunBodyTracedAsync(arguments, frame, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            stack.Pop();
+        }
+    }
+
+    private async ValueTask<ValueRef> RunBodyTracedAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
             ValueRef result = await ExecuteBodyAsync(arguments, frame, cancellationToken).ConfigureAwait(false);
             DatumActivity.Scalars.Trace($"[model] {_descriptor.Name}: exit kind={result.Kind} isArray={result.IsArray}");
             return result;
@@ -157,10 +205,6 @@ public sealed class ProceduralModelFunction : IScalarFunction
         {
             DatumActivity.Scalars.Trace($"[model] {_descriptor.Name}: THREW {ex.GetType().Name}: {ex.Message}");
             throw;
-        }
-        finally
-        {
-            stack.Pop();
         }
     }
 
@@ -211,6 +255,40 @@ public sealed class ProceduralModelFunction : IScalarFunction
         DatumActivity.Scalars.Trace($"[model] {_descriptor.Name}: batched enter, rowCount={rowCount}");
         try
         {
+            // See ExecuteAsync for the rationale on AcquireAsync here —
+            // nested batched model calls (e.g. a column-major delegating
+            // model invoking its sibling) must participate in residency
+            // tracking too.
+            ModelCatalog? models = frame.Context?.Models;
+            if (models is not null && models.TryGetEntry(_descriptor.Name) is not null)
+            {
+                using ModelLease lease = await models
+                    .AcquireAsync(_descriptor.Name, cancellationToken)
+                    .ConfigureAwait(false);
+                return await RunBatchedBodyTracedAsync(
+                    rowInputs, rowOverrides, frame, rowCount, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            return await RunBatchedBodyTracedAsync(
+                rowInputs, rowOverrides, frame, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            stack.Pop();
+        }
+    }
+
+    private async ValueTask<ValueRef[]> RunBatchedBodyTracedAsync(
+        IReadOnlyList<IReadOnlyList<ValueRef>> rowInputs,
+        IReadOnlyList<IReadOnlyList<ValueRef>> rowOverrides,
+        EvaluationFrame frame,
+        int rowCount,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
             ValueRef[] results = await ExecuteBatchedBodyAsync(
                 rowInputs, rowOverrides, frame, rowCount, cancellationToken).ConfigureAwait(false);
             DatumActivity.Scalars.Trace($"[model] {_descriptor.Name}: batched exit, rowCount={rowCount}");
@@ -220,10 +298,6 @@ public sealed class ProceduralModelFunction : IScalarFunction
         {
             DatumActivity.Scalars.Trace($"[model] {_descriptor.Name}: batched THREW {ex.GetType().Name}: {ex.Message}");
             throw;
-        }
-        finally
-        {
-            stack.Pop();
         }
     }
 

@@ -126,12 +126,20 @@
       "textFile": "licenses/llama-3.1-community.md",
       "summary": "Source-available license from Meta. Allows commercial use BELOW 700 million monthly active users (above requires a separate Meta license). Requires 'Built with Llama' attribution and prefixing derivative model names with 'Llama'. Subject to Meta's Acceptable Use Policy.",
       "requiresAcceptance": true
+    },
+    "falcon-llm-license-2.0": {
+      "title": "TII Falcon-LLM License 2.0",
+      "spdx": "Falcon-LLM-2.0",
+      "canonicalUrl": "https://falconllm.tii.ae/falcon-terms-and-conditions.html",
+      "textFile": "licenses/falcon-llm-license-2.0.md",
+      "summary": "Custom permissive license from Technology Innovation Institute (TII), UAE. Allows commercial use, modification, and redistribution with attribution. Subject to TII's acceptable-use policy (no weapons / surveillance / defamation / CSAM use).",
+      "requiresAcceptance": true
     }
   },
   "tiers": {
     "starter": [
       "all-minilm-l6-v2",
-      "phi-3.5-mini-instruct-gguf",
+      "qwen2.5-coder-1.5b-instruct-gguf",
       "toxic-bert",
       "twitter-roberta-sentiment"
     ],
@@ -144,7 +152,7 @@
       "bert-base-ner",
       "toxic-bert",
       "roberta-squad2",
-      "phi-3.5-mini-instruct-gguf",
+      "qwen2.5-coder-1.5b-instruct-gguf",
       "florence-2-base-ft-quantized",
       "yolox-s",
       "kokoro-v1.0"
@@ -3686,12 +3694,160 @@
       "approxSizeMb": 13312
     },
     {
-      "id": "phi-3.5-mini-instruct-gguf",
-      "displayName": "Phi-3.5 mini Instruct (GGUF Q4_K_M)",
-      "summary": "Small (3.8B-parameter) MIT-licensed chat model with strong reasoning for its size. Pick when CPU footprint matters more than chat quality.",
-      "description": "Microsoft's 3.8B-param instruction-tuned LLM. Strong reasoning for its size. MIT-licensed.",
+      "id": "qwen2.5-coder-1.5b-instruct-gguf",
+      "displayName": "Qwen 2.5 Coder 1.5B Instruct (GGUF Q4_K_M)",
+      "summary": "Small (1.5B-parameter) Apache-2.0 code-focused chat LLM from Alibaba. Fast to load and dispatch — the right pilot for validating SQL-defined LLM infrastructure.",
+      "description": "Alibaba's 1.5B-param code-tuned Qwen 2.5 variant. ChatML chat template; reliable EOG discipline. Registered as a pair of SQL-defined models: qwen25_coder_1_5b_chat (ChatCompleter, owns the GGUF session) and qwen25_coder_1_5b (TextGenerator, delegates to the chat model — zero additional VRAM cost).",
       "tasks": [
-        "TextGenerator"
+        "TextGenerator",
+        "ChatCompleter"
+      ],
+      "tags": [
+        "llm",
+        "instruct",
+        "code",
+        "small"
+      ],
+      "licenseIds": [
+        "apache-2.0"
+      ],
+      "attributions": [
+        "Alibaba — Qwen 2.5 Coder",
+        "bartowski (GGUF quantization)"
+      ],
+      "hardware": {
+        "minRamMb": 2048,
+        "minVramMb": 0,
+        "preferred": "cuda"
+      },
+      "versions": [
+        {
+          "version": "2026-06-01",
+          "sources": [
+            {
+              "type": "huggingface",
+              "repo": "bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+              "revision": "1af47f78b1f9b0c242fabe43f7a365d5a67f3207",
+              "include": [
+                "Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf"
+              ]
+            }
+          ],
+          "installSql": "sql/qwen2.5-coder-1.5b-instruct-gguf/2026-06-01.sql",
+          "models": [
+            { "identifier": "qwen25_coder_1_5b_chat" },
+            { "identifier": "qwen25_coder_1_5b" }
+          ]
+        }
+      ],
+      "approxSizeMb": 1100
+    },
+    {
+      "id": "qwen2.5-coder-3b-instruct-gguf",
+      "displayName": "Qwen 2.5 Coder 3B Instruct (GGUF Q4_K_M)",
+      "summary": "Middle (3B-parameter) Apache-2.0 code-focused chat LLM from Alibaba. Meaningfully more coherent on multi-section HTML and short scripts than the 1.5B sibling.",
+      "description": "Alibaba's 3B-param code-tuned Qwen 2.5 variant. ChatML chat template; reliable EOG discipline. Registered as a pair of SQL-defined models: qwen25_coder_3b_chat (ChatCompleter, owns the GGUF session) and qwen25_coder_3b (TextGenerator, delegates to the chat model — zero additional VRAM cost).",
+      "tasks": [
+        "TextGenerator",
+        "ChatCompleter"
+      ],
+      "tags": [
+        "llm",
+        "instruct",
+        "code",
+        "medium"
+      ],
+      "licenseIds": [
+        "apache-2.0"
+      ],
+      "attributions": [
+        "Alibaba — Qwen 2.5 Coder",
+        "bartowski (GGUF quantization)"
+      ],
+      "hardware": {
+        "minRamMb": 4096,
+        "minVramMb": 0,
+        "preferred": "cuda"
+      },
+      "versions": [
+        {
+          "version": "2026-06-01",
+          "sources": [
+            {
+              "type": "huggingface",
+              "repo": "bartowski/Qwen2.5-Coder-3B-Instruct-GGUF",
+              "revision": "7c137640ef0332dfedb229f2504c58d83ed4307a",
+              "include": [
+                "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf"
+              ]
+            }
+          ],
+          "installSql": "sql/qwen2.5-coder-3b-instruct-gguf/2026-06-01.sql",
+          "models": [
+            { "identifier": "qwen25_coder_3b_chat" },
+            { "identifier": "qwen25_coder_3b" }
+          ]
+        }
+      ],
+      "approxSizeMb": 1900
+    },
+    {
+      "id": "qwen2.5-coder-7b-instruct-gguf",
+      "displayName": "Qwen 2.5 Coder 7B Instruct (GGUF Q5_K_M)",
+      "summary": "Large (7B-parameter) Apache-2.0 code-focused chat LLM from Alibaba. Handles full single-file pages with embedded CSS/JS and multi-paragraph rationale.",
+      "description": "Alibaba's 7B-param code-tuned Qwen 2.5 variant. Q5_K_M (not Q4) for higher fidelity. ChatML chat template; reliable EOG discipline. Registered as a pair of SQL-defined models: qwen25_coder_7b_chat (ChatCompleter, owns the GGUF session) and qwen25_coder_7b (TextGenerator, delegates to the chat model — zero additional VRAM cost). Default temperature 0.5 (vs 0.7 for smaller siblings) favours deterministic code output.",
+      "tasks": [
+        "TextGenerator",
+        "ChatCompleter"
+      ],
+      "tags": [
+        "llm",
+        "instruct",
+        "code",
+        "medium"
+      ],
+      "licenseIds": [
+        "apache-2.0"
+      ],
+      "attributions": [
+        "Alibaba — Qwen 2.5 Coder",
+        "bartowski (GGUF quantization)"
+      ],
+      "hardware": {
+        "minRamMb": 8192,
+        "minVramMb": 4096,
+        "preferred": "cuda"
+      },
+      "versions": [
+        {
+          "version": "2026-06-01",
+          "sources": [
+            {
+              "type": "huggingface",
+              "repo": "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+              "revision": "1f629da0c8bed16b9e50cee91c70693650e66c35",
+              "include": [
+                "Qwen2.5-Coder-7B-Instruct-Q5_K_M.gguf"
+              ]
+            }
+          ],
+          "installSql": "sql/qwen2.5-coder-7b-instruct-gguf/2026-06-01.sql",
+          "models": [
+            { "identifier": "qwen25_coder_7b_chat" },
+            { "identifier": "qwen25_coder_7b" }
+          ]
+        }
+      ],
+      "approxSizeMb": 5200
+    },
+    {
+      "id": "tinyllama-1.1b-chat-v1.0-gguf",
+      "displayName": "TinyLlama 1.1B Chat v1.0 (GGUF Q4_K_M)",
+      "summary": "Small (1.1B-parameter) Apache-2.0 chat LLM with a distinctly 2023-era voice. Useful for tonal A/B comparison against modern instruction-tuned models, and the cheapest LLM to dispatch in the zoo.",
+      "description": "Community-trained 1.1B chat model on the Zephyr template. Tiny (~700 MB) and fast — pick when latency or footprint trump quality. Registered as a pair of SQL-defined models: tinyllama_1_1b_chat (ChatCompleter, owns the GGUF session) and tinyllama_1_1b (TextGenerator, delegates to the chat model — zero additional VRAM cost).",
+      "tasks": [
+        "TextGenerator",
+        "ChatCompleter"
       ],
       "tags": [
         "llm",
@@ -3699,41 +3855,143 @@
         "small"
       ],
       "licenseIds": [
-        "mit"
+        "apache-2.0"
       ],
       "attributions": [
-        "Microsoft Research — Phi-3.5",
-        "bartowski (GGUF quantization)"
+        "TinyLlama community",
+        "TheBloke (GGUF quantization)"
       ],
       "hardware": {
-        "minRamMb": 4096,
+        "minRamMb": 1024,
         "minVramMb": 0,
-        "preferred": "cpu"
+        "preferred": "cuda"
       },
       "versions": [
         {
-          "version": "2026-05-29",
+          "version": "2026-06-01",
           "sources": [
             {
               "type": "huggingface",
-              "repo": "bartowski/Phi-3.5-mini-instruct-GGUF",
-              "revision": "6d70da17e749a471ccb62ade694486011a75cda3",
+              "repo": "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
+              "revision": "52e7645ba7c309695bec7ac98f4f005b139cf465",
               "include": [
-                "Phi-3.5-mini-instruct-Q4_K_M.gguf"
+                "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
               ]
             }
+          ],
+          "installSql": "sql/tinyllama-1.1b-chat-v1.0-gguf/2026-06-01.sql",
+          "models": [
+            { "identifier": "tinyllama_1_1b_chat" },
+            { "identifier": "tinyllama_1_1b" }
           ]
         }
       ],
-      "approxSizeMb": 2200
+      "approxSizeMb": 700
+    },
+    {
+      "id": "granite-3.1-1b-a400m-instruct-gguf",
+      "displayName": "IBM Granite 3.1 1B A400M Instruct (GGUF Q4_K_M)",
+      "summary": "IBM's small (1B total, 400M active) mixture-of-experts chat LLM. Apache-2.0. Distinct 'enterprise-y' instruction-tuning voice — frequently bullet-pointed, careful with caveats.",
+      "description": "IBM's MoE-architecture small chat model. 1B total parameters, 400M active per token. Apache-2.0 fully unencumbered for commercial use. Registered as a pair of SQL-defined models: granite31_1b_chat (ChatCompleter, owns the GGUF session) and granite31_1b (TextGenerator, delegates to the chat model — zero additional VRAM cost).",
+      "tasks": [
+        "TextGenerator",
+        "ChatCompleter"
+      ],
+      "tags": [
+        "llm",
+        "instruct",
+        "moe",
+        "small"
+      ],
+      "licenseIds": [
+        "apache-2.0"
+      ],
+      "attributions": [
+        "IBM — Granite 3.1",
+        "bartowski (GGUF quantization)"
+      ],
+      "hardware": {
+        "minRamMb": 1024,
+        "minVramMb": 0,
+        "preferred": "cuda"
+      },
+      "versions": [
+        {
+          "version": "2026-06-01",
+          "sources": [
+            {
+              "type": "huggingface",
+              "repo": "bartowski/granite-3.1-1b-a400m-instruct-GGUF",
+              "revision": "940d2e1f9f65330615c7c8e980e6c5ac73d3360c",
+              "include": [
+                "granite-3.1-1b-a400m-instruct-Q4_K_M.gguf"
+              ]
+            }
+          ],
+          "installSql": "sql/granite-3.1-1b-a400m-instruct-gguf/2026-06-01.sql",
+          "models": [
+            { "identifier": "granite31_1b_chat" },
+            { "identifier": "granite31_1b" }
+          ]
+        }
+      ],
+      "approxSizeMb": 800
+    },
+    {
+      "id": "falcon3-1b-instruct-gguf",
+      "displayName": "Falcon3 1B Instruct (GGUF Q4_K_M)",
+      "summary": "TII (UAE) trained 1B chat LLM. Custom Falcon LLM License 2.0 (broadly permissive with acceptable-use policy). Distinct vocabulary and style — useful for family-comparison tonal A/B.",
+      "description": "Technology Innovation Institute's 1B-param chat-tuned model. ChatML chat template. Registered as a pair of SQL-defined models: falcon3_1b_chat (ChatCompleter, owns the GGUF session) and falcon3_1b (TextGenerator, delegates to the chat model — zero additional VRAM cost).",
+      "tasks": [
+        "TextGenerator",
+        "ChatCompleter"
+      ],
+      "tags": [
+        "llm",
+        "instruct",
+        "small"
+      ],
+      "licenseIds": [
+        "falcon-llm-license-2.0"
+      ],
+      "attributions": [
+        "Technology Innovation Institute (TII) — Falcon3"
+      ],
+      "hardware": {
+        "minRamMb": 1024,
+        "minVramMb": 0,
+        "preferred": "cuda"
+      },
+      "versions": [
+        {
+          "version": "2026-06-01",
+          "sources": [
+            {
+              "type": "huggingface",
+              "repo": "tiiuae/Falcon3-1B-Instruct-GGUF",
+              "revision": "fc404df7cfbd32eaefbcbeb2079aba684e894d39",
+              "include": [
+                "Falcon3-1B-Instruct-q4_k_m.gguf"
+              ]
+            }
+          ],
+          "installSql": "sql/falcon3-1b-instruct-gguf/2026-06-01.sql",
+          "models": [
+            { "identifier": "falcon3_1b_chat" },
+            { "identifier": "falcon3_1b" }
+          ]
+        }
+      ],
+      "approxSizeMb": 750
     },
     {
       "id": "mistral-7b-instruct-v0.3-gguf",
       "displayName": "Mistral 7B Instruct v0.3 (GGUF Q5_K_M)",
-      "summary": "Solid 7B-parameter Apache-2.0 chat model. The 'just give me a good general-purpose local LLM' default.",
-      "description": "Apache-2.0 7B instruction-tuned LLM. Solid general-purpose default.",
+      "summary": "Solid 7B-parameter Apache-2.0 chat model. The 'just give me a good general-purpose local LLM' default. Note: no native system role — prepend system text to the first user message if needed.",
+      "description": "Apache-2.0 7B instruction-tuned LLM. Solid general-purpose default. Registered as a pair of SQL-defined models: mistral_7b_chat (ChatCompleter, owns the GGUF session) and mistral_7b (TextGenerator, delegates to the chat model — zero additional VRAM cost).",
       "tasks": [
-        "TextGenerator"
+        "TextGenerator",
+        "ChatCompleter"
       ],
       "tags": [
         "llm",
@@ -3750,11 +4008,11 @@
       "hardware": {
         "minRamMb": 8192,
         "minVramMb": 0,
-        "preferred": "cpu"
+        "preferred": "cuda"
       },
       "versions": [
         {
-          "version": "2026-05-29",
+          "version": "2026-06-01",
           "sources": [
             {
               "type": "huggingface",
@@ -3764,60 +4022,24 @@
                 "Mistral-7B-Instruct-v0.3-Q5_K_M.gguf"
               ]
             }
+          ],
+          "installSql": "sql/mistral-7b-instruct-v0.3-gguf/2026-06-01.sql",
+          "models": [
+            { "identifier": "mistral_7b_chat" },
+            { "identifier": "mistral_7b" }
           ]
         }
       ],
       "approxSizeMb": 4800
     },
     {
-      "id": "qwen2.5-coder-7b-instruct-gguf",
-      "displayName": "Qwen 2.5 Coder 7B Instruct (GGUF Q5_K_M)",
-      "summary": "Coding-specialized 7B chat model. Strong at SQL, Python, code review, and refactoring. Pick for coding-assistant workflows.",
-      "description": "Apache-2.0 coding-specialized LLM. Strong at SQL, Python, refactoring.",
-      "tasks": [
-        "TextGenerator"
-      ],
-      "tags": [
-        "llm",
-        "code",
-        "instruct"
-      ],
-      "licenseIds": [
-        "apache-2.0"
-      ],
-      "attributions": [
-        "Alibaba Cloud — Qwen Team",
-        "bartowski (GGUF quantization)"
-      ],
-      "hardware": {
-        "minRamMb": 8192,
-        "minVramMb": 0,
-        "preferred": "cpu"
-      },
-      "versions": [
-        {
-          "version": "2026-05-29",
-          "sources": [
-            {
-              "type": "huggingface",
-              "repo": "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
-              "revision": "1f629da0c8bed16b9e50cee91c70693650e66c35",
-              "include": [
-                "Qwen2.5-Coder-7B-Instruct-Q5_K_M.gguf"
-              ]
-            }
-          ]
-        }
-      ],
-      "approxSizeMb": 5100
-    },
-    {
       "id": "llama-3.1-8b-instruct-gguf",
       "displayName": "Llama 3.1 8B Instruct (GGUF Q4_K_M)",
-      "summary": "Meta's 8B chat model. Higher quality than Mistral 7B; requires accepting Meta's license on HuggingFace before download.",
-      "description": "Meta's 8B-param instruction-tuned LLM. Requires accepting Meta's license on HF before download.",
+      "summary": "Meta's 8B chat model. The zoo's most reliable chat discipline. Requires accepting Meta's Llama 3.1 Community License before download.",
+      "description": "Meta's 8B-param instruction-tuned LLM. The most reliable chat discipline in the zoo — consistently emits `<|eot_id|>` on trivial prompts. Registered as a pair of SQL-defined models: llama31_8b_chat (ChatCompleter, owns the GGUF session) and llama31_8b (TextGenerator, delegates to the chat model — zero additional VRAM cost). Requires accepting the Llama 3.1 Community License before download.",
       "tasks": [
-        "TextGenerator"
+        "TextGenerator",
+        "ChatCompleter"
       ],
       "tags": [
         "llm",
@@ -3835,11 +4057,11 @@
       "hardware": {
         "minRamMb": 8192,
         "minVramMb": 0,
-        "preferred": "cpu"
+        "preferred": "cuda"
       },
       "versions": [
         {
-          "version": "2026-05-29",
+          "version": "2026-06-01",
           "sources": [
             {
               "type": "huggingface",
@@ -3849,6 +4071,11 @@
                 "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
               ]
             }
+          ],
+          "installSql": "sql/llama-3.1-8b-instruct-gguf/2026-06-01.sql",
+          "models": [
+            { "identifier": "llama31_8b_chat" },
+            { "identifier": "llama31_8b" }
           ]
         }
       ],

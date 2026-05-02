@@ -81,15 +81,30 @@ public sealed class OnnxRuntimeBackend : IInferenceBackend
     /// <inheritdoc />
     public BackendCompatibility Inspect(BundleManifest bundle)
     {
-        // V1: ORT accepts essentially every ONNX model the export tools
-        // produce. The real failure surfaces at LoadAsync (missing op,
-        // opset out of range). Refine this once we have empirical data
-        // about what gets rejected at load time.
+        // Extension gate: ORT only handles .onnx files. Without this the
+        // dispatcher would route a .gguf bundle to ORT first and the
+        // failure would surface as an opaque native parse error from
+        // InferenceSession's constructor. This rejection lets the
+        // dispatcher fall through to a sibling backend (LlamaSharp for
+        // .gguf) cleanly.
+        foreach ((_, string filePath) in bundle.Sessions)
+        {
+            if (!filePath.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase))
+            {
+                return BackendCompatibility.NotSupported(
+                    $"OnnxRuntime backend handles .onnx files only; got '{System.IO.Path.GetFileName(filePath)}'.");
+            }
+        }
+
+        // Beyond the extension check, ORT accepts essentially every ONNX
+        // model the export tools produce. The real failure surfaces at
+        // LoadAsync (missing op, opset out of range). Refine this once
+        // we have empirical data about what gets rejected at load time.
         return BackendCompatibility.Supported(estimatedLoadCostMs: 0);
     }
 
     /// <inheritdoc />
-    public ValueTask<IInferenceSession> LoadAsync(
+    public ValueTask<IModelSession> LoadAsync(
         InferenceLoadRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -111,11 +126,11 @@ public sealed class OnnxRuntimeBackend : IInferenceBackend
         InferenceSession ortSession = new(request.ModelFilePath, options);
 
         OnnxRuntimeSession session = new(ortSession, request.Device, estimatedBytes);
-        return new ValueTask<IInferenceSession>(session);
+        return new ValueTask<IModelSession>(session);
     }
 
     /// <summary>
-    /// Resolves the <see cref="IInferenceSession.EstimatedResidentBytes"/>
+    /// Resolves the <see cref="IModelSession.EstimatedResidentBytes"/>
     /// value for a session being loaded. Enforces the file-size floor on
     /// the author-declared estimate (rejecting bundles whose
     /// <see cref="InferenceLoadRequest.DeclaredResidentBytes"/> is below

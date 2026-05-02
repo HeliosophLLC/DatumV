@@ -161,6 +161,13 @@ public static class TaskTypeRegistry
             [Scalar(DataKind.String)],
             Scalar(DataKind.String),
             "Text → text. LLM completion."),
+        new("ChatCompleter", TaskFamily.Text,
+            [ArrayOfNamed("ChatMessage")],
+            Scalar(DataKind.String),
+            "Multi-turn chat (role-tagged messages) → assistant response. "
+            + "Chat-tuned LLMs implement this in addition to TextGenerator; "
+            + "the simple TextGenerator surface is a thin view of the same "
+            + "weights via a single-user-message message list."),
         new("Translator", TaskFamily.Text,
             [Scalar(DataKind.String)],
             Scalar(DataKind.String),

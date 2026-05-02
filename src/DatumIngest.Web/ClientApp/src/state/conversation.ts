@@ -407,7 +407,7 @@ export async function compactConversation(): Promise<number> {
 
 // Creates a fresh conversation on the server, switches to it, and
 // refreshes the popover list so it shows up. The new conversation has
-// no messages, so the surface flips back to HomePage.
+// no messages, so ConversationView renders its empty / idle state.
 export async function newConversation(): Promise<void> {
   if (conversationState.status === 'awaiting' || conversationState.status === 'streaming') {
     return;

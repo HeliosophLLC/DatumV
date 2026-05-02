@@ -10,20 +10,24 @@ DatumIngest invokes machine-learning models through SQL functions in the
 documents what's registered out of the box, where each weights file
 comes from, and how to set up the model directory on a fresh machine.
 
-For multi-turn LLM prompts, see the per-family chat-template scalar
-functions in [Chat Templates](sql/chat-templates.md) — they expose the
-role-header / turn-end primitives so a prompt can be assembled in
-plain SQL alongside `string_agg`, with a `templated` opt-arg on the
-model that bypasses the built-in single-message wrapper.
+For multi-turn LLM prompts, use the
+[`llama_chat(session, messages, ...)`](sql/create-model.md#llm-dispatch-scalars)
+dispatch scalar from inside a `CREATE MODEL` body — pass an
+`Array<ChatMessage>` and llama.cpp's native template engine applies
+the GGUF's embedded chat format. The catalog ships every LLM entry
+as a pair: a `<name>_chat` registration implementing `ChatCompleter`
+plus a `<name>` `TextGenerator` view that delegates with a single
+user message.
 
-To register your own ONNX file as a model — without writing C# — see
-[CREATE MODEL](sql/create-model.md). User-registered models surface in
-the same `models.X` namespace as the catalog entries documented here.
-The `kind` column on `system.models` distinguishes engine-baked
-implementations (`builtin`, e.g. LLMs via LlamaSharp, multi-session
-diffusion bundles) from SQL-defined registrations (`declared` — both
-your own `CREATE MODEL` entries and the catalog-installed ONNX models
-on this page whose entries carry an `installSql` field).
+To register your own ONNX or GGUF file as a model — without writing
+C# — see [CREATE MODEL](sql/create-model.md). User-registered models
+surface in the same `models.X` namespace as the catalog entries
+documented here. The `kind` column on `system.models` distinguishes
+engine-baked implementations (`builtin`, e.g. SD bundles still on the
+C# path) from SQL-defined registrations (`declared` — both your own
+`CREATE MODEL` entries and the catalog-installed models whose entries
+carry an `installSql` field; every LLM in the zoo is `declared` after
+the SQL-LLM migration).
 
 For an introspectable view of the same information, query the
 `system_models` virtual table:
@@ -1223,110 +1227,74 @@ FROM read_directory('E:\screenshots\*.png');
 For dense text extraction from screenshots, prefer `florence2_ocr_region`
 (sub-second, no autoregressive loop).
 
-### LLMs (`llama31_8b`, `phi3_mini`, `tinyllama_1b`, `gemma2_2b`, `qwen25_coder_*`, `granite31_1b`, `falcon3_1b`, `mistral_7b`)
+### LLMs (`llama31_8b`, `mistral_7b`, `qwen25_coder_*`, `tinyllama_1_1b`, `granite31_1b`, `falcon3_1b`)
 
-Ten LLMs spanning Meta, Microsoft, TinyLlama community, Google,
-Alibaba (three Qwen-Coder sizes), IBM, TII, Mistral AI. Mostly
-quantized to **Q4_K_M** for clean cross-model comparison; Qwen-Coder 7B
-and Mistral 7B use Q5_K_M for the small quality bump. Each is a single
-GGUF file loaded via LlamaSharp.
+Eight LLM catalog entries spanning Meta, Mistral AI, Alibaba (three
+Qwen-Coder sizes), TinyLlama community, IBM, and TII. Mostly quantized
+to **Q4_K_M** for clean cross-model comparison; Qwen-Coder 7B and
+Mistral 7B use Q5_K_M for the small quality bump. Each is a single GGUF
+file loaded via LlamaSharp.
 
-| Catalog name | Display | License | Holder |
+**Every LLM is now SQL-defined** — a pair of `CREATE MODEL` registrations
+per GGUF, both sharing one weights file. The pair shape:
+
+- `<name>_chat` implements **`ChatCompleter`**: takes `Array<ChatMessage>`
+  for multi-turn input. Owns the GGUF session via the `USING` clause.
+- `<name>` implements **`TextGenerator`**: takes a single prompt
+  `String`. A *delegating* registration (no `USING` — see
+  [CREATE MODEL § Delegating models](sql/create-model.md#delegating-models))
+  that calls `models.<name>_chat([{role:'user', content:prompt}])` under
+  the hood, so it costs zero additional VRAM.
+
+| Catalog id | Identifiers | License | Holder |
 |---|---|---|---|
-| `llama31_8b` | Llama 3.1 8B Instruct | Llama 3.1 Community | Meta |
-| `phi3_mini` | Phi-3-mini-4k Instruct | MIT | Microsoft |
-| `tinyllama_1b` | TinyLlama 1.1B Chat v1.0 | Apache-2.0 | TinyLlama community |
-| `gemma2_2b` | Gemma 2 2B Instruct | Gemma Terms | Google |
-| `qwen25_coder_1_5b` | Qwen 2.5 Coder 1.5B Instruct | Apache-2.0 | Alibaba |
-| `qwen25_coder_3b` | Qwen 2.5 Coder 3B Instruct | Apache-2.0 | Alibaba |
-| `qwen25_coder_7b` | Qwen 2.5 Coder 7B Instruct | Apache-2.0 | Alibaba |
-| `granite31_1b` | IBM Granite 3.1 1B A400M | Apache-2.0 | IBM |
-| `falcon3_1b` | Falcon3 1B Instruct | Falcon LLM License 2.0 | TII |
-| `mistral_7b` | Mistral 7B Instruct v0.3 | Apache-2.0 | Mistral AI |
+| `llama-3.1-8b-instruct-gguf` | `llama31_8b`, `llama31_8b_chat` | Llama 3.1 Community | Meta |
+| `mistral-7b-instruct-v0.3-gguf` | `mistral_7b`, `mistral_7b_chat` | Apache-2.0 | Mistral AI |
+| `qwen2.5-coder-1.5b-instruct-gguf` | `qwen25_coder_1_5b`, `qwen25_coder_1_5b_chat` | Apache-2.0 | Alibaba |
+| `qwen2.5-coder-3b-instruct-gguf` | `qwen25_coder_3b`, `qwen25_coder_3b_chat` | Apache-2.0 | Alibaba |
+| `qwen2.5-coder-7b-instruct-gguf` | `qwen25_coder_7b`, `qwen25_coder_7b_chat` | Apache-2.0 | Alibaba |
+| `tinyllama-1.1b-chat-v1.0-gguf` | `tinyllama_1_1b`, `tinyllama_1_1b_chat` | Apache-2.0 | TinyLlama community |
+| `granite-3.1-1b-a400m-instruct-gguf` | `granite31_1b`, `granite31_1b_chat` | Apache-2.0 | IBM |
+| `falcon3-1b-instruct-gguf` | `falcon3_1b`, `falcon3_1b_chat` | TII Falcon-LLM License 2.0 | TII |
 
-The Qwen2.5-Coder ladder is registered with size-appropriate defaults:
-the 1.5B uses a 4K context (fast iteration), while the 3B and 7B use a
-16K context with a higher max-tokens budget so single-call generation of
-multi-paragraph code or HTML pages doesn't truncate. The 7B drops to
-`temperature=0.5` (vs 0.7 default) for more deterministic code output.
-Per-call overrides — `models.qwen25_coder_7b(prompt, 0.7, 4096)` — let
-you tweak both temperature and max_tokens at the call site.
+Per-call overrides — `models.qwen25_coder_7b(prompt, max_tokens => 4096,
+temperature => 0.5)` — let you tweak `max_tokens` and `temperature` at
+the call site within each model's declared `CHECK` bounds. Chat-form
+calls pass a `messages` array instead of `prompt`:
 
-**Streaming output.** LLM responses produce tokens incrementally;
-DatumIngest exposes that stream when the consumer opts in:
-
-- `SELECT models.X(prompt) FROM t` collects the full response into a
-  single string per row before rendering — no live tokens. The
-  underlying streaming path is still exercised internally (LLM
-  `InferBatchAsync` collects over `InferStreamingAsync`), so the same
-  code is on the hot path either way.
-
-The LLM is the only model family that produces multi-chunk streams
-today; other models (classifiers, detectors, captioners, image
-generators) yield a single result and the `CALL` streaming pane shows
-that one value once inference completes.
-
-**Setup**: each is a single `*.gguf` file dropped into the models
-directory. Filenames must match the catalog defaults
-(see [BuiltinModels.cs](../src/DatumIngest/Models/BuiltinModels.cs))
-or be passed explicitly via the registration helper's `modelFilename`
-parameter.
-
-```powershell
-# Llama 3.1 8B
-huggingface-cli download bartowski/Meta-Llama-3.1-8B-Instruct-GGUF `
-  Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf `
-  --local-dir $env:DATUM_MODELS
-
-# Phi-3 mini
-huggingface-cli download bartowski/Phi-3-mini-4k-instruct-GGUF `
-  Phi-3-mini-4k-instruct-Q4_K_M.gguf `
-  --local-dir $env:DATUM_MODELS
-
-# TinyLlama 1.1B Chat
-huggingface-cli download TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF `
-  tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf `
-  --local-dir $env:DATUM_MODELS
-
-# Gemma 2 2B
-huggingface-cli download bartowski/gemma-2-2b-it-GGUF `
-  gemma-2-2b-it-Q4_K_M.gguf `
-  --local-dir $env:DATUM_MODELS
-
-# Qwen 2.5 Coder 1.5B
-huggingface-cli download bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF `
-  Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf `
-  --local-dir $env:DATUM_MODELS
-
-# Qwen 2.5 Coder 3B
-huggingface-cli download bartowski/Qwen2.5-Coder-3B-Instruct-GGUF `
-  Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf `
-  --local-dir $env:DATUM_MODELS
-
-# Qwen 2.5 Coder 7B (note Q5_K_M, not Q4_K_M)
-huggingface-cli download bartowski/Qwen2.5-Coder-7B-Instruct-GGUF `
-  Qwen2.5-Coder-7B-Instruct-Q5_K_M.gguf `
-  --local-dir $env:DATUM_MODELS
-
-# Granite 3.1 1B (MoE)
-huggingface-cli download bartowski/granite-3.1-1b-a400m-instruct-GGUF `
-  granite-3.1-1b-a400m-instruct-Q4_K_M.gguf `
-  --local-dir $env:DATUM_MODELS
-
-# Falcon3 1B
-huggingface-cli download tiiuae/Falcon3-1B-Instruct-GGUF `
-  Falcon3-1B-Instruct-q4_k_m.gguf `
-  --local-dir $env:DATUM_MODELS
-
-# Mistral 7B Instruct v0.3 (note Q5_K_M, not Q4_K_M)
-huggingface-cli download bartowski/Mistral-7B-Instruct-v0.3-GGUF `
-  Mistral-7B-Instruct-v0.3-Q5_K_M.gguf `
-  --local-dir $env:DATUM_MODELS
+```sql
+SELECT models.llama31_8b_chat(
+  [ {role:'system', content:'You are a senior code reviewer.'},
+    {role:'user',   content:'Review this SQL: ...'} ]);
 ```
 
-Total LLM disk: ~21 GB with all three Qwen-Coder sizes plus Mistral 7B.
-Each call holds one model resident; the residency manager swaps when
-VRAM is tight.
+**Retired:** Phi-3-mini-4k, Phi-3.5-mini, Gemma 2 2B. The two Phi
+quants (bartowski Q4_K_M) tilt trivial prompts into training-data
+markdown continuation (`## Instruction N`-style headers); Gemma never
+got a working entry. Reintroduce any of them by adding a new
+catalog.json entry + installSql following the Qwen pattern when a
+better quant / license file is available.
+
+**Streaming output.** LLM responses produce tokens incrementally inside
+LlamaSharp's `StatelessExecutor`; the current SQL surface
+(`llama_chat` / `llama_generate`) collects the full response into a
+single string per row before returning. Token-by-token streaming via
+`CALL` is on the roadmap (procedural-UDF streaming work).
+
+**Setup**: install via the in-app **Model Manager** — pick the entry,
+click Install, the engine fetches the GGUF from HuggingFace into
+`<DATUM_MODELS>/<catalog-id>/<version>/<file>.gguf` and runs the
+installSql to register both surfaces. Llama 3.1 prompts for license
+acceptance before download; the others are Apache / TII permissive and
+download immediately. Manual `huggingface-cli` setup still works for
+power users — drop the file at the same path the Model Manager would
+produce (path layout is identical) and re-run the catalog's installSql
+via the SQL surface.
+
+Total LLM disk: ~21 GB with every entry installed simultaneously
+(typical pick: one general-purpose 7B/8B + Qwen Coder 1.5B for fast
+iteration). Each call holds one model resident; the residency manager
+swaps when VRAM is tight.
 
 ### Whisper STT zoo (`whisper_tiny`, `whisper_base`, `whisper_small`, `whisper_medium`)
 
@@ -1562,33 +1530,56 @@ WHERE license IN ('Apache-2.0', 'MIT', 'BSD-3-Clause');
 
 ## Adding a new model
 
-1. **Pick a backend.** Three options:
-   - **ONNX** — vision, embeddings, captioners, detectors, image gen
-     pipelines. Inherits from `OnnxModel`. The fast, native path.
-   - **GGUF + LlamaSharp** — LLMs. Use `LlamaModel`.
-   - **Python bridge** — for libraries that don't ship ONNX export
-     tooling (research-grade TTS, multi-stage pipelines with dynamic
-     control flow, anything in the HuggingFace transformers ecosystem
-     that fights `optimum-cli`). Inherits from `PythonBackedModel`,
-     ships a worker `.py` in `src/DatumIngest/Models/Python/scripts/`,
-     gets a `setup-X-venv.ps1` script under `scripts/`, and reports
+**The default path is now SQL-defined via catalog.json + installSql.**
+This is the same shape every LLM and most ONNX entries already use:
+weights download into `<DATUM_MODELS>/<catalog-id>/<version>/`, and a
+SQL file registers the model identifiers via `CREATE MODEL`. No C#
+required. See [CREATE MODEL](sql/create-model.md) for the DDL surface
+and [`models/sql/qwen2.5-coder-1.5b-instruct-gguf/2026-06-01.sql`](../models/sql/qwen2.5-coder-1.5b-instruct-gguf/2026-06-01.sql)
+for the canonical pilot example.
+
+### SQL-defined path (recommended)
+
+1. **Pick a backend by file type.**
+   - **ONNX (`.onnx`)** — vision, embeddings, captioners, detectors,
+     image-gen pipelines. Dispatch via `infer()` /
+     `decode_decoder_only()` / `decode_seq2seq()` from the body.
+   - **GGUF (`.gguf`)** — text-generation LLMs. Dispatch via
+     `llama_chat()` / `llama_generate()` from the body.
+2. **Add a catalog entry** in `models/catalog.json` declaring the
+   HuggingFace source, `versions[0].installSql` path, and `models[]`
+   identifier list (cross-checked at install time).
+3. **Write the installSql** at `models/sql/<catalog-id>/<version>.sql`.
+   Use `CREATE OR REPLACE MODEL` so rehydrate is idempotent. For LLMs,
+   register a pair: a `<name>_chat` (ChatCompleter, owns the GGUF
+   session) and a `<name>` (TextGenerator, delegates — no USING
+   clause). See [CREATE MODEL § Delegating models](sql/create-model.md#delegating-models).
+4. **Update this doc** with the entry.
+
+### C# path (for non-trivial cases)
+
+Reserve this for models that can't fit the SQL surface — typically
+multi-session bundles with bespoke per-step orchestration (the SD
+text-encoder + UNet + VAE pipeline still uses this path) or Python-
+bridge models.
+
+1. Pick a backend:
+   - **ONNX** — Inherits from `OnnxModel`.
+   - **Python bridge** — Inherits from `PythonBackedModel`, ships a
+     worker `.py` in `src/DatumIngest/Models/Python/scripts/`, gets a
+     `setup-X-venv.ps1` script under `scripts/`, and reports
      `status=bridge` in `system_models`.
-2. **Add a model class** to `src/DatumIngest/Models/Onnx/` or
-   `src/DatumIngest/Models/Llama/`. Inherit from `OnnxModel` for ONNX
-   Runtime models; for multi-session pipelines like ViT-GPT2,
-   Florence-2, or Whisper, override `InferBatchAsync` directly.
-   For Python-bridge models, the model class is just a
-   `PythonBackedModel` instantiation in the registration helper —
-   the worker script does the per-model logic.
-3. **Add a register helper** to
+2. Add a model class to `src/DatumIngest/Models/Onnx/` (or `Python/`).
+   For multi-session pipelines (ViT-GPT2 historically) override
+   `InferBatchAsync` directly.
+3. Add a register helper to
    [BuiltinModels.cs](../src/DatumIngest/Models/BuiltinModels.cs).
    Populate the full metadata: `DisplayName`, `Parameters`, `License`,
    `LicenseHolder`, `SourceUrl`, `Category`, `Modalities`, `Files`.
-4. **Wire into `AttachStandardModels`** so it ships with the default
+4. Wire into `AttachStandardModels` so it ships with the default
    catalog.
-5. **Add a smoke test** under
-   `tests/DatumIngest.Tests/Models/`. Self-skip when the file isn't
-   available so CI machines don't fail.
-6. **Add a setup script** if Python-backed: `scripts/setup-X-venv.ps1`
+5. Add a smoke test under `tests/DatumIngest.Tests/Models/`. Self-skip
+   when the file isn't available so CI machines don't fail.
+6. Add a setup script if Python-backed: `scripts/setup-X-venv.ps1`
    following the Bark / Kokoro template.
-7. **Update this doc** with the model entry.
+7. Update this doc with the entry.

@@ -33,11 +33,18 @@ public sealed class LlamaModelTests : ServiceTestBase
         // Tests run on whatever backend the system can provide. In production
         // (the shell) we require CUDA so the user gets a real error if it's
         // misconfigured; here we want tests green on CPU-only machines too.
-        LlamaModel.RequireCuda = false;
+        LlamaNativeConfig.RequireCuda = false;
     }
 
+    // Catalog-substrate-aware path: SQL-installed weights live at
+    // <DATUM_MODELS>/<catalog-id>/<active-version>/<file>. The 2026-06-01
+    // version is the current cut of the llama-3.1-8b-instruct-gguf
+    // catalog entry; update this constant when the entry is bumped.
     private static string ModelPath => Path.Combine(
-        ModelCatalog.DefaultModelDirectory, BuiltinModels.Llama31_8BDefaultFilename);
+        ModelCatalog.DefaultModelDirectory,
+        "llama-3.1-8b-instruct-gguf",
+        "2026-06-01",
+        "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf");
 
     private static bool ModelAvailable => File.Exists(ModelPath);
 
@@ -202,28 +209,10 @@ public sealed class LlamaModelTests : ServiceTestBase
     /// and resolving it through <see cref="ModelCatalog.GetModel"/> should yield
     /// a usable <see cref="LlamaModel"/> with the expected signature.
     /// </summary>
-    [Fact]
-    public void Catalog_RegisterAndResolve_YieldsLlamaModel()
-    {
-        if (!ModelAvailable)
-        {
-            return;
-        }
-
-        ModelCatalog catalog = new(modelDirectory: ModelCatalog.DefaultModelDirectory);
-        BuiltinModels.RegisterLlama31(catalog, maxTokens: 16);
-
-        ModelCatalogEntry? entry = catalog.TryGetEntry("llama31_8b");
-        Assert.NotNull(entry);
-        Assert.Equal("llama", entry!.Backend);
-        Assert.Equal(BuiltinModels.Llama31_8BDefaultFilename, entry.RelativePath);
-        Assert.False(entry.IsDeterministic);
-
-        using ModelLease lease = catalog.ResolveLeaseSynchronously("llama31_8b");
-        IModel model = lease.Model;
-        Assert.IsType<LlamaModel>(model);
-        Assert.Equal(DataKind.String, model.OutputKind);
-        Assert.Single(model.InputKinds);
-        Assert.Equal(DataKind.String, model.InputKinds[0]);
-    }
+    // The previous `Catalog_RegisterAndResolve_YieldsLlamaModel` test
+    // exercised BuiltinModels.RegisterLlama31 — that registration was
+    // retired when the Llama 3.1 entry moved to a SQL-defined model
+    // pair (catalog id llama-3.1-8b-instruct-gguf). Round-trip
+    // coverage of the SQL → LlamaSharpSession path now lives in
+    // ModelRegistrationTests / LazyModelSessions tests.
 }

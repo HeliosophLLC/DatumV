@@ -257,7 +257,11 @@ public sealed class InferFunction : IFunction, IScalarFunction
                 this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
         }
 
-        IInferenceSession session = await model.BoundSessions
+        // infer() is the ORT-shaped tensor-dispatch entry point: cast from
+        // the narrow IModelSession handle. Non-tensor backends bound under
+        // 'default' would surface here as InvalidCastException — correct,
+        // since infer() is contractually a tensor-graph call.
+        IInferenceSession session = (IInferenceSession)await model.BoundSessions
             .ResolveAsync("default", cancellationToken)
             .ConfigureAwait(false);
         // Batched packing dispatches over the input element kind — Float32
@@ -756,7 +760,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
                     + "Aliases come from the CREATE MODEL's USING clause "
                     + "(`USING 'path' AS alias`).");
             }
-            session = await model.BoundSessions.ResolveAsync(alias, cancellationToken).ConfigureAwait(false);
+            session = (IInferenceSession)await model.BoundSessions.ResolveAsync(alias, cancellationToken).ConfigureAwait(false);
             sessionName = alias;
         }
         else
@@ -770,7 +774,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
                     + "Available sessions: ["
                     + $"{string.Join(", ", model.BoundSessions.Keys)}].");
             }
-            session = await model.BoundSessions.ResolveAsync("default", cancellationToken).ConfigureAwait(false);
+            session = (IInferenceSession)await model.BoundSessions.ResolveAsync("default", cancellationToken).ConfigureAwait(false);
             sessionName = "default";
         }
 
@@ -1720,7 +1724,7 @@ public sealed class InferOutputsFunction : IFunction, IScalarFunction
                 this, argumentColumns, rowCount, frame, cancellationToken).ConfigureAwait(false);
         }
 
-        IInferenceSession session = await model.BoundSessions
+        IInferenceSession session = (IInferenceSession)await model.BoundSessions
             .ResolveAsync("default", cancellationToken)
             .ConfigureAwait(false);
 

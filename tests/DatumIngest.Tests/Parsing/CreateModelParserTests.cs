@@ -196,13 +196,44 @@ public sealed class CreateModelParserTests : ServiceTestBase
     }
 
     [Fact]
-    public void CreateModel_NoUsing_FailsToParse()
+    public void CreateModel_NoUsing_ParsesAsDelegatingModel()
     {
-        // USING is required — there's no ambient default for the model
-        // file and the registrar wouldn't know what to load.
-        Assert.ThrowsAny<Exception>(() => SqlParser.ParseStatement(
+        // No USING clause is accepted: a delegating model whose body
+        // produces its result by calling another model or UDF, with no
+        // weights of its own. UsingPath and UsingFiles both stay null;
+        // the registrar binds zero sessions for these.
+        Statement stmt = SqlParser.ParseStatement(
             "CREATE MODEL classify(img IMAGE) RETURNS INT32 " +
-            "AS BEGIN RETURN 1 END"));
+            "AS BEGIN RETURN 1 END");
+
+        CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
+        Assert.Null(create.UsingPath);
+        Assert.Null(create.UsingFiles);
+        Assert.Equal("classify", create.Name);
+        Assert.Equal("INT32", create.ReturnTypeName);
+    }
+
+    [Fact]
+    public void CreateModel_NoUsing_BodyCanDelegateToAnotherModel()
+    {
+        // The realistic delegating shape: a TextGenerator surface that
+        // wraps a sibling ChatCompleter model. No USING — both surfaces
+        // share the underlying weights via the sibling's session, and
+        // the simple form costs zero additional VRAM. Struct literals
+        // use the curly-brace syntax (`{ role: 'user', content: prompt }`);
+        // arrays of structs wrap them in the standard `[...]` array
+        // literal.
+        Statement stmt = SqlParser.ParseStatement(
+            "CREATE MODEL phi35_mini(prompt STRING) RETURNS STRING " +
+            "IMPLEMENTS TextGenerator " +
+            "AS BEGIN " +
+            "  RETURN models.phi35_mini_chat([{ role: 'user', content: prompt }]) " +
+            "END");
+
+        CreateModelStatement create = Assert.IsType<CreateModelStatement>(stmt);
+        Assert.Null(create.UsingPath);
+        Assert.Null(create.UsingFiles);
+        Assert.Equal("TextGenerator", create.ImplementsTaskName);
     }
 
     [Fact]

@@ -193,15 +193,6 @@
           href: sql/procedural.md#for
         - name: CREATE PROCEDURE
           href: sql/procedural.md#create-procedure
-    - name: Chat Templates
-      href: sql/chat-templates.md
-      items:
-        - name: Supported families
-          href: sql/chat-templates.md#supported-families
-        - name: Family quirks
-          href: sql/chat-templates.md#family-quirks
-        - name: Worked example
-          href: sql/chat-templates.md#worked-example-persisted-conversation
 
 - name: Functions
   items:

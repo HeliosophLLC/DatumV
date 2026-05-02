@@ -386,7 +386,9 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     private static void FillRowFromDescriptor(
         DataValue[] cells, ModelDescriptor descriptor, DatumIngest.ModelLibrary.IModelPathResolver pathResolver, Arena arena, ICatalogVocabulary? vocabulary)
     {
-        long? fileSize = TryStatUsingPath(descriptor.UsingPath, pathResolver);
+        long? fileSize = descriptor.UsingPath is { } usingPath
+            ? TryStatUsingPath(usingPath, pathResolver)
+            : null;
 
         cells[0]  = DataValue.FromString(descriptor.Name, arena);
         cells[1]  = DataValue.Null(DataKind.String);          // display_name
@@ -394,7 +396,9 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         cells[3]  = DataValue.NullArrayOf(DataKind.String);   // modalities
         cells[4]  = DataValue.FromString("sql", arena);       // backend — discriminator inside the row; the `kind` column is the schema-stable signal
         cells[5]  = DataValue.Null(DataKind.String);          // parameters
-        cells[6]  = DataValue.FromString(descriptor.UsingPath, arena);
+        cells[6]  = descriptor.UsingPath is not null
+            ? DataValue.FromString(descriptor.UsingPath, arena)
+            : DataValue.Null(DataKind.String);                // file_name — null for delegating models with no USING
         // file_names: NULL for legacy single-session bundles; a string[]
         // of every aliased file's source path for multi-session bundles.
         // Each entry is the SQL-declared path (not the resolved absolute

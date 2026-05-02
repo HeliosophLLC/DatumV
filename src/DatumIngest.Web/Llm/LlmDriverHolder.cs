@@ -65,7 +65,7 @@ internal sealed class LlmDriverHolder : IAsyncDisposable
         ModelCatalog? modelCatalog = _tableCatalog.Models
             ?? throw new InvalidOperationException(
                 "No ModelCatalog attached to TableCatalog — chat surface is unavailable. " +
-                "Set WebHostOptions.RegisterBuiltinModels = true to attach the standard zoo.");
+                "Set WebHostOptions.RegisterBuiltinModels = true to attach the model subsystem via ModelHost.");
 
         // Read the user's pinned LLM at load time so settings → restart →
         // load picks up changes without a second redeploy hop. The setting

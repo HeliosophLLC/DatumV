@@ -3,12 +3,18 @@ import { api } from '@/api';
 import { settingsState } from './settings';
 
 // Every icon that can live on a dock. Order in DockState.left / .right
-// arrays is the user's visible ordering.
+// arrays is the user's visible ordering. `chat` stays in the PanelId
+// union so the registry entry + ChatPanel + SidePanelHost case keep
+// type-checking, but it's deliberately absent from ALL_PANEL_IDS for
+// the first release — the dock arrays + the sanitize() whitelist
+// derive from ALL_PANEL_IDS, so the icon doesn't render and any
+// persisted `'chat'` in user settings is dropped at hydrate time.
+// Restoring chat for a future release is a one-line addition here
+// plus the four server-side singleton re-enables in WebHostExtensions.
 export type PanelId = 'chat' | 'catalog' | 'procedures' | 'projects';
 export type DockSide = 'left' | 'right';
 
 export const ALL_PANEL_IDS: readonly PanelId[] = [
-  'chat',
   'catalog',
   'procedures',
   'projects',

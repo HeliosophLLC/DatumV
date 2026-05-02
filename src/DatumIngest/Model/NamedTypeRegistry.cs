@@ -243,5 +243,24 @@ public static class NamedTypeRegistry
                 new("image", reg.InternArrayType(DataKind.Float32)),
                 new("text", reg.InternArrayType(DataKind.Float32)),
             ])),
+
+        // ─── chat / LLM ─────────────────────────────────────────────────
+        //
+        // ChatMessage is the row shape consumed by the ChatCompleter task
+        // contract — the structured-multi-turn surface for LLMs.
+        // `role` is one of 'user', 'assistant', 'system', 'tool';
+        // `content` is the message body. The role vocabulary is
+        // intentionally non-typed at the schema layer: per-family chat
+        // templates reject unsupported roles at runtime with a clear
+        // diagnostic (see LlamaChatTemplate's role-mapping switches).
+
+        new(
+            "ChatMessage",
+            "Struct<role: String, content: String>",
+            (reg, _) => reg.InternStructType(
+            [
+                new("role", reg.InternScalarType(DataKind.String)),
+                new("content", reg.InternScalarType(DataKind.String)),
+            ])),
     ];
 }

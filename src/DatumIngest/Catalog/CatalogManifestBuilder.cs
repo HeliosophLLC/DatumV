@@ -87,7 +87,7 @@ public static class CatalogManifestBuilder
         // metadata — register-by-instance only — so their argument lists
         // stay empty until the registries gain descriptors. SchemaName
         // flows in from the registry's QualifiedName keys so completion can
-        // filter templates.X / etc. correctly.
+        // filter schema-qualified call sites correctly.
         foreach (QualifiedName qn in functions.AggregateFunctionQualifiedNames)
         {
             functionSigs.Add(new FunctionSignature { SchemaName = qn.Schema, Name = qn.Name, Parameters = [], IsAggregate = true });

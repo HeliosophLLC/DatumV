@@ -1775,8 +1775,8 @@ export interface ModelDto {
     parameters?: ScalarFunctionParameterDto[];
     returnType?: string;
     returnIsNotNull?: boolean;
-    usingPath?: string;
-    resolvedUsingPath?: string;
+    usingPath?: string | undefined;
+    resolvedUsingPath?: string | undefined;
     implementsTask?: string | undefined;
     sourceText?: string | undefined;
 }

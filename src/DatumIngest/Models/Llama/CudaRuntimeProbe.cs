@@ -21,9 +21,9 @@ namespace DatumIngest.Models.Llama;
 /// </para>
 /// <para>
 /// The probe runs at most once per process. Failure is non-fatal: callers
-/// decide what to do (LlamaModel surfaces it as a clear error when
-/// <see cref="LlamaModel.RequireCuda"/> is set, or silently allows CPU
-/// fallback otherwise).
+/// decide what to do (LlamaModel / LlamaSharpBackend surface it as a clear
+/// error when <see cref="LlamaNativeConfig.RequireCuda"/> is set, or silently
+/// allow CPU fallback otherwise).
 /// </para>
 /// <para>
 /// <strong>Windows-only.</strong> All probe paths walk Windows-specific

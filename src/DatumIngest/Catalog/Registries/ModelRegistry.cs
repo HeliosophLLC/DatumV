@@ -47,13 +47,17 @@ namespace DatumIngest.Catalog.Registries;
 /// Raw path supplied to the <c>USING</c> clause. The registrar resolves
 /// this against the host's models directory (<c>file://</c>-prefixed paths
 /// are treated as absolute) before passing to the dispatcher.
+/// <see langword="null"/> for delegating models that declared no
+/// <c>USING</c> clause — their body produces its result by calling into
+/// another model or a UDF, with no weights of their own.
 /// </param>
 /// <param name="ResolvedUsingPath">
 /// Absolute path after the registrar resolves <see cref="UsingPath"/>
 /// against the host's models directory. Lets the body's scalar functions
 /// (e.g. <c>tokenizer.encode_bert</c>) find sibling files like
-/// <c>vocab.txt</c> next to the bound ONNX without re-implementing the
-/// path-resolution rules.
+/// <c>vocab.txt</c> next to the bound weights without re-implementing
+/// the path-resolution rules. <see langword="null"/> when
+/// <see cref="UsingPath"/> is null.
 /// </param>
 /// <param name="StatementBody">
 /// Procedural body. Always non-null on a valid model (CREATE MODEL parser
@@ -121,8 +125,8 @@ public sealed record ModelDescriptor(
     string Name,
     IReadOnlyList<UdfParameter> Parameters,
     string ReturnTypeName,
-    string UsingPath,
-    string ResolvedUsingPath,
+    string? UsingPath,
+    string? ResolvedUsingPath,
     IReadOnlyList<Statement> StatementBody,
     LazyModelSessions BoundSessions,
     bool ReturnIsNotNull = false,

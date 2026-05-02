@@ -2000,7 +2000,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         public IReadOnlyList<IInferenceBackend> Backends => Array.Empty<IInferenceBackend>();
 
-        public ValueTask<IReadOnlyDictionary<string, IInferenceSession>> LoadBundleAsync(
+        public ValueTask<IReadOnlyDictionary<string, IModelSession>> LoadBundleAsync(
             BundleManifest bundle,
             InferencePreferences preferences,
             CancellationToken cancellationToken)
@@ -2009,8 +2009,8 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             StubSession session = NextSession ?? new StubSession();
             NextSession = null;
             LastSession = session;
-            IReadOnlyDictionary<string, IInferenceSession> sessions =
-                new Dictionary<string, IInferenceSession>(StringComparer.Ordinal)
+            IReadOnlyDictionary<string, IModelSession> sessions =
+                new Dictionary<string, IModelSession>(StringComparer.Ordinal)
                 {
                     ["default"] = session,
                 };

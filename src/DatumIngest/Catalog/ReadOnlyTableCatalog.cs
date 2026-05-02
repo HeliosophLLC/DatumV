@@ -16,7 +16,7 @@ namespace DatumIngest.Catalog;
 /// CREATE INDEX, DROP INDEX) throws <see cref="NotSupportedException"/>
 /// here — user DDL never applies to these schemas. Providers are
 /// attached at construction (system / virtual schemas) or by the host
-/// at startup (e.g. <c>BuiltinModels.AttachStandardModels</c> attaches
+/// at startup (e.g. <c>ModelHost.AttachTo</c> attaches
 /// <see cref="Providers.ModelsTableProvider"/> after the catalog is
 /// built).
 /// </para>

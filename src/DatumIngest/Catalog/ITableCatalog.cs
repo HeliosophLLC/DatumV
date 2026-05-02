@@ -57,7 +57,7 @@ public interface ITableCatalog : IDisposable
 
     /// <summary>
     /// Registers an already-constructed provider. Used by hosts attaching
-    /// projections (e.g. <c>BuiltinModels.AttachStandardModels</c>), by
+    /// projections (e.g. <c>ModelHost.AttachTo</c>), by
     /// tests adding <see cref="Providers.InMemoryTableProvider"/>, and by
     /// the facade's CREATE TEMP TABLE path.
     /// </summary>

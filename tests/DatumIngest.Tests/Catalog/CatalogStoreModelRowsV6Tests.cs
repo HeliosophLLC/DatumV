@@ -243,11 +243,11 @@ public sealed class CatalogStoreModelRowsV6Tests : ServiceTestBase, IDisposable
     {
         public IReadOnlyList<IInferenceBackend> Backends => Array.Empty<IInferenceBackend>();
 
-        public ValueTask<IReadOnlyDictionary<string, IInferenceSession>> LoadBundleAsync(
+        public ValueTask<IReadOnlyDictionary<string, IModelSession>> LoadBundleAsync(
             BundleManifest bundle,
             InferencePreferences preferences,
             CancellationToken cancellationToken)
-            => ValueTask.FromResult<IReadOnlyDictionary<string, IInferenceSession>>(
-                new Dictionary<string, IInferenceSession>(StringComparer.Ordinal));
+            => ValueTask.FromResult<IReadOnlyDictionary<string, IModelSession>>(
+                new Dictionary<string, IModelSession>(StringComparer.Ordinal));
     }
 }

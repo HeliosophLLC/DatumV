@@ -90,7 +90,15 @@ public interface IInferenceBackend
     /// Throws if the device is unsupported, the file is unreadable, or
     /// the graph has ops this backend doesn't implement.
     /// </summary>
-    ValueTask<IInferenceSession> LoadAsync(
+    /// <remarks>
+    /// Return type is the narrow <see cref="IModelSession"/> handle so
+    /// backends that don't surface tensor I/O (LlamaSharp, future RPC
+    /// clients) can satisfy the contract. Tensor-graph backends (ONNX
+    /// Runtime, OpenVINO) return concrete sessions implementing the
+    /// derived <see cref="IInferenceSession"/>; consumers that need the
+    /// tensor surface cast at the use site.
+    /// </remarks>
+    ValueTask<IModelSession> LoadAsync(
         InferenceLoadRequest request,
         CancellationToken cancellationToken);
 }

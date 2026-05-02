@@ -55,7 +55,13 @@ public interface IInferenceDispatcher
     /// <param name="bundle">Bundle to load.</param>
     /// <param name="preferences">User-set preferences; defaults pick "Balanced" everywhere.</param>
     /// <param name="cancellationToken">Honoured between session loads.</param>
-    ValueTask<IReadOnlyDictionary<string, IInferenceSession>> LoadBundleAsync(
+    /// <remarks>
+    /// Values are typed as the narrow <see cref="IModelSession"/> handle so
+    /// non-tensor backends fit the same bundle/lazy-resolve pipeline as
+    /// ONNX Runtime. Consumers that need tensor I/O cast to
+    /// <see cref="IInferenceSession"/> at the use site.
+    /// </remarks>
+    ValueTask<IReadOnlyDictionary<string, IModelSession>> LoadBundleAsync(
         BundleManifest bundle,
         InferencePreferences preferences,
         CancellationToken cancellationToken);

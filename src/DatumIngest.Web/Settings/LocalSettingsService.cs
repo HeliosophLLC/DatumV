@@ -23,7 +23,7 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
     // Settings is pinned to the bottom of the left dock by the renderer and
     // is not part of this list. Order = display order.
     private static readonly IReadOnlyList<string> DefaultDockLeftItems =
-        ["chat", "catalog", "procedures", "projects"];
+        ["catalog", "procedures", "projects"];
 
     private static readonly IReadOnlyList<string> DefaultDockRightItems =
         Array.Empty<string>();

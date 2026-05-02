@@ -135,7 +135,8 @@ public sealed class MeshFromTriplaneFunction : IFunction, IScalarFunction
                 + $"[{string.Join(", ", model.BoundSessions.Keys)}]. Aliases come from "
                 + "the CREATE MODEL's USING clause (`USING 'path' AS alias`).");
         }
-        IInferenceSession session = await model.BoundSessions
+        // Tensor surface required: cast from the narrow IModelSession handle.
+        IInferenceSession session = (IInferenceSession)await model.BoundSessions
             .ResolveAsync(sessionAlias, cancellationToken).ConfigureAwait(false);
 
         // Resolve the input / output names. 'triplane' and 'xyz' inputs are

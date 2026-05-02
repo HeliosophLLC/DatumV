@@ -55,16 +55,32 @@ public sealed record LlamaChatTemplate(
     public string Format(string userMsg) => Open + WrapMessage("user", userMsg) + AssistantTurn;
 
     /// <summary>
-    /// "Raw" template that performs no wrapping. Used by
-    /// <c>LlamaModel</c>'s <c>templated</c> override path so SQL callers
-    /// that already assembled a full prompt via the <c>templates.X</c>
-    /// scalar functions don't get double-wrapped.
+    /// Looks up a built-in template by canonical name (case-insensitive).
+    /// SQL <c>llama_generate</c> / <c>llama_chat</c> scalars accept the
+    /// family identifier as a string argument and resolve through here so
+    /// catalog installSql doesn't have to thread C# enum values through.
+    /// Returns <see langword="null"/> when no template matches; callers
+    /// surface that as an actionable error including the supported set.
     /// </summary>
-    public static readonly LlamaChatTemplate Identity = new(
-        Open: string.Empty,
-        WrapMessage: static (_, content) => content,
-        AssistantTurn: string.Empty,
-        StopSequences: []);
+    public static LlamaChatTemplate? TryByName(string name) =>
+        name?.ToLowerInvariant() switch
+        {
+            "llama31" or "llama-3.1" or "llama3.1" => Llama31,
+            "phi3" or "phi-3" or "phi3.5" or "phi-3.5" => Phi3,
+            "zephyr" => Zephyr,
+            "gemma" => Gemma,
+            "chatml" => ChatML,
+            "mistral" => Mistral,
+            "granite" => Granite,
+            _ => null,
+        };
+
+    /// <summary>
+    /// Comma-separated list of supported template names for use in error
+    /// diagnostics. Kept in sync with <see cref="TryByName"/>'s switch.
+    /// </summary>
+    public const string SupportedTemplateNames =
+        "llama31, phi3, zephyr, gemma, chatml, mistral, granite";
 
     // ─── Per-family templates ─────────────────────────────────────────────────
     //
@@ -233,7 +249,8 @@ public sealed record LlamaChatTemplate(
         "tool" => "[INST] " + content + " [/INST]",
         "system" => throw new ArgumentException(
             "Mistral has no native system role. Concatenate the system text " +
-            "into the first user message before invoking templates.mistral_msg."),
+            "into the first user message before passing the messages array " +
+            "to llama_chat()."),
         _ => throw new ArgumentException(
             $"Mistral template received unsupported role '{role}'. " +
             "Supported: user, assistant, tool."),

@@ -158,9 +158,16 @@ public sealed class DecodeDecoderOnlyFunction : IFunction, IScalarFunction
                 $"decode_decoder_only(): embed_tokens session alias '{embedAlias}' is not bound. "
                 + $"Available: [{string.Join(", ", model.BoundSessions.Keys)}].");
         }
-        IInferenceSession decoder = await model.BoundSessions
+        // Cast from the narrow IModelSession handle: this scalar drives
+        // tensor I/O (Inputs/Outputs introspection + RunAsync), so it
+        // requires the IInferenceSession surface that the ORT-backed
+        // session implementation supplies. A non-tensor backend bound
+        // to this alias would surface here as an InvalidCastException —
+        // the right outcome, since the body declared an ORT-shaped
+        // contract.
+        IInferenceSession decoder = (IInferenceSession)await model.BoundSessions
             .ResolveAsync(decoderAlias, cancellationToken).ConfigureAwait(false);
-        IInferenceSession embedTokens = await model.BoundSessions
+        IInferenceSession embedTokens = (IInferenceSession)await model.BoundSessions
             .ResolveAsync(embedAlias, cancellationToken).ConfigureAwait(false);
 
         ReadOnlySpan<ValueRef> args = arguments.Span;

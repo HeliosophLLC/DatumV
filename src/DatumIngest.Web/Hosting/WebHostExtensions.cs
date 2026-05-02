@@ -69,14 +69,15 @@ public static class WebHostExtensions
                     StartupSettingsLoader.LoadModelsDirectory(catalogRootPath)
                     ?? modelsDirectory;
 
-                // Attach the standard model zoo before any hosted service runs.
-                // BuiltinModels uses VramBudgetResolver internally (one
+                // Attach the model subsystem (catalog manifest, calibration,
+                // residency, system.* providers) before any hosted service
+                // runs. ModelHost uses VramBudgetResolver internally (one
                 // nvidia-smi shell-out) and sets catalog.Models. Registrations
                 // are cheap — model loads are lazy via the residency manager,
                 // triggered on first chat send via LlmDriverHolder.
                 if (registerBuiltinModels)
                 {
-                    BuiltinModels.AttachStandardModels(catalog, effectiveModelsDir);
+                    ModelHost.AttachTo(catalog, effectiveModelsDir);
                 }
 
                 return catalog;
@@ -127,20 +128,23 @@ public static class WebHostExtensions
             // surface.
             services.AddScoped<QueryStreamService>();
 
-            // Chat LLM wiring. The holder is a singleton lazy loader: the
-            // first /api/chat send awaits LlmDriverHolder.GetAsync, which
-            // selects + acquires the model on first call and caches it for
-            // the process lifetime. No eager startup-time load — the LLM is
-            // a rarely-used surface and was burning VRAM + startup time for
-            // nothing.
-            if (registerBuiltinModels)
-            {
-                services.AddSingleton<LlmDriverHolder>();
-
-                services.AddSingleton<Messages.IMessageGraph, Messages.MessageGraph>();
-                services.AddSingleton<Conversation.IConversationRegistry, Conversation.ConversationRegistry>();
-                services.AddSingleton<Conversation.IConversationAgent, Conversation.ConversationAgent>();
-            }
+            // Chat LLM wiring intentionally skipped for the first release.
+            // The SQL-LLM migration left the conversation agent's prompt
+            // assembly double-wrapping chat templates (the agent builds a
+            // templated string via LlamaChatTemplate; the SQL-defined model
+            // body then wraps that string again via llama.cpp's native
+            // template engine — model sees gibberish) and routes streaming
+            // through ProceduralModelAdapter's single-chunk fallback. The
+            // front-end's chat dock entry is marked disabled in panels/
+            // registry.ts to match. Re-register these three singletons
+            // once the agent is rewired against the ChatCompleter task
+            // contract (see project_procedural_udf_model_followups.md for
+            // the streaming-sink design).
+            //
+            //   services.AddSingleton<LlmDriverHolder>();
+            //   services.AddSingleton<Messages.IMessageGraph, Messages.MessageGraph>();
+            //   services.AddSingleton<Conversation.IConversationRegistry, Conversation.ConversationRegistry>();
+            //   services.AddSingleton<Conversation.IConversationAgent, Conversation.ConversationAgent>();
         }
 
         // Per-request context. CurrentContext is the writable concrete; ICurrentContext

@@ -327,16 +327,13 @@ AS BEGIN
 END
 ```
 
-For multi-turn chat with role-aware templating, pair `tokenizer.encode`
-with the [chat-template helpers](sql/chat-templates.md):
-
-```sql
-DECLARE prompt String =
-    templates.llama31_open()
-    || templates.llama31_msg('user', user_question)
-    || templates.llama31_assistant_turn();
-DECLARE ids Int64[] = tokenizer.encode(prompt, '/path/tokenizer.json');
-```
+For multi-turn chat, prefer the SQL-defined LLM surface
+(`llama_chat(session, messages, ...)` documented in
+[CREATE MODEL § LLM dispatch scalars](sql/create-model.md#llm-dispatch-scalars))
+over hand-rolling role-aware tokenization here. The chat scalar's body
+calls llama.cpp's native `llama_chat_apply_template` against the GGUF's
+embedded chat template, which is the only reliable way to tokenize
+special role markers across quants.
 
 ### Object detection (bounding boxes)
 

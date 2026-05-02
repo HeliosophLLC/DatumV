@@ -7,7 +7,10 @@ namespace DatumIngest.Inference;
 /// policy layer chose.
 /// </summary>
 /// <param name="ModelFilePath">
-/// Absolute path to the ONNX file the session should load. For multi-session
+/// Absolute path to the model file the session should load. Backend-specific
+/// (<c>.onnx</c> for OnnxRuntime, <c>.gguf</c> for LlamaSharp); each backend's
+/// <see cref="IInferenceBackend.Inspect"/> rejects file extensions it doesn't
+/// handle so the dispatcher routes to the right backend. For multi-session
 /// bundles the dispatcher invokes <see cref="IInferenceBackend.LoadAsync"/>
 /// once per session, each with its own path.
 /// </param>
@@ -33,7 +36,7 @@ namespace DatumIngest.Inference;
 /// the backend falls back to its default estimate (typically
 /// <c>1.5 × file_size</c>). When set, the backend enforces that the
 /// value is ≥ the ONNX file size and uses it as the
-/// <see cref="IInferenceSession.EstimatedResidentBytes"/>.
+/// <see cref="IModelSession.EstimatedResidentBytes"/>.
 /// </param>
 public sealed record InferenceLoadRequest(
     string ModelFilePath,

@@ -6,15 +6,15 @@ namespace DatumIngest.Catalog.Registries;
 /// <summary>
 /// Per-model lazy session loader. Wraps the (alias → resolved-path) map
 /// declared in a <c>CREATE MODEL ... USING ... AS alias</c> clause and
-/// defers the actual ONNX session load until the first <c>infer('alias',
-/// ...)</c> call invokes the alias.
+/// defers the actual session load until the first call (<c>infer('alias',
+/// ...)</c>, <c>llama_chat('alias', ...)</c>, …) invokes the alias.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <strong>Why lazy.</strong> SQL-defined models used to call
 /// <see cref="IInferenceDispatcher.LoadBundleAsync"/> at CREATE MODEL
 /// registration time, which made catalog rehydration on startup load
-/// every installed model's ONNX sessions before the host could serve
+/// every installed model's sessions before the host could serve
 /// requests. With a few dozen SQL-defined models the boot cost ran into
 /// minutes; this class makes session load O(invocations) instead of
 /// O(installed models).
@@ -31,13 +31,21 @@ namespace DatumIngest.Catalog.Registries;
 /// invoked carry no native resources, so skipping them is both correct
 /// and faster on shutdown.
 /// </para>
+/// <para>
+/// <strong>Session type.</strong> Sessions are surfaced as the narrow
+/// <see cref="IModelSession"/> handle. Consumers that need the tensor
+/// surface (ONNX-style scalars like <c>infer</c>,
+/// <c>decode_decoder_only</c>) cast to <see cref="IInferenceSession"/>
+/// at the use site; backends with non-tensor dispatch shapes return
+/// their own derived interfaces that scalars cast to similarly.
+/// </para>
 /// </remarks>
 public sealed class LazyModelSessions
 {
     private readonly IInferenceDispatcher _dispatcher;
     private readonly IReadOnlyDictionary<string, string> _resolvedPaths;
     private readonly string _bundleId;
-    private readonly ConcurrentDictionary<string, Lazy<Task<IInferenceSession>>> _loaders;
+    private readonly ConcurrentDictionary<string, Lazy<Task<IModelSession>>> _loaders;
 
     /// <summary>
     /// Builds a lazy session bundle. <paramref name="resolvedPaths"/> must
@@ -53,7 +61,7 @@ public sealed class LazyModelSessions
         _dispatcher = dispatcher;
         _resolvedPaths = resolvedPaths;
         _bundleId = bundleId;
-        _loaders = new ConcurrentDictionary<string, Lazy<Task<IInferenceSession>>>(StringComparer.Ordinal);
+        _loaders = new ConcurrentDictionary<string, Lazy<Task<IModelSession>>>(StringComparer.Ordinal);
     }
 
     /// <summary>All declared session aliases. Available without triggering loads.</summary>
@@ -68,7 +76,7 @@ public sealed class LazyModelSessions
 
     /// <summary>True when <paramref name="alias"/> has been loaded and is in cache.</summary>
     public bool IsLoaded(string alias)
-        => _loaders.TryGetValue(alias, out Lazy<Task<IInferenceSession>>? lazy)
+        => _loaders.TryGetValue(alias, out Lazy<Task<IModelSession>>? lazy)
             && lazy.IsValueCreated
             && lazy.Value.IsCompletedSuccessfully;
 
@@ -78,29 +86,44 @@ public sealed class LazyModelSessions
     /// in-flight load (any caller may be the loader, the rest await).
     /// Throws when the alias wasn't declared in CREATE MODEL.
     /// </summary>
-    public ValueTask<IInferenceSession> ResolveAsync(string alias, CancellationToken cancellationToken)
+    public ValueTask<IModelSession> ResolveAsync(string alias, CancellationToken cancellationToken)
     {
         if (!_resolvedPaths.ContainsKey(alias))
         {
+            // Distinguish "alias not in the declared set" from "this model
+            // has no USING clause at all". The latter is a delegating
+            // model whose body produces its result by calling into
+            // another model or a UDF — referencing a session alias from
+            // its body is almost always an author bug (forgot to add
+            // USING, or copied the body from a model that did bind a
+            // session).
+            if (_resolvedPaths.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"Session alias '{alias}' is not declared: this model has no USING clause. " +
+                    "Add a USING clause (e.g. `USING 'path/to/model.gguf' AS " + alias + "`) " +
+                    "if the body should bind its own sessions, or remove the alias-consuming call " +
+                    "if the body should delegate to another model.");
+            }
             throw new InvalidOperationException(
                 $"Session alias '{alias}' is not declared in the model's USING clause. " +
                 $"Available aliases: [{string.Join(", ", _resolvedPaths.Keys)}].");
         }
-        Lazy<Task<IInferenceSession>> lazy = _loaders.GetOrAdd(
+        Lazy<Task<IModelSession>> lazy = _loaders.GetOrAdd(
             alias,
-            a => new Lazy<Task<IInferenceSession>>(
+            a => new Lazy<Task<IModelSession>>(
                 () => LoadOneAsync(a, cancellationToken),
                 LazyThreadSafetyMode.ExecutionAndPublication));
-        return new ValueTask<IInferenceSession>(lazy.Value);
+        return new ValueTask<IModelSession>(lazy.Value);
     }
 
-    private async Task<IInferenceSession> LoadOneAsync(string alias, CancellationToken cancellationToken)
+    private async Task<IModelSession> LoadOneAsync(string alias, CancellationToken cancellationToken)
     {
         BundleManifest single = new(
             BundleId: $"{_bundleId}#{alias}",
             Sessions: new Dictionary<string, string>(StringComparer.Ordinal) { [alias] = _resolvedPaths[alias] },
             PreferredBackends: Array.Empty<InferenceBackendId>());
-        IReadOnlyDictionary<string, IInferenceSession> loaded = await _dispatcher
+        IReadOnlyDictionary<string, IModelSession> loaded = await _dispatcher
             .LoadBundleAsync(single, new InferencePreferences(), cancellationToken)
             .ConfigureAwait(false);
         return loaded[alias];
@@ -113,10 +136,10 @@ public sealed class LazyModelSessions
     /// </summary>
     public void DisposeLoaded()
     {
-        foreach (KeyValuePair<string, Lazy<Task<IInferenceSession>>> kv in _loaders)
+        foreach (KeyValuePair<string, Lazy<Task<IModelSession>>> kv in _loaders)
         {
             if (!kv.Value.IsValueCreated) continue;
-            Task<IInferenceSession> task = kv.Value.Value;
+            Task<IModelSession> task = kv.Value.Value;
             if (!task.IsCompletedSuccessfully) continue;
             try { task.Result.Dispose(); }
             catch (Exception ex)

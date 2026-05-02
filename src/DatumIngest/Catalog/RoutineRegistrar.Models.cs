@@ -131,13 +131,17 @@ internal sealed partial class RoutineRegistrar
             return;
         }
 
-        // Build the (alias → resolved-path) map from either the new
-        // multi-file USING form or the legacy single-file form. The legacy
-        // form's session is always keyed "default" so downstream code that
-        // looks up BoundSessions["default"] keeps working without change.
+        // Build the (alias → resolved-path) map from one of three shapes:
+        //   - Multi-file USING: every spec resolves to a separate session
+        //   - Legacy single-file USING: one session keyed "default"
+        //   - No USING clause: empty map → zero sessions bound. The
+        //     model's body produces its result by delegating to another
+        //     model or a UDF; any body that references a session alias
+        //     surfaces a clear runtime error from LazyModelSessions
+        //     because the alias is never declared.
         Dictionary<string, string> sessionPaths = new(StringComparer.Ordinal);
         List<ResolvedUsingFile>? resolvedFiles = null;
-        string primaryResolvedPath;
+        string? primaryResolvedPath = null;
         if (create.UsingFiles is { Count: > 0 } usingFiles)
         {
             resolvedFiles = new List<ResolvedUsingFile>(usingFiles.Count);
@@ -147,7 +151,7 @@ internal sealed partial class RoutineRegistrar
                 if (!File.Exists(resolved))
                 {
                     throw new FileNotFoundException(
-                        $"CREATE MODEL {create.Name}: ONNX file not found at '{resolved}' " +
+                        $"CREATE MODEL {create.Name}: model file not found at '{resolved}' " +
                         $"(USING '{spec.Path}' AS {spec.Alias}). " +
                         "Verify the path is correct relative to the host's model directory, " +
                         "or prefix with 'file://' for an absolute path.",
@@ -158,20 +162,21 @@ internal sealed partial class RoutineRegistrar
             }
             primaryResolvedPath = resolvedFiles[0].ResolvedPath;
         }
-        else
+        else if (create.UsingPath is { } usingPath)
         {
-            primaryResolvedPath = ResolveUsingPath(create.UsingPath, create.Name);
+            primaryResolvedPath = ResolveUsingPath(usingPath, create.Name);
             if (!File.Exists(primaryResolvedPath))
             {
                 throw new FileNotFoundException(
-                    $"CREATE MODEL {create.Name}: ONNX file not found at '{primaryResolvedPath}' " +
-                    $"(USING '{create.UsingPath}'). " +
+                    $"CREATE MODEL {create.Name}: model file not found at '{primaryResolvedPath}' " +
+                    $"(USING '{usingPath}'). " +
                     "Verify the path is correct relative to the host's model directory, " +
                     "or prefix with 'file://' for an absolute path.",
                     primaryResolvedPath);
             }
             sessionPaths["default"] = primaryResolvedPath;
         }
+        // else: delegating model — sessionPaths stays empty
 
         // Defer the ONNX session load until the body's first infer('alias', ...)
         // call. Eager LoadBundleAsync at registration time made catalog rehydration
@@ -183,7 +188,9 @@ internal sealed partial class RoutineRegistrar
         LazyModelSessions sessions = new(
             dispatcher,
             sessionPaths,
-            bundleId: $"{qn} (USING '{create.UsingPath}')");
+            bundleId: create.UsingPath is { } bundlePath
+                ? $"{qn} (USING '{bundlePath}')"
+                : $"{qn} (no USING)");
 
         // Stamp catalog provenance from the install context — set by
         // CatalogBackedModelInstaller during catalog-driven installs and by
@@ -472,7 +479,13 @@ internal sealed partial class RoutineRegistrar
         // happily co-load past dedicated VRAM and spill into shared memory,
         // which the NVIDIA driver mishandles into native crashes inside
         // InferenceSession.Run.
-        long estimatedVram = EstimateFileSizeBytes(descriptor.ResolvedUsingPath);
+        //
+        // Delegating models (no USING) have no weights of their own — the
+        // delegated model's residency accounting owns the VRAM cost, so
+        // this entry's estimate stays at 0.
+        long estimatedVram = descriptor.ResolvedUsingPath is { } weightsPath
+            ? EstimateFileSizeBytes(weightsPath)
+            : 0L;
         ModelCatalogEntry entry = new(
             Name: descriptor.Name,
             Backend: "sql",

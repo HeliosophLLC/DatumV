@@ -1806,12 +1806,21 @@ public sealed record CreateFunctionStatement(
 /// <param name="Parameters">Declared call-site parameters.</param>
 /// <param name="ReturnTypeName">Required return-type annotation.</param>
 /// <param name="UsingPath">
-/// Path to the primary ONNX file or bundle directory. Relative paths
+/// Path to the primary model file or bundle directory. Relative paths
 /// resolve against the host's models directory; <c>file://</c>-prefixed
 /// paths are treated as absolute (useful for testing). When the model
 /// declares multiple sessions via <see cref="UsingFiles"/> this is the
 /// first declared file's path — kept for back-compat with serializers
 /// and front-end DTOs that show a single primary file.
+/// <para>
+/// <see langword="null"/> when the model has no <c>USING</c> clause —
+/// a "view" / delegating model whose body produces its result by
+/// calling into another model (or a UDF), with no weights of its own.
+/// These models still register on every surface (<c>models.X</c>,
+/// <c>system.models</c>, task contracts) but bind zero sessions; a
+/// body that references a session alias surfaces a clear runtime
+/// error because no aliases are declared.
+/// </para>
 /// </param>
 /// <param name="UsingFiles">
 /// Optional multi-session bundle declaration. When non-null, each entry
@@ -1833,7 +1842,7 @@ public sealed record CreateModelStatement(
     string Name,
     IReadOnlyList<UdfParameter> Parameters,
     string ReturnTypeName,
-    string UsingPath,
+    string? UsingPath,
     IReadOnlyList<Statement> StatementBody,
     bool IfNotExists = false,
     bool OrReplace = false,

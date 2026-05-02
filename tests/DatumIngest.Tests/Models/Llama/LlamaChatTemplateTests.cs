@@ -202,18 +202,13 @@ public sealed class LlamaChatTemplateTests
         Assert.Equal(expected, actual);
     }
 
-    [Fact]
-    public void Identity_PassesContentThrough()
-    {
-        // Used by the `templated` opt-arg path on LlamaModel: skip wrapping
-        // entirely so SQL callers that pre-templated their prompt aren't
-        // double-wrapped.
-        Assert.Equal(string.Empty, LlamaChatTemplate.Identity.Open);
-        Assert.Equal(string.Empty, LlamaChatTemplate.Identity.AssistantTurn);
-        Assert.Equal("hello", LlamaChatTemplate.Identity.WrapMessage("user", "hello"));
-        Assert.Equal("hello", LlamaChatTemplate.Identity.WrapMessage("assistant", "hello"));
-        Assert.Empty(LlamaChatTemplate.Identity.StopSequences);
-    }
+    // Identity_PassesContentThrough test retired alongside the
+    // LlamaChatTemplate.Identity template. The no-wrap identity template
+    // existed only to support the `templated` opt-arg on LlamaModel,
+    // which paired with the templates.X scalars for SQL-side prompt
+    // assembly. With the SQL-LLM migration through llama_chat()
+    // (llama.cpp's native chat-template engine drives prompt formatting)
+    // there is no longer a "pre-templated" path to bypass.
 
     [Fact]
     public void LegacyFormat_StillWrapsSingleUserMessage()

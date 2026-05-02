@@ -18,6 +18,13 @@ public enum InferenceBackendId
 
     /// <summary>Intel OpenVINO — preferred for Intel CPUs / iGPUs / NPUs.</summary>
     OpenVino,
+
+    /// <summary>
+    /// LlamaSharp / llama.cpp — GGUF text-generation models. Non-tensor
+    /// dispatch shape; sessions produced by this backend implement only
+    /// <see cref="IModelSession"/>, not <see cref="IInferenceSession"/>.
+    /// </summary>
+    LlamaSharp,
 }
 
 /// <summary>
@@ -57,6 +64,12 @@ public enum InferenceDevice
     /// Designed for sustained INT8 inference at very low power.
     /// </summary>
     OpenVinoNpu,
+
+    /// <summary>Generic CPU via LlamaSharp / llama.cpp. Always available.</summary>
+    LlamaSharpCpu,
+
+    /// <summary>NVIDIA GPU via LlamaSharp / llama.cpp's CUDA backend.</summary>
+    LlamaSharpCuda,
 }
 
 /// <summary>

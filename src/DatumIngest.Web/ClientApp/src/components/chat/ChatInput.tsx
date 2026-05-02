@@ -3,10 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { ArrowUp, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-// Shared composer for both the centered HomePage layout and the
-// bottom-anchored ConversationView layout. Caller controls width / margins
-// via the wrapping element; this component owns the textarea + send/stop
-// affordances and the Enter / Shift+Enter behaviour.
+// Composer for the bottom-anchored ConversationView layout. Caller
+// controls width / margins via the wrapping element; this component
+// owns the textarea + send/stop affordances and the Enter /
+// Shift+Enter behaviour.
 //
 // When `isStreaming` is true the send button swaps for a stop button that
 // calls `onCancel`. The textarea stays interactive so the user can start

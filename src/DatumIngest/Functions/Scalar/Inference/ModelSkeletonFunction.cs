@@ -92,7 +92,7 @@ public sealed class ModelSkeletonFunction : IFunction, IScalarFunction
             Optimization: InferenceOptimization.None);
 
         OnnxRuntimeBackend backend = new();
-        using IInferenceSession session = await backend.LoadAsync(request, cancellationToken);
+        using IInferenceSession session = (IInferenceSession)await backend.LoadAsync(request, cancellationToken);
         string skeleton = BuildSkeleton(resolvedPath, session.Inputs, session.Outputs);
         return ValueRef.FromString(skeleton);
     }

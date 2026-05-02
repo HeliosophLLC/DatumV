@@ -16,11 +16,13 @@ public sealed class WebHostOptions
     // path is the no-config option.
     public bool ManageLocalCatalog { get; init; } = true;
 
-    // Attaches BuiltinModels (LLMs, vision, audio, etc.) to the local
-    // TableCatalog so SQL surfaces `models.X(...)` can resolve and the chat
-    // surface can pick an LLM. Cheap registration — actual loads are lazy
-    // via the residency manager. Set false for SaaS or test hosts that
-    // don't want the standard zoo.
+    // Attaches the model subsystem via ModelHost.AttachTo — loads the
+    // models/catalog.json manifest, wires the ModelCatalog onto the
+    // TableCatalog, registers system.* model providers, and runs the
+    // catalog-driven Python registrar. Cheap registration — actual model
+    // loads are lazy via the residency manager. Set false for SaaS or
+    // test hosts that don't want catalog-driven SQL models. The property
+    // name predates the SQL-LLM migration; it's preserved as public API.
     public bool RegisterBuiltinModels { get; init; } = true;
 
     // Override for the model files directory. When null, ModelCatalog uses

@@ -357,7 +357,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
 
     /// <summary>
     /// Server-wide model catalog. <see langword="null"/> until set by the host
-    /// (typically at startup via <c>BuiltinModels.Register</c>); inherited from a
+    /// (typically at startup via <c>ModelHost.AttachTo</c>); inherited from a
     /// parent catalog when nested. Held on the table catalog so query planning
     /// has uniform access to it without threading a separate parameter through
     /// every entry point.

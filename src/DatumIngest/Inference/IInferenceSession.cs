@@ -1,10 +1,13 @@
 namespace DatumIngest.Inference;
 
 /// <summary>
-/// One loaded model bound to one device, ready to accept inference calls.
-/// Created by <see cref="IInferenceBackend.LoadAsync"/>, managed by
-/// <see cref="IInferenceDispatcher"/>, disposed by the residency manager
-/// under memory pressure (and transparently reloaded on the next call).
+/// One loaded model bound to one device, ready to accept tensor-graph
+/// inference calls. The ONNX-style dispatch surface — adds the
+/// <see cref="Inputs"/> / <see cref="Outputs"/> tensor signature and the
+/// <see cref="RunAsync"/> entry point on top of the generic
+/// <see cref="IModelSession"/> handle. Backends with non-tensor dispatch
+/// shapes (LlamaSharp, future RPC clients) implement only
+/// <see cref="IModelSession"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,7 +25,7 @@ namespace DatumIngest.Inference;
 /// serialises per-session to keep VRAM-pressure semantics predictable.
 /// </para>
 /// </remarks>
-public interface IInferenceSession : IDisposable
+public interface IInferenceSession : IModelSession
 {
     /// <summary>
     /// Input signature of the underlying model graph. Read from the loaded
@@ -34,21 +37,6 @@ public interface IInferenceSession : IDisposable
 
     /// <summary>Output signature of the underlying model graph.</summary>
     IReadOnlyList<TensorSpec> Outputs { get; }
-
-    /// <summary>The backend that produced this session.</summary>
-    InferenceBackendId Backend { get; }
-
-    /// <summary>The concrete device this session is running on.</summary>
-    InferenceDevice Device { get; }
-
-    /// <summary>
-    /// Reasonable estimate of how much memory this session is keeping
-    /// resident (weights + activation arenas + EP-internal buffers).
-    /// Used by the residency manager to budget VRAM/RAM at load time and
-    /// pick eviction candidates under pressure. Implementations should
-    /// err on the high side — under-estimating triggers OOMs.
-    /// </summary>
-    long EstimatedResidentBytes { get; }
 
     /// <summary>
     /// Constructs an input <see cref="TensorBag"/> sized for this session's

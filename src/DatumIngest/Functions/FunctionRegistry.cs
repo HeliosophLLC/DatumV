@@ -1018,12 +1018,13 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<DecodeSeq2SeqFunction>();
         registry.RegisterScalar<DecodeDecoderOnlyFunction>();
 
-        // Templates — per-LLM-family chat-template primitives. Three
-        // functions per family (open / msg / assistant_turn) for
-        // assembling multi-turn prompts in plain SQL. See
-        // Functions/Templates/ChatTemplateFunctions.cs for the family
-        // list and call shape.
-        Templates.ChatTemplateFunctions.RegisterAll(registry);
+        // LlamaSharp — GGUF text generation. ModelBody-scoped scalars
+        // that dispatch into a LlamaSharpSession resolved from the
+        // CREATE MODEL's USING clause. llama_generate implements the
+        // TextGenerator task contract; llama_chat implements
+        // ChatCompleter on Array<ChatMessage>.
+        registry.RegisterScalar<Scalar.Vector.LlamaGenerateFunction>();
+        registry.RegisterScalar<Scalar.Vector.LlamaChatFunction>();
 
         // ── Table-valued ──────────────────────────────────────────────────
         // UNNEST retired pending the reference-type-array consolidation; will be

@@ -13,10 +13,12 @@ namespace DatumIngest.Models;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Demo 0.5 / Phase A registers entries via a hardcoded
-/// <c>BuiltinModels.Register(catalog)</c>. The eventual <c>CREATE MODEL</c> SQL
-/// statement will be a second caller of the same registration API, populating
-/// the same shape from user input.
+/// Today's entries land in this shape via the <c>CREATE MODEL</c> SQL
+/// statement (catalog-driven installSql or user-authored) and via
+/// programmatic registration from
+/// <see cref="Python.CatalogDrivenPythonRegistrar"/> for kind="python"
+/// catalog entries. <see cref="ModelHost"/> wires the subsystem up; it
+/// doesn't construct entries itself.
 /// </para>
 /// </remarks>
 /// <param name="Name">

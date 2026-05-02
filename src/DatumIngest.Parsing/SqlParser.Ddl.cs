@@ -1398,16 +1398,24 @@ public static partial class SqlParser
             select (string?)GetTokenText(taskName)
         ).OptionalOrDefault()
         // USING is a contextual identifier (matches existing
-        // CREATE INDEX USING pattern). Two accepted shapes:
+        // CREATE INDEX USING pattern). Three accepted shapes:
         //   - Single-session legacy:  USING 'path'
         //   - Multi-session aliased:  USING 'a' AS x, 'b' AS y[, ...]
+        //   - Absent:                  no USING clause at all — the body
+        //     produces its result by delegating to another model or a UDF
+        //     and binds no sessions of its own.
         // The parser captures the full list in `usingEntries`; legacy
         // single-string form is a one-entry list with the implicit
         // "default" alias, kept null on the Alias field so the registrar
-        // can route through the same back-compat path as today.
-        from usingKw in Token.EqualTo(SqlToken.Identifier)
-            .Where(t => GetTokenText(t).Equals("USING", StringComparison.OrdinalIgnoreCase), "USING")
-        from usingEntries in ParseUsingEntries()
+        // can route through the same back-compat path as today. The
+        // absent form yields an empty list which BuildCreateModelStatement
+        // translates to UsingPath: null + UsingFiles: null.
+        from usingEntries in (
+            from usingKw in Token.EqualTo(SqlToken.Identifier)
+                .Where(t => GetTokenText(t).Equals("USING", StringComparison.OrdinalIgnoreCase), "USING")
+            from entries in ParseUsingEntries()
+            select entries
+        ).Try().OptionalOrDefault((IReadOnlyList<(string Path, string? Alias)>)Array.Empty<(string, string?)>())
         // Body: optionally preceded by AS, always a BEGIN…END block.
         from body in
             (from asKw in Token.EqualTo(SqlToken.As)
@@ -1499,11 +1507,28 @@ public static partial class SqlParser
         string? schemaName,
         string? implementsTaskName)
     {
+        // No USING clause at all: a delegating model whose body produces
+        // its result by calling into another model or UDF, with no
+        // weights of its own. UsingPath / UsingFiles both stay null so
+        // the registrar binds zero sessions.
         if (usingEntries.Count == 0)
         {
-            throw new FormatException(
-                $"CREATE MODEL {name}: USING clause must specify at least one file.");
+            ValidateProceduralBody(name, body);
+            return new CreateModelStatement(
+                Name: name,
+                Parameters: parameters,
+                ReturnTypeName: returnTypeName,
+                UsingPath: null,
+                StatementBody: body,
+                IfNotExists: ifNotExists,
+                OrReplace: orReplace,
+                Span: null,
+                ReturnIsNotNull: returnIsNotNull,
+                SchemaName: schemaName,
+                ImplementsTaskName: implementsTaskName,
+                UsingFiles: null);
         }
+
         foreach ((string path, _) in usingEntries)
         {
             if (string.IsNullOrWhiteSpace(path))

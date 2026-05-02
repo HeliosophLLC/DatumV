@@ -6,11 +6,10 @@ namespace DatumIngest.Models.Python;
 /// <summary>
 /// Reads <c>kind: "python"</c> entries from a <see cref="CatalogManifest"/>
 /// and registers them as <see cref="ModelCatalogEntry"/>s in a
-/// <see cref="ModelCatalog"/>. Replaces the hardcoded <c>RegisterBark</c>
-/// / <c>RegisterKokoro82M</c> registrations in <c>BuiltinModels</c> —
-/// instead of every Python-backed model being a code-level entry, they
-/// flow through the same data-driven path as the rest of the model
-/// zoo.
+/// <see cref="ModelCatalog"/>. Invoked from <see cref="ModelHost.AttachTo"/>
+/// once the manifest is loaded — every Python-backed model flows through
+/// the same data-driven path as the rest of the model zoo (ONNX entries
+/// via their per-entry installSql, Python entries via this registrar).
 /// </summary>
 /// <remarks>
 /// <para>

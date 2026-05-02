@@ -51,7 +51,7 @@ export const settingsState = proxy<SettingsState>({
   locale: 'system',
   modelsDirectory: '',
   animations: true,
-  dockLeftItems: ['chat', 'catalog', 'procedures', 'projects'],
+  dockLeftItems: ['catalog', 'procedures', 'projects'],
   dockRightItems: [],
   openLeftPanel: null,
   openRightPanel: null,
