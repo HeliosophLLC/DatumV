@@ -169,12 +169,14 @@ public static class BuiltinModels
         // (models/sql/whisper-*/2026-05-29.sql); the catalog entries' installSql
         // declarations re-register them when their bundles land on disk.
 
-        // VLM zoo — Apache/MIT-licensed alternatives to OmniParser's
-        // AGPL detector. Phi-3.5-vision uses ORT GenAI for IO-binding-
-        // accelerated generation. Moondream2 migrated to SQL (catalog
-        // installSql → models/sql/moondream2.sql) using the
-        // `decode_decoder_only` scalar; no C# registration here.
-        RegisterPhi35Vision(modelCatalog);
+        // VLM zoo — Apache/MIT-licensed alternatives to OmniParser's AGPL
+        // detector. Moondream2 ships as SQL (catalog installSql →
+        // models/sql/moondream2.sql) using the `decode_decoder_only`
+        // scalar. Phi-3.5-vision was previously registered here via
+        // ORT GenAI; it was dropped in favour of the Python-backed
+        // model path for VLMs that need IO-binding-accelerated
+        // generation (avoids the ORT GenAI dependency + Microsoft's
+        // OGA export lag for new models).
 
         // Python-bridge models. These show status=bridge in system.models
         // (rather than available/missing) when their worker scripts and
@@ -855,89 +857,6 @@ public static class BuiltinModels
     /// have to drop their own copy.
     /// </summary>
     public const string Kokoro82MWorkerFilename = "kokoro_worker.py";
-
-    /// <summary>Default subfolder for the Microsoft GenAI-format Phi-3.5-vision GPU build.</summary>
-    public const string Phi35VisionGpuSubfolder = "phi35-vision-onnx/gpu/gpu-int4-rtn-block-32";
-
-    /// <summary>
-    /// File-existence anchor for Phi-3.5-vision: the <c>genai_config.json</c>
-    /// inside the chosen variant subfolder. ORT GenAI loads the directory
-    /// as a single unit and resolves the three ONNX bundles + tokenizer
-    /// from the bundled config.
-    /// </summary>
-    public const string Phi35VisionAnchor = Phi35VisionGpuSubfolder + "/genai_config.json";
-
-    /// <summary>
-    /// Files needed for any Phi-3.5-vision install (relative to the
-    /// model directory). The three <c>.onnx</c> sidecars (<c>.data</c>)
-    /// hold the bulk of the weights; the JSON files are config /
-    /// tokenizer.
-    /// </summary>
-    private static IReadOnlyList<string> Phi35VisionFiles() =>
-    [
-        Phi35VisionGpuSubfolder + "/genai_config.json",
-        Phi35VisionGpuSubfolder + "/processor_config.json",
-        Phi35VisionGpuSubfolder + "/tokenizer.json",
-        Phi35VisionGpuSubfolder + "/tokenizer_config.json",
-        Phi35VisionGpuSubfolder + "/special_tokens_map.json",
-        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-vision.onnx",
-        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-vision.onnx.data",
-        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-embedding.onnx",
-        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-embedding.onnx.data",
-        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-text.onnx",
-        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-text.onnx.data",
-    ];
-
-    /// <summary>
-    /// Registers Microsoft Phi-3.5-vision via the ORT GenAI managed
-    /// runtime. SQL surface:
-    /// <c>models.phi35_vision(image, prompt) → string</c>. Anchors on
-    /// the int4-quantized GPU build's <c>genai_config.json</c>; ORT
-    /// GenAI handles vision encoder + embedding + decoder orchestration,
-    /// IO binding, and KV-cache management internally — dramatically
-    /// faster than hand-rolled ORT for decoder-only generation.
-    /// </summary>
-    /// <param name="catalog">Catalog to register against.</param>
-    /// <param name="modelName">SQL-visible name. Defaults to <c>"phi35_vision"</c>.</param>
-    /// <param name="maxTokens">
-    /// Cap on generated tokens per prompt. 256 is generous for
-    /// descriptions and short Q&amp;A; raise for long-form summarisation.
-    /// </param>
-    public static void RegisterPhi35Vision(
-        ModelCatalog catalog,
-        string modelName = "phi35_vision",
-        int maxTokens = 256)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            // Distinct from "onnx" so system_models can render the runtime
-            // boundary (ORT GenAI vs raw ORT) for users debugging.
-            Backend: "onnx_genai",
-            RelativePath: Phi35VisionAnchor,
-            InputKinds: [DataKind.Image, DataKind.String],
-            OutputKind: DataKind.String,
-            // genai_config.json pins do_sample=false + top_k=1 — pure greedy.
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string anchorPath = ctx.Paths.ResolveIdPrefixedPath(Phi35VisionAnchor);
-                string bundleDirectory = Path.GetDirectoryName(anchorPath)!;
-                return new Phi35VisionModel(modelName, bundleDirectory, maxTokens);
-            },
-            DisplayName: "Phi-3.5-vision (Vision-Language, ORT GenAI)",
-            ImplementsTaskName: "VisualQA",
-            Parameters: "4.2B",
-            License: "MIT",
-            LicenseHolder: "Microsoft",
-            SourceUrl: "https://huggingface.co/microsoft/Phi-3.5-vision-instruct-onnx",
-            Category: "vlm",
-            Modalities: ["image", "text"],
-            Files: Phi35VisionFiles()));
-    }
-
-    // Moondream2 migrated to SQL — see models/sql/moondream2.sql, registered
-    // via the catalog's installSql entry. Uses the `decode_decoder_only`
-    // scalar for the KV-cached greedy decoder loop.
 
     /// <summary>
     /// Registers Kokoro-82M TTS under the catalog name <paramref name="modelName"/>

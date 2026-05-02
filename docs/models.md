@@ -1171,59 +1171,27 @@ the `<loc_*>` markers.
     --local-dir $env:DATUM_MODELS\florence-2-base-ft-quantized
   ```
 
-### Vision-language models (`phi35_vision`, `moondream2`)
+### Vision-language models (`moondream2`)
 
-Free-form vision-language models with a `(image, prompt) → string` SQL
+Free-form vision-language model with a `(image, prompt) → string` SQL
 shape — the user supplies the question per call rather than getting a
-fixed-task caption. Designed as a license-clean (Apache/MIT)
+fixed-task caption. Designed as a license-clean (Apache-2.0)
 alternative to OmniParser's AGPL-licensed icon detector for screenshot
-interpretation; same shape works for any image-grounded Q&A.
+interpretation; the same shape works for any image-grounded Q&A.
 
 | Catalog name | Backbone | Runtime | License | Disk | Cold-start, 32-token output |
 |---|---|---|---|---|---|
-| `phi35_vision` | Microsoft Phi-3.5-vision (4.2B) | ORT GenAI managed runtime | MIT | ~2.5 GB (int4) | ~4s |
 | `moondream2` | SigLIP encoder + Phi-1.5/2 decoder (1.9B) | Hand-rolled ORT with IO Binding | Apache-2.0 | ~3.6 GB (fp16) | ~7s |
 
-Both are registered with `Category="vlm"` and the same input shape
-`[Image, String] → String`, so a single SQL query can compare them
-side-by-side:
+Registered with `Category="vlm"` and input shape
+`[Image, String] → String`:
 
 ```sql
 SELECT
   path,
-  models.phi35_vision(image,  'Describe what is shown')  AS phi,
-  models.moondream2(image,    'Describe what is shown')  AS moondream
+  models.moondream2(image, 'Describe what is shown') AS caption
 FROM read_directory('E:\screenshots\*.png');
 ```
-
-#### `phi35_vision` — Phi-3.5-vision via ORT GenAI
-
-- **Files**: bundle directory at `phi35-vision-onnx/gpu/gpu-int4-rtn-block-32/`
-  containing `genai_config.json`, `processor_config.json`, three ONNX
-  files (`phi-3.5-v-instruct-{vision,embedding,text}.onnx` plus their
-  `.data` external-data sidecars), and tokenizer JSONs. The
-  `gpu-int4-rtn-block-32` subfolder name is a quantization label
-  (int4 round-to-nearest, block size 32) — not a runtime selector.
-- **Setup**:
-  ```powershell
-  huggingface-cli download microsoft/Phi-3.5-vision-instruct-onnx `
-    --include "gpu/gpu-int4-rtn-block-32/*" `
-    --local-dir $env:DATUM_MODELS\phi35-vision-onnx
-  ```
-- **Runtime**: managed by `Microsoft.ML.OnnxRuntimeGenAI.Cuda` (NuGet
-  0.5.2). The GenAI runtime handles vision encoder + embedding +
-  decoder orchestration, KV cache, and IO binding internally — much
-  faster than hand-rolled ORT for decoder-only generation. CUDA
-  acceleration requires `Config.AppendProvider("cuda")` at load time
-  (the genai_config.json ships with empty `provider_options`,
-  defaulting to CPU regardless of folder name).
-- **Output**: `string`. Greedy sampling (`do_sample=false`, `top_k=1`
-  in genai_config.json) — deterministic per (image, prompt).
-- **High-resolution image processing**: the bundled processor crops
-  large images into up to 16 sub-images at 144 tokens each, which is
-  why a single image can produce a ~2,500-token input prefix. The
-  decoder uses Phi-3's 128K context; per-call cap is `max_length =
-  4096 + maxTokens` to preserve the user's "N new tokens" budget.
 
 #### `moondream2` — vikhyatk/moondream2 via hand-rolled ORT
 
@@ -1240,8 +1208,6 @@ FROM read_directory('E:\screenshots\*.png');
 - **Runtime**: plain `Microsoft.ML.OnnxRuntime.Gpu` with explicit
   ORT IO Binding — KV cache stays GPU-resident across the
   autoregressive loop, eliminating per-token PCIe round-trips.
-  Reference implementation: `MusicGenModel.cs` in the same folder
-  uses the same pattern.
 - **Prompt template**: Moondream's training format is
   `<image>\n\nQuestion: {prompt}\n\nAnswer:`. The `<image>` marker
   is the splice point for image embeddings; the model class
@@ -1254,13 +1220,7 @@ FROM read_directory('E:\screenshots\*.png');
 - **Resolution**: fixed 378×378 input (SigLIP encoder), 729 image
   tokens regardless of input size.
 
-#### Choosing between them
-
-`phi35_vision` is faster end-to-end for typical screenshots and has
-stronger reasoning behavior on complex scenes. `moondream2` is the
-smaller model with fewer image tokens — use it when input prompts
-are simple ("describe this") and short outputs suffice. For dense
-text extraction from screenshots, prefer `florence2_ocr_region`
+For dense text extraction from screenshots, prefer `florence2_ocr_region`
 (sub-second, no autoregressive loop).
 
 ### LLMs (`llama31_8b`, `phi3_mini`, `tinyllama_1b`, `gemma2_2b`, `qwen25_coder_*`, `granite31_1b`, `falcon3_1b`, `mistral_7b`)

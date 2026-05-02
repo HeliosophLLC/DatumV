@@ -63,13 +63,6 @@
     -->
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.5" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.25.1" />
-    <!--
-      ORT GenAI 0.13.x targets ORT 1.25.x — the matching managed-runtime layer
-      for decoder-only / multimodal inference (Phi-3-vision, Llama, etc.).
-      Used by Phi35VisionModel; the .Cuda variant pulls in the GPU-enabled
-      native runtime to match Microsoft.ML.OnnxRuntime.Gpu above.
-    -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" Version="0.13.2" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="0.22.0" />
     <!--
       OpenCvSharp4 supplies ORB feature detection, descriptor matching, and
