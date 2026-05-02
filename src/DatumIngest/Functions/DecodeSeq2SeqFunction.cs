@@ -79,12 +79,25 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
     [
-        // 8-arg form with embed_tokens session. Used for decoders that take
-        // `inputs_embeds` (BART, Florence-2's decoder) instead of raw
-        // `input_ids`. The embed_tokens session converts token ids →
-        // embeddings each step before the decoder call. Listed BEFORE the
-        // 7-arg form because the matcher tries variants top-to-bottom and
-        // a call with 8 args should never accidentally fall through.
+        // 9-arg form: embed_tokens path + suppress_above. Listed first so the
+        // matcher reaches it before the shorter forms.
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("decoder_session", DataKindMatcher.Exact(DataKind.String),  IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("encoder_features", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("encoder_attention_mask", DataKindMatcher.Any),
+                new ParameterSpec("prefix_token_ids", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Array),
+                new ParameterSpec("eos_token_id", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("max_tokens", DataKindMatcher.Exact(DataKind.Int32), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("use_kv_cache", DataKindMatcher.Exact(DataKind.Boolean), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("embed_tokens_session", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("suppress_above", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Scalar),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Int64))),
+        // 8-arg embed_tokens form (existing). Distinguished from the raw-input_ids
+        // + suppress_above 8-arg form below by the kind at position 7 (String vs Int64).
         new FunctionSignatureVariant(
             Parameters:
             [
@@ -99,17 +112,29 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Int64))),
+        // 8-arg raw-input_ids form + suppress_above. Whisper-style decoder:
+        // argmax is capped at (suppress_above + 1) tokens to drop special-
+        // token IDs that the model might otherwise emit mid-transcript.
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("decoder_session", DataKindMatcher.Exact(DataKind.String),  IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("encoder_features", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("encoder_attention_mask", DataKindMatcher.Any),
+                new ParameterSpec("prefix_token_ids", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Array),
+                new ParameterSpec("eos_token_id", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("max_tokens", DataKindMatcher.Exact(DataKind.Int32), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("use_kv_cache", DataKindMatcher.Exact(DataKind.Boolean), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("suppress_above", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Scalar),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Int64))),
         // 7-arg form: decoder takes raw `input_ids`. ViT-GPT2, TrOCR.
         new FunctionSignatureVariant(
             Parameters:
             [
                 new ParameterSpec("decoder_session", DataKindMatcher.Exact(DataKind.String),  IsArray: ArrayMatch.Scalar),
                 new ParameterSpec("encoder_features", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
-                // Nullable: a decoder without an encoder_attention_mask input
-                // takes NULL here. NULL arrives at plan time as Unknown, which
-                // doesn't match an exact-kind+array spec; widen to Any and
-                // type-check inside ExecuteAsync. The function's contract
-                // (non-NULL must be Int64[]) is enforced at runtime instead.
                 new ParameterSpec("encoder_attention_mask", DataKindMatcher.Any),
                 new ParameterSpec("prefix_token_ids", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Array),
                 new ParameterSpec("eos_token_id", DataKindMatcher.Exact(DataKind.Int64), IsArray: ArrayMatch.Scalar),
@@ -117,7 +142,6 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
                 new ParameterSpec("use_kv_cache", DataKindMatcher.Exact(DataKind.Boolean), IsArray: ArrayMatch.Scalar),
             ],
             VariadicTrailing: null,
-            // Output element kind known statically — token ids.
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Int64))),
     ];
 
@@ -143,10 +167,10 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         // (Spans can't cross an await). Phase 2 re-acquires the span and
         // unpacks the rest.
         int argLen = arguments.Length;
-        if (argLen is not 7 and not 8)
+        if (argLen is not 7 and not 8 and not 9)
         {
             throw new InvalidOperationException(
-                $"decode_seq2seq() expects 7 or 8 arguments; got {argLen}.");
+                $"decode_seq2seq() expects 7, 8, or 9 arguments; got {argLen}.");
         }
 
         if (frame.CurrentModel is not { } model)
@@ -156,9 +180,13 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
                 + "Outside a model frame there is no bound session to dispatch to.");
         }
 
-        // Phase 1: extract alias strings and the optional embed-tokens alias.
+        // Phase 1: extract alias strings, the optional embed-tokens alias,
+        // and the optional suppress_above cap. Disambiguates the two 8-arg
+        // shapes by checking the kind at index 7 (String → embed-tokens
+        // form; Int64 → raw-input_ids form with suppress_above tacked on).
         string sessionAlias;
         string? embedAlias;
+        long suppressAbove = -1; // -1 = no suppression (sentinel; argmax sees the full vocab)
         {
             ReadOnlySpan<ValueRef> probe = arguments.Span;
             if (probe[0].IsNull || probe[0].Kind != DataKind.String)
@@ -170,12 +198,35 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
             embedAlias = null;
             if (argLen == 8)
             {
+                if (probe[7].IsNull)
+                {
+                    throw new InvalidOperationException(
+                        "decode_seq2seq(): trailing 8th arg must be a non-NULL embed_tokens "
+                        + "session alias (String) or a suppress_above cap (Int64).");
+                }
+                if (probe[7].Kind == DataKind.String)
+                {
+                    embedAlias = probe[7].AsString();
+                }
+                else
+                {
+                    suppressAbove = probe[7].AsInt64();
+                }
+            }
+            else if (argLen == 9)
+            {
                 if (probe[7].IsNull || probe[7].Kind != DataKind.String)
                 {
                     throw new InvalidOperationException(
                         "decode_seq2seq(): embed_tokens_session must be a non-NULL String alias.");
                 }
+                if (probe[8].IsNull)
+                {
+                    throw new InvalidOperationException(
+                        "decode_seq2seq(): suppress_above must be a non-NULL Int64.");
+                }
                 embedAlias = probe[7].AsString();
+                suppressAbove = probe[8].AsInt64();
             }
         }
 
@@ -389,7 +440,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
             result = await GenerateNoCacheEmbedsAsync(
                 decoder, inputIdsSpec, encoderHiddenSpec, encoderMaskSpec, logitsSpec,
                 embedTokensSession, embedTokensInputIdsSpec!, embedTokensOutputSpec!,
-                prefix, eosTokenId, maxTokens,
+                prefix, eosTokenId, maxTokens, suppressAbove,
                 encoderFeatures, encoderShape, encoderMask, encoderMaskShape,
                 cancellationToken).ConfigureAwait(false);
         }
@@ -397,7 +448,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         {
             result = await GenerateWithKvCacheAsync(
                 decoder, inputIdsSpec, encoderHiddenSpec, encoderMaskSpec, logitsSpec,
-                prefix, eosTokenId, maxTokens,
+                prefix, eosTokenId, maxTokens, suppressAbove,
                 encoderFeatures, encoderShape, encoderMask, encoderMaskShape,
                 sessionAlias, cancellationToken).ConfigureAwait(false);
         }
@@ -405,7 +456,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         {
             result = await GenerateNoCacheAsync(
                 decoder, inputIdsSpec, encoderHiddenSpec, encoderMaskSpec, logitsSpec,
-                prefix, eosTokenId, maxTokens,
+                prefix, eosTokenId, maxTokens, suppressAbove,
                 encoderFeatures, encoderShape, encoderMask, encoderMaskShape,
                 cancellationToken).ConfigureAwait(false);
         }
@@ -434,6 +485,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         long[] prefix,
         long eosTokenId,
         int maxTokens,
+        long suppressAbove,
         float[] encoderFeatures,
         int[] encoderShape,
         long[]? encoderMask,
@@ -462,6 +514,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
                 encoderShape,
                 encoderMask,
                 encoderMaskShape,
+                suppressAbove,
                 cancellationToken).ConfigureAwait(false);
 
             if (nextToken == eosTokenId) break;
@@ -495,6 +548,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         long[] prefix,
         long eosTokenId,
         int maxTokens,
+        long suppressAbove,
         float[] encoderFeatures,
         int[] encoderShape,
         long[]? encoderMask,
@@ -534,6 +588,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
                 encoderShape,
                 encoderMask,
                 encoderMaskShape,
+                suppressAbove,
                 cancellationToken).ConfigureAwait(false);
 
             if (nextToken == eosTokenId) break;
@@ -607,6 +662,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         int[] encoderShape,
         long[]? encoderMask,
         int[]? encoderMaskShape,
+        long suppressAbove,
         CancellationToken cancellationToken)
     {
         TensorBag inputBag = decoder.CreateInputBag();
@@ -645,14 +701,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
             int vocab = shape[2];
             int lastPosStart = (shape[1] - 1) * vocab;
             ReadOnlySpan<float> lastPos = logits.Slice(lastPosStart, vocab);
-
-            int argmax = 0;
-            float best = lastPos[0];
-            for (int i = 1; i < lastPos.Length; i++)
-            {
-                if (lastPos[i] > best) { best = lastPos[i]; argmax = i; }
-            }
-            return argmax;
+            return ArgmaxWithSuppression(lastPos, suppressAbove);
         }
         finally
         {
@@ -681,6 +730,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         long[] prefix,
         long eosTokenId,
         int maxTokens,
+        long suppressAbove,
         float[] encoderFeatures,
         int[] encoderShape,
         long[]? encoderMask,
@@ -816,6 +866,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
                 decoderKeyCache, decoderValueCache, encoderKeyCache, encoderValueCache,
                 decoderCacheShape, encoderCacheShape, hasCrossCache,
                 numLayers,
+                suppressAbove,
                 cancellationToken).ConfigureAwait(false);
 
             if (nextToken == eosTokenId) break;
@@ -859,6 +910,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         int[] encoderCacheShape,
         bool hasCrossCache,
         int numLayers,
+        long suppressAbove,
         CancellationToken cancellationToken)
     {
         TensorBag inputBag = decoder.CreateInputBag();
@@ -934,13 +986,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
             int vocab = shape[2];
             int lastPosStart = (shape[1] - 1) * vocab;
             ReadOnlySpan<float> lastPos = logits.Slice(lastPosStart, vocab);
-
-            int argmax = 0;
-            float best = lastPos[0];
-            for (int i = 1; i < lastPos.Length; i++)
-            {
-                if (lastPos[i] > best) { best = lastPos[i]; argmax = i; }
-            }
+            int argmax = ArgmaxWithSuppression(lastPos, suppressAbove);
 
             // Rotate `present.*` outputs into the corresponding cache slot
             // for the next iteration. Names match per-layer past inputs but
@@ -1008,6 +1054,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
         int[] encoderShape,
         long[]? encoderMask,
         int[]? encoderMaskShape,
+        long suppressAbove,
         CancellationToken cancellationToken)
     {
         TensorBag inputBag = decoder.CreateInputBag();
@@ -1048,18 +1095,7 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
             int vocab = shape[2];
             int lastPosStart = (shape[1] - 1) * vocab;
             ReadOnlySpan<float> lastPos = logits.Slice(lastPosStart, vocab);
-
-            int argmax = 0;
-            float best = lastPos[0];
-            for (int i = 1; i < lastPos.Length; i++)
-            {
-                if (lastPos[i] > best)
-                {
-                    best = lastPos[i];
-                    argmax = i;
-                }
-            }
-            return argmax;
+            return ArgmaxWithSuppression(lastPos, suppressAbove);
         }
         finally
         {
@@ -1135,5 +1171,38 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
             copied[i] = v;
         }
         return copied;
+    }
+
+    /// <summary>
+    /// Greedy argmax over a logits row, optionally capped at
+    /// <paramref name="suppressAbove"/> (inclusive). Whisper's decoder
+    /// occasionally fires special-token logits (IDs ≥ 50258 — language /
+    /// task / timestamp markers) mid-transcript; suppressing them at
+    /// argmax-time keeps the generated stream confined to content tokens
+    /// (plus EOS at 50257). <c>suppressAbove &lt; 0</c> disables the cap
+    /// and scans the full vocab — the only behaviour the 7-arg form has.
+    /// </summary>
+    private static int ArgmaxWithSuppression(ReadOnlySpan<float> lastPos, long suppressAbove)
+    {
+        int searchEnd = suppressAbove < 0
+            ? lastPos.Length
+            : Math.Min(lastPos.Length, (int)suppressAbove + 1);
+        if (searchEnd <= 0)
+        {
+            // Defensive: suppress_above < 0 should already have been
+            // normalized to the "no suppression" sentinel; a 0-length scan
+            // means the caller passed a meaningless cap. Falling back to
+            // argmax over the whole vocab is more useful than throwing
+            // mid-decode.
+            searchEnd = lastPos.Length;
+        }
+
+        int argmax = 0;
+        float best = lastPos[0];
+        for (int i = 1; i < searchEnd; i++)
+        {
+            if (lastPos[i] > best) { best = lastPos[i]; argmax = i; }
+        }
+        return argmax;
     }
 }

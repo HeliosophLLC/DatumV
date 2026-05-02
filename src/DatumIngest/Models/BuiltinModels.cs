@@ -7,7 +7,6 @@ using DatumIngest.Model;
 using DatumIngest.ModelLibrary;
 using DatumIngest.Models.Llama;
 using DatumIngest.Models.Onnx;
-using DatumIngest.Models.Onnx.Whisper;
 using DatumIngest.Models.Python;
 
 namespace DatumIngest.Models;
@@ -158,12 +157,9 @@ public static class BuiltinModels
         RegisterFalcon31b(modelCatalog);
         RegisterMistral7B(modelCatalog);
 
-        // Whisper STT zoo. All four sizes; each shows status=missing in
-        // system.models until its optimum-cli output folder lands.
-        RegisterWhisperTiny(modelCatalog);
-        RegisterWhisperBase(modelCatalog);
-        RegisterWhisperSmall(modelCatalog);
-        RegisterWhisperMedium(modelCatalog);
+        // Whisper STT (tiny/base/small) migrated to SQL-defined models
+        // (models/sql/whisper-*/2026-05-29.sql); the catalog entries' installSql
+        // declarations re-register them when their bundles land on disk.
 
         // VLM zoo — Apache/MIT-licensed alternatives to OmniParser's
         // AGPL detector. Phi-3.5-vision uses ORT GenAI for IO-binding-
@@ -851,109 +847,6 @@ public static class BuiltinModels
     /// have to drop their own copy.
     /// </summary>
     public const string Kokoro82MWorkerFilename = "kokoro_worker.py";
-
-    // ─────────────────────────── Whisper STT ──────────────────────────────
-    //
-    // OpenAI Whisper as native ONNX. Each size variant is a separate
-    // registration pointing at its own optimum-cli output folder. Same
-    // architectural shape as ViT-GPT2 (encoder + autoregressive decoder),
-    // plus a Slaney mel-spectrogram pipeline for the audio side. MIT
-    // license, fully unencumbered.
-
-    /// <summary>Default folder for Whisper Tiny (~78 MB encoder + 250 MB decoder).
-    /// Matches the catalog id so the downloader's per-entry folder convention
-    /// resolves to the same on-disk location.</summary>
-    public const string WhisperTinyFolder = "whisper-tiny";
-
-    /// <summary>Default folder for Whisper Base (~78 MB encoder + 300 MB decoder).</summary>
-    public const string WhisperBaseFolder = "whisper-base";
-
-    /// <summary>Default folder for Whisper Small (~280 MB encoder + 1.1 GB decoder).</summary>
-    public const string WhisperSmallFolder = "whisper-small";
-
-    /// <summary>Default folder for Whisper Medium (~870 MB encoder + 2.5 GB decoder).</summary>
-    public const string WhisperMediumFolder = "whisper-medium";
-
-    /// <summary>
-    /// Files needed for any Whisper install (relative to the model
-    /// directory). The Xenova / onnx-community export convention puts
-    /// the two ONNX components in an <c>onnx/</c> subdir and the
-    /// tokenizer + configs at the catalog folder's root — matches what
-    /// the downloader gets from <c>"include": ["onnx/*", "*.json", "*.txt"]</c>.
-    /// Tracks every file so <c>system.models</c> reports missing pieces
-    /// accurately.
-    /// </summary>
-    private static IReadOnlyList<string> WhisperFiles(string folder) =>
-    [
-        $"{folder}/onnx/encoder_model.onnx",
-        $"{folder}/onnx/decoder_model.onnx",
-        $"{folder}/vocab.json",
-        $"{folder}/merges.txt",
-        $"{folder}/tokenizer.json",
-        $"{folder}/preprocessor_config.json",
-        $"{folder}/generation_config.json",
-        $"{folder}/special_tokens_map.json",
-    ];
-
-    /// <summary>
-    /// Common backbone for the four Whisper size registrations. Each
-    /// public <c>RegisterWhisper*</c> wraps this with size-specific
-    /// folder + display metadata.
-    /// </summary>
-    private static void RegisterWhisperVariant(
-        ModelCatalog catalog,
-        string modelName,
-        string folder,
-        string displayName,
-        string parameters,
-        int maxTokens)
-    {
-        // Encoder/decoder live in {folder}/onnx/ per the Xenova export
-        // convention; tokenizer + configs at {folder}/ root.
-        string encoderRelativePath = $"{folder}/onnx/encoder_model.onnx";
-
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: encoderRelativePath,
-            InputKinds: [DataKind.Audio],
-            OutputKind: DataKind.String,
-            // Greedy decoding from a fixed prefix → reproducible.
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string encoderPath = ctx.Paths.ResolveIdPrefixedPath(encoderRelativePath);
-                return new WhisperOnnxModel(modelName, encoderPath, maxTokens);
-            },
-            DisplayName: displayName,
-            Parameters: parameters,
-            License: "MIT",
-            LicenseHolder: "OpenAI",
-            SourceUrl: "https://huggingface.co/openai/whisper-base",
-            Category: "stt",
-            Modalities: ["audio", "text"],
-            Files: WhisperFiles(folder)));
-    }
-
-    /// <summary>Registers Whisper Tiny — fastest STT, lowest accuracy. ~39M params.</summary>
-    public static void RegisterWhisperTiny(ModelCatalog catalog, string modelName = "whisper_tiny")
-        => RegisterWhisperVariant(catalog, modelName, WhisperTinyFolder,
-            displayName: "Whisper Tiny", parameters: "39M", maxTokens: 224);
-
-    /// <summary>Registers Whisper Base — balanced STT. ~74M params.</summary>
-    public static void RegisterWhisperBase(ModelCatalog catalog, string modelName = "whisper_base")
-        => RegisterWhisperVariant(catalog, modelName, WhisperBaseFolder,
-            displayName: "Whisper Base", parameters: "74M", maxTokens: 224);
-
-    /// <summary>Registers Whisper Small — better accuracy, modest cost. ~244M params.</summary>
-    public static void RegisterWhisperSmall(ModelCatalog catalog, string modelName = "whisper_small")
-        => RegisterWhisperVariant(catalog, modelName, WhisperSmallFolder,
-            displayName: "Whisper Small", parameters: "244M", maxTokens: 224);
-
-    /// <summary>Registers Whisper Medium — strong STT, slower. ~769M params.</summary>
-    public static void RegisterWhisperMedium(ModelCatalog catalog, string modelName = "whisper_medium")
-        => RegisterWhisperVariant(catalog, modelName, WhisperMediumFolder,
-            displayName: "Whisper Medium", parameters: "769M", maxTokens: 224);
 
     /// <summary>Default subfolder for the Microsoft GenAI-format Phi-3.5-vision GPU build.</summary>
     public const string Phi35VisionGpuSubfolder = "phi35-vision-onnx/gpu/gpu-int4-rtn-block-32";

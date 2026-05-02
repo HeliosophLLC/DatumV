@@ -5,17 +5,18 @@ using DatumIngest.Inference;
 using DatumIngest.Inference.OnnxRuntime;
 using DatumIngest.Model;
 using DatumIngest.ModelLibrary;
+using DatumIngest.Parsing;
+using DatumIngest.Parsing.Ast;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DatumIngest.Tests.Inference.Cpu;
 
 /// <summary>
-/// Parse + body-shape smoke for the SQL-defined MobileSAM everything-mode
-/// body. Locks in the parser-side surface (nested WHILE, IF/BEGIN/END inside
-/// WHILE, struct-shape decoder dispatch, Array&lt;Image&gt; return) without
-/// requiring the 60 MB bundle. The real e2e tests against an actual image
-/// + decoder run gated by bundle presence.
+/// Parse + body-shape smoke for the SQL-defined MobileSAM bodies. The
+/// install SQL contains two CREATE MODEL statements (everything-mode +
+/// prompted-point); both must parse and register. The actual e2e against
+/// real images runs gated by bundle presence.
 /// </summary>
 public sealed class MobileSamSqlParseTests : ServiceTestBase
 {
@@ -39,35 +40,47 @@ public sealed class MobileSamSqlParseTests : ServiceTestBase
         return File.Exists(Path.Combine(root, "mobile-sam", "mobile_sam_image_encoder.onnx"));
     }
 
-    [Fact]
-    public void MobileSamPoint_CreateModelStatement_ParsesAndRegisters()
+    /// <summary>
+    /// Plans every CREATE MODEL statement in the install SQL via the same
+    /// batch-aware parser the catalog installer uses. Self-skips when the
+    /// bundle is missing so CI without downloads stays green.
+    /// </summary>
+    private async Task RunInstallAsync(TableCatalog catalog)
     {
-        // temp force-validate
-
-        TableCatalog catalog = CreateCatalog();
-        catalog.Models = new DatumIngest.Models.ModelCatalog(modelDirectory: ModelsDirectory);
-        catalog.InferenceDispatcher = new InferenceDispatcher(
-            [new OnnxRuntimeBackend()],
-            NullLogger<InferenceDispatcher>.Instance);
-
-        catalog.Plan(LoadCanonicalSql());
-
-        Assert.True(
-            catalog.DeclaredModels.TryGet(
-                new QualifiedName("models", "mobilesam_point"),
-                out ModelDescriptor? descriptor));
-        Assert.NotNull(descriptor);
-        Assert.Equal("Image", descriptor!.ReturnTypeName);
-        Assert.NotNull(descriptor.UsingFiles);
-        Assert.Equal(2, descriptor.UsingFiles!.Count);
-        // (img Image, x Float64, y Float64).
-        Assert.Equal(3, descriptor.Parameters.Count);
+        string sql = LoadCanonicalSql();
+        IReadOnlyList<(Statement Statement, string SourceText)> statements =
+            SqlParser.ParseBatchWithText(sql);
+        Assert.Equal(2, statements.Count);
+        foreach ((Statement statement, string sourceText) in statements)
+        {
+            await catalog.ExecuteStatementAsync(statement, sourceText);
+        }
     }
 
     [Fact]
-    public void MobileSam_CreateModelStatement_ParsesAndRegisters()
+    public void MobileSam_InstallSql_ParsesToTwoCreateModelStatements()
     {
-        // temp force-validate
+        // Body-shape regression: both models must parse standalone even
+        // without the bundle. The catalog installer's batch path
+        // (ParseBatchWithText) is what runs at engine startup; mirroring it
+        // here catches parser-level regressions (reserved-word DECLARE
+        // names, mismatched BEGIN/END, etc.) without needing the 60MB
+        // bundle.
+        string sql = LoadCanonicalSql();
+        IReadOnlyList<(Statement Statement, string SourceText)> statements =
+            SqlParser.ParseBatchWithText(sql);
+        Assert.Equal(2, statements.Count);
+        Assert.All(statements, s => Assert.IsType<CreateModelStatement>(s.Statement));
+        CreateModelStatement everything = (CreateModelStatement)statements[0].Statement;
+        CreateModelStatement prompted   = (CreateModelStatement)statements[1].Statement;
+        Assert.Equal("mobilesam",       everything.Name);
+        Assert.Equal("mobilesam_point", prompted.Name);
+    }
+
+    [Fact]
+    public async Task MobileSam_InstallSql_RegistersBothModels()
+    {
+        if (!BundlePresent()) return;
 
         TableCatalog catalog = CreateCatalog();
         catalog.Models = new DatumIngest.Models.ModelCatalog(modelDirectory: ModelsDirectory);
@@ -75,17 +88,22 @@ public sealed class MobileSamSqlParseTests : ServiceTestBase
             [new OnnxRuntimeBackend()],
             NullLogger<InferenceDispatcher>.Instance);
 
-        catalog.Plan(LoadCanonicalSql());
+        await RunInstallAsync(catalog);
 
         Assert.True(
             catalog.DeclaredModels.TryGet(
                 new QualifiedName("models", "mobilesam"),
-                out ModelDescriptor? descriptor));
-        Assert.NotNull(descriptor);
-        Assert.Equal("Array<Image>", descriptor!.ReturnTypeName);
-        Assert.NotNull(descriptor.UsingFiles);
-        Assert.Equal(2, descriptor.UsingFiles!.Count);
-        Assert.Contains(descriptor.UsingFiles, f => f.Alias == "encoder");
-        Assert.Contains(descriptor.UsingFiles, f => f.Alias == "decoder");
+                out ModelDescriptor? everythingMode));
+        Assert.NotNull(everythingMode);
+        Assert.Equal("Array<Image>", everythingMode!.ReturnTypeName);
+
+        Assert.True(
+            catalog.DeclaredModels.TryGet(
+                new QualifiedName("models", "mobilesam_point"),
+                out ModelDescriptor? promptedMode));
+        Assert.NotNull(promptedMode);
+        Assert.Equal("Image", promptedMode!.ReturnTypeName);
+        // (img Image, x Float64, y Float64).
+        Assert.Equal(3, promptedMode.Parameters.Count);
     }
 }

@@ -859,6 +859,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Audio.AudioSampleRateFunction>();
         registry.RegisterScalar<Scalar.Audio.AudioSamplesFunction>();
         registry.RegisterScalar<Scalar.Audio.AudioToMonoFunction>();
+        registry.RegisterScalar<Scalar.Audio.AudioToLogMelFunction>();
 
         // Spatial — PointCloud construction + accessors. Constructors consume an
         // Image-typed depth map (output of depth_map_to_image on MiDaS/DPT-family

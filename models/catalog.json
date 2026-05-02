@@ -4042,10 +4042,10 @@
       "approxSizeMb": 1
     },
     {
-      "id": "whisper-base",
-      "displayName": "Whisper Base (Speech-to-Text)",
-      "summary": "Convert speech to text in 99 languages. Balanced speed / accuracy default — start here for transcribing audio recordings.",
-      "description": "OpenAI Whisper, base size. Balanced speed/accuracy for English STT.",
+      "id": "whisper-large-v3-turbo",
+      "displayName": "Whisper Large v3 Turbo (Speech-to-Text)",
+      "summary": "Whisper at the next size up — better transcription accuracy, ~3× the cost of Base. Pick when quality matters more than throughput.",
+      "description": "OpenAI Whisper, large size. Better accuracy than base, ~3x cost.",
       "tasks": [
         "AudioToText"
       ],
@@ -4062,7 +4062,7 @@
         "onnx-community (ONNX export)"
       ],
       "hardware": {
-        "minRamMb": 1024,
+        "minRamMb": 2048,
         "minVramMb": 0,
         "preferred": "cpu"
       },
@@ -4072,18 +4072,26 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "onnx-community/whisper-base",
-              "revision": "1846881b6b3a3024392c1eea3ad983695bc23925",
+              "repo": "onnx-community/whisper-large-v3-turbo",
+              "revision": "360ebcde2559d60bb474678be3c1de9ef347d01a",
               "include": [
-                "onnx/*",
+                "onnx/encoder_model.onnx",
+                "onnx/encoder_model.onnx_data",
+                "onnx/decoder_model.onnx",
                 "*.json",
                 "*.txt"
               ]
             }
+          ],
+          "installSql": "sql/whisper-large-v3-turbo/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "whisper_large_v3_turbo"
+            }
           ]
         }
       ],
-      "approxSizeMb": 290
+      "approxSizeMb": 3020
     },
     {
       "id": "whisper-small",
@@ -4119,15 +4127,73 @@
               "repo": "onnx-community/whisper-small",
               "revision": "36050c46d777d46dc4b5f43f6d90574fc38f8732",
               "include": [
-                "onnx/*",
+                "onnx/encoder_model.onnx",
+                "onnx/decoder_model.onnx",
                 "*.json",
                 "*.txt"
               ]
             }
+          ],
+          "installSql": "sql/whisper-small/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "whisper_small"
+            }
           ]
         }
       ],
-      "approxSizeMb": 970
+      "approxSizeMb": 927
+    },
+    {
+      "id": "whisper-base",
+      "displayName": "Whisper Base (Speech-to-Text)",
+      "summary": "Convert speech to text in 99 languages. Balanced speed / accuracy default — start here for transcribing audio recordings.",
+      "description": "OpenAI Whisper, base size. Balanced speed/accuracy for English STT.",
+      "tasks": [
+        "AudioToText"
+      ],
+      "tags": [
+        "stt",
+        "speech",
+        "multilingual"
+      ],
+      "licenseIds": [
+        "mit"
+      ],
+      "attributions": [
+        "OpenAI — Whisper (Radford, Kim, Xu et al.)",
+        "onnx-community (ONNX export)"
+      ],
+      "hardware": {
+        "minRamMb": 1024,
+        "minVramMb": 0,
+        "preferred": "cpu"
+      },
+      "versions": [
+        {
+          "version": "2026-05-29",
+          "sources": [
+            {
+              "type": "huggingface",
+              "repo": "onnx-community/whisper-base",
+              "revision": "1846881b6b3a3024392c1eea3ad983695bc23925",
+              "include": [
+                "onnx/encoder_model.onnx",
+                "onnx/decoder_model.onnx",
+                "*.json",
+                "*.txt"
+              ]
+            }
+          ],
+          "installSql": "sql/whisper-base/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "whisper_base"
+            }
+          ]
+        }
+      ],
+      "approxSizeMb": 281
     },
     {
       "id": "whisper-tiny",
@@ -4163,15 +4229,22 @@
               "repo": "onnx-community/whisper-tiny",
               "revision": "ff4177021cc41f7db950912b73ea4fdf7d01d8e7",
               "include": [
-                "onnx/*",
+                "onnx/encoder_model.onnx",
+                "onnx/decoder_model.onnx",
                 "*.json",
                 "*.txt"
               ]
             }
+          ],
+          "installSql": "sql/whisper-tiny/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "whisper_tiny"
+            }
           ]
         }
       ],
-      "approxSizeMb": 598
+      "approxSizeMb": 148
     },
     {
       "id": "clip-vit-base-patch32",
