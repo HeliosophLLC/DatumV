@@ -16,6 +16,7 @@
 CREATE OR REPLACE MODEL openjourney_hyper(
   prompt String,
   steps  Int32 = 4
+    CHECK (steps BETWEEN 1 AND 8)
     COMMENT 'Number of Euler denoising steps. Hyper-SD was distilled for 1-4 steps; 1 is fastest, 4 is the recommended minimum for face / detail quality, beyond 4 returns diminishing gains.'
 ) RETURNS Image
 IMPLEMENTS TextToImage

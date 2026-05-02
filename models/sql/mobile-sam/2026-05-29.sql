@@ -60,6 +60,7 @@
 CREATE OR REPLACE MODEL mobilesam(
   img       Image,
   grid_size Int32 = 16
+    CHECK (grid_size BETWEEN 4 AND 128)
     COMMENT 'Side length of the foreground-prompt grid (the model runs grid_size * grid_size decoder dispatches per row). Default 16 (SAM canonical was 32; lowered here because per-row Float32-plane accumulation through array_concat is currently O(N^2) in arena bytes — a follow-up per-procedural-call arena lifts the cap). 16 finds typical object set on COCO-class images; bump to 32 once that follow-up ships. Range 4-128.'
 ) RETURNS Array<Image>
 USING 'mobile-sam/mobile_sam_image_encoder.onnx' AS encoder,

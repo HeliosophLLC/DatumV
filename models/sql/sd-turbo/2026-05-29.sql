@@ -24,8 +24,12 @@
 CREATE OR REPLACE MODEL sd_turbo(
   prompt String,
   steps  Int32 = 4
+    CHECK (steps BETWEEN 1 AND 8)
     COMMENT 'Number of Euler denoising steps. SD Turbo was distilled via ADD for 1-4 steps; 1 is the design point for fastest output, 4 is the quality sweet spot, beyond 4 returns diminishing gains.',
   size   Int32 = 512
+    CHECK (size BETWEEN 256 AND 1024 AND size % 8 = 0)
+    STEP 8
+    UNIT 'pixels'
     COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. The underlying SD 2.1 UNet supports 64-aligned alternates (576, 640, 768, ...) with roughly quadratic VRAM cost and quality drift away from the 512 sweet spot.'
 ) RETURNS Image
 IMPLEMENTS TextToImage

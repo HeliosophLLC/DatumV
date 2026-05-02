@@ -19,8 +19,12 @@
 CREATE OR REPLACE MODEL sdxl_turbo(
   prompt String,
   steps  Int32 = 4
+    CHECK (steps BETWEEN 1 AND 8)
     COMMENT 'Number of Euler denoising steps. SDXL Turbo was distilled via ADD for 1-4 steps; 1 is the design point for fastest output, 4 is the quality sweet spot.',
   size   Int32 = 512
+    CHECK (size BETWEEN 256 AND 1024 AND size % 8 = 0)
+    STEP 8
+    UNIT 'pixels'
     COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. 768 and 1024 work since the underlying UNet is full SDXL, but VRAM grows roughly with size² and quality drifts away from the 512 distillation point. Other multiples of 8 are accepted but untested.'
 ) RETURNS Image
 IMPLEMENTS TextToImage

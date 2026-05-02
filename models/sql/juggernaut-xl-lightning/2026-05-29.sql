@@ -29,6 +29,7 @@
 CREATE OR REPLACE MODEL juggernaut_xl_lightning(
   prompt String,
   steps  Int32 = 4
+    CHECK (steps BETWEEN 1 AND 8)
     COMMENT 'Number of Euler denoising steps. Lightning was distilled for 1-8 steps; 1 is fastest, 4 is the recommended minimum for face / fine-detail quality, 8 for hero outputs.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
