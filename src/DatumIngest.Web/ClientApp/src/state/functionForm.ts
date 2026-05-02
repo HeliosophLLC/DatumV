@@ -1,4 +1,5 @@
 import { proxy } from 'valtio';
+import type { ScalarFunctionParameterDto } from '@/api/generated/openapi-client';
 import { runTab } from './execution';
 import { buildFunctionRequest } from '@/lib/buildFunctionRequest';
 import { resolveExecutable } from '@/lib/resolveExecutableEntry';
@@ -141,12 +142,12 @@ export function setFunctionFormSelection(
   // values — parameter names rarely collide across functions, but even
   // when they do the value's interpretation depends on the new variant's
   // kind. Drop them rather than silently re-bind.
-  if (
+  const isNewSelection =
     !state.selection ||
     state.selection.schema !== selection.schema ||
     state.selection.name !== selection.name ||
-    state.selection.variantIndex !== selection.variantIndex
-  ) {
+    state.selection.variantIndex !== selection.variantIndex;
+  if (isNewSelection) {
     state.textValues = {};
     state.fileNames = {};
     state.fieldErrors = {};
@@ -155,6 +156,51 @@ export function setFunctionFormSelection(
     filesByTabId.delete(tabId);
   }
   state.selection = selection;
+  if (isNewSelection) {
+    // Pre-fill optional parameters from their declared default so the
+    // user sees the value the function would use if they hit Run as-is
+    // — gives them a starting point to tweak rather than blank fields.
+    const resolved = resolveExecutable(selection);
+    if (resolved) {
+      const seeded: Record<string, string> = {};
+      for (const p of resolved.variant.parameters ?? []) {
+        const name = p.name ?? '';
+        if (!name) continue;
+        const prefill = defaultPrefillFor(p);
+        if (prefill !== null) seeded[name] = prefill;
+      }
+      if (Object.keys(seeded).length > 0) {
+        state.textValues = seeded;
+      }
+    }
+  }
+}
+
+/**
+ * Maps a parameter's <c>defaultExpression</c> to a string suitable for
+ * the form's text input. Returns null when we can't represent the
+ * default in the input (NULL, complex expressions, missing default).
+ *
+ *  - Bare numeric / boolean / identifier literals: pass through.
+ *  - Single-quoted string literals (<c>'foo'</c>, <c>'it''s'</c>):
+ *    strip wrapping quotes, unescape doubled-quotes.
+ *  - <c>NULL</c> (any case): null — text controls have no NULL state,
+ *    and an empty optional field already binds as UnknownNull at submit.
+ */
+function defaultPrefillFor(param: ScalarFunctionParameterDto): string | null {
+  const expr = param.defaultExpression;
+  if (!expr) return null;
+  const trimmed = expr.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.toUpperCase() === 'NULL') return null;
+  if (
+    trimmed.length >= 2
+    && trimmed.startsWith("'")
+    && trimmed.endsWith("'")
+  ) {
+    return trimmed.slice(1, -1).replace(/''/g, "'");
+  }
+  return trimmed;
 }
 
 export function setFunctionFormText(

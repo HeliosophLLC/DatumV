@@ -183,6 +183,7 @@ export function loadFunctionCatalog(): Promise<void> {
 const REFETCH_DEBOUNCE_MS = 250;
 let procRefetchTimer: number | null = null;
 let udfRefetchTimer: number | null = null;
+let modelRefetchTimer: number | null = null;
 
 function scheduleProcedureRefetch(): void {
   if (procRefetchTimer !== null) window.clearTimeout(procRefetchTimer);
@@ -202,6 +203,15 @@ function scheduleUdfRefetch(): void {
   }, REFETCH_DEBOUNCE_MS);
 }
 
+function scheduleModelRefetch(): void {
+  if (modelRefetchTimer !== null) window.clearTimeout(modelRefetchTimer);
+  modelRefetchTimer = window.setTimeout(() => {
+    modelRefetchTimer = null;
+    functionCatalogState.modelStatus = 'idle';
+    void loadModels();
+  }, REFETCH_DEBOUNCE_MS);
+}
+
 const PROCEDURE_KINDS: ReadonlySet<CatalogChangeKind> = new Set([
   CatalogChangeKind.ProcedureCreated,
   CatalogChangeKind.ProcedureAltered,
@@ -214,9 +224,15 @@ const UDF_KINDS: ReadonlySet<CatalogChangeKind> = new Set([
   CatalogChangeKind.FunctionDropped,
 ]);
 
+const MODEL_KINDS: ReadonlySet<CatalogChangeKind> = new Set([
+  CatalogChangeKind.ModelCreated,
+  CatalogChangeKind.ModelAltered,
+  CatalogChangeKind.ModelDropped,
+]);
+
 let routinesSubscribed = false;
-// Subscribe the Procedures/UDFs panel to live catalog updates. Idempotent;
-// call once at app startup.
+// Subscribe the Procedures/UDFs/Models panel to live catalog updates.
+// Idempotent; call once at app startup.
 export function subscribeRoutinesToHub(): void {
   if (routinesSubscribed) return;
   routinesSubscribed = true;
@@ -229,6 +245,9 @@ export function subscribeRoutinesToHub(): void {
     }
     if (UDF_KINDS.has(event.kind)) {
       scheduleUdfRefetch();
+    }
+    if (MODEL_KINDS.has(event.kind)) {
+      scheduleModelRefetch();
     }
   });
 }
