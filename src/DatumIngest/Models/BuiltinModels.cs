@@ -122,8 +122,8 @@ public static class BuiltinModels
         // Real-ESRGAN + U²-Net (full + lite) + MiDaS-small + DPT-Large
         // migrated to SQL-defined models (models/sql/{realesrgan-x4v3,u2net,
         // u2netp,midas-small,dpt-large}.sql).
-        RegisterMobileSamPrompted(modelCatalog);
-        RegisterMobileSam(modelCatalog);
+        // MobileSAM migrated to a SQL-defined model (models/sql/mobile-sam/).
+        // Prompted-mode TBD as a follow-up.
         // ViT-GPT2 migrated to a SQL-defined model (models/sql/vit-gpt2-image-captioning.sql).
         // TrOCR (fp32 + fp16) migrated to SQL-defined models
         // (models/sql/trocr-base-printed.sql + trocr-base-printed-fp16.sql).
@@ -806,148 +806,6 @@ public static class BuiltinModels
             Category: "llm",
             Modalities: ["text"],
             Files: [modelFilename]));
-    }
-
-    /// <summary>
-    /// Default folder for the MobileSAM bundle. Matches the catalog id
-    /// (<c>mobile-sam</c>) so the downloader's per-entry folder convention
-    /// resolves to the same on-disk location.
-    /// </summary>
-    public const string MobileSamFolder = "mobile-sam";
-
-    /// <summary>Default filename for the MobileSAM (TinyViT) image encoder.</summary>
-    public const string MobileSamEncoderFilename = "mobile_sam_image_encoder.onnx";
-
-    /// <summary>
-    /// Default filename for the multi-mask prompt decoder. Emits a small
-    /// number of candidate masks per prompt with a per-mask predicted-IoU
-    /// score; the model wrapper picks the highest-scoring one.
-    /// </summary>
-    public const string MobileSamMaskDecoderMultiFilename = "sam_mask_decoder_multi.onnx";
-
-    /// <summary>
-    /// Single-mask decoder variant. Produces one mask + one IoU score per
-    /// prompt. Either decoder file works with <see cref="MobileSamModel"/>;
-    /// the multi variant gives slightly better quality at no meaningful
-    /// extra runtime cost, so it's the default registration.
-    /// </summary>
-    public const string MobileSamMaskDecoderSingleFilename = "sam_mask_decoder_single.onnx";
-
-    /// <summary>
-    /// Registers MobileSAM prompted segmentation under the catalog name
-    /// <paramref name="modelName"/> (defaults to <c>"mobilesam_prompted"</c>).
-    /// SQL surface: <c>models.mobilesam_prompted(image, x, y) → Image</c>
-    /// — a binary foreground mask sized to match the input image.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Coordinates <c>x</c> / <c>y</c> are in original-image pixel space:
-    /// <c>(0, 0)</c> is the top-left corner; <c>x</c> grows to the right,
-    /// <c>y</c> down. The decoder's <c>orig_im_size</c> input handles the
-    /// internal 1024-space rescaling.
-    /// </para>
-    /// <para>
-    /// Output mask: 0 = background, 255 = foreground, written as RGBA with
-    /// equal channels (matches every other image-emitting model so
-    /// downstream consumers don't branch on colour type).
-    /// </para>
-    /// <para>
-    /// Upstream encoder distillation: <a href="https://github.com/ChaoningZhang/MobileSAM">ChaoningZhang/MobileSAM</a>.
-    /// ONNX export pipeline: <a href="https://github.com/vietanhdev/samexporter">vietanhdev/samexporter</a>.
-    /// </para>
-    /// </remarks>
-    public static void RegisterMobileSamPrompted(
-        ModelCatalog catalog,
-        string modelName = "mobilesam_prompted",
-        string encoderFilename = MobileSamEncoderFilename,
-        string decoderFilename = MobileSamMaskDecoderMultiFilename)
-    {
-        // All files land under {ModelDirectory}/{MobileSamFolder}/ once the
-        // catalog downloader extracts the bundle. Prefix every path with
-        // the folder so the loader + Files manifest agree with on-disk
-        // layout.
-        string encoderRelativePath = $"{MobileSamFolder}/{encoderFilename}";
-        string decoderRelativePath = $"{MobileSamFolder}/{decoderFilename}";
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: encoderRelativePath,
-            InputKinds: [DataKind.Image, DataKind.Float64, DataKind.Float64],
-            OutputKind: DataKind.Image,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string encoderPath = ctx.Paths.ResolveIdPrefixedPath(encoderRelativePath);
-                string decoderPath = ctx.Paths.ResolveIdPrefixedPath(decoderRelativePath);
-                return new MobileSamModel(modelName, encoderPath, decoderPath, MobileSamMode.Prompted);
-            },
-            DisplayName: "MobileSAM (prompted segmentation)",
-            Parameters: "9.7M",
-            License: "Apache-2.0",
-            LicenseHolder: "Meta AI / Kyung Hee University",
-            SourceUrl: "https://github.com/ChaoningZhang/MobileSAM",
-            Category: "segmenter",
-            Modalities: ["image"],
-            Files: [encoderRelativePath, decoderRelativePath]));
-    }
-
-    /// <summary>
-    /// Registers MobileSAM "everything" segmentation under the catalog
-    /// name <paramref name="modelName"/> (defaults to <c>"mobilesam"</c>).
-    /// SQL surface: <c>models.mobilesam(image, [gridSize]) →
-    /// Array&lt;Image&gt;</c> — one binary mask per object the model
-    /// finds.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Sweeps a <c>gridSize × gridSize</c> grid of foreground prompts
-    /// across the image (<c>32 × 32 = 1024</c> prompts at the default),
-    /// runs the decoder per prompt, drops candidates with low predicted
-    /// IoU or low stability, and NMS-deduplicates the survivors.
-    /// </para>
-    /// <para>
-    /// <strong>Cost.</strong> Encoder runs once per image; decoder runs
-    /// <c>gridSize²</c> times. ~3-5 seconds per image on CPU at the
-    /// default. Pass a smaller grid (<c>models.mobilesam(image, 16)</c>)
-    /// for ~4× faster batches at the cost of missing small objects.
-    /// </para>
-    /// </remarks>
-    public static void RegisterMobileSam(
-        ModelCatalog catalog,
-        string modelName = "mobilesam",
-        string encoderFilename = MobileSamEncoderFilename,
-        string decoderFilename = MobileSamMaskDecoderMultiFilename,
-        int defaultGridSize = 32)
-    {
-        string encoderRelativePath = $"{MobileSamFolder}/{encoderFilename}";
-        string decoderRelativePath = $"{MobileSamFolder}/{decoderFilename}";
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: encoderRelativePath,
-            InputKinds: [DataKind.Image],
-            OutputKind: DataKind.Image,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string encoderPath = ctx.Paths.ResolveIdPrefixedPath(encoderRelativePath);
-                string decoderPath = ctx.Paths.ResolveIdPrefixedPath(decoderRelativePath);
-                return new MobileSamModel(
-                    modelName, encoderPath, decoderPath,
-                    MobileSamMode.Everything, defaultGridSize);
-            },
-            // Per-call hyperparameter overrides:
-            //   [0] gridSize (Int32) — grid side length for the prompt
-            //   sweep; the model does gridSize² decoder dispatches per row.
-            OptionalArgKinds: [DataKind.Int32],
-            DisplayName: "MobileSAM (everything segmentation)",
-            Parameters: "9.7M",
-            License: "Apache-2.0",
-            LicenseHolder: "Meta AI / Kyung Hee University",
-            SourceUrl: "https://github.com/ChaoningZhang/MobileSAM",
-            Category: "segmenter",
-            Modalities: ["image"],
-            Files: [encoderRelativePath, decoderRelativePath]));
     }
 
     // YOLOX-{nano,tiny,s,m,l,x,darknet} previously registered here as built-in

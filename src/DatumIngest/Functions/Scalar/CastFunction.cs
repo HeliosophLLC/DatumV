@@ -69,7 +69,10 @@ public sealed class CastFunction : IFunction, IScalarFunction
         // Array-typed casts are intentionally restrictive: source must already
         // be an array of the same element kind. Parsing a string into an array
         // belongs in helpers like string_split + array_map + cast on elements,
-        // not in cast() itself.
+        // not in cast() itself. CAST(multi_dim AS T[]) flattens — the target
+        // annotation `Array<T>` carries no shape, so dropping the multi-dim
+        // shape is the only consistent reading and gives bodies a clean
+        // surface for "give me the flat row-major buffer."
         if (targetIsArray)
         {
             if (input.IsNull)
@@ -78,7 +81,7 @@ public sealed class CastFunction : IFunction, IScalarFunction
             }
             if (input.IsArray && input.Kind == targetKind)
             {
-                return new ValueTask<ValueRef>(input);
+                return new ValueTask<ValueRef>(input.AsFlatArray());
             }
             throw new InvalidOperationException(
                 $"cast() to Array<{targetKind}> requires the source to already be Array<{targetKind}>; "

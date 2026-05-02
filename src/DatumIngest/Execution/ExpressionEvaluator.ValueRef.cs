@@ -59,6 +59,8 @@ public sealed partial class ExpressionEvaluator
         {
             case FunctionCallExpression functionCall:
                 return EvaluateFunctionAsValueRefAsync(functionCall, frame, cancellationToken);
+            case CastExpression castExpr:
+                return EvaluateCastAsValueRefAsync(castExpr, frame, cancellationToken);
             case InlineAccessorExpression inlineAccessor:
                 return EvaluateInlineAccessorAsValueRefAsync(inlineAccessor, frame, cancellationToken);
             case BinaryExpression binary:

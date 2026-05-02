@@ -191,6 +191,43 @@ public readonly struct ValueRef
         return new(typed._inline, typed._materialized, shape);
     }
 
+    /// <summary>
+    /// Returns a flat 1-D view of this multi-dim array value by dropping the
+    /// <see cref="_shape"/> attachment AND swapping the inline carrier for
+    /// one without the multi-dim flag. The underlying <c>_materialized</c>
+    /// array is already flat row-major (multi-dim ValueRefs at the function
+    /// boundary materialise through <c>PrimitiveMultiDimToValueRef</c> →
+    /// <see cref="FromPrimitiveMultiDimArray"/>, both of which store elements
+    /// as a flat <c>T[]</c>), so no element copy is needed. Returns
+    /// <c>this</c> unchanged when not multi-dim.
+    /// </summary>
+    /// <remarks>
+    /// Clearing <c>_shape</c> alone is not enough: when the value originated
+    /// from a struct field round-trip (e.g. <c>infer_outputs(...)</c> → <c>dec['masks']</c>),
+    /// the inline DataValue carries the <c>DataValueFlags.IsMultiDim</c>
+    /// flag with its own shape prefix; that flag leaks through to
+    /// <see cref="IsMultiDim"/> and downstream 1-D-only consumers
+    /// (<c>array_slice</c>, bracket indexing) reject the value. We rebuild
+    /// the inline carrier from <c>NullArrayOf</c> so neither side carries
+    /// the multi-dim flag.
+    /// </remarks>
+    public ValueRef AsFlatArray()
+    {
+        if (!IsMultiDim) return this;
+        // Fast path: materialised T[] payload — keep the buffer, swap the
+        // inline carrier for a flat (IsMultiDim=false) one.
+        if (_materialized is not null)
+        {
+            return new(DataValue.NullArrayOf(ArrayElementKind), _materialized);
+        }
+        // Arena-backed payload: drop only the wrapper shape. The element
+        // accessors index off ToDataValue → AsArraySpan, which honours the
+        // multi-dim shape prefix in the byte payload regardless of the
+        // wrapper, so clearing _shape alone is still surface-correct here;
+        // the leak only bites the materialised path above.
+        return new(_inline, _materialized, shape: null);
+    }
+
     /// <summary>Boolean inline value.</summary>
     public static ValueRef FromBoolean(bool value) =>
         new(DataValue.FromBoolean(value), null);

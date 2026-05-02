@@ -297,11 +297,16 @@ public readonly partial struct DataValue
         elementBytes.CopyTo(buffer.AsSpan(shapeBytes));
         var (p0, p1) = store.StoreBytes(buffer);
 
+        // Hash the full shape+elements block: same-elements-different-shape arrays
+        // (e.g. [2,3] vs [3,2]) carry the same ndim in _charCount and would
+        // collide in the hash-fast-path of Equals if hashed by elements alone.
+        // Cross-arena dedup correctness in hash joins / GROUP BY depends on this.
+        ulong hash = XxHash64.HashToUInt64(buffer);
         ushort cc = (ushort)(shape.Length << 8);
         return new(
             elementKind,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray | DataValueFlags.IsMultiDim,
-            offset: p0.Value, length: p1.Value, charCount: cc);
+            offset: p0.Value, length: p1.Value, hash: hash, charCount: cc);
     }
 
     /// <summary>
@@ -407,6 +412,74 @@ public readonly partial struct DataValue
             p2: (int)length,
             p3: (int)((length >> 32) & 0xFF),
             charCount: cc);
+    }
+
+    /// <summary>
+    /// Returns a flat 1-D view of a multi-dim array without copying the
+    /// element bytes. Pure descriptor rewrite for arena and sidecar storage —
+    /// the new value's offset advances past the shape prefix, length shrinks
+    /// by the same amount, and the multi-dim flag clears. For inline values
+    /// the prefix bytes live inside the 16-byte payload region, so the
+    /// element bytes are re-packed at the head of a fresh inline value.
+    /// Returns <c>this</c> unchanged when not multi-dim.
+    /// </summary>
+    /// <param name="store">Required for arena-backed values (used to read the
+    /// element bytes for rehashing); ignored for inline and sidecar.</param>
+    /// <remarks>
+    /// Arena flat arrays carry an XxHash64 over element bytes in <c>_p4+_p5</c>
+    /// (see <see cref="FromArenaArray{T}"/>); multi-dim arrays carry an XxHash64
+    /// over the full shape+elements block. The slice path rehashes the element
+    /// bytes only so the resulting flat value is indistinguishable in the
+    /// hash-fast-path from one constructed via <see cref="FromArenaArray{T}"/>.
+    /// Element bytes are read but not copied — the underlying arena allocation
+    /// stays in place and is shared with the source DataValue.
+    /// </remarks>
+    public DataValue SliceMultiDimAsFlat(IValueStore? store = null)
+    {
+        if (!IsMultiDim) return this;
+
+        DataValueFlags flatFlags = _flags & ~DataValueFlags.IsMultiDim;
+        int shapeBytes = ShapePrefixByteCount;
+
+        if (IsInlineArray)
+        {
+            // Inline payload holds [shape prefix][elements] in 16 bytes; rebuild
+            // with no prefix. InlineArrayBytes already strips the prefix.
+            return FromInlineArrayBytes(InlineArrayBytes, _kind);
+        }
+
+        if (IsInSidecar)
+        {
+            // Sidecar: descriptor slice. _charCount low byte carries storeId
+            // (preserved); high byte was ndim (cleared by dropping IsMultiDim).
+            // No cached hash on sidecar arrays today, so nothing to rehash.
+            long newOffset = SidecarOffset + shapeBytes;
+            long newLength = SidecarLength - shapeBytes;
+            return new(
+                _kind, flatFlags,
+                offset: newOffset, length: newLength,
+                charCount: SidecarStoreId);
+        }
+
+        // Arena-backed: descriptor slice + element-bytes rehash so the flat
+        // value's _p4+_p5 matches FromArenaArray's hash domain.
+        if (store is null)
+        {
+            throw new InvalidOperationException(
+                "SliceMultiDimAsFlat: arena-backed multi-dim array requires an IValueStore. " +
+                "Pass the frame's Source arena.");
+        }
+        long arenaOffset = BackedOffset;
+        long arenaLength = BackedLength;
+        ReadOnlySpan<byte> allBytes = store.RetrieveUtf8Span(
+            new ArenaOffset(arenaOffset), new ArenaLength(arenaLength));
+        ReadOnlySpan<byte> elementBytes = allBytes[shapeBytes..];
+        ulong hash = XxHash64.HashToUInt64(elementBytes);
+        return new(
+            _kind, flatFlags,
+            offset: arenaOffset + shapeBytes,
+            length: arenaLength - shapeBytes,
+            hash: hash);
     }
 
     /// <summary>
@@ -553,11 +626,14 @@ public readonly partial struct DataValue
         RejectReferenceElementKind(elementKind);
 
         var (p0, p1) = store.StoreBytes(rawBytes);
+        // Hash the full shape+elements block — matches FromArenaMultiDimArrayBytes
+        // so values built via either path hash identically.
+        ulong hash = XxHash64.HashToUInt64(rawBytes);
         ushort cc = (ushort)(ndim << 8);
         return new(
             elementKind,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray | DataValueFlags.IsMultiDim,
-            offset: p0.Value, length: p1.Value, charCount: cc);
+            offset: p0.Value, length: p1.Value, hash: hash, charCount: cc);
     }
 
     /// <summary>

@@ -38,12 +38,55 @@ public static partial class SqlParser
             ToSpan(setKw));
 
     /// <summary>
+    /// Variable-name slot of a DECLARE. Delegates to
+    /// <see cref="IdentifierOrKeywordAsName"/>, but on failure inspects the
+    /// next token: if it lexes as a SQL reserved keyword whose text reads
+    /// like an identifier (<c>OFFSET</c>, <c>LIMIT</c>, <c>WHERE</c>, …), we
+    /// throw a targeted <see cref="ParseException"/> at that token instead
+    /// of letting the Superpower default surface a misleading
+    /// "expected end" at the next nested block boundary further down. The
+    /// failure mode without this — silent backtrack out of DECLARE followed
+    /// by a downstream WHILE/IF parse error — costs ~30 min of bisection
+    /// per occurrence to recognise as a reserved-word collision.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string> DeclareVariableNameParser =
+        input =>
+        {
+            TokenListParserResult<SqlToken, string> nameResult = IdentifierOrKeywordAsName(input);
+            if (nameResult.HasValue) return nameResult;
+            if (!input.IsAtEnd)
+            {
+                Token<SqlToken> head = input.ConsumeToken().Value;
+                if (head.Kind != SqlToken.Identifier && LooksLikeIdentifier(head.ToStringValue()))
+                {
+                    string word = head.ToStringValue();
+                    throw new ParseException(
+                        $"'{word}' is a reserved keyword and cannot be used as a DECLARE variable name. " +
+                        $"Rename it (e.g. '{word}_value') or double-quote it (\"{word}\").",
+                        head.Position);
+                }
+            }
+            return nameResult;
+        };
+
+    private static bool LooksLikeIdentifier(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        if (!char.IsLetter(text[0]) && text[0] != '_') return false;
+        for (int i = 1; i < text.Length; i++)
+        {
+            if (!char.IsLetterOrDigit(text[i]) && text[i] != '_') return false;
+        }
+        return true;
+    }
+
+    /// <summary>
     /// <c>DECLARE @var TypeName [= initializer]</c>. Type is required at
     /// parse time; type-inference from initializer is not yet supported.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> DeclareStatementParser =
         from declareKw in Token.EqualTo(SqlToken.Declare)
-        from name in IdentifierOrKeywordAsName
+        from name in DeclareVariableNameParser
         from typeName in TypeNameParser
         from initializer in (
             from eq in Token.EqualTo(SqlToken.Equals)

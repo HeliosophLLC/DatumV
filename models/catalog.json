@@ -1297,6 +1297,15 @@
                 "sam_mask_decoder_multi.onnx"
               ]
             }
+          ],
+          "installSql": "sql/mobile-sam/2026-05-29.sql",
+          "models": [
+            {
+              "identifier": "mobilesam"
+            },
+            {
+              "identifier": "mobilesam_point"
+            }
           ]
         }
       ],

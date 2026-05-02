@@ -233,6 +233,23 @@ public sealed partial class ExpressionEvaluator
     private async ValueTask<DataValue> EvaluateCastAsync(
         CastExpression cast, EvaluationFrame frame, CancellationToken cancellationToken)
     {
+        ValueRef result = await EvaluateCastAsValueRefAsync(cast, frame, cancellationToken).ConfigureAwait(false);
+        return ToDataValue(result, frame);
+    }
+
+    /// <summary>
+    /// ValueRef-native cast evaluator: invokes the registered <c>cast</c>
+    /// scalar function and returns its result without round-tripping through
+    /// <see cref="ToDataValue"/>. Keeps nested cast chains (and casts feeding
+    /// other ValueRef-path expressions) in managed memory — load-bearing for
+    /// procedural bodies that route large array values through
+    /// <c>CAST(...)</c> expressions; the DataValue round-trip would otherwise
+    /// materialise the full element buffer into the frame's target arena on
+    /// every cast.
+    /// </summary>
+    private async ValueTask<ValueRef> EvaluateCastAsValueRefAsync(
+        CastExpression cast, EvaluationFrame frame, CancellationToken cancellationToken)
+    {
         IScalarFunction? castFunction = _functions.TryGetScalar("cast");
         if (castFunction is null)
         {
@@ -244,8 +261,21 @@ public sealed partial class ExpressionEvaluator
         {
             arguments[0] = await EvaluateAsValueRefAsync(cast.Expression, frame, cancellationToken).ConfigureAwait(false);
             arguments[1] = ValueRef.FromString(cast.TargetType);
-            ValueRef result = await castFunction.ExecuteAsync(arguments.AsMemory(0, 2), frame, cancellationToken).ConfigureAwait(false);
-            return ToDataValue(result, frame);
+            return await castFunction.ExecuteAsync(arguments.AsMemory(0, 2), frame, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not ExpressionEvaluationException)
+        {
+            // Mirror EvaluateAsyncSlow's wrapping so nested casts attribute the
+            // failure to the innermost expression whose evaluation threw, not
+            // the enclosing cast. Without this, a CAST(CAST(...)) chain reports
+            // the outer span when the inner cast fails.
+            SourceSpan? span = cast.TryGetSourceSpan();
+            if (span is not null)
+            {
+                throw new ExpressionEvaluationException(
+                    $"[Line {span.Line}, Col {span.Column}] {ex.Message}", span, ex);
+            }
+            throw;
         }
         finally
         {

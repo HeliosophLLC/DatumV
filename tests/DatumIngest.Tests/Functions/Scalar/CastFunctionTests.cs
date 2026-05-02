@@ -285,6 +285,56 @@ public sealed class CastFunctionTests
         Assert.Equal(DataKind.String, result.Kind);
     }
 
+    [Fact]
+    public async Task Cast_MultiDimArrayToFlatArrayAnnotation_StripsShape()
+    {
+        // CAST(multi_dim AS T[]) intentionally flattens. Both `_inline.IsMultiDim`
+        // AND the wrapper `_shape` must come back false so downstream 1-D-only
+        // consumers (array_slice, single-index bracket) can read the value.
+        //
+        // Historical note (2026-05-31): an earlier AsFlatArray implementation
+        // cleared only the wrapper shape; the inline carrier kept IsMultiDim
+        // and leaked through, breaking array_slice. This test pins the
+        // post-fix behaviour. Inverse direction: 2-D consumers
+        // (pose_from_rgbd, array_resize_2d) that depended on the no-op CAST
+        // must use the source without the CAST (see project_procedural_body_arena_lifetime.md).
+        float[] data = [1f, 2f, 3f, 4f, 5f, 6f];
+        ValueRef multi = ValueRef.FromPrimitiveMultiDimArray(data, [2, 3], DataKind.Float32);
+        Assert.True(multi.IsMultiDim, "fixture precondition: source must be multi-dim");
+
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { multi, ValueRef.FromString("Array<Float32>") },
+            Frame, default);
+
+        Assert.True(result.IsArray);
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.False(result.IsMultiDim,
+            "CAST(multi_dim AS T[]) must produce a fully-flat array — neither " +
+            "the wrapper shape nor the inline IsMultiDim flag may survive. " +
+            "Regressing this leaks the multi-dim shape through to consumers " +
+            "that test IsMultiDim (array_slice, single-index bracket).");
+        Assert.Equal(6, result.GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Cast_FlatArrayToSameKindAnnotation_NoOp()
+    {
+        // 1-D source through a same-kind CAST is the trivial identity case.
+        // Pinned to make sure a future "always rebuild on CAST" refactor
+        // doesn't accidentally copy 1-D inputs.
+        float[] data = [10f, 20f, 30f];
+        ValueRef flat = ValueRef.FromPrimitiveArray(data, DataKind.Float32);
+        Assert.False(flat.IsMultiDim);
+
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { flat, ValueRef.FromString("Array<Float32>") },
+            Frame, default);
+
+        Assert.True(result.IsArray);
+        Assert.False(result.IsMultiDim);
+        Assert.Equal(3, result.GetArrayLength());
+    }
+
     // ─── try_cast ──────────────────────────────────────────────────────────
 
     [Fact]

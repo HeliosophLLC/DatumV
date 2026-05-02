@@ -35,7 +35,7 @@ export function GlobalStatusBar({
   return (
     <div
       className={cn(
-        'bg-background text-muted-foreground border-border flex h-6 shrink-0 items-stretch overflow-hidden border-t text-xs',
+        'bg-background text-muted-foreground border-border flex h-6 shrink-0 items-stretch overflow-hidden border-t text-xs select-none',
         className,
       )}
       role="status"

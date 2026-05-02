@@ -1042,7 +1042,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// <see cref="ResolveShape"/> entirely and is used verbatim — the
     /// only way to satisfy session specs with multiple dynamic dims.
     /// </summary>
-    private static void AddInputTensor(
+    internal static void AddInputTensor(
         TensorBag bag, TensorSpec spec, ValueRef arg, string modelName, int[]? explicitShape)
     {
         if (arg.IsNull)
@@ -1357,7 +1357,7 @@ public sealed class InferFunction : IFunction, IScalarFunction
     /// axis when the shape is 1-d. v1 keeps this simple: any other
     /// dynamic shape raises a clear error rather than guessing.
     /// </summary>
-    private static int[] ResolveShape(TensorSpec spec, int elementCount)
+    internal static int[] ResolveShape(TensorSpec spec, int elementCount)
     {
         IReadOnlyList<int?> declared = spec.Shape;
         if (declared.Count == 0)

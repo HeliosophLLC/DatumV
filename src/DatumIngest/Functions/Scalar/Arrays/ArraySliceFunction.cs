@@ -106,12 +106,13 @@ public sealed class ArraySliceFunction : IFunction, IScalarFunction
         }
 
         // Reject multi-dim explicitly so we don't silently slice the
-        // flat row-major buffer of a tensor and produce a meaningless
-        // result. A 1-D check via ToDataValue keeps multi-dim arrays
-        // (which carry a shape sidecar) out of the primitive path.
-        DataValue source = arrayArg.ToDataValue(frame.Source);
-        if (source.IsMultiDim)
+        // flat row-major buffer of a tensor. Check off the ValueRef
+        // directly — materialising the full input via ToDataValue just
+        // to read IsMultiDim was forcing an O(input-size) arena copy on
+        // every call (256 MB × 200+ iterations in the SAM body's loop).
+        if (arrayArg.IsMultiDim)
         {
+            DataValue source = arrayArg.ToDataValue(frame.Source);
             ReadOnlySpan<int> shape = source.GetShape(frame.Source, frame.SidecarRegistry);
             throw new FunctionArgumentException(Name,
                 "array_slice operates on 1-D arrays only; got shape "

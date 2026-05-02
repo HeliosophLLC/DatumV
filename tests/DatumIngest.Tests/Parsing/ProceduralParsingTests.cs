@@ -99,6 +99,41 @@ public class ProceduralParsingTests : ServiceTestBase
         Assert.Equal("Array<FLOAT32>", decl.TypeName);
     }
 
+    [Theory]
+    [InlineData("offset")]
+    [InlineData("OFFSET")]
+    [InlineData("limit")]
+    [InlineData("where")]
+    [InlineData("order")]
+    [InlineData("group")]
+    [InlineData("having")]
+    [InlineData("desc")]
+    [InlineData("asc")]
+    public void Declare_ReservedKeywordAsName_ProducesTargetedError(string reserved)
+    {
+        // Without the targeted check, the failure backtracks out of DECLARE
+        // silently and surfaces at a far-downstream block boundary (typically
+        // the next nested WHILE/IF), with a "unexpected X, expected end"
+        // message that doesn't point at the actual DECLARE line.
+        ParseException ex = Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement($"DECLARE {reserved} INT32 = 1"));
+
+        Assert.Contains("reserved keyword", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(reserved, ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DECLARE", ex.Message);
+        // Position should point at the offending token, not a downstream block boundary.
+        Assert.Equal(9, ex.ErrorPosition.Column);
+    }
+
+    [Fact]
+    public void Declare_DoubleQuotedReservedWord_Works()
+    {
+        // The targeted error suggests double-quoting as an escape hatch;
+        // verify it actually parses.
+        DeclareStatement decl = Parse<DeclareStatement>("DECLARE \"offset\" INT32 = 1");
+        Assert.Equal("offset", decl.VariableName);
+    }
+
     // ───────────────────── SET ─────────────────────
 
     [Fact]

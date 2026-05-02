@@ -137,6 +137,25 @@ _p6 bytes 1–3             reserved
 
 Populated via `ValueRef.MaterializeMeshWithMetadata`. Accessors: `MeshVertexCount`, `MeshTriangleCount`, `MeshAttributes`. SQL: `mesh_vertex_count()`, `mesh_triangle_count()` short-circuit on inline metadata.
 
+#### Primitive arrays (`IsArray` with primitive element kind)
+
+```
+[shape int32 × ndim][element bytes]   (multi-dim only; flat arrays omit the prefix)
+_p4 + _p5  (bytes 16–23)  XxHash64 of the bytes addressed by (offset, length)
+                          — element bytes only for flat arrays
+                            (FromArenaArray / FromArenaArrayBytes),
+                          — full shape+elements block for multi-dim
+                            (FromArenaMultiDimArrayBytes / FromArenaMultiDimRawBytes);
+                          zero = no cached hash (sidecar-backed arrays today)
+_p6        (bytes 24–27)  reserved
+```
+
+`(offset, length)` spans the complete payload — for multi-dim that includes the leading `int32 × ndim` shape prefix. `AsArraySpan<T>`, `ElementCount`, `InlineArrayBytes`, and the sidecar/arena byte readers all skip `ShapePrefixByteCount` transparently; `GetShape` exposes the dims.
+
+The hash domain differs by storage shape because the hash-fast-path in `Equals` first checks `_flags` + `_charCount` (which encodes ndim in the high byte for multi-dim). Two multi-dim values with the same elements but different shapes (e.g. `[2,3]` vs `[3,2]`) share `_charCount` and `_flags`, so the hash must distinguish them — hashing the full block (which includes the shape prefix bytes) accomplishes that. Flat arrays carry no shape, so their hash domain is just the element bytes.
+
+**Flatten as descriptor slice.** `DataValue.SliceMultiDimAsFlat` converts multi-dim → flat without copying the element bytes: the new value's offset advances by `ShapePrefixByteCount`, length shrinks by the same amount, the `IsMultiDim` flag clears, and `_charCount` zeros (storeId preserved in the low byte for sidecar). The hash is recomputed over the element bytes only so the resulting flat value is indistinguishable in the hash-fast-path from one constructed via `FromArenaArray`. Surfaced at the SQL layer as `CAST(arr AS T[])`, where the target annotation `Array<T>` carries no shape and dropping the multi-dim shape is the only consistent reading.
+
 #### Sidecar-backed reference arrays (`IsArray | InSidecar`)
 
 The slot block in the sidecar follows the per-element `ArraySlot` layout (16 bytes: 64-bit offset + 40-bit length + per-element TypeId + codec discriminator). The container DataValue uses the same 64-bit offset / 40-bit length encoding to address the slot block itself; `_charCount.low` carries the sidecar storeId.

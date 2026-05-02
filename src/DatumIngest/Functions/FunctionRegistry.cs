@@ -980,6 +980,16 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Diffusion.ArrayClampFunction>();
         registry.RegisterScalar<Scalar.Diffusion.ArrayConcatLastDimFunction>();
 
+        // SAM-family segmentation primitives. sam_preprocess: aspect-preserving
+        // longest-side=1024 resize + HWC raw-byte Float32 pack. sam_stability_score:
+        // per-candidate stability filter (IoU of ±delta thresholdings).
+        // mask_nms_planes: post-sweep accumulator → binary masks + IoU NMS →
+        // Array<Image>. Used by the SQL-defined MobileSAM body.
+        registry.RegisterScalar<Scalar.Sam.SamPreprocessFunction>();
+        registry.RegisterScalar<Scalar.Sam.SamStabilityScoreFunction>();
+        registry.RegisterScalar<Scalar.Sam.MaskNmsPlanesFunction>();
+        registry.RegisterScalar<Scalar.Sam.BinaryMaskFromLogitsFunction>();
+
         // Temporal — current time, date/time arithmetic, extraction.
         registry.RegisterScalar<Scalar.Temporal.NowFunction>();
         registry.RegisterScalar<Scalar.Temporal.CyclicalEncodeFunction>();
