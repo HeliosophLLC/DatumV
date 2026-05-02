@@ -17,7 +17,7 @@
 
 CREATE OR REPLACE MODEL metric3d_v2_giant_fp16(img Image) RETURNS Image
 IMPLEMENTS DepthEstimator
-USING 'metric3d-v2-giant-fp16/onnx/model_fp16.onnx'
+USING 'metric3d-v2-giant-fp16/2026-05-29/onnx/model_fp16.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,
@@ -36,7 +36,7 @@ END;
 CREATE OR REPLACE MODEL metric3d_v2_giant_fp16_meters(img Image)
   RETURNS Array<Float32>
 IMPLEMENTS DepthEstimatorMetric
-USING 'metric3d-v2-giant-fp16/onnx/model_fp16.onnx'
+USING 'metric3d-v2-giant-fp16/2026-05-29/onnx/model_fp16.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,
@@ -51,7 +51,7 @@ END;
 
 CREATE OR REPLACE MODEL metric3d_v2_giant_fp16_full(img Image)
   RETURNS Struct
-USING 'metric3d-v2-giant-fp16/onnx/model_fp16.onnx'
+USING 'metric3d-v2-giant-fp16/2026-05-29/onnx/model_fp16.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,

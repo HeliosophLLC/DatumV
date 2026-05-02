@@ -19,7 +19,7 @@ CREATE OR REPLACE MODEL epicrealism_hyper(
     COMMENT 'Number of Euler denoising steps. Hyper-SD was distilled for 1-4 steps; 1 is fastest, 4 is the recommended minimum for face / detail quality, beyond 4 returns diminishing gains.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
-USING 'epicrealism-hyper/text_encoder/model.onnx' AS text_encoder,
+USING 'epicrealism-hyper/2026-05-29/text_encoder/model.onnx' AS text_encoder,
       'epicrealism-hyper/unet/model.onnx'         AS unet,
       'epicrealism-hyper/vae_decoder/model.onnx'  AS vae_decoder
 AS BEGIN

@@ -25,7 +25,7 @@
 
 CREATE OR REPLACE MODEL u2net(img Image) RETURNS Image
 IMPLEMENTS BackgroundRemover
-USING 'u2net/u2net.onnx'
+USING 'u2net/2026-05-29/u2net.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img, [320, 320], imagenet_mean(), imagenet_std());

@@ -24,7 +24,7 @@
 
 CREATE OR REPLACE MODEL dpt_large(img Image) RETURNS Image
 IMPLEMENTS DepthEstimator
-USING 'dpt-large/dpt_large_384.onnx'
+USING 'dpt-large/2026-05-29/dpt_large_384.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,

@@ -33,7 +33,7 @@ CREATE OR REPLACE MODEL juggernaut_xl_lightning(
     COMMENT 'Number of Euler denoising steps. Lightning was distilled for 1-8 steps; 1 is fastest, 4 is the recommended minimum for face / fine-detail quality, 8 for hero outputs.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
-USING 'juggernaut-xl-lightning/text_encoder/model.onnx'   AS text_encoder_1,
+USING 'juggernaut-xl-lightning/2026-05-29/text_encoder/model.onnx'   AS text_encoder_1,
       'juggernaut-xl-lightning/text_encoder_2/model.onnx' AS text_encoder_2,
       'juggernaut-xl-lightning/unet/model.onnx'           AS unet,
       'juggernaut-xl-lightning/vae_decoder/model.onnx'    AS vae_decoder

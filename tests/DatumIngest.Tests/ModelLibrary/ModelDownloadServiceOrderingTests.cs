@@ -9,19 +9,26 @@ namespace DatumIngest.Tests.ModelLibrary;
 /// Pins the install-sequence ordering invariants in
 /// <see cref="ModelDownloadService"/> that, when violated, surface as
 /// runtime "file not found" errors from CREATE MODEL inside the catalog
-/// entry's installSql or as in-flight queries observing torn active state.
+/// entry's installSql.
 /// </summary>
 /// <remarks>
 /// The bug this guards against:
 /// <list type="bullet">
-///   <item>installSql contains <c>CREATE MODEL ... USING 'id/file.onnx'</c>.</item>
-///   <item>USING resolves through <see cref="IModelPathResolver"/>, which
-///   reads <c>&lt;id&gt;/active</c> and injects the active version unless
-///   <see cref="ModelInstallContext.CurrentVersionPin"/> overrides.</item>
+///   <item>installSql declares per-version USING paths like
+///   <c>'id/&lt;version&gt;/file.onnx'</c>; the version segment is part
+///   of the SQL authoring contract.</item>
+///   <item>Internal C# loaders (BuiltinModels et al.) still use
+///   id-prefixed shorthand and need the resolver to inject the version
+///   segment for them; the resolver consults
+///   <see cref="ICatalogActiveVersionLookup"/> for "active" and
+///   <see cref="ModelInstallContext.CurrentVersionPin"/> for the
+///   in-flight install override.</item>
 ///   <item>The download service sets the install-context pin around the
-///   installer call so USING paths resolve to the version being installed
-///   without flipping the active pointer mid-install (which would race
-///   with in-flight queries on a cross-check failure).</item>
+///   installer call so resolver-driven paths see the version being
+///   installed; the active version becomes that version once the
+///   installer's CREATE MODEL chain registers the descriptor (the
+///   bare-form catalog row is itself the active-version signal — no
+///   separate filesystem pointer to flip).</item>
 /// </list>
 /// </remarks>
 public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
@@ -72,59 +79,16 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
         await installer.InstallCalled.Task.WaitAsync(timeout.Token);
 
-        // Wait for the post-installer active-pointer flip — it runs in the
-        // background Task.Run after the installer's TCS completes.
-        while (paths.GetActiveVersion(ModelId) is null)
-        {
-            timeout.Token.ThrowIfCancellationRequested();
-            await Task.Delay(5, timeout.Token);
-        }
-
-        // ASSERT: at the moment installSql ran the active pointer was NOT
-        // yet set (it flips only after a successful install + cross-check)
-        // and the install-context pin named the version being installed.
-        // After the install finished, the active pointer is the target
-        // version.
+        // ASSERT: the install-context pin named the target version during
+        // installSql execution. The resolver's GetActiveVersion read the
+        // pin (the lookup itself has no row yet — the installer is a
+        // stub), so paths inside installSql resolve to the right version
+        // folder. After the installer returns, the bare-form catalog row
+        // it produced becomes the active-version signal — no separate
+        // filesystem pointer to flip.
         Assert.Equal(1, installer.InstallCallCount);
-        Assert.Null(installer.CapturedActiveVersionAtInstallTime);
+        Assert.Equal(Version, installer.CapturedActiveVersionAtInstallTime);
         Assert.Equal(Version, installer.CapturedInstallContextPinAtInstallTime);
-        Assert.Equal(Version, paths.GetActiveVersion(ModelId));
-    }
-
-    [Fact]
-    public async Task InstallAsync_NoInstallSql_StillFlipsActivePointer()
-    {
-        // For catalog entries with no installSql (download-only entries
-        // like raw GGUF blobs), the active pointer still needs to flip
-        // so later queries against `models.<id>` resolve to the right
-        // version folder.
-        const string ModelId = "test-blob";
-        const string Version = "2026-05-29";
-
-        VersionedModelPathResolver paths = new(_root);
-        FakeManifestStore manifest = new(BuildOneEntryManifest(ModelId, Version, withInstallSql: false));
-
-        ModelDownloadService service = new(
-            store: manifest, sourceClients: [new NoOpSourceClient()],
-            licenses: new AlwaysAcceptedLicenseService(),
-            reporter: new NullProgressReporter(),
-            installer: new ThrowingInstaller(),
-            python: new NullPythonEnvironmentManager(),
-            paths: paths, logger: NullLogger<ModelDownloadService>.Instance);
-
-        await service.InstallAsync(ModelId, CancellationToken.None);
-        // RunDownloadAsync is fire-and-forget under Task.Run; spin
-        // briefly until the active pointer flips (it's the last thing
-        // before the python/installSql steps return). 5 s is generous
-        // for a no-I/O test run; the actual path is microseconds.
-        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
-        while (paths.GetActiveVersion(ModelId) is null)
-        {
-            timeout.Token.ThrowIfCancellationRequested();
-            await Task.Delay(5, timeout.Token);
-        }
-
-        Assert.Equal(Version, paths.GetActiveVersion(ModelId));
     }
 
     [Fact]
@@ -160,10 +124,11 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
         await installer.InstallCalled.Task.WaitAsync(timeout.Token);
         await installer.DropCalled.Task.WaitAsync(timeout.Token);
 
-        // ASSERT: 'foo' (the partial registration) was dropped, and the
-        // active pointer was never flipped (so probes see Downloaded).
+        // ASSERT: 'foo' (the partial registration) was dropped. The lookup
+        // never saw a bare-form row register (the failing installer didn't
+        // produce one), so probes continue to surface this entry as
+        // Downloaded — the user can retry the install.
         Assert.Equal(["foo"], installer.DroppedIdentifiers);
-        Assert.Null(paths.GetActiveVersion(ModelId));
     }
 
     private static CatalogManifest BuildManifestWithDeclaredIdentifiers(
@@ -232,13 +197,12 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
 
     // ----- harness types ---------------------------------------------------
 
-    private static CatalogManifest BuildOneEntryManifest(
-        string modelId, string version, bool withInstallSql = true)
+    private static CatalogManifest BuildOneEntryManifest(string modelId, string version)
     {
         CatalogVersion ver = new(
             Version: version,
             Sources: [],
-            InstallSql: withInstallSql ? $"sql/{modelId}/{version}.sql" : null,
+            InstallSql: $"sql/{modelId}/{version}.sql",
             Models: null);
 
         CatalogModel model = new(
@@ -315,17 +279,6 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
         public ValueTask OnInstallingAsync(ModelInstalling i, CancellationToken ct) => ValueTask.CompletedTask;
         public ValueTask OnInstalledAsync(ModelInstalled i, CancellationToken ct) => ValueTask.CompletedTask;
         public ValueTask OnFailedAsync(ModelDownloadFailed f, CancellationToken ct) => ValueTask.CompletedTask;
-    }
-
-    private sealed class ThrowingInstaller : IModelInstaller
-    {
-        public ValueTask<bool> IsInstalledAsync(CatalogModel model, CancellationToken ct)
-            => ValueTask.FromResult(true);
-        public ValueTask<IReadOnlyList<string>> InstallAsync(
-            CatalogModel model, CatalogVersion version, bool pinnedMode, CancellationToken ct)
-            => throw new InvalidOperationException("installer must not be called for entries without installSql");
-        public ValueTask DropModelsAsync(IReadOnlyList<string> identifiers, CancellationToken ct)
-            => ValueTask.CompletedTask;
     }
 
     private sealed class NoOpSourceClient : IModelSourceClient

@@ -38,6 +38,8 @@ namespace DatumIngest.ModelLibrary;
 public static class ModelInstallContext
 {
     private static readonly AsyncLocal<string?> _versionPin = new();
+    private static readonly AsyncLocal<string?> _catalogId = new();
+    private static readonly AsyncLocal<bool> _isPinnedInstall = new();
 
     /// <summary>
     /// The catalog version a currently-running install is pinning USING
@@ -49,5 +51,34 @@ public static class ModelInstallContext
     {
         get => _versionPin.Value;
         set => _versionPin.Value = value;
+    }
+
+    /// <summary>
+    /// The catalog entry id (kebab-case, e.g. <c>"sd-turbo"</c>) the
+    /// in-flight install/rehydrate belongs to. Read by
+    /// <c>RoutineRegistrar.ApplyCreateModelAsync</c> when stamping
+    /// provenance fields onto a newly registered <c>ModelDescriptor</c>
+    /// so the persisted catalog row carries enough information to
+    /// rehydrate from the on-disk installSql without round-tripping
+    /// through the verbatim source text.
+    /// </summary>
+    public static string? CurrentCatalogId
+    {
+        get => _catalogId.Value;
+        set => _catalogId.Value = value;
+    }
+
+    /// <summary>
+    /// True while a pinned-mode install or rehydrate is in flight. Set
+    /// by <c>CatalogBackedModelInstaller</c> (for pinned-version
+    /// installs) and by <c>TableCatalog.RehydrateModelsAsync</c> (for
+    /// rehydrate of persisted pinned-form rows). Read by
+    /// <c>RoutineRegistrar.ApplyCreateModelAsync</c> to record the
+    /// pinned-form identifier on the descriptor.
+    /// </summary>
+    public static bool CurrentInstallIsPinned
+    {
+        get => _isPinnedInstall.Value;
+        set => _isPinnedInstall.Value = value;
     }
 }

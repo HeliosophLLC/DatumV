@@ -21,7 +21,7 @@ CREATE OR REPLACE MODEL rtdetr_r18_int8(
     COMMENT 'Per-query max-class-probability floor for emitting a detection.'
 ) RETURNS Array<LabeledDetection>
 IMPLEMENTS LabeledObjectDetector
-USING 'rtdetr-r18-int8/onnx/model_quantized.onnx'
+USING 'rtdetr-r18-int8/2026-05-29/onnx/model_quantized.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(img, [640, 640]);
   DECLARE outputs Struct = infer_outputs(

@@ -90,10 +90,19 @@ public sealed class CatalogStore
     ///     Rehydration is deferred to <see cref="TableCatalog.RehydrateModelsAsync"/>
     ///     because session loading is async — Load only captures the
     ///     pending entries.</description></item>
+    ///   <item><description><c>6</c>: model rows bifurcate by origin.
+    ///     <em>Catalog-installed rows</em> persist
+    ///     <c>(catalog_id, catalog_version, pinned_as?)</c> pointers instead
+    ///     of source text — rehydrate resolves the installSql by
+    ///     <c>(catalog_id, catalog_version)</c> against the current manifest
+    ///     so edits to the on-disk SQL file flow through on the next process
+    ///     start. <em>User-authored rows</em> (no catalog parent) keep the
+    ///     v5 verbatim-source-text shape because the source has nowhere
+    ///     else to live.</description></item>
     /// </list>
-    /// Only v5 is accepted; older and newer versions both throw at load.
+    /// Only v6 is accepted; older and newer versions both throw at load.
     /// </summary>
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
 
     private readonly string _path;
     private readonly object _writeLock = new();
@@ -237,24 +246,27 @@ public sealed class CatalogStore
 
         // Capture SQL-defined model entries. They're rehydrated later via
         // TableCatalog.RehydrateModelsAsync (after the dispatcher + models
-        // directory are wired). Skip entries with missing fields here so
-        // the rehydrate loop doesn't have to re-validate; warnings land
-        // on the load report.
+        // directory are wired). Two row shapes are accepted:
+        //   * catalog-installed rows carry (catalog_id, catalog_version)
+        //     and resolve their installSql against the live manifest.
+        //   * user-authored rows carry source_text and round-trip verbatim.
+        // Rows that match neither shape are skipped — rehydration runs
+        // separately and is the right place to surface failures.
         List<PendingModelEntry> models = new();
         foreach (CatalogFileModelEntry entry in parsed.Models ?? [])
         {
-            if (string.IsNullOrWhiteSpace(entry.Name) ||
-                string.IsNullOrWhiteSpace(entry.SourceText))
-            {
-                // No skip-count for models in the report — rehydration runs
-                // separately and can surface failures from there. Warning
-                // is still useful so a malformed entry isn't silent.
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(entry.Name)) { continue; }
+            bool isCatalogRow = !string.IsNullOrWhiteSpace(entry.CatalogId)
+                && !string.IsNullOrWhiteSpace(entry.CatalogVersion);
+            bool isUserRow = !string.IsNullOrWhiteSpace(entry.SourceText);
+            if (!isCatalogRow && !isUserRow) { continue; }
             models.Add(new PendingModelEntry(
                 Schema: entry.Schema ?? "models",
                 Name: entry.Name!,
-                SourceText: entry.SourceText!));
+                SourceText: entry.SourceText,
+                CatalogId: entry.CatalogId,
+                CatalogVersion: entry.CatalogVersion,
+                PinnedAs: entry.PinnedAs));
         }
         _loadedModelEntries = models;
 
@@ -629,10 +641,13 @@ public sealed class CatalogStore
                         SourceText = e.SourceText,
                     })
                     .ToList(),
-                // v5: SQL-defined models persist verbatim source text. Bound
-                // sessions are recreated on rehydrate via the dispatcher;
-                // only the SQL (and the resolved (schema, name) for diagnostics)
-                // need to live on disk.
+                // v6: SQL-defined models split by origin. Catalog-installed
+                // rows record (catalog_id, catalog_version, pinned_as?) so
+                // rehydrate resolves the originating installSql from the
+                // live manifest — editing the on-disk SQL file flows through
+                // on the next process start. User-authored CREATE MODEL rows
+                // keep the v5 source-text shape because the source has
+                // nowhere else to live.
                 Models = models?.Entries
                     .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
                     .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
@@ -640,7 +655,15 @@ public sealed class CatalogStore
                     {
                         Schema = e.SchemaName,
                         Name = e.Name,
-                        SourceText = e.SourceText,
+                        // Catalog-installed rows: provenance pointers + no source_text.
+                        CatalogId = e.CatalogId,
+                        CatalogVersion = e.CatalogVersion,
+                        PinnedAs = e.PinnedAs,
+                        // User rows: source_text + no provenance. The catalog row
+                        // is recognised as user-authored exactly when CatalogId
+                        // is null; emitting source_text only in that case keeps
+                        // the on-disk file shape unambiguous.
+                        SourceText = e.CatalogId is null ? e.SourceText : null,
                     })
                     .ToList(),
                 Backends = flatFileState is null
@@ -876,29 +899,61 @@ internal sealed class CatalogFileProcedureEntry
 }
 
 /// <summary>
-/// One SQL-defined model entry in the persisted catalog. Stores the
-/// original <c>CREATE MODEL</c> source verbatim so re-applying it on
-/// startup picks up the same USING path, parameters, return type, and
-/// body the user wrote — no separate AST formatter required.
+/// One SQL-defined model entry in the persisted catalog. Two row shapes
+/// share this type:
+/// <list type="bullet">
+///   <item><description><strong>Catalog-installed</strong>:
+///   <see cref="CatalogId"/> + <see cref="CatalogVersion"/> are set;
+///   <see cref="SourceText"/> is null. Rehydrate resolves the originating
+///   installSql by <c>(CatalogId, CatalogVersion)</c> against the current
+///   manifest and re-executes it, so edits to
+///   <c>models/sql/&lt;catalog_id&gt;/&lt;catalog_version&gt;.sql</c>
+///   flow through on the next process start without catalog file surgery.
+///   <see cref="PinnedAs"/> is non-null when this row was installed in
+///   pinned mode (coexisting with a different bare-form active version);
+///   rehydrate applies the same pinned-identifier rewrite the original
+///   install did.</description></item>
+///   <item><description><strong>User-authored</strong>:
+///   <see cref="SourceText"/> is set; the catalog-pointer fields are null.
+///   Round-trips verbatim because no installSql file exists on disk for
+///   user-defined models.</description></item>
+/// </list>
 /// </summary>
-/// <remarks>
-/// Unlike <see cref="CatalogFileUdfEntry"/>, model entries don't store
-/// parameter / return-type fields separately: the source text is the
-/// only thing the rehydrate path needs, and the parser produces the same
-/// <see cref="CreateModelStatement"/> it did originally. The bound
-/// inference sessions are recreated at rehydrate time via the
-/// dispatcher's bundle loader.
-/// </remarks>
 internal sealed class CatalogFileModelEntry
 {
-    /// <summary>Schema portion of the canonical name. Always <c>"models"</c> in v5 (CREATE MODEL enforces it).</summary>
+    /// <summary>Schema portion of the canonical name. Always <c>"models"</c> (CREATE MODEL enforces it).</summary>
     public string? Schema { get; set; }
 
     /// <summary>Unqualified model name within the schema.</summary>
     public string? Name { get; set; }
 
-    /// <summary>Verbatim <c>CREATE MODEL</c> SQL. Reparsed on load.</summary>
+    /// <summary>
+    /// Verbatim <c>CREATE MODEL</c> SQL. Reparsed on load. Populated only
+    /// for user-authored rows; catalog-installed rows leave this null and
+    /// resolve their source from the on-disk installSql at rehydrate.
+    /// </summary>
     public string? SourceText { get; set; }
+
+    /// <summary>
+    /// Parent catalog entry id (kebab-case, e.g. <c>"sd-turbo"</c>) when
+    /// this row was registered by a catalog-driven install. Null for
+    /// user-authored rows.
+    /// </summary>
+    public string? CatalogId { get; set; }
+
+    /// <summary>
+    /// Catalog version string the install belonged to (e.g.
+    /// <c>"2026-05-29"</c>). Null when <see cref="CatalogId"/> is null.
+    /// </summary>
+    public string? CatalogVersion { get; set; }
+
+    /// <summary>
+    /// When non-null, the suffixed pinned-form identifier this row was
+    /// registered under (e.g. <c>"foo@20260529"</c>) — meaning the row is
+    /// a pinned-mode install coexisting with a different bare-form active
+    /// version. Null for bare-mode installs and user-authored rows.
+    /// </summary>
+    public string? PinnedAs { get; set; }
 }
 
 /// <summary>
@@ -911,8 +966,32 @@ internal sealed class CatalogFileModelEntry
 /// </summary>
 /// <param name="Schema">Schema name from the entry (always <c>"models"</c> today).</param>
 /// <param name="Name">Unqualified model name.</param>
-/// <param name="SourceText">Verbatim CREATE MODEL SQL to re-parse and re-apply.</param>
-public sealed record PendingModelEntry(string Schema, string Name, string SourceText);
+/// <param name="SourceText">
+/// Verbatim CREATE MODEL SQL — populated only for user-authored rows.
+/// Null for catalog-installed rows, which resolve their source from
+/// the on-disk installSql via the manifest store at rehydrate time.
+/// </param>
+/// <param name="CatalogId">
+/// Parent catalog entry id when this row was registered by a catalog
+/// install; <see langword="null"/> for user-authored rows.
+/// </param>
+/// <param name="CatalogVersion">
+/// Catalog version string the install belonged to; null when
+/// <paramref name="CatalogId"/> is null.
+/// </param>
+/// <param name="PinnedAs">
+/// Suffixed pinned-form identifier (e.g. <c>"foo@20260529"</c>) when this
+/// row was installed in pinned mode; null otherwise. Drives whether
+/// rehydrate applies the pinned-identifier rewrite to the resolved
+/// installSql.
+/// </param>
+public sealed record PendingModelEntry(
+    string Schema,
+    string Name,
+    string? SourceText,
+    string? CatalogId = null,
+    string? CatalogVersion = null,
+    string? PinnedAs = null);
 
 /// <summary>
 /// Source-generated JSON serializer context for the catalog file. Required

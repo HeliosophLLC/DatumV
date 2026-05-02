@@ -44,7 +44,7 @@ CREATE OR REPLACE MODEL paddleocr_v4_det(
     COMMENT 'DBNet polygon-expansion factor; higher values keep more margin.'
 ) RETURNS Array<RegionScore>
 IMPLEMENTS TextDetector
-USING 'paddleocr-v4-det/ch_PP-OCRv4_det.onnx'
+USING 'paddleocr-v4-det/2026-05-29/ch_PP-OCRv4_det.onnx'
 AS BEGIN
   DECLARE resized Image    = image_resize_to_stride(img, 960, 32);
   DECLARE rh      Int32    = image_height(resized);

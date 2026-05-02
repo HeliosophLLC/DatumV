@@ -238,7 +238,9 @@ internal sealed class ModelDownloadService : IModelDownloadService
         // surface.
         string idRoot = Path.Combine(_paths.ModelsRoot, model.Id);
         if (Directory.Exists(idRoot)) Directory.Delete(idRoot, recursive: true);
-        _paths.InvalidateActiveVersionCache(model.Id);
+        // No active pointer to invalidate — the catalog row registration
+        // (which the installer torn down during the SQL DROP MODEL path)
+        // was the active-version signal, and it's already gone.
         return Task.CompletedTask;
     }
 
@@ -354,7 +356,10 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 }
             }
 
-            _paths.SetActiveVersion(modelId, version);
+            // No active pointer to flip — registering the incoming version's
+            // bare identifiers (which happened during the installer call
+            // above) is itself the activation. The lookup picks up the new
+            // CatalogVersion from the freshly-registered descriptor.
         }
         finally
         {
@@ -411,21 +416,12 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 Directory.Delete(versionDir, recursive: true);
             }
 
-            if (isActive)
-            {
-                // No auto-flip to a sibling version — that would be a
-                // surprise. The entry returns to a "no active" state;
-                // ProbeAsync surfaces it as NotDownloaded (the
-                // recommended-version folder is gone) and the UI's
-                // top-level install affordance reappears.
-                _paths.ClearActiveVersion(modelId);
-            }
-            else
-            {
-                // Cache may carry a stale "this version is on disk"
-                // implication for path resolution; cheap to invalidate.
-                _paths.InvalidateActiveVersionCache(modelId);
-            }
+            // No auto-flip to a sibling version — that would be a
+            // surprise. The entry returns to a "no active" state via
+            // the installer's DROP MODEL above removing the catalog row
+            // (or the pinned row for non-active deletes), and ProbeAsync
+            // surfaces it as NotDownloaded once the recommended-version
+            // folder is gone. No filesystem active pointer to maintain.
         }
         finally
         {
@@ -725,14 +721,11 @@ internal sealed class ModelDownloadService : IModelDownloadService
                     .ConfigureAwait(false);
             }
 
-            // Cross-check passed (or there was no installSql); flip the
-            // active pointer last. Pinned installs don't disturb the
-            // active install — their identifier already lives under the
-            // suffixed `<bare>@<digits>` form and resolves directly.
-            if (!pinnedMode)
-            {
-                _paths.SetActiveVersion(model.Id, version);
-            }
+            // Cross-check passed (or there was no installSql). No active
+            // pointer to flip — the catalog row registered by installSql
+            // (bare for !pinnedMode, suffixed otherwise) is itself the
+            // active-version signal. ICatalogActiveVersionLookup walks
+            // those rows to answer "what version is active for <id>?"
         }
         catch (OperationCanceledException)
         {

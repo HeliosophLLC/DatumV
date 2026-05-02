@@ -61,7 +61,7 @@ CREATE OR REPLACE MODEL scunet_color_real_psnr(
     COMMENT 'Long-side cap after aspect-preserving resize. Default 1024 keeps activation memory under ~1 GB; raise on GPUs with headroom (2048 ≈ 4 GB, 4096 ≈ 12 GB) for higher source resolution, lower for fastest CPU dispatch. Rounded to /64 (the architectural stride) regardless of the supplied value.'
 ) RETURNS Image
 IMPLEMENTS ImageRestorer
-USING 'scunet-color-real-psnr/scunet_color_real_psnr.onnx'
+USING 'scunet-color-real-psnr/2026-05-29/scunet_color_real_psnr.onnx'
 AS BEGIN
   DECLARE resized Image = image_resize_to_stride(img, max_side, 64);
   DECLARE rh Int32 = image_height(resized);

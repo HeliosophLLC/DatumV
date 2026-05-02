@@ -40,7 +40,7 @@
 
 CREATE OR REPLACE MODEL realesrgan_x4v3(img Image) RETURNS Image
 IMPLEMENTS ImageUpscaler
-USING 'realesrgan-x4v3/realesr-general-x4v3.onnx'
+USING 'realesrgan-x4v3/2026-05-29/realesr-general-x4v3.onnx'
 AS BEGIN
   DECLARE iw Int32 = image_width(img);
   DECLARE ih Int32 = image_height(img);

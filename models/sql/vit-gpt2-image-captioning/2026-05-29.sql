@@ -28,7 +28,7 @@
 
 CREATE OR REPLACE MODEL vit_gpt2_caption(img Image) RETURNS String
 IMPLEMENTS ImageCaptioner
-USING 'vit-gpt2-image-captioning/encoder_model.onnx' AS encoder,
+USING 'vit-gpt2-image-captioning/2026-05-29/encoder_model.onnx' AS encoder,
       'vit-gpt2-image-captioning/decoder_model.onnx' AS decoder
 AS BEGIN
   -- Step 1: ViT preprocessing. nlpconnect/vit-gpt2 was fine-tuned on

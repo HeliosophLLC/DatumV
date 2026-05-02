@@ -37,7 +37,7 @@
 
 CREATE OR REPLACE MODEL glpn_nyu(img Image) RETURNS Image
 IMPLEMENTS DepthEstimator
-USING 'glpn-nyu/onnx/model.onnx'
+USING 'glpn-nyu/2026-05-29/onnx/model.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,
@@ -62,7 +62,7 @@ END;
 CREATE OR REPLACE MODEL glpn_nyu_meters(img Image)
   RETURNS Array<Float32>
 IMPLEMENTS DepthEstimatorMetric
-USING 'glpn-nyu/onnx/model.onnx'
+USING 'glpn-nyu/2026-05-29/onnx/model.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,

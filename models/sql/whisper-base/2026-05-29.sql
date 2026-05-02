@@ -56,7 +56,7 @@ CREATE OR REPLACE MODEL whisper_base(
     COMMENT 'Hard cap on generated tokens per clip. Whispers ceiling is 448 (positional embeddings); lower values bound the decoder loop for short clips.'
 ) RETURNS String
 IMPLEMENTS AudioToText
-USING 'whisper-base/onnx/encoder_model.onnx' AS encoder,
+USING 'whisper-base/2026-05-29/onnx/encoder_model.onnx' AS encoder,
       'whisper-base/onnx/decoder_model.onnx' AS decoder
 AS BEGIN
   -- 1. WAV bytes → mono 16 kHz Float32 samples.

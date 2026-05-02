@@ -21,7 +21,7 @@ CREATE OR REPLACE MODEL scunet_gray_25(
     COMMENT 'Long-side cap after aspect-preserving resize. See scunet-color-real-psnr.sql for memory-budget rationale (default ~1 GB activations, 2048 ≈ 4 GB, 4096 ≈ 12 GB).'
 ) RETURNS Image
 IMPLEMENTS ImageRestorer
-USING 'scunet-gray-25/scunet_gray_25.onnx'
+USING 'scunet-gray-25/2026-05-29/scunet_gray_25.onnx'
 AS BEGIN
   DECLARE resized Image = image_resize_to_stride(img, max_side, 64);
   DECLARE rh Int32 = image_height(resized);

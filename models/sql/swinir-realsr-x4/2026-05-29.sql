@@ -31,7 +31,7 @@
 
 CREATE OR REPLACE MODEL swinir_realsr_x4(img Image) RETURNS Image
 IMPLEMENTS ImageUpscaler
-USING 'swinir-realsr-x4/swinir_realsr_x4.onnx'
+USING 'swinir-realsr-x4/2026-05-29/swinir_realsr_x4.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,

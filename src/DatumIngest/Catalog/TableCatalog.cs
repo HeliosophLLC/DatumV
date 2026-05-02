@@ -8,6 +8,7 @@ using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
+using DatumIngest.ModelLibrary;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -21,8 +22,31 @@ namespace DatumIngest.Catalog;
 /// <see cref="TableDescriptor"/> instances and creates the
 /// appropriate <see cref="ITableProvider"/> for each.
 /// </summary>
-public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
+public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICatalogActiveVersionLookup
 {
+    /// <summary>
+    /// <see cref="ICatalogActiveVersionLookup.GetActiveVersion"/>: returns
+    /// the catalog version of the currently-installed bare-form row for
+    /// <paramref name="catalogId"/>, or <see langword="null"/> when no
+    /// bare-form row exists. Bare rows have <c>PinnedAs == null</c> —
+    /// pinned-form rows coexist on the same catalog id but intentionally
+    /// don't drive "active." Replaces the previous
+    /// <c>&lt;DATUM_MODELS&gt;/&lt;id&gt;/active</c> text-pointer file.
+    /// </summary>
+    public string? GetActiveVersion(string catalogId)
+    {
+        foreach (Registries.ModelDescriptor d in DeclaredModels.Entries)
+        {
+            if (d.PinnedAs is null
+                && d.CatalogId is not null
+                && string.Equals(d.CatalogId, catalogId, StringComparison.Ordinal))
+            {
+                return d.CatalogVersion;
+            }
+        }
+        return null;
+    }
+
     /// <summary>
     /// Opens a new catalog containing a single <c>.datum</c> file. Owns its own pool
     /// and disposes everything when <see cref="Dispose"/> is called. The table name
@@ -416,7 +440,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// model doesn't keep all the others from coming back.
     /// </para>
     /// </remarks>
-    public async Task<ModelRehydrationReport> RehydrateModelsAsync(CancellationToken ct = default)
+    public async Task<ModelRehydrationReport> RehydrateModelsAsync(
+        IManifestStore? manifest = null,
+        CancellationToken ct = default)
     {
         if (CatalogStore is null || CatalogStore.LoadedModelEntries.Count == 0)
         {
@@ -427,14 +453,69 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         int skipped = 0;
         List<string> warnings = new();
 
-        foreach (PendingModelEntry entry in CatalogStore.LoadedModelEntries)
+        // Partition by row shape. Catalog-installed rows (CatalogId set)
+        // resolve their source from the live manifest's installSql — edits
+        // to the on-disk SQL file flow through on the next process start.
+        // User-authored rows still round-trip their persisted SourceText
+        // because no installSql file exists for them.
+        List<PendingModelEntry> catalogRows = [];
+        List<PendingModelEntry> userRows = [];
+        foreach (PendingModelEntry e in CatalogStore.LoadedModelEntries)
+        {
+            if (e.CatalogId is not null && e.CatalogVersion is not null)
+            {
+                catalogRows.Add(e);
+            }
+            else if (e.SourceText is not null)
+            {
+                userRows.Add(e);
+            }
+            else
+            {
+                // Defensive: CatalogStore.Load already drops malformed rows,
+                // but if a row slips through (e.g. catalog provenance fields
+                // half-populated) skip it loudly rather than NRE downstream.
+                skipped++;
+                warnings.Add(
+                    $"Skipping model '{e.Schema}.{e.Name}': persisted row has neither catalog provenance nor source text.");
+            }
+        }
+
+        // Catalog rows: group by (catalog_id, version, isPinned). Each
+        // distinct triple maps to one installSql execution — pinned-mode
+        // groups apply the bare-→-pinned identifier rewrite first. Within
+        // a group, the persisted row names tell us which identifiers we
+        // expect to land; anything missing surfaces as a warning so a
+        // catalog SQL edit that removed an identifier doesn't silently
+        // leave a phantom registration.
+        IEnumerable<IGrouping<(string CatalogId, string CatalogVersion, bool IsPinned), PendingModelEntry>> groups =
+            catalogRows.GroupBy(e =>
+                (CatalogId: e.CatalogId!, CatalogVersion: e.CatalogVersion!, IsPinned: e.PinnedAs is not null));
+        foreach (var group in groups)
+        {
+            ct.ThrowIfCancellationRequested();
+            await RehydrateCatalogGroupAsync(
+                group.Key.CatalogId,
+                group.Key.CatalogVersion,
+                group.Key.IsPinned,
+                group.ToList(),
+                manifest,
+                warnings,
+                ct,
+                onLoaded: () => loaded++,
+                onSkipped: () => skipped++).ConfigureAwait(false);
+        }
+
+        // User rows: parse the persisted CREATE MODEL source text and
+        // re-apply through the standard registration path.
+        foreach (PendingModelEntry entry in userRows)
         {
             ct.ThrowIfCancellationRequested();
 
             CreateModelStatement create;
             try
             {
-                Statement parsed = SqlParser.ParseStatement(entry.SourceText);
+                Statement parsed = SqlParser.ParseStatement(entry.SourceText!);
                 if (parsed is not CreateModelStatement c)
                 {
                     skipped++;
@@ -454,19 +535,12 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
             try
             {
-                // suppressSave: the catalog file already holds these entries;
-                // re-saving on each rehydrate would rewrite identical bytes N
-                // times. Save resumes for the next user-driven DDL.
-                await Routines.ApplyCreateModelAsync(create, entry.SourceText, suppressSave: true)
+                await Routines.ApplyCreateModelAsync(create, entry.SourceText!, suppressSave: true)
                     .ConfigureAwait(false);
                 loaded++;
             }
             catch (Exception ex)
             {
-                // Dispatcher load failure (missing file, unsupported op,
-                // GPU not available, etc.) — skip the entry and keep
-                // going. The user can DROP MODEL + re-issue CREATE MODEL
-                // to fix it once the environment is repaired.
                 skipped++;
                 warnings.Add(
                     $"Skipping model '{entry.Schema}.{entry.Name}': failed to rehydrate — {ex.Message}");
@@ -474,6 +548,161 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         return new ModelRehydrationReport(loaded, skipped, warnings);
+    }
+
+    /// <summary>
+    /// Re-runs the installSql for one <c>(catalog_id, version, isPinned)</c>
+    /// group: resolves the SQL file via <paramref name="manifest"/>, applies
+    /// the pinned-identifier rewrite when <paramref name="isPinned"/> is
+    /// true, sets the install context so each <c>CREATE MODEL</c> stamps
+    /// its catalog provenance back onto the registered descriptor, and
+    /// re-applies each statement through the standard registration path.
+    /// Increments <paramref name="onLoaded"/> per persisted row that
+    /// successfully landed and <paramref name="onSkipped"/> per row that
+    /// didn't.
+    /// </summary>
+    private async Task RehydrateCatalogGroupAsync(
+        string catalogId,
+        string catalogVersion,
+        bool isPinned,
+        IReadOnlyList<PendingModelEntry> rows,
+        IManifestStore? manifest,
+        List<string> warnings,
+        CancellationToken ct,
+        Action onLoaded,
+        Action onSkipped)
+    {
+        if (manifest is null)
+        {
+            warnings.Add(
+                $"Skipping catalog group '{catalogId}' v{catalogVersion}: no manifest store available to resolve installSql.");
+            for (int i = 0; i < rows.Count; i++) { onSkipped(); }
+            return;
+        }
+
+        CatalogModel? model = manifest.Manifest.Models.FirstOrDefault(
+            m => string.Equals(m.Id, catalogId, StringComparison.Ordinal));
+        CatalogVersion? version = model?.Versions.FirstOrDefault(
+            v => string.Equals(v.Version, catalogVersion, StringComparison.Ordinal));
+        if (model is null || version is null)
+        {
+            // Catalog entry dropped or the specific version cut removed.
+            // The persisted row points at a hole; skip + warn so the user
+            // sees it. Recovery is DROP MODEL or reinstall from the
+            // current catalog.
+            warnings.Add(
+                $"Skipping catalog group '{catalogId}' v{catalogVersion}: not present in current manifest (entry or version removed).");
+            for (int i = 0; i < rows.Count; i++) { onSkipped(); }
+            return;
+        }
+        if (string.IsNullOrEmpty(version.InstallSql))
+        {
+            warnings.Add(
+                $"Skipping catalog group '{catalogId}' v{catalogVersion}: manifest entry declares no installSql.");
+            for (int i = 0; i < rows.Count; i++) { onSkipped(); }
+            return;
+        }
+
+        string sqlPath = Path.GetFullPath(
+            Path.Combine(manifest.ManifestDirectory, version.InstallSql));
+        if (!File.Exists(sqlPath))
+        {
+            warnings.Add(
+                $"Skipping catalog group '{catalogId}' v{catalogVersion}: installSql file not found at '{sqlPath}'.");
+            for (int i = 0; i < rows.Count; i++) { onSkipped(); }
+            return;
+        }
+
+        string sql;
+        try
+        {
+            sql = await File.ReadAllTextAsync(sqlPath, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            warnings.Add(
+                $"Skipping catalog group '{catalogId}' v{catalogVersion}: failed to read installSql at '{sqlPath}' — {ex.Message}");
+            for (int i = 0; i < rows.Count; i++) { onSkipped(); }
+            return;
+        }
+        if (isPinned)
+        {
+            sql = PinnedInstallSqlRewriter.Rewrite(sql, version);
+        }
+
+        IReadOnlyList<(Statement Statement, string SourceText)> statements;
+        try
+        {
+            statements = SqlParser.ParseBatchWithText(sql);
+        }
+        catch (Exception ex)
+        {
+            warnings.Add(
+                $"Skipping catalog group '{catalogId}' v{catalogVersion}: installSql failed to parse — {ex.Message}");
+            for (int i = 0; i < rows.Count; i++) { onSkipped(); }
+            return;
+        }
+
+        // Push install context so each CREATE MODEL re-stamps its catalog
+        // provenance back onto the descriptor — keeps the row shape
+        // round-trip-stable across rehydrate cycles. CurrentVersionPin
+        // also drives USING-path resolution against the right version
+        // folder during this group's execution.
+        string? previousCatalogId = ModelInstallContext.CurrentCatalogId;
+        string? previousVersionPin = ModelInstallContext.CurrentVersionPin;
+        bool previousIsPinned = ModelInstallContext.CurrentInstallIsPinned;
+        ModelInstallContext.CurrentCatalogId = catalogId;
+        ModelInstallContext.CurrentVersionPin = catalogVersion;
+        ModelInstallContext.CurrentInstallIsPinned = isPinned;
+
+        HashSet<string> registered = new(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach ((Statement statement, string sourceText) in statements)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (statement is not CreateModelStatement create)
+                {
+                    // installSql may declare helper UDFs / procedures
+                    // alongside CREATE MODEL. Those persisted in their own
+                    // catalog sections (udfs, procedures) and were already
+                    // rehydrated synchronously during CatalogStore.Load.
+                    // Re-executing them here would double-register; skip.
+                    continue;
+                }
+                try
+                {
+                    await Routines.ApplyCreateModelAsync(create, sourceText, suppressSave: true)
+                        .ConfigureAwait(false);
+                    registered.Add(create.Name);
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add(
+                        $"Rehydrating '{catalogId}' v{catalogVersion}: CREATE MODEL '{create.Name}' failed — {ex.Message}");
+                }
+            }
+        }
+        finally
+        {
+            ModelInstallContext.CurrentInstallIsPinned = previousIsPinned;
+            ModelInstallContext.CurrentVersionPin = previousVersionPin;
+            ModelInstallContext.CurrentCatalogId = previousCatalogId;
+        }
+
+        // Match the persisted row identifiers against what landed. Drift
+        // here means the catalog SQL file was edited to remove an
+        // identifier the user still has registered; the row gets dropped.
+        foreach (PendingModelEntry row in rows)
+        {
+            if (registered.Contains(row.Name)) { onLoaded(); }
+            else
+            {
+                onSkipped();
+                warnings.Add(
+                    $"Skipping model '{row.Schema}.{row.Name}': installSql for '{catalogId}' v{catalogVersion} did not register expected identifier.");
+            }
+        }
     }
 
     /// <summary>

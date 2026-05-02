@@ -5,9 +5,10 @@ namespace DatumIngest.Tests.ModelLibrary;
 
 /// <summary>
 /// Tests the path-resolver substrate: <see cref="VersionedModelPathResolver"/>
-/// (production), <see cref="FlatModelPathResolver"/> (legacy fallback), and
-/// <see cref="ModelCatalog.ResolveFilePath"/> (the SQL-side entry point that
-/// routes through whatever resolver the catalog carries).
+/// (production) and <see cref="FlatModelPathResolver"/> (legacy fallback),
+/// plus <see cref="ModelCatalog.ResolveFilePath"/> — the SQL-facing entry
+/// point that returns supplied paths verbatim (no implicit version-segment
+/// injection).
 /// </summary>
 public sealed class ModelPathResolverTests : IDisposable
 {
@@ -26,19 +27,22 @@ public sealed class ModelPathResolverTests : IDisposable
     }
 
     [Fact]
-    public void VersionedResolver_NoActivePointer_FallsBackToVersionlessFolder()
+    public void VersionedResolver_NoLookup_FallsBackToVersionlessFolder()
     {
+        // No catalog active-version lookup wired (Null instance) → resolver
+        // has no way to know "what version is active for foo" so it falls
+        // back to the version-less folder shape.
         VersionedModelPathResolver resolver = new(_root);
-        string actual = resolver.GetModelRoot("foo");
-        Assert.Equal(Path.Combine(_root, "foo"), actual);
+        Assert.Equal(Path.Combine(_root, "foo"), resolver.GetModelRoot("foo"));
         Assert.Null(resolver.GetActiveVersion("foo"));
     }
 
     [Fact]
-    public void VersionedResolver_ActivePointerSet_InjectsVersionSegment()
+    public void VersionedResolver_LookupReturnsActive_InjectsVersionSegment()
     {
-        VersionedModelPathResolver resolver = new(_root);
-        resolver.SetActiveVersion("foo", "2026-05-29");
+        StubLookup lookup = new();
+        lookup.Set("foo", "2026-05-29");
+        VersionedModelPathResolver resolver = new(_root, lookup);
 
         Assert.Equal(
             Path.Combine(_root, "foo", "2026-05-29"),
@@ -47,10 +51,11 @@ public sealed class ModelPathResolverTests : IDisposable
     }
 
     [Fact]
-    public void VersionedResolver_ExplicitVersionPin_OverridesActive()
+    public void VersionedResolver_ExplicitVersionPin_OverridesLookup()
     {
-        VersionedModelPathResolver resolver = new(_root);
-        resolver.SetActiveVersion("foo", "2026-05-29");
+        StubLookup lookup = new();
+        lookup.Set("foo", "2026-05-29");
+        VersionedModelPathResolver resolver = new(_root, lookup);
 
         Assert.Equal(
             Path.Combine(_root, "foo", "2026-04-15"),
@@ -58,64 +63,68 @@ public sealed class ModelPathResolverTests : IDisposable
     }
 
     [Fact]
-    public void VersionedResolver_SetActiveVersion_AtomicallyReplacesPointer()
+    public void VersionedResolver_CurrentVersionPin_OverridesLookup()
     {
-        VersionedModelPathResolver resolver = new(_root);
-        resolver.SetActiveVersion("foo", "2026-04-15");
-        resolver.SetActiveVersion("foo", "2026-05-29");
+        // ModelInstallContext.CurrentVersionPin AsyncLocal beats the lookup —
+        // this is how installs/rehydrates pin paths to the version they're
+        // staging before the catalog row exists.
+        StubLookup lookup = new();
+        lookup.Set("foo", "2026-05-29");
+        VersionedModelPathResolver resolver = new(_root, lookup);
 
-        // After overwrite the pointer reflects the newest write; no .tmp
-        // leftovers stranded next to it.
-        Assert.Equal("2026-05-29", resolver.GetActiveVersion("foo"));
-        string idFolder = Path.Combine(_root, "foo");
-        Assert.True(File.Exists(Path.Combine(idFolder, VersionedModelPathResolver.ActivePointerFilename)));
-        Assert.False(File.Exists(Path.Combine(idFolder, VersionedModelPathResolver.ActivePointerFilename + ".tmp")));
+        string? previous = ModelInstallContext.CurrentVersionPin;
+        ModelInstallContext.CurrentVersionPin = "2026-04-15";
+        try
+        {
+            Assert.Equal("2026-04-15", resolver.GetActiveVersion("foo"));
+            Assert.Equal(
+                Path.Combine(_root, "foo", "2026-04-15"),
+                resolver.GetModelRoot("foo"));
+        }
+        finally
+        {
+            ModelInstallContext.CurrentVersionPin = previous;
+        }
     }
 
     [Fact]
-    public void VersionedResolver_InvalidateActiveVersionCache_RefreshesNextRead()
+    public void VersionedResolver_LookupUpdatesObservedImmediately()
     {
-        VersionedModelPathResolver resolver = new(_root);
+        // No persistent cache layer — the lookup is the source of truth, so
+        // an updated answer flows through on the next read.
+        StubLookup lookup = new();
+        VersionedModelPathResolver resolver = new(_root, lookup);
 
-        // Read once with no pointer — caches "missing".
         Assert.Null(resolver.GetActiveVersion("foo"));
 
-        // Write the pointer directly to the filesystem (bypassing
-        // SetActiveVersion's cache update) to simulate a sibling resolver
-        // / external installer doing the write.
-        string idFolder = Path.Combine(_root, "foo");
-        Directory.CreateDirectory(idFolder);
-        File.WriteAllText(
-            Path.Combine(idFolder, VersionedModelPathResolver.ActivePointerFilename),
-            "2026-05-29");
-
-        // Cache still says "missing" until invalidation.
-        Assert.Null(resolver.GetActiveVersion("foo"));
-        resolver.InvalidateActiveVersionCache("foo");
+        lookup.Set("foo", "2026-05-29");
         Assert.Equal("2026-05-29", resolver.GetActiveVersion("foo"));
+
+        lookup.Clear("foo");
+        Assert.Null(resolver.GetActiveVersion("foo"));
     }
 
     [Fact]
     public void VersionedResolver_ResolveIdPrefixedPath_SplitsAtFirstSlash()
     {
-        VersionedModelPathResolver resolver = new(_root);
-        resolver.SetActiveVersion("all-minilm-l6-v2", "2026-05-29");
+        StubLookup lookup = new();
+        lookup.Set("all-minilm-l6-v2", "2026-05-29");
+        VersionedModelPathResolver resolver = new(_root, lookup);
 
-        // SQL USING 'all-minilm-l6-v2/model.onnx' must resolve into the
-        // active-version folder — this is the bug fix.
-        string actual = resolver.ResolveIdPrefixedPath("all-minilm-l6-v2/model.onnx");
+        // Internal C# callers (BuiltinModels loaders, ResidencyManager,
+        // CalibrationCoordinator) still use the id-prefixed shorthand and
+        // get the version segment injected for them via the lookup.
         Assert.Equal(
             Path.Combine(_root, "all-minilm-l6-v2", "2026-05-29", "model.onnx"),
-            actual);
+            resolver.ResolveIdPrefixedPath("all-minilm-l6-v2/model.onnx"));
     }
 
     [Fact]
     public void VersionedResolver_ResolveIdPrefixedPath_PreservesFlatFallbackForNonCatalogPaths()
     {
         VersionedModelPathResolver resolver = new(_root);
-        // No active pointer for "my-experiments" — user's own subfolder.
-        // Falls back to <root>/my-experiments/x.onnx, byte-identical to
-        // the pre-substrate behaviour.
+        // No active version for "my-experiments" — user's own subfolder.
+        // Falls back to <root>/my-experiments/x.onnx.
         Assert.Equal(
             Path.Combine(_root, "my-experiments", "x.onnx"),
             resolver.ResolveIdPrefixedPath("my-experiments/x.onnx"));
@@ -125,75 +134,73 @@ public sealed class ModelPathResolverTests : IDisposable
     public void VersionedResolver_ResolveIdPrefixedPath_NoSlashLandsDirectlyUnderRoot()
     {
         VersionedModelPathResolver resolver = new(_root);
-        // Preserves the pre-catalog "bare GGUF filename in $DATUM_MODELS"
-        // layout that a couple of BuiltinModels registrations still use.
         Assert.Equal(
             Path.Combine(_root, "Phi-3-mini-Q4_K_M.gguf"),
             resolver.ResolveIdPrefixedPath("Phi-3-mini-Q4_K_M.gguf"));
     }
 
     [Fact]
-    public void ResolveFilePath_RelativeUsingPath_RoutesThroughActiveVersion()
+    public void ResolveFilePath_RelativeUsingPath_PassesThroughVerbatim()
     {
-        VersionedModelPathResolver resolver = new(_root);
-        resolver.SetActiveVersion("all-minilm-l6-v2", "2026-05-29");
+        // ResolveFilePath no longer injects an implicit version segment.
+        // The SQL author writes the literal version-explicit path; the
+        // resolver hands it back joined with ModelDirectory. Fixes the
+        // segment-doubling bug that bit `inference.onnx_inspect` when
+        // users passed paths that already contained a version segment.
+        StubLookup lookup = new();
+        lookup.Set("all-minilm-l6-v2", "2026-05-29");
+        VersionedModelPathResolver resolver = new(_root, lookup);
         using ModelCatalog catalog = new(_root, vramBudgetBytes: 0, admissionTimeout: null,
             calibrationStore: null, hostFingerprint: null, pathResolver: resolver);
 
+        // Literal versioned path — author wrote 2026-05-29; resolver doesn't
+        // inject it a second time.
         string actual = ModelCatalog.ResolveFilePath(
-            "all-minilm-l6-v2/model.onnx", catalog, "test");
+            "all-minilm-l6-v2/2026-05-29/model.onnx", catalog, "test");
         Assert.Equal(
             Path.GetFullPath(Path.Combine(_root, "all-minilm-l6-v2", "2026-05-29", "model.onnx")),
             actual);
     }
 
     [Fact]
-    public void ResolveFilePath_NoActivePointer_FallsBackToFlatLayout()
+    public void ResolveFilePath_VersionlessPath_AlsoPassesThroughVerbatim()
     {
-        VersionedModelPathResolver resolver = new(_root);
+        // Even when the lookup knows "foo's active is 2026-05-29",
+        // ResolveFilePath does NOT inject it. What the author wrote is what
+        // gets loaded — predictable for `inference.onnx_inspect` callers
+        // and for users debugging USING paths.
+        StubLookup lookup = new();
+        lookup.Set("foo", "2026-05-29");
+        VersionedModelPathResolver resolver = new(_root, lookup);
         using ModelCatalog catalog = new(_root, vramBudgetBytes: 0, admissionTimeout: null,
             calibrationStore: null, hostFingerprint: null, pathResolver: resolver);
 
-        // No <id>/active pointer → the resolver returns the flat path so
-        // freshly-downloaded-but-not-activated installs, user-owned
-        // subfolders, and the E2E test fleet all keep working without
-        // anyone having to plant `active` files in their fixtures.
-        string actual = ModelCatalog.ResolveFilePath(
-            "some-model/model.onnx", catalog, "test");
         Assert.Equal(
-            Path.GetFullPath(Path.Combine(_root, "some-model", "model.onnx")),
-            actual);
+            Path.GetFullPath(Path.Combine(_root, "foo", "model.onnx")),
+            ModelCatalog.ResolveFilePath("foo/model.onnx", catalog, "test"));
     }
 
     [Fact]
     public void ResolveFilePath_FileUriPrefix_BypassesResolverEntirely()
     {
         VersionedModelPathResolver resolver = new(_root);
-        resolver.SetActiveVersion("foo", "2026-05-29");
         using ModelCatalog catalog = new(_root, vramBudgetBytes: 0, admissionTimeout: null,
             calibrationStore: null, hostFingerprint: null, pathResolver: resolver);
 
         string absoluteSomewhereElse = Path.Combine(Path.GetTempPath(), "external", "model.onnx");
-        string actual = ModelCatalog.ResolveFilePath(
-            $"file://{absoluteSomewhereElse}", catalog, "test");
-        Assert.Equal(absoluteSomewhereElse, actual);
+        Assert.Equal(absoluteSomewhereElse,
+            ModelCatalog.ResolveFilePath($"file://{absoluteSomewhereElse}", catalog, "test"));
     }
 
     [Fact]
     public void ResolveFilePath_AbsolutePath_NormalizedWithoutResolver()
     {
         VersionedModelPathResolver resolver = new(_root);
-        resolver.SetActiveVersion("foo", "2026-05-29");
         using ModelCatalog catalog = new(_root, vramBudgetBytes: 0, admissionTimeout: null,
             calibrationStore: null, hostFingerprint: null, pathResolver: resolver);
 
-        // An absolute USING path (e.g. user pointing at a side-loaded weight
-        // file outside DATUM_MODELS) must not have id-prefix splitting
-        // applied to it — the first segment is a drive root or "/", not
-        // a catalog id.
         string absolute = Path.GetFullPath(Path.Combine(_root, "external", "model.onnx"));
-        string actual = ModelCatalog.ResolveFilePath(absolute, catalog, "test");
-        Assert.Equal(absolute, actual);
+        Assert.Equal(absolute, ModelCatalog.ResolveFilePath(absolute, catalog, "test"));
     }
 
     [Fact]
@@ -202,10 +209,22 @@ public sealed class ModelPathResolverTests : IDisposable
         FlatModelPathResolver resolver = new(_root);
         Assert.Null(resolver.GetActiveVersion("foo"));
         Assert.Equal(Path.Combine(_root, "foo"), resolver.GetModelRoot("foo"));
-        // SetActiveVersion + InvalidateActiveVersionCache are no-ops; the
-        // resolver has no version concept and must not throw.
-        resolver.SetActiveVersion("foo", "2026-05-29");
-        resolver.InvalidateActiveVersionCache("foo");
-        Assert.Equal(Path.Combine(_root, "foo"), resolver.GetModelRoot("foo"));
+        Assert.False(resolver.IsVersionOnDisk("foo", "2026-05-29"));
+    }
+
+    /// <summary>
+    /// In-memory <see cref="ICatalogActiveVersionLookup"/> for tests —
+    /// replaces the old filesystem-pointer approach where tests had to
+    /// plant <c>&lt;id&gt;/active</c> text files in their scratch dirs.
+    /// </summary>
+    private sealed class StubLookup : ICatalogActiveVersionLookup
+    {
+        private readonly Dictionary<string, string> _active = new(StringComparer.Ordinal);
+
+        public string? GetActiveVersion(string catalogId)
+            => _active.TryGetValue(catalogId, out string? v) ? v : null;
+
+        public void Set(string catalogId, string version) => _active[catalogId] = version;
+        public void Clear(string catalogId) => _active.Remove(catalogId);
     }
 }

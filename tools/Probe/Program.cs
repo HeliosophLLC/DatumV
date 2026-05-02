@@ -170,7 +170,12 @@ else
 
 if (!opts.NoRehydrate)
 {
-    ModelRehydrationReport rep = await catalog.RehydrateModelsAsync(CancellationToken.None);
+    // Probe doesn't carry an IManifestStore — catalog-installed rows skip
+    // with a warning, which is the right behaviour for a standalone tool
+    // that's poking at a catalog file outside the engine's normal hosting
+    // shell. User-authored CREATE MODEL rows still rehydrate.
+    ModelRehydrationReport rep = await catalog.RehydrateModelsAsync(
+        manifest: null, ct: CancellationToken.None);
     Console.WriteLine($"Rehydrated SQL models: loaded={rep.Loaded} skipped={rep.Skipped}");
     foreach (string w in rep.Warnings) Console.Error.WriteLine($"  warning: {w}");
 }

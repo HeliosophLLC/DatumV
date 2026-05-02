@@ -1831,14 +1831,17 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             .First();
         string source = File.ReadAllText(sqlPath);
 
-        // Substitute the relative USING path with our temp file — the
-        // stub dispatcher returns a fake session regardless of the
-        // actual file contents. The shipped SQL declares both the
-        // Image-returning variant (glpn_nyu) and a metric Array<Float32>
-        // variant; we slice off the second statement so the single-statement
-        // Plan API is happy and only the first model is registered.
-        string sqlSource = source.Replace(
-            "'glpn-nyu/onnx/model.onnx'", $"'{_absoluteUsingPath}'");
+        // Substitute the catalog-versioned relative USING path with our
+        // temp file — the stub dispatcher returns a fake session regardless
+        // of the actual file contents. The shipped SQL declares paths like
+        // 'glpn-nyu/<version>/onnx/model.onnx' (literal version segment per
+        // PR 2). The version segment depends on the latest cut and would
+        // need updating every catalog bump, so swap by Regex against the
+        // shape instead of by literal.
+        string sqlSource = System.Text.RegularExpressions.Regex.Replace(
+            source,
+            @"'glpn-nyu/[^']*/onnx/model\.onnx'",
+            $"'{_absoluteUsingPath}'");
         // The single-statement Plan API needs exactly one statement with no
         // trailing separator. Slice up to and including the first `END`
         // (closing the glpn_nyu body) and drop everything after — the

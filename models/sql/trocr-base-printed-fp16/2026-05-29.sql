@@ -18,7 +18,7 @@
 
 CREATE OR REPLACE MODEL trocr_printed_fp16(img Image) RETURNS String
 IMPLEMENTS TextRecognizer
-USING 'trocr-base-printed-fp16/onnx/encoder_model_fp16.onnx' AS encoder,
+USING 'trocr-base-printed-fp16/2026-05-29/onnx/encoder_model_fp16.onnx' AS encoder,
       'trocr-base-printed-fp16/onnx/decoder_model_merged_fp16.onnx' AS decoder
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(

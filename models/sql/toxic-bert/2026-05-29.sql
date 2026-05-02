@@ -32,7 +32,7 @@ CREATE OR REPLACE MODEL toxic_bert(
     COMMENT 'Per-label sigmoid-probability floor for emitting that label.'
 ) RETURNS Array<ScoredLabel>
 IMPLEMENTS LabeledTextMultiClassifier
-USING 'toxic-bert/onnx/model.onnx'
+USING 'toxic-bert/2026-05-29/onnx/model.onnx'
 AS BEGIN
   -- vocab.txt sits at the catalog root, one directory up from the ONNX file.
   DECLARE encoded Struct = tokenizer.encode_bert(text, '../vocab.txt');

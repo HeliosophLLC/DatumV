@@ -43,7 +43,7 @@
 -- and doesn't affect the task signature.
 CREATE OR REPLACE MODEL silero_vad(clip Audio) RETURNS Array<Float32>
 IMPLEMENTS VoiceActivityDetector
-USING 'silero-vad/onnx/model.onnx'
+USING 'silero-vad/2026-05-29/onnx/model.onnx'
 AS BEGIN
   -- Pipe through audio_to_mono so stereo / multi-channel sources work
   -- transparently — silero is mono-only by design, but most real-world

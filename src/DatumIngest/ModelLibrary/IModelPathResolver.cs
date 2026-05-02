@@ -1,7 +1,5 @@
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 
-using System.Collections.Concurrent;
-
 namespace DatumIngest.ModelLibrary;
 
 /// <summary>
@@ -9,20 +7,27 @@ namespace DatumIngest.ModelLibrary;
 /// Every callsite that previously constructed a path of the form
 /// <c>&lt;DATUM_MODELS&gt;/&lt;catalog-id&gt;/...</c> by hand routes through this
 /// resolver so the catalog substrate's per-version layout
-/// (<c>&lt;id&gt;/&lt;version&gt;/...</c> + <c>&lt;id&gt;/active</c> pointer)
-/// is owned in one place.
+/// (<c>&lt;id&gt;/&lt;version&gt;/...</c>) is owned in one place.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <see cref="VersionedModelPathResolver"/> is the production
 /// implementation: <see cref="GetModelRoot"/> returns
 /// <c>&lt;root&gt;/&lt;id&gt;/&lt;active-version&gt;</c> where the active
-/// version is read from <c>&lt;root&gt;/&lt;id&gt;/active</c> (a one-line
-/// text file). When no <c>active</c> pointer exists yet (download not
-/// started, partial install never activated), the resolver falls back to
-/// <c>&lt;root&gt;/&lt;id&gt;</c> — the same shape today's flat layout
-/// has — so probe / size estimation against a not-yet-installed entry
-/// still resolves to a stable path.
+/// version comes from the wired <see cref="ICatalogActiveVersionLookup"/>
+/// — for the production host that's a query against the live model-registry
+/// rows (a catalog row's <c>CatalogVersion</c> with <c>PinnedAs == null</c>
+/// is the active version). The <c>ModelInstallContext.CurrentVersionPin</c>
+/// AsyncLocal can override the lookup for the duration of an install /
+/// rehydrate, when the catalog row doesn't exist yet or names a different
+/// version than the one being staged.
+/// </para>
+/// <para>
+/// When no active version is known (no install yet, no lookup wired), the
+/// resolver falls back to the version-less folder <c>&lt;root&gt;/&lt;id&gt;</c>
+/// — the same shape the pre-catalog flat layout had — so probe / size
+/// estimation against a not-yet-installed entry still resolves to a
+/// stable path.
 /// </para>
 /// <para>
 /// <see cref="FlatModelPathResolver"/> is the legacy flat-layout
@@ -35,8 +40,8 @@ public interface IModelPathResolver
     /// <summary>
     /// Absolute path to the top-level models directory
     /// (<c>$DATUM_MODELS</c> or the per-user default). Stable for the
-    /// lifetime of the resolver — version-switch flips happen
-    /// <i>below</i> this root.
+    /// lifetime of the resolver — version flips happen <i>below</i>
+    /// this root.
     /// </summary>
     string ModelsRoot { get; }
 
@@ -52,10 +57,11 @@ public interface IModelPathResolver
 
     /// <summary>
     /// Currently active version for <paramref name="modelId"/>, or
-    /// <see langword="null"/> when the <c>&lt;id&gt;/active</c> pointer
-    /// has not been written yet (install never completed, model
-    /// uninstalled, or — for <see cref="FlatModelPathResolver"/> — no
-    /// version concept at all).
+    /// <see langword="null"/> when no bare-form install exists yet. The
+    /// resolver consults <see cref="ModelInstallContext.CurrentVersionPin"/>
+    /// first so installs / rehydrates pin to the version they're staging,
+    /// then the wired <see cref="ICatalogActiveVersionLookup"/>.
+    /// <see cref="FlatModelPathResolver"/> always returns null.
     /// </summary>
     string? GetActiveVersion(string modelId);
 
@@ -72,7 +78,7 @@ public interface IModelPathResolver
     /// Splits the first path segment, treats it as the model id, and
     /// resolves the rest as a model-rooted relative path. Paths with no
     /// separator fall through to <c>Path.Combine(ModelsRoot, path)</c>
-    /// — preserves today's "drop the file straight under the models
+    /// — preserves the "drop the file straight under the models
     /// directory" pattern used by a handful of pre-catalog GGUF
     /// registrations.
     /// </summary>
@@ -81,82 +87,51 @@ public interface IModelPathResolver
     /// <summary>
     /// True when <c>&lt;root&gt;/&lt;modelId&gt;/&lt;version&gt;/</c> exists
     /// on disk. Used by pre-flight (to decide whether a pinned reference
-    /// like <c>models.foo@20260529</c> is downloaded) and by the install
-    /// cross-check's revert path. The flat resolver returns
-    /// <see langword="false"/> for any version argument because it has
-    /// no version concept.
+    /// like <c>models.foo@20260529</c> is downloaded). The flat resolver
+    /// returns <see langword="false"/> for any version argument because
+    /// it has no version concept.
     /// </summary>
     bool IsVersionOnDisk(string modelId, string version);
-
-    /// <summary>
-    /// Sets the active version pointer for <paramref name="modelId"/>.
-    /// Atomic at the filesystem level — the new pointer is written to a
-    /// temporary file in the model's folder and then renamed over the
-    /// existing one. Invalidates any cached active-version reads for
-    /// the same id.
-    /// </summary>
-    void SetActiveVersion(string modelId, string version);
-
-    /// <summary>
-    /// Clears any in-memory cached active-version reads — used after
-    /// the catalog substrate's version-switch uninstall to ensure the
-    /// next path resolution sees the freshly-written <c>active</c>
-    /// file.
-    /// </summary>
-    void InvalidateActiveVersionCache(string? modelId = null);
-
-    /// <summary>
-    /// Deletes the <c>&lt;id&gt;/active</c> pointer file (if present) and
-    /// invalidates the in-memory cache, leaving the entry with no
-    /// active version. Used by per-version delete when the user removes
-    /// the currently-active version's folder — subsequent path
-    /// resolutions fall back to the version-less folder shape until a
-    /// fresh install (or an Activate of a remaining on-disk version)
-    /// writes a new pointer.
-    /// </summary>
-    void ClearActiveVersion(string modelId);
 }
 
 /// <summary>
 /// Production resolver: paths look like
-/// <c>&lt;root&gt;/&lt;id&gt;/&lt;version&gt;/&lt;rest&gt;</c>. Reads the
-/// active version from the <c>&lt;root&gt;/&lt;id&gt;/active</c> text
-/// file once per id, then caches in memory. Cache invalidation runs
-/// through <see cref="InvalidateActiveVersionCache"/> — the only callers
-/// that need to clear it are the version-switch (<c>SetActiveVersion</c>
-/// already invalidates itself) and uninstall paths.
+/// <c>&lt;root&gt;/&lt;id&gt;/&lt;version&gt;/&lt;rest&gt;</c>. The active
+/// version is resolved through <see cref="ICatalogActiveVersionLookup"/>
+/// (typically a query against the live catalog rows in
+/// <see cref="DatumIngest.Catalog.TableCatalog"/>) with an
+/// <see cref="ModelInstallContext.CurrentVersionPin"/> override for
+/// in-flight installs / rehydrates.
 /// </summary>
 internal sealed class VersionedModelPathResolver : IModelPathResolver
 {
-    /// <summary>
-    /// One-line text file living at <c>&lt;root&gt;/&lt;id&gt;/active</c>.
-    /// Holds the version string of the currently-active install.
-    /// Text file rather than symlink for cross-platform portability
-    /// (no Windows symlink permission gnarliness) and to leave room for
-    /// future extensions like lock-files / transition state.
-    /// </summary>
-    public const string ActivePointerFilename = "active";
-
     public string ModelsRoot { get; }
 
-    // Sentinel string distinguishing "we looked, no active pointer
-    // exists" (cached null) from "we haven't looked yet" (absent key).
-    private static readonly string Missing = "\0";
-
-    private readonly ConcurrentDictionary<string, string> _activeCache =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ICatalogActiveVersionLookup _lookup;
 
     public VersionedModelPathResolver(string modelsRoot)
+        : this(modelsRoot, NullCatalogActiveVersionLookup.Instance)
+    {
+    }
+
+    public VersionedModelPathResolver(string modelsRoot, ICatalogActiveVersionLookup lookup)
     {
         // Empty allowed (some test fixtures construct the residency
         // manager without caring about a real models directory); null
         // rejected so a forgotten DI wiring fails loudly.
         ArgumentNullException.ThrowIfNull(modelsRoot);
+        ArgumentNullException.ThrowIfNull(lookup);
         ModelsRoot = modelsRoot;
+        _lookup = lookup;
     }
 
     public VersionedModelPathResolver(ModelLibraryOptions options)
-        : this(options.ModelsDirectory)
+        : this(options.ModelsDirectory, NullCatalogActiveVersionLookup.Instance)
+    {
+    }
+
+    public VersionedModelPathResolver(ModelLibraryOptions options, ICatalogActiveVersionLookup lookup)
+        : this(options.ModelsDirectory, lookup)
     {
     }
 
@@ -171,26 +146,13 @@ internal sealed class VersionedModelPathResolver : IModelPathResolver
     public string? GetActiveVersion(string modelId)
     {
         ArgumentException.ThrowIfNullOrEmpty(modelId);
-        string cached = _activeCache.GetOrAdd(modelId, ReadActivePointer);
-        return ReferenceEquals(cached, Missing) ? null : cached;
-    }
-
-    private string ReadActivePointer(string modelId)
-    {
-        string pointer = Path.Combine(ModelsRoot, modelId, ActivePointerFilename);
-        if (!File.Exists(pointer)) return Missing;
-        try
-        {
-            string text = File.ReadAllText(pointer).Trim();
-            return string.IsNullOrEmpty(text) ? Missing : text;
-        }
-        catch (IOException)
-        {
-            // Pointer present but unreadable — treat as missing so the
-            // resolver falls back to the version-less folder. The
-            // download/install path will rewrite the pointer next time.
-            return Missing;
-        }
+        // CurrentVersionPin wins — set by ModelDownloadService /
+        // CatalogBackedModelInstaller during install and by
+        // TableCatalog.RehydrateModelsAsync during rehydrate so paths
+        // resolve against the version being staged before the catalog
+        // row exists. Outside those flows it's null and the lookup
+        // answers.
+        return ModelInstallContext.CurrentVersionPin ?? _lookup.GetActiveVersion(modelId);
     }
 
     public string ResolveRelative(string modelId, string relativeToModelRoot, string? versionPin = null)
@@ -207,8 +169,8 @@ internal sealed class VersionedModelPathResolver : IModelPathResolver
         if (slash < 0)
         {
             // No leading id segment — drop the file directly under the
-            // models root. Matches today's behaviour for a handful of
-            // pre-catalog GGUF registrations whose modelFilename is bare.
+            // models root. Matches behaviour for a handful of pre-catalog
+            // GGUF registrations whose modelFilename is bare.
             return Path.Combine(ModelsRoot, idPrefixedRelativePath);
         }
         string id = idPrefixedRelativePath[..slash];
@@ -221,48 +183,6 @@ internal sealed class VersionedModelPathResolver : IModelPathResolver
         ArgumentException.ThrowIfNullOrEmpty(modelId);
         ArgumentException.ThrowIfNullOrEmpty(version);
         return Directory.Exists(Path.Combine(ModelsRoot, modelId, version));
-    }
-
-    public void SetActiveVersion(string modelId, string version)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(modelId);
-        ArgumentException.ThrowIfNullOrEmpty(version);
-
-        string idFolder = Path.Combine(ModelsRoot, modelId);
-        Directory.CreateDirectory(idFolder);
-        string pointer = Path.Combine(idFolder, ActivePointerFilename);
-        string tempPointer = pointer + ".tmp";
-
-        File.WriteAllText(tempPointer, version);
-        // File.Move with overwrite is atomic-on-same-volume on every
-        // supported platform; the version-switch's narrow write-lock
-        // window is short enough that a torn write is impossible.
-        File.Move(tempPointer, pointer, overwrite: true);
-
-        _activeCache[modelId] = version;
-    }
-
-    public void InvalidateActiveVersionCache(string? modelId = null)
-    {
-        if (modelId is null)
-        {
-            _activeCache.Clear();
-        }
-        else
-        {
-            _activeCache.TryRemove(modelId, out _);
-        }
-    }
-
-    public void ClearActiveVersion(string modelId)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(modelId);
-        string pointer = Path.Combine(ModelsRoot, modelId, ActivePointerFilename);
-        if (File.Exists(pointer))
-        {
-            File.Delete(pointer);
-        }
-        _activeCache.TryRemove(modelId, out _);
     }
 }
 
@@ -279,9 +199,6 @@ internal sealed class FlatModelPathResolver : IModelPathResolver
 
     public FlatModelPathResolver(string modelsRoot)
     {
-        // Empty allowed (some test fixtures construct the residency
-        // manager without caring about a real models directory); null
-        // rejected so a forgotten DI wiring fails loudly.
         ArgumentNullException.ThrowIfNull(modelsRoot);
         ModelsRoot = modelsRoot;
     }
@@ -320,19 +237,4 @@ internal sealed class FlatModelPathResolver : IModelPathResolver
     }
 
     public bool IsVersionOnDisk(string modelId, string version) => false;
-
-    public void SetActiveVersion(string modelId, string version)
-    {
-        // No-op for the flat resolver — there's no active pointer.
-    }
-
-    public void InvalidateActiveVersionCache(string? modelId = null)
-    {
-        // No-op for the flat resolver — no cache.
-    }
-
-    public void ClearActiveVersion(string modelId)
-    {
-        // No-op for the flat resolver — no active pointer to clear.
-    }
 }

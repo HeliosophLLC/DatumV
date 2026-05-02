@@ -21,7 +21,7 @@ CREATE OR REPLACE MODEL absolute_reality_hyper(
     COMMENT 'Number of Euler denoising steps. Hyper-SD was distilled for 1-4 steps; 1 is fastest, 4 is the recommended minimum for face / detail quality, beyond 4 returns diminishing gains.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
-USING 'absolute-reality-hyper/text_encoder/model.onnx' AS text_encoder,
+USING 'absolute-reality-hyper/2026-05-29/text_encoder/model.onnx' AS text_encoder,
       'absolute-reality-hyper/unet/model.onnx'         AS unet,
       'absolute-reality-hyper/vae_decoder/model.onnx'  AS vae_decoder
 AS BEGIN

@@ -26,7 +26,7 @@
 
 CREATE OR REPLACE MODEL midas_small(img Image) RETURNS Image
 IMPLEMENTS DepthEstimator
-USING 'midas-small/midas_v21_small_256.onnx'
+USING 'midas-small/2026-05-29/midas_v21_small_256.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw_bgr(
     img,

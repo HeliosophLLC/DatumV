@@ -48,7 +48,7 @@ CREATE OR REPLACE MODEL bge_reranker_base(
   passage String
 ) RETURNS Float32
 IMPLEMENTS TextPairScorer
-USING 'bge-reranker-base/onnx/model.onnx'
+USING 'bge-reranker-base/2026-05-29/onnx/model.onnx'
 AS BEGIN
   -- vocab.txt sits at the bundle root (sibling to the onnx/ folder).
   DECLARE encoded Struct = tokenizer.encode_bert_pair(query, passage, '../vocab.txt');

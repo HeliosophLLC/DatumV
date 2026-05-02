@@ -3,6 +3,7 @@ using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.ModelLibrary;
 using DatumIngest.Models;
 using DatumIngest.Parsing.Ast;
 
@@ -184,6 +185,21 @@ internal sealed partial class RoutineRegistrar
             sessionPaths,
             bundleId: $"{qn} (USING '{create.UsingPath}')");
 
+        // Stamp catalog provenance from the install context — set by
+        // CatalogBackedModelInstaller during catalog-driven installs and by
+        // TableCatalog.RehydrateModelsAsync during catalog-row rehydrate.
+        // User-authored CREATE MODEL leaves the context unset, so these
+        // stay null and the persisted row falls back to the source-text
+        // shape on the next Save.
+        string? installCatalogId = ModelInstallContext.CurrentCatalogId;
+        string? installCatalogVersion = installCatalogId is null
+            ? null
+            : ModelInstallContext.CurrentVersionPin;
+        string? installPinnedAs = installCatalogId is not null
+            && ModelInstallContext.CurrentInstallIsPinned
+            ? qn.Name
+            : null;
+
         ModelDescriptor descriptor = new(
             SchemaName: qn.Schema,
             Name: qn.Name,
@@ -196,7 +212,10 @@ internal sealed partial class RoutineRegistrar
             ReturnIsNotNull: create.ReturnIsNotNull,
             SourceText: sourceText ?? $"CREATE MODEL {qn}",
             ImplementsTaskName: create.ImplementsTaskName,
-            UsingFiles: resolvedFiles);
+            UsingFiles: resolvedFiles,
+            CatalogId: installCatalogId,
+            CatalogVersion: installCatalogVersion,
+            PinnedAs: installPinnedAs);
 
         ModelDescriptor? displaced = _catalog.DeclaredModels.Register(
             descriptor, replace: create.OrReplace);

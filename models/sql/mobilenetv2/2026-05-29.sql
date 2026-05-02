@@ -25,7 +25,7 @@
 
 CREATE OR REPLACE MODEL mobilenetv2(img Image) RETURNS ScoredLabel
 IMPLEMENTS LabeledImageClassifier
-USING 'mobilenetv2/mobilenetv2-12.onnx'
+USING 'mobilenetv2/2026-05-29/mobilenetv2-12.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(img, [224, 224], imagenet_mean(), imagenet_std());
   DECLARE logits Float32[] = infer(tensor);

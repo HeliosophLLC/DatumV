@@ -20,7 +20,7 @@
 
 CREATE OR REPLACE MODEL bge_small_en_v1_5(text String) RETURNS Float32[]
 IMPLEMENTS TextEmbedder
-USING 'bge-small-en-v1.5/onnx/model.onnx'
+USING 'bge-small-en-v1.5/2026-05-29/onnx/model.onnx'
 AS BEGIN
   -- vocab.txt sits at the catalog root (`<id>/vocab.txt`), one directory up
   -- from the ONNX file (`<id>/onnx/model.onnx`). Relative paths resolve

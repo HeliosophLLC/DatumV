@@ -45,7 +45,7 @@ CREATE OR REPLACE MODEL yolox_s(
     COMMENT 'NMS IoU overlap threshold.'
 ) RETURNS Array<LabeledDetection>
 IMPLEMENTS LabeledObjectDetector
-USING 'yolox-s/yolox_s.onnx'
+USING 'yolox-s/2026-05-29/yolox_s.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = yolox_preprocess(img, 640);
   -- ONNX input is pinned to [1, 3, 640, 640] in Megvii's default exports

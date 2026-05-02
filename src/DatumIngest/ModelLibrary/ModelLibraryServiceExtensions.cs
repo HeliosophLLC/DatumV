@@ -40,12 +40,18 @@ public static class ModelLibraryServiceExtensions
         services.AddSingleton<IManifestStore, ManifestStore>();
         services.AddSingleton<ILicenseAcceptanceService, LicenseAcceptanceService>();
 
-        // Centralised "where does <id> live on disk?" lookup. The catalog
-        // substrate's per-version layout reads the active version from
-        // <root>/<id>/active and resolves <id>/<active-version>/<rest>;
-        // model installs and uninstalls flip the pointer through the
-        // resolver's SetActiveVersion / InvalidateActiveVersionCache surface.
-        services.AddSingleton<IModelPathResolver, VersionedModelPathResolver>();
+        // Centralised "where does <id> live on disk?" lookup. Resolves
+        // <id>/<active-version>/<rest> by consulting the wired
+        // ICatalogActiveVersionLookup (the live catalog rows) plus the
+        // optional ModelInstallContext.CurrentVersionPin override that
+        // installs / rehydrates set for the duration of their async flow.
+        // Hosts that don't register an ICatalogActiveVersionLookup get
+        // NullCatalogActiveVersionLookup, which always returns null
+        // (paths fall back to the version-less folder shape).
+        services.TryAddSingleton<ICatalogActiveVersionLookup>(NullCatalogActiveVersionLookup.Instance);
+        services.AddSingleton<IModelPathResolver>(sp => new VersionedModelPathResolver(
+            sp.GetRequiredService<ModelLibraryOptions>(),
+            sp.GetRequiredService<ICatalogActiveVersionLookup>()));
 
         // Each source client gets its own typed HttpClient so handler
         // pools, BaseAddress, and default headers stay isolated.

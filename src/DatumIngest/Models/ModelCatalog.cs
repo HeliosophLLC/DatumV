@@ -134,17 +134,15 @@ public sealed class ModelCatalog : IDisposable
     /// <c>inference.onnx_inspect</c>) that takes a model path argument.
     /// </summary>
     /// <param name="path">
-    /// The user-supplied path. A leading <c>file://</c> marks an absolute path
-    /// (anywhere on disk); without that prefix the path is treated as an
-    /// id-prefixed relative path resolved through the catalog's
-    /// <see cref="PathResolver"/> — for catalog-installed entries the leading
-    /// segment names an entry whose <c>active</c> pointer selects the version
-    /// folder, so <c>'all-minilm-l6-v2/model.onnx'</c> resolves to
-    /// <c>&lt;root&gt;/all-minilm-l6-v2/&lt;active-version&gt;/model.onnx</c>.
-    /// Paths whose leading segment has no <c>active</c> pointer (user-owned
-    /// subfolders, freshly-downloaded entries that haven't activated yet,
-    /// test fixtures) fall back to <c>&lt;root&gt;/&lt;leading&gt;/&lt;rest&gt;</c>
-    /// — the flat layout the engine used before the catalog substrate.
+    /// The user-supplied path. A leading <c>file://</c> marks an absolute
+    /// path (anywhere on disk); a rooted absolute path is returned
+    /// canonicalised; otherwise the path is treated as relative to the
+    /// host's <see cref="ModelDirectory"/> and returned verbatim — what
+    /// you see in the SQL is what gets loaded. Authors of catalog
+    /// <c>installSql</c> files write the version segment explicitly
+    /// (e.g. <c>'sd-turbo/2026-05-29/text_encoder/model.onnx'</c>) and
+    /// ad-hoc <c>inference.onnx_inspect</c> calls do the same. No
+    /// implicit version-segment injection happens at this layer.
     /// </param>
     /// <param name="models">
     /// The host's model catalog, or <see langword="null"/> when none is wired.
@@ -162,6 +160,11 @@ public sealed class ModelCatalog : IDisposable
             return path["file://".Length..];
         }
 
+        if (Path.IsPathRooted(path))
+        {
+            return Path.GetFullPath(path);
+        }
+
         if (models is null)
         {
             throw new InvalidOperationException(
@@ -170,24 +173,14 @@ public sealed class ModelCatalog : IDisposable
                 "TableCatalog.Models before invoking.");
         }
 
-        // Route through the path resolver so SQL `USING` clauses inherit the
-        // catalog substrate's active-version indirection without the SQL
-        // itself naming a version. Rooted absolute paths short-circuit early
-        // and don't get the id-prefix treatment.
-        if (Path.IsPathRooted(path))
-        {
-            return Path.GetFullPath(path);
-        }
-        // If an install is currently running on this async flow,
-        // `ModelInstallContext.CurrentVersionPin` names the version the
-        // resolver should pin USING paths to — bypasses `<id>/active`
-        // (which doesn't flip until the install fully succeeds, so
-        // mid-install resolution would otherwise pick up the prior
-        // version's bytes or fall back to the flat layout). When no
-        // install is in flight (the common case), the value is null
-        // and the resolver reverts to active-pointer indirection.
-        string? versionPin = ModelInstallContext.CurrentVersionPin;
-        return Path.GetFullPath(models.PathResolver.ResolveIdPrefixedPath(path, versionPin));
+        // Verbatim join under ModelDirectory — no implicit version-segment
+        // injection. Catalog SQL files declare literal versioned paths
+        // (e.g. 'sd-turbo/2026-05-29/text_encoder/model.onnx'), so the
+        // path written by the author is the path on disk. Fixes the
+        // segment-doubling bug where ad-hoc inference.onnx_inspect calls
+        // with an already-versioned path would get the active version
+        // injected a second time.
+        return Path.GetFullPath(Path.Combine(models.ModelDirectory, path));
     }
 
     /// <summary>
@@ -248,10 +241,13 @@ public sealed class ModelCatalog : IDisposable
         TimeSpan? admissionTimeout,
         CalibrationStore? calibrationStore,
         HostFingerprint? hostFingerprint,
-        IModelPathResolver? pathResolver = null)
+        IModelPathResolver? pathResolver = null,
+        DatumIngest.ModelLibrary.ICatalogActiveVersionLookup? activeVersionLookup = null)
     {
         ModelDirectory = modelDirectory ?? DefaultModelDirectory;
-        PathResolver = pathResolver ?? new VersionedModelPathResolver(ModelDirectory);
+        PathResolver = pathResolver ?? new VersionedModelPathResolver(
+            ModelDirectory,
+            activeVersionLookup ?? DatumIngest.ModelLibrary.NullCatalogActiveVersionLookup.Instance);
         ResidencyManager = new ModelResidencyManager(vramBudgetBytes, admissionTimeout, CalibrationRegistry);
         ResidencyManager.Catalog = this;
         _calibrationStore = calibrationStore;

@@ -104,12 +104,20 @@ public static class BuiltinModels
                 + "Calibration will work in-memory but won't survive restarts.");
         }
 
+        // Thread the TableCatalog through as the active-version lookup so
+        // the resolver consults the live model rows instead of any
+        // <id>/active filesystem pointer. Wires the lookup eagerly here
+        // because BuiltinModels constructs its own ModelCatalog (and
+        // therefore its own VersionedModelPathResolver) outside the DI
+        // graph — the resolver registered in AddModelLibrary is not the
+        // one ModelCatalog will use.
         ModelCatalog modelCatalog = new(
             modelDirectory,
             resolvedBudget,
             admissionTimeout: null,
             calibrationStore: calibrationStore,
-            hostFingerprint: fingerprint);
+            hostFingerprint: fingerprint,
+            activeVersionLookup: tableCatalog);
 
         // Vision models
         // PP-OCR-det, MobileNetV2, and YOLOX-{nano,tiny,s,m,l,x,darknet}

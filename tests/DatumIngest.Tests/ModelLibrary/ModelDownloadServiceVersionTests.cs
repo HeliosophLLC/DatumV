@@ -9,9 +9,10 @@ namespace DatumIngest.Tests.ModelLibrary;
 /// Pins the per-version Activate + Delete contract surfaced through the
 /// model card's "Previous versions" disclosure. Activate runs a
 /// version-switch (drop outgoing bare identifiers, re-register outgoing
-/// in pinned form, install incoming bare, flip pointer); Delete removes
-/// one version folder plus the identifiers it registered, with active-
-/// version delete also clearing the <c>&lt;id&gt;/active</c> pointer.
+/// in pinned form, install incoming bare); Delete removes one version
+/// folder plus the identifiers it registered. The bare-form catalog
+/// row produced by the incoming install is itself the active-version
+/// signal — no filesystem pointer to flip.
 /// </summary>
 public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
 {
@@ -38,13 +39,14 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
         const string OldVersion = "2026-04-15";
         const string NewVersion = "2026-05-29";
 
-        VersionedModelPathResolver paths = new(_root);
+        StubLookup lookup = new();
+        lookup.Set(ModelId, OldVersion);
+        VersionedModelPathResolver paths = new(_root, lookup);
         // Both version folders must exist on disk for the activate path
         // to engage — IsVersionOnDisk gates the target check, and the
         // outgoing pinned re-register also requires its folder.
         Directory.CreateDirectory(Path.Combine(_root, ModelId, OldVersion));
         Directory.CreateDirectory(Path.Combine(_root, ModelId, NewVersion));
-        paths.SetActiveVersion(ModelId, OldVersion);
 
         CatalogManifest manifest = BuildTwoVersionManifest(
             ModelId,
@@ -70,15 +72,14 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
 
         // Two installer calls happened: outgoing pinned re-register first
         // (registers foo@20260415 + foo_meters@20260415), then incoming
-        // bare install (registers foo, foo_pose).
+        // bare install (registers foo, foo_pose). The incoming bare-mode
+        // install is what makes NewVersion the new active — its CatalogVersion
+        // becomes the lookup's answer for ModelId.
         Assert.Equal(2, installer.Calls.Count);
         Assert.True(installer.Calls[0].PinnedMode);
         Assert.Equal(OldVersion, installer.Calls[0].Version);
         Assert.False(installer.Calls[1].PinnedMode);
         Assert.Equal(NewVersion, installer.Calls[1].Version);
-
-        // Active pointer flipped last.
-        Assert.Equal(NewVersion, paths.GetActiveVersion(ModelId));
     }
 
     [Fact]
@@ -87,9 +88,10 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
         const string ModelId = "switcher";
         const string Version = "2026-05-29";
 
-        VersionedModelPathResolver paths = new(_root);
+        StubLookup lookup = new();
+        lookup.Set(ModelId, Version);
+        VersionedModelPathResolver paths = new(_root, lookup);
         Directory.CreateDirectory(Path.Combine(_root, ModelId, Version));
-        paths.SetActiveVersion(ModelId, Version);
 
         CatalogManifest manifest = BuildTwoVersionManifest(
             ModelId,
@@ -109,7 +111,6 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
 
         Assert.Empty(installer.Calls);
         Assert.Empty(installer.DroppedIdentifiers);
-        Assert.Equal(Version, paths.GetActiveVersion(ModelId));
     }
 
     [Fact]
@@ -144,10 +145,11 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
         const string ActiveVersion = "2026-05-29";
         const string OldVersion = "2026-04-15";
 
-        VersionedModelPathResolver paths = new(_root);
+        StubLookup lookup = new();
+        lookup.Set(ModelId, ActiveVersion);
+        VersionedModelPathResolver paths = new(_root, lookup);
         Directory.CreateDirectory(Path.Combine(_root, ModelId, ActiveVersion));
         Directory.CreateDirectory(Path.Combine(_root, ModelId, OldVersion));
-        paths.SetActiveVersion(ModelId, ActiveVersion);
 
         CatalogManifest manifest = BuildTwoVersionManifest(
             ModelId,
@@ -167,9 +169,10 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
 
         // Pinned-form identifiers dropped (suffix derived from OldVersion's digits).
         Assert.Equal(new[] { "foo@20260415", "foo_meters@20260415" }, installer.DroppedIdentifiers);
-        // Version folder gone, active pointer untouched.
+        // Version folder gone; the active version (bare-form catalog row)
+        // is the installer's concern and stays intact because nothing was
+        // dropped for ActiveVersion.
         Assert.False(Directory.Exists(Path.Combine(_root, ModelId, OldVersion)));
-        Assert.Equal(ActiveVersion, paths.GetActiveVersion(ModelId));
     }
 
     [Fact]
@@ -178,9 +181,10 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
         const string ModelId = "deleter";
         const string ActiveVersion = "2026-05-29";
 
-        VersionedModelPathResolver paths = new(_root);
+        StubLookup lookup = new();
+        lookup.Set(ModelId, ActiveVersion);
+        VersionedModelPathResolver paths = new(_root, lookup);
         Directory.CreateDirectory(Path.Combine(_root, ModelId, ActiveVersion));
-        paths.SetActiveVersion(ModelId, ActiveVersion);
 
         CatalogManifest manifest = BuildTwoVersionManifest(
             ModelId,
@@ -199,10 +203,11 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
         await service.DeleteVersionAsync(ModelId, ActiveVersion, CancellationToken.None);
 
         // Bare identifiers dropped (no @-suffix because this was active).
+        // Dropping the bare-form catalog rows removes the active-version
+        // signal — the lookup will now answer null for ModelId on next
+        // read (the installer's DROP MODEL chain produced that side-effect).
         Assert.Equal(new[] { "foo", "foo_pose" }, installer.DroppedIdentifiers);
-        // Folder gone, active pointer cleared.
         Assert.False(Directory.Exists(Path.Combine(_root, ModelId, ActiveVersion)));
-        Assert.Null(paths.GetActiveVersion(ModelId));
     }
 
     [Fact]
@@ -351,6 +356,21 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
             => Task.CompletedTask;
         public Task<IReadOnlyList<string>> GetAcceptedAsync(CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<string>>([]);
+    }
+
+    /// <summary>
+    /// In-memory <see cref="ICatalogActiveVersionLookup"/> stub. Tests
+    /// pre-seed it with the desired pre-state ("for this catalog id,
+    /// version X is active") and read back through the resolver.
+    /// </summary>
+    private sealed class StubLookup : ICatalogActiveVersionLookup
+    {
+        private readonly Dictionary<string, string> _active = new(StringComparer.Ordinal);
+
+        public string? GetActiveVersion(string catalogId)
+            => _active.TryGetValue(catalogId, out string? v) ? v : null;
+
+        public void Set(string catalogId, string version) => _active[catalogId] = version;
     }
 
     private sealed class NullPythonEnvironmentManager : IPythonEnvironmentManager

@@ -28,7 +28,7 @@
 
 CREATE OR REPLACE MODEL twitter_roberta_sentiment(text String) RETURNS ScoredLabel
 IMPLEMENTS LabeledTextClassifier
-USING 'twitter-roberta-sentiment/onnx/model.onnx'
+USING 'twitter-roberta-sentiment/2026-05-29/onnx/model.onnx'
 AS BEGIN
   -- tokenizer.json sits at the catalog root one directory up from
   -- the ONNX (which lives in `onnx/`), so the relative path is `../tokenizer.json`.

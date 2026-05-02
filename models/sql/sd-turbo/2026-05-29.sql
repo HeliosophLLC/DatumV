@@ -33,7 +33,7 @@ CREATE OR REPLACE MODEL sd_turbo(
     COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. The underlying SD 2.1 UNet supports 64-aligned alternates (576, 640, 768, ...) with roughly quadratic VRAM cost and quality drift away from the 512 sweet spot.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
-USING 'sd-turbo/text_encoder/model.onnx' AS text_encoder,
+USING 'sd-turbo/2026-05-29/text_encoder/model.onnx' AS text_encoder,
       'sd-turbo/unet/model.onnx'         AS unet,
       'sd-turbo/vae_decoder/model.onnx'  AS vae_decoder
 AS BEGIN

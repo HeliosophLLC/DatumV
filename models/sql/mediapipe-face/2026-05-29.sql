@@ -45,7 +45,7 @@ CREATE OR REPLACE MODEL mediapipe_face(
     COMMENT 'IoU overlap threshold for class-less NMS. Lower = stricter dedup (drops overlapping faces); higher = retains overlapping detections.'
 ) RETURNS Array<FaceDetection>
 IMPLEMENTS FaceDetector
-USING 'mediapipe-face/float/face_detector.onnx'
+USING 'mediapipe-face/2026-05-29/float/face_detector.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,

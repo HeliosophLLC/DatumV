@@ -45,7 +45,7 @@ CREATE OR REPLACE MODEL florence2_caption(
     COMMENT 'Florence-2 task instruction. Default targets a single-sentence COCO-style caption; pass alternate task tokens like ''<DETAILED_CAPTION>'', ''<OD>'', ''<CAPTION_TO_PHRASE_GROUNDING>'', or any natural-language instruction Florence-2 was fine-tuned on to switch behavior without picking a different model variant.'
 ) RETURNS String
 IMPLEMENTS ImageCaptioner
-USING 'florence-2-base-ft-fp16/vision_encoder_fp16.onnx' AS vision_encoder,
+USING 'florence-2-base-ft-fp16/2026-05-29/vision_encoder_fp16.onnx' AS vision_encoder,
       'florence-2-base-ft-fp16/embed_tokens_fp16.onnx'   AS embed_tokens,
       'florence-2-base-ft-fp16/encoder_model_fp16.onnx'  AS encoder,
       'florence-2-base-ft-fp16/decoder_model_fp16.onnx'  AS decoder
@@ -114,7 +114,7 @@ CREATE OR REPLACE MODEL florence2_detailed_caption(
     COMMENT 'Florence-2 task instruction. Default targets a multi-sentence detailed caption (max 150 tokens); override to repurpose this variant''s token budget for other task tokens.'
 ) RETURNS String
 IMPLEMENTS ImageCaptioner
-USING 'florence-2-base-ft-fp16/vision_encoder_fp16.onnx' AS vision_encoder,
+USING 'florence-2-base-ft-fp16/2026-05-29/vision_encoder_fp16.onnx' AS vision_encoder,
       'florence-2-base-ft-fp16/embed_tokens_fp16.onnx'   AS embed_tokens,
       'florence-2-base-ft-fp16/encoder_model_fp16.onnx'  AS encoder,
       'florence-2-base-ft-fp16/decoder_model_fp16.onnx'  AS decoder
@@ -169,7 +169,7 @@ CREATE OR REPLACE MODEL florence2_more_detailed_caption(
     COMMENT 'Florence-2 task instruction. Default targets a multi-sentence paragraph caption (max 300 tokens); override to access alternate task tokens with the same large token budget.'
 ) RETURNS String
 IMPLEMENTS ImageCaptioner
-USING 'florence-2-base-ft-fp16/vision_encoder_fp16.onnx' AS vision_encoder,
+USING 'florence-2-base-ft-fp16/2026-05-29/vision_encoder_fp16.onnx' AS vision_encoder,
       'florence-2-base-ft-fp16/embed_tokens_fp16.onnx'   AS embed_tokens,
       'florence-2-base-ft-fp16/encoder_model_fp16.onnx'  AS encoder,
       'florence-2-base-ft-fp16/decoder_model_fp16.onnx'  AS decoder
@@ -226,7 +226,7 @@ CREATE OR REPLACE MODEL florence2_ocr_with_region(
     COMMENT 'Florence-2 task instruction. Default targets OCR with <loc_*> region tokens (max 500 tokens); override to access alternate long-output task tokens like ''<OD>'' or ''<DENSE_REGION_CAPTION>'' with the same generous token budget.'
 ) RETURNS String
 IMPLEMENTS TextRecognizer
-USING 'florence-2-base-ft-fp16/vision_encoder_fp16.onnx' AS vision_encoder,
+USING 'florence-2-base-ft-fp16/2026-05-29/vision_encoder_fp16.onnx' AS vision_encoder,
       'florence-2-base-ft-fp16/embed_tokens_fp16.onnx'   AS embed_tokens,
       'florence-2-base-ft-fp16/encoder_model_fp16.onnx'  AS encoder,
       'florence-2-base-ft-fp16/decoder_model_fp16.onnx'  AS decoder

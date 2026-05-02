@@ -22,7 +22,7 @@
 
 CREATE OR REPLACE MODEL depth_anything_v2_base(img Image) RETURNS Image
 IMPLEMENTS DepthEstimator
-USING 'depth-anything-v2-base/onnx/model.onnx'
+USING 'depth-anything-v2-base/2026-05-29/onnx/model.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,

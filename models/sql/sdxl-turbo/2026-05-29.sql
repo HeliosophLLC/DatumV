@@ -28,7 +28,7 @@ CREATE OR REPLACE MODEL sdxl_turbo(
     COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. 768 and 1024 work since the underlying UNet is full SDXL, but VRAM grows roughly with size² and quality drifts away from the 512 distillation point. Other multiples of 8 are accepted but untested.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
-USING 'sdxl-turbo/text_encoder/model.onnx'   AS text_encoder_1,
+USING 'sdxl-turbo/2026-05-29/text_encoder/model.onnx'   AS text_encoder_1,
       'sdxl-turbo/text_encoder_2/model.onnx' AS text_encoder_2,
       'sdxl-turbo/unet/model.onnx'           AS unet,
       'sdxl-turbo/vae_decoder/model.onnx'    AS vae_decoder

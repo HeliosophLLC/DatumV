@@ -82,6 +82,12 @@ public static class WebHostExtensions
                 return catalog;
             });
 
+            // TableCatalog implements ICatalogActiveVersionLookup directly —
+            // its DeclaredModels rows carry the catalog provenance the
+            // lookup needs. Replace the null default from AddModelLibrary.
+            services.AddSingleton<ICatalogActiveVersionLookup>(
+                sp => sp.GetRequiredService<TableCatalog>());
+
             services.AddHostedService<CatalogInitializationService>();
 
             // Language-intelligence host. Singleton because it owns one

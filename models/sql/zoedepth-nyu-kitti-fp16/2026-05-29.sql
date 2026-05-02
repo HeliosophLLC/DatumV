@@ -27,7 +27,7 @@
 
 CREATE OR REPLACE MODEL zoedepth_nyu_kitti_fp16(img Image) RETURNS Image
 IMPLEMENTS DepthEstimator
-USING 'zoedepth-nyu-kitti-fp16/model_fp16.onnx'
+USING 'zoedepth-nyu-kitti-fp16/2026-05-29/model_fp16.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,
@@ -55,7 +55,7 @@ END;
 CREATE OR REPLACE MODEL zoedepth_nyu_kitti_fp16_meters(img Image)
   RETURNS Array<Float32>
 IMPLEMENTS DepthEstimatorMetric
-USING 'zoedepth-nyu-kitti-fp16/model_fp16.onnx'
+USING 'zoedepth-nyu-kitti-fp16/2026-05-29/model_fp16.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,

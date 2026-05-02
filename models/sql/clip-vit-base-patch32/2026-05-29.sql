@@ -31,7 +31,7 @@
 
 CREATE OR REPLACE MODEL clip_image_embed(img Image) RETURNS Float32[]
 IMPLEMENTS ImageEmbedder
-USING 'clip-vit-base-patch32/onnx/vision_model.onnx'
+USING 'clip-vit-base-patch32/2026-05-29/onnx/vision_model.onnx'
 AS BEGIN
   -- CLIP-specific normalisation stats — distinct from ImageNet's. The
   -- mean is [0.48145466, 0.4578275, 0.40821073], std is
@@ -56,7 +56,7 @@ END;
 
 CREATE OR REPLACE MODEL clip_text_embed(text String) RETURNS Float32[]
 IMPLEMENTS TextEmbedder
-USING 'clip-vit-base-patch32/onnx/text_model.onnx'
+USING 'clip-vit-base-patch32/2026-05-29/onnx/text_model.onnx'
 AS BEGIN
   -- CLIP uses byte-level BPE (same family as GPT-2 / RoBERTa), but
   -- prepends <|startoftext|> (id 49406) and appends <|endoftext|>

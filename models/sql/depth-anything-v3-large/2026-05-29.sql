@@ -64,7 +64,7 @@
 
 CREATE OR REPLACE MODEL depth_anything_v3_large(img Image) RETURNS Image
 IMPLEMENTS DepthEstimator
-USING 'depth-anything-v3-large/onnx/model.onnx'
+USING 'depth-anything-v3-large/2026-05-29/onnx/model.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,
@@ -88,7 +88,7 @@ END;
 CREATE OR REPLACE MODEL depth_anything_v3_large_meters(img Image)
   RETURNS Array<Float32>
 IMPLEMENTS DepthEstimatorMetric
-USING 'depth-anything-v3-large/onnx/model.onnx'
+USING 'depth-anything-v3-large/2026-05-29/onnx/model.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,
@@ -145,7 +145,7 @@ CREATE OR REPLACE MODEL depth_anything_v3_large_full(img Image)
     extrinsics Array<Float32>(1, 1, 3, 4),
     intrinsics Array<Float32>(1, 1, 3, 3)
   >
-USING 'depth-anything-v3-large/onnx/model.onnx'
+USING 'depth-anything-v3-large/2026-05-29/onnx/model.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,

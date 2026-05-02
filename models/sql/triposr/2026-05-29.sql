@@ -80,7 +80,7 @@ CREATE OR REPLACE MODEL triposr(
     COMMENT 'Fraction of the 512×512 input that the subject should occupy after centring (the rest is transparent margin filled by mid-gray). 0.85 is TripoSR''s reference; lower (0.7–0.8) leaves more breathing room and helps when the subject has extremities (legs, antennas, etc.) that would otherwise hit the edge.'
 ) RETURNS Mesh
 IMPLEMENTS MeshFromImage
-USING 'triposr/triplane.onnx' AS triplane,
+USING 'triposr/2026-05-29/triplane.onnx' AS triplane,
       'triposr/nerf.onnx'     AS nerf
 AS BEGIN
   -- Centre the subject in a canonical-margin square. Without this, photos

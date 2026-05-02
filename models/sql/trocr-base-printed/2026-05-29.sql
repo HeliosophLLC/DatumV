@@ -32,7 +32,7 @@
 
 CREATE OR REPLACE MODEL trocr_printed(img Image) RETURNS String
 IMPLEMENTS TextRecognizer
-USING 'trocr-base-printed/onnx/encoder_model.onnx' AS encoder,
+USING 'trocr-base-printed/2026-05-29/onnx/encoder_model.onnx' AS encoder,
       'trocr-base-printed/onnx/decoder_model_merged.onnx' AS decoder
 AS BEGIN
   -- Step 1: TrOCR uses ViT mean/std (NOT ImageNet).

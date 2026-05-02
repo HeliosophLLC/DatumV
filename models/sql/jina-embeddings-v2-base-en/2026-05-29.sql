@@ -18,7 +18,7 @@
 
 CREATE OR REPLACE MODEL jina_embeddings_v2_base_en(text String) RETURNS Float32[]
 IMPLEMENTS TextEmbedder
-USING 'jina-embeddings-v2-base-en/model.onnx'
+USING 'jina-embeddings-v2-base-en/2026-05-29/model.onnx'
 AS BEGIN
   -- Jina ships ONNX + vocab.txt at the repo root (no `onnx/` subdir like
   -- BGE), so the tokenizer file resolves directly relative to the model.

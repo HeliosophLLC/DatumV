@@ -2,11 +2,8 @@ using DatumIngest.Catalog;
 using DatumIngest.ModelLibrary;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
-using DatumIngest.Parsing.Tokens;
 
 using Microsoft.Extensions.Logging;
-
-using Superpower.Model;
 
 namespace DatumIngest.Web.ModelLibrary;
 
@@ -80,7 +77,7 @@ internal sealed class CatalogBackedModelInstaller : IModelInstaller
         string sql = await File.ReadAllTextAsync(sqlPath, ct).ConfigureAwait(false);
         if (pinnedMode)
         {
-            sql = RewriteIdentifiersForPinnedInstall(sql, version);
+            sql = PinnedInstallSqlRewriter.Rewrite(sql, version);
         }
 
         // ParseBatchWithText returns each top-level statement with its
@@ -94,22 +91,38 @@ internal sealed class CatalogBackedModelInstaller : IModelInstaller
                 $"Install SQL for model '{model.Id}' parsed to zero statements.");
         }
 
-        // Apply each statement in order. DDL applies as a side effect inside
-        // ExecuteStatementAsync (Routines.ApplyCreateModelAsync runs there),
-        // so we don't need to also iterate the returned plan for CREATE MODEL.
-        // Throw early on the first failure — partial install would leave the
-        // catalog in an inconsistent state.
-        List<string> observed = [];
-        foreach ((Statement statement, string sourceText) in statements)
+        // Push catalog provenance onto the install context so each registered
+        // ModelDescriptor knows which catalog entry / version it came from
+        // — stamped into the persisted catalog row so rehydrate can resolve
+        // the originating installSql without re-saving the verbatim source.
+        string? previousCatalogId = ModelInstallContext.CurrentCatalogId;
+        bool previousIsPinned = ModelInstallContext.CurrentInstallIsPinned;
+        ModelInstallContext.CurrentCatalogId = model.Id;
+        ModelInstallContext.CurrentInstallIsPinned = pinnedMode;
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            await _catalog.ExecuteStatementAsync(statement, sourceText).ConfigureAwait(false);
-            if (statement is CreateModelStatement create)
+            // Apply each statement in order. DDL applies as a side effect inside
+            // ExecuteStatementAsync (Routines.ApplyCreateModelAsync runs there),
+            // so we don't need to also iterate the returned plan for CREATE MODEL.
+            // Throw early on the first failure — partial install would leave the
+            // catalog in an inconsistent state.
+            List<string> observed = [];
+            foreach ((Statement statement, string sourceText) in statements)
             {
-                observed.Add(create.Name);
+                ct.ThrowIfCancellationRequested();
+                await _catalog.ExecuteStatementAsync(statement, sourceText).ConfigureAwait(false);
+                if (statement is CreateModelStatement create)
+                {
+                    observed.Add(create.Name);
+                }
             }
+            return observed;
         }
-        return observed;
+        finally
+        {
+            ModelInstallContext.CurrentInstallIsPinned = previousIsPinned;
+            ModelInstallContext.CurrentCatalogId = previousCatalogId;
+        }
     }
 
     public async ValueTask DropModelsAsync(IReadOnlyList<string> identifiers, CancellationToken ct)
@@ -147,94 +160,4 @@ internal sealed class CatalogBackedModelInstaller : IModelInstaller
     // (clearly broken; fix the SQL).
     private static string ToConventionalModelName(string id) =>
         id.Replace('-', '_').Replace('.', '_');
-
-    // Source-level rewrite for pinned installs. Walks tokens until a
-    // `CREATE [OR REPLACE] MODEL <Identifier>` sequence appears, then
-    // substitutes the identifier with its <see cref="CatalogVersionModel.PinnedAs"/>
-    // form. Only the identifier source range is touched — comments and
-    // every other identifier mention pass through untouched. USING-path
-    // resolution to the pinned version's folder is handled separately by
-    // `ModelInstallContext.CurrentVersionPin` (set by the download service
-    // for the duration of the install), so we don't rewrite USING strings
-    // here.
-    private static string RewriteIdentifiersForPinnedInstall(string sql, CatalogVersion version)
-    {
-        if (version.Models is null || version.Models.Count == 0) { return sql; }
-
-        Dictionary<string, string> pinMap = new(StringComparer.OrdinalIgnoreCase);
-        foreach (CatalogVersionModel vm in version.Models)
-        {
-            string pinnedAs = vm.EffectivePinnedAs(version.Version);
-            if (!string.Equals(pinnedAs, vm.Identifier, StringComparison.Ordinal))
-            {
-                pinMap[vm.Identifier] = pinnedAs;
-            }
-        }
-        if (pinMap.Count == 0) { return sql; }
-
-        TokenList<SqlToken> tokens;
-        try
-        {
-            tokens = SqlTokenizer.Instance.Tokenize(sql);
-        }
-        catch (Superpower.ParseException)
-        {
-            // Tokeniser refused: let the downstream ParseBatchWithText
-            // surface the diagnostic against the original source, since
-            // any rewriting we do here would be against a malformed
-            // baseline anyway.
-            return sql;
-        }
-
-        // Collect (start, length, replacement) substitutions to apply in
-        // reverse order. Walking sequentially keeps offset arithmetic
-        // simple — reverse application means earlier offsets stay valid.
-        List<(int Start, int Length, string Replacement)> subs = [];
-        Token<SqlToken>[] arr = tokens.ToArray();
-        for (int i = 0; i < arr.Length; i++)
-        {
-            if (arr[i].Kind != SqlToken.Create) { continue; }
-            int j = i + 1;
-            // Skip optional OR REPLACE.
-            if (j + 1 < arr.Length
-                && arr[j].Kind == SqlToken.Or
-                && arr[j + 1].Kind == SqlToken.Replace)
-            {
-                j += 2;
-            }
-            // Soft `MODEL` keyword tokenises as an Identifier with text "MODEL".
-            if (j >= arr.Length
-                || arr[j].Kind != SqlToken.Identifier
-                || !arr[j].ToStringValue().Equals("MODEL", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            int identIndex = j + 1;
-            if (identIndex >= arr.Length || arr[identIndex].Kind != SqlToken.Identifier)
-            {
-                continue;
-            }
-            Token<SqlToken> identTok = arr[identIndex];
-            string identText = identTok.ToStringValue();
-            if (!pinMap.TryGetValue(identText, out string? pinnedAs))
-            {
-                continue;
-            }
-            subs.Add((
-                Start: identTok.Span.Position.Absolute,
-                Length: identTok.Span.Length,
-                Replacement: pinnedAs));
-        }
-
-        if (subs.Count == 0) { return sql; }
-
-        subs.Sort(static (a, b) => b.Start.CompareTo(a.Start));
-        System.Text.StringBuilder builder = new(sql);
-        foreach ((int start, int length, string replacement) in subs)
-        {
-            builder.Remove(start, length);
-            builder.Insert(start, replacement);
-        }
-        return builder.ToString();
-    }
 }

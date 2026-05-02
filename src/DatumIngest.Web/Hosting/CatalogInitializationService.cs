@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.ModelLibrary;
 using DatumIngest.Web.Migrations;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -19,12 +20,17 @@ namespace DatumIngest.Web.Hosting;
 internal sealed class CatalogInitializationService : IHostedService
 {
     private readonly TableCatalog _catalog;
+    private readonly IManifestStore _manifest;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<CatalogInitializationService> _logger;
 
-    public CatalogInitializationService(TableCatalog catalog, ILoggerFactory loggerFactory)
+    public CatalogInitializationService(
+        TableCatalog catalog,
+        IManifestStore manifest,
+        ILoggerFactory loggerFactory)
     {
         _catalog = catalog;
+        _manifest = manifest;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<CatalogInitializationService>();
     }
@@ -39,9 +45,12 @@ internal sealed class CatalogInitializationService : IHostedService
         // and models directory were both wired in the TableCatalog factory
         // (see WebHostExtensions.AddDatumIngestWeb), so by the time this
         // hosted service runs everything ApplyCreateModelAsync needs is
-        // in place. Per-entry failures are tolerated; the report's
-        // warnings make them visible.
-        ModelRehydrationReport report = await _catalog.RehydrateModelsAsync(cancellationToken)
+        // in place. The manifest store lets catalog-installed rows resolve
+        // their originating installSql by (catalog_id, version) rather
+        // than replaying a stale persisted source-text snapshot. Per-entry
+        // failures are tolerated; the report's warnings make them visible.
+        ModelRehydrationReport report = await _catalog
+            .RehydrateModelsAsync(_manifest, cancellationToken)
             .ConfigureAwait(false);
         if (report.Loaded > 0 || report.Skipped > 0)
         {

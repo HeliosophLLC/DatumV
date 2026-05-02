@@ -29,7 +29,7 @@
 
 CREATE OR REPLACE MODEL swinir_denoising_color_25(img Image) RETURNS Image
 IMPLEMENTS ImageRestorer
-USING 'swinir-denoising-color-25/swinir_denoising_color_25.onnx'
+USING 'swinir-denoising-color-25/2026-05-29/swinir_denoising_color_25.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,

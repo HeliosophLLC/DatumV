@@ -90,6 +90,32 @@ namespace DatumIngest.Catalog.Registries;
 /// single-session bundles) <see cref="BoundSessions"/> has one entry
 /// keyed <c>"default"</c> loaded from <see cref="UsingPath"/>.
 /// </param>
+/// <param name="CatalogId">
+/// Parent catalog entry id (kebab-case, e.g. <c>"sd-turbo"</c>) when this
+/// descriptor was registered by a catalog-driven install; <see langword="null"/>
+/// for user-authored <c>CREATE MODEL</c> registrations. Populated by
+/// <see cref="DatumIngest.ModelLibrary.ModelInstallContext.CurrentCatalogId"/>
+/// at registration time. Persists into the catalog file's model row so
+/// rehydrate can resolve the originating installSql by
+/// <c>(CatalogId, CatalogVersion)</c> instead of replaying a stale snapshot
+/// of the source text — edits to the on-disk SQL file flow through to the
+/// next process start without catalog surgery.
+/// </param>
+/// <param name="CatalogVersion">
+/// Version string of the catalog cut that produced this registration
+/// (e.g. <c>"2026-05-29"</c>), or <see langword="null"/> when
+/// <paramref name="CatalogId"/> is null. Persisted alongside
+/// <paramref name="CatalogId"/>.
+/// </param>
+/// <param name="PinnedAs">
+/// When non-null, the suffixed pinned-form identifier this descriptor
+/// was registered under (e.g. <c>"foo@20260529"</c>) — meaning this row
+/// is a pinned-mode install coexisting with a different bare-form active
+/// version. <see langword="null"/> for bare installs and user
+/// <c>CREATE MODEL</c>. Persisted on the catalog row so rehydrate knows
+/// to apply the pinned-identifier rewrite when re-executing the
+/// originating installSql.
+/// </param>
 public sealed record ModelDescriptor(
     string SchemaName,
     string Name,
@@ -102,7 +128,10 @@ public sealed record ModelDescriptor(
     bool ReturnIsNotNull = false,
     string? SourceText = null,
     string? ImplementsTaskName = null,
-    IReadOnlyList<ResolvedUsingFile>? UsingFiles = null)
+    IReadOnlyList<ResolvedUsingFile>? UsingFiles = null,
+    string? CatalogId = null,
+    string? CatalogVersion = null,
+    string? PinnedAs = null)
 {
     /// <summary>Canonical <c>(schema, name)</c> identity.</summary>
     public QualifiedName QualifiedName => new(SchemaName, Name);

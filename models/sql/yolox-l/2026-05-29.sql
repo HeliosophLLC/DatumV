@@ -15,7 +15,7 @@ CREATE OR REPLACE MODEL yolox_l(
     COMMENT 'NMS IoU overlap threshold.'
 ) RETURNS Array<LabeledDetection>
 IMPLEMENTS LabeledObjectDetector
-USING 'yolox-l/yolox_l.onnx'
+USING 'yolox-l/2026-05-29/yolox_l.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = yolox_preprocess(img, 640);
   DECLARE raw    Float32[] = infer(tensor, [CAST(1 AS Int32), CAST(3 AS Int32), CAST(640 AS Int32), CAST(640 AS Int32)]);

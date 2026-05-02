@@ -19,7 +19,7 @@
 
 CREATE OR REPLACE MODEL silero_vad_fp16(clip Audio) RETURNS Array<Float32>
 IMPLEMENTS VoiceActivityDetector
-USING 'silero-vad-fp16/onnx/model_fp16.onnx'
+USING 'silero-vad-fp16/2026-05-29/onnx/model_fp16.onnx'
 AS BEGIN
   DECLARE samples Float32[] = audio_samples(16000, audio_to_mono(clip));
   DECLARE frame_size Int32 = 512;

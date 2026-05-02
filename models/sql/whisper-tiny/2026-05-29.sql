@@ -20,7 +20,7 @@ CREATE OR REPLACE MODEL whisper_tiny(
     COMMENT 'Hard cap on generated tokens per clip. Whispers ceiling is 448 (positional embeddings); lower values bound the decoder loop for short clips.'
 ) RETURNS String
 IMPLEMENTS AudioToText
-USING 'whisper-tiny/onnx/encoder_model.onnx' AS encoder,
+USING 'whisper-tiny/2026-05-29/onnx/encoder_model.onnx' AS encoder,
       'whisper-tiny/onnx/decoder_model.onnx' AS decoder
 AS BEGIN
   DECLARE samples Float32[] = audio_samples(16000, audio_to_mono(clip));
