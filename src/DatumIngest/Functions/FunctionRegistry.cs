@@ -1065,6 +1065,7 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate(new Aggregates.ApproximatePercentileFunction());
         registry.RegisterAggregate(new Aggregates.StringAggregateFunction());
         registry.RegisterAggregate(new Aggregates.ArrayAggregateFunction());
+        registry.RegisterAggregate(new Aggregates.ImageStackAggregateFunction());
         registry.RegisterAggregate(new Aggregates.PcFuseAggregateFunction());
         registry.RegisterAggregate(new Aggregates.PcVoxelConsensusAggregateFunction());
         registry.RegisterAggregate(new Aggregates.ArgMaxFunction(findMaximum: true, "ARG_MAX"));

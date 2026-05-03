@@ -15,7 +15,7 @@ namespace DatumIngest.Functions.Scalar.Image;
 public sealed class ResizeAndCropImageFunction : IFunction, IScalarFunction
 {
     /// <inheritdoc />
-    public static string Name => "resize_and_crop";
+    public static string Name => "image_resize_and_crop";
 
     /// <inheritdoc />
     public static FunctionCategory Category => FunctionCategory.Image;
@@ -23,6 +23,9 @@ public sealed class ResizeAndCropImageFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static string Description =>
         "Resize to fill then crop to the exact target size. Gravity selects which excess to discard.";
+
+    private static readonly string[] GravityValues =
+        ["center", "top", "bottom", "left", "right"];
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -33,7 +36,7 @@ public sealed class ResizeAndCropImageFunction : IFunction, IScalarFunction
                 new ParameterSpec("image",   DataKindMatcher.Exact(DataKind.Image)),
                 new ParameterSpec("width",   DataKindMatcher.Family(DataKindFamily.NumericScalar)),
                 new ParameterSpec("height",  DataKindMatcher.Family(DataKindFamily.NumericScalar)),
-                new ParameterSpec("gravity", DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("gravity", DataKindMatcher.StringEnum(GravityValues)),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
