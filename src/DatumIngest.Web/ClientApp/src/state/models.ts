@@ -74,6 +74,10 @@ interface ModelsState {
   // Id of the model whose detail pane is showing in the right column.
   // Null = no selection (show the empty/prompt state).
   selectedId: string | null;
+  // modelFamily → markdown card body (or null when probed and not
+  // present on the server). Populated lazily by `loadFamilyCard`.
+  // Absence of a key = not fetched yet; null value = fetched, no card.
+  familyCards: Readonly<Record<string, string | null>>;
 }
 
 export const modelsState = proxy<ModelsState>({
@@ -88,6 +92,7 @@ export const modelsState = proxy<ModelsState>({
   query: '',
   selectedTasks: new Set<string>(),
   selectedId: null,
+  familyCards: {},
 });
 
 export async function loadModelsCatalog(): Promise<void> {
@@ -253,6 +258,82 @@ export function filterModels(
     }
     return true;
   });
+}
+
+// One row in the model browser's list pane. Either a single catalog
+// entry (`single`) or a multi-variant family (`family`) — the list
+// renders the same way for both, but family rows expand into a variant
+// picker inside the detail pane.
+export type ModelGroup =
+  | { readonly kind: 'single'; readonly entry: CatalogModelSnapshot }
+  | {
+      readonly kind: 'family';
+      readonly family: string;
+      readonly entries: readonly CatalogModelSnapshot[];
+      readonly lead: CatalogModelSnapshot;
+    };
+
+// Buckets the filtered model list by `modelFamily`. Family buckets that
+// end up with exactly one surviving entry collapse back to `single`
+// rows so the user doesn't see a meaningless "1 variant" pill when a
+// filter trims a family down. Each bucket appears at the position of
+// its first member so the catalog's authoring order is preserved.
+export function groupByModelFamily(
+  models: readonly CatalogModelSnapshot[],
+): readonly ModelGroup[] {
+  type Bucket = { family: string | null; entries: CatalogModelSnapshot[] };
+  const ordered: Bucket[] = [];
+  const byFamily = new Map<string, Bucket>();
+  for (const m of models) {
+    const f = m.modelFamily ?? null;
+    if (f === null) {
+      ordered.push({ family: null, entries: [m] });
+      continue;
+    }
+    let bucket = byFamily.get(f);
+    if (!bucket) {
+      bucket = { family: f, entries: [m] };
+      byFamily.set(f, bucket);
+      ordered.push(bucket);
+    } else {
+      bucket.entries.push(m);
+    }
+  }
+  return ordered.map((b): ModelGroup => {
+    if (b.family === null || b.entries.length === 1) {
+      return { kind: 'single', entry: b.entries[0] };
+    }
+    return { kind: 'family', family: b.family, entries: b.entries, lead: b.entries[0] };
+  });
+}
+
+// Fetch the family card markdown for `family`. Cached in modelsState
+// after the first call — the card body doesn't change without a server
+// restart. Returns null when the server has no card for this family
+// (no entry declared a familyCardFile) or the request failed.
+export async function loadFamilyCard(family: string): Promise<string | null> {
+  if (family in modelsState.familyCards) {
+    return modelsState.familyCards[family];
+  }
+  try {
+    const response = await window.fetch(
+      `/api/model-catalog/family-cards/${encodeURIComponent(family)}`,
+      { credentials: 'include' },
+    );
+    if (response.status === 404) {
+      modelsState.familyCards = { ...modelsState.familyCards, [family]: null };
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(`family-card fetch failed: ${response.status}`);
+    }
+    const text = await response.text();
+    modelsState.familyCards = { ...modelsState.familyCards, [family]: text };
+    return text;
+  } catch (err) {
+    console.error('[models] loadFamilyCard failed', err);
+    return null;
+  }
 }
 
 // Per-state counts across the manifest — drives the `Installed (N)` etc.

@@ -28,6 +28,10 @@ internal sealed class ManifestStore : IManifestStore
     // licenseId -> resolved absolute path to the textFile. Pre-resolved at
     // load time so GetLicenseText is a plain File.ReadAllText.
     private readonly Dictionary<string, string> _licenseTextPaths;
+    // modelFamily -> resolved absolute path to the familyCardFile.
+    // Populated at load time from the (validated) at-most-one mapping
+    // discovered in ValidateFamilyCardFiles.
+    private readonly Dictionary<string, string> _familyCardPaths;
     private readonly ILogger<ManifestStore> _logger;
 
     public ManifestStore(ILogger<ManifestStore> logger)
@@ -66,6 +70,17 @@ internal sealed class ManifestStore : IManifestStore
             }
         }
 
+        _familyCardPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (CatalogModel m in manifest.Models)
+        {
+            if (string.IsNullOrEmpty(m.FamilyCardFile)) { continue; }
+            if (string.IsNullOrEmpty(m.ModelFamily)) { continue; }
+            // ValidateFamilyCardFiles already enforced existence + per-family
+            // uniqueness, so this is a straight resolve.
+            _familyCardPaths[m.ModelFamily] =
+                Path.GetFullPath(Path.Combine(manifestDir, m.FamilyCardFile));
+        }
+
         _logger.LogInformation(
             "Catalog loaded: {Models} models, {Licenses} licenses",
             manifest.Models.Count, manifest.Licenses.Count);
@@ -74,6 +89,13 @@ internal sealed class ManifestStore : IManifestStore
     public string? GetLicenseText(string licenseId)
     {
         return _licenseTextPaths.TryGetValue(licenseId, out string? path)
+            ? File.ReadAllText(path)
+            : null;
+    }
+
+    public string? GetFamilyCardMarkdown(string modelFamily)
+    {
+        return _familyCardPaths.TryGetValue(modelFamily, out string? path)
             ? File.ReadAllText(path)
             : null;
     }
@@ -295,6 +317,49 @@ internal sealed class ManifestStore : IManifestStore
             }
         }
 
+        ValidateFamilyCardFiles(manifest, manifestPath);
+    }
+
+    /// <summary>
+    /// Cross-entry validation for the <c>modelFamily</c> + <c>familyCardFile</c>
+    /// pair. Rules:
+    /// <list type="bullet">
+    /// <item>At most one entry per family may declare <c>familyCardFile</c>
+    /// — the family card is one document covering every variant.</item>
+    /// <item>An entry that declares <c>familyCardFile</c> without
+    /// <c>modelFamily</c> is rejected (no group to attach the card to).</item>
+    /// <item>The referenced file must exist on disk under the manifest
+    /// directory — broken pointers fail loudly at startup.</item>
+    /// </list>
+    /// </summary>
+    private static void ValidateFamilyCardFiles(CatalogManifest manifest, string manifestPath)
+    {
+        string manifestDir = Path.GetDirectoryName(manifestPath)!;
+        Dictionary<string, string> cardOwnerByFamily = new(StringComparer.OrdinalIgnoreCase);
+        foreach (CatalogModel m in manifest.Models)
+        {
+            if (string.IsNullOrEmpty(m.FamilyCardFile)) { continue; }
+            if (string.IsNullOrEmpty(m.ModelFamily))
+            {
+                throw new InvalidOperationException(
+                    $"Catalog entry '{m.Id}' in {manifestPath} declares familyCardFile " +
+                    "but no modelFamily. The card describes a family — set modelFamily first.");
+            }
+            if (cardOwnerByFamily.TryGetValue(m.ModelFamily, out string? prevOwner))
+            {
+                throw new InvalidOperationException(
+                    $"Both '{prevOwner}' and '{m.Id}' in {manifestPath} declare familyCardFile " +
+                    $"for modelFamily '{m.ModelFamily}'. At most one entry per family may own the card.");
+            }
+            string cardPath = Path.GetFullPath(Path.Combine(manifestDir, m.FamilyCardFile));
+            if (!File.Exists(cardPath))
+            {
+                throw new InvalidOperationException(
+                    $"Catalog entry '{m.Id}' in {manifestPath} references familyCardFile " +
+                    $"'{m.FamilyCardFile}' but no file exists at '{cardPath}'.");
+            }
+            cardOwnerByFamily[m.ModelFamily] = m.Id;
+        }
     }
 
     // Resolution order:

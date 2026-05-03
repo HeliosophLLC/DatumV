@@ -94,6 +94,9 @@
   },
   "selectPrompt": "Select a model on the left to see details.",
   "noMatches": "No models match your search.",
+  "list": {
+    "variantCount": "{count, plural, one {# variant} other {# variants}}"
+  },
   "card": {
     "size": "~{size} MB",
     "attributions": "Credits:",
@@ -129,7 +132,8 @@
     "licenseRequired": "Requires accepting the {license} license.",
     "acceptAndDownload": "Accept & download",
     "updateAvailable": "Update available",
-    "driftTooltip": "Active: {active} · Latest: {latest}"
+    "driftTooltip": "Active: {active} · Latest: {latest}",
+    "modelFamily": "Model family"
   },
   "previousVersions": {
     "title": "Previous versions",

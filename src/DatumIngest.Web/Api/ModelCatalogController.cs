@@ -57,6 +57,18 @@ public sealed class ModelCatalogController(
         return Content(text, "text/plain");
     }
 
+    // GET /api/model-catalog/family-cards/{family} — raw markdown body of
+    // the model-family card. Returns 404 when no entry in the family
+    // declares a familyCardFile.
+    [HttpGet("family-cards/{family}")]
+    [Produces("text/markdown")]
+    public ActionResult<string> GetFamilyCard(string family)
+    {
+        string? text = store.GetFamilyCardMarkdown(family);
+        if (text is null) return NotFound();
+        return Content(text, "text/markdown");
+    }
+
     // POST /api/model-catalog/licenses/{id}/accept — records explicit
     // acceptance. Idempotent.
     [HttpPost("licenses/{id}/accept")]

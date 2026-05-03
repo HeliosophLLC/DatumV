@@ -662,6 +662,8 @@
     {
       "id": "yolox-s",
       "displayName": "YOLOX-S (Object Detection)",
+      "modelFamily": "YOLOX",
+      "familyCardFile": "cards/yolox.md",
       "summary": "Find and box common objects in a photo (people, cars, dogs — 80 COCO categories). Recommended starting point for object detection.",
       "description": "Apache-2.0 alternative to YOLOv8. 80 COCO classes. Recommended general default.",
       "tasks": [
@@ -710,6 +712,7 @@
     {
       "id": "yolox-nano",
       "displayName": "YOLOX-Nano (Edge Detection)",
+      "modelFamily": "YOLOX",
       "summary": "Smallest YOLOX — fits on phones and edge devices (~4 MB). Use when latency and disk matter more than peak accuracy.",
       "description": "Smallest YOLOX (0.9M params). For mobile/edge/CPU detection.",
       "tasks": [
@@ -758,6 +761,7 @@
     {
       "id": "yolox-x",
       "displayName": "YOLOX-X (Maximum Accuracy)",
+      "modelFamily": "YOLOX",
       "summary": "Biggest YOLOX — highest accuracy in the family. Pick when GPU is available and you want the fewest false positives.",
       "description": "Largest YOLOX (99M params). For GPU + accuracy-critical detection.",
       "tasks": [
@@ -806,6 +810,7 @@
     {
       "id": "yolox-tiny",
       "displayName": "YOLOX-Tiny (Mobile Detection)",
+      "modelFamily": "YOLOX",
       "summary": "Step up from YOLOX-Nano with meaningfully better accuracy at minimal extra cost. The pragmatic pick for edge devices that can spare a few MB.",
       "description": "5.1M params. Step up from Nano with materially better mAP at minimal extra cost.",
       "tasks": [
@@ -854,6 +859,7 @@
     {
       "id": "yolox-m",
       "displayName": "YOLOX-M (Balanced Detection)",
+      "modelFamily": "YOLOX",
       "summary": "Mid-size YOLOX. Runs comfortably on CPU; flies on GPU. The default 'I want quality without a big model' pick.",
       "description": "25.3M params. Balanced speed/accuracy. CPU-viable, GPU-faster.",
       "tasks": [
@@ -901,6 +907,7 @@
     {
       "id": "yolox-l",
       "displayName": "YOLOX-L (Quality Detection)",
+      "modelFamily": "YOLOX",
       "summary": "Larger YOLOX — sharper accuracy than M on small / crowded objects. Plan for GPU.",
       "description": "54.2M params. Higher accuracy than M; GPU recommended.",
       "tasks": [
@@ -949,6 +956,7 @@
     {
       "id": "yolox-darknet",
       "displayName": "YOLOX-Darknet53",
+      "modelFamily": "YOLOX",
       "summary": "Original YOLOX backbone — included for reproducibility. The CSPDarknet variants (M / L) generally beat it on accuracy-per-cost; pick this only when you need this specific architecture for comparison.",
       "description": "63.7M params. Original Darknet backbone variant; included for reproducibility. CSPDarknet variants (M/L) generally supersede this on accuracy/cost.",
       "tasks": [

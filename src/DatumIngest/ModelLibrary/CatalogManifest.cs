@@ -93,7 +93,23 @@ public sealed record CatalogModel(
     bool Deprecated = false,
     // Optional catalog id pointer to the successor entry, surfaced
     // alongside <see cref="Deprecated"/>.
-    string? SupersededBy = null)
+    string? SupersededBy = null,
+    // Optional model-family identifier. Entries sharing the same
+    // `ModelFamily` string are presented as a single card with a
+    // variant picker in the model browser (e.g. all YOLOX size points,
+    // both Florence-2 quantizations). Distinct from `TaskFamily` —
+    // that's the coarse task category (NLP / ComputerVision / Audio /
+    // Multimodal / Tabular) on `system.task_contracts`. Free-form;
+    // the catalog author picks the label ("YOLOX", "Florence-2", …)
+    // and the frontend groups verbatim. Null = standalone entry.
+    string? ModelFamily = null,
+    // Optional path (relative to the manifest directory) to a markdown
+    // file describing the model family — overview, when to pick which
+    // variant, example SQL, screenshots. Surfaced as the body of the
+    // detail card. Only one entry per `ModelFamily` may set this
+    // (validated at load); whichever entry sets it owns the card text
+    // for the whole family.
+    string? FamilyCardFile = null)
 {
     /// <summary>
     /// Shorthand for <c>Versions[0].Sources</c>. The catalog substrate

@@ -753,6 +753,43 @@ export class ModelCatalogClient {
         return Promise.resolve<string>(null as any);
     }
 
+    getFamilyCard(family: string, signal?: AbortSignal): Promise<string> {
+        let url_ = this.baseUrl + "/api/model-catalog/family-cards/{family}";
+        if (family === undefined || family === null)
+            throw new Error("The parameter 'family' must be defined.");
+        url_ = url_.replace("{family}", encodeURIComponent("" + family));
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processGetFamilyCard(_response);
+        });
+    }
+
+    protected processGetFamilyCard(response: Response): Promise<string> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as string;
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<string>(null as any);
+    }
+
     acceptLicense(id: string, signal?: AbortSignal): Promise<FileResponse> {
         let url_ = this.baseUrl + "/api/model-catalog/licenses/{id}/accept";
         if (id === undefined || id === null)
@@ -1937,6 +1974,8 @@ export interface CatalogModel {
     python?: CatalogPythonSpec | undefined;
     deprecated?: boolean;
     supersededBy?: string | undefined;
+    modelFamily?: string | undefined;
+    familyCardFile?: string | undefined;
 }
 
 export interface CatalogHardware {

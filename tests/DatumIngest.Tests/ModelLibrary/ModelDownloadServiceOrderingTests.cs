@@ -229,6 +229,7 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
         public string ManifestDirectory { get; } = Path.GetTempPath();
         public ICatalogVocabulary Vocabulary { get; } = new CatalogVocabulary(manifest);
         public string? GetLicenseText(string licenseId) => null;
+        public string? GetFamilyCardMarkdown(string modelFamily) => null;
     }
 
     /// <summary>

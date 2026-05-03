@@ -14,6 +14,7 @@ import {
   clearFilters,
   driftedCount,
   filterModels,
+  groupByModelFamily,
   groupTasksByFamily,
   installStateCounts,
   isDrifted,
@@ -26,6 +27,7 @@ import {
   toggleInstallState,
   toggleTask,
   type CatalogTaskInfoSnapshot,
+  type ModelGroup,
 } from '@/state/models';
 import type { ModelInstallState } from '@/api/generated/openapi-client';
 import type { CatalogModelSnapshot } from '@/state/models';
@@ -107,6 +109,12 @@ export function ModelsView() {
         : [],
     [manifest, updatesOnly, installStates, downloads.state, query, selectedTasks, activeVersions],
   );
+
+  // Group filtered entries by model family. Singletons and 1-of-1
+  // family survivors render as plain rows; multi-entry families collapse
+  // into a single "X variants" row that expands into a picker in the
+  // detail pane when selected.
+  const grouped = useMemo(() => groupByModelFamily(filtered), [filtered]);
 
   // Auto-select the first match once the manifest lands. Don't override an
   // existing selection — even if it falls outside the current filter, the
@@ -228,16 +236,27 @@ export function ModelsView() {
               </p>
             ) : (
               <ul className="flex flex-col">
-                {filtered.map((model) => (
-                  <ModelListItem
-                    key={model.id}
-                    model={model}
-                    active={model.id === selectedId}
-                    drifted={isDrifted(model, activeVersions)}
-                    taskFamilies={taskFamilies}
-                    onSelect={() => model.id && setSelectedId(model.id)}
-                  />
-                ))}
+                {grouped.map((group) =>
+                  group.kind === 'single' ? (
+                    <ModelListItem
+                      key={group.entry.id}
+                      model={group.entry}
+                      active={group.entry.id === selectedId}
+                      drifted={isDrifted(group.entry, activeVersions)}
+                      taskFamilies={taskFamilies}
+                      onSelect={() => group.entry.id && setSelectedId(group.entry.id)}
+                    />
+                  ) : (
+                    <FamilyListItem
+                      key={group.family}
+                      group={group}
+                      selectedId={selectedId}
+                      activeVersions={activeVersions}
+                      taskFamilies={taskFamilies}
+                      onSelect={setSelectedId}
+                    />
+                  ),
+                )}
               </ul>
             )}
           </div>
@@ -546,6 +565,144 @@ function ModelListItem({
         {(model.tasks ?? []).length > 0 && (
           <div className="flex w-full min-w-0 flex-nowrap gap-1 overflow-hidden pl-5">
             {(model.tasks ?? []).map((task) => {
+              const family = taskFamilies.get(task.toLowerCase()) ?? '';
+              const Icon = taskIcon(task);
+              const label = taskLabel(t, task);
+              return (
+                <span
+                  key={task}
+                  title={label}
+                  aria-label={label}
+                  className={cn(
+                    'flex shrink-0 items-center justify-center rounded-xs border border-l-4 px-1 py-0.5 text-muted-foreground',
+                    familyAccentClass(family),
+                  )}
+                >
+                  <Icon className="size-3" />
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </button>
+    </li>
+  );
+}
+
+function FamilyListItem({
+  group,
+  selectedId,
+  activeVersions,
+  taskFamilies,
+  onSelect,
+}: {
+  group: Extract<ModelGroup, { kind: 'family' }>;
+  selectedId: string | null;
+  activeVersions: Readonly<Record<string, string>>;
+  taskFamilies: ReadonlyMap<string, string>;
+  onSelect: (id: string) => void;
+}) {
+  const { t } = useTranslation('models');
+  const downloads = useSnapshot(downloadsState);
+
+  const variantIds = group.entries.map((e) => e.id ?? '');
+  // The row is "active" when the user has any of this family's variants
+  // selected — switching variants inside the family stays on the same
+  // row visually.
+  const active = selectedId !== null && variantIds.includes(selectedId);
+
+  // Aggregate install state across variants. Priority mirrors the
+  // single-row icon precedence: in-flight > installed > downloaded >
+  // partial > nothing. The icon represents "the most useful thing this
+  // family currently is on disk".
+  let anyDownloading = false;
+  let anyInstalling = false;
+  let anyInstalled = false;
+  let anyDownloaded = false;
+  let anyPartial = false;
+  let anyDrifted = false;
+  for (const e of group.entries) {
+    const id = e.id ?? '';
+    if (downloads.active[id]) anyDownloading = true;
+    if (downloads.installing[id] === true) anyInstalling = true;
+    const s = downloads.state?.[id];
+    if (s === 'installed') anyInstalled = true;
+    else if (s === 'downloaded') anyDownloaded = true;
+    else if (s === 'partial') anyPartial = true;
+    if (isDrifted(e, activeVersions)) anyDrifted = true;
+  }
+  const status: { Icon: typeof Loader2; label: string; spin: boolean } | null =
+    anyDownloading || anyInstalling
+      ? { Icon: Loader2, label: t('card.installing'), spin: true }
+      : anyInstalled
+      ? { Icon: CircleCheck, label: t('card.installed'), spin: false }
+      : anyDownloaded
+      ? { Icon: HardDrive, label: t('card.downloaded'), spin: false }
+      : anyPartial
+      ? { Icon: CircleDashed, label: t('card.partial'), spin: false }
+      : null;
+
+  const handleClick = () => {
+    // Stay on whichever variant the user already had selected when the
+    // family was active; otherwise jump to the lead variant.
+    const targetId =
+      selectedId !== null && variantIds.includes(selectedId)
+        ? selectedId
+        : group.lead.id ?? '';
+    if (targetId) onSelect(targetId);
+  };
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={handleClick}
+        aria-current={active ? 'true' : undefined}
+        className={cn(
+          'flex w-full min-w-0 flex-col gap-0.5 border-b px-3 py-2 text-left transition-colors',
+          active
+            ? 'cursor-default bg-primary/15 text-foreground'
+            : 'cursor-pointer text-foreground hover:bg-muted/60',
+        )}
+      >
+        <div className="flex w-full min-w-0 items-center gap-2">
+          {status ? (
+            <status.Icon
+              className={cn(
+                'text-muted-foreground size-3 shrink-0',
+                status.spin && 'animate-spin',
+              )}
+              aria-label={status.label}
+            >
+              <title>{status.label}</title>
+            </status.Icon>
+          ) : (
+            <span className="size-3 shrink-0" />
+          )}
+          <span className="min-w-0 flex-1 truncate text-xs font-medium">
+            {group.family}
+          </span>
+          <span
+            className="text-muted-foreground shrink-0 text-[10px]"
+            title={t('list.variantCount', { count: group.entries.length })}
+          >
+            {t('list.variantCount', { count: group.entries.length })}
+          </span>
+          {anyDrifted && (
+            <ArrowUpCircle
+              className="text-muted-foreground size-3 shrink-0"
+              aria-label={t('card.updateAvailable')}
+            >
+              <title>{t('card.updateAvailable')}</title>
+            </ArrowUpCircle>
+          )}
+        </div>
+        <span className="text-muted-foreground line-clamp-2 w-full min-w-0 break-words pl-5 text-xs">
+          {group.lead.summary ?? group.lead.description}
+        </span>
+        {(group.lead.tasks ?? []).length > 0 && (
+          <div className="flex w-full min-w-0 flex-nowrap gap-1 overflow-hidden pl-5">
+            {(group.lead.tasks ?? []).map((task) => {
               const family = taskFamilies.get(task.toLowerCase()) ?? '';
               const Icon = taskIcon(task);
               const label = taskLabel(t, task);

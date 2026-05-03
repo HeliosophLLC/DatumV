@@ -21,6 +21,11 @@ public interface IManifestStore
     // referenced textFile is missing on disk.
     string? GetLicenseText(string licenseId);
 
+    // Returns the markdown body of the family card for `modelFamily`, or
+    // null when no entry in that family declares a `familyCardFile`.
+    // Resolved at load time; this is a plain file read at call time.
+    string? GetFamilyCardMarkdown(string modelFamily);
+
     // Reverse identifier→catalog index built once at load time from each
     // version's declared `models[]` arrays. Consumed by `system.models`,
     // `system.tasks`, pre-flight, and the install-time cross-check.

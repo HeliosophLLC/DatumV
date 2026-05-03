@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { ChevronDown, ChevronRight, CircleCheck, Download, HardDrive, Loader2, RotateCcw, Trash2 } from 'lucide-react';
-import { isDrifted, modelsState, type CatalogModelSnapshot } from '@/state/models';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
+import { CodeBlock } from '@/components/markdown/CodeBlock';
+import { isExternalUrl, openExternalUrl } from '@/lib/openExternal';
+import { isDrifted, loadFamilyCard, modelsState, setSelectedId, type CatalogModelSnapshot } from '@/state/models';
 import {
   buildTaskFamilyMap,
   familyAccentClass,
@@ -62,9 +67,69 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
   const hostStep = downloads.pythonHostStep;
   const activeStep: PythonInstallStep | null = venvStep ?? (installing ? hostStep : null) ?? null;
 
+  // Sibling variants — every catalog entry sharing this model's
+  // `modelFamily`. Empty when the entry stands alone. Drives the variant
+  // picker chips at the top of the card; selecting a sibling swaps the
+  // detail pane via `setSelectedId`.
+  const modelFamily = model.modelFamily ?? null;
+  const siblings = useMemo(() => {
+    if (modelFamily === null || models.manifest === null) return [];
+    return (models.manifest.models ?? []).filter(
+      (m) => m.modelFamily === modelFamily,
+    );
+  }, [modelFamily, models.manifest]);
+
+  // Family card markdown — fetched once per family, cached in state.
+  // `loadFamilyCard` is a no-op when the family already has an entry
+  // (cached value, possibly null); we keep a local copy for rendering.
+  const [familyCard, setFamilyCard] = useState<string | null>(null);
+  useEffect(() => {
+    if (modelFamily === null) {
+      setFamilyCard(null);
+      return;
+    }
+    let cancelled = false;
+    void loadFamilyCard(modelFamily).then((text) => {
+      if (!cancelled) setFamilyCard(text);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [modelFamily]);
+
   return (
     <article className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 py-5">
       <header className="flex flex-col gap-2">
+        {siblings.length > 1 && (
+          <div className="flex flex-col gap-1">
+            <span className="text-muted-foreground text-[10px] uppercase tracking-wide">
+              {t('card.modelFamily')} · {modelFamily}
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {siblings.map((sib) => {
+                const sid = sib.id ?? '';
+                const isActive = sid === modelId;
+                return (
+                  <button
+                    key={sid}
+                    type="button"
+                    onClick={() => sid && setSelectedId(sid)}
+                    aria-pressed={isActive}
+                    disabled={isActive}
+                    className={cn(
+                      'rounded-xs px-2 py-0.5 text-xs transition-colors',
+                      isActive
+                        ? 'bg-primary/15 text-primary cursor-default'
+                        : 'text-muted-foreground hover:bg-primary/10 hover:text-primary cursor-pointer',
+                    )}
+                  >
+                    {sib.displayName ?? sib.id}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {!model.placeholder && (
           <div className="flex items-center justify-between gap-3">
             {/* Install-state indicator. Only renders when the entry is
@@ -175,6 +240,36 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
         <p className="text-destructive text-xs" role="alert">
           {error}
         </p>
+      )}
+
+      {familyCard && (
+        <div className="markdown-body">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[[rehypeHighlight, { detect: true }]]}
+            components={{
+              pre: ({ children, ...rest }) => (
+                <CodeBlock {...rest}>{children}</CodeBlock>
+              ),
+              a: ({ href, children, ...rest }) => (
+                <a
+                  {...rest}
+                  href={href}
+                  onClick={(e) => {
+                    if (isExternalUrl(href)) {
+                      e.preventDefault();
+                      openExternalUrl(href);
+                    }
+                  }}
+                >
+                  {children}
+                </a>
+              ),
+            }}
+          >
+            {familyCard}
+          </ReactMarkdown>
+        </div>
       )}
 
       <PreviousVersionsDisclosure
