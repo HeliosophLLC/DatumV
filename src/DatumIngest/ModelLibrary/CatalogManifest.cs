@@ -15,20 +15,7 @@ namespace DatumIngest.ModelLibrary;
 public sealed record CatalogManifest(
     int SchemaVersion,
     IReadOnlyDictionary<string, CatalogLicense> Licenses,
-    CatalogTiers Tiers,
-    IReadOnlyList<CatalogModel> Models,
-    // Top-level per-task recommendation map: contract name (matching a
-    // `TaskTypeRegistry` entry) → recommended model identifier (the
-    // SQL-visible snake_case name registered by some catalog entry's
-    // installSql). Powers the `tasks.<contract>(...)` dispatcher. Empty
-    // (or absent in JSON) when no recommendations are wired yet — every
-    // `tasks.x` call then fails preflight with "no recommended model
-    // for contract X."
-    CatalogTaskRecommendations? Tasks = null);
-
-public sealed record CatalogTaskRecommendations(
-    // contract name → recommended model identifier
-    IReadOnlyDictionary<string, string> Recommended);
+    IReadOnlyList<CatalogModel> Models);
 
 public sealed record CatalogLicense(
     string Title,
@@ -37,10 +24,6 @@ public sealed record CatalogLicense(
     string TextFile,
     string Summary,
     bool RequiresAcceptance);
-
-public sealed record CatalogTiers(
-    IReadOnlyList<string> Starter,
-    IReadOnlyList<string> Recommended);
 
 public sealed record CatalogModel(
     string Id,
@@ -150,12 +133,11 @@ public sealed record CatalogVersion(
     string? InstallSql = null,
     // Declared set of model identifiers this cut's installSql registers.
     // Source of truth for version-switch DROP/CREATE OR REPLACE
-    // accounting and `tasks.recommended` validation. Cross-checked
-    // against actual registrations at install time — mismatch fails
-    // the install before <id>/active flips. Each entry also declares
-    // a `pinnedAs` companion name used when this version is installed
-    // alongside a different active version via `@<version>` SQL pin
-    // syntax; see <see cref="CatalogVersionModel"/>.
+    // accounting. Cross-checked against actual registrations at install
+    // time — mismatch fails the install before <id>/active flips. Each
+    // entry also declares a `pinnedAs` companion name used when this
+    // version is installed alongside a different active version via
+    // `@<version>` SQL pin syntax; see <see cref="CatalogVersionModel"/>.
     IReadOnlyList<CatalogVersionModel>? Models = null,
     // Per-version deprecation: this specific cut has a known bug; the
     // entry itself is still good. Pre-flight surfaces the reason

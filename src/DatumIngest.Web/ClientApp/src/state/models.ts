@@ -4,6 +4,7 @@ import type {
   CatalogManifest,
   CatalogModel,
   CatalogTaskInfo,
+  ModelInstallState,
 } from '@/api/generated/openapi-client';
 
 // Snapshot<> deep-readonlys nested arrays/objects, which means a function
@@ -23,19 +24,16 @@ export type CatalogTaskInfoSnapshot = Snapshot<CatalogTaskInfo>;
 // nested arrays/objects don't get proxied (cheaper and avoids "you can't
 // mutate this readonly array" gotchas on the generated DTOs).
 
-export type TierFilter = 'all' | 'starter' | 'recommended' | 'updates';
-
 // Family ordering for the faceted task filter UI. The server-side enum
 // values arrive as PascalCase strings ("Text" / "Image" / …); the list
 // here drives display order on the filter panel so the section headers
 // stay stable across catalog reshuffles.
 export const TASK_FAMILY_ORDER: readonly string[] = [
-  'Text',
-  'Image',
-  'Audio',
-  'Video',
   'Multimodal',
-  'Structured',
+  'ComputerVision',
+  'NaturalLanguageProcessing',
+  'Audio',
+  'Tabular',
 ];
 
 interface ModelsState {
@@ -57,7 +55,14 @@ interface ModelsState {
   versionsOnDisk: Readonly<Record<string, readonly string[]>>;
   loading: boolean;
   error: string | null;
-  tier: TierFilter;
+  // When true, only show models with an installed-but-outdated active
+  // version (drift). Driven by the standalone "Updates" toggle next to
+  // the search box; auto-resets when the toggle is hidden (no drifts).
+  updatesOnly: boolean;
+  // Multi-select install-state filter. When non-empty, only models whose
+  // current install state appears here match (OR semantics). Driven by
+  // the Installed / Downloaded / Partial toggles in the header.
+  installStates: ReadonlySet<ModelInstallState>;
   // Free-text search term; matched against id + displayName + summary +
   // description. Empty string = no search filter.
   query: string;
@@ -78,7 +83,8 @@ export const modelsState = proxy<ModelsState>({
   versionsOnDisk: {},
   loading: false,
   error: null,
-  tier: 'all',
+  updatesOnly: false,
+  installStates: new Set<ModelInstallState>(),
   query: '',
   selectedTasks: new Set<string>(),
   selectedId: null,
@@ -133,8 +139,15 @@ export async function refreshVersionsOnDisk(): Promise<void> {
   }
 }
 
-export function setTier(tier: TierFilter): void {
-  modelsState.tier = tier;
+export function setUpdatesOnly(value: boolean): void {
+  modelsState.updatesOnly = value;
+}
+
+export function toggleInstallState(state: ModelInstallState): void {
+  const next = new Set(modelsState.installStates);
+  if (next.has(state)) next.delete(state);
+  else next.add(state);
+  modelsState.installStates = next;
 }
 
 export function setQuery(query: string): void {
@@ -158,7 +171,8 @@ export function clearSelectedTasks(): void {
 }
 
 export function clearFilters(): void {
-  modelsState.tier = 'all';
+  modelsState.updatesOnly = false;
+  modelsState.installStates = new Set<ModelInstallState>();
   modelsState.query = '';
   modelsState.selectedTasks = new Set<string>();
 }
@@ -196,20 +210,18 @@ export function driftedCount(
 }
 
 // Pure filter — applied at render time. Doesn't mutate state. Caller passes
-// the manifest snapshot from useSnapshot. The `updates` tier is special:
-// it isn't a manifest.tiers entry but a runtime drift comparison against
-// `activeVersions`, so it short-circuits the tier-id intersection below.
+// the manifest snapshot from useSnapshot. `updatesOnly` is a runtime drift
+// comparison against `activeVersions` (not a manifest field).
 export function filterModels(
   manifest: CatalogManifestSnapshot,
-  tier: TierFilter,
+  updatesOnly: boolean,
+  installStates: ReadonlySet<ModelInstallState>,
+  installStateMap: Readonly<Record<string, ModelInstallState>> | null,
   query: string,
   selectedTasks: ReadonlySet<string>,
   activeVersions: Readonly<Record<string, string>>,
 ): readonly CatalogModelSnapshot[] {
   const models = manifest.models ?? [];
-  const tierIds = tier === 'all' || tier === 'updates'
-    ? null
-    : new Set(manifest.tiers?.[tier] ?? []);
   const needle = query.trim().toLowerCase();
   // Case-insensitive task match so manifest typo-mixing (e.g. "textembedder"
   // vs "TextEmbedder") doesn't drop matches. The TS Set is case-sensitive
@@ -219,8 +231,12 @@ export function filterModels(
     : new Set([...selectedTasks].map((t) => t.toLowerCase()));
 
   return models.filter((m) => {
-    if (tierIds && !tierIds.has(m.id ?? '')) return false;
-    if (tier === 'updates' && !isDrifted(m, activeVersions)) return false;
+    if (updatesOnly && !isDrifted(m, activeVersions)) return false;
+    if (installStates.size > 0) {
+      const id = m.id ?? '';
+      const state = installStateMap?.[id];
+      if (!state || !installStates.has(state)) return false;
+    }
     if (needle.length > 0) {
       const hay = [
         m.id ?? '',
@@ -236,6 +252,49 @@ export function filterModels(
       if (!hit) return false;
     }
     return true;
+  });
+}
+
+// Per-state counts across the manifest — drives the `Installed (N)` etc.
+// toggle labels and the "hide Partial when 0" rule. Unknown / missing
+// install states (model not yet probed) don't contribute to any bucket.
+export function installStateCounts(
+  manifest: CatalogManifestSnapshot | null,
+  installStateMap: Readonly<Record<string, ModelInstallState>> | null,
+): Readonly<Record<ModelInstallState, number>> {
+  const counts: Record<ModelInstallState, number> = {
+    notDownloaded: 0,
+    partial: 0,
+    downloaded: 0,
+    installed: 0,
+  };
+  if (manifest === null || installStateMap === null) return counts;
+  for (const m of manifest.models ?? []) {
+    const id = m.id;
+    if (!id) continue;
+    const state = installStateMap[id];
+    if (state) counts[state]++;
+  }
+  return counts;
+}
+
+// Filter the task vocabulary to entries that are actually referenced by
+// at least one model in the manifest. The sidebar uses this so users
+// don't see filter chips that would empty the model list when clicked.
+// Comparison is case-insensitive to match `filterModels`.
+export function tasksWithAssignedModels(
+  tasks: readonly CatalogTaskInfoSnapshot[],
+  manifest: CatalogManifestSnapshot | null,
+): readonly CatalogTaskInfoSnapshot[] {
+  if (manifest === null) return [];
+  const assigned = new Set<string>();
+  for (const m of manifest.models ?? []) {
+    for (const name of m.tasks ?? []) assigned.add(name.toLowerCase());
+  }
+  return tasks.filter((t) => {
+    const name = t.name;
+    if (!name) return false;
+    return assigned.has(name.toLowerCase());
   });
 }
 

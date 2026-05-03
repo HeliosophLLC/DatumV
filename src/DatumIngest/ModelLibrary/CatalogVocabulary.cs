@@ -7,9 +7,9 @@ namespace DatumIngest.ModelLibrary;
 
 // Reverse identifier→catalog index built at catalog-load time from each
 // version's declared `models[]` arrays. The same source of truth that
-// `system.models`, `system.tasks`, the `tasks.*` dispatcher, pre-flight,
-// completion, and the install-time cross-check all consult — built once
-// rather than re-walking the manifest at every consumption site.
+// `system.models`, `system.tasks`, pre-flight, completion, and the
+// install-time cross-check all consult — built once rather than
+// re-walking the manifest at every consumption site.
 //
 // Built once per catalog load. Holds no residency state — residency lives
 // in `ModelCatalog` + `ModelRegistry` and gets joined on demand. This
@@ -35,13 +35,6 @@ public interface ICatalogVocabulary
     // without walking versions[]. The set is the union across all
     // versions of that entry.
     IReadOnlyDictionary<string, IReadOnlySet<string>> IdentifiersByEntry { get; }
-
-    // Every TaskTypeRegistry contract whose recommended model the
-    // catalog declares. Empty when `tasks.recommended` is absent or empty
-    // in catalog.json. Used by the `tasks.<contract>` dispatcher to
-    // resolve at plan time and by pre-flight to decide which model needs
-    // installing for a `tasks.x(...)` call.
-    IReadOnlyDictionary<string, string> RecommendedByTask { get; }
 
     // Reverse index over every materialised `pinnedAs` name. The parser
     // maps `models.foo@<digits>` to the (entry × version × bare identifier)
@@ -108,17 +101,12 @@ public sealed record CatalogPinnedReference(
 public sealed record CatalogTaskCandidate(
     string Task,
     string ModelIdentifier,
-    string CatalogEntryId,
-    // True when this identifier equals
-    // <see cref="ICatalogVocabulary.RecommendedByTask"/>[Task] — the
-    // dispatcher target for `tasks.<Task>(...)`.
-    bool IsRecommended);
+    string CatalogEntryId);
 
 internal sealed class CatalogVocabulary : ICatalogVocabulary
 {
     public IReadOnlyDictionary<string, CatalogVocabularyEntry> ByIdentifier { get; }
     public IReadOnlyDictionary<string, IReadOnlySet<string>> IdentifiersByEntry { get; }
-    public IReadOnlyDictionary<string, string> RecommendedByTask { get; }
     public IReadOnlyDictionary<string, CatalogPinnedReference> ByPinnedAs { get; }
 
     private readonly IReadOnlyDictionary<string, IReadOnlyList<CatalogTaskCandidate>> _candidatesByTask;
@@ -193,18 +181,10 @@ internal sealed class CatalogVocabulary : ICatalogVocabulary
             kvp => (IReadOnlySet<string>)kvp.Value,
             StringComparer.OrdinalIgnoreCase);
 
-        // tasks.recommended map — already validated by ManifestStore so
-        // every entry here points at a known identifier + known contract.
-        RecommendedByTask = manifest.Tasks?.Recommended is { Count: > 0 } recs
-            ? new Dictionary<string, string>(recs, StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
         // Build the (task × candidate identifier) join. For each entry's
         // declared task contracts, every identifier the entry declares
-        // is a candidate. Marked `IsRecommended` when it matches
-        // `tasks.recommended[task]`. Sparse contracts (declared on an
-        // entry but never recommended anywhere) still surface as
-        // candidate rows so `system.tasks` shows what's available.
+        // is a candidate. `system.tasks` materialises one row per pair so
+        // users can see every available implementation of a contract.
         Dictionary<string, List<CatalogTaskCandidate>> candidatesByTask = new(StringComparer.OrdinalIgnoreCase);
         foreach (CatalogModel entry in manifest.Models)
         {
@@ -218,12 +198,9 @@ internal sealed class CatalogVocabulary : ICatalogVocabulary
                     list = [];
                     candidatesByTask[contract] = list;
                 }
-                string? recommended = RecommendedByTask.TryGetValue(contract, out string? r) ? r : null;
                 foreach (string identifier in identifiers)
                 {
-                    bool isRec = recommended is not null &&
-                        string.Equals(identifier, recommended, StringComparison.OrdinalIgnoreCase);
-                    list.Add(new CatalogTaskCandidate(contract, identifier, entry.Id, isRec));
+                    list.Add(new CatalogTaskCandidate(contract, identifier, entry.Id));
                 }
             }
         }

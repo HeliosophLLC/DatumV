@@ -159,7 +159,6 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
         return new CatalogManifest(
             SchemaVersion: 2,
             Licenses: new Dictionary<string, CatalogLicense>(),
-            Tiers: new CatalogTiers([], []),
             Models: [model]);
     }
 
@@ -221,7 +220,6 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
         return new CatalogManifest(
             SchemaVersion: 2,
             Licenses: new Dictionary<string, CatalogLicense>(),
-            Tiers: new CatalogTiers([], []),
             Models: [model]);
     }
 

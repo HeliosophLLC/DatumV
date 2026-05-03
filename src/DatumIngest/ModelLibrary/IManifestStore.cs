@@ -23,7 +23,7 @@ public interface IManifestStore
 
     // Reverse identifier→catalog index built once at load time from each
     // version's declared `models[]` arrays. Consumed by `system.models`,
-    // `system.tasks`, the `tasks.*` dispatcher, pre-flight, and the
-    // install-time cross-check. See <see cref="ICatalogVocabulary"/>.
+    // `system.tasks`, pre-flight, and the install-time cross-check.
+    // See <see cref="ICatalogVocabulary"/>.
     ICatalogVocabulary Vocabulary { get; }
 }

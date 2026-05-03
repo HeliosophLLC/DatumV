@@ -41,7 +41,6 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
         return new CatalogManifest(
             SchemaVersion: 2,
             Licenses: new Dictionary<string, CatalogLicense>(),
-            Tiers: new CatalogTiers([], []),
             Models: [entry]);
     }
 
@@ -379,7 +378,6 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
         CatalogManifest manifest = new(
             SchemaVersion: 2,
             Licenses: new Dictionary<string, CatalogLicense>(),
-            Tiers: new CatalogTiers([], []),
             Models: [entry]);
         ICatalogVocabulary vocab = new CatalogVocabulary(manifest);
         FunctionRegistry functions = new();

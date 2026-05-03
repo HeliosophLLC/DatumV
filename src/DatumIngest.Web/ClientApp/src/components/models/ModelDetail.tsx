@@ -1,8 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { ChevronDown, ChevronRight, Download, Loader2, RotateCcw, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, CircleCheck, Download, HardDrive, Loader2, RotateCcw, Trash2 } from 'lucide-react';
 import { isDrifted, modelsState, type CatalogModelSnapshot } from '@/state/models';
+import {
+  buildTaskFamilyMap,
+  familyAccentClass,
+} from '@/components/models/taskStyles';
+import { cn } from '@/lib/utils';
 import {
   activateVersion,
   computeEtaSeconds,
@@ -44,6 +49,10 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
   const drifted = isDrifted(model, models.activeVersions);
   const activeVersion = models.activeVersions[modelId];
   const latestVersion = model.versions?.[0]?.version;
+  // Name → family lookup so each task badge can pick up the right
+  // family-accent left border. Memoised against the (rarely-changing)
+  // task vocabulary so we don't rebuild it on every snapshot tick.
+  const taskFamilies = useMemo(() => buildTaskFamilyMap(models.tasks), [models.tasks]);
   // Python install sub-step. The venv-install step is model-scoped (keyed
   // by catalog id), so it appears only on the card that triggered it. The
   // uv-download + python-install steps are machine-scoped — surface them
@@ -56,17 +65,43 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
   return (
     <article className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 py-5">
       <header className="flex flex-col gap-2">
+        {!model.placeholder && (
+          <div className="flex items-center justify-between gap-3">
+            {/* Install-state indicator. Only renders when the entry is
+                actually installed or downloaded — other states leave the
+                left side empty and `justify-between` keeps the action
+                button anchored on the right. */}
+            {installState === 'installed' && !installing ? (
+              <div className="flex items-center gap-1 text-xs text-primary">
+                <CircleCheck className="size-3.5" />
+                <span>{t('card.installed')}</span>
+              </div>
+            ) : installState === 'downloaded' && !installing ? (
+              <div className="flex items-center gap-1 text-xs text-primary">
+                <HardDrive className="size-3.5" />
+                <span>{t('card.downloaded')}</span>
+              </div>
+            ) : (
+              <span />
+            )}
+            <DetailActions
+              modelId={modelId}
+              modelDisplayName={modelDisplayName}
+              placeholder={!!model.placeholder}
+              installed={installState === 'installed'}
+              downloaded={installState === 'downloaded'}
+              downloading={!!activeDownload}
+              installing={installing}
+              partialBytes={downloads.partials[modelId] ?? 0}
+              installStep={activeStep}
+            />
+          </div>
+        )}
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-xl font-medium">{modelDisplayName}</h2>
           <div className="flex shrink-0 gap-1.5">
             {model.placeholder && (
               <Badge variant="muted">{t('card.comingSoon')}</Badge>
-            )}
-            {!model.placeholder && installState === 'installed' && !installing && (
-              <Badge>{t('card.installed')}</Badge>
-            )}
-            {!model.placeholder && installState === 'downloaded' && !installing && (
-              <Badge variant="muted">{t('card.downloaded')}</Badge>
             )}
             {!model.placeholder && installing && (
               <Badge variant="muted">{t('card.installing')}</Badge>
@@ -100,11 +135,18 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
       </header>
 
       <div className="flex flex-wrap gap-1.5">
-        {(model.tasks ?? []).map((task) => (
-          <Badge key={task} variant="secondary">
-            {task}
-          </Badge>
-        ))}
+        {(model.tasks ?? []).map((task) => {
+          const family = taskFamilies.get(task.toLowerCase()) ?? '';
+          return (
+            <Badge
+              key={task}
+              variant="outline"
+              className={cn('border-l-6', familyAccentClass(family))}
+            >
+              {t(`tasks.${task}` as 'tasks.TextEmbedder', { defaultValue: task })}
+            </Badge>
+          );
+        })}
         {typeof model.approxSizeMb === 'number' && (
           <Badge variant="outline">
             {t('card.size', { size: model.approxSizeMb })}
@@ -134,18 +176,6 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
           {error}
         </p>
       )}
-
-      <DetailActions
-        modelId={modelId}
-        modelDisplayName={modelDisplayName}
-        placeholder={!!model.placeholder}
-        installed={installState === 'installed'}
-        downloaded={installState === 'downloaded'}
-        downloading={!!activeDownload}
-        installing={installing}
-        partialBytes={downloads.partials[modelId] ?? 0}
-        installStep={activeStep}
-      />
 
       <PreviousVersionsDisclosure
         model={model}

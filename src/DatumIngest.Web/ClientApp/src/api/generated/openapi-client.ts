@@ -1907,9 +1907,7 @@ export interface InstalledLlm {
 export interface CatalogManifest {
     schemaVersion?: number;
     licenses?: { [key: string]: CatalogLicense; };
-    tiers?: CatalogTiers;
     models?: CatalogModel[];
-    tasks?: CatalogTaskRecommendations | undefined;
 }
 
 export interface CatalogLicense {
@@ -1919,11 +1917,6 @@ export interface CatalogLicense {
     textFile?: string;
     summary?: string;
     requiresAcceptance?: boolean;
-}
-
-export interface CatalogTiers {
-    starter?: string[];
-    recommended?: string[];
 }
 
 export interface CatalogModel {
@@ -2004,10 +1997,6 @@ export interface CatalogModelSignature {
     outputKind?: string;
     isDeterministic?: boolean;
     optionalArgKinds?: string[] | undefined;
-}
-
-export interface CatalogTaskRecommendations {
-    recommended?: { [key: string]: string; };
 }
 
 export interface CatalogTaskInfo {

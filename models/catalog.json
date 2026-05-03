@@ -136,28 +136,6 @@
       "requiresAcceptance": true
     }
   },
-  "tiers": {
-    "starter": [
-      "all-minilm-l6-v2",
-      "qwen2.5-coder-1.5b-instruct-gguf",
-      "toxic-bert",
-      "twitter-roberta-sentiment"
-    ],
-    "recommended": [
-      "all-minilm-l6-v2",
-      "bge-small-en-v1.5",
-      "bge-reranker-base",
-      "deberta-v3-base-zeroshot-v2",
-      "twitter-roberta-sentiment",
-      "bert-base-ner",
-      "toxic-bert",
-      "roberta-squad2",
-      "qwen2.5-coder-1.5b-instruct-gguf",
-      "florence-2-base-ft-quantized",
-      "yolox-s",
-      "kokoro-v1.0"
-    ]
-  },
   "models": [
     {
       "id": "all-minilm-l6-v2",
@@ -4437,8 +4415,5 @@
       ],
       "approxSizeMb": 600
     }
-  ],
-  "tasks": {
-    "recommended": {}
-  }
+  ]
 }

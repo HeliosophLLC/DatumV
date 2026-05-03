@@ -111,10 +111,8 @@ internal sealed class ManifestStore : IManifestStore
                 "Regenerate or upgrade the manifest.");
         }
 
-        // Build the union of declared model identifiers across every
-        // entry's versions[].models. Used by tasks.recommended
-        // validation below: every recommended identifier must appear in
-        // some entry's declared set.
+        // Tracks every declared identifier so cross-entry collisions
+        // surface at load.
         Dictionary<string, CatalogModel> declaredIdentifierOwner = new(StringComparer.OrdinalIgnoreCase);
 
         // Tracks every materialised pinnedAs string across the whole
@@ -297,40 +295,6 @@ internal sealed class ManifestStore : IManifestStore
             }
         }
 
-        // tasks.recommended validation: every recommended identifier must
-        // appear in some entry's declared versions[].models, the owning
-        // entry must declare the corresponding task contract, and the
-        // entry must not be entry-level deprecated.
-        if (manifest.Tasks?.Recommended is { Count: > 0 } recs)
-        {
-            foreach ((string taskName, string modelIdentifier) in recs)
-            {
-                if (TaskTypeRegistry.TryGet(taskName) is null)
-                {
-                    throw new InvalidOperationException(
-                        $"tasks.recommended in {manifestPath} maps task '{taskName}' (which is not a TaskTypeRegistry contract) " +
-                        $"to model '{modelIdentifier}'. Drop the row or rename the task.");
-                }
-                if (!declaredIdentifierOwner.TryGetValue(modelIdentifier, out CatalogModel? owner))
-                {
-                    throw new InvalidOperationException(
-                        $"tasks.recommended['{taskName}'] = '{modelIdentifier}' in {manifestPath} but no catalog entry " +
-                        "declares that model identifier in any versions[].models array.");
-                }
-                if (owner.Deprecated)
-                {
-                    throw new InvalidOperationException(
-                        $"tasks.recommended['{taskName}'] = '{modelIdentifier}' in {manifestPath} resolves to deprecated " +
-                        $"catalog entry '{owner.Id}'. Recommend a non-deprecated alternative.");
-                }
-                if (!owner.Tasks.Any(t => string.Equals(t, taskName, StringComparison.OrdinalIgnoreCase)))
-                {
-                    throw new InvalidOperationException(
-                        $"tasks.recommended['{taskName}'] = '{modelIdentifier}' in {manifestPath} resolves to catalog entry " +
-                        $"'{owner.Id}' but that entry's tasks[] does not include '{taskName}'.");
-                }
-            }
-        }
     }
 
     // Resolution order:

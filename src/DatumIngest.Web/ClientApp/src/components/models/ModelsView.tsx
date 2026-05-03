@@ -1,60 +1,111 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { ArrowUpCircle, ChevronDown, Loader2, Search, X } from 'lucide-react';
+import {
+  ArrowUpCircle,
+  CircleCheck,
+  CircleDashed,
+  HardDrive,
+  Loader2,
+  Search,
+  X,
+} from 'lucide-react';
 import {
   clearFilters,
-  clearSelectedTasks,
   driftedCount,
   filterModels,
   groupTasksByFamily,
+  installStateCounts,
   isDrifted,
   loadModelsCatalog,
   modelsState,
   setQuery,
   setSelectedId,
-  setTier,
+  setUpdatesOnly,
+  tasksWithAssignedModels,
+  toggleInstallState,
   toggleTask,
   type CatalogTaskInfoSnapshot,
-  type TierFilter,
 } from '@/state/models';
+import type { ModelInstallState } from '@/api/generated/openapi-client';
 import type { CatalogModelSnapshot } from '@/state/models';
 import { downloadsState, refreshDownloads } from '@/state/downloads';
 import { ModelDetail } from '@/components/models/ModelDetail';
+import {
+  buildTaskFamilyMap,
+  familyAccentClass,
+  familyHoverBackgroundClass,
+  familySelectedBackgroundClass,
+  taskIcon,
+} from '@/components/models/taskStyles';
 import { Button } from '@/components/ui/button';
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '@/components/ui/resizable';
 import { cn } from '@/lib/utils';
 
-// VS Code Extensions–style layout: search box + tier tabs in the header,
-// compact list of matches on the left, full detail pane for the selected
-// model on the right. A collapsible task-filter panel sits below the tier
-// row; it's faceted by family so users can narrow to a category (e.g.
-// Image → ObjectDetector) without scrolling a flat 60+-entry list.
-
-const TIER_OPTIONS: readonly TierFilter[] = ['all', 'starter', 'recommended', 'updates'];
+// VS Code Extensions–style layout: search box + a single "Updates" toggle
+// in the header (visible only when something is drifted), then a three-
+// pane resizable body — task filter on the far left, list of matches in
+// the middle, full detail pane on the right.
 
 export function ModelsView() {
   const { t } = useTranslation('models');
-  const { manifest, tasks, activeVersions, loading, error, tier, query, selectedTasks, selectedId } =
-    useSnapshot(modelsState);
+  const {
+    manifest,
+    tasks,
+    activeVersions,
+    loading,
+    error,
+    updatesOnly,
+    installStates,
+    query,
+    selectedTasks,
+    selectedId,
+  } = useSnapshot(modelsState);
+  const downloads = useSnapshot(downloadsState);
   const driftCount = useMemo(
     () => driftedCount(manifest, activeVersions),
     [manifest, activeVersions],
   );
-  // Auto-open the task panel when any task is selected (e.g. after a page
-  // reload or a deep-link), so the user can see what's filtering them.
-  const [tasksPanelOpen, setTasksPanelOpen] = useState(false);
-  useEffect(() => {
-    if (selectedTasks.size > 0) setTasksPanelOpen(true);
-  }, [selectedTasks.size]);
+  const stateCounts = useMemo(
+    () => installStateCounts(manifest, downloads.state),
+    [manifest, downloads.state],
+  );
 
   useEffect(() => {
     void loadModelsCatalog();
     void refreshDownloads();
   }, []);
 
+  // Only surface tasks that at least one model actually claims — an
+  // unassigned task in the sidebar would empty the list when clicked.
+  const visibleTasks = useMemo(
+    () => (tasks && manifest ? tasksWithAssignedModels(tasks, manifest) : []),
+    [tasks, manifest],
+  );
+
+  // Name → family lookup so each row's chips can pick up the family-
+  // accent left border. Built once over the task vocabulary so we don't
+  // walk it per row.
+  const taskFamilies = useMemo(() => buildTaskFamilyMap(tasks), [tasks]);
+
   const filtered = useMemo(
-    () => (manifest ? filterModels(manifest, tier, query, selectedTasks, activeVersions) : []),
-    [manifest, tier, query, selectedTasks, activeVersions],
+    () =>
+      manifest
+        ? filterModels(
+            manifest,
+            updatesOnly,
+            installStates,
+            downloads.state,
+            query,
+            selectedTasks,
+            activeVersions,
+          )
+        : [],
+    [manifest, updatesOnly, installStates, downloads.state, query, selectedTasks, activeVersions],
   );
 
   // Auto-select the first match once the manifest lands. Don't override an
@@ -92,103 +143,123 @@ export function ModelsView() {
     );
   }
 
-  const filtersActive = tier !== 'all' || query.length > 0 || selectedTasks.size > 0;
+  const filtersActive =
+    updatesOnly || installStates.size > 0 || query.length > 0 || selectedTasks.size > 0;
 
   return (
     <div className="bg-editor flex h-full flex-col overflow-hidden">
       <header className="flex flex-col gap-2 border-b px-4 py-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-sm font-medium">{t('title')}</h1>
-          <span className="text-muted-foreground text-xs">
-            {t('results', { count: filtered.length })}
-          </span>
-        </div>
-
-        <SearchInput value={query} onChange={setQuery} placeholder={t('search.placeholder')} />
-
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1">
-            {TIER_OPTIONS.map((opt) => {
-              // The `updates` tab is computed from runtime drift rather
-              // than a manifest tier set: render it disabled (greyed,
-              // non-clickable) when nothing is drifted, and append the
-              // count to the label when something is. Selecting it while
-              // drift exists shows only the drifted entries.
-              const isUpdates = opt === 'updates';
-              const disabled = isUpdates && driftCount === 0;
-              const label = isUpdates
-                ? t('filters.tierUpdatesWithCount', { count: driftCount })
-                : t(`filters.tier${capitalize(opt)}` as 'filters.tierAll');
-              return (
-                <TierTab
-                  key={opt}
-                  active={tier === opt}
-                  disabled={disabled}
-                  onClick={() => setTier(opt)}
-                >
-                  {label}
-                </TierTab>
-              );
-            })}
-            <TasksToggle
-              open={tasksPanelOpen}
-              onToggle={() => setTasksPanelOpen((v) => !v)}
-              selectedCount={selectedTasks.size}
-              label={
-                selectedTasks.size > 0
-                  ? t('filters.tasksToggleWithCount', { count: selectedTasks.size })
-                  : t('filters.tasksToggle')
-              }
+        <div className="flex items-center gap-2">
+          <div className="flex-1">
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder={t('search.placeholder', { count: filtered.length })}
             />
           </div>
-          {filtersActive && (
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              {t('filters.clear')}
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={clearFilters}
+            disabled={!filtersActive}
+          >
+            {t('filters.clear')}
+          </Button>
         </div>
 
-        {tasksPanelOpen && tasks && (
-          <TaskFilterPanel
-            tasks={tasks}
-            selected={selectedTasks}
-            onToggle={toggleTask}
-            onClear={clearSelectedTasks}
+        <div className="flex items-center gap-1">
+          {/* Updates toggle: always rendered so the row's layout
+              stays stable, but disabled when nothing is drifted. */}
+          <UpdatesToggle
+            active={updatesOnly}
+            disabled={driftCount === 0}
+            onToggle={() => setUpdatesOnly(!updatesOnly)}
+            label={t('filters.updatesWithCount', { count: driftCount })}
           />
-        )}
+          <InstallStateToggle
+            state="installed"
+            active={installStates.has('installed')}
+            count={stateCounts.installed}
+            label={t('filters.installedWithCount', { count: stateCounts.installed })}
+          />
+          <InstallStateToggle
+            state="downloaded"
+            active={installStates.has('downloaded')}
+            count={stateCounts.downloaded}
+            label={t('filters.downloadedWithCount', { count: stateCounts.downloaded })}
+          />
+          {/* Partial is uncommon — collapse it out of the row entirely
+              when no model is in that state so the strip stays tidy. */}
+          {stateCounts.partial > 0 && (
+            <InstallStateToggle
+              state="partial"
+              active={installStates.has('partial')}
+              count={stateCounts.partial}
+              label={t('filters.partialWithCount', { count: stateCounts.partial })}
+            />
+          )}
+        </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-80 shrink-0 overflow-y-auto border-r">
-          {filtered.length === 0 ? (
-            <p className="text-muted-foreground p-6 text-center text-sm">
-              {query.length > 0 ? t('noMatches') : t('empty')}
-            </p>
-          ) : (
-            <ul className="flex flex-col">
-              {filtered.map((model) => (
-                <ModelListItem
-                  key={model.id}
-                  model={model}
-                  active={model.id === selectedId}
-                  drifted={isDrifted(model, activeVersions)}
-                  onSelect={() => model.id && setSelectedId(model.id)}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {selectedModel ? (
-            <ModelDetail model={selectedModel} />
-          ) : (
-            <p className="text-muted-foreground flex h-full items-center justify-center px-6 text-center text-sm">
-              {t('selectPrompt')}
-            </p>
-          )}
-        </div>
-      </div>
+      <ResizablePanelGroup orientation="horizontal" className="flex-1">
+        <ResizablePanel
+          id="models-tasks"
+          defaultSize="18%"
+          minSize="10%"
+          className="flex flex-col overflow-hidden"
+        >
+          <TaskSidebar
+            tasks={visibleTasks}
+            selected={selectedTasks}
+            onToggle={toggleTask}
+          />
+        </ResizablePanel>
+        <ResizableHandle />
+        <ResizablePanel
+          id="models-list"
+          defaultSize="25%"
+          minSize="15%"
+          className="flex flex-col overflow-hidden"
+        >
+          <div className="flex-1 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="text-muted-foreground p-6 text-center text-sm">
+                {query.length > 0 ? t('noMatches') : t('empty')}
+              </p>
+            ) : (
+              <ul className="flex flex-col">
+                {filtered.map((model) => (
+                  <ModelListItem
+                    key={model.id}
+                    model={model}
+                    active={model.id === selectedId}
+                    drifted={isDrifted(model, activeVersions)}
+                    taskFamilies={taskFamilies}
+                    onSelect={() => model.id && setSelectedId(model.id)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </ResizablePanel>
+        <ResizableHandle />
+        <ResizablePanel
+          id="models-detail"
+          defaultSize="57%"
+          minSize="25%"
+          className="flex flex-col overflow-hidden"
+        >
+          <div className="flex-1 overflow-y-auto">
+            {selectedModel ? (
+              <ModelDetail model={selectedModel} />
+            ) : (
+              <p className="text-muted-foreground flex h-full items-center justify-center px-6 text-center text-sm">
+                {t('selectPrompt')}
+              </p>
+            )}
+          </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }
@@ -209,8 +280,14 @@ function SearchInput({
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' && value.length > 0) {
+            e.preventDefault();
+            onChange('');
+          }
+        }}
         placeholder={placeholder}
-        className="placeholder:text-muted-foreground w-full bg-transparent py-1 pl-7 pr-7 text-xs outline-none"
+        className="placeholder:text-muted-foreground placeholder:italic w-full bg-transparent py-1 pl-7 pr-7 text-xs outline-none"
       />
       {value.length > 0 && (
         <button
@@ -226,125 +303,142 @@ function SearchInput({
   );
 }
 
-function TierTab({
+function UpdatesToggle({
   active,
   disabled = false,
-  onClick,
-  children,
+  onToggle,
+  label,
 }: {
   active: boolean;
   disabled?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        'rounded-xs px-2 py-0.5 text-xs transition-colors',
-        disabled
-          ? 'text-muted-foreground/40 cursor-not-allowed'
-          : active
-            ? 'bg-primary/15 text-primary'
-            : 'text-muted-foreground hover:bg-primary/10 hover:text-primary cursor-pointer',
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function TasksToggle({
-  open,
-  onToggle,
-  selectedCount,
-  label,
-}: {
-  open: boolean;
   onToggle: () => void;
-  selectedCount: number;
   label: string;
 }) {
-  // Visual sibling to <TierTab> — same chrome, plus a chevron that rotates
-  // when the panel is open. When tasks are selected, the button reads
-  // `Task (3)` and the count itself is the primary signal that filters
-  // are active even when the panel is collapsed.
   return (
     <button
       type="button"
       onClick={onToggle}
-      aria-expanded={open}
+      disabled={disabled}
+      aria-pressed={active}
       className={cn(
-        'flex items-center gap-1 rounded-xs px-2 py-0.5 text-xs transition-colors',
-        selectedCount > 0
-          ? 'bg-primary/15 text-primary'
-          : 'text-muted-foreground hover:bg-primary/10 hover:text-primary',
+        'border flex items-center gap-1 rounded-xs px-2 py-1 text-xs transition-colors select-none',
+        disabled
+          ? 'text-muted-foreground/40 cursor-not-allowed'
+          : active
+            ? 'bg-primary/15 cursor-pointer'
+            : 'text-muted-foreground hover:bg-primary/10 cursor-pointer',
       )}
     >
-      <span>{label}</span>
-      <ChevronDown
-        className={cn('size-3 transition-transform', open && 'rotate-180')}
-      />
+      <ArrowUpCircle className="size-3" />
+      {label}
     </button>
   );
 }
 
-function TaskFilterPanel({
+function InstallStateToggle({
+  state,
+  active,
+  count,
+  label,
+}: {
+  state: ModelInstallState;
+  active: boolean;
+  count: number;
+  label: string;
+}) {
+  // Same shape as UpdatesToggle, with the disabled-when-zero pattern so
+  // the toggle row's layout stays stable as the user installs / removes
+  // models. The Partial toggle is hidden by the caller when count === 0
+  // (uncommon state) so it doesn't follow this disabled-shell pattern.
+  const disabled = count === 0;
+  const Icon =
+    state === 'installed' ? CircleCheck
+    : state === 'downloaded' ? HardDrive
+    : state === 'partial' ? CircleDashed
+    : null;
+  return (
+    <button
+      type="button"
+      onClick={() => toggleInstallState(state)}
+      disabled={disabled}
+      aria-pressed={active}
+      className={cn(
+        'border flex items-center gap-1 rounded-xs px-2 py-1 text-xs transition-colors select-none',
+        disabled
+          ? 'text-muted-foreground/40 cursor-not-allowed'
+          : active
+            ? 'bg-primary/15 cursor-pointer'
+            : 'text-muted-foreground hover:bg-primary/10 cursor-pointer',
+      )}
+    >
+      {Icon && <Icon className="size-3" />}
+      {label}
+    </button>
+  );
+}
+
+function TaskSidebar({
   tasks,
   selected,
   onToggle,
-  onClear,
 }: {
   tasks: readonly CatalogTaskInfoSnapshot[];
   selected: ReadonlySet<string>;
   onToggle: (name: string) => void;
-  onClear: () => void;
 }) {
   const { t } = useTranslation('models');
   const grouped = useMemo(() => groupTasksByFamily(tasks), [tasks]);
 
   return (
-    <div className="border-input bg-muted/30 flex flex-col gap-2 rounded-xs border px-3 py-2">
-      {grouped.map((group) => (
-        <div key={group.family} className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-[10px] uppercase tracking-wide">
-            {familyLabel(t, group.family)}
-          </span>
-          <div className="flex flex-wrap gap-1">
-            {group.tasks.map((task) => {
-              const name = task.name ?? '';
-              if (name.length === 0) return null;
-              const isSelected = selected.has(name);
-              return (
-                <button
-                  key={name}
-                  type="button"
-                  onClick={() => onToggle(name)}
-                  title={task.description ?? undefined}
-                  aria-pressed={isSelected}
-                  className={cn(
-                    'rounded-xs px-1.5 py-0.5 text-[11px] transition-colors',
-                    isSelected
-                      ? 'bg-primary/20 text-primary'
-                      : 'text-muted-foreground hover:bg-primary/10 hover:text-primary',
-                  )}
-                >
-                  {name}
-                </button>
-              );
-            })}
+    <div className="flex h-full flex-col overflow-hidden border-r">
+      <div className="flex-1 overflow-y-auto px-3 py-2">
+        {grouped.length === 0 ? (
+          <p className="text-muted-foreground text-xs">{t('filters.tasksEmpty')}</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {grouped.map((group) => (
+              <div
+                key={group.family}
+                className={cn(
+                  'flex flex-col gap-1 select-none',
+                )}
+              >
+                <span className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                  {familyLabel(t, group.family)}
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {group.tasks.map((task) => {
+                    const name = task.name ?? '';
+                    if (name.length === 0) return null;
+                    const isSelected = selected.has(name);
+                    return (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => onToggle(name)}
+                        title={task.description ?? undefined}
+                        aria-pressed={isSelected}
+                        className={cn(
+                          'border border-l-6 rounded-xs px-2 py-1 text-[11px] transition-colors text-left',
+                          familyAccentClass(group.family),
+                          isSelected
+                            ? familySelectedBackgroundClass(group.family)
+                            : cn(
+                                'cursor-pointer',
+                                familyHoverBackgroundClass(group.family),
+                              ),
+                        )}
+                      >
+                        {taskLabel(t, name)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
-      ))}
-      {selected.size > 0 && (
-        <div className="flex justify-end pt-1">
-          <Button variant="ghost" size="sm" onClick={onClear}>
-            {t('filters.tasksClear')}
-          </Button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -354,29 +448,35 @@ function familyLabel(
   family: string,
 ): string {
   // PascalCase family strings (from TaskFamily enum) map to localized
-  // section headers. Unknown families (e.g. server added a new one before
-  // the front-end caught up) fall through to the raw string so nothing
-  // disappears silently.
-  switch (family) {
-    case 'Text': return t('filters.familyText');
-    case 'Image': return t('filters.familyImage');
-    case 'Audio': return t('filters.familyAudio');
-    case 'Video': return t('filters.familyVideo');
-    case 'Multimodal': return t('filters.familyMultimodal');
-    case 'Structured': return t('filters.familyStructured');
-    default: return family;
-  }
+  // section headers via the `filters.family.*` namespace. Unknown families
+  // (server added a new one before the front-end caught up) fall through
+  // to the raw string so nothing disappears silently.
+  return t(`filters.family.${family}` as 'filters.family.ComputerVision', {
+    defaultValue: family,
+  });
+}
+
+function taskLabel(
+  t: ReturnType<typeof useTranslation<'models'>>['t'],
+  name: string,
+): string {
+  // Same shape as familyLabel: PascalCase contract name → human-friendly
+  // localized label; unknown task names trail back to the raw identifier
+  // so a newly-added contract still shows up in the UI.
+  return t(`tasks.${name}` as 'tasks.TextEmbedder', { defaultValue: name });
 }
 
 function ModelListItem({
   model,
   active,
   drifted,
+  taskFamilies,
   onSelect,
 }: {
   model: CatalogModelSnapshot;
   active: boolean;
   drifted: boolean;
+  taskFamilies: ReadonlyMap<string, string>;
   onSelect: () => void;
 }) {
   const { t } = useTranslation('models');
@@ -386,18 +486,20 @@ function ModelListItem({
   const activeDownload = downloads.active[modelId];
   const installing = downloads.installing[modelId] === true;
 
-  // Status indicator: a small dot whose color encodes install state.
-  // Mirrors VS Code's "installed" green check / "outdated" yellow / "none"
-  // but condensed into a single dot so the row stays scannable.
-  const dotClass = activeDownload || installing
-    ? 'bg-primary animate-pulse'
-    : installState === 'installed'
-    ? 'bg-emerald-500'
-    : installState === 'downloaded'
-    ? 'bg-amber-500'
-    : installState === 'partial'
-    ? 'bg-muted-foreground'
-    : 'bg-transparent';
+  // Status indicator: a small icon whose silhouette encodes install
+  // state. Colored install dots competed with the family-accent colors
+  // on the task chips, so we read state by shape and keep all icons in
+  // a muted hue.
+  const status: { Icon: typeof Loader2; label: string; spin: boolean } | null =
+    activeDownload || installing
+      ? { Icon: Loader2, label: t('card.installing'), spin: true }
+      : installState === 'installed'
+      ? { Icon: CircleCheck, label: t('card.installed'), spin: false }
+      : installState === 'downloaded'
+      ? { Icon: HardDrive, label: t('card.downloaded'), spin: false }
+      : installState === 'partial'
+      ? { Icon: CircleDashed, label: t('card.partial'), spin: false }
+      : null;
 
   return (
     <li>
@@ -413,7 +515,19 @@ function ModelListItem({
         )}
       >
         <div className="flex w-full min-w-0 items-center gap-2">
-          <span className={cn('size-1.5 shrink-0 rounded-full', dotClass)} />
+          {status ? (
+            <status.Icon
+              className={cn(
+                'text-muted-foreground size-3 shrink-0',
+                status.spin && 'animate-spin',
+              )}
+              aria-label={status.label}
+            >
+              <title>{status.label}</title>
+            </status.Icon>
+          ) : (
+            <span className="size-3 shrink-0" />
+          )}
           <span className="min-w-0 flex-1 truncate text-xs font-medium">
             {model.displayName}
           </span>
@@ -426,14 +540,33 @@ function ModelListItem({
             </ArrowUpCircle>
           )}
         </div>
-        <span className="text-muted-foreground line-clamp-2 w-full min-w-0 break-words pl-3.5 text-xs">
+        <span className="text-muted-foreground line-clamp-2 w-full min-w-0 break-words pl-5 text-xs">
           {model.summary ?? model.description}
         </span>
+        {(model.tasks ?? []).length > 0 && (
+          <div className="flex w-full min-w-0 flex-nowrap gap-1 overflow-hidden pl-5">
+            {(model.tasks ?? []).map((task) => {
+              const family = taskFamilies.get(task.toLowerCase()) ?? '';
+              const Icon = taskIcon(task);
+              const label = taskLabel(t, task);
+              return (
+                <span
+                  key={task}
+                  title={label}
+                  aria-label={label}
+                  className={cn(
+                    'flex shrink-0 items-center justify-center rounded-xs border border-l-4 px-1 py-0.5 text-muted-foreground',
+                    familyAccentClass(family),
+                  )}
+                >
+                  <Icon className="size-3" />
+                </span>
+              );
+            })}
+          </div>
+        )}
       </button>
     </li>
   );
 }
 
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1);
-}

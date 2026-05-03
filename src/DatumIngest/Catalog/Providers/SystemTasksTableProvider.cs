@@ -10,16 +10,15 @@ using DatumIngest.Pooling;
 namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
-/// Virtual table surfacing the catalog's task-dispatch state at
-/// <c>system.tasks</c>. One row per (task contract × model identifier
-/// implementing it). Powers the answer to "what does
-/// <c>tasks.depth_metric(image)</c> actually resolve to right now, and
-/// what alternatives are available?":
+/// Virtual table surfacing every model declared for each task contract
+/// at <c>system.tasks</c>. One row per (task contract × model identifier
+/// implementing it). Lets users answer "what implementations of
+/// DepthEstimatorMetric does the catalog ship?":
 /// <code>
-/// SELECT task, model, recommended, installed
+/// SELECT task, model, installed
 /// FROM system.tasks
 /// WHERE task = 'DepthEstimatorMetric'
-/// ORDER BY recommended DESC, installed DESC, model;
+/// ORDER BY installed DESC, model;
 /// </code>
 /// </summary>
 /// <remarks>
@@ -27,15 +26,14 @@ namespace DatumIngest.Catalog.Providers;
 /// Distinct from <see cref="TaskContractsTableProvider"/>
 /// (<c>system.task_contracts</c>) — that table is the static type
 /// interface registry (one row per <see cref="TaskTypeRegistry"/>
-/// contract); this one is the dynamic dispatch view (one row per
-/// candidate model implementing each contract).
+/// contract); this one is the candidate view (one row per
+/// catalog-declared model implementing each contract).
 /// </para>
 /// <para>
-/// Schema (4 columns):
+/// Schema (3 columns):
 /// <list type="table">
 ///   <item><term>task</term><description>Canonical contract identifier (matches <c>system.task_contracts.name</c>).</description></item>
 ///   <item><term>model</term><description>Candidate model identifier the catalog declares implements the contract.</description></item>
-///   <item><term>recommended</term><description><see langword="true"/> when this row matches <c>catalog.tasks.recommended[task]</c> — the dispatcher target for <c>tasks.&lt;task&gt;(...)</c>.</description></item>
 ///   <item><term>installed</term><description><see langword="true"/> when the model identifier currently has a live registration in <see cref="ModelCatalog"/> or <see cref="ModelRegistry"/>. Mirrors <c>system.models.residency = 'callable'</c>.</description></item>
 /// </list>
 /// </para>
@@ -138,8 +136,7 @@ public sealed class SystemTasksTableProvider : NonSeekableTableProviderBase
                 DataValue[] cells = Pool.RentDataValues(_schema.Columns.Count);
                 cells[0] = DataValue.FromString(cand.Task, batch.Arena);
                 cells[1] = DataValue.FromString(cand.ModelIdentifier, batch.Arena);
-                cells[2] = DataValue.FromBoolean(cand.IsRecommended);
-                cells[3] = DataValue.FromBoolean(callable.Contains(cand.ModelIdentifier));
+                cells[2] = DataValue.FromBoolean(callable.Contains(cand.ModelIdentifier));
                 batch.Add(cells);
 
                 if (batch.IsFull) { yield return batch; batch = null; }
@@ -153,9 +150,8 @@ public sealed class SystemTasksTableProvider : NonSeekableTableProviderBase
 
     private static Schema BuildSchema() => new(
     [
-        new ColumnInfo("task",        DataKind.String,  nullable: false),
-        new ColumnInfo("model",       DataKind.String,  nullable: false),
-        new ColumnInfo("recommended", DataKind.Boolean, nullable: false),
-        new ColumnInfo("installed",   DataKind.Boolean, nullable: false),
+        new ColumnInfo("task",      DataKind.String,  nullable: false),
+        new ColumnInfo("model",     DataKind.String,  nullable: false),
+        new ColumnInfo("installed", DataKind.Boolean, nullable: false),
     ]);
 }

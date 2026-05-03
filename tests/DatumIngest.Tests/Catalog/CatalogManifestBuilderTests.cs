@@ -220,7 +220,6 @@ public sealed class CatalogManifestBuilderTests : ServiceTestBase
         CatalogManifest manifest = new(
             SchemaVersion: 2,
             Licenses: new Dictionary<string, CatalogLicense>(),
-            Tiers: new CatalogTiers([], []),
             Models: [entry]);
         catalog.CatalogVocabulary = new CatalogVocabulary(manifest);
 

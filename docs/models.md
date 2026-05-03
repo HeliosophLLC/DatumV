@@ -189,15 +189,6 @@ models/
 render the acceptance modal — the license text ships with the binary so
 acceptance works offline.
 
-**`tiers`** — named bundles for one-click multi-model installs.
-
-```json
-"tiers": {
-  "starter":     ["all-minilm-l6-v2", "phi-3.5-mini-instruct-gguf", "toxic-bert"],
-  "recommended": ["all-minilm-l6-v2", "bge-small-en-v1.5", "bge-reranker-base", ...]
-}
-```
-
 **`models`** — the model entries. Each one:
 
 ```json
@@ -391,9 +382,6 @@ For each upload:
 4. If the source repo doesn't exist yet (Heliosoph upload pending),
    mark the entry `"placeholder": true`. The installer will refuse to
    download it until the flag is removed.
-5. Optionally add the new model id to `tiers.starter` or
-   `tiers.recommended` if it belongs in a bundle.
-
 The manifest is loaded once at app startup. Restart the host process
 after editing `catalog.json`.
 

@@ -5,9 +5,9 @@ using Microsoft.AspNetCore.Mvc;
 namespace DatumIngest.Web.Api;
 
 // Lightweight DTO describing one task contract for the front-end filter UI.
-// Family is stringified (e.g. "Text") so the JSON wire form matches the
-// `family` column of system.task_contracts and the locale-file keys
-// (`families.text`, …) on the client.
+// Family is stringified (e.g. "ComputerVision") so the JSON wire form
+// matches the `family` column of system.task_contracts and the locale-file
+// keys (`filters.family.computerVision`, …) on the client.
 public sealed record CatalogTaskInfo(
     string Name,
     string Family,
