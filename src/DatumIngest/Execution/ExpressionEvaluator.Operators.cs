@@ -339,7 +339,9 @@ public sealed partial class ExpressionEvaluator
     /// </summary>
     private static int CompareDataValues(DataValue left, DataValue right, EvaluationFrame frame)
     {
-        return DataValueComparer.Compare(left, frame.Source, right, frame.Target);
+        return DataValueComparer.Compare(
+            left, frame.Source, frame.SidecarRegistry,
+            right, frame.Target, frame.SidecarRegistry);
     }
 
     /// <summary>
