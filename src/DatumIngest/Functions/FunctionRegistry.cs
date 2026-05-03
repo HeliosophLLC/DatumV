@@ -1015,8 +1015,6 @@ public sealed class FunctionRegistry
         // ONNX
         registry.RegisterScalar<InferFunction>();
         registry.RegisterScalar<InferOutputsFunction>();
-        registry.RegisterScalar<DecodeSeq2SeqFunction>();
-        registry.RegisterScalar<DecodeDecoderOnlyFunction>();
 
         // LlamaSharp — GGUF text generation. ModelBody-scoped scalars
         // that dispatch into a LlamaSharpSession resolved from the
@@ -1025,6 +1023,8 @@ public sealed class FunctionRegistry
         // ChatCompleter on Array<ChatMessage>.
         registry.RegisterScalar<Scalar.Vector.LlamaGenerateFunction>();
         registry.RegisterScalar<Scalar.Vector.LlamaChatFunction>();
+        registry.RegisterScalar<Scalar.Vector.DecodeSeq2SeqFunction>();
+        registry.RegisterScalar<Scalar.Vector.DecodeDecoderOnlyFunction>();
 
         // ── Table-valued ──────────────────────────────────────────────────
         // UNNEST retired pending the reference-type-array consolidation; will be
