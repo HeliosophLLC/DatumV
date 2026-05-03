@@ -65,9 +65,7 @@ public class ArrayAggregateTests : ServiceTestBase
     [Fact]
     public async Task Name_ReturnsArrayAgg()
     {
-        ArrayAggregateFunction function = new();
-
-        Assert.Equal("ARRAY_AGG", function.Name);
+        Assert.Equal("ARRAY_AGG", ArrayAggregateFunction.Name);
     }
 
     // ─────────────── REGISTRY ───────────────

@@ -1,4 +1,5 @@
 using DatumIngest.Functions.Image;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using SkiaSharp;
 
@@ -20,10 +21,35 @@ namespace DatumIngest.Functions.Aggregates;
 /// finalisation. Output is PNG-encoded with width/height/channels stamped
 /// inline via <see cref="ImageDataValueFactory.FromBitmap"/>.
 /// </remarks>
-public sealed class ImageStackAggregateFunction : IAggregateFunction
+public sealed class ImageStackAggregateFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
+    private static readonly string[] AxisValues = ["horizontal", "vertical"];
+
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "image_stack";
+
     /// <inheritdoc/>
-    public string Name => "image_stack";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Concatenates images in a group along 'horizontal' or 'vertical' axis; supports WITHIN GROUP (ORDER BY ...) for stack order.";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("image", DataKindMatcher.Exact(DataKind.Image)),
+                new ParameterSpec("axis",  DataKindMatcher.StringEnum(AxisValues)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
+    ];
 
     /// <inheritdoc/>
     public WithinGroupSemantics WithinGroupSemantics => WithinGroupSemantics.SortModifier;

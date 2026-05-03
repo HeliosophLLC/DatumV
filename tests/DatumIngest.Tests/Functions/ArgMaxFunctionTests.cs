@@ -16,7 +16,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_ReturnsValueAtMaxKey()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         // (value, key): want value where key is largest
@@ -30,7 +30,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMin_ReturnsValueAtMinKey()
     {
-        ArgMaxFunction function = new(findMaximum: false, "ARG_MIN");
+        ArgMinFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         accumulator.Accumulate([DataValue.FromString("apple"), DataValue.FromFloat32(10f)], in _testFrame);
@@ -43,7 +43,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_SkipsNullKeys()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         accumulator.Accumulate([DataValue.FromString("apple"), DataValue.Null(DataKind.Float32)], in _testFrame);
@@ -56,7 +56,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_AllNullKeys_ReturnsNull()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         accumulator.Accumulate([DataValue.FromString("apple"), DataValue.Null(DataKind.Float32)], in _testFrame);
@@ -68,7 +68,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_SingleRow_ReturnsThatValue()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         accumulator.Accumulate([DataValue.FromString("only"), DataValue.FromFloat32(42f)], in _testFrame);
@@ -79,7 +79,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_StringKeys()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         accumulator.Accumulate([DataValue.FromFloat32(1f), DataValue.FromString("alpha")], in _testFrame);
@@ -93,7 +93,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_TieBreaking_FirstEncounteredWins()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         accumulator.Accumulate([DataValue.FromString("first"), DataValue.FromFloat32(100f)], in _testFrame);
@@ -106,7 +106,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_NullValue_PreservedWhenKeyIsMax()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         accumulator.Accumulate([DataValue.FromString("apple"), DataValue.FromFloat32(10f)], in _testFrame);
@@ -119,7 +119,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_Merge_TakesBetterPartition()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
         IAggregateAccumulator left = function.CreateAccumulator();
         IAggregateAccumulator right = function.CreateAccumulator();
 
@@ -134,7 +134,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_Merge_KeepsLocalWhenBetter()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
         IAggregateAccumulator left = function.CreateAccumulator();
         IAggregateAccumulator right = function.CreateAccumulator();
 
@@ -149,7 +149,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_Merge_EmptyOther_NoChange()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
         IAggregateAccumulator left = function.CreateAccumulator();
         IAggregateAccumulator right = function.CreateAccumulator();
 
@@ -164,7 +164,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_Reset_ClearsState()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         accumulator.Accumulate([DataValue.FromString("first_group"), DataValue.FromFloat32(100f)], in _testFrame);
@@ -181,7 +181,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_ValidateArguments_ReturnsValueKind()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
 
         DataKind result = function.ValidateArguments([DataKind.String, DataKind.Float32]);
 
@@ -191,7 +191,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_ValidateArguments_WrongCount_Throws()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
 
         Assert.Throws<ArgumentException>(() =>
             function.ValidateArguments([DataKind.String]));
@@ -200,7 +200,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMax_ValidateArguments_NonComparableKey_Throws()
     {
-        ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
+        ArgMaxFunction function = new();
 
         Assert.Throws<ArgumentException>(() =>
             function.ValidateArguments([DataKind.String, DataKind.Image]));
@@ -209,7 +209,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
     [Fact]
     public async Task ArgMin_Int32Keys()
     {
-        ArgMaxFunction function = new(findMaximum: false, "ARG_MIN");
+        ArgMinFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         accumulator.Accumulate([DataValue.FromString("a"), DataValue.FromInt32(50)], in _testFrame);

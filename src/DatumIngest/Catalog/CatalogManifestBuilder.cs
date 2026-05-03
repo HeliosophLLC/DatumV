@@ -83,15 +83,23 @@ public static class CatalogManifestBuilder
             }
         }
 
-        // Aggregate / window functions don't yet carry static signature
-        // metadata — register-by-instance only — so their argument lists
-        // stay empty until the registries gain descriptors. SchemaName
-        // flows in from the registry's QualifiedName keys so completion can
-        // filter schema-qualified call sites correctly.
-        foreach (QualifiedName qn in functions.AggregateFunctionQualifiedNames)
+        // Aggregate functions carry static-abstract metadata
+        // (IAggregateFunctionMetadata.Signatures) captured at registration
+        // time as AggregateFunctionDescriptor.Signatures. Mirror the scalar
+        // path: emit one entry per primary name plus one per alias so
+        // completion offers each surfaced spelling.
+        foreach (AggregateFunctionDescriptor descriptor in functions.AggregateDescriptors)
         {
-            functionSigs.Add(new FunctionSignature { SchemaName = qn.Schema, Name = qn.Name, Parameters = [], IsAggregate = true });
+            functionSigs.Add(BuildAggregateSignatureFromDescriptor(descriptor.PrimaryName, descriptor));
+            foreach (string alias in descriptor.Aliases)
+            {
+                functionSigs.Add(BuildAggregateSignatureFromDescriptor(alias, descriptor));
+            }
         }
+
+        // Window functions don't yet carry static signature metadata —
+        // register-by-instance only — so their argument lists stay empty
+        // until the window registry gains descriptors.
         foreach (QualifiedName qn in functions.WindowFunctionQualifiedNames)
         {
             functionSigs.Add(new FunctionSignature { SchemaName = qn.Schema, Name = qn.Name, Parameters = [], IsWindowFunction = true });
@@ -456,6 +464,64 @@ public static class CatalogManifestBuilder
             Contexts = descriptor.Contexts is { Count: > 0 } ctxList
                 ? new List<string>(ctxList)
                 : null,
+        };
+    }
+
+    /// <summary>
+    /// Builds a <see cref="FunctionSignature"/> for one aggregate function.
+    /// Reuses the scalar parameter / return-type rendering helpers and stamps
+    /// <see cref="FunctionSignature.IsAggregate"/> to <see langword="true"/>.
+    /// Mirrors <see cref="BuildSignatureFromDescriptor"/> for scalars; the
+    /// minor variations (no <see cref="FunctionDescriptor.Contexts"/>, no
+    /// body-scope filter) keep this dedicated to the aggregate code path.
+    /// </summary>
+    private static FunctionSignature BuildAggregateSignatureFromDescriptor(
+        string surfacedName, AggregateFunctionDescriptor descriptor)
+    {
+        FunctionSignatureVariant? first = descriptor.Signatures.Count > 0
+            ? descriptor.Signatures[0]
+            : null;
+
+        IReadOnlyList<ParameterSignature> parameters = first is not null
+            ? BuildVariantParameters(first)
+            : Array.Empty<ParameterSignature>();
+
+        string? returnType = null;
+        if (first is not null)
+        {
+            if (first.ReturnType.StaticHint is DataKind staticHint)
+            {
+                string elementName = staticHint.ToString();
+                returnType = first.ReturnType.ProducesArray
+                    ? $"Array<{elementName}>"
+                    : elementName;
+            }
+            else
+            {
+                returnType = first.ReturnType.Describe();
+            }
+        }
+
+        List<IReadOnlyList<ParameterSignature>>? additional = null;
+        if (descriptor.Signatures.Count > 1)
+        {
+            additional = new List<IReadOnlyList<ParameterSignature>>(descriptor.Signatures.Count - 1);
+            for (int i = 1; i < descriptor.Signatures.Count; i++)
+            {
+                additional.Add(BuildVariantParameters(descriptor.Signatures[i]));
+            }
+        }
+
+        return new FunctionSignature
+        {
+            SchemaName = descriptor.SchemaName,
+            Name = surfacedName,
+            Parameters = parameters,
+            ReturnType = returnType,
+            Description = descriptor.Description,
+            Category = descriptor.Category,
+            AdditionalParameterShapes = additional,
+            IsAggregate = true,
         };
     }
 

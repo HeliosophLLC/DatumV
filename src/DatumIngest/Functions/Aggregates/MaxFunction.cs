@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
@@ -7,10 +8,32 @@ namespace DatumIngest.Functions.Aggregates;
 /// Works on numeric, string, date, datetime, and time types using their
 /// natural ordering. Returns null if all values are null.
 /// </summary>
-public sealed class MaxFunction : IAggregateFunction
+public sealed class MaxFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "MAX";
+
     /// <inheritdoc/>
-    public string Name => "MAX";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Maximum non-null value in a group; works on any comparable kind (numeric, string, date, datetime, time).";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("expression", DataKindMatcher.Any),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.SameAs(0)),
+    ];
 
     /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

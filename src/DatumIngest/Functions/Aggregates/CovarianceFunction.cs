@@ -1,40 +1,40 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
 
 /// <summary>
-/// Implements <c>COVAR_POP(y, x)</c> and <c>COVAR_SAMP(y, x)</c>. Computes
-/// the covariance between two numeric columns using an online co-moment
-/// algorithm (parallel to Welford's variance algorithm).
-/// <para>
-/// Population covariance divides by N; sample covariance divides by N−1.
-/// Returns null if all values are null, or if sample covariance is requested
-/// with fewer than two non-null pairs.
-/// </para>
-/// <para>
-/// Memory: O(1) per group — only running statistics are maintained.
-/// </para>
+/// Implements <c>COVAR_POP(y, x)</c> (population covariance, N denominator).
+/// Numerically stable via an online co-moment algorithm parallel to
+/// Welford's variance algorithm.
 /// </summary>
-public sealed class CovarianceFunction : IAggregateFunction
+public sealed class CovariancePopulationFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
-    private readonly bool _usePopulation;
-
-    /// <summary>
-    /// Creates a covariance aggregate function.
-    /// </summary>
-    /// <param name="usePopulation">
-    /// When <see langword="true"/>, computes population covariance (divide by N).
-    /// When <see langword="false"/>, computes sample covariance (divide by N−1).
-    /// </param>
-    /// <param name="name">The SQL function name (e.g. "COVAR_POP", "COVAR_SAMP").</param>
-    public CovarianceFunction(bool usePopulation, string name)
-    {
-        _usePopulation = usePopulation;
-        Name = name;
-    }
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "COVAR_POP";
 
     /// <inheritdoc/>
-    public string Name { get; }
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Population covariance (N denominator) between two numeric columns; online co-moment algorithm.";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("y", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+                new ParameterSpec("x", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Float64)),
+    ];
 
     /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -43,117 +43,163 @@ public sealed class CovarianceFunction : IAggregateFunction
         {
             throw new ArgumentException($"{Name}() requires exactly two arguments: y and x.");
         }
-
-        bool firstIsNumeric = argumentKinds[0] is DataKind.Int8 or DataKind.Int16 or DataKind.UInt8 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
-            or DataKind.Float32 or DataKind.Float64;
-        if (!firstIsNumeric)
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[0]))
         {
             throw new ArgumentException(
                 $"{Name}() first argument (y) must be numeric, got {argumentKinds[0]}.");
         }
-
-        bool secondIsNumeric = argumentKinds[1] is DataKind.Int8 or DataKind.Int16 or DataKind.UInt8 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
-            or DataKind.Float32 or DataKind.Float64;
-        if (!secondIsNumeric)
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[1]))
         {
             throw new ArgumentException(
                 $"{Name}() second argument (x) must be numeric, got {argumentKinds[1]}.");
         }
-
         return DataKind.Float64;
     }
 
     /// <inheritdoc/>
-    public IAggregateAccumulator CreateAccumulator() => new CovarianceAccumulator(_usePopulation);
+    public IAggregateAccumulator CreateAccumulator() => new CovarianceAccumulator(usePopulation: true);
+}
 
-    /// <summary>
-    /// Online co-moment accumulator. Tracks running means for both variables
-    /// and the cross-moment. Pairs where either value is null are skipped.
-    /// </summary>
-    private sealed class CovarianceAccumulator : IAggregateAccumulator
+/// <summary>
+/// Implements <c>COVAR_SAMP(y, x)</c> (sample covariance, N−1 denominator).
+/// Numerically stable via an online co-moment algorithm.
+/// </summary>
+public sealed class CovarianceSampleFunction : IAggregateFunction, IAggregateFunctionMetadata
+{
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "COVAR_SAMP";
+
+    /// <inheritdoc/>
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Sample covariance (N−1 denominator) between two numeric columns; online co-moment algorithm.";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("y", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+                new ParameterSpec("x", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Float64)),
+    ];
+
+    /// <inheritdoc/>
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
-        private readonly bool _usePopulation;
-        private long _count;
-        private double _meanY;
-        private double _meanX;
-        private double _coMoment;
-
-        public CovarianceAccumulator(bool usePopulation)
+        if (argumentKinds.Length != 2)
         {
-            _usePopulation = usePopulation;
+            throw new ArgumentException($"{Name}() requires exactly two arguments: y and x.");
         }
-
-        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[0]))
         {
-            if (arguments[0].IsNull || arguments[1].IsNull) return;
-
-            double y = arguments[0].ToDouble();
-            double x = arguments[1].ToDouble();
-
-            _count++;
-
-            double deltaY = y - _meanY;
-            _meanY += deltaY / _count;
-
-            double deltaX = x - _meanX;
-            _meanX += deltaX / _count;
-
-            // Co-moment uses the new mean of X with the old delta of Y.
-            _coMoment += deltaY * (x - _meanX);
+            throw new ArgumentException(
+                $"{Name}() first argument (y) must be numeric, got {argumentKinds[0]}.");
         }
-
-        /// <inheritdoc/>
-        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[1]))
         {
-            CovarianceAccumulator otherAccumulator = (CovarianceAccumulator)other;
+            throw new ArgumentException(
+                $"{Name}() second argument (x) must be numeric, got {argumentKinds[1]}.");
+        }
+        return DataKind.Float64;
+    }
 
-            if (otherAccumulator._count == 0)
-            {
-                return ValueTask.CompletedTask;
-            }
+    /// <inheritdoc/>
+    public IAggregateAccumulator CreateAccumulator() => new CovarianceAccumulator(usePopulation: false);
+}
 
-            if (_count == 0)
-            {
-                _count = otherAccumulator._count;
-                _meanY = otherAccumulator._meanY;
-                _meanX = otherAccumulator._meanX;
-                _coMoment = otherAccumulator._coMoment;
-                return ValueTask.CompletedTask;
-            }
+/// <summary>
+/// Online co-moment accumulator. Tracks running means for both variables
+/// and the cross-moment. Pairs where either value is null are skipped.
+/// </summary>
+internal sealed class CovarianceAccumulator : IAggregateAccumulator
+{
+    private readonly bool _usePopulation;
+    private long _count;
+    private double _meanY;
+    private double _meanX;
+    private double _coMoment;
 
-            long combinedCount = _count + otherAccumulator._count;
-            double deltaY = otherAccumulator._meanY - _meanY;
-            double deltaX = otherAccumulator._meanX - _meanX;
-            _coMoment += otherAccumulator._coMoment + deltaY * deltaX * _count * otherAccumulator._count / combinedCount;
-            _meanY += deltaY * otherAccumulator._count / combinedCount;
-            _meanX += deltaX * otherAccumulator._count / combinedCount;
-            _count = combinedCount;
+    public CovarianceAccumulator(bool usePopulation)
+    {
+        _usePopulation = usePopulation;
+    }
+
+    public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull) return;
+
+        double y = arguments[0].ToDouble();
+        double x = arguments[1].ToDouble();
+
+        _count++;
+
+        double deltaY = y - _meanY;
+        _meanY += deltaY / _count;
+
+        double deltaX = x - _meanX;
+        _meanX += deltaX / _count;
+
+        _coMoment += deltaY * (x - _meanX);
+    }
+
+    /// <inheritdoc/>
+    public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
+    {
+        CovarianceAccumulator otherAccumulator = (CovarianceAccumulator)other;
+
+        if (otherAccumulator._count == 0)
+        {
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
+        if (_count == 0)
         {
-            if (_usePopulation)
-            {
-                return new(_count > 0
-                    ? DataValue.FromFloat64(_coMoment / _count)
-                    : DataValue.Null(DataKind.Float64));
-            }
+            _count = otherAccumulator._count;
+            _meanY = otherAccumulator._meanY;
+            _meanX = otherAccumulator._meanX;
+            _coMoment = otherAccumulator._coMoment;
+            return ValueTask.CompletedTask;
+        }
 
-            return new(_count > 1
-                ? DataValue.FromFloat64(_coMoment / (_count - 1))
+        long combinedCount = _count + otherAccumulator._count;
+        double deltaY = otherAccumulator._meanY - _meanY;
+        double deltaX = otherAccumulator._meanX - _meanX;
+        _coMoment += otherAccumulator._coMoment + deltaY * deltaX * _count * otherAccumulator._count / combinedCount;
+        _meanY += deltaY * otherAccumulator._count / combinedCount;
+        _meanX += deltaX * otherAccumulator._count / combinedCount;
+        _count = combinedCount;
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
+    {
+        if (_usePopulation)
+        {
+            return new(_count > 0
+                ? DataValue.FromFloat64(_coMoment / _count)
                 : DataValue.Null(DataKind.Float64));
         }
 
-        /// <inheritdoc />
-        public void Reset()
-        {
-            _count = 0;
-            _meanY = 0;
-            _meanX = 0;
-            _coMoment = 0;
-        }
+        return new(_count > 1
+            ? DataValue.FromFloat64(_coMoment / (_count - 1))
+            : DataValue.Null(DataKind.Float64));
+    }
+
+    /// <inheritdoc />
+    public void Reset()
+    {
+        _count = 0;
+        _meanY = 0;
+        _meanX = 0;
+        _coMoment = 0;
     }
 }

@@ -44,10 +44,34 @@ namespace DatumIngest.Functions.Aggregates;
 /// throw.
 /// </para>
 /// </remarks>
-public sealed class PcVoxelConsensusAggregateFunction : IAggregateFunction
+public sealed class PcVoxelConsensusAggregateFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "pc_voxel_consensus_agg";
+
     /// <inheritdoc/>
-    public string Name => "pc_voxel_consensus_agg";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Voxel-hashed aggregate fusion with per-cell vote threshold; bounded by occupied voxel count rather than point count.";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("pc",        DataKindMatcher.Exact(DataKind.PointCloud)),
+                new ParameterSpec("cell_size", DataKindMatcher.Family(DataKindFamily.FloatFamily)),
+                new ParameterSpec("min_votes", DataKindMatcher.Family(DataKindFamily.IntegerFamily)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.PointCloud)),
+    ];
 
     /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

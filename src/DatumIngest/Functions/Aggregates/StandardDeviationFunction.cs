@@ -1,38 +1,40 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
 
 /// <summary>
-/// Implements <c>STDDEV(expression)</c>, <c>STDDEV_SAMP(expression)</c>, and
-/// <c>STDDEV_POP(expression)</c>. Computes the standard deviation of all non-null
-/// numeric values using Welford's online algorithm (O(1) memory per group).
-/// <para>
-/// Sample standard deviation (N−1 denominator) is used by <c>STDDEV</c> and <c>STDDEV_SAMP</c>.
-/// Population standard deviation (N denominator) is used by <c>STDDEV_POP</c>.
-/// Returns null if all values are null, or if sample standard deviation is
-/// requested with fewer than two values.
-/// </para>
+/// Implements <c>STDDEV(expression)</c> and <c>STDDEV_SAMP(expression)</c>
+/// (sample standard deviation, N−1 denominator). Numerically stable via
+/// Welford's online algorithm. Returns null when fewer than two non-null
+/// values are observed.
 /// </summary>
-public sealed class StandardDeviationFunction : IAggregateFunction
+public sealed class StandardDeviationFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
-    private readonly bool _usePopulation;
-
-    /// <summary>
-    /// Creates a standard deviation aggregate function.
-    /// </summary>
-    /// <param name="usePopulation">
-    /// When <see langword="true"/>, computes population stddev (divide by N).
-    /// When <see langword="false"/>, computes sample stddev (divide by N−1).
-    /// </param>
-    /// <param name="name">The SQL function name (e.g. "STDDEV", "STDDEV_POP").</param>
-    public StandardDeviationFunction(bool usePopulation, string name)
-    {
-        _usePopulation = usePopulation;
-        Name = name;
-    }
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "STDDEV";
 
     /// <inheritdoc/>
-    public string Name { get; }
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Sample standard deviation (N−1 denominator) of non-null numeric values; numerically stable via Welford's algorithm.";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("expression", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Float64)),
+    ];
 
     /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -42,10 +44,7 @@ public sealed class StandardDeviationFunction : IAggregateFunction
             throw new ArgumentException($"{Name}() requires exactly one argument.");
         }
 
-        bool isNumeric = argumentKinds[0] is DataKind.Int8 or DataKind.Int16 or DataKind.UInt8 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
-            or DataKind.Float32 or DataKind.Float64;
-        if (!isNumeric)
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[0]))
         {
             throw new ArgumentException($"{Name}() requires a numeric argument, got {argumentKinds[0]}.");
         }
@@ -54,83 +53,133 @@ public sealed class StandardDeviationFunction : IAggregateFunction
     }
 
     /// <inheritdoc/>
-    public IAggregateAccumulator CreateAccumulator() => new WelfordStandardDeviationAccumulator(_usePopulation);
+    public IAggregateAccumulator CreateAccumulator() => new WelfordStandardDeviationAccumulator(usePopulation: false);
+}
 
-    /// <summary>
-    /// Welford's online algorithm accumulator that returns the square root of
-    /// variance as the final result.
-    /// </summary>
-    private sealed class WelfordStandardDeviationAccumulator : IAggregateAccumulator
+/// <summary>
+/// Implements <c>STDDEV_POP(expression)</c> (population standard deviation,
+/// N denominator). Numerically stable via Welford's online algorithm.
+/// </summary>
+public sealed class StandardDeviationPopulationFunction : IAggregateFunction, IAggregateFunctionMetadata
+{
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "STDDEV_POP";
+
+    /// <inheritdoc/>
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Population standard deviation (N denominator) of non-null numeric values; numerically stable via Welford's algorithm.";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("expression", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Float64)),
+    ];
+
+    /// <inheritdoc/>
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
-        private readonly bool _usePopulation;
-        private long _count;
-        private double _mean;
-        private double _m2;
-
-        public WelfordStandardDeviationAccumulator(bool usePopulation)
+        if (argumentKinds.Length != 1)
         {
-            _usePopulation = usePopulation;
+            throw new ArgumentException($"{Name}() requires exactly one argument.");
         }
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[0]))
         {
-            if (arguments[0].IsNull) return;
-
-            double value = arguments[0].ToDouble();
-            _count++;
-            double delta = value - _mean;
-            _mean += delta / _count;
-            double delta2 = value - _mean;
-            _m2 += delta * delta2;
+            throw new ArgumentException($"{Name}() requires a numeric argument, got {argumentKinds[0]}.");
         }
 
-        /// <inheritdoc/>
-        public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
+        return DataKind.Float64;
+    }
+
+    /// <inheritdoc/>
+    public IAggregateAccumulator CreateAccumulator() => new WelfordStandardDeviationAccumulator(usePopulation: true);
+}
+
+/// <summary>
+/// Welford's online algorithm accumulator that returns the square root of
+/// variance as the final result.
+/// </summary>
+internal sealed class WelfordStandardDeviationAccumulator : IAggregateAccumulator
+{
+    private readonly bool _usePopulation;
+    private long _count;
+    private double _mean;
+    private double _m2;
+
+    public WelfordStandardDeviationAccumulator(bool usePopulation)
+    {
+        _usePopulation = usePopulation;
+    }
+
+    public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    {
+        if (arguments[0].IsNull) return;
+
+        double value = arguments[0].ToDouble();
+        _count++;
+        double delta = value - _mean;
+        _mean += delta / _count;
+        double delta2 = value - _mean;
+        _m2 += delta * delta2;
+    }
+
+    /// <inheritdoc/>
+    public ValueTask MergeAsync(IAggregateAccumulator other, InvocationFrame frame)
+    {
+        WelfordStandardDeviationAccumulator otherAccumulator = (WelfordStandardDeviationAccumulator)other;
+
+        if (otherAccumulator._count == 0)
         {
-            WelfordStandardDeviationAccumulator otherAccumulator = (WelfordStandardDeviationAccumulator)other;
-
-            if (otherAccumulator._count == 0)
-            {
-                return ValueTask.CompletedTask;
-            }
-
-            if (_count == 0)
-            {
-                _count = otherAccumulator._count;
-                _mean = otherAccumulator._mean;
-                _m2 = otherAccumulator._m2;
-                return ValueTask.CompletedTask;
-            }
-
-            long combinedCount = _count + otherAccumulator._count;
-            double delta = otherAccumulator._mean - _mean;
-            _m2 += otherAccumulator._m2 + delta * delta * _count * otherAccumulator._count / combinedCount;
-            _mean += delta * otherAccumulator._count / combinedCount;
-            _count = combinedCount;
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
+        if (_count == 0)
         {
-            if (_usePopulation)
-            {
-                return new(_count > 0
-                    ? DataValue.FromFloat64(System.Math.Sqrt(_m2 / _count))
-                    : DataValue.Null(DataKind.Float64));
-            }
+            _count = otherAccumulator._count;
+            _mean = otherAccumulator._mean;
+            _m2 = otherAccumulator._m2;
+            return ValueTask.CompletedTask;
+        }
 
-            // Sample stddev requires at least 2 values (N-1 denominator).
-            return new(_count > 1
-                ? DataValue.FromFloat64(System.Math.Sqrt(_m2 / (_count - 1)))
+        long combinedCount = _count + otherAccumulator._count;
+        double delta = otherAccumulator._mean - _mean;
+        _m2 += otherAccumulator._m2 + delta * delta * _count * otherAccumulator._count / combinedCount;
+        _mean += delta * otherAccumulator._count / combinedCount;
+        _count = combinedCount;
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<DataValue> ResultAsync(InvocationFrame frame)
+    {
+        if (_usePopulation)
+        {
+            return new(_count > 0
+                ? DataValue.FromFloat64(System.Math.Sqrt(_m2 / _count))
                 : DataValue.Null(DataKind.Float64));
         }
 
-        /// <inheritdoc />
-        public void Reset()
-        {
-            _count = 0;
-            _mean = 0;
-            _m2 = 0;
-        }
+        return new(_count > 1
+            ? DataValue.FromFloat64(System.Math.Sqrt(_m2 / (_count - 1)))
+            : DataValue.Null(DataKind.Float64));
+    }
+
+    /// <inheritdoc />
+    public void Reset()
+    {
+        _count = 0;
+        _mean = 0;
+        _m2 = 0;
     }
 }

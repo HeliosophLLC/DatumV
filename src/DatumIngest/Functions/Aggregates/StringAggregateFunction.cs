@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
@@ -18,10 +19,33 @@ namespace DatumIngest.Functions.Aggregates;
 /// sorts buffered rows before calling <see cref="IAggregateAccumulator.Accumulate(ReadOnlySpan{DataValue}, in InvocationFrame)"/>.
 /// </para>
 /// </summary>
-public sealed class StringAggregateFunction : IAggregateFunction
+public sealed class StringAggregateFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "STRING_AGG";
+
     /// <inheritdoc/>
-    public string Name => "STRING_AGG";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Concatenates non-null strings in a group with the given separator; supports WITHIN GROUP (ORDER BY ...) for stable ordering.";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("expression", DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("separator", DataKindMatcher.Exact(DataKind.String)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.String)),
+    ];
 
     /// <inheritdoc/>
     public WithinGroupSemantics WithinGroupSemantics => WithinGroupSemantics.SortModifier;

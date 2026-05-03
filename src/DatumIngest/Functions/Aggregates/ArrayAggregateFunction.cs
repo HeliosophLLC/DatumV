@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
@@ -19,10 +20,32 @@ namespace DatumIngest.Functions.Aggregates;
 /// Supports <c>DISTINCT</c> via <see cref="DistinctAccumulatorDecorator"/>.
 /// </para>
 /// </summary>
-public sealed class ArrayAggregateFunction : IAggregateFunction
+public sealed class ArrayAggregateFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "ARRAY_AGG";
+
     /// <inheritdoc/>
-    public string Name => "ARRAY_AGG";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Collects non-null values in a group into a typed array; supports WITHIN GROUP (ORDER BY ...) and DISTINCT.";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("expression", DataKindMatcher.Any),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.SameAs(0))),
+    ];
 
     /// <inheritdoc/>
     public WithinGroupSemantics WithinGroupSemantics => WithinGroupSemantics.SortModifier;

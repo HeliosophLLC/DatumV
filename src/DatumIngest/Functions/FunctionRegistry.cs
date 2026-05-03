@@ -41,6 +41,8 @@ public sealed class FunctionRegistry
     private readonly Dictionary<QualifiedName, TableValuedFunctionDescriptor> _tableValuedDescriptorsByName = new();
     private readonly List<TableValuedFunctionDescriptor> _tableValuedDescriptors = new();
     private readonly Dictionary<QualifiedName, IAggregateFunction> _aggregateFunctions = new();
+    private readonly Dictionary<QualifiedName, AggregateFunctionDescriptor> _aggregateDescriptorsByName = new();
+    private readonly List<AggregateFunctionDescriptor> _aggregateDescriptors = new();
     private readonly Dictionary<QualifiedName, IWindowFunction> _windowFunctions = new();
     private readonly ConcurrentDictionary<QualifiedName, ModelScalarFunction> _resolvedModelFunctions = new();
     private Func<ModelCatalog?>? _modelCatalogResolver;
@@ -219,16 +221,66 @@ public sealed class FunctionRegistry
     }
 
     /// <summary>
-    /// Registers an aggregate function into <paramref name="schema"/>.
+    /// Registers an aggregate function described by <typeparamref name="T"/>'s
+    /// static-abstract metadata. The aggregate lands in <paramref name="schema"/>
+    /// (defaults to <c>system</c> — every built-in lives there).
     /// </summary>
-    /// <exception cref="ArgumentException">A function with the same qualified name is already registered.</exception>
-    public void RegisterAggregate(IAggregateFunction function, string schema = SystemSchema)
+    /// <exception cref="ArgumentException">An aggregate with the same qualified name is already registered.</exception>
+    public void RegisterAggregate<T>(string schema = SystemSchema) where T : IAggregateFunctionMetadata, IAggregateFunction, new()
     {
-        QualifiedName key = new(schema, function.Name);
-        if (!_aggregateFunctions.TryAdd(key, function))
+        T instance = new();
+        QualifiedName key = new(schema, T.Name);
+        AggregateFunctionDescriptor descriptor = new(
+            PrimaryName: T.Name,
+            Aliases: Array.Empty<string>(),
+            Category: T.Category,
+            Description: T.Description,
+            Signatures: T.Signatures,
+            SchemaName: schema);
+
+        if (!_aggregateFunctions.TryAdd(key, instance))
         {
             throw new ArgumentException($"Aggregate function '{key}' is already registered.");
         }
+        _aggregateDescriptorsByName[key] = descriptor;
+        _aggregateDescriptors.Add(descriptor);
+    }
+
+    /// <summary>
+    /// Registers an existing aggregate function under an additional alias name.
+    /// The alias lives in the same schema as the primary and shares the same
+    /// instance, mirroring <see cref="RegisterScalarAlias{T}"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException">No primary registration for <typeparamref name="T"/> exists in <paramref name="schema"/>, or the alias is already taken.</exception>
+    public void RegisterAggregateAlias<T>(string alias, string schema = SystemSchema) where T : IAggregateFunctionMetadata, IAggregateFunction
+    {
+        QualifiedName primaryKey = new(schema, T.Name);
+        QualifiedName aliasKey = new(schema, alias);
+        if (!_aggregateFunctions.TryGetValue(primaryKey, out IAggregateFunction? primary))
+        {
+            throw new ArgumentException(
+                $"Cannot register alias '{aliasKey}' for {primaryKey}: primary registration not found.",
+                nameof(alias));
+        }
+        if (!_aggregateFunctions.TryAdd(aliasKey, primary))
+        {
+            throw new ArgumentException($"Aggregate function '{aliasKey}' is already registered.");
+        }
+
+        if (_aggregateDescriptorsByName.TryGetValue(primaryKey, out AggregateFunctionDescriptor? primaryDescriptor))
+        {
+            AggregateFunctionDescriptor updated = primaryDescriptor with
+            {
+                Aliases = [.. primaryDescriptor.Aliases, alias],
+            };
+            int idx = _aggregateDescriptors.IndexOf(primaryDescriptor);
+            if (idx >= 0)
+            {
+                _aggregateDescriptors[idx] = updated;
+            }
+            _aggregateDescriptorsByName[primaryKey] = updated;
+        }
+        _aggregateDescriptorsByName[aliasKey] = _aggregateDescriptorsByName[primaryKey];
     }
 
     /// <summary>
@@ -630,6 +682,22 @@ public sealed class FunctionRegistry
 
     /// <summary>Bare names of every registered aggregate function.</summary>
     public IEnumerable<string> AggregateFunctionNames => _aggregateFunctions.Keys.Select(k => k.Name);
+
+    /// <summary>
+    /// Returns the descriptor for every primary aggregate registration.
+    /// Aliases are reported via <see cref="AggregateFunctionDescriptor.Aliases"/>.
+    /// </summary>
+    public IReadOnlyList<AggregateFunctionDescriptor> AggregateDescriptors => _aggregateDescriptors;
+
+    /// <summary>
+    /// Looks up the descriptor for an aggregate function by qualified name
+    /// (or alias within the same schema).
+    /// </summary>
+    public AggregateFunctionDescriptor? TryGetAggregateDescriptor(QualifiedName name)
+    {
+        _aggregateDescriptorsByName.TryGetValue(name, out AggregateFunctionDescriptor? descriptor);
+        return descriptor;
+    }
 
     /// <summary>Every registered window function as <c>(schema, name)</c>.</summary>
     public IEnumerable<QualifiedName> WindowFunctionQualifiedNames => _windowFunctions.Keys;
@@ -1043,33 +1111,33 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Inference.ModelSkeletonFunction>("inference");
 
         // ── Aggregate ─────────────────────────────────────────────────────
-        registry.RegisterAggregate(new Aggregates.CountFunction());
-        registry.RegisterAggregate(new Aggregates.SumFunction());
-        registry.RegisterAggregate(new Aggregates.AvgFunction());
-        registry.RegisterAggregate(new Aggregates.MinFunction());
-        registry.RegisterAggregate(new Aggregates.MaxFunction());
-        registry.RegisterAggregate(new Aggregates.VarianceFunction(usePopulation: false, "VARIANCE"));
-        registry.RegisterAggregate(new Aggregates.VarianceFunction(usePopulation: false, "VAR_SAMP"));
-        registry.RegisterAggregate(new Aggregates.VarianceFunction(usePopulation: true, "VAR_POP"));
-        registry.RegisterAggregate(new Aggregates.StandardDeviationFunction(usePopulation: false, "STDDEV"));
-        registry.RegisterAggregate(new Aggregates.StandardDeviationFunction(usePopulation: false, "STDDEV_SAMP"));
-        registry.RegisterAggregate(new Aggregates.StandardDeviationFunction(usePopulation: true, "STDDEV_POP"));
-        registry.RegisterAggregate(new Aggregates.MedianFunction());
-        registry.RegisterAggregate(new Aggregates.PercentileContinuousFunction());
-        registry.RegisterAggregate(new Aggregates.PercentileDiscreteFunction());
-        registry.RegisterAggregate(new Aggregates.ModeFunction());
-        registry.RegisterAggregate(new Aggregates.CorrelationFunction());
-        registry.RegisterAggregate(new Aggregates.CovarianceFunction(usePopulation: true, "COVAR_POP"));
-        registry.RegisterAggregate(new Aggregates.CovarianceFunction(usePopulation: false, "COVAR_SAMP"));
-        registry.RegisterAggregate(new Aggregates.ApproximateMedianFunction());
-        registry.RegisterAggregate(new Aggregates.ApproximatePercentileFunction());
-        registry.RegisterAggregate(new Aggregates.StringAggregateFunction());
-        registry.RegisterAggregate(new Aggregates.ArrayAggregateFunction());
-        registry.RegisterAggregate(new Aggregates.ImageStackAggregateFunction());
-        registry.RegisterAggregate(new Aggregates.PcFuseAggregateFunction());
-        registry.RegisterAggregate(new Aggregates.PcVoxelConsensusAggregateFunction());
-        registry.RegisterAggregate(new Aggregates.ArgMaxFunction(findMaximum: true, "ARG_MAX"));
-        registry.RegisterAggregate(new Aggregates.ArgMaxFunction(findMaximum: false, "ARG_MIN"));
+        registry.RegisterAggregate<Aggregates.CountFunction>();
+        registry.RegisterAggregate<Aggregates.SumFunction>();
+        registry.RegisterAggregate<Aggregates.AvgFunction>();
+        registry.RegisterAggregate<Aggregates.MinFunction>();
+        registry.RegisterAggregate<Aggregates.MaxFunction>();
+        registry.RegisterAggregate<Aggregates.VarianceFunction>();
+        registry.RegisterAggregateAlias<Aggregates.VarianceFunction>("VAR_SAMP");
+        registry.RegisterAggregate<Aggregates.VariancePopulationFunction>();
+        registry.RegisterAggregate<Aggregates.StandardDeviationFunction>();
+        registry.RegisterAggregateAlias<Aggregates.StandardDeviationFunction>("STDDEV_SAMP");
+        registry.RegisterAggregate<Aggregates.StandardDeviationPopulationFunction>();
+        registry.RegisterAggregate<Aggregates.MedianFunction>();
+        registry.RegisterAggregate<Aggregates.PercentileContinuousFunction>();
+        registry.RegisterAggregate<Aggregates.PercentileDiscreteFunction>();
+        registry.RegisterAggregate<Aggregates.ModeFunction>();
+        registry.RegisterAggregate<Aggregates.CorrelationFunction>();
+        registry.RegisterAggregate<Aggregates.CovariancePopulationFunction>();
+        registry.RegisterAggregate<Aggregates.CovarianceSampleFunction>();
+        registry.RegisterAggregate<Aggregates.ApproximateMedianFunction>();
+        registry.RegisterAggregate<Aggregates.ApproximatePercentileFunction>();
+        registry.RegisterAggregate<Aggregates.StringAggregateFunction>();
+        registry.RegisterAggregate<Aggregates.ArrayAggregateFunction>();
+        registry.RegisterAggregate<Aggregates.ImageStackAggregateFunction>();
+        registry.RegisterAggregate<Aggregates.PcFuseAggregateFunction>();
+        registry.RegisterAggregate<Aggregates.PcVoxelConsensusAggregateFunction>();
+        registry.RegisterAggregate<Aggregates.ArgMaxFunction>();
+        registry.RegisterAggregate<Aggregates.ArgMinFunction>();
 
         // ── Window ────────────────────────────────────────────────────────
         registry.RegisterWindow(new Window.RowNumberFunction());

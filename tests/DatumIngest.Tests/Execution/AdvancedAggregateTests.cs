@@ -506,7 +506,7 @@ public class AdvancedAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new CovarianceFunction(usePopulation: true, "COVAR_POP"),
+                    new CovariancePopulationFunction(),
                     [new ColumnReference("y"), new ColumnReference("x")],
                     "COVAR_POP(y, x)"),
             ]);
@@ -534,7 +534,7 @@ public class AdvancedAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new CovarianceFunction(usePopulation: false, "COVAR_SAMP"),
+                    new CovarianceSampleFunction(),
                     [new ColumnReference("y"), new ColumnReference("x")],
                     "COVAR_SAMP(y, x)"),
             ]);
@@ -557,7 +557,7 @@ public class AdvancedAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new CovarianceFunction(usePopulation: false, "COVAR_SAMP"),
+                    new CovarianceSampleFunction(),
                     [new ColumnReference("y"), new ColumnReference("x")],
                     "COVAR_SAMP(y, x)"),
             ]);
@@ -581,7 +581,7 @@ public class AdvancedAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new CovarianceFunction(usePopulation: true, "COVAR_POP"),
+                    new CovariancePopulationFunction(),
                     [new ColumnReference("y"), new ColumnReference("x")],
                     "COVAR_POP(y, x)"),
             ]);
@@ -605,7 +605,7 @@ public class AdvancedAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new CovarianceFunction(usePopulation: true, "COVAR_POP"),
+                    new CovariancePopulationFunction(),
                     [new ColumnReference("y"), new ColumnReference("x")],
                     "COVAR_POP(y, x)"),
             ]);

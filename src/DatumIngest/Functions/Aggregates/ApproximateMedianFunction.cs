@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
@@ -12,13 +13,35 @@ namespace DatumIngest.Functions.Aggregates;
 /// regardless of group size, compared to the exact <c>MEDIAN</c> which is O(N).
 /// </para>
 /// </summary>
-public sealed class ApproximateMedianFunction : IAggregateFunction
+public sealed class ApproximateMedianFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
     /// <summary>Maximum samples retained in the reservoir.</summary>
     internal const int MaxSamples = 100_000;
 
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "APPROX_MEDIAN";
+
     /// <inheritdoc/>
-    public string Name => "APPROX_MEDIAN";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Approximate median via reservoir sampling (bounded O(1) memory per group; exact for small groups).";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("expression", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Float64)),
+    ];
 
     /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

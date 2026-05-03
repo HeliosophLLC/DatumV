@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
@@ -7,10 +8,32 @@ namespace DatumIngest.Functions.Aggregates;
 /// non-null numeric values. Returns null if all values are null.
 /// Always returns <c>Float64</c>, matching PostgreSQL semantics.
 /// </summary>
-public sealed class AvgFunction : IAggregateFunction
+public sealed class AvgFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "AVG";
+
     /// <inheritdoc/>
-    public string Name => "AVG";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Arithmetic mean of non-null numeric values in a group; always returns Float64.";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("expression", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Float64)),
+    ];
 
     /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

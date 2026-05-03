@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
@@ -17,10 +18,33 @@ namespace DatumIngest.Functions.Aggregates;
 /// is computed. Returns <see cref="DataKind.Float64"/>.
 /// </para>
 /// </summary>
-public sealed class PercentileContinuousFunction : IAggregateFunction
+public sealed class PercentileContinuousFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "PERCENTILE_CONT";
+
     /// <inheritdoc/>
-    public string Name => "PERCENTILE_CONT";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Continuous percentile with linear interpolation; PERCENTILE_CONT(expr, fraction) or PERCENTILE_CONT(fraction) WITHIN GROUP (ORDER BY expr).";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("expression", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+                new ParameterSpec("fraction", DataKindMatcher.Family(DataKindFamily.FloatFamily)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Float64)),
+    ];
 
     /// <inheritdoc/>
     public WithinGroupSemantics WithinGroupSemantics => WithinGroupSemantics.OrderedSet;

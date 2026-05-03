@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
@@ -7,10 +8,36 @@ namespace DatumIngest.Functions.Aggregates;
 /// (counts non-null values). The <c>*</c> form receives zero arguments because
 /// the parser treats the star as a sentinel that the planner strips.
 /// </summary>
-public sealed class CountFunction : IAggregateFunction
+public sealed class CountFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "COUNT";
+
     /// <inheritdoc/>
-    public string Name => "COUNT";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Counts rows (COUNT(*)) or non-null values of an expression (COUNT(expr)).";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters: [],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Int64)),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("expression", DataKindMatcher.Any),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Int64)),
+    ];
 
     /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

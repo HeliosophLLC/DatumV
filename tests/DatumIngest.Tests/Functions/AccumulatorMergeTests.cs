@@ -193,7 +193,7 @@ public class AccumulatorMergeTests : ServiceTestBase
     [Fact]
     public async Task Variance_Merge_MatchesSinglePassResult()
     {
-        VarianceFunction function = new(usePopulation: false, name: "VARIANCE");
+        VarianceFunction function = new();
 
         // Single accumulator with all data.
         IAggregateAccumulator reference = function.CreateAccumulator();
@@ -224,7 +224,7 @@ public class AccumulatorMergeTests : ServiceTestBase
     [Fact]
     public async Task VariancePopulation_Merge_MatchesSinglePassResult()
     {
-        VarianceFunction function = new(usePopulation: true, name: "VAR_POP");
+        VariancePopulationFunction function = new();
 
         IAggregateAccumulator reference = function.CreateAccumulator();
         foreach (float value in new[] { 2f, 4f, 4f, 4f, 5f, 5f, 7f, 9f })
@@ -255,7 +255,7 @@ public class AccumulatorMergeTests : ServiceTestBase
     [Fact]
     public async Task StandardDeviation_Merge_MatchesSinglePassResult()
     {
-        StandardDeviationFunction function = new(usePopulation: false, name: "STDDEV");
+        StandardDeviationFunction function = new();
 
         IAggregateAccumulator reference = function.CreateAccumulator();
         foreach (float value in new[] { 10f, 20f, 30f, 40f, 50f })
@@ -286,7 +286,7 @@ public class AccumulatorMergeTests : ServiceTestBase
     [Fact]
     public async Task Covariance_Merge_MatchesSinglePassResult()
     {
-        CovarianceFunction function = new(usePopulation: false, name: "COVAR_SAMP");
+        CovarianceSampleFunction function = new();
 
         IAggregateAccumulator reference = function.CreateAccumulator();
         (float y, float x)[] data = [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10)];
@@ -515,7 +515,7 @@ public class AccumulatorMergeTests : ServiceTestBase
     [Fact]
     public async Task Variance_Merge_OneEmpty_MatchesSingleAccumulator()
     {
-        VarianceFunction function = new(usePopulation: false, name: "VARIANCE");
+        VarianceFunction function = new();
 
         IAggregateAccumulator left = function.CreateAccumulator();
         IAggregateAccumulator right = function.CreateAccumulator();

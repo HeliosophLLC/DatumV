@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
@@ -14,10 +15,33 @@ namespace DatumIngest.Functions.Aggregates;
 /// Memory: O(1) per group — only running statistics are maintained.
 /// </para>
 /// </summary>
-public sealed class CorrelationFunction : IAggregateFunction
+public sealed class CorrelationFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "CORR";
+
     /// <inheritdoc/>
-    public string Name => "CORR";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Pearson correlation coefficient between two numeric columns (online co-moment).";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("y", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+                new ParameterSpec("x", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Float64)),
+    ];
 
     /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

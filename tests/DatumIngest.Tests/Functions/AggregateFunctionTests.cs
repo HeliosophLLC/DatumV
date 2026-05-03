@@ -497,7 +497,7 @@ public class AggregateFunctionTests : ServiceTestBase
     [Fact]
     public async Task Stddev_Int32Input_ReturnsFloat64()
     {
-        StandardDeviationFunction function = new(usePopulation: true, name: "STDDEV_POP");
+        StandardDeviationPopulationFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Int32]);
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
@@ -514,7 +514,7 @@ public class AggregateFunctionTests : ServiceTestBase
     [Fact]
     public async Task Variance_Float64Input_ReturnsFloat64()
     {
-        VarianceFunction function = new(usePopulation: false, name: "VAR_SAMP");
+        VarianceFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Float64]);
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
@@ -551,7 +551,7 @@ public class AggregateFunctionTests : ServiceTestBase
     [Fact]
     public async Task Covar_Int32Inputs_ReturnsFloat64()
     {
-        CovarianceFunction function = new(usePopulation: false, name: "COVAR_SAMP");
+        CovarianceSampleFunction function = new();
         DataKind outputKind = function.ValidateArguments([DataKind.Int32, DataKind.Int32]);
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 

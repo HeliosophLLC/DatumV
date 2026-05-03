@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
@@ -16,10 +17,32 @@ namespace DatumIngest.Functions.Aggregates;
 /// due to the frequency map.
 /// </para>
 /// </summary>
-public sealed class ModeFunction : IAggregateFunction
+public sealed class ModeFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "MODE";
+
     /// <inheritdoc/>
-    public string Name => "MODE";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Most frequently occurring non-null value; ties resolve by first-encountered order.";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("expression", DataKindMatcher.Any),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.SameAs(0)),
+    ];
 
     /// <inheritdoc/>
     public WithinGroupSemantics WithinGroupSemantics => WithinGroupSemantics.OrderedSet;

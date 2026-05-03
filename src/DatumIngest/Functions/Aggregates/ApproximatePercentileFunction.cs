@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Aggregates;
@@ -19,13 +20,36 @@ namespace DatumIngest.Functions.Aggregates;
 /// which is O(N).
 /// </para>
 /// </summary>
-public sealed class ApproximatePercentileFunction : IAggregateFunction
+public sealed class ApproximatePercentileFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
     /// <summary>Maximum samples retained in the reservoir.</summary>
     internal const int MaxSamples = 100_000;
 
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "APPROX_PERCENTILE";
+
     /// <inheritdoc/>
-    public string Name => "APPROX_PERCENTILE";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Approximate percentile via reservoir sampling (bounded O(1) memory per group; exact for small groups).";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("expression", DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+                new ParameterSpec("fraction", DataKindMatcher.Family(DataKindFamily.FloatFamily)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Float64)),
+    ];
 
     /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

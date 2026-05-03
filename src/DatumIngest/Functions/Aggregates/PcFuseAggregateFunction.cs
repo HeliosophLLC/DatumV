@@ -37,10 +37,32 @@ namespace DatumIngest.Functions.Aggregates;
 /// committed frames must agree, otherwise throws. Mirrors <c>pc_fuse</c>.
 /// </para>
 /// </remarks>
-public sealed class PcFuseAggregateFunction : IAggregateFunction
+public sealed class PcFuseAggregateFunction : IAggregateFunction, IAggregateFunctionMetadata
 {
+    /// <inheritdoc cref="IAggregateFunctionMetadata.Name"/>
+    public static string Name => "pc_fuse_agg";
+
     /// <inheritdoc/>
-    public string Name => "pc_fuse_agg";
+    string IAggregateFunction.Name => Name;
+
+    /// <inheritdoc/>
+    public static FunctionCategory Category => FunctionCategory.Aggregate;
+
+    /// <inheritdoc/>
+    public static string Description =>
+        "Aggregate variant of pc_fuse: folds every non-null PointCloud in a group into a single fused cloud (concat positions+colors, union bbox).";
+
+    /// <inheritdoc/>
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("pc", DataKindMatcher.Exact(DataKind.PointCloud)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.PointCloud)),
+    ];
 
     /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

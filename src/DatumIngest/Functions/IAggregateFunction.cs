@@ -1,6 +1,41 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions;
+
+/// <summary>
+/// Static-abstract metadata interface for registered aggregate functions.
+/// Mirrors <see cref="IFunction"/> for scalars: carries the canonical name,
+/// category, description, and accepted signature shapes so the catalog and
+/// language-server tooling can describe aggregates without instantiating
+/// their classes.
+/// </summary>
+/// <remarks>
+/// Kept separate from <see cref="IAggregateFunction"/> because interfaces
+/// with static abstract members can't be used as generic type arguments
+/// (Dictionary&lt;string, IAggregateFunction&gt; would fail with CS8920).
+/// Implementing classes implement both <see cref="IAggregateFunctionMetadata"/>
+/// (for metadata) and <see cref="IAggregateFunction"/> (for instance dispatch).
+/// </remarks>
+public interface IAggregateFunctionMetadata
+{
+    /// <summary>The aggregate's canonical name (case-insensitive).</summary>
+    static abstract string Name { get; }
+
+    /// <summary>Functional category (drives grouping in completion / catalog views).</summary>
+    static abstract FunctionCategory Category { get; }
+
+    /// <summary>Human-readable description for hover / catalog text.</summary>
+    static abstract string Description { get; }
+
+    /// <summary>
+    /// Accepted argument shapes. Mirrors <see cref="IFunction.Signatures"/>;
+    /// each variant's return rule resolves the per-element kind (for
+    /// array-producing aggregates, array-ness lives on the variant's
+    /// <see cref="FunctionSignatureVariant.ReturnType"/>).
+    /// </summary>
+    static abstract IReadOnlyList<FunctionSignatureVariant> Signatures { get; }
+}
 
 /// <summary>
 /// How a SQL aggregate uses the <c>WITHIN GROUP (ORDER BY …)</c> clause.

@@ -43,7 +43,7 @@ public class StatisticalAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new VarianceFunction(usePopulation: false, "VARIANCE"),
+                    new VarianceFunction(),
                     [new ColumnReference("x")],
                     "VARIANCE(x)"),
             ]);
@@ -69,7 +69,7 @@ public class StatisticalAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new VarianceFunction(usePopulation: true, "VAR_POP"),
+                    new VariancePopulationFunction(),
                     [new ColumnReference("x")],
                     "VAR_POP(x)"),
             ]);
@@ -92,7 +92,7 @@ public class StatisticalAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new VarianceFunction(usePopulation: false, "VAR_SAMP"),
+                    new VarianceFunction(),
                     [new ColumnReference("x")],
                     "VAR_SAMP(x)"),
             ]);
@@ -115,7 +115,7 @@ public class StatisticalAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new VarianceFunction(usePopulation: true, "VAR_POP"),
+                    new VariancePopulationFunction(),
                     [new ColumnReference("x")],
                     "VAR_POP(x)"),
             ]);
@@ -139,7 +139,7 @@ public class StatisticalAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new VarianceFunction(usePopulation: false, "VARIANCE"),
+                    new VarianceFunction(),
                     [new ColumnReference("x")],
                     "VARIANCE(x)"),
             ]);
@@ -168,7 +168,7 @@ public class StatisticalAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new VarianceFunction(usePopulation: false, "VARIANCE"),
+                    new VarianceFunction(),
                     [new ColumnReference("x")],
                     "VARIANCE(x)"),
             ]);
@@ -201,7 +201,7 @@ public class StatisticalAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new StandardDeviationFunction(usePopulation: false, "STDDEV"),
+                    new StandardDeviationFunction(),
                     [new ColumnReference("x")],
                     "STDDEV(x)"),
             ]);
@@ -227,7 +227,7 @@ public class StatisticalAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new StandardDeviationFunction(usePopulation: true, "STDDEV_POP"),
+                    new StandardDeviationPopulationFunction(),
                     [new ColumnReference("x")],
                     "STDDEV_POP(x)"),
             ]);
@@ -250,7 +250,7 @@ public class StatisticalAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new StandardDeviationFunction(usePopulation: false, "STDDEV"),
+                    new StandardDeviationFunction(),
                     [new ColumnReference("x")],
                     "STDDEV(x)"),
             ]);
@@ -274,7 +274,7 @@ public class StatisticalAggregateTests : ServiceTestBase
             aggregateColumns:
             [
                 new AggregateColumn(
-                    new StandardDeviationFunction(usePopulation: true, "STDDEV_POP"),
+                    new StandardDeviationPopulationFunction(),
                     [new ColumnReference("x")],
                     "STDDEV_POP(x)"),
             ]);
@@ -642,7 +642,7 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public void Variance_WrongArgCount_Throws()
     {
-        VarianceFunction function = new(usePopulation: false, "VARIANCE");
+        VarianceFunction function = new();
 
         Assert.Throws<ArgumentException>(() =>
             function.ValidateArguments([]));
@@ -654,7 +654,7 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public void Variance_NonNumericArg_Throws()
     {
-        VarianceFunction function = new(usePopulation: false, "VARIANCE");
+        VarianceFunction function = new();
 
         Assert.Throws<ArgumentException>(() =>
             function.ValidateArguments([DataKind.String]));
@@ -663,7 +663,7 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public void StdDev_WrongArgCount_Throws()
     {
-        StandardDeviationFunction function = new(usePopulation: false, "STDDEV");
+        StandardDeviationFunction function = new();
 
         Assert.Throws<ArgumentException>(() =>
             function.ValidateArguments([]));
