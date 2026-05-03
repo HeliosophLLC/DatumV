@@ -241,7 +241,12 @@ public sealed class QueryPlanner
         // rewritten node's record equality.
         QueryOperator afterAccessorElide = InlineAccessorElider.Elide(
             afterMetadataLower, _functionRegistry, _catalog.SearchPath);
-        return CommonSubexpressionEliminator.Eliminate(afterAccessorElide, _functionRegistry);
+        QueryOperator afterCse = CommonSubexpressionEliminator.Eliminate(afterAccessorElide, _functionRegistry);
+        // Pushes LIMIT below the projection (and any CSE-introduced RowEnricher)
+        // so expensive per-row work in those wrappers only runs for the rows
+        // that survive LIMIT/OFFSET. Must follow CSE so the rewrite sees the
+        // final wrapper chain.
+        return LimitPushdown.Push(afterCse);
     }
 
     /// <summary>
