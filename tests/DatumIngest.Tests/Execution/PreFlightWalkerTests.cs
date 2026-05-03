@@ -155,6 +155,49 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
     }
 
     [Fact]
+    public void Cte_BodyReference_EmitsModelNotInstalled()
+    {
+        CatalogManifest manifest = BuildManifestWithEntry(
+            entryId: "depth-anything-v3-large",
+            identifier: "depth_anything_v3_large_full",
+            versionString: "2026-05-29");
+        ICatalogVocabulary vocab = new CatalogVocabulary(manifest);
+        FunctionRegistry functions = new();
+
+        QueryExpression q = Parse(
+            "WITH frames AS (SELECT models.depth_anything_v3_large_full(img) AS d FROM vid) "
+            + "SELECT d FROM frames");
+        PreFlightRequirements result = PreFlightWalker.Walk(q, models: null, vocab, functions);
+
+        PreFlightModelRequirement req = Assert.Single(result.Models);
+        Assert.Equal("depth_anything_v3_large_full", req.Identifier);
+        Assert.Equal(PreFlightReason.ModelNotInstalled, req.Reason);
+    }
+
+    [Fact]
+    public void Cte_RecursiveMember_EmitsModelNotInstalled()
+    {
+        CatalogManifest manifest = BuildManifestWithEntry(
+            entryId: "step-entry",
+            identifier: "step_fn",
+            versionString: "2026-05-29");
+        ICatalogVocabulary vocab = new CatalogVocabulary(manifest);
+        FunctionRegistry functions = new();
+
+        QueryExpression q = Parse(
+            "WITH RECURSIVE walk AS ("
+            + " SELECT 0 AS n, 1 AS v"
+            + " UNION ALL"
+            + " SELECT n + 1, models.step_fn(v) FROM walk WHERE n < 5"
+            + ") SELECT * FROM walk");
+        PreFlightRequirements result = PreFlightWalker.Walk(q, models: null, vocab, functions);
+
+        PreFlightModelRequirement req = Assert.Single(result.Models);
+        Assert.Equal("step_fn", req.Identifier);
+        Assert.Equal(PreFlightReason.ModelNotInstalled, req.Reason);
+    }
+
+    [Fact]
     public void UnknownReference_NoCatalog_NoSuggestion_StaysSilent()
     {
         // No vocabulary at all + no scalar functions registered: the walker

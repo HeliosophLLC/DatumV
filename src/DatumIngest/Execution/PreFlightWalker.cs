@@ -33,11 +33,11 @@ namespace DatumIngest.Execution;
 /// model only blocks pre-flight for queries that name the model directly.
 /// </para>
 /// <para>
-/// Scope: the top-level query statement, its CTE projections, joined sub-
-/// queries, and INSERT … query sources. UDF bodies (already-registered
-/// function descriptors) are skipped. Bodies declared inline via
-/// CREATE OR REPLACE MODEL never reach the planner — they're interpreted
-/// by <c>ProceduralModelFunction</c>.
+/// Scope: the top-level query statement, its CTE bodies (anchor +
+/// recursive member), joined sub-queries, and INSERT … query sources.
+/// UDF bodies (already-registered function descriptors) are skipped.
+/// Bodies declared inline via CREATE OR REPLACE MODEL never reach the
+/// planner — they're interpreted by <c>ProceduralModelFunction</c>.
 /// </para>
 /// <para>
 /// The walker does not throw — call sites decide whether a non-empty
@@ -173,6 +173,14 @@ internal static class PreFlightWalker
 
         private void VisitSelect(SelectStatement select)
         {
+            if (select.CommonTableExpressions is not null)
+            {
+                foreach (CommonTableExpression cte in select.CommonTableExpressions)
+                {
+                    VisitQuery(cte.Body);
+                    if (cte.RecursiveQuery is not null) { VisitSelect(cte.RecursiveQuery); }
+                }
+            }
             if (select.LetBindings is not null)
             {
                 foreach (LetBinding binding in select.LetBindings)
