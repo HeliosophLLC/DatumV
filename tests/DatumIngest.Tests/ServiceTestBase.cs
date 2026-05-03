@@ -170,9 +170,9 @@ public abstract class ServiceTestBase : IDisposable
     /// Creates a <see cref="TableCatalog"/> from the provided <paramref name="path"/>
     /// </summary>
     /// <param name="path">The path to the catalog.</param>
-    protected TableCatalog CreateCatalog(string path, bool allowExplicitTablePaths = false)
+    protected TableCatalog CreateCatalog(string path)
     {
-        return new TableCatalog(CreatePool(), path, allowExplicitTablePaths: allowExplicitTablePaths);
+        return new TableCatalog(CreatePool(), path);
     }
 
     /// <summary>
@@ -192,9 +192,9 @@ public abstract class ServiceTestBase : IDisposable
     /// needs the pool's lifetime to outlive any individual catalog
     /// instance.
     /// </summary>
-    protected TableCatalog CreateCatalog(Pool pool, string path, bool allowExplicitTablePaths = false)
+    protected TableCatalog CreateCatalog(Pool pool, string path)
     {
-        return new TableCatalog(pool, path, allowExplicitTablePaths: allowExplicitTablePaths);
+        return new TableCatalog(pool, path);
     }
 
     /// <summary>

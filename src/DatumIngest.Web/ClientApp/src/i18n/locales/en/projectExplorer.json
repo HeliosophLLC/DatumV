@@ -1,0 +1,22 @@
+{
+  "loading": "Loading files…",
+  "errorTitle": "Couldn't load files",
+  "empty": "No files in this catalog yet.",
+  "rootLabel": "Catalog root",
+  "orphan": "orphan",
+  "orphanTitle": "No registry entry references this file. Left behind by a crash or hand-edit; safe to delete.",
+  "refresh": "Refresh",
+  "collapseAll": "Collapse all",
+  "hideSystem": "Hide system files",
+  "showSystem": "Show system files",
+  "kinds": {
+    "data": "Table data",
+    "data_sidecar": "Sidecar",
+    "udf": "Function",
+    "procedure": "Procedure",
+    "model": "Model",
+    "manifest": "Catalog manifest",
+    "gitignore": "Git config",
+    "other": "Other"
+  }
+}

@@ -124,16 +124,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// <see cref="CatalogStore.DefaultFileName"/>. The directory is created on
     /// first save if missing.
     /// </param>
-    /// <param name="allowExplicitTablePaths">
-    /// When <see langword="true"/>, <c>CREATE TABLE … AT 'path'</c> is honored;
-    /// the persistent <c>.datum</c> file lands at the supplied location. Defaults
-    /// to <see langword="false"/> so production hosts get the safe behaviour
-    /// (table file always derived from the catalog directory + table name).
-    /// Tests opt in.
-    /// </param>
-    public TableCatalog(Pool pool, string? catalogPath, bool allowExplicitTablePaths = false)
+    public TableCatalog(Pool pool, string? catalogPath)
     {
-        this.AllowExplicitTablePaths = allowExplicitTablePaths;
         this.Events = new CatalogEvents();
         this.Pool = pool;
         this.SidecarRegistry = new();
@@ -155,11 +147,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         string? catalogDirectory = CatalogStore is null
             ? null
             : global::System.IO.Path.GetDirectoryName(CatalogStore.Path) ?? Environment.CurrentDirectory;
+        this.CatalogDirectory = catalogDirectory;
         this.FlatFileCatalog = new FlatFileCatalog(
             pool,
             SidecarRegistry,
             catalogDirectory,
-            allowExplicitTablePaths,
             persistManifest: () => CatalogStore?.Save(Udfs, Procedures, DeclaredModels));
 
         // Construct the read-only backends. System holds host-attached
@@ -196,6 +188,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // time; construction is safe because no scan occurs here.
         SystemCatalog.Add(new Providers.UdfsTableProvider(pool, Udfs));
         SystemCatalog.Add(new Providers.ProceduresTableProvider(pool, Procedures));
+        SystemCatalog.Add(new Providers.SystemFilesProvider(pool, catalogDirectory, this));
         VirtualCatalog.Add(new Providers.InformationSchemaTablesProvider(pool, this));
         VirtualCatalog.Add(new Providers.InformationSchemaColumnsProvider(pool, this));
         VirtualCatalog.Add(new Providers.InformationSchemaSchemataProvider(pool));
@@ -241,12 +234,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     internal Pool Pool { get; }
 
     /// <summary>
-    /// When <see langword="true"/>, <c>CREATE TABLE … AT 'path'</c>
-    /// statements are honored. Default is <see langword="false"/> —
-    /// production hosts reject the clause so table files always land in
-    /// the catalog's working directory.
+    /// Absolute path to the directory holding <c>.datum-catalog.json</c>
+    /// and the conventional subdirs (<c>data/</c>, <c>udfs/</c>,
+    /// <c>procedures/</c>, <c>models/</c>). <see langword="null"/> when
+    /// the catalog is in-memory (no catalog path supplied to the
+    /// constructor). Hosts use this to anchor a file-system watcher so
+    /// out-of-band edits to the catalog tree (VS Code save, git checkout)
+    /// can drive UI refreshes.
     /// </summary>
-    public bool AllowExplicitTablePaths { get; }
+    public string? CatalogDirectory { get; }
 
     /// <summary>
     /// Catalog-change event bus. Subscribers attach to typed events

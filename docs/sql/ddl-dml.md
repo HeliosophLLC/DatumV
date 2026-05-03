@@ -76,9 +76,9 @@ See [Source Indexes — Mutable B+Trees](../technical/indexes.md#mutable-btrees)
 
 `CREATE TABLE IF NOT EXISTS` does a name-only existence check; no schema-equivalence comparison. If a table already exists, the statement is a no-op regardless of whether the requested schema matches.
 
-#### AT 'path'
+#### Storage location
 
-`CREATE TABLE … AT 'path'` lets the caller place the backing `.datum` file at a specific location instead of the catalog directory. This clause is rejected by default — production catalogs don't honor it. Pass `allowExplicitTablePaths: true` to the `TableCatalog` constructor to opt in (typically test fixtures only).
+Persistent tables always land at `<catalog>/data/<schema>/<name>.datum` — the catalog owns the file layout so a directory checked into source control has a predictable shape. The historical `CREATE TABLE … AT 'path'` clause is no longer honored and is rejected at execute time.
 
 ### CREATE TEMP TABLE
 

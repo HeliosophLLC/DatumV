@@ -85,10 +85,6 @@ public interface ITableCatalog : IDisposable
     /// </summary>
     /// <param name="name">Canonical <c>(schema, table)</c> identity.</param>
     /// <param name="schema">Post-validation schema from the facade.</param>
-    /// <param name="explicitStoragePath">
-    /// The path from <c>CREATE TABLE … AT 'path'</c>, or <see langword="null"/>
-    /// to let the backend derive the path from its own conventions.
-    /// </param>
     /// <param name="primaryKeyConstraintName">
     /// User-supplied <c>CONSTRAINT name PRIMARY KEY</c>, or
     /// <see langword="null"/> when no custom name was given (the backend
@@ -97,7 +93,6 @@ public interface ITableCatalog : IDisposable
     ITableProvider CreatePersistentTable(
         QualifiedName name,
         Model.Schema schema,
-        string? explicitStoragePath,
         string? primaryKeyConstraintName);
 
     /// <summary>

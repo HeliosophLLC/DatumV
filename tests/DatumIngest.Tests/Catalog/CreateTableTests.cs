@@ -7,12 +7,11 @@ using DatumIngest.Pooling;
 namespace DatumIngest.Tests.Catalog;
 
 /// <summary>
-/// PR10a tests for SQL <c>CREATE TABLE</c> / <c>CREATE TEMP TABLE</c> /
-/// <c>DROP TABLE</c>. Cover: TEMP vs persistent dispatch, schema
-/// resolution from column type names, <c>IF NOT EXISTS</c> /
-/// <c>IF EXISTS</c>, the <c>AT 'path'</c> clause + production flag,
-/// catalog-file persistence (v2), and rehydration on catalog reopen.
-/// PRIMARY KEY enforcement (uniqueness, NULL rejection, 16-byte cap) ships in PR10f and is exercised in [PrimaryKeyTests](PrimaryKeyTests.cs).
+/// Tests for SQL <c>CREATE TABLE</c> / <c>CREATE TEMP TABLE</c> /
+/// <c>DROP TABLE</c>: TEMP vs persistent dispatch, schema resolution,
+/// <c>IF NOT EXISTS</c> / <c>IF EXISTS</c>, catalog-file persistence,
+/// rehydration on reopen. PRIMARY KEY enforcement lives in
+/// <see cref="PrimaryKeyTests"/>.
 /// </summary>
 public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
 {
@@ -240,13 +239,43 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
 
         catalog.Plan("CREATE TABLE users (id Int32, name String)");
 
-        // Default storage location: {catalog_dir}/{name}.datum
-        string expectedPath = Path.Combine(_tempDir, "users.datum");
+        // Default storage location: {catalog_dir}/data/{schema}/{name}.datum
+        string expectedPath = Path.Combine(_tempDir, "data", "public", "users.datum");
         Assert.True(File.Exists(expectedPath));
 
         ITableProvider provider = catalog["users"];
         Assert.IsType<DatumFileTableProviderV2>(provider);
         Assert.Equal(0, provider.GetRowCount());
+    }
+
+    [Fact]
+    public void CreatePersistentTable_SeedsGitignoreInCatalogDirectory()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32)");
+
+        string gitignorePath = Path.Combine(_tempDir, ".gitignore");
+        Assert.True(File.Exists(gitignorePath), "catalog save should seed a .gitignore");
+
+        string contents = File.ReadAllText(gitignorePath);
+        Assert.Contains("*.datum-cindex-*", contents);
+        Assert.Contains("*.datum-pkindex", contents);
+        Assert.Contains("*.datum-fts-*", contents);
+        Assert.Contains("*.datum-manifest", contents);
+    }
+
+    [Fact]
+    public void CreatePersistentTable_GitignoreSeed_RespectsExistingFile()
+    {
+        string gitignorePath = Path.Combine(_tempDir, ".gitignore");
+        Directory.CreateDirectory(_tempDir);
+        File.WriteAllText(gitignorePath, "# my custom rules\nbuild/\n");
+
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32)");
+
+        // User's .gitignore is preserved verbatim — no overwrite.
+        Assert.Equal("# my custom rules\nbuild/\n", File.ReadAllText(gitignorePath));
     }
 
     [Fact]
@@ -316,7 +345,7 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
         }
 
         // Simulate the .datum file disappearing out from under the catalog.
-        File.Delete(Path.Combine(_tempDir, "users.datum"));
+        File.Delete(Path.Combine(_tempDir, "data", "public", "users.datum"));
 
         using TableCatalog reopened = CreateCatalog(CatalogPath);
         // Stale entry silently dropped; catalog still opens cleanly.
@@ -326,25 +355,13 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
     // ──────────────────── AT clause ────────────────────
 
     [Fact]
-    public void CreatePersistentTable_AtClause_RequiresAllowExplicitTablePaths()
+    public void CreatePersistentTable_AtClause_IsRejected()
     {
-        using TableCatalog catalog = CreateCatalog(CatalogPath); // production default: AllowExplicitTablePaths=false
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
             catalog.Plan($"CREATE TABLE t (a Int32) AT '{Path.Combine(_tempDir, "elsewhere.datum")}'"));
-        Assert.Contains("AllowExplicitTablePaths", ex.Message);
-    }
-
-    [Fact]
-    public void CreatePersistentTable_AtClause_AllowedInTestMode()
-    {
-        string explicitPath = Path.Combine(_tempDir, "elsewhere.datum");
-        using TableCatalog catalog = CreateCatalog(CatalogPath, allowExplicitTablePaths: true);
-
-        catalog.Plan($"CREATE TABLE t (a Int32) AT '{explicitPath}'");
-
-        Assert.True(File.Exists(explicitPath));
-        Assert.True(catalog.HasTable("t"));
+        Assert.Contains("AT 'path' is no longer supported", ex.Message);
     }
 
     // ──────────────────── DROP TABLE ────────────────────
@@ -364,7 +381,7 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void DropPersistentTable_RemovesCatalogEntryAndDeletesFile()
     {
-        string datumPath = Path.Combine(_tempDir, "users.datum");
+        string datumPath = Path.Combine(_tempDir, "data", "public", "users.datum");
         using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE users (id Int32, name String)");
         Assert.True(File.Exists(datumPath));

@@ -78,7 +78,7 @@ public sealed class UpdatePolishTests : ServiceTestBase, IAsyncLifetime
         // `UPDATE t SET name = name` evaluates SET against each row, but
         // the new value matches the existing value → no rewrite, no
         // commit, no generation bump.
-        string filePath = Path.Combine(_tempDir, "t.datum");
+        string filePath = Path.Combine(_tempDir, "data", "public", "t.datum");
         ulong genBefore;
         using (TableCatalog catalog = NewFileCatalog())
         {
@@ -99,7 +99,7 @@ public sealed class UpdatePolishTests : ServiceTestBase, IAsyncLifetime
         // `SET status = 'pending' WHERE status = 'pending'` is a degenerate
         // but legal pattern (e.g. retry loops). Every matched row's new
         // value equals the existing one → no rewrite.
-        string filePath = Path.Combine(_tempDir, "t.datum");
+        string filePath = Path.Combine(_tempDir, "data", "public", "t.datum");
         ulong genBefore;
         using (TableCatalog catalog = NewFileCatalog())
         {
@@ -137,7 +137,7 @@ public sealed class UpdatePolishTests : ServiceTestBase, IAsyncLifetime
     {
         // Multi-column SET where every column collapses to a no-op for
         // every row. Should produce zero commits.
-        string filePath = Path.Combine(_tempDir, "t.datum");
+        string filePath = Path.Combine(_tempDir, "data", "public", "t.datum");
         ulong genBefore;
         using (TableCatalog catalog = NewFileCatalog())
         {
@@ -155,7 +155,7 @@ public sealed class UpdatePolishTests : ServiceTestBase, IAsyncLifetime
     public async Task Update_RealChange_StillCommits()
     {
         // Sanity: no-op detection doesn't suppress legitimate updates.
-        string filePath = Path.Combine(_tempDir, "t.datum");
+        string filePath = Path.Combine(_tempDir, "data", "public", "t.datum");
         ulong genBefore;
         using (TableCatalog catalog = NewFileCatalog())
         {
@@ -184,7 +184,7 @@ public sealed class UpdatePolishTests : ServiceTestBase, IAsyncLifetime
         // every matched row would append a duplicate of the bytes to the
         // sidecar. Pass-through preserves the existing pointer so the
         // sidecar size is stable across the no-op UPDATE.
-        string filePath = Path.Combine(_tempDir, "t.datum");
+        string filePath = Path.Combine(_tempDir, "data", "public", "t.datum");
         string sidecarPath = Path.ChangeExtension(filePath, ".datum-blob");
 
         // Strings long enough to spill to sidecar (well above the
@@ -216,7 +216,7 @@ public sealed class UpdatePolishTests : ServiceTestBase, IAsyncLifetime
         // source.body. Without sidecar pass-through, the value would
         // round-trip through CLR and produce a duplicate sidecar entry
         // for every matched target row.
-        string filePath = Path.Combine(_tempDir, "features.datum");
+        string filePath = Path.Combine(_tempDir, "data", "public", "features.datum");
         string sidecarPath = Path.ChangeExtension(filePath, ".datum-blob");
 
         string longText = new('x', 200);

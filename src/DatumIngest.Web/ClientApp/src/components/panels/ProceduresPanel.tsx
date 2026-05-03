@@ -7,18 +7,21 @@ import {
   loadProcedures,
   loadUdfs,
 } from '@/state/functionCatalog';
+import { closePanel, type DockSide } from '@/state/nav';
 import type {
   ProcedureDto,
   ScalarFunctionParameterDto,
   UdfDto,
 } from '@/api/generated/openapi-client';
+import { PanelHeader } from './PanelHeader';
 
 // Two collapsible sections: Procedures + UDFs. Names + parameter lists
 // only; clicking a row is reserved for a future "preview source" or
 // "insert into editor" gesture (no consumer wired today, so the row is
 // presentational).
-export function ProceduresPanel() {
+export function ProceduresPanel({ side }: { side: DockSide }) {
   const { t } = useTranslation('procedures');
+  const { t: tPanels } = useTranslation('panels');
   const { procedureStatus, procedures, procedureError, udfStatus, udfs, udfError } =
     useSnapshot(functionCatalogState);
 
@@ -28,7 +31,9 @@ export function ProceduresPanel() {
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto py-1 text-xs">
+    <div className="flex h-full flex-col">
+      <PanelHeader title={tPanels('procedures.title')} onClose={() => closePanel(side)} />
+      <div className="flex-1 overflow-y-auto py-1 text-xs">
       <Section
         title={t('procedures')}
         status={procedureStatus}
@@ -57,6 +62,7 @@ export function ProceduresPanel() {
           />
         ))}
       </Section>
+      </div>
     </div>
   );
 }

@@ -13,27 +13,12 @@ namespace DatumIngest.Catalog.Executors;
 internal static class TableExecutor
 {
     /// <summary>
-    /// Applies a <c>CREATE TABLE</c> statement: validates the
-    /// <c>AT 'path'</c> clause against
-    /// <see cref="TableCatalog.AllowExplicitTablePaths"/>, resolves the
-    /// storage location, materialises the table (in-memory for TEMP, an
-    /// empty <c>.datum</c> file for persistent), registers it with the
-    /// catalog, and persists the entry in the catalog json (persistent
-    /// only).
+    /// Applies a <c>CREATE TABLE</c> statement: resolves the storage
+    /// location (always <c>&lt;catalog&gt;/data/&lt;schema&gt;/&lt;name&gt;.datum</c>),
+    /// materialises the table (in-memory for TEMP, an empty <c>.datum</c>
+    /// file for persistent), registers it with the catalog, and persists
+    /// the entry in the catalog json (persistent only).
     /// </summary>
-    /// <remarks>
-    /// PR10a covers shape only — column kinds, NULL/NOT NULL,
-    /// <c>IF NOT EXISTS</c>, optional <c>AT 'path'</c>. PR10b adds
-    /// <c>DEFAULT &lt;literal&gt;</c> persisted in the footer prologue;
-    /// PR10c/PR10c' adds INSERT VALUES/SELECT auto-fill from those
-    /// defaults. PR10e adds <c>IDENTITY</c> with a per-table counter
-    /// in the prologue and <c>IAppendSession.ReserveNextIdentityValue</c>
-    /// auto-fill at INSERT time. PR10f adds <c>PRIMARY KEY</c>
-    /// enforcement: the prologue carries the ordered PK column-index
-    /// list, the catalog rejects tables whose key exceeds 16 bytes,
-    /// and the INSERT layer scans existing rows to reject duplicate /
-    /// null PK values.
-    /// </remarks>
     public static async Task<IQueryPlan> CreateTableAsync(
         TableCatalog catalog, CreateTableStatement create, string? sourceText = null)
     {
@@ -81,6 +66,18 @@ internal static class TableExecutor
             return EmptyQueryPlan.Instance;
         }
 
+        // AT 'path' is no longer supported — table files always land at
+        // <catalog>/data/<schema>/<name>.datum. Reject early with a clear
+        // pointer so any leftover scripts (or test fixtures we missed)
+        // surface the change at parse-execute boundary rather than silently
+        // writing somewhere unexpected.
+        if (create.StoragePath is not null)
+        {
+            throw new InvalidOperationException(
+                $"CREATE TABLE '{create.TableName}': AT 'path' is no longer supported. " +
+                "Table files always land at <catalog>/data/<schema>/<name>.datum.");
+        }
+
         // Persistent: ResolveForCreate picks the first DDL-capable schema
         // on the search_path when the user didn't supply an explicit
         // qualifier; explicit qualifiers are validated DDL-capable
@@ -88,9 +85,6 @@ internal static class TableExecutor
         SchemaResolver resolver = new(catalog, catalog.SearchPath);
         QualifiedName qn = resolver.ResolveForCreate(create.SchemaName, create.TableName);
 
-        // Route to the schema's backend. AT-clause / no-catalog-file /
-        // file-already-exists validation lives in the backend so it stays
-        // with the storage concerns it depends on.
         if (!catalog.TryResolveBackend(qn.Schema, out ITableCatalog? backend))
         {
             throw new InvalidOperationException(
@@ -100,7 +94,6 @@ internal static class TableExecutor
         backend.CreatePersistentTable(
             qn,
             schema,
-            create.StoragePath,
             create.PrimaryKeyConstraintName);
 
         catalog.Events.Raise(new TableCreatedEvent(qn, schema, sourceText));

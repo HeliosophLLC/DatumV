@@ -218,7 +218,7 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         }
 
         // Read the .datum file directly and inspect the prologue.
-        string datumPath = Path.Combine(_tempDir, "users.datum");
+        string datumPath = Path.Combine(_tempDir, "data", "public", "users.datum");
         using DatumFileReaderV2 reader = DatumFileReaderV2.Open(datumPath);
         Assert.Equal(2, reader.Footer.Prologue.ColumnDefaults.Count);
 

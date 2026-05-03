@@ -38,7 +38,6 @@ public sealed class FlatFileCatalog : ITableCatalog
     private readonly Pool _pool;
     private readonly SidecarRegistry _sidecarRegistry;
     private readonly string? _catalogDirectory;
-    private readonly bool _allowExplicitTablePaths;
 
     /// <summary>
     /// Invoked after every mutation that changes the persistent manifest
@@ -82,9 +81,6 @@ public sealed class FlatFileCatalog : ITableCatalog
     /// catalog file is attached — persistent CREATE TABLE is rejected
     /// upstream in that case.
     /// </param>
-    /// <param name="allowExplicitTablePaths">
-    /// When true, <c>CREATE TABLE … AT 'path'</c> is honoured.
-    /// </param>
     /// <param name="persistManifest">
     /// Callback invoked after every state change to write the catalog
     /// manifest. Wraps <see cref="CatalogStore.Save"/> with the facade's
@@ -94,13 +90,11 @@ public sealed class FlatFileCatalog : ITableCatalog
         Pool pool,
         SidecarRegistry sidecarRegistry,
         string? catalogDirectory,
-        bool allowExplicitTablePaths,
         Action persistManifest)
     {
         _pool = pool;
         _sidecarRegistry = sidecarRegistry;
         _catalogDirectory = catalogDirectory;
-        _allowExplicitTablePaths = allowExplicitTablePaths;
         _persistManifest = persistManifest;
     }
 
@@ -202,18 +196,8 @@ public sealed class FlatFileCatalog : ITableCatalog
     public ITableProvider CreatePersistentTable(
         QualifiedName name,
         Schema schema,
-        string? explicitStoragePath,
         string? primaryKeyConstraintName)
     {
-        if (explicitStoragePath is not null && !_allowExplicitTablePaths)
-        {
-            throw new InvalidOperationException(
-                $"CREATE TABLE '{name}' uses AT 'path' but the catalog has " +
-                "AllowExplicitTablePaths = false. Pass allowExplicitTablePaths: true to the " +
-                "TableCatalog constructor to opt in (test scenarios), or remove the AT clause " +
-                "and let the catalog place the file at {catalog_dir}/{name}.datum.");
-        }
-
         if (_catalogDirectory is null)
         {
             throw new InvalidOperationException(
@@ -223,13 +207,21 @@ public sealed class FlatFileCatalog : ITableCatalog
                 "recorded.");
         }
 
-        string targetPath = ResolveCreateTablePath(name, explicitStoragePath);
+        string targetPath = ResolveCreateTablePath(name);
         if (File.Exists(targetPath))
         {
             throw new InvalidOperationException(
                 $"CREATE TABLE '{name}' would create a file at '{targetPath}' " +
-                "but a file already exists there. Drop the existing file or pick a different " +
-                "name / AT clause.");
+                "but a file already exists there. Drop the existing file or pick a different name.");
+        }
+
+        // Create data/<schema>/ if it doesn't exist. CREATE TABLE is the only
+        // path that materialises new files, so the subdirectory is created
+        // lazily here rather than at catalog construction.
+        string? targetDir = System.IO.Path.GetDirectoryName(targetPath);
+        if (!string.IsNullOrEmpty(targetDir))
+        {
+            Directory.CreateDirectory(targetDir);
         }
 
         ColumnDescriptorV2[] descriptors = new ColumnDescriptorV2[schema.Columns.Count];
@@ -533,21 +525,14 @@ public sealed class FlatFileCatalog : ITableCatalog
         datumProvider.SidecarStoreId = _sidecarRegistry.Register(source);
     }
 
-    private string ResolveCreateTablePath(QualifiedName name, string? explicitPath)
+    private string ResolveCreateTablePath(QualifiedName name)
     {
-        if (explicitPath is not null)
-        {
-            return System.IO.Path.IsPathRooted(explicitPath)
-                ? explicitPath
-                : ResolveTablePath(explicitPath);
-        }
-
-        // File name uses just the unqualified portion to preserve today's
-        // on-disk convention (users.datum, not public.users.datum). Schema
-        // disambiguation will need a different solution once multiple
-        // user-created schemas can host same-named tables.
+        // Persistent tables land under <catalog>/data/<schema>/<name>.datum.
+        // Schema-as-directory makes the on-disk layout readable, lets users
+        // gitignore /data/ wholesale for schema-only commits, and gives
+        // same-named tables in different user-created schemas distinct files.
         string catalogDir = _catalogDirectory ?? Environment.CurrentDirectory;
-        return System.IO.Path.Combine(catalogDir, name.Name + ".datum");
+        return System.IO.Path.Combine(catalogDir, "data", name.Schema, name.Name + ".datum");
     }
 
     private string ResolveTablePath(string storedPath)

@@ -144,6 +144,7 @@ class ICatalogHubClient_Binder implements ReceiverRegister<ICatalogHubClient> {
 
         const __onPong = (...args: [string]) => receiver.onPong(...args);
         const __onCatalogChanged = (...args: [CatalogChangedEvent]) => receiver.onCatalogChanged(...args);
+        const __onFilesChanged = () => receiver.onFilesChanged();
         const __onModelLoaded = (...args: [ModelLoadedEvent]) => receiver.onModelLoaded(...args);
         const __onModelEvicted = (...args: [ModelEvictedEvent]) => receiver.onModelEvicted(...args);
         const __onModelActiveChanged = (...args: [ModelActiveChangedEvent]) => receiver.onModelActiveChanged(...args);
@@ -154,6 +155,7 @@ class ICatalogHubClient_Binder implements ReceiverRegister<ICatalogHubClient> {
 
         connection.on("OnPong", __onPong);
         connection.on("OnCatalogChanged", __onCatalogChanged);
+        connection.on("OnFilesChanged", __onFilesChanged);
         connection.on("OnModelLoaded", __onModelLoaded);
         connection.on("OnModelEvicted", __onModelEvicted);
         connection.on("OnModelActiveChanged", __onModelActiveChanged);
@@ -165,6 +167,7 @@ class ICatalogHubClient_Binder implements ReceiverRegister<ICatalogHubClient> {
         const methodList: ReceiverMethod[] = [
             { methodName: "OnPong", method: __onPong },
             { methodName: "OnCatalogChanged", method: __onCatalogChanged },
+            { methodName: "OnFilesChanged", method: __onFilesChanged },
             { methodName: "OnModelLoaded", method: __onModelLoaded },
             { methodName: "OnModelEvicted", method: __onModelEvicted },
             { methodName: "OnModelActiveChanged", method: __onModelActiveChanged },

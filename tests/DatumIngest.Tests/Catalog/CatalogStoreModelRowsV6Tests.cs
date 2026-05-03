@@ -69,33 +69,32 @@ public sealed class CatalogStoreModelRowsV6Tests : ServiceTestBase, IDisposable
         $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x END";
 
     [Fact]
-    public void OlderVersion5_File_RejectedAtLoad()
+    public void OlderVersion_File_RejectedAtLoad()
     {
-        // v5 readers no longer exist — the schema bumped to v6 when model
-        // rows split into catalog-pointer vs source-text shapes. Files
-        // pinned at the older shape must fail loudly so a stale binary
-        // can't silently start fresh and lose state.
+        // Pre-v7 readers no longer exist. Files pinned at an older shape
+        // must fail loudly so a stale binary can't silently start fresh
+        // and lose state.
         File.WriteAllText(_catalogPath,
             """
             {
               "version": 5,
-              "udfs": [{"name": "ignored", "parameters": [], "body": "1"}]
+              "udfs": []
             }
             """);
 
         CatalogStoreLoadException ex = Assert.Throws<CatalogStoreLoadException>(
             () => CreateCatalog(_catalogPath));
         Assert.Contains("version 5", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("requires version 6", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("requires version 7", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task UserCreateModel_PersistsSourceText_NoCatalogProvenance()
+    public async Task UserCreateModel_PersistsFilePath_NoCatalogProvenance()
     {
         // User CREATE MODEL has no catalog parent — the install context's
-        // catalog id / version stay null, so the persisted row falls back
-        // to the source-text shape. Verifies on-disk JSON includes
-        // source_text and omits catalog_id / catalog_version / pinned_as.
+        // catalog id / version stay null, so the persisted row carries
+        // file_path pointing at the on-disk models/<name>.sql instead of
+        // a catalog pointer. Verifies the JSON shape and the file content.
         using (TableCatalog first = OpenCatalogWithDispatcher())
         {
             first.Plan(UserCreateModelSql("user_model"));
@@ -103,16 +102,22 @@ public sealed class CatalogStoreModelRowsV6Tests : ServiceTestBase, IDisposable
 
         string json = File.ReadAllText(_catalogPath);
         Assert.Contains("\"name\": \"user_model\"", json);
-        Assert.Contains("\"source_text\":", json);
+        Assert.Contains("\"file_path\": \"models/user_model.sql\"", json);
         // Catalog-pointer fields suppress for user rows because Save sets
         // them to null and the source generator omits null properties.
         Assert.DoesNotContain("\"catalog_id\":", json);
         Assert.DoesNotContain("\"catalog_version\":", json);
         Assert.DoesNotContain("\"pinned_as\":", json);
 
-        // Reopen + rehydrate: user rows take the source_text path and the
-        // descriptor re-lands without a manifest store. Observable signal
-        // that the row was treated as a user row, not a catalog row.
+        // .sql file holds the verbatim CREATE OR REPLACE MODEL text.
+        string modelSqlPath = Path.Combine(_scratchDir, "models", "user_model.sql");
+        Assert.True(File.Exists(modelSqlPath));
+        string source = File.ReadAllText(modelSqlPath);
+        Assert.StartsWith("CREATE OR REPLACE MODEL", source);
+
+        // Reopen + rehydrate: user rows take the file_path → source-text
+        // path and the descriptor re-lands without a manifest store.
+        // Observable signal that the row was treated as a user row.
         using TableCatalog reopened = OpenCatalogWithDispatcher();
         ModelRehydrationReport report = await reopened.RehydrateModelsAsync(
             manifest: null, ct: CancellationToken.None);
@@ -155,7 +160,7 @@ public sealed class CatalogStoreModelRowsV6Tests : ServiceTestBase, IDisposable
         // Bare install: pinned_as stays null, source_text is omitted because
         // the row points at the on-disk installSql for its source of truth.
         Assert.DoesNotContain("\"pinned_as\":", json);
-        Assert.DoesNotContain("\"source_text\":", json);
+        Assert.DoesNotContain("\"file_path\":", json);
     }
 
     [Fact]
@@ -188,7 +193,7 @@ public sealed class CatalogStoreModelRowsV6Tests : ServiceTestBase, IDisposable
         Assert.Contains("\"catalog_id\": \"test-entry\"", json);
         Assert.Contains("\"catalog_version\": \"2026-04-15\"", json);
         Assert.Contains("\"pinned_as\": \"catalog_model_pinned\"", json);
-        Assert.DoesNotContain("\"source_text\":", json);
+        Assert.DoesNotContain("\"file_path\":", json);
     }
 
     [Fact]

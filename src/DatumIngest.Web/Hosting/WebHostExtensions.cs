@@ -108,6 +108,13 @@ public static class WebHostExtensions
             // and runs once for the catalog's lifetime.
             services.AddHostedService<CatalogEventBroadcastService>();
 
+            // Catalog directory watcher. Sits alongside the DDL broadcaster
+            // but listens to the filesystem instead of the in-process event
+            // bus — fires OnFilesChanged when an external editor / git /
+            // hand-edit modifies the catalog tree so the Project Explorer
+            // panel can refetch.
+            services.AddHostedService<CatalogDirectoryWatcher>();
+
             // Model lifecycle + calibration observers. Both forward
             // engine-side events to the CatalogHub so the status-bar
             // chips (residency, calibration) can render live state

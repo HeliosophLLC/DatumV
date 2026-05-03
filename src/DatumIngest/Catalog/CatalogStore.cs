@@ -99,10 +99,20 @@ public sealed class CatalogStore
     ///     start. <em>User-authored rows</em> (no catalog parent) keep the
     ///     v5 verbatim-source-text shape because the source has nowhere
     ///     else to live.</description></item>
+    ///   <item><description><c>7</c>: user-authored UDF / procedure / model
+    ///     bodies move out of the JSON manifest into per-object <c>.sql</c>
+    ///     files at <c>udfs/&lt;schema&gt;/&lt;name&gt;.sql</c>,
+    ///     <c>procedures/&lt;schema&gt;/&lt;name&gt;.sql</c>, and
+    ///     <c>models/&lt;name&gt;.sql</c> respectively. The manifest entry
+    ///     shrinks to <c>(schema, name, file_path)</c>; the file holds the
+    ///     verbatim <c>CREATE OR REPLACE …</c> SQL. The source-text-bearing
+    ///     UDF / procedure / user-model fields from earlier versions are
+    ///     removed. Catalog-installed model rows keep the v6 provenance shape.
+    ///     </description></item>
     /// </list>
-    /// Only v6 is accepted; older and newer versions both throw at load.
+    /// Only v7 is accepted; older and newer versions both throw at load.
     /// </summary>
-    public const int CurrentVersion = 6;
+    public const int CurrentVersion = 7;
 
     private readonly string _path;
     private readonly object _writeLock = new();
@@ -244,26 +254,37 @@ public sealed class CatalogStore
         // Capture the FlatFile backend's state so TableCatalog can rehydrate it.
         _loadedFlatFileState = parsed.Backends?.FlatFile;
 
+        string catalogDirectory = System.IO.Path.GetDirectoryName(_path)
+            ?? Environment.CurrentDirectory;
+
         // Capture SQL-defined model entries. They're rehydrated later via
         // TableCatalog.RehydrateModelsAsync (after the dispatcher + models
         // directory are wired). Two row shapes are accepted:
         //   * catalog-installed rows carry (catalog_id, catalog_version)
         //     and resolve their installSql against the live manifest.
-        //   * user-authored rows carry source_text and round-trip verbatim.
-        // Rows that match neither shape are skipped — rehydration runs
-        // separately and is the right place to surface failures.
+        //   * user-authored rows carry file_path and the source is read
+        //     from disk at rehydrate time.
         List<PendingModelEntry> models = new();
+        List<string> warnings = new();
         foreach (CatalogFileModelEntry entry in parsed.Models ?? [])
         {
             if (string.IsNullOrWhiteSpace(entry.Name)) { continue; }
             bool isCatalogRow = !string.IsNullOrWhiteSpace(entry.CatalogId)
                 && !string.IsNullOrWhiteSpace(entry.CatalogVersion);
-            bool isUserRow = !string.IsNullOrWhiteSpace(entry.SourceText);
+            bool isUserRow = !string.IsNullOrWhiteSpace(entry.FilePath);
             if (!isCatalogRow && !isUserRow) { continue; }
+
+            string? sourceText = null;
+            if (isUserRow)
+            {
+                sourceText = TryReadSqlFile(catalogDirectory, entry.FilePath!, $"model '{entry.Schema}.{entry.Name}'", warnings);
+                if (sourceText is null) continue;
+            }
+
             models.Add(new PendingModelEntry(
                 Schema: entry.Schema ?? "models",
                 Name: entry.Name!,
-                SourceText: entry.SourceText,
+                SourceText: sourceText,
                 CatalogId: entry.CatalogId,
                 CatalogVersion: entry.CatalogVersion,
                 PinnedAs: entry.PinnedAs));
@@ -274,7 +295,6 @@ public sealed class CatalogStore
         int skippedUdfs = 0;
         int loadedProcedures = 0;
         int skippedProcedures = 0;
-        List<string> warnings = new();
 
         foreach (CatalogFileUdfEntry entry in parsed.Udfs ?? [])
         {
@@ -284,13 +304,19 @@ public sealed class CatalogStore
                 warnings.Add("Skipping UDF entry with missing or empty 'name'.");
                 continue;
             }
-
-            UdfDescriptor? descriptor = TryRehydrate(entry, udfs, warnings);
-            if (descriptor is null)
+            if (string.IsNullOrWhiteSpace(entry.FilePath))
             {
                 skippedUdfs++;
+                warnings.Add($"Skipping UDF '{entry.Name}': manifest entry has no file_path.");
                 continue;
             }
+
+            string? sourceText = TryReadSqlFile(catalogDirectory, entry.FilePath!, $"UDF '{entry.Schema}.{entry.Name}'", warnings);
+            if (sourceText is null) { skippedUdfs++; continue; }
+
+            UdfDescriptor? descriptor = TryRehydrateUdfFromSource(
+                entry.Schema ?? "public", entry.Name!, sourceText, udfs, warnings);
+            if (descriptor is null) { skippedUdfs++; continue; }
 
             try
             {
@@ -312,13 +338,19 @@ public sealed class CatalogStore
                 warnings.Add("Skipping procedure entry with missing or empty 'name'.");
                 continue;
             }
-
-            ProcedureDescriptor? descriptor = TryRehydrateProcedure(entry, warnings);
-            if (descriptor is null)
+            if (string.IsNullOrWhiteSpace(entry.FilePath))
             {
                 skippedProcedures++;
+                warnings.Add($"Skipping procedure '{entry.Name}': manifest entry has no file_path.");
                 continue;
             }
+
+            string? sourceText = TryReadSqlFile(catalogDirectory, entry.FilePath!, $"procedure '{entry.Schema}.{entry.Name}'", warnings);
+            if (sourceText is null) { skippedProcedures++; continue; }
+
+            ProcedureDescriptor? descriptor = TryRehydrateProcedureFromSource(
+                entry.Schema ?? "public", entry.Name!, sourceText, warnings);
+            if (descriptor is null) { skippedProcedures++; continue; }
 
             try
             {
@@ -339,234 +371,128 @@ public sealed class CatalogStore
     }
 
     /// <summary>
-    /// Re-parses a persisted procedure entry's source text into a
-    /// <see cref="CreateProcedureStatement"/>, extracts the body, and
-    /// returns a fresh descriptor. Returns <see langword="null"/> when
-    /// the entry can't be rehydrated; <paramref name="warnings"/>
-    /// collects the reason.
+    /// Reads <paramref name="relativePath"/> resolved against
+    /// <paramref name="catalogDirectory"/> as UTF-8 text. Records a warning
+    /// and returns <see langword="null"/> when the file is missing or
+    /// unreadable; load continues with the remaining entries so one missing
+    /// file doesn't abort the whole catalog.
     /// </summary>
-    private static ProcedureDescriptor? TryRehydrateProcedure(
-        CatalogFileProcedureEntry entry, List<string> warnings)
+    private static string? TryReadSqlFile(
+        string catalogDirectory, string relativePath, string contextLabel, List<string> warnings)
     {
-        if (string.IsNullOrWhiteSpace(entry.SourceText))
+        string resolved = System.IO.Path.GetFullPath(
+            System.IO.Path.Combine(catalogDirectory, relativePath.Replace('/', System.IO.Path.DirectorySeparatorChar)));
+        try
         {
-            warnings.Add($"Skipping procedure '{entry.Name}': source text is missing.");
+            return File.ReadAllText(resolved);
+        }
+        catch (FileNotFoundException)
+        {
+            warnings.Add($"Skipping {contextLabel}: backing file '{relativePath}' is missing.");
             return null;
         }
+        catch (DirectoryNotFoundException)
+        {
+            warnings.Add($"Skipping {contextLabel}: backing file '{relativePath}' is missing.");
+            return null;
+        }
+        catch (IOException ex)
+        {
+            warnings.Add($"Skipping {contextLabel}: could not read backing file '{relativePath}' — {ex.Message}");
+            return null;
+        }
+    }
 
+    /// <summary>
+    /// Re-parses the verbatim <c>CREATE FUNCTION</c> SQL read from disk into
+    /// a fresh <see cref="UdfDescriptor"/>. Handles both macro and procedural
+    /// forms — the parser surfaces both as <see cref="CreateFunctionStatement"/>
+    /// with either <see cref="CreateFunctionStatement.ExpressionBody"/> or
+    /// <see cref="CreateFunctionStatement.StatementBody"/> populated.
+    /// </summary>
+    private static UdfDescriptor? TryRehydrateUdfFromSource(
+        string schemaName, string name, string sourceText, UdfRegistry udfs, List<string> warnings)
+    {
         Statement parsed;
         try
         {
-            parsed = SqlParser.ParseStatement(entry.SourceText!);
+            parsed = SqlParser.ParseStatement(sourceText);
         }
-        catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException)
+        catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException || ex is FormatException)
         {
-            warnings.Add(
-                $"Skipping procedure '{entry.Name}': source failed to parse — {ex.Message}");
+            warnings.Add($"Skipping UDF '{name}': source failed to parse — {ex.Message}");
             return null;
         }
 
-        if (parsed is not CreateProcedureStatement create)
+        if (parsed is not CreateFunctionStatement create)
         {
-            warnings.Add(
-                $"Skipping procedure '{entry.Name}': persisted source is not a CREATE PROCEDURE statement.");
+            warnings.Add($"Skipping UDF '{name}': persisted source did not parse as a CREATE FUNCTION statement.");
             return null;
         }
 
-        // v4: the entry carries a real schema. Use it as the descriptor's
-        // SchemaName (the parser-resolved Schema on `create` is whatever
-        // the user wrote at original CREATE time; the manifest is the
-        // canonical record of where the procedure lives).
-        return new ProcedureDescriptor(
-            SchemaName: entry.Schema ?? "public",
+        bool isProcedural = create.StatementBody is not null;
+        UdfDescriptor descriptor = new(
+            SchemaName: schemaName,
             Name: create.Name,
             Parameters: create.Parameters,
-            Body: create.Body,
-            SourceText: entry.SourceText!);
-    }
+            ReturnTypeName: create.ReturnTypeName,
+            ExpressionBody: isProcedural ? null : create.ExpressionBody,
+            ReturnIsNotNull: create.ReturnIsNotNull,
+            StatementBody: create.StatementBody,
+            IsPure: create.IsPure,
+            SourceText: sourceText);
 
-    /// <summary>
-    /// Parses a serialised expression fragment back into an AST by wrapping
-    /// it in a synthetic <c>SELECT</c> and pulling the first column —
-    /// the same trick used to round-trip UDF bodies.
-    /// </summary>
-    private static Expression ParseExpressionFragment(string fragment)
-    {
-        QueryExpression q = SqlParser.Parse($"SELECT {fragment}");
-        return ((SelectQueryExpression)q).Statement.Columns[0].Expression;
-    }
-
-    /// <summary>
-    /// Re-parses the entry's body into an AST and validates it via the
-    /// inliner against the partially-loaded registry, so cycles introduced
-    /// in the file surface here. Returns <see langword="null"/> when the
-    /// entry can't be rehydrated; <paramref name="warnings"/> collects the
-    /// reason.
-    /// </summary>
-    private static UdfDescriptor? TryRehydrate(
-        CatalogFileUdfEntry entry, UdfRegistry udfs, List<string> warnings)
-    {
-        // body_kind selects the rehydration path. The default ("macro") keeps
-        // forward-compatibility with files written by binaries that predate the
-        // procedural-UDF format; a missing or unrecognised kind falls back to
-        // macro because that's the original (and still most common) shape.
-        string kind = entry.BodyKind ?? UdfBodyKindMacro;
-        return kind.Equals(UdfBodyKindProcedural, StringComparison.OrdinalIgnoreCase)
-            ? TryRehydrateProcedural(entry, warnings)
-            : TryRehydrateMacro(entry, udfs, warnings);
-    }
-
-    private static UdfDescriptor? TryRehydrateMacro(
-        CatalogFileUdfEntry entry, UdfRegistry udfs, List<string> warnings)
-    {
-        if (entry.Body is null)
+        // For macros, validate the body resolves against the partially-loaded
+        // registry. Procedurals get reconciled later via
+        // RoutineRegistrar.SyncProceduralAdaptersFromRegistry once the whole
+        // registry is in place.
+        if (!isProcedural && descriptor.ExpressionBody is not null)
         {
-            warnings.Add($"Skipping UDF '{entry.Name}': body is missing.");
-            return null;
-        }
-
-        Expression body;
-        try
-        {
-            // The body is parsed as the expression in a synthetic SELECT so
-            // we can reuse the public parser entry point. Wrapping is safe
-            // because we only consume the first column expression.
-            QueryExpression q = SqlParser.Parse($"SELECT {entry.Body}");
-            body = ((SelectQueryExpression)q).Statement.Columns[0].Expression;
-        }
-        catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException)
-        {
-            // Tokenizer failures surface as Superpower.ParseException; parser
-            // failures as DatumIngest.Parsing.ParseException. Treat both as
-            // "this entry is corrupt" and continue with the remaining
-            // entries instead of aborting the whole load.
-            warnings.Add(
-                $"Skipping UDF '{entry.Name}': body failed to parse — {ex.Message}");
-            return null;
-        }
-
-        IReadOnlyList<UdfParameter>? parameters = TryRehydrateParameters(entry, warnings);
-        if (parameters is null) return null;
-
-        UdfDescriptor descriptor = new(
-            SchemaName: entry.Schema ?? "public",
-            Name: entry.Name!,
-            Parameters: parameters,
-            ReturnTypeName: entry.ReturnType,
-            ExpressionBody: body,
-            ReturnIsNotNull: entry.ReturnIsNotNull);
-
-        // Validate against the partially-loaded registry. This catches
-        // unresolved UDF references in the body and direct cycles. The
-        // walk uses the default search_path; richer search_path-aware
-        // load-time validation can come later.
-        try
-        {
-            UdfInliner.Inline(body, udfs, new[] { "public", "system" });
-        }
-        catch (InvalidOperationException ex)
-        {
-            warnings.Add($"Skipping UDF '{entry.Name}': {ex.Message}");
-            return null;
+            try
+            {
+                UdfInliner.Inline(descriptor.ExpressionBody, udfs, new[] { "public", "system" });
+            }
+            catch (InvalidOperationException ex)
+            {
+                warnings.Add($"Skipping UDF '{name}': {ex.Message}");
+                return null;
+            }
         }
 
         return descriptor;
     }
 
     /// <summary>
-    /// Re-parses a persisted procedural UDF entry from its source text. The
-    /// source text is the entire <c>CREATE FUNCTION</c> SQL (matching the
-    /// procedure pattern), which lets the existing <see cref="SqlParser"/>
-    /// reconstruct the statement body with its full validation pass — no
-    /// separate Statement formatter is needed.
+    /// Re-parses the verbatim <c>CREATE PROCEDURE</c> SQL read from disk
+    /// into a fresh <see cref="ProcedureDescriptor"/>.
     /// </summary>
-    private static UdfDescriptor? TryRehydrateProcedural(
-        CatalogFileUdfEntry entry, List<string> warnings)
+    private static ProcedureDescriptor? TryRehydrateProcedureFromSource(
+        string schemaName, string name, string sourceText, List<string> warnings)
     {
-        if (string.IsNullOrWhiteSpace(entry.SourceText))
-        {
-            warnings.Add(
-                $"Skipping UDF '{entry.Name}': procedural source text is missing.");
-            return null;
-        }
-
         Statement parsed;
         try
         {
-            parsed = SqlParser.ParseStatement(entry.SourceText!);
-        }
-        catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException || ex is FormatException)
-        {
-            warnings.Add(
-                $"Skipping UDF '{entry.Name}': source failed to parse — {ex.Message}");
-            return null;
-        }
-
-        if (parsed is not CreateFunctionStatement create || create.StatementBody is null)
-        {
-            warnings.Add(
-                $"Skipping UDF '{entry.Name}': persisted source did not parse as a procedural CREATE FUNCTION statement.");
-            return null;
-        }
-
-        return new UdfDescriptor(
-            SchemaName: entry.Schema ?? "public",
-            Name: create.Name,
-            Parameters: create.Parameters,
-            ReturnTypeName: create.ReturnTypeName,
-            ExpressionBody: null,
-            ReturnIsNotNull: create.ReturnIsNotNull,
-            StatementBody: create.StatementBody,
-            IsPure: create.IsPure,
-            SourceText: entry.SourceText);
-    }
-
-    /// <summary>
-    /// Parses the persisted parameter list back into <see cref="UdfParameter"/>
-    /// instances. Returns <see langword="null"/> on failure with a warning
-    /// recorded; shared between macro and procedural rehydration.
-    /// </summary>
-    private static IReadOnlyList<UdfParameter>? TryRehydrateParameters(
-        CatalogFileUdfEntry entry, List<string> warnings)
-    {
-        try
-        {
-            return entry.Parameters is null
-                ? []
-                : entry.Parameters
-                    .Where(p => !string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Type))
-                    .Select(p => new UdfParameter(
-                        p.Name!,
-                        p.Type!,
-                        p.IsNotNull,
-                        p.Default is null ? null : ParseExpressionFragment(p.Default),
-                        p.Check is null ? null : ParseExpressionFragment(p.Check),
-                        p.Step,
-                        p.Unit,
-                        p.Description))
-                    .ToList();
+            parsed = SqlParser.ParseStatement(sourceText);
         }
         catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException)
         {
-            warnings.Add(
-                $"Skipping UDF '{entry.Name}': default-value expression failed to parse — {ex.Message}");
+            warnings.Add($"Skipping procedure '{name}': source failed to parse — {ex.Message}");
             return null;
         }
+
+        if (parsed is not CreateProcedureStatement create)
+        {
+            warnings.Add($"Skipping procedure '{name}': persisted source is not a CREATE PROCEDURE statement.");
+            return null;
+        }
+
+        return new ProcedureDescriptor(
+            SchemaName: schemaName,
+            Name: create.Name,
+            Parameters: create.Parameters,
+            Body: create.Body,
+            SourceText: sourceText);
     }
-
-    /// <summary>
-    /// Tag stored in <see cref="CatalogFileUdfEntry.BodyKind"/> for macro UDFs
-    /// (body is an inline expression). Default when the field is absent so
-    /// older catalog files keep loading.
-    /// </summary>
-    private const string UdfBodyKindMacro = "macro";
-
-    /// <summary>
-    /// Tag stored in <see cref="CatalogFileUdfEntry.BodyKind"/> for procedural
-    /// UDFs (body is a <c>BEGIN…END</c> statement sequence reparsed from
-    /// <see cref="CatalogFileUdfEntry.SourceText"/>).
-    /// </summary>
-    private const string UdfBodyKindProcedural = "procedural";
 
     /// <summary>
     /// Atomically persists the current state of <paramref name="udfs"/>,
@@ -582,113 +508,259 @@ public sealed class CatalogStore
     /// from the output instead of written as an empty list.</param>
     public void Save(UdfRegistry udfs, ProcedureRegistry procedures, ModelRegistry? models)
     {
-        // Snapshot under the write lock so a concurrent CREATE / DROP
-        // doesn't observe a partial state mid-serialisation.
-        CatalogFile file;
         lock (_writeLock)
         {
+            string directory = System.IO.Path.GetDirectoryName(_path)
+                ?? throw new InvalidOperationException(
+                    $"CatalogStore path '{_path}' has no directory; cannot persist.");
+
+            Directory.CreateDirectory(directory);
+            SeedGitignoreIfMissing(directory);
+
             FlatFileBackendState? flatFileState = _flatFileStateProvider?.Invoke();
-            file = new CatalogFile
+
+            // Project each user-authored entry to (relative-path, source-text)
+            // so the per-file writer and the manifest builder see one ordered
+            // snapshot. Path uses forward slashes — the manifest is platform-
+            // neutral. Catalog-installed model rows have no file backing and
+            // appear separately below.
+            List<(string Schema, string Name, string FilePath, string SourceText)> udfFiles =
+                udfs.Entries
+                    .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(e => (
+                        e.SchemaName,
+                        e.Name,
+                        FilePath: UdfRelativePath(e.SchemaName, e.Name),
+                        SourceText: EnsureOrReplace(e.SourceText ?? string.Empty)))
+                    .ToList();
+
+            List<(string Schema, string Name, string FilePath, string SourceText)> procFiles =
+                procedures.Entries
+                    .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(e => (
+                        e.SchemaName,
+                        e.Name,
+                        FilePath: ProcedureRelativePath(e.SchemaName, e.Name),
+                        SourceText: EnsureOrReplace(e.SourceText)))
+                    .ToList();
+
+            List<ModelDescriptor> orderedModels = models is null
+                ? new List<ModelDescriptor>()
+                : models.Entries
+                    .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+            List<(string Schema, string Name, string FilePath, string SourceText)> userModelFiles =
+                orderedModels
+                    .Where(e => e.CatalogId is null)
+                    .Select(e => (
+                        e.SchemaName,
+                        e.Name,
+                        FilePath: ModelRelativePath(e.Name),
+                        SourceText: EnsureOrReplace(e.SourceText ?? string.Empty)))
+                    .ToList();
+
+            // Write per-file SQL before the JSON manifest — if we crash midway,
+            // the manifest still points at the previous (consistent) set of
+            // files until the rename below completes.
+            foreach (var f in udfFiles) WriteSqlFile(directory, f.FilePath, f.SourceText);
+            foreach (var f in procFiles) WriteSqlFile(directory, f.FilePath, f.SourceText);
+            foreach (var f in userModelFiles) WriteSqlFile(directory, f.FilePath, f.SourceText);
+
+            // Reconcile orphans: anything in udfs/, procedures/, models/ that
+            // isn't in the current registry snapshot gets deleted. Drops and
+            // renames take effect through this pass — Save is the single
+            // source of disk truth.
+            ReconcileOrphans(directory, "udfs", udfFiles.Select(f => f.FilePath));
+            ReconcileOrphans(directory, "procedures", procFiles.Select(f => f.FilePath));
+            ReconcileOrphans(directory, "models", userModelFiles.Select(f => f.FilePath));
+
+            CatalogFile file = new()
             {
                 Version = CurrentVersion,
-                Udfs = udfs.Entries
-                    .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(e => new CatalogFileUdfEntry
+                Udfs = udfFiles
+                    .Select(f => new CatalogFileUdfEntry
                     {
-                        // v4: real schema membership. The descriptor's
-                        // SchemaName is the canonical record.
-                        Schema = e.SchemaName,
-                        Name = e.Name,
-                        Parameters = e.Parameters
-                            .Select(p => new CatalogFileUdfParameterEntry
-                            {
-                                Name = p.Name,
-                                Type = p.TypeName,
-                                IsNotNull = p.IsNotNull,
-                                Default = p.Default is null
-                                    ? null
-                                    : QueryExplainer.FormatExpression(p.Default),
-                                Check = p.Check is null
-                                    ? null
-                                    : QueryExplainer.FormatExpression(p.Check),
-                                Step = p.Step,
-                                Unit = p.Unit,
-                                Description = p.Description,
-                            })
-                            .ToList(),
-                        ReturnType = e.ReturnTypeName,
-                        ReturnIsNotNull = e.ReturnIsNotNull,
-                        // Procedural UDFs persist the verbatim CREATE FUNCTION
-                        // text and a kind tag — round-tripping through the
-                        // parser is cheaper than carrying a Statement
-                        // formatter, and mirrors how procedures already
-                        // persist. Macros keep the existing per-field shape.
-                        BodyKind = e.IsProcedural ? UdfBodyKindProcedural : UdfBodyKindMacro,
-                        Body = e.IsProcedural ? null : QueryExplainer.FormatExpression(e.ExpressionBody!),
-                        SourceText = e.IsProcedural ? e.SourceText : null,
-                        IsPure = e.IsPure,
+                        Schema = f.Schema,
+                        Name = f.Name,
+                        FilePath = f.FilePath,
                     })
                     .ToList(),
-                Procedures = procedures.Entries
-                    .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(e => new CatalogFileProcedureEntry
+                Procedures = procFiles
+                    .Select(f => new CatalogFileProcedureEntry
                     {
-                        // v4: real schema membership.
-                        Schema = e.SchemaName,
-                        Name = e.Name,
-                        SourceText = e.SourceText,
+                        Schema = f.Schema,
+                        Name = f.Name,
+                        FilePath = f.FilePath,
                     })
                     .ToList(),
-                // v6: SQL-defined models split by origin. Catalog-installed
-                // rows record (catalog_id, catalog_version, pinned_as?) so
-                // rehydrate resolves the originating installSql from the
-                // live manifest — editing the on-disk SQL file flows through
-                // on the next process start. User-authored CREATE MODEL rows
-                // keep the v5 source-text shape because the source has
-                // nowhere else to live.
-                Models = models?.Entries
-                    .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(e => new CatalogFileModelEntry
-                    {
-                        Schema = e.SchemaName,
-                        Name = e.Name,
-                        // Catalog-installed rows: provenance pointers + no source_text.
-                        CatalogId = e.CatalogId,
-                        CatalogVersion = e.CatalogVersion,
-                        PinnedAs = e.PinnedAs,
-                        // User rows: source_text + no provenance. The catalog row
-                        // is recognised as user-authored exactly when CatalogId
-                        // is null; emitting source_text only in that case keeps
-                        // the on-disk file shape unambiguous.
-                        SourceText = e.CatalogId is null ? e.SourceText : null,
-                    })
-                    .ToList(),
+                Models = models?.Entries.Any() == true
+                    ? orderedModels
+                        .Select(e => new CatalogFileModelEntry
+                        {
+                            Schema = e.SchemaName,
+                            Name = e.Name,
+                            // Catalog-installed rows: provenance pointers only.
+                            CatalogId = e.CatalogId,
+                            CatalogVersion = e.CatalogVersion,
+                            PinnedAs = e.PinnedAs,
+                            // User-authored rows: file_path points at the .sql
+                            // we just wrote. Recognised as user-authored
+                            // exactly when CatalogId is null.
+                            FilePath = e.CatalogId is null ? ModelRelativePath(e.Name) : null,
+                        })
+                        .ToList()
+                    : null,
                 Backends = flatFileState is null
                     ? null
                     : new CatalogFileBackends { FlatFile = flatFileState },
             };
-        }
 
-        string json = JsonSerializer.Serialize(file, CatalogJsonContext.Default.CatalogFile);
-
-        string? directory = System.IO.Path.GetDirectoryName(_path);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        string tempPath = _path + ".tmp";
-
-        // Lock the file-system mutation so two concurrent saves don't
-        // overwrite each other's temp file. The single in-process lock is
-        // sufficient because each TableCatalog owns its own CatalogStore.
-        lock (_writeLock)
-        {
+            string json = JsonSerializer.Serialize(file, CatalogJsonContext.Default.CatalogFile);
+            string tempPath = _path + ".tmp";
             File.WriteAllText(tempPath, json);
             File.Move(tempPath, _path, overwrite: true);
+        }
+    }
+
+    /// <summary>
+    /// Catalog-relative <c>.sql</c> path for a UDF: <c>udfs/&lt;schema&gt;/&lt;name&gt;.sql</c>.
+    /// Forward slashes — the manifest is platform-neutral.
+    /// </summary>
+    internal static string UdfRelativePath(string schema, string name)
+        => $"udfs/{schema}/{name}.sql";
+
+    /// <summary>
+    /// Catalog-relative <c>.sql</c> path for a procedure:
+    /// <c>procedures/&lt;schema&gt;/&lt;name&gt;.sql</c>.
+    /// </summary>
+    internal static string ProcedureRelativePath(string schema, string name)
+        => $"procedures/{schema}/{name}.sql";
+
+    /// <summary>
+    /// Catalog-relative <c>.sql</c> path for a user-authored model:
+    /// <c>models/&lt;name&gt;.sql</c>. Schema is fixed to <c>models</c> so it's
+    /// elided from the path.
+    /// </summary>
+    internal static string ModelRelativePath(string name)
+        => $"models/{name}.sql";
+
+    /// <summary>
+    /// Resolves a forward-slash catalog-relative path against
+    /// <paramref name="catalogDirectory"/>, atomically replacing the file's
+    /// contents with <paramref name="contents"/>. The parent directory is
+    /// created on demand.
+    /// </summary>
+    private static void WriteSqlFile(string catalogDirectory, string relativePath, string contents)
+    {
+        string fullPath = System.IO.Path.Combine(
+            catalogDirectory,
+            relativePath.Replace('/', System.IO.Path.DirectorySeparatorChar));
+        string? dir = System.IO.Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrEmpty(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+        string tempPath = fullPath + ".tmp";
+        File.WriteAllText(tempPath, contents);
+        File.Move(tempPath, fullPath, overwrite: true);
+    }
+
+    /// <summary>
+    /// Deletes <c>.sql</c> files under <c>&lt;catalogDirectory&gt;/&lt;rootDir&gt;/</c>
+    /// that aren't in <paramref name="keepRelativePaths"/>. Catches drops,
+    /// renames, and stale entries in one pass. Empty schema subdirectories
+    /// left behind are pruned too.
+    /// </summary>
+    private static void ReconcileOrphans(
+        string catalogDirectory, string rootDir, IEnumerable<string> keepRelativePaths)
+    {
+        string rootFull = System.IO.Path.Combine(catalogDirectory, rootDir);
+        if (!Directory.Exists(rootFull)) return;
+
+        HashSet<string> keep = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string rel in keepRelativePaths)
+        {
+            string full = System.IO.Path.GetFullPath(
+                System.IO.Path.Combine(catalogDirectory,
+                    rel.Replace('/', System.IO.Path.DirectorySeparatorChar)));
+            keep.Add(full);
+        }
+
+        foreach (string file in Directory.EnumerateFiles(rootFull, "*.sql", SearchOption.AllDirectories))
+        {
+            string normalized = System.IO.Path.GetFullPath(file);
+            if (!keep.Contains(normalized))
+            {
+                try { File.Delete(file); } catch { /* best-effort */ }
+            }
+        }
+
+        // Prune any now-empty subdirectories (e.g. a schema dir whose last
+        // routine was dropped) but leave the root dir in place so subsequent
+        // writes don't have to recreate it.
+        foreach (string subdir in Directory.EnumerateDirectories(rootFull, "*", SearchOption.AllDirectories)
+            .OrderByDescending(p => p.Length))
+        {
+            try
+            {
+                if (!Directory.EnumerateFileSystemEntries(subdir).Any())
+                {
+                    Directory.Delete(subdir);
+                }
+            }
+            catch { /* best-effort */ }
+        }
+    }
+
+    /// <summary>
+    /// Rewrites a leading <c>CREATE FUNCTION|PROCEDURE|MODEL</c> to its
+    /// <c>CREATE OR REPLACE …</c> form so the persisted file is self-applying
+    /// when a user pipes it back into a session. <c>OR REPLACE</c> /
+    /// <c>OR ALTER</c> already present pass through unchanged.
+    /// </summary>
+    private static string EnsureOrReplace(string source)
+    {
+        if (string.IsNullOrEmpty(source)) return source;
+        return CreatePrefix.Replace(source, "CREATE OR REPLACE", 1);
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex CreatePrefix =
+        new(@"\bCREATE\b(?!\s+OR\s+(?:REPLACE|ALTER)\b)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Writes a default <c>.gitignore</c> into the catalog directory if one
+    /// doesn't already exist. Ignores rebuildable sidecar artefacts; data
+    /// (<c>.datum</c>, <c>.datum-blob</c>) is left committable so users can
+    /// decide whether to track row content in git or scope their ignore to
+    /// <c>data/</c> themselves.
+    /// </summary>
+    private static void SeedGitignoreIfMissing(string catalogDirectory)
+    {
+        string gitignorePath = System.IO.Path.Combine(catalogDirectory, ".gitignore");
+        if (File.Exists(gitignorePath)) return;
+
+        const string contents =
+            "# DatumIngest catalog — auto-seeded. Edit freely.\n" +
+            "# Rebuildable artefacts:\n" +
+            "*.tmp\n" +
+            "*.datum-cindex-*\n" +
+            "*.datum-fts-*\n" +
+            "*.datum-pkindex\n" +
+            "*.datum-manifest\n";
+        try
+        {
+            File.WriteAllText(gitignorePath, contents);
+        }
+        catch
+        {
+            // Best-effort. A failure here doesn't break catalog save; the
+            // user can always add their own .gitignore.
         }
     }
 
@@ -808,94 +880,43 @@ public sealed class FlatFileIndexEntry
     public string? AnalyzerName { get; set; }
 }
 
-/// <summary>One UDF entry in the persisted catalog.</summary>
+/// <summary>
+/// One UDF entry in the persisted catalog (v7). Source text lives in the
+/// <c>.sql</c> file referenced by <see cref="FilePath"/> — the manifest only
+/// tracks identity + location.
+/// </summary>
 internal sealed class CatalogFileUdfEntry
 {
-    /// <summary>
-    /// Schema placeholder. v3 stores <c>"udf"</c> for every entry today;
-    /// real schema membership is an S7 follow-up. Ignored on load.
-    /// </summary>
+    /// <summary>Schema portion of the canonical name.</summary>
     public string? Schema { get; set; }
 
+    /// <summary>Unqualified UDF name within the schema.</summary>
     public string? Name { get; set; }
-    public List<CatalogFileUdfParameterEntry>? Parameters { get; set; }
-    public string? ReturnType { get; set; }
-    public bool ReturnIsNotNull { get; set; }
 
     /// <summary>
-    /// Macro body rendered as a SQL fragment via
-    /// <see cref="QueryExplainer.FormatExpression"/>. <see langword="null"/>
-    /// for procedural UDFs (their body lives in <see cref="SourceText"/>).
+    /// Forward-slash path (catalog-relative) to the <c>CREATE OR REPLACE FUNCTION</c>
+    /// <c>.sql</c> file. Conventionally <c>udfs/&lt;schema&gt;/&lt;name&gt;.sql</c>.
     /// </summary>
-    public string? Body { get; set; }
-
-    /// <summary>
-    /// Body shape tag: <c>"macro"</c> for inline-expression UDFs,
-    /// <c>"procedural"</c> for <c>BEGIN…END</c> bodies.
-    /// </summary>
-    public string? BodyKind { get; set; }
-
-    /// <summary>
-    /// Verbatim <c>CREATE FUNCTION</c> SQL for procedural UDFs. Reparsed on
-    /// load to reconstruct the statement-level body. <see langword="null"/>
-    /// for macros (whose body round-trips through <see cref="Body"/>).
-    /// </summary>
-    public string? SourceText { get; set; }
-
-    /// <summary>Mirrors <see cref="UdfDescriptor.IsPure"/>.</summary>
-    public bool IsPure { get; set; }
-}
-
-/// <summary>One declared parameter in a persisted UDF entry.</summary>
-internal sealed class CatalogFileUdfParameterEntry
-{
-    public string? Name { get; set; }
-    public string? Type { get; set; }
-    public bool IsNotNull { get; set; }
-
-    /// <summary>
-    /// Persisted default-value expression, rendered as a SQL fragment via
-    /// <see cref="QueryExplainer.FormatExpression"/>. Re-parsed on load
-    /// using the same trick as <see cref="CatalogFileUdfEntry.Body"/>:
-    /// wrap in a synthetic <c>SELECT</c> and pull the first column.
-    /// <see langword="null"/> when the parameter has no default.
-    /// </summary>
-    public string? Default { get; set; }
-
-    /// <summary>
-    /// Persisted <c>CHECK</c> expression, rendered as a SQL fragment the
-    /// same way as <see cref="Default"/>. Re-parsed on load and walked by
-    /// <c>ParameterCheckWalker</c> at registration time into a typed
-    /// <c>ParameterCheck</c>. <see langword="null"/> when no constraint
-    /// was declared.
-    /// </summary>
-    public string? Check { get; set; }
-
-    /// <summary>Persisted UI granularity hint (<c>STEP</c> clause).</summary>
-    public decimal? Step { get; set; }
-
-    /// <summary>Persisted display unit (<c>UNIT</c> clause).</summary>
-    public string? Unit { get; set; }
-
-    /// <summary>Persisted per-parameter description (<c>COMMENT</c> clause).</summary>
-    public string? Description { get; set; }
+    public string? FilePath { get; set; }
 }
 
 /// <summary>
-/// One procedure entry in the persisted catalog. Stores the original
-/// CREATE PROCEDURE source verbatim so the user's formatting and
-/// comments survive a round-trip.
+/// One procedure entry in the persisted catalog (v7). Source text lives in
+/// the <c>.sql</c> file referenced by <see cref="FilePath"/>.
 /// </summary>
 internal sealed class CatalogFileProcedureEntry
 {
-    /// <summary>
-    /// Schema placeholder. v3 stores <c>"proc"</c> for every entry today;
-    /// real schema membership is an S7 follow-up. Ignored on load.
-    /// </summary>
+    /// <summary>Schema portion of the canonical name.</summary>
     public string? Schema { get; set; }
 
+    /// <summary>Unqualified procedure name within the schema.</summary>
     public string? Name { get; set; }
-    public string? SourceText { get; set; }
+
+    /// <summary>
+    /// Forward-slash path (catalog-relative) to the <c>CREATE OR REPLACE PROCEDURE</c>
+    /// <c>.sql</c> file. Conventionally <c>procedures/&lt;schema&gt;/&lt;name&gt;.sql</c>.
+    /// </summary>
+    public string? FilePath { get; set; }
 }
 
 /// <summary>
@@ -904,7 +925,7 @@ internal sealed class CatalogFileProcedureEntry
 /// <list type="bullet">
 ///   <item><description><strong>Catalog-installed</strong>:
 ///   <see cref="CatalogId"/> + <see cref="CatalogVersion"/> are set;
-///   <see cref="SourceText"/> is null. Rehydrate resolves the originating
+///   <see cref="FilePath"/> is null. Rehydrate resolves the originating
 ///   installSql by <c>(CatalogId, CatalogVersion)</c> against the current
 ///   manifest and re-executes it, so edits to
 ///   <c>models/sql/&lt;catalog_id&gt;/&lt;catalog_version&gt;.sql</c>
@@ -914,9 +935,10 @@ internal sealed class CatalogFileProcedureEntry
 ///   rehydrate applies the same pinned-identifier rewrite the original
 ///   install did.</description></item>
 ///   <item><description><strong>User-authored</strong>:
-///   <see cref="SourceText"/> is set; the catalog-pointer fields are null.
-///   Round-trips verbatim because no installSql file exists on disk for
-///   user-defined models.</description></item>
+///   <see cref="FilePath"/> points at the on-disk <c>.sql</c>; the
+///   catalog-pointer fields are null. The file is the canonical source
+///   text — edits to the <c>.sql</c> flow through on the next process
+///   start.</description></item>
 /// </list>
 /// </summary>
 internal sealed class CatalogFileModelEntry
@@ -928,11 +950,12 @@ internal sealed class CatalogFileModelEntry
     public string? Name { get; set; }
 
     /// <summary>
-    /// Verbatim <c>CREATE MODEL</c> SQL. Reparsed on load. Populated only
+    /// Forward-slash path (catalog-relative) to the <c>CREATE OR REPLACE MODEL</c>
+    /// <c>.sql</c> file. Conventionally <c>models/&lt;name&gt;.sql</c>. Set only
     /// for user-authored rows; catalog-installed rows leave this null and
     /// resolve their source from the on-disk installSql at rehydrate.
     /// </summary>
-    public string? SourceText { get; set; }
+    public string? FilePath { get; set; }
 
     /// <summary>
     /// Parent catalog entry id (kebab-case, e.g. <c>"sd-turbo"</c>) when
@@ -1004,13 +1027,11 @@ public sealed record PendingModelEntry(
 [JsonSerializable(typeof(FlatFileTableEntry))]
 [JsonSerializable(typeof(FlatFileIndexEntry))]
 [JsonSerializable(typeof(CatalogFileUdfEntry))]
-[JsonSerializable(typeof(CatalogFileUdfParameterEntry))]
 [JsonSerializable(typeof(CatalogFileProcedureEntry))]
 [JsonSerializable(typeof(CatalogFileModelEntry))]
 [JsonSerializable(typeof(List<FlatFileTableEntry>))]
 [JsonSerializable(typeof(List<FlatFileIndexEntry>))]
 [JsonSerializable(typeof(List<CatalogFileUdfEntry>))]
-[JsonSerializable(typeof(List<CatalogFileUdfParameterEntry>))]
 [JsonSerializable(typeof(List<CatalogFileProcedureEntry>))]
 [JsonSerializable(typeof(List<CatalogFileModelEntry>))]
 [JsonSourceGenerationOptions(

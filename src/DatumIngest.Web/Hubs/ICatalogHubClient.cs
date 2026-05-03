@@ -12,6 +12,17 @@ public interface ICatalogHubClient
 
     Task OnCatalogChanged(CatalogChangedEvent change);
 
+    /// <summary>
+    /// Fired when the catalog directory's contents change on disk for any
+    /// reason that didn't go through a DDL statement — VS Code save, git
+    /// checkout, hand-edit, etc. The payload is intentionally empty;
+    /// listeners refetch <c>/api/files</c> rather than try to apply a
+    /// per-file delta. Self-triggered events from the app's own writes
+    /// are coalesced with the corresponding <see cref="OnCatalogChanged"/>
+    /// notification by the client-side debounce.
+    /// </summary>
+    Task OnFilesChanged();
+
     // ─── Residency lifecycle (IModelLifecycleObserver fan-out) ───
     Task OnModelLoaded(ModelLoadedEvent ev);
     Task OnModelEvicted(ModelEvictedEvent ev);

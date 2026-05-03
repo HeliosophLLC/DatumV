@@ -279,7 +279,7 @@ public sealed class PrimaryKeyTests : ServiceTestBase, IAsyncLifetime
             catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
         }
 
-        using DatumFileReaderV2 reader = DatumFileReaderV2.Open(Path.Combine(_tempDir, "users.datum"));
+        using DatumFileReaderV2 reader = DatumFileReaderV2.Open(Path.Combine(_tempDir, "data", "public", "users.datum"));
         Assert.Single(reader.Footer.Prologue.PrimaryKeyColumnIndices);
         Assert.Equal((ushort)0, reader.Footer.Prologue.PrimaryKeyColumnIndices[0]);
     }
@@ -452,7 +452,7 @@ public sealed class PrimaryKeyTests : ServiceTestBase, IAsyncLifetime
         // successful PK add on a populated table — that's what gives us
         // the lookup-backed PK check at INSERT time instead of the
         // O(table) scan fallback.
-        string pkIndexPath = Path.Combine(_tempDir, "users.datum-pkindex");
+        string pkIndexPath = Path.Combine(_tempDir, "data", "public", "users.datum-pkindex");
         Assert.True(File.Exists(pkIndexPath), $"Expected PK index sidecar at {pkIndexPath}");
     }
 
@@ -497,7 +497,7 @@ public sealed class PrimaryKeyTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
         catalog.Plan("INSERT INTO users VALUES (1, 'alice')");
 
-        string pkIndexPath = Path.Combine(_tempDir, "users.datum-pkindex");
+        string pkIndexPath = Path.Combine(_tempDir, "data", "public", "users.datum-pkindex");
         Assert.True(File.Exists(pkIndexPath), "PK sidecar should exist before drop.");
 
         catalog.Plan("ALTER TABLE users DROP CONSTRAINT users_pkey");

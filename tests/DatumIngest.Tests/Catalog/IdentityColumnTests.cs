@@ -236,7 +236,7 @@ public sealed class IdentityColumnTests : ServiceTestBase, IAsyncLifetime
             catalog.Plan("CREATE TABLE users (id Int32 IDENTITY(50, 2), name String)");
         }
 
-        using DatumFileReaderV2 reader = DatumFileReaderV2.Open(Path.Combine(_tempDir, "users.datum"));
+        using DatumFileReaderV2 reader = DatumFileReaderV2.Open(Path.Combine(_tempDir, "data", "public", "users.datum"));
         Assert.Equal(0, reader.Footer.Prologue.IdentityColumnIndex);
         Assert.Equal(50, reader.Footer.Prologue.IdentitySeed);
         Assert.Equal(2, reader.Footer.Prologue.IdentityStep);
@@ -252,7 +252,7 @@ public sealed class IdentityColumnTests : ServiceTestBase, IAsyncLifetime
             catalog.Plan("INSERT INTO users (name) VALUES ('a'), ('b'), ('c')");
         }
 
-        using DatumFileReaderV2 reader = DatumFileReaderV2.Open(Path.Combine(_tempDir, "users.datum"));
+        using DatumFileReaderV2 reader = DatumFileReaderV2.Open(Path.Combine(_tempDir, "data", "public", "users.datum"));
         Assert.Equal(4, reader.Footer.Prologue.IdentityNextValue);
 
         // Independent verify: scan back and count rows.

@@ -176,9 +176,15 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE PROCEDURE noop() AS BEGIN SELECT 1 END");
 
         Assert.True(File.Exists(_catalogPath));
-        string contents = File.ReadAllText(_catalogPath);
-        Assert.Contains("\"name\": \"noop\"", contents);
-        Assert.Contains("\"source_text\":", contents);
+        string manifest = File.ReadAllText(_catalogPath);
+        Assert.Contains("\"name\": \"noop\"", manifest);
+        Assert.Contains("\"file_path\": \"procedures/public/noop.sql\"", manifest);
+
+        string procPath = Path.Combine(_scratchDir, "procedures", "public", "noop.sql");
+        Assert.True(File.Exists(procPath));
+        string source = File.ReadAllText(procPath);
+        Assert.StartsWith("CREATE OR REPLACE PROCEDURE", source);
+        Assert.Contains("BEGIN", source);
     }
 
     [Fact]
@@ -197,8 +203,11 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
-    public void Reopen_PreservesProcedureSourceTextVerbatim()
+    public void Reopen_PreservesProcedureBodyVerbatim()
     {
+        // Save rewrites the leading `CREATE` to `CREATE OR REPLACE` so the
+        // on-disk .sql is self-applying. Everything after that — body
+        // formatting, comments, multi-line layout — round-trips unchanged.
         const string sql = "CREATE PROCEDURE multi_line(x INT32) AS BEGIN\n  SET x = x + 1\nEND";
         TableCatalog first = OpenCatalog();
         first.Plan(sql);
@@ -206,7 +215,9 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         TableCatalog second = OpenCatalog();
 
         Assert.True(second.Procedures.TryGet("multi_line", out ProcedureDescriptor? proc));
-        Assert.Equal(sql, proc!.SourceText);
+        Assert.Equal(
+            "CREATE OR REPLACE PROCEDURE multi_line(x INT32) AS BEGIN\n  SET x = x + 1\nEND",
+            proc!.SourceText);
     }
 
     [Fact]
@@ -242,19 +253,23 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     // ───────────────────── Procedural UDFs ─────────────────────
 
     [Fact]
-    public void CreateProceduralUdf_PersistsBodyKindAndSourceText()
+    public void CreateProceduralUdf_PersistsToFile()
     {
-        // Procedural UDFs serialise as body_kind="procedural" with the
-        // verbatim source_text — different from macros, which carry an
-        // expression fragment under body. The on-disk JSON should reflect
-        // both fields when the user writes a BEGIN…END function.
+        // Procedural UDFs persist the verbatim CREATE FUNCTION text in the
+        // per-routine .sql file (with the leading CREATE rewritten to
+        // CREATE OR REPLACE). The manifest just points at it.
         TableCatalog catalog = OpenCatalog();
         catalog.Plan(
             "CREATE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END");
 
-        string contents = File.ReadAllText(_catalogPath);
-        Assert.Contains("\"body_kind\": \"procedural\"", contents);
-        Assert.Contains("\"source_text\":", contents);
+        string manifest = File.ReadAllText(_catalogPath);
+        Assert.Contains("\"name\": \"sq\"", manifest);
+        Assert.Contains("\"file_path\": \"udfs/public/sq.sql\"", manifest);
+
+        string udfPath = Path.Combine(_scratchDir, "udfs", "public", "sq.sql");
+        string source = File.ReadAllText(udfPath);
+        Assert.StartsWith("CREATE OR REPLACE FUNCTION", source);
+        Assert.Contains("BEGIN RETURN x * x END", source);
     }
 
     [Fact]
@@ -273,7 +288,11 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         Assert.NotNull(udf.StatementBody);
         Assert.Single(udf.StatementBody);
         Assert.Equal("INT32", udf.ReturnTypeName, ignoreCase: true);
-        Assert.Equal(sql, udf.SourceText);
+        // SourceText round-trips with the leading `CREATE` rewritten to
+        // `CREATE OR REPLACE` so the file is self-applying.
+        Assert.Equal(
+            "CREATE OR REPLACE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END",
+            udf.SourceText);
         Assert.False(udf.IsPure);
     }
 
@@ -293,10 +312,11 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
-    public void Reopen_ProceduralUdf_PreservesSourceTextVerbatim()
+    public void Reopen_ProceduralUdf_PreservesBodyFormattingVerbatim()
     {
-        // The user's exact formatting (multi-line body) must round-trip
-        // through the catalog file — system_udfs.body relies on this.
+        // The user's multi-line body formatting round-trips byte-for-byte;
+        // the only rewrite Save makes is the leading `CREATE` →
+        // `CREATE OR REPLACE` so the file is self-applying.
         const string sql =
             "CREATE FUNCTION pipeline(x INT32) RETURNS INT32 BEGIN\n" +
             "  DECLARE y INT32 = x + 1;\n" +
@@ -308,7 +328,12 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         TableCatalog second = OpenCatalog();
 
         Assert.True(second.Udfs.TryGet("pipeline", out UdfDescriptor? udf));
-        Assert.Equal(sql, udf!.SourceText);
+        Assert.Equal(
+            "CREATE OR REPLACE FUNCTION pipeline(x INT32) RETURNS INT32 BEGIN\n" +
+            "  DECLARE y INT32 = x + 1;\n" +
+            "  RETURN y * 2\n" +
+            "END",
+            udf!.SourceText);
     }
 
     [Fact]
@@ -349,17 +374,22 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
-    public void LegacyMacroEntryWithoutBodyKind_LoadsAsMacro()
+    public void HandWrittenManifest_WithFilePath_LoadsFromDisk()
     {
-        // Forward-compat: catalog files written before procedural UDFs
-        // existed have no body_kind field. The loader should treat them
-        // as macros (the original body shape) so older state keeps working.
+        // A hand-edited (or version-controlled) catalog with the manifest +
+        // sibling .sql file pair loads cleanly. This is the canonical v7
+        // round-trip shape — the file is the source of truth, the manifest
+        // is the registry.
+        string udfDir = Path.Combine(_scratchDir, "udfs", "public");
+        Directory.CreateDirectory(udfDir);
+        File.WriteAllText(Path.Combine(udfDir, "shout.sql"),
+            "CREATE OR REPLACE FUNCTION shout(s STRING) AS upper(s)");
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 6,
+              "version": 7,
               "udfs": [
-                {"name": "shout", "parameters": [{"name": "s", "type": "STRING"}], "body": "upper(s)"}
+                {"schema": "public", "name": "shout", "file_path": "udfs/public/shout.sql"}
               ]
             }
             """);
@@ -370,7 +400,6 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         Assert.False(udf!.IsProcedural);
         Assert.NotNull(udf.ExpressionBody);
         Assert.Null(udf.StatementBody);
-        Assert.False(udf.IsPure);
     }
 
     // ───────────────────── Failure handling ─────────────────────
@@ -457,23 +486,22 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     [Fact]
     public void EntryWithUnparseableBody_IsSkipped_OthersLoad()
     {
-        // The bad entry's body is not valid SQL — should be skipped, the
-        // good entry should still load.
+        // The bad entry's .sql file contains invalid SQL — should be skipped
+        // with a warning, the good entry should still load.
+        string udfDir = Path.Combine(_scratchDir, "udfs", "public");
+        Directory.CreateDirectory(udfDir);
+        File.WriteAllText(Path.Combine(udfDir, "good.sql"),
+            "CREATE OR REPLACE FUNCTION good(x INT32) AS x + 1");
+        File.WriteAllText(Path.Combine(udfDir, "bad.sql"),
+            "this is not a valid CREATE FUNCTION statement");
+
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 6,
+              "version": 7,
               "udfs": [
-                {
-                  "name": "good",
-                  "parameters": [{"name": "x", "type": "INT32"}],
-                  "body": "x + 1"
-                },
-                {
-                  "name": "bad",
-                  "parameters": [],
-                  "body": "this is not a valid expression !!!"
-                }
+                {"schema": "public", "name": "good", "file_path": "udfs/public/good.sql"},
+                {"schema": "public", "name": "bad", "file_path": "udfs/public/bad.sql"}
               ]
             }
             """);
@@ -489,15 +517,44 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
-    public void EntryWithMissingName_IsSkipped()
+    public void EntryWithMissingFile_IsSkipped()
     {
+        // file_path points at a .sql that doesn't exist — load skips with a
+        // warning rather than aborting the whole catalog.
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 6,
+              "version": 7,
               "udfs": [
-                {"name": "", "parameters": [], "body": "1"},
-                {"name": "good", "parameters": [], "body": "1"}
+                {"schema": "public", "name": "ghost", "file_path": "udfs/public/ghost.sql"}
+              ]
+            }
+            """);
+
+        TableCatalog catalog = OpenCatalog();
+
+        Assert.False(catalog.Udfs.TryGet("ghost", out _));
+        Assert.Equal(0, catalog.CatalogLoadReport!.LoadedUdfs);
+        Assert.Equal(1, catalog.CatalogLoadReport.SkippedUdfs);
+        Assert.Contains(catalog.CatalogLoadReport.Warnings,
+            w => w.Contains("missing", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void EntryWithMissingName_IsSkipped()
+    {
+        string udfDir = Path.Combine(_scratchDir, "udfs", "public");
+        Directory.CreateDirectory(udfDir);
+        File.WriteAllText(Path.Combine(udfDir, "good.sql"),
+            "CREATE OR REPLACE FUNCTION good() AS 1");
+
+        File.WriteAllText(_catalogPath,
+            """
+            {
+              "version": 7,
+              "udfs": [
+                {"schema": "public", "name": "", "file_path": "udfs/public/good.sql"},
+                {"schema": "public", "name": "good", "file_path": "udfs/public/good.sql"}
               ]
             }
             """);
@@ -565,5 +622,82 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         }
         // Last write should NOT contain the .tmp residue.
         Assert.False(File.Exists(_catalogPath + ".tmp"));
+    }
+
+    // ───────────────────── On-disk layout ─────────────────────
+
+    [Fact]
+    public void CreateFunction_WritesSqlFileUnderUdfsDir()
+    {
+        TableCatalog catalog = OpenCatalog();
+        catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
+
+        string udfPath = Path.Combine(_scratchDir, "udfs", "public", "shout.sql");
+        Assert.True(File.Exists(udfPath));
+        string source = File.ReadAllText(udfPath);
+        Assert.StartsWith("CREATE OR REPLACE FUNCTION", source);
+    }
+
+    [Fact]
+    public void CreateOrReplace_PreservedVerbatim()
+    {
+        // If the user wrote CREATE OR REPLACE explicitly, Save should leave
+        // it alone — the regex only rewrites plain CREATE.
+        TableCatalog catalog = OpenCatalog();
+        catalog.Plan("CREATE OR REPLACE FUNCTION shout(s STRING) AS upper(s)");
+
+        string udfPath = Path.Combine(_scratchDir, "udfs", "public", "shout.sql");
+        Assert.Equal(
+            "CREATE OR REPLACE FUNCTION shout(s STRING) AS upper(s)",
+            File.ReadAllText(udfPath));
+    }
+
+    [Fact]
+    public void DropFunction_RemovesSqlFile()
+    {
+        TableCatalog catalog = OpenCatalog();
+        catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
+
+        string udfPath = Path.Combine(_scratchDir, "udfs", "public", "shout.sql");
+        Assert.True(File.Exists(udfPath));
+
+        catalog.Plan("DROP FUNCTION shout");
+
+        Assert.False(File.Exists(udfPath));
+        // The schema directory was the last occupant — should be pruned too.
+        Assert.False(Directory.Exists(Path.Combine(_scratchDir, "udfs", "public")));
+    }
+
+    [Fact]
+    public void DropProcedure_RemovesSqlFile()
+    {
+        TableCatalog catalog = OpenCatalog();
+        catalog.Plan("CREATE PROCEDURE noop() AS BEGIN SELECT 1 END");
+
+        string procPath = Path.Combine(_scratchDir, "procedures", "public", "noop.sql");
+        Assert.True(File.Exists(procPath));
+
+        catalog.Plan("DROP PROCEDURE noop");
+
+        Assert.False(File.Exists(procPath));
+    }
+
+    [Fact]
+    public void OrphanSqlFile_ReconciledOnNextSave()
+    {
+        // A .sql file that's not in the registry — e.g. left behind by a
+        // hand-edit or a crash mid-rename — gets cleaned up on the next
+        // Save so the disk state matches the registry exactly.
+        TableCatalog catalog = OpenCatalog();
+        catalog.Plan("CREATE FUNCTION known(x INT32) AS x + 1");
+
+        string orphan = Path.Combine(_scratchDir, "udfs", "public", "ghost.sql");
+        File.WriteAllText(orphan, "CREATE FUNCTION ghost(x INT32) AS x");
+        Assert.True(File.Exists(orphan));
+
+        // Trigger another Save by performing any catalog mutation.
+        catalog.Plan("CREATE FUNCTION other(x INT32) AS x * 2");
+
+        Assert.False(File.Exists(orphan));
     }
 }

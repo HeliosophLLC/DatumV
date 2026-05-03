@@ -86,7 +86,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(IndexValidity.Valid, provider.GetIndexValidity());
         Assert.NotNull(provider.GetSourceIndex());
 
-        string indexPath = Path.ChangeExtension(Path.Combine(_tempDir, "t.datum"), ".datum-index");
+        string indexPath = Path.ChangeExtension(Path.Combine(_tempDir, "data", "public", "t.datum"), ".datum-index");
         Assert.True(File.Exists(indexPath), "first INSERT should have produced the .datum-index");
     }
 

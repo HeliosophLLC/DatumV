@@ -54,6 +54,17 @@ export type ICatalogHubClient = {
     */
     onCatalogChanged(change: CatalogChangedEvent): Promise<void>;
     /**
+    * Fired when the catalog directory's contents change on disk for any
+    * reason that didn't go through a DDL statement — VS Code save, git
+    * checkout, hand-edit, etc. The payload is intentionally empty;
+    * listeners refetch /api/files rather than try to apply a
+    * per-file delta. Self-triggered events from the app's own writes
+    * are coalesced with the corresponding
+    * notification by the client-side debounce.
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onFilesChanged(): Promise<void>;
+    /**
     * @param ev Transpiled from DatumIngest.Web.Hubs.ModelLoadedEvent
     * @returns Transpiled from System.Threading.Tasks.Task
     */

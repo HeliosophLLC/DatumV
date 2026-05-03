@@ -1,15 +1,13 @@
-import { useTranslation } from 'react-i18next';
-import { X } from 'lucide-react';
-import { closePanel, type DockSide, type PanelId } from '@/state/nav';
-import { PANEL_REGISTRY } from './registry';
+import type { DockSide, PanelId } from '@/state/nav';
 import { ChatPanel } from './ChatPanel';
 import { CatalogExplorerPanel } from './CatalogExplorerPanel';
 import { ProceduresPanel } from './ProceduresPanel';
 import { ProjectExplorerPanel } from './ProjectExplorerPanel';
 
-// Header + body shell every dockable side panel sits inside. Keeps the
-// title bar styling and the close-X identical across panels — the panel
-// components themselves just render their own body.
+// Thin chrome for every side panel: a flex column with the dock-coloured
+// background, and a slot for the panel component. Header is rendered by
+// each panel via <PanelHeader> so per-panel actions (refresh, collapse all,
+// etc.) live next to the panel logic that drives them.
 
 export function SidePanelHost({
   side,
@@ -18,44 +16,28 @@ export function SidePanelHost({
   side: DockSide;
   panelId: PanelId;
 }) {
-  const { t } = useTranslation('panels');
-  const entry = PANEL_REGISTRY[panelId];
-  // Panel titleKey is registry-data, not a static literal — cast past
-  // i18next's strict typed-key check.
-  const title = t(entry.titleKey as never) as string;
-
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="select-none bg-dock-header text-dock-header-foreground flex h-9 shrink-0 items-center justify-between border-b px-3">
-        <span className="text-xs font-medium tracking-wide uppercase">
-          {title}
-        </span>
-        <button
-          type="button"
-          onClick={() => closePanel(side)}
-          aria-label={t('closePanel')}
-          title={t('closePanel')}
-          className="text-dock-header-foreground/80 hover:text-dock-header-foreground flex size-6 items-center justify-center rounded-xs transition-colors hover:bg-white/15 cursor-pointer"
-        >
-          <X className="size-3.5" />
-        </button>
-      </div>
-      <div className="flex-1 overflow-hidden bg-white dark:bg-background">
-        <PanelBody panelId={panelId} />
-      </div>
+    <div className="flex h-full flex-col overflow-hidden bg-white dark:bg-background">
+      <PanelBody panelId={panelId} side={side} />
     </div>
   );
 }
 
-function PanelBody({ panelId }: { panelId: PanelId }) {
+function PanelBody({
+  panelId,
+  side,
+}: {
+  panelId: PanelId;
+  side: DockSide;
+}) {
   switch (panelId) {
     case 'chat':
-      return <ChatPanel />;
+      return <ChatPanel side={side} />;
     case 'catalog':
-      return <CatalogExplorerPanel />;
+      return <CatalogExplorerPanel side={side} />;
     case 'procedures':
-      return <ProceduresPanel />;
+      return <ProceduresPanel side={side} />;
     case 'projects':
-      return <ProjectExplorerPanel />;
+      return <ProjectExplorerPanel side={side} />;
   }
 }

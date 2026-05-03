@@ -17,7 +17,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_fts_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
     private string FtsPath(string tableName, string column) =>
-        Path.Combine(_tempDir, $"{tableName}.datum-fts-{column}");
+        Path.Combine(_tempDir, "data", "public", $"{tableName}.datum-fts-{column}");
 
     public Task InitializeAsync()
     {
@@ -456,7 +456,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("DROP TABLE t");
 
         Assert.False(File.Exists(FtsPath("t", "body")));
-        Assert.False(File.Exists(Path.Combine(_tempDir, "t.datum-cindex-idx_title")));
+        Assert.False(File.Exists(Path.Combine(_tempDir, "data", "public", "t.datum-cindex-idx_title")));
     }
 
     [Fact]

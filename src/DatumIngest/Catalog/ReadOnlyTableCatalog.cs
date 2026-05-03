@@ -101,7 +101,7 @@ public sealed class ReadOnlyTableCatalog : ITableCatalog
 
     /// <inheritdoc/>
     public ITableProvider CreatePersistentTable(
-        QualifiedName name, Model.Schema schema, string? explicitStoragePath, string? primaryKeyConstraintName)
+        QualifiedName name, Model.Schema schema, string? primaryKeyConstraintName)
         => throw new NotSupportedException(
             $"Schema '{name.Schema}' is read-only — CREATE TABLE is not supported.");
 

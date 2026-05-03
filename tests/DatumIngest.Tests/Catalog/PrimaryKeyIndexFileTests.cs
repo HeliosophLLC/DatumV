@@ -19,7 +19,7 @@ public sealed class PrimaryKeyIndexFileTests : ServiceTestBase, IAsyncLifetime
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr10h_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
     private string PkIndexPath(string tableName) =>
-        Path.Combine(_tempDir, tableName + ".datum-pkindex");
+        Path.Combine(_tempDir, "data", "public", tableName + ".datum-pkindex");
 
     public Task InitializeAsync()
     {

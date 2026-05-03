@@ -21,7 +21,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_cidx_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
     private string CompositeIndexPath(string tableName, string indexName) =>
-        Path.Combine(_tempDir, $"{tableName}.datum-cindex-{indexName}");
+        Path.Combine(_tempDir, "data", "public", $"{tableName}.datum-cindex-{indexName}");
 
     public Task InitializeAsync()
     {

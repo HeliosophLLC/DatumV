@@ -7,5 +7,7 @@
   "noIndexes": "No indexes",
   "primaryKey": "Primary key",
   "notNull": "not null",
-  "unique": "unique"
+  "unique": "unique",
+  "refresh": "Refresh",
+  "collapseAll": "Collapse all"
 }

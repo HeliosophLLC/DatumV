@@ -49,7 +49,7 @@ internal sealed partial class RoutineRegistrar
         }
         else
         {
-            ApplyCreateMacroFunction(create, qn);
+            ApplyCreateMacroFunction(create, qn, sourceText);
         }
 
         _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
@@ -67,9 +67,9 @@ internal sealed partial class RoutineRegistrar
         }
     }
 
-    private void ApplyCreateMacroFunction(CreateFunctionStatement create, QualifiedName qn)
+    private void ApplyCreateMacroFunction(CreateFunctionStatement create, QualifiedName qn, string? sourceText)
     {
-        UdfDescriptor descriptor = BuildMacroDescriptor(create, qn);
+        UdfDescriptor descriptor = BuildMacroDescriptor(create, qn, sourceText);
         _udfs.Register(descriptor, replace: create.OrReplace);
         // OR REPLACE may have swapped a previous procedural for this macro;
         // drop any stale adapter so dispatch falls through to the inliner.
@@ -501,7 +501,7 @@ internal sealed partial class RoutineRegistrar
     /// registration are caught at the call site that closes the loop because
     /// the visibility needed to detect them isn't available here.
     /// </summary>
-    private UdfDescriptor BuildMacroDescriptor(CreateFunctionStatement create, QualifiedName qn)
+    private UdfDescriptor BuildMacroDescriptor(CreateFunctionStatement create, QualifiedName qn, string? sourceText)
     {
         if (create.ExpressionBody is null)
         {
@@ -528,7 +528,8 @@ internal sealed partial class RoutineRegistrar
             Parameters: create.Parameters,
             ReturnTypeName: create.ReturnTypeName,
             ExpressionBody: create.ExpressionBody,
-            ReturnIsNotNull: create.ReturnIsNotNull);
+            ReturnIsNotNull: create.ReturnIsNotNull,
+            SourceText: sourceText ?? $"CREATE FUNCTION {qn}");
     }
 
     /// <summary>

@@ -10,6 +10,7 @@ import enHome from './locales/en/home.json';
 import enModels from './locales/en/models.json';
 import enPanels from './locales/en/panels.json';
 import enProcedures from './locales/en/procedures.json';
+import enProjectExplorer from './locales/en/projectExplorer.json';
 import enQuery from './locales/en/query.json';
 import enSettings from './locales/en/settings.json';
 import enStatus from './locales/en/status.json';
@@ -33,6 +34,7 @@ const resources = {
     panels: enPanels,
     catalog: enCatalog,
     procedures: enProcedures,
+    projectExplorer: enProjectExplorer,
     docs: enDocs,
     status: enStatus,
   },
@@ -57,6 +59,7 @@ i18next
       'panels',
       'catalog',
       'procedures',
+      'projectExplorer',
       'docs',
       'status',
     ],

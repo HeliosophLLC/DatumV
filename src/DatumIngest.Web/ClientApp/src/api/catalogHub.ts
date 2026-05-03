@@ -37,6 +37,13 @@ type Handler<T> = (event: T) => void;
 
 const catalogChangedHandlers: Set<Handler<CatalogChangedEvent>> = new Set();
 
+// Files-changed has no payload — it's a "refetch /api/files" hint pushed
+// by the server-side directory watcher when the catalog tree changes out
+// of band (VS Code save, git checkout, hand-edit). State/files.ts is the
+// sole consumer today.
+type VoidHandler = () => void;
+const filesChangedHandlers: Set<VoidHandler> = new Set();
+
 // Residency lifecycle (IModelLifecycleObserver fan-out). State
 // subscribers register from `state/residency.ts`; views never touch
 // these directly.
@@ -70,6 +77,11 @@ export function onCatalogChanged(
 ): () => void {
   catalogChangedHandlers.add(handler);
   return () => catalogChangedHandlers.delete(handler);
+}
+
+export function onFilesChanged(handler: VoidHandler): () => void {
+  filesChangedHandlers.add(handler);
+  return () => filesChangedHandlers.delete(handler);
 }
 
 export function onModelLoaded(handler: Handler<ModelLoadedEvent>): () => void {
@@ -146,6 +158,15 @@ const dispatcher: ICatalogHubClient = {
   },
   async onCatalogChanged(event: CatalogChangedEvent): Promise<void> {
     fanOut(catalogChangedHandlers, event);
+  },
+  async onFilesChanged(): Promise<void> {
+    for (const handler of filesChangedHandlers) {
+      try {
+        handler();
+      } catch {
+        // Handler bugs shouldn't break sibling handlers or future events.
+      }
+    }
   },
   async onModelLoaded(event: ModelLoadedEvent): Promise<void> {
     fanOut(modelLoadedHandlers, event);

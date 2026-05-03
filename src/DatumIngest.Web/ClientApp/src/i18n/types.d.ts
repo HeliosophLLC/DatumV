@@ -7,6 +7,7 @@ import type enHome from './locales/en/home.json';
 import type enModels from './locales/en/models.json';
 import type enPanels from './locales/en/panels.json';
 import type enProcedures from './locales/en/procedures.json';
+import type enProjectExplorer from './locales/en/projectExplorer.json';
 import type enQuery from './locales/en/query.json';
 import type enSettings from './locales/en/settings.json';
 import type enStatus from './locales/en/status.json';
@@ -29,6 +30,7 @@ declare module 'i18next' {
       panels: typeof enPanels;
       catalog: typeof enCatalog;
       procedures: typeof enProcedures;
+      projectExplorer: typeof enProjectExplorer;
       docs: typeof enDocs;
       status: typeof enStatus;
     };

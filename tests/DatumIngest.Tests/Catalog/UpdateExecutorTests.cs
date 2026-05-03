@@ -209,7 +209,7 @@ public sealed class UpdateExecutorTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public async Task Update_DatumFile_NoMatchLeavesFileUnchanged()
     {
-        string filePath = Path.Combine(_tempDir, "t.datum");
+        string filePath = Path.Combine(_tempDir, "data", "public", "t.datum");
         ulong genBefore;
         using (TableCatalog catalog = NewFileCatalog())
         {
