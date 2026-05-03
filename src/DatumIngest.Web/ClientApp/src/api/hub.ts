@@ -28,6 +28,13 @@ import type {
   VenvInstallProgressDto as VenvInstallProgress,
   VenvInstallCompleteDto as VenvInstallComplete,
   PythonEnvironmentFailedDto as PythonEnvironmentFailed,
+  DatasetDownloadStartedDto as DatasetDownloadStarted,
+  DatasetDownloadProgressDto as DatasetDownloadProgress,
+  DatasetDownloadCompleteDto as DatasetDownloadComplete,
+  DatasetIngestingDto as DatasetIngesting,
+  DatasetTableIngestedDto as DatasetTableIngested,
+  DatasetInstalledDto as DatasetInstalled,
+  DatasetDownloadFailedDto as DatasetDownloadFailed,
 } from './generated/hubs/DatumIngest.Web.Hubs';
 export type {
   ModelDownloadStarted,
@@ -46,6 +53,13 @@ export type {
   VenvInstallProgress,
   VenvInstallComplete,
   PythonEnvironmentFailed,
+  DatasetDownloadStarted,
+  DatasetDownloadProgress,
+  DatasetDownloadComplete,
+  DatasetIngesting,
+  DatasetTableIngested,
+  DatasetInstalled,
+  DatasetDownloadFailed,
 };
 
 // Singleton HubConnection + proxy + a fan-out dispatcher.
@@ -97,6 +111,14 @@ const venvStartedHandlers: Set<Handler<VenvInstallStarted>> = new Set();
 const venvProgressHandlers: Set<Handler<VenvInstallProgress>> = new Set();
 const venvCompleteHandlers: Set<Handler<VenvInstallComplete>> = new Set();
 const pythonFailedHandlers: Set<Handler<PythonEnvironmentFailed>> = new Set();
+
+const dsStartedHandlers: Set<Handler<DatasetDownloadStarted>> = new Set();
+const dsProgressHandlers: Set<Handler<DatasetDownloadProgress>> = new Set();
+const dsCompleteHandlers: Set<Handler<DatasetDownloadComplete>> = new Set();
+const dsIngestingHandlers: Set<Handler<DatasetIngesting>> = new Set();
+const dsTableIngestedHandlers: Set<Handler<DatasetTableIngested>> = new Set();
+const dsInstalledHandlers: Set<Handler<DatasetInstalled>> = new Set();
+const dsFailedHandlers: Set<Handler<DatasetDownloadFailed>> = new Set();
 
 type CloseHandler = (err?: Error) => void;
 const closeHandlers: Set<CloseHandler> = new Set();
@@ -155,6 +177,21 @@ export const onVenvInstallComplete = (handler: Handler<VenvInstallComplete>) =>
   subscribe(venvCompleteHandlers, handler);
 export const onPythonEnvironmentFailed = (handler: Handler<PythonEnvironmentFailed>) =>
   subscribe(pythonFailedHandlers, handler);
+
+export const onDatasetDownloadStarted = (handler: Handler<DatasetDownloadStarted>) =>
+  subscribe(dsStartedHandlers, handler);
+export const onDatasetDownloadProgress = (handler: Handler<DatasetDownloadProgress>) =>
+  subscribe(dsProgressHandlers, handler);
+export const onDatasetDownloadComplete = (handler: Handler<DatasetDownloadComplete>) =>
+  subscribe(dsCompleteHandlers, handler);
+export const onDatasetIngesting = (handler: Handler<DatasetIngesting>) =>
+  subscribe(dsIngestingHandlers, handler);
+export const onDatasetTableIngested = (handler: Handler<DatasetTableIngested>) =>
+  subscribe(dsTableIngestedHandlers, handler);
+export const onDatasetInstalled = (handler: Handler<DatasetInstalled>) =>
+  subscribe(dsInstalledHandlers, handler);
+export const onDatasetDownloadFailed = (handler: Handler<DatasetDownloadFailed>) =>
+  subscribe(dsFailedHandlers, handler);
 
 export function onConnectionClosed(handler: CloseHandler): () => void {
   closeHandlers.add(handler);
@@ -223,6 +260,27 @@ const dispatcher: IStreamHubClient = {
   },
   async onPythonEnvironmentFailed(event: PythonEnvironmentFailed): Promise<void> {
     fanOut(pythonFailedHandlers, event);
+  },
+  async onDatasetDownloadStarted(event: DatasetDownloadStarted): Promise<void> {
+    fanOut(dsStartedHandlers, event);
+  },
+  async onDatasetDownloadProgress(event: DatasetDownloadProgress): Promise<void> {
+    fanOut(dsProgressHandlers, event);
+  },
+  async onDatasetDownloadComplete(event: DatasetDownloadComplete): Promise<void> {
+    fanOut(dsCompleteHandlers, event);
+  },
+  async onDatasetIngesting(event: DatasetIngesting): Promise<void> {
+    fanOut(dsIngestingHandlers, event);
+  },
+  async onDatasetTableIngested(event: DatasetTableIngested): Promise<void> {
+    fanOut(dsTableIngestedHandlers, event);
+  },
+  async onDatasetInstalled(event: DatasetInstalled): Promise<void> {
+    fanOut(dsInstalledHandlers, event);
+  },
+  async onDatasetDownloadFailed(event: DatasetDownloadFailed): Promise<void> {
+    fanOut(dsFailedHandlers, event);
   },
 };
 

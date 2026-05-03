@@ -1,5 +1,7 @@
 using System.Text.Json;
 
+using DatumIngest.DatasetLibrary;
+
 namespace DatumIngest.Web.Settings;
 
 // Reads selected fields out of settings.json synchronously at startup,
@@ -26,6 +28,50 @@ internal static class StartupSettingsLoader
     // applies cleanly.
     public static string? LoadDefaultLlm(string catalogRootPath)
         => ReadStringField(catalogRootPath, "defaultLlmModel");
+
+    // Reads {catalogRootPath}/settings.json and returns the user-configured
+    // DatasetsDirectory if present and non-empty. Null means "no user
+    // override; use the host's default cascade ($DATUM_DATASETS env var →
+    // %LOCALAPPDATA%/DatumIngest/datasets-cache)."
+    public static string? LoadDatasetsDirectory(string catalogRootPath)
+        => ReadStringField(catalogRootPath, "datasetsDirectory");
+
+    // Reads the user's current KeepRawDownloads preference. Called by the
+    // SettingsBackedKeepRawDownloadsPolicy on every install — each install
+    // re-reads the file so a flip to `never` applies on the next install
+    // without a restart. Returns the default (`Ask`) when the file is
+    // missing or the field is unset / unparseable.
+    public static KeepRawDownloadsMode LoadKeepRawDownloads(string catalogRootPath)
+    {
+        string path = Path.Combine(catalogRootPath, "settings.json");
+        if (!File.Exists(path)) return KeepRawDownloadsMode.Ask;
+
+        try
+        {
+            using FileStream stream = File.OpenRead(path);
+            using JsonDocument doc = JsonDocument.Parse(stream);
+
+            if (doc.RootElement.TryGetProperty("keepRawDownloads", out JsonElement element)
+                && element.ValueKind == JsonValueKind.String)
+            {
+                string? value = element.GetString();
+                if (string.Equals(value, "always", StringComparison.OrdinalIgnoreCase))
+                {
+                    return KeepRawDownloadsMode.Always;
+                }
+                if (string.Equals(value, "never", StringComparison.OrdinalIgnoreCase))
+                {
+                    return KeepRawDownloadsMode.Never;
+                }
+                // "ask" or any unknown value → default.
+            }
+        }
+        catch (Exception)
+        {
+            // Swallow; the install path still runs with the default.
+        }
+        return KeepRawDownloadsMode.Ask;
+    }
 
     private static string? ReadStringField(string catalogRootPath, string fieldName)
     {

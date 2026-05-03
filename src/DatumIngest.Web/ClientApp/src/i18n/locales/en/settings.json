@@ -30,6 +30,20 @@
     "directoryHint": "Changes apply on next launch.",
     "directorySaved": "Saved — restart the app to use the new directory."
   },
+  "datasets": {
+    "title": "Datasets",
+    "directory": "Raw downloads directory",
+    "directoryEffective": "Currently using: {path}",
+    "directoryPlaceholder": "Leave empty to use the default location",
+    "directorySave": "Save",
+    "directoryHint": "Holds downloaded archives before they're ingested. Separate from where ingested data lives. Changes apply on next launch.",
+    "directorySaved": "Saved — restart the app to use the new directory.",
+    "keepRawDownloads": "Keep raw downloads after ingest",
+    "keepRawDownloadsAsk": "Ask each time",
+    "keepRawDownloadsAlways": "Always",
+    "keepRawDownloadsNever": "Never",
+    "keepRawDownloadsHint": "After a dataset finishes ingesting, the downloaded archives can be deleted to reclaim space — the ingested data remains usable on its own."
+  },
   "chat": {
     "title": "Chat",
     "llm": "Language model",

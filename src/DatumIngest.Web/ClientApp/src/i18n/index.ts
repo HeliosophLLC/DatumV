@@ -4,6 +4,7 @@ import { initReactI18next } from 'react-i18next';
 import enCatalog from './locales/en/catalog.json';
 import enChat from './locales/en/chat.json';
 import enCommon from './locales/en/common.json';
+import enDatasets from './locales/en/datasets.json';
 import enDialogs from './locales/en/dialogs.json';
 import enDocs from './locales/en/docs.json';
 import enHome from './locales/en/home.json';
@@ -28,6 +29,7 @@ const resources = {
     home: enHome,
     chat: enChat,
     models: enModels,
+    datasets: enDatasets,
     query: enQuery,
     settings: enSettings,
     dialogs: enDialogs,
@@ -53,6 +55,7 @@ i18next
       'home',
       'chat',
       'models',
+      'datasets',
       'query',
       'settings',
       'dialogs',

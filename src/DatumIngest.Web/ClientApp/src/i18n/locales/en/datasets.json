@@ -1,0 +1,57 @@
+{
+  "title": "Datasets",
+  "loading": "Loading dataset catalog…",
+  "error": "Failed to load dataset catalog: {message}",
+  "search": "Search datasets",
+  "emptyList": "No datasets match the current filters.",
+  "noSelection": "Select a dataset to see details.",
+  "modality": {
+    "Image": "Image",
+    "Text": "Text",
+    "Audio": "Audio",
+    "Video": "Video",
+    "Tabular": "Tabular",
+    "3D": "3D",
+    "Geospatial": "Geospatial",
+    "Document": "Document",
+    "TimeSeries": "Time-series"
+  },
+  "suitableFor": "Suitable for",
+  "approxSize": "≈ {size}",
+  "variantCount": "{count, plural, one {# variant} other {# variants}}",
+  "license": "License",
+  "attributions": "Attributions",
+  "expectedRows": "Expected rows",
+  "downloadSize": "Download size",
+  "ingestedSize": "Ingested size",
+  "rowCount": "{count, plural, one {# row} other {# rows}}",
+  "install": "Install",
+  "uninstall": "Uninstall",
+  "reinstall": "Reinstall",
+  "cancel": "Cancel",
+  "state": {
+    "notDownloaded": "Not installed",
+    "partial": "Partial",
+    "installed": "Installed"
+  },
+  "progress": {
+    "starting": "Starting download…",
+    "downloading": "Downloading {current} ({fileIndex} of {fileCount})",
+    "downloadComplete": "Download complete, preparing ingest…",
+    "ingesting": "Ingesting {table} ({jobIndex} of {jobCount})",
+    "installed": "Installed"
+  },
+  "filters": {
+    "modality": "Modality",
+    "modalityEmpty": "No modalities yet.",
+    "clear": "Clear",
+    "all": "All",
+    "installed": "Installed",
+    "notInstalled": "Not installed"
+  },
+  "license_section": {
+    "accept": "Accept license to install",
+    "accepted": "License accepted",
+    "viewText": "View full license"
+  }
+}

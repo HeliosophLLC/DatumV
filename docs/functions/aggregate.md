@@ -143,6 +143,19 @@ Concatenates non-null string values with a separator. Supports intra-aggregate O
 
 Collects non-null values into a typed `Array`. Accepts any data kind. Supports intra-aggregate ORDER BY and DISTINCT. Returns null if all inputs are null.
 
+### image_stack
+
+`image_stack(img, axis [ORDER BY ...])` -> Image | QU: 2
+
+Concatenates non-null images in a group along `axis` -- a case-insensitive string enum: `'horizontal'` (output width = sum of widths, height = max of heights) or `'vertical'` (width = max, height = sum). Images with smaller perpendicular dimensions are centred; excess is transparent. The axis is captured from the first non-null row and must be constant across the group. Supports intra-aggregate ORDER BY for deterministic placement. Returns null when every image in the group is null.
+
+```sql
+-- Build a contact sheet, one row per label
+SELECT label, image_stack(image, 'horizontal' ORDER BY id) AS strip
+FROM images
+GROUP BY label
+```
+
 ### ARG_MAX
 
 `ARG_MAX(value, key)` -> (matches value type) | QU: 1

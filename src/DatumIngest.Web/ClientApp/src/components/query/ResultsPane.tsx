@@ -489,6 +489,7 @@ function SingleValueImage({ cell }: { cell: JsonCell }) {
         src={src}
         alt=""
         onClick={() => setOpen(true)}
+        onContextMenu={(e) => showImageContextMenu(cell, e)}
         title={title}
         className="hover:ring-primary max-h-full max-w-full cursor-zoom-in rounded-xs object-contain hover:ring-1"
       />
@@ -502,11 +503,11 @@ function SingleValueImage({ cell }: { cell: JsonCell }) {
       >
         View full resolution
       </button>
-      <MediaPreview open={open} onClose={() => setOpen(false)} title={title}>
+      <ImagePreviewModal cell={cell} open={open} onClose={() => setOpen(false)}>
         {/* No max-w/max-h: the modal's overflow-auto content area
             scrolls so the user can pan around at native pixel size. */}
         <img src={src} alt="" />
-      </MediaPreview>
+      </ImagePreviewModal>
     </div>
   );
 }
@@ -1614,11 +1615,93 @@ function extensionForMime(mime: string | undefined): string {
   return subtype.split('+')[0] || 'bin';
 }
 
+// Programmatic Save-As: a transient <a download> click. Used by the
+// context-menu path; the modal's header action uses a real <a> so it
+// already gets this for free.
+function triggerImageDownload(cell: JsonCell): void {
+  const a = document.createElement('a');
+  a.href = dataUriOf(cell);
+  a.download = `image.${extensionForMime(cell.mime)}`;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// Right-click handler that shows the native Electron context menu with
+// a "Download Image" entry. In the browser, returning early lets the
+// default menu surface its built-in "Save image as…", so the
+// affordance is consistent across hosts without an extra branch in
+// every caller.
+async function showImageContextMenu(
+  cell: JsonCell,
+  e: React.MouseEvent,
+): Promise<void> {
+  const eh = window.electronHost;
+  if (!eh?.isElectron) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const result = await eh.showContextMenu({
+    items: [{ id: 'download', label: 'Download Image' }],
+  });
+  if (result === 'download') triggerImageDownload(cell);
+}
+
+// Shared image preview modal: title + Save-to-disk action over the
+// common <MediaPreview> chrome. Callers pass the inner <img> so each
+// surface picks its own sizing (thumbnail callers cap at 80vh/80vw;
+// single-value callers render at native size with the modal's own
+// overflow-auto handling pan/scroll).
+//
+// `<a download>` triggers the browser's Save dialog with the suggested
+// filename. Data URIs work for all current browsers; future-proof
+// against very large blobs by switching to an object URL if we ever
+// cross the ~512 KB data-URI sweet spot.
+function ImagePreviewModal({
+  cell,
+  open,
+  onClose,
+  children,
+}: {
+  cell: JsonCell;
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const src = dataUriOf(cell);
+  const bytes = bytesFromBase64(cell.dataB64);
+  const downloadName = `image.${extensionForMime(cell.mime)}`;
+  return (
+    <MediaPreview
+      open={open}
+      onClose={onClose}
+      title={`${cell.mime ?? 'image'} · ${formatBytes(bytes)}`}
+      actions={
+        <a
+          href={src}
+          download={downloadName}
+          aria-label="Download"
+          title="Download"
+          className="text-muted-foreground hover:bg-background hover:text-foreground -my-1 inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-xs p-1 transition-colors"
+        >
+          <Download className="size-4" />
+        </a>
+      }
+    >
+      {/* Wrap so right-click anywhere over the image (or the modal's
+          padding) offers a Download item via the native Electron menu;
+          browsers fall through to their built-in "Save image as…". */}
+      <div onContextMenu={(e) => showImageContextMenu(cell, e)}>
+        {children}
+      </div>
+    </MediaPreview>
+  );
+}
+
 function ImageCell({ cell, largeMedia = false }: { cell: JsonCell; largeMedia?: boolean }) {
   const [open, setOpen] = useState(false);
   const src = dataUriOf(cell);
   const bytes = bytesFromBase64(cell.dataB64);
-  const downloadName = `image.${extensionForMime(cell.mime)}`;
   return (
     <>
       <img
@@ -1626,38 +1709,20 @@ function ImageCell({ cell, largeMedia = false }: { cell: JsonCell; largeMedia?: 
         alt=""
         loading="lazy"
         onClick={() => setOpen(true)}
+        onContextMenu={(e) => showImageContextMenu(cell, e)}
         title={`image · ${formatBytes(bytes)}`}
         className={cn(
           'hover:ring-primary inline-block max-w-full cursor-zoom-in rounded-xs object-contain hover:ring-1',
           largeMedia ? 'h-16' : 'h-5',
         )}
       />
-      <MediaPreview
-        open={open}
-        onClose={() => setOpen(false)}
-        title={`image · ${cell.mime ?? 'unknown'} · ${formatBytes(bytes)}`}
-        actions={
-          // `<a download>` triggers the browser's Save dialog with the
-          // suggested filename. Data URIs work for all current browsers;
-          // future-proof against very large blobs by switching to an
-          // object URL if we ever cross the ~512 KB data-URI sweet spot.
-          <a
-            href={src}
-            download={downloadName}
-            aria-label="Download"
-            title="Download"
-            className="text-muted-foreground hover:bg-background hover:text-foreground -my-1 inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-xs p-1 transition-colors"
-          >
-            <Download className="size-4" />
-          </a>
-        }
-      >
+      <ImagePreviewModal cell={cell} open={open} onClose={() => setOpen(false)}>
         {/* `block mx-auto` so an image narrower than the modal's min
             width (320px) sits centered in the content area rather than
             hugging the left edge. Block display is needed because `img`
             is inline by default and `mx-auto` is a no-op on inline. */}
         <img src={src} alt="" className="mx-auto block max-h-[80vh] max-w-[80vw] object-contain" />
-      </MediaPreview>
+      </ImagePreviewModal>
     </>
   );
 }
@@ -2322,15 +2387,28 @@ function MediaArrayCell({ cell, largeMedia = false }: { cell: JsonCell; largeMed
         title={`${items.length} items`}
       >
         <div className="grid max-h-[80vh] grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2 overflow-auto">
-          {items.map((it, i) => (
-            <img
-              key={i}
-              src={`data:${it.mime};base64,${it.dataB64}`}
-              alt=""
-              loading="lazy"
-              className="bg-muted/40 h-32 w-full rounded-xs object-contain"
-            />
-          ))}
+          {items.map((it, i) => {
+            const src = `data:${it.mime};base64,${it.dataB64}`;
+            return (
+              <div key={i} className="group relative">
+                <img
+                  src={src}
+                  alt=""
+                  loading="lazy"
+                  className="bg-muted/40 h-32 w-full rounded-xs object-contain"
+                />
+                <a
+                  href={src}
+                  download={`image-${i}.${extensionForMime(it.mime)}`}
+                  aria-label="Download"
+                  title="Download"
+                  className="bg-card/80 text-muted-foreground hover:text-foreground absolute right-1 top-1 inline-flex cursor-pointer items-center rounded-xs p-1 opacity-0 transition-opacity group-hover:opacity-100"
+                >
+                  <Download className="size-4" />
+                </a>
+              </div>
+            );
+          })}
         </div>
       </MediaPreview>
     </>

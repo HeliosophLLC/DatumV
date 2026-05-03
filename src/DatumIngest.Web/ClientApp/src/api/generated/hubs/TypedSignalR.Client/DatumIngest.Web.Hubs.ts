@@ -3,7 +3,7 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { IStreamResult, Subject } from '@microsoft/signalr';
-import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto } from '../DatumIngest.Web.Hubs';
+import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto } from '../DatumIngest.Web.Hubs';
 
 export type ICatalogHub = {
     /**
@@ -201,5 +201,40 @@ export type IStreamHubClient = {
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onPythonEnvironmentFailed(failed: PythonEnvironmentFailedDto): Promise<void>;
+    /**
+    * @param started Transpiled from DatumIngest.Web.Hubs.DatasetDownloadStartedDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onDatasetDownloadStarted(started: DatasetDownloadStartedDto): Promise<void>;
+    /**
+    * @param progress Transpiled from DatumIngest.Web.Hubs.DatasetDownloadProgressDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onDatasetDownloadProgress(progress: DatasetDownloadProgressDto): Promise<void>;
+    /**
+    * @param complete Transpiled from DatumIngest.Web.Hubs.DatasetDownloadCompleteDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onDatasetDownloadComplete(complete: DatasetDownloadCompleteDto): Promise<void>;
+    /**
+    * @param ingesting Transpiled from DatumIngest.Web.Hubs.DatasetIngestingDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onDatasetIngesting(ingesting: DatasetIngestingDto): Promise<void>;
+    /**
+    * @param ingested Transpiled from DatumIngest.Web.Hubs.DatasetTableIngestedDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onDatasetTableIngested(ingested: DatasetTableIngestedDto): Promise<void>;
+    /**
+    * @param installed Transpiled from DatumIngest.Web.Hubs.DatasetInstalledDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onDatasetInstalled(installed: DatasetInstalledDto): Promise<void>;
+    /**
+    * @param failed Transpiled from DatumIngest.Web.Hubs.DatasetDownloadFailedDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onDatasetDownloadFailed(failed: DatasetDownloadFailedDto): Promise<void>;
 }
 

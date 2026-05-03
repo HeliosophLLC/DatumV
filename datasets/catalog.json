@@ -1,0 +1,153 @@
+{
+  "_comment": [
+    "DatumIngest dataset catalog — v1 manifest read by the in-app Datasets",
+    "panel and (eventually) the catalog-aware datasets.<name> SQL resolver.",
+    "",
+    "Schema shape:",
+    "  - Each top-level `datasets` entry is a dataset family (e.g. COCO 2017).",
+    "    Entry-level fields (summary, license, attribution, card, hero)",
+    "    describe the family as a whole. A `variants[]` array carries the",
+    "    install-handle-bearing cuts (e.g. test2017, val2017).",
+    "  - Variants own the sources, ingest jobs, version history, and size",
+    "    metadata; install / uninstall / probe key on `variant.id`.",
+    "  - The renderer shows one list row per entry; the detail pane renders",
+    "    entry chrome (hero + card markdown) plus a variant tab strip,",
+    "    flipping which variant is active without reloading the entry.",
+    "",
+    "Install pipeline: download source(s) into the raw cache",
+    "(`DATUM_DATASETS`) -> for each ingest[] job, point",
+    "DatumIngest.Ingestion.Ingester at the named source path so the",
+    "output `.datum` lands at <catalog>/datasets/<variantId>/<version>/<tableName>.datum.",
+    "The FormatRegistry resolves the format from the source file's",
+    "extension or magic bytes (e.g. ZipDeserializer reads a JPEG-bag",
+    "archive directly — no separate extraction step). Raw-cache contents",
+    "are deletable once ingest completes."
+  ],
+  "schemaVersion": 1,
+  "licenses": {
+    "cc-by-4.0": {
+      "title": "Creative Commons Attribution 4.0 International",
+      "spdx": "CC-BY-4.0",
+      "canonicalUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+      "textFile": "licenses/cc-by-4.0.txt",
+      "summary": "Permissive license. Allows commercial use, modification, and redistribution. Requires attribution to the original author.",
+      "requiresAcceptance": false
+    }
+  },
+  "datasets": [
+    {
+      "name": "COCO 2017",
+      "summary": "Microsoft Common Objects in Context — the 2017 release. Eighty-class object detection, segmentation, keypoint, and captioning corpus drawn from Flickr. The default reach-for benchmark in computer vision.",
+      "description": "Every pretrained detector / segmenter / captioner reports COCO mAP, and most were trained on it. All variants share the same image distribution and label vocabulary — they differ only in which split. Pick a split, not a dataset: the schemas are interchangeable so you can swap `datasets.coco_val2017` for `datasets.coco_test2017` in a query and the only thing that changes is the number of rows.",
+      "modalities": ["Image"],
+      "licenseIds": ["cc-by-4.0"],
+      "attributions": [
+        "Lin et al. (COCO consortium, 2014)",
+        "Flickr contributors (per-image rights via upstream Flickr terms)"
+      ],
+      "suitableForTasks": [
+        "LabeledObjectDetector",
+        "ImageCaptioner",
+        "InstanceSegmenter",
+        "KeypointDetector"
+      ],
+      "cardFile": "cards/coco2017/index.md",
+      "heroImageFile": "cards/coco2017/hero.png",
+      "variants": [
+        {
+          "id": "coco-test2017",
+          "displayName": "test2017 (images)",
+          "summary": "40,670 unlabeled test images. Largest split; the held-out evaluation set with no public annotations. Best for image-only experiments — pretrained detectors / captioners / depth estimators run end-to-end without an annotation pipeline.",
+          "approxArchiveBytes": 6646972416,
+          "approxIngestedBytes": 6643406422,
+          "expectedRowCounts": { "images": 40670 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "2017",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "http://images.cocodataset.org/zips/test2017.zip",
+                      "destFile": "test2017.zip"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "sourcePath": "test2017.zip",
+                  "tableName": "images"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "coco-val2017",
+          "displayName": "val2017 (images)",
+          "summary": "5,000 validation images. The standard COCO benchmark slice — every mAP / BLEU / CIDEr number you see reported in a paper is computed against this split. Annotations (bbox / segmentation / captions / keypoints) ship separately and require the JSON deserializer (deferred to a follow-up); this variant is images-only for now.",
+          "approxArchiveBytes": 815585330,
+          "approxIngestedBytes": 815585330,
+          "expectedRowCounts": { "images": 5000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "2017",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "http://images.cocodataset.org/zips/val2017.zip",
+                      "destFile": "val2017.zip"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "sourcePath": "val2017.zip",
+                  "tableName": "images"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "coco-train2017",
+          "displayName": "train2017 (images)",
+          "summary": "118,287 training images. The largest 2017 split — used to train (or fine-tune) most COCO-pretrained detectors, segmenters, and captioners. Annotations ship separately and require the JSON deserializer (deferred to a follow-up); this variant is images-only for now. At ~18 GB it's by far the heaviest install in the family — reach for val2017 or test2017 first unless you genuinely need the training set on disk.",
+          "approxArchiveBytes": 19309994224,
+          "approxIngestedBytes": 19309994224,
+          "expectedRowCounts": { "images": 118287 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "2017",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "http://images.cocodataset.org/zips/train2017.zip",
+                      "destFile": "train2017.zip"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "sourcePath": "train2017.zip",
+                  "tableName": "images"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

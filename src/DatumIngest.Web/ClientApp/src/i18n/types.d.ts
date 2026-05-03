@@ -1,6 +1,7 @@
 import type enCatalog from './locales/en/catalog.json';
 import type enChat from './locales/en/chat.json';
 import type enCommon from './locales/en/common.json';
+import type enDatasets from './locales/en/datasets.json';
 import type enDialogs from './locales/en/dialogs.json';
 import type enDocs from './locales/en/docs.json';
 import type enHome from './locales/en/home.json';
@@ -24,6 +25,7 @@ declare module 'i18next' {
       home: typeof enHome;
       chat: typeof enChat;
       models: typeof enModels;
+      datasets: typeof enDatasets;
       query: typeof enQuery;
       settings: typeof enSettings;
       dialogs: typeof enDialogs;

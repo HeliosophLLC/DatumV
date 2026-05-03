@@ -21,6 +21,7 @@ import { disposeTabExplain } from '@/state/explain';
 import { disposeFunctionForm } from '@/state/functionForm';
 import { FunctionForm } from './FunctionForm';
 import { ModelsView } from '@/components/models/ModelsView';
+import { DatasetsView } from '@/components/datasets/DatasetsView';
 import { SettingsView } from '@/components/settings/SettingsView';
 import { DocsView } from '@/components/docs/DocsView';
 import {
@@ -334,6 +335,10 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
         // the LeafToolbar — nothing to run.
         <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">
           <ModelsView />
+        </div>
+      ) : activeTab !== null && activeTabKind === 'datasets' ? (
+        <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">
+          <DatasetsView />
         </div>
       ) : activeTab !== null && activeTabKind === 'settings' ? (
         <div ref={bodyRef} className="relative flex flex-1 flex-col overflow-hidden">

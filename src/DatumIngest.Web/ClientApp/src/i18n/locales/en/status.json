@@ -2,8 +2,8 @@
   "downloadsChip": {
     "label": "Downloads",
     "downloadingWithPercent": "Downloading · {percent}%",
-    "downloadingNoTotal": "Downloading {count, plural, one {# model} other {# models}}",
-    "installing": "Installing {count, plural, one {# model} other {# models}}",
+    "downloadingNoTotal": "Downloading {count, plural, one {# item} other {# items}}",
+    "installing": "Installing {count, plural, one {# item} other {# items}}",
     "stalled": "{count, plural, one {# stalled} other {# stalled}}",
     "failed": "{count, plural, one {# failed} other {# failed}}",
     "popoverTitle": "Downloads",

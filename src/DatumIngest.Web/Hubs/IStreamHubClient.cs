@@ -49,4 +49,20 @@ public interface IStreamHubClient
     Task OnVenvInstallProgress(VenvInstallProgressDto progress);
     Task OnVenvInstallComplete(VenvInstallCompleteDto complete);
     Task OnPythonEnvironmentFailed(PythonEnvironmentFailedDto failed);
+
+    // Dataset-download lifecycle events. Broadcast to all clients (same
+    // single-user-desktop assumption as the model events). Populated by
+    // SignalRDatasetDownloadProgressReporter from the core
+    // DatumIngest.DatasetLibrary event records. Lifecycle:
+    //   OnDatasetDownloadStarted -> N x OnDatasetDownloadProgress ->
+    //   OnDatasetDownloadComplete -> N x (OnDatasetIngesting ->
+    //   OnDatasetTableIngested) -> OnDatasetInstalled.
+    // OnDatasetDownloadFailed replaces any later event on failure.
+    Task OnDatasetDownloadStarted(DatasetDownloadStartedDto started);
+    Task OnDatasetDownloadProgress(DatasetDownloadProgressDto progress);
+    Task OnDatasetDownloadComplete(DatasetDownloadCompleteDto complete);
+    Task OnDatasetIngesting(DatasetIngestingDto ingesting);
+    Task OnDatasetTableIngested(DatasetTableIngestedDto ingested);
+    Task OnDatasetInstalled(DatasetInstalledDto installed);
+    Task OnDatasetDownloadFailed(DatasetDownloadFailedDto failed);
 }

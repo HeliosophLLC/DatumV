@@ -109,7 +109,13 @@ public sealed record CatalogModel(
     // detail card. Only one entry per `ModelFamily` may set this
     // (validated at load); whichever entry sets it owns the card text
     // for the whole family.
-    string? FamilyCardFile = null)
+    string? FamilyCardFile = null,
+    // Optional path (relative to the manifest directory) to a hero
+    // image displayed at the top of the detail card. Per-entry for
+    // standalone models; on the family-card-owner for families.
+    // Missing files are tolerated (warning logged); the renderer
+    // simply omits the hero band when the file isn't present.
+    string? HeroImageFile = null)
 {
     /// <summary>
     /// Shorthand for <c>Versions[0].Sources</c>. The catalog substrate

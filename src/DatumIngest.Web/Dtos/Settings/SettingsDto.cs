@@ -1,3 +1,5 @@
+using DatumIngest.DatasetLibrary;
+
 namespace DatumIngest.Web.Dtos.Settings;
 
 // Full settings document — what GET /api/settings returns. All fields
@@ -12,6 +14,18 @@ public sealed record SettingsDto(
     // When non-empty, takes precedence over both. Read once at startup by
     // StartupSettingsLoader; runtime changes require a restart to apply.
     string ModelsDirectory,
+    // User-configured raw datasets cache directory. Empty string = use
+    // the resolution cascade ($DATUM_DATASETS env var →
+    // %LOCALAPPDATA%/DatumIngest/datasets-cache). When non-empty, takes
+    // precedence over both. Read once at startup by StartupSettingsLoader;
+    // runtime changes require a restart to apply.
+    string DatasetsDirectory,
+    // What to do with the raw archives in the dataset cache after a
+    // successful ingest. `Ask` keeps the cache and (in a later release)
+    // shows a prompt asking the user to remember `Always` or `Never`.
+    // Default is `Ask` so the first install never silently deletes
+    // anything.
+    KeepRawDownloadsMode KeepRawDownloads,
     bool Animations,
     // Dock layout. PanelIds: "chat" | "catalog" | "procedures" | "projects".
     // Settings is always pinned to the bottom of the left dock and is not
@@ -42,6 +56,8 @@ public sealed record SettingsPatchDto(
     ChromeStyle? ChromeStyle = null,
     string? Locale = null,
     string? ModelsDirectory = null,
+    string? DatasetsDirectory = null,
+    KeepRawDownloadsMode? KeepRawDownloads = null,
     bool? Animations = null,
     IReadOnlyList<string>? DockLeftItems = null,
     IReadOnlyList<string>? DockRightItems = null,

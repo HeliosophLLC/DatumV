@@ -26,6 +26,19 @@ public interface IManifestStore
     // Resolved at load time; this is a plain file read at call time.
     string? GetFamilyCardMarkdown(string modelFamily);
 
+    // Absolute filesystem path to the asset file `relativePath` underneath
+    // the family-card-owner's `cards/<family>/` tree, validated against
+    // path-traversal escapes. Null when no family card is registered for
+    // `modelFamily`, or when the resolved path falls outside the manifest
+    // directory (escape attempt). The caller streams the file content
+    // with the right content type.
+    string? ResolveFamilyCardAssetPath(string modelFamily, string relativePath);
+
+    // Absolute filesystem path to the hero image declared on `modelId`'s
+    // entry, or null when the entry didn't set one or the file isn't on
+    // disk. The renderer asks for the path; the controller streams it.
+    string? ResolveHeroImagePath(string modelId);
+
     // Reverse identifier→catalog index built once at load time from each
     // version's declared `models[]` arrays. Consumed by `system.models`,
     // `system.tasks`, pre-flight, and the install-time cross-check.

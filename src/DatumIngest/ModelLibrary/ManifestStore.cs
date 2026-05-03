@@ -32,6 +32,10 @@ internal sealed class ManifestStore : IManifestStore
     // Populated at load time from the (validated) at-most-one mapping
     // discovered in ValidateFamilyCardFiles.
     private readonly Dictionary<string, string> _familyCardPaths;
+    // modelId -> resolved absolute path to the hero image. Populated at
+    // load time; entries with missing hero files log a warning at load
+    // and don't get a path so ResolveHeroImagePath returns null.
+    private readonly Dictionary<string, string> _heroImagePaths;
     private readonly ILogger<ManifestStore> _logger;
 
     public ManifestStore(ILogger<ManifestStore> logger)
@@ -81,9 +85,26 @@ internal sealed class ManifestStore : IManifestStore
                 Path.GetFullPath(Path.Combine(manifestDir, m.FamilyCardFile));
         }
 
+        _heroImagePaths = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (CatalogModel m in manifest.Models)
+        {
+            if (string.IsNullOrEmpty(m.HeroImageFile)) { continue; }
+            string heroPath = Path.GetFullPath(Path.Combine(manifestDir, m.HeroImageFile));
+            if (File.Exists(heroPath))
+            {
+                _heroImagePaths[m.Id] = heroPath;
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Model entry {Id} declares heroImageFile '{File}' but no file exists at {Path}",
+                    m.Id, m.HeroImageFile, heroPath);
+            }
+        }
+
         _logger.LogInformation(
-            "Catalog loaded: {Models} models, {Licenses} licenses",
-            manifest.Models.Count, manifest.Licenses.Count);
+            "Catalog loaded: {Models} models, {Licenses} licenses, {Cards} family cards",
+            manifest.Models.Count, manifest.Licenses.Count, _familyCardPaths.Count);
     }
 
     public string? GetLicenseText(string licenseId)
@@ -98,6 +119,35 @@ internal sealed class ManifestStore : IManifestStore
         return _familyCardPaths.TryGetValue(modelFamily, out string? path)
             ? File.ReadAllText(path)
             : null;
+    }
+
+    public string? ResolveFamilyCardAssetPath(string modelFamily, string relativePath)
+    {
+        if (!_familyCardPaths.TryGetValue(modelFamily, out string? cardPath))
+        {
+            return null;
+        }
+        // Assets live in a sibling directory named after the family
+        // card's basename — for a card at `cards/yolox.md`, assets live
+        // at `cards/yolox/`. Authors reference them in markdown as
+        // `yolox/street-detections.png` and the asset-rewriter on the
+        // client maps that to the served URL.
+        string cardDir = Path.GetDirectoryName(cardPath)!;
+        string requested = Path.GetFullPath(Path.Combine(cardDir, relativePath));
+        // Path-traversal guard: resolved path must stay inside the
+        // manifest directory's `cards/` subtree.
+        string cardsRoot = Path.GetFullPath(Path.Combine(ManifestDirectory, "cards"))
+            + Path.DirectorySeparatorChar;
+        if (!requested.StartsWith(cardsRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        return File.Exists(requested) ? requested : null;
+    }
+
+    public string? ResolveHeroImagePath(string modelId)
+    {
+        return _heroImagePaths.TryGetValue(modelId, out string? path) ? path : null;
     }
 
     /// <summary>

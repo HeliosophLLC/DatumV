@@ -197,7 +197,7 @@ Sobel edge detection producing a grayscale edge-magnitude image. The 1-pixel bor
 
 ### resize_and_crop
 
-`resize_and_crop(img, w, h, gravity)` → Image
+`image_resize_and_crop(img, w, h, gravity)` → Image
 
 Scale the image to fill the target rectangle (aspect preserved — the larger of the X/Y scale factors wins), then crop the excess from the gravity anchor. Gravity (case-insensitive): `'center'`, `'top'`, `'bottom'`, `'left'`, `'right'`.
 

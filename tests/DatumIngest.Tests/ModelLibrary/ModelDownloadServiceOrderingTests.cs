@@ -230,6 +230,8 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
         public ICatalogVocabulary Vocabulary { get; } = new CatalogVocabulary(manifest);
         public string? GetLicenseText(string licenseId) => null;
         public string? GetFamilyCardMarkdown(string modelFamily) => null;
+        public string? ResolveFamilyCardAssetPath(string modelFamily, string relativePath) => null;
+        public string? ResolveHeroImagePath(string modelId) => null;
     }
 
     /// <summary>

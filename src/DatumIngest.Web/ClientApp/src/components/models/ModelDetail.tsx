@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { ChevronDown, ChevronRight, CircleCheck, Download, HardDrive, Loader2, RotateCcw, Trash2 } from 'lucide-react';
@@ -8,15 +8,11 @@ import rehypeHighlight from 'rehype-highlight';
 import { CodeBlock } from '@/components/markdown/CodeBlock';
 import { isExternalUrl, openExternalUrl } from '@/lib/openExternal';
 import { isDrifted, loadFamilyCard, modelsState, setSelectedId, type CatalogModelSnapshot } from '@/state/models';
-import {
-  buildTaskFamilyMap,
-  familyAccentClass,
-} from '@/components/models/taskStyles';
+import { buildTaskFamilyMap } from '@/components/shared/taskStyles';
+import { TaskChipLabel } from '@/components/shared/TaskChip';
 import { cn } from '@/lib/utils';
 import {
   activateVersion,
-  computeEtaSeconds,
-  computeRateBytesPerSec,
   deleteVersion,
   downloadsState,
   installModel,
@@ -26,7 +22,8 @@ import {
   type ActiveDownload,
   type PythonInstallStep,
 } from '@/state/downloads';
-import { localeState } from '@/state/locale';
+import { DownloadProgressBar } from '@/components/shared/DownloadProgressBar';
+import { shortenPath } from '@/lib/formatDownload';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -98,7 +95,9 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
   }, [modelFamily]);
 
   return (
-    <article className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 py-5">
+    <article className="mx-auto flex w-full max-w-3xl flex-col">
+      <ModelHeroBand modelId={modelId} />
+      <div className="flex flex-col gap-4 px-6 py-5">
       <header className="flex flex-col gap-2">
         {siblings.length > 1 && (
           <div className="flex flex-col gap-1">
@@ -200,18 +199,14 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
       </header>
 
       <div className="flex flex-wrap gap-1.5">
-        {(model.tasks ?? []).map((task) => {
-          const family = taskFamilies.get(task.toLowerCase()) ?? '';
-          return (
-            <Badge
-              key={task}
-              variant="outline"
-              className={cn('border-l-6', familyAccentClass(family))}
-            >
-              {t(`tasks.${task}` as 'tasks.TextEmbedder', { defaultValue: task })}
-            </Badge>
-          );
-        })}
+        {(model.tasks ?? []).map((task) => (
+          <TaskChipLabel
+            key={task}
+            task={task}
+            family={taskFamilies.get(task.toLowerCase()) ?? ''}
+            label={t(`tasks.${task}` as 'tasks.TextEmbedder', { defaultValue: task })}
+          />
+        ))}
         {typeof model.approxSizeMb === 'number' && (
           <Badge variant="outline">
             {t('card.size', { size: model.approxSizeMb })}
@@ -247,6 +242,17 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[[rehypeHighlight, { detect: true }]]}
+            // Rewrite relative URLs to the family-card-asset endpoint so
+            // `![alt](yolox/street-detections.png)` resolves to the file
+            // served from `models/cards/yolox/street-detections.png`.
+            // Absolute URLs / data: / mailto: / anchors / SPA-routes
+            // pass through unchanged.
+            urlTransform={(url) => {
+              if (modelFamily === null) return url;
+              if (/^https?:|^data:|^mailto:|^#|^\//i.test(url)) return url;
+              const clean = url.replace(/^\.\//, '');
+              return `/api/model-catalog/family-cards/${encodeURIComponent(modelFamily)}/assets/${clean}`;
+            }}
             components={{
               pre: ({ children, ...rest }) => (
                 <CodeBlock {...rest}>{children}</CodeBlock>
@@ -280,75 +286,52 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
         versionsOnDisk={models.versionsOnDisk[modelId] ?? []}
         busy={!!activeDownload || installing}
       />
+      </div>
     </article>
   );
 }
 
-// 3-second moving-average window. Long enough to absorb single-event
-// jitter (file-boundary stalls, TCP buffer flushes) without making the
-// display feel laggy when the actual speed shifts.
-const RATE_SMOOTHING_MS = 3_000;
+// Hero band at the top of the model detail card. Matches the dataset
+// side's HeroBand: height-clamped, centered, with a bottom gradient
+// fade into the page background. Hides on 404 / load error so entries
+// without a declared HeroImageFile (or with a missing file on disk)
+// just don't render a band.
+function ModelHeroBand({ modelId }: { modelId: string }) {
+  const [visible, setVisible] = useState(true);
+  if (!visible) return null;
+  return (
+    <div className="relative w-full overflow-hidden">
+      <img
+        src={`/api/model-catalog/models/${encodeURIComponent(modelId)}/hero`}
+        alt=""
+        className="object-cover h-60 m-auto"
+        onError={() => setVisible(false)}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent to-[var(--color-editor)]"
+      />
+    </div>
+  );
+}
 
 function DownloadProgress({ download }: { download: ActiveDownload }) {
   const { t } = useTranslation('models');
-  const { resolved: locale } = useSnapshot(localeState);
-  const total = download.bytesTotalAcrossModel;
-  const read = download.bytesReadTotal;
-  const percent = total > 0 ? (read / total) * 100 : 0;
-
-  // Tick every second so elapsed / ETA refresh even when progress events
-  // pause (e.g. between files). The ticker drives only this component's
-  // re-render; the underlying samples/startedAt come from valtio state.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  // Smooth the rate over the last RATE_SMOOTHING_MS so the displayed speed
-  // and ETA don't snap with every progress event. Raw rate (from the
-  // sliding sample window) is fed in once per render; the buffer holds
-  // recent readings and we display their mean.
-  const rateBuffer = useRef<{ t: number; rate: number }[]>([]);
-  const rawRate = computeRateBytesPerSec(download.samples);
-  const now = performance.now();
-  if (rawRate != null) {
-    rateBuffer.current.push({ t: now, rate: rawRate });
-  }
-  rateBuffer.current = rateBuffer.current.filter((s) => now - s.t < RATE_SMOOTHING_MS);
-  const rate = rateBuffer.current.length > 0
-    ? rateBuffer.current.reduce((sum, s) => sum + s.rate, 0) / rateBuffer.current.length
-    : null;
-
-  const etaSec = computeEtaSeconds(download, rate);
-  const elapsedSec = Math.max(0, Math.round((Date.now() - download.startedAt) / 1000));
-
-  const rateText = rate != null ? formatBytesPerSec(rate) : '';
-  const elapsedText = t('card.elapsed', { duration: formatDuration(elapsedSec, locale) });
-  const remainingText =
-    etaSec != null ? t('card.remaining', { duration: formatDuration(Math.round(etaSec), locale) }) : '';
-
+  const statusText = download.fileCount > 0
+    ? t('card.downloadingFile', {
+        index: download.fileIndex,
+        count: download.fileCount,
+        file: shortenPath(download.currentFile),
+      })
+    : t('card.downloadingStarting');
   return (
-    <div className="flex flex-col gap-1">
-      <Progress value={percent} />
-      <div className="text-muted-foreground flex justify-between gap-2 text-xs">
-        <span className="truncate">
-          {download.fileCount > 0
-            ? t('card.downloadingFile', {
-                index: download.fileIndex,
-                count: download.fileCount,
-                file: shortenPath(download.currentFile),
-              })
-            : t('card.downloadingStarting')}
-        </span>
-        <span className="shrink-0">{total > 0 ? `${Math.round(percent)}%` : ''}</span>
-      </div>
-      <div className="text-muted-foreground flex gap-3 text-xs tabular-nums">
-        <span className="inline-block min-w-[5.5rem]">{rateText || ' '}</span>
-        <span className="inline-block min-w-[8rem]">{elapsedText}</span>
-        <span className="inline-block min-w-[9rem]">{remainingText || ' '}</span>
-      </div>
-    </div>
+    <DownloadProgressBar
+      bytesRead={download.bytesReadTotal}
+      bytesTotal={download.bytesTotalAcrossModel}
+      startedAt={download.startedAt}
+      samples={download.samples}
+      statusText={statusText}
+    />
   );
 }
 
@@ -521,39 +504,11 @@ function DetailActions({
   );
 }
 
-function formatBytesPerSec(bps: number): string {
-  const KB = 1024;
-  const MB = KB * 1024;
-  const GB = MB * 1024;
-  if (bps >= GB) return `${(bps / GB).toFixed(2)} GB/s`;
-  if (bps >= MB) return `${(bps / MB).toFixed(1)} MB/s`;
-  if (bps >= KB) return `${(bps / KB).toFixed(0)} KB/s`;
-  return `${Math.round(bps)} B/s`;
-}
-
-const durationFormatterCache = new Map<string, Intl.DurationFormat>();
-
-function getDurationFormatter(locale: string): Intl.DurationFormat {
-  let f = durationFormatterCache.get(locale);
-  if (!f) {
-    f = new Intl.DurationFormat(locale, { style: 'narrow' });
-    durationFormatterCache.set(locale, f);
-  }
-  return f;
-}
-
-function formatDuration(totalSec: number, locale: string): string {
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-
-  const duration: Intl.DurationInput = {};
-  if (h > 0) duration.hours = h;
-  if (h > 0 || m > 0) duration.minutes = m;
-  if (h === 0) duration.seconds = s;
-
-  return getDurationFormatter(locale).format(duration);
-}
+// Bytes/sec, formatDuration, and shortenPath have moved to
+// `@/lib/formatDownload` so the shared <DownloadProgressBar> can reuse
+// them — this file imports `shortenPath` above for the status-line
+// label. `formatPartialSize` stays local since it's only used by the
+// model card's resume affordance below.
 
 function formatPartialSize(bytes: number): string {
   const MB = 1024 * 1024;
@@ -562,14 +517,6 @@ function formatPartialSize(bytes: number): string {
   if (bytes >= MB) return `${(bytes / MB).toFixed(0)} MB`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${bytes} B`;
-}
-
-function shortenPath(path: string): string {
-  if (path.length <= 48) return path;
-  const slash = path.lastIndexOf('/');
-  if (slash === -1) return path.slice(0, 24) + '…' + path.slice(-24);
-  const tail = path.slice(slash + 1);
-  return '…/' + tail;
 }
 
 function PreviousVersionsDisclosure({

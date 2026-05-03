@@ -6,9 +6,12 @@ import {
   setAnimations,
   setChromeStyle,
   setColumnDisplayModeDefault,
+  setDatasetsDirectory,
   setDefaultLlmModel,
+  setKeepRawDownloads,
   setModelsDirectory,
   type ChromeStyle,
+  type KeepRawDownloadsMode,
   type ThemePreference,
 } from '@/state/settings';
 import { setTheme } from '@/state/theme';
@@ -26,6 +29,7 @@ const THEMES: readonly ThemePreference[] = ['system', 'light', 'dark'];
 const CHROMES: readonly ChromeStyle[] = ['auto', 'windows', 'macos', 'linux'];
 const LOCALES: readonly string[] = ['system', 'en'];
 const ANIMATIONS: readonly ('on' | 'off')[] = ['on', 'off'];
+const KEEP_RAW_DOWNLOADS: readonly KeepRawDownloadsMode[] = ['ask', 'always', 'never'];
 
 // Settings page. Sections: Appearance, Language, Models, About. Each
 // section is a labeled row + control. Models directory is the one
@@ -99,6 +103,26 @@ export function SettingsView() {
             persistedValue={settings.modelsDirectory}
             effectivePath={health?.modelsDirectory ?? null}
           />
+        </Section>
+
+        <Section title={t('datasets.title')}>
+          <DatasetsDirectoryField
+            persistedValue={settings.datasetsDirectory}
+            effectivePath={health?.datasetsCacheDirectory ?? null}
+          />
+          <Field label={t('datasets.keepRawDownloads')}>
+            <ChipGroup
+              options={KEEP_RAW_DOWNLOADS}
+              value={settings.keepRawDownloads}
+              onChange={(v) => void setKeepRawDownloads(v)}
+              labelFor={(v) =>
+                t(`datasets.keepRawDownloads${capitalize(v)}` as 'datasets.keepRawDownloadsAsk')
+              }
+            />
+          </Field>
+          <p className="text-muted-foreground text-xs">
+            {t('datasets.keepRawDownloadsHint')}
+          </p>
         </Section>
 
         <Section title={t('chat.title')}>
@@ -245,6 +269,59 @@ function ModelsDirectoryField({
       </div>
       <span className="text-muted-foreground text-xs">
         {saved ? t('models.directorySaved') : t('models.directoryHint')}
+      </span>
+    </div>
+  );
+}
+
+function DatasetsDirectoryField({
+  persistedValue,
+  effectivePath,
+}: {
+  persistedValue: string;
+  effectivePath: string | null;
+}) {
+  const { t } = useTranslation('settings');
+  const [draft, setDraft] = useState(persistedValue);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setDraft(persistedValue);
+    setSaved(false);
+  }, [persistedValue]);
+
+  const dirty = draft !== persistedValue;
+
+  async function onSave() {
+    await setDatasetsDirectory(draft.trim());
+    setSaved(true);
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-sm font-medium">{t('datasets.directory')}</span>
+      {effectivePath && (
+        <span className="text-muted-foreground font-mono text-xs break-all">
+          {t('datasets.directoryEffective', { path: effectivePath })}
+        </span>
+      )}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setSaved(false);
+          }}
+          placeholder={t('datasets.directoryPlaceholder')}
+          className="bg-background focus-visible:ring-ring flex-1 rounded-xs border px-2 py-1 font-mono text-xs focus-visible:ring-2 focus-visible:outline-none"
+        />
+        <Button type="button" size="sm" onClick={onSave} disabled={!dirty}>
+          {t('datasets.directorySave')}
+        </Button>
+      </div>
+      <span className="text-muted-foreground text-xs">
+        {saved ? t('datasets.directorySaved') : t('datasets.directoryHint')}
       </span>
     </div>
   );

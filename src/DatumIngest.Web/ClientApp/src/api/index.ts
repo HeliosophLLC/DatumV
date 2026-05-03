@@ -1,4 +1,5 @@
 import {
+  DatasetCatalogClient,
   FilesClient,
   FunctionCatalogClient,
   HealthClient,
@@ -32,6 +33,7 @@ export function createApi(baseUrl = '') {
     health: new HealthClient(baseUrl, http),
     settings: new SettingsClient(baseUrl, http),
     modelCatalog: new ModelCatalogClient(baseUrl, http),
+    datasetCatalog: new DatasetCatalogClient(baseUrl, http),
     modelRuntime: new ModelRuntimeClient(baseUrl, http),
     language: new LanguageClient(baseUrl, http),
     files: new FilesClient(baseUrl, http),

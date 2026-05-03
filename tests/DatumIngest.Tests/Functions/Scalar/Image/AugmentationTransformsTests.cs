@@ -6,7 +6,7 @@ using SkiaSharp;
 namespace DatumIngest.Tests.Functions.Scalar.Image;
 
 /// <summary>
-/// Phase-4 augmentation transforms: noise, resize_and_crop,
+/// Augmentation transforms: noise, resize_and_crop,
 /// affine_transform, elastic_deform, perspective_warp.
 /// </summary>
 public sealed class AugmentationTransformsTests : ServiceTestBase

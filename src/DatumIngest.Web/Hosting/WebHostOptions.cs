@@ -29,6 +29,15 @@ public sealed class WebHostOptions
     // the $DATUM_MODELS env var or %LOCALAPPDATA%/DatumIngest/models.
     public string? ModelsDirectory { get; init; }
 
+    // Override for the raw datasets cache directory — where downloaded
+    // archives and their extracted trees land before ingest. When null,
+    // the dataset library uses $DATUM_DATASETS or
+    // %LOCALAPPDATA%/DatumIngest/datasets-cache. Distinct from
+    // CatalogRootPath because ingested .datum files live under the
+    // catalog root (datasets/ subfolder) while raw archives are
+    // expendable per the user's keepRawDownloads setting.
+    public string? DatasetsCacheDirectory { get; init; }
+
     // System prompt prepended to every conversation. When null, the chat
     // agent uses its built-in default. Read once at agent construction.
     public string? SystemPrompt { get; init; }

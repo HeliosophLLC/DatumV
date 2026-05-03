@@ -5,6 +5,7 @@ import type {
   SettingsPatchDto,
   ThemePreference,
   ChromeStyle,
+  KeepRawDownloadsMode,
 } from '../api/generated/openapi-client';
 
 // Mirrors SettingsDto. Server defaults fill in any unset fields on GET, so
@@ -21,6 +22,18 @@ interface SettingsState {
   // cascade" ($DATUM_MODELS env → %LOCALAPPDATA%/DatumIngest/models). Read
   // once at startup; runtime changes require a restart to take effect.
   modelsDirectory: string;
+  // User-configured raw datasets cache directory. Empty string = "use
+  // the resolution cascade" ($DATUM_DATASETS env →
+  // %LOCALAPPDATA%/DatumIngest/datasets-cache). Read once at startup;
+  // runtime changes require a restart to take effect.
+  datasetsDirectory: string;
+  // What to do with the raw archives in the dataset cache after a
+  // successful ingest. `ask` keeps the cache and (in a later release)
+  // surfaces a prompt; `always` keeps it forever; `never` deletes it
+  // immediately after each install. Re-read by the dataset download
+  // service on every install — flipping the chip applies without a
+  // restart.
+  keepRawDownloads: KeepRawDownloadsMode;
   // When false, the shell suppresses transition animations (chat dock
   // slide, future page transitions). Honours a user who prefers reduced
   // motion or just dislikes the movement.
@@ -50,6 +63,8 @@ export const settingsState = proxy<SettingsState>({
   chromeStyle: 'auto',
   locale: 'system',
   modelsDirectory: '',
+  datasetsDirectory: '',
+  keepRawDownloads: 'ask',
   animations: true,
   dockLeftItems: ['catalog', 'procedures', 'projects'],
   dockRightItems: [],
@@ -68,6 +83,8 @@ function applyDto(dto: SettingsDto): void {
   settingsState.chromeStyle = dto.chromeStyle ?? settingsState.chromeStyle;
   settingsState.locale = dto.locale ?? settingsState.locale;
   settingsState.modelsDirectory = dto.modelsDirectory ?? settingsState.modelsDirectory;
+  settingsState.datasetsDirectory = dto.datasetsDirectory ?? settingsState.datasetsDirectory;
+  settingsState.keepRawDownloads = dto.keepRawDownloads ?? settingsState.keepRawDownloads;
   settingsState.animations = dto.animations ?? settingsState.animations;
   settingsState.dockLeftItems = dto.dockLeftItems ?? [];
   settingsState.dockRightItems = dto.dockRightItems ?? [];
@@ -109,6 +126,16 @@ export function setModelsDirectory(modelsDirectory: string): Promise<void> {
   return updateSettings({ modelsDirectory });
 }
 
+export function setDatasetsDirectory(datasetsDirectory: string): Promise<void> {
+  return updateSettings({ datasetsDirectory });
+}
+
+export function setKeepRawDownloads(
+  keepRawDownloads: KeepRawDownloadsMode,
+): Promise<void> {
+  return updateSettings({ keepRawDownloads });
+}
+
 // `null` reverts the chat surface to the auto-pick (largest installed
 // LLM that fits VRAM). The server flips the persisted slot back to null
 // via the explicit clear flag — sending `defaultLlmModel: null` alone
@@ -141,4 +168,4 @@ export function setColumnDisplayModeDefault(
   return updateSettings({ columnDisplayModeDefaults: next });
 }
 
-export type { SettingsDto, ThemePreference, ChromeStyle };
+export type { SettingsDto, ThemePreference, ChromeStyle, KeepRawDownloadsMode };

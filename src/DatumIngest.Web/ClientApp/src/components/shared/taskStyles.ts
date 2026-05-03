@@ -11,6 +11,7 @@ import {
   Eraser,
   Film,
   Frame,
+  Image as ImageIcon,
   ImagePlay,
   ImagePlus,
   Languages,
@@ -42,7 +43,12 @@ import {
   ZoomIn,
   type LucideIcon,
 } from 'lucide-react';
-import type { CatalogTaskInfoSnapshot } from '@/state/models';
+// Structural shape — matches both Snapshot<CatalogTaskInfo> (Valtio
+// snapshot from state/models.ts) and any other source that carries the
+// (name, family) pair. Keeping the dependency structural so the
+// shared chip components don't pull a specific state module into every
+// consumer.
+export type TaskFamilyInfo = { name?: string; family?: string };
 
 // Left-border accent color per task family. Tailwind JIT only emits
 // classes that appear verbatim in source, so each branch must spell out
@@ -84,6 +90,95 @@ export function familyHoverBackgroundClass(family: string): string {
     case 'Tabular': return 'hover:bg-violet-500/10';
     default: return '';
   }
+}
+
+// ─────────────────────────── modality accents ───────────────────────────
+//
+// Datasets browser only — modalities don't map onto task families
+// directly (an image dataset feeds ComputerVision *and* Multimodal
+// tasks). Each modality gets its own hue so the sidebar reads as a
+// distinct facet rail. Same JIT-literal rule applies: every full
+// Tailwind class must appear verbatim.
+
+export function modalityAccentClass(modality: string): string {
+  switch (modality) {
+    case 'Image': return 'border-l-emerald-500';
+    case 'Text': return 'border-l-red-500';
+    case 'Audio': return 'border-l-amber-500';
+    case 'Video': return 'border-l-rose-500';
+    case 'Tabular': return 'border-l-violet-500';
+    case '3D': return 'border-l-cyan-500';
+    case 'Geospatial': return 'border-l-sky-500';
+    case 'Document': return 'border-l-stone-500';
+    case 'TimeSeries': return 'border-l-yellow-500';
+    default: return 'border-l-transparent';
+  }
+}
+
+export function modalitySelectedBackgroundClass(modality: string): string {
+  switch (modality) {
+    case 'Image': return 'bg-emerald-500/20';
+    case 'Text': return 'bg-red-500/20';
+    case 'Audio': return 'bg-amber-500/20';
+    case 'Video': return 'bg-rose-500/20';
+    case 'Tabular': return 'bg-violet-500/20';
+    case '3D': return 'bg-cyan-500/20';
+    case 'Geospatial': return 'bg-sky-500/20';
+    case 'Document': return 'bg-stone-500/20';
+    case 'TimeSeries': return 'bg-yellow-500/20';
+    default: return 'bg-transparent';
+  }
+}
+
+// Text color for the modality glyph that replaces the left-border
+// accent. Same JIT-literal rule applies.
+export function modalityIconColorClass(modality: string): string {
+  switch (modality) {
+    case 'Image': return 'text-emerald-500';
+    case 'Text': return 'text-red-500';
+    case 'Audio': return 'text-amber-500';
+    case 'Video': return 'text-rose-500';
+    case 'Tabular': return 'text-violet-500';
+    case '3D': return 'text-cyan-500';
+    case 'Geospatial': return 'text-sky-500';
+    case 'Document': return 'text-stone-500';
+    case 'TimeSeries': return 'text-yellow-500';
+    default: return '';
+  }
+}
+
+export function modalityHoverBackgroundClass(modality: string): string {
+  switch (modality) {
+    case 'Image': return 'hover:bg-emerald-500/10';
+    case 'Text': return 'hover:bg-red-500/10';
+    case 'Audio': return 'hover:bg-amber-500/10';
+    case 'Video': return 'hover:bg-rose-500/10';
+    case 'Tabular': return 'hover:bg-violet-500/10';
+    case '3D': return 'hover:bg-cyan-500/10';
+    case 'Geospatial': return 'hover:bg-sky-500/10';
+    case 'Document': return 'hover:bg-stone-500/10';
+    case 'TimeSeries': return 'hover:bg-yellow-500/10';
+    default: return '';
+  }
+}
+
+// Lucide icon per modality. Mirrors the task-icon pattern but keyed
+// on the canonical modality vocabulary. Unknown modalities fall back
+// to a generic Tag so a newly-added entry still renders something.
+const MODALITY_ICONS: Readonly<Record<string, LucideIcon>> = {
+  Image: ImageIcon,
+  Text: AlignLeft,
+  Audio: AudioLines,
+  Video: Film,
+  Tabular: Table,
+  '3D': Boxes,
+  Geospatial: MapPin,
+  Document: ScanText,
+  TimeSeries: LineChart,
+};
+
+export function modalityIcon(name: string): LucideIcon {
+  return MODALITY_ICONS[name] ?? Tag;
 }
 
 // Lucide icon per task contract. Used by the model-row chips when the
@@ -175,7 +270,7 @@ export function taskIcon(name: string): LucideIcon {
 // matched case-insensitively to mirror the rest of the catalog
 // (manifest entries occasionally case-mix).
 export function buildTaskFamilyMap(
-  tasks: readonly CatalogTaskInfoSnapshot[] | null,
+  tasks: readonly TaskFamilyInfo[] | null,
 ): ReadonlyMap<string, string> {
   const map = new Map<string, string>();
   if (tasks === null) return map;

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DatumIngest.DatasetLibrary;
 using DatumIngest.Web.Dtos.Settings;
 using DatumIngest.Web.Hosting;
 
@@ -36,6 +37,8 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
         ChromeStyle: ChromeStyle.Auto,
         Locale: "system",
         ModelsDirectory: "",
+        DatasetsDirectory: "",
+        KeepRawDownloads: KeepRawDownloadsMode.Ask,
         Animations: true,
         DockLeftItems: DefaultDockLeftItems,
         DockRightItems: DefaultDockRightItems,
@@ -74,7 +77,8 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
     {
         if (dto.DockLeftItems is not null
             && dto.DockRightItems is not null
-            && dto.ColumnDisplayModeDefaults is not null)
+            && dto.ColumnDisplayModeDefaults is not null
+            && dto.DatasetsDirectory is not null)
         {
             return dto;
         }
@@ -83,6 +87,11 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
             DockLeftItems = dto.DockLeftItems ?? DefaultDockLeftItems,
             DockRightItems = dto.DockRightItems ?? DefaultDockRightItems,
             ColumnDisplayModeDefaults = dto.ColumnDisplayModeDefaults ?? DefaultColumnDisplayModeDefaults,
+            // Settings files written before the Datasets feature shipped
+            // lack this field — heal to the empty-string "use the
+            // resolution cascade" sentinel so downstream code never sees
+            // a null Directory.
+            DatasetsDirectory = dto.DatasetsDirectory ?? "",
         };
     }
 
@@ -94,6 +103,8 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
             ChromeStyle: patch.ChromeStyle ?? current.ChromeStyle,
             Locale: patch.Locale ?? current.Locale,
             ModelsDirectory: patch.ModelsDirectory ?? current.ModelsDirectory,
+            DatasetsDirectory: patch.DatasetsDirectory ?? current.DatasetsDirectory,
+            KeepRawDownloads: patch.KeepRawDownloads ?? current.KeepRawDownloads,
             Animations: patch.Animations ?? current.Animations,
             DockLeftItems: patch.DockLeftItems ?? current.DockLeftItems,
             DockRightItems: patch.DockRightItems ?? current.DockRightItems,

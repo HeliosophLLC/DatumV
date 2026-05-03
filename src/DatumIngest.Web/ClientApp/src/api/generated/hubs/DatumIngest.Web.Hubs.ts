@@ -79,6 +79,80 @@ export type CatalogChangedEvent = {
     childName?: string;
 }
 
+/** Transpiled from DatumIngest.Web.Hubs.DatasetDownloadStartedDto */
+export type DatasetDownloadStartedDto = {
+    /** Transpiled from string */
+    datasetId: string;
+    /** Transpiled from int */
+    fileCount: number;
+    /** Transpiled from long */
+    totalBytes: number;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.DatasetDownloadProgressDto */
+export type DatasetDownloadProgressDto = {
+    /** Transpiled from string */
+    datasetId: string;
+    /** Transpiled from string */
+    currentFile: string;
+    /** Transpiled from int */
+    fileIndex: number;
+    /** Transpiled from int */
+    fileCount: number;
+    /** Transpiled from long */
+    bytesReadInFile: number;
+    /** Transpiled from long */
+    bytesTotalInFile: number;
+    /** Transpiled from long */
+    bytesReadTotal: number;
+    /** Transpiled from long */
+    bytesTotalAcrossDataset: number;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.DatasetDownloadCompleteDto */
+export type DatasetDownloadCompleteDto = {
+    /** Transpiled from string */
+    datasetId: string;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.DatasetIngestingDto */
+export type DatasetIngestingDto = {
+    /** Transpiled from string */
+    datasetId: string;
+    /** Transpiled from string */
+    currentTable: string;
+    /** Transpiled from int */
+    jobIndex: number;
+    /** Transpiled from int */
+    jobCount: number;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.DatasetTableIngestedDto */
+export type DatasetTableIngestedDto = {
+    /** Transpiled from string */
+    datasetId: string;
+    /** Transpiled from string */
+    table: string;
+    /** Transpiled from long */
+    rowsWritten: number;
+    /** Transpiled from long */
+    bytesWritten: number;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.DatasetInstalledDto */
+export type DatasetInstalledDto = {
+    /** Transpiled from string */
+    datasetId: string;
+}
+
+/** Transpiled from DatumIngest.Web.Hubs.DatasetDownloadFailedDto */
+export type DatasetDownloadFailedDto = {
+    /** Transpiled from string */
+    datasetId: string;
+    /** Transpiled from string */
+    error: string;
+}
+
 /** Transpiled from DatumIngest.Web.Hubs.ModelDownloadStartedDto */
 export type ModelDownloadStartedDto = {
     /** Transpiled from string */

@@ -1,6 +1,12 @@
 import { proxy } from 'valtio';
 import { api } from '@/api';
 import {
+  computeEtaSeconds as computeEtaSecondsShared,
+  computeRateBytesPerSec as computeRateBytesPerSecShared,
+  pushSample as pushSampleShared,
+  type ProgressSample,
+} from '@/state/progressSamples';
+import {
   acquireStreamHub,
   onModelDownloadComplete,
   onModelDownloadFailed,
@@ -46,11 +52,10 @@ void acquireStreamHub().catch(() => {
 // OnModelDownloadFailed. Views render a progress bar for any model
 // that has an entry here, regardless of `state`.
 
-export interface ProgressSample {
-  // performance.now() timestamp in ms.
-  t: number;
-  bytes: number;
-}
+// Re-export so existing consumers (ModelDetail) keep importing from
+// here. Authoritative definition lives in `state/progressSamples`,
+// shared with the dataset state module.
+export type { ProgressSample };
 
 export interface ActiveDownload {
   modelId: string;
@@ -70,18 +75,7 @@ export interface ActiveDownload {
   samples: readonly ProgressSample[];
 }
 
-const SAMPLE_CAP = 12;
-// Drop samples older than this so a long pause (e.g. file open / hash
-// verify between files) doesn't pollute the rate window with stale data.
-const SAMPLE_MAX_AGE_MS = 8_000;
-
-function pushSample(prev: readonly ProgressSample[] | undefined, bytes: number): ProgressSample[] {
-  const now = performance.now();
-  const fresh = (prev ?? []).filter((s) => now - s.t < SAMPLE_MAX_AGE_MS);
-  fresh.push({ t: now, bytes });
-  if (fresh.length > SAMPLE_CAP) fresh.splice(0, fresh.length - SAMPLE_CAP);
-  return fresh;
-}
+const pushSample = pushSampleShared;
 
 // Sub-step status shown inline on the model card during the post-download
 // install phase, for kind:"python" catalog entries. `kind` discriminates
@@ -672,26 +666,18 @@ onPythonEnvironmentFailed((event) => {
 
 // ───────────────────────── Derived stats helpers ─────────────────────────
 
-// Instantaneous transfer rate in bytes/sec, derived from the sliding
-// progress sample window. Returns null when there isn't enough data (one
-// sample or all samples within the same ~tick) so callers can render a
-// placeholder instead of "0 B/s" or "Infinity".
-export function computeRateBytesPerSec(samples: readonly ProgressSample[]): number | null {
-  if (samples.length < 2) return null;
-  const first = samples[0];
-  const last = samples[samples.length - 1];
-  const dtSec = (last.t - first.t) / 1000;
-  if (dtSec <= 0) return null;
-  const dBytes = last.bytes - first.bytes;
-  if (dBytes <= 0) return null;
-  return dBytes / dtSec;
-}
+// Re-export the generic samples-window rate so existing imports
+// (`@/state/downloads`) keep working. Authoritative copy lives in
+// `state/progressSamples` alongside `pushSample` + `ProgressSample`.
+export const computeRateBytesPerSec = computeRateBytesPerSecShared;
 
-// Seconds remaining at the current rate, or null when unknown
-// (no total, no rate, or already complete).
-export function computeEtaSeconds(d: ActiveDownload, nowRate: number | null): number | null {
-  if (nowRate == null || nowRate <= 0) return null;
-  const remaining = d.bytesTotalAcrossModel - d.bytesReadTotal;
-  if (remaining <= 0) return null;
-  return remaining / nowRate;
+// Backwards-compatible shim: the original signature took the full
+// ActiveDownload because the totals lived on that record under model-
+// specific field names. The shared helper takes (bytesRead, bytesTotal)
+// so the dataset state can reuse it without coupling to model shapes.
+export function computeEtaSeconds(
+  d: ActiveDownload,
+  nowRate: number | null,
+): number | null {
+  return computeEtaSecondsShared(d.bytesReadTotal, d.bytesTotalAcrossModel, nowRate);
 }

@@ -12,6 +12,13 @@ import {
   installModel,
   type ActiveDownload,
 } from '@/state/downloads';
+import {
+  datasetsState,
+  dismissActiveInstall as dismissActiveDatasetInstall,
+  dismissError as dismissDatasetError,
+  installVariant,
+  type ActiveDatasetInstall,
+} from '@/state/datasets';
 
 // Status-bar chip showing aggregate model-download / install activity.
 // Hidden when nothing is in flight — left-section placement keeps the
@@ -41,6 +48,26 @@ function applyEma(prev: number | null, current: number | null): number | null {
   return RATE_SMOOTHING_ALPHA * current + (1 - RATE_SMOOTHING_ALPHA) * prev;
 }
 
+// Project a dataset variant install onto the ActiveDownload shape the
+// chip's rendering helpers consume. The dataset record carries a few
+// extra fields (phase, currentTable, jobIndex/Count) which the chip
+// doesn't surface — they only matter inside the dataset detail card.
+// `bytesTotalAcrossDataset` is renamed to `bytesTotalAcrossModel` so the
+// existing aggregation + ActiveRow / StalledRow don't have to branch on
+// the source.
+function adaptDatasetActive(d: ActiveDatasetInstall): ActiveDownload {
+  return {
+    modelId: d.datasetId,
+    bytesReadTotal: d.bytesReadTotal,
+    bytesTotalAcrossModel: d.bytesTotalAcrossDataset,
+    fileIndex: d.fileIndex,
+    fileCount: d.fileCount,
+    currentFile: d.currentFile,
+    startedAt: d.startedAt,
+    samples: d.samples,
+  };
+}
+
 function rawPercentOf(bytesRead: number, bytesTotal: number): number | null {
   if (bytesTotal <= 0) return null;
   return Math.min(99, Math.floor((bytesRead / bytesTotal) * 100));
@@ -49,16 +76,32 @@ function rawPercentOf(bytesRead: number, bytesTotal: number): number | null {
 export function DownloadsChip() {
   const { t } = useTranslation('status');
   const snap = useSnapshot(downloadsState);
+  const datasetSnap = useSnapshot(datasetsState);
 
-  const activeIds = Object.keys(snap.active);
+  // Project the dataset active map into the same shape the chip already
+  // aggregates over. Dataset entries split by phase: starting /
+  // downloading rendered as active downloads, ingesting rendered as
+  // post-download installs (parallel to the model side's `installing`
+  // map). The same map drives popover row rendering further down.
+  const datasetDownloading: Record<string, ActiveDownload> = {};
+  const datasetIngestingIds: string[] = [];
+  for (const [id, d] of Object.entries(datasetSnap.active)) {
+    if (d.phase === 'ingesting') datasetIngestingIds.push(id);
+    else datasetDownloading[id] = adaptDatasetActive(d);
+  }
+  const datasetErrorIds = Object.keys(datasetSnap.errors);
+
+  const modelActiveIds = Object.keys(snap.active);
+  const activeIds = [...modelActiveIds, ...Object.keys(datasetDownloading)];
   const installingIds = Object.keys(snap.installing);
   const venvIds = Object.keys(snap.venvSteps);
-  const errorIds = Object.keys(snap.errors);
+  const errorIds = [...Object.keys(snap.errors), ...datasetErrorIds];
 
   const hasAnything =
     activeIds.length > 0 ||
     installingIds.length > 0 ||
     venvIds.length > 0 ||
+    datasetIngestingIds.length > 0 ||
     errorIds.length > 0 ||
     snap.pythonHostStep != null;
 
@@ -82,15 +125,19 @@ export function DownloadsChip() {
 
   const perfNow = performance.now();
   const wallNow = Date.now();
+  // Lookup that resolves an active id from either the model or dataset
+  // map. Both contribute to aggregate progress + stall detection.
+  const lookupActive = (id: string): ActiveDownload =>
+    (snap.active[id] as ActiveDownload | undefined) ?? datasetDownloading[id]!;
   const stalledIds = activeIds.filter((id) =>
-    isStalled(snap.active[id]!, perfNow, wallNow),
+    isStalled(lookupActive(id), perfNow, wallNow),
   );
   const healthyActiveIds = activeIds.filter((id) => !stalledIds.includes(id));
 
   let bytesRead = 0;
   let bytesTotal = 0;
   for (const id of healthyActiveIds) {
-    const a = snap.active[id]!;
+    const a = lookupActive(id);
     bytesRead += a.bytesReadTotal;
     bytesTotal += a.bytesTotalAcrossModel;
   }
@@ -116,7 +163,8 @@ export function DownloadsChip() {
     rawAggPercent != null ? monotonicAggPercentRef.current : null;
 
   const installingCount =
-    new Set([...installingIds, ...venvIds]).size + (snap.pythonHostStep ? 1 : 0);
+    new Set([...installingIds, ...venvIds, ...datasetIngestingIds]).size
+    + (snap.pythonHostStep ? 1 : 0);
 
   let chipClasses: string;
   let chipText: string;
@@ -163,31 +211,64 @@ export function DownloadsChip() {
 function DownloadsPopoverBody({ stalledIds }: { stalledIds: readonly string[] }) {
   const { t } = useTranslation('status');
   const snap = useSnapshot(downloadsState);
+  const datasetSnap = useSnapshot(datasetsState);
+
+  // Mirror of the parent's per-phase dataset projection so the popover
+  // can render dataset rows alongside model rows. Source tag drives
+  // dismiss / retry routing into the right state module.
+  const datasetDownloading: Record<string, ActiveDownload> = {};
+  const datasetIngestingIds: string[] = [];
+  for (const [id, d] of Object.entries(datasetSnap.active)) {
+    if (d.phase === 'ingesting') datasetIngestingIds.push(id);
+    else datasetDownloading[id] = adaptDatasetActive(d);
+  }
 
   const stalledSet = new Set(stalledIds);
-  const errorIds = Object.keys(snap.errors).sort();
-  const activeIds = Object.keys(snap.active).sort();
-  const installingIds = [
-    ...Object.keys(snap.installing),
-    ...Object.keys(snap.venvSteps),
-  ].sort();
-
+  type RowSource = 'model' | 'dataset';
+  type Row = {
+    id: string;
+    source: RowSource;
+    kind: 'failed' | 'stalled' | 'active' | 'installing';
+  };
   const seen = new Set<string>();
-  const rows: { id: string; kind: 'failed' | 'stalled' | 'active' | 'installing' }[] = [];
-  for (const id of errorIds) {
-    if (seen.has(id)) continue;
-    seen.add(id);
-    rows.push({ id, kind: 'failed' });
+  const rows: Row[] = [];
+
+  const errorEntries: { id: string; source: RowSource }[] = [
+    ...Object.keys(snap.errors).map((id) => ({ id, source: 'model' as RowSource })),
+    ...Object.keys(datasetSnap.errors).map((id) => ({ id, source: 'dataset' as RowSource })),
+  ].sort((a, b) => a.id.localeCompare(b.id));
+  for (const { id, source } of errorEntries) {
+    const key = `${source}:${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ id, source, kind: 'failed' });
   }
-  for (const id of activeIds) {
-    if (seen.has(id)) continue;
-    seen.add(id);
-    rows.push({ id, kind: stalledSet.has(id) ? 'stalled' : 'active' });
+
+  const activeEntries: { id: string; source: RowSource }[] = [
+    ...Object.keys(snap.active).map((id) => ({ id, source: 'model' as RowSource })),
+    ...Object.keys(datasetDownloading).map((id) => ({ id, source: 'dataset' as RowSource })),
+  ].sort((a, b) => a.id.localeCompare(b.id));
+  for (const { id, source } of activeEntries) {
+    const key = `${source}:${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({
+      id,
+      source,
+      kind: stalledSet.has(id) ? 'stalled' : 'active',
+    });
   }
-  for (const id of installingIds) {
-    if (seen.has(id)) continue;
-    seen.add(id);
-    rows.push({ id, kind: 'installing' });
+
+  const installingEntries: { id: string; source: RowSource }[] = [
+    ...Object.keys(snap.installing).map((id) => ({ id, source: 'model' as RowSource })),
+    ...Object.keys(snap.venvSteps).map((id) => ({ id, source: 'model' as RowSource })),
+    ...datasetIngestingIds.map((id) => ({ id, source: 'dataset' as RowSource })),
+  ].sort((a, b) => a.id.localeCompare(b.id));
+  for (const { id, source } of installingEntries) {
+    const key = `${source}:${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ id, source, kind: 'installing' });
   }
 
   return (
@@ -195,13 +276,40 @@ function DownloadsPopoverBody({ stalledIds }: { stalledIds: readonly string[] })
       <div className="text-xs font-medium">{t('downloadsChip.popoverTitle')}</div>
       <ul className="flex flex-col gap-1">
         {rows.map((row) => (
-          <li key={row.id} className="border-border/40 border-t pt-1.5">
+          <li key={`${row.source}:${row.id}`} className="border-border/40 border-t pt-1.5">
             {row.kind === 'failed' && (
-              <FailedRow modelId={row.id} error={snap.errors[row.id]!} />
+              <FailedRow
+                modelId={row.id}
+                source={row.source}
+                error={
+                  row.source === 'dataset'
+                    ? datasetSnap.errors[row.id]!
+                    : snap.errors[row.id]!
+                }
+              />
             )}
-            {row.kind === 'active' && <ActiveRow active={snap.active[row.id]!} />}
-            {row.kind === 'stalled' && <StalledRow active={snap.active[row.id]!} />}
-            {row.kind === 'installing' && <InstallingRow modelId={row.id} />}
+            {row.kind === 'active' && (
+              <ActiveRow
+                active={
+                  row.source === 'dataset'
+                    ? datasetDownloading[row.id]!
+                    : snap.active[row.id]!
+                }
+              />
+            )}
+            {row.kind === 'stalled' && (
+              <StalledRow
+                source={row.source}
+                active={
+                  row.source === 'dataset'
+                    ? datasetDownloading[row.id]!
+                    : snap.active[row.id]!
+                }
+              />
+            )}
+            {row.kind === 'installing' && (
+              <InstallingRow modelId={row.id} source={row.source} />
+            )}
           </li>
         ))}
       </ul>
@@ -273,7 +381,13 @@ function ActiveRow({ active }: { active: ActiveDownload }) {
   );
 }
 
-function StalledRow({ active }: { active: ActiveDownload }) {
+function StalledRow({
+  active,
+  source,
+}: {
+  active: ActiveDownload;
+  source: 'model' | 'dataset';
+}) {
   const { t } = useTranslation('status');
   const rawPercent = rawPercentOf(
     active.bytesReadTotal,
@@ -304,7 +418,11 @@ function StalledRow({ active }: { active: ActiveDownload }) {
       <div className="flex justify-end">
         <button
           type="button"
-          onClick={() => dismissActiveDownload(active.modelId)}
+          onClick={() =>
+            source === 'dataset'
+              ? dismissActiveDatasetInstall(active.modelId)
+              : dismissActiveDownload(active.modelId)
+          }
           className="border-border hover:bg-muted/60 cursor-pointer rounded border px-2 py-0.5 text-[10px] uppercase tracking-wide"
         >
           {t('downloadsChip.dismissButton')}
@@ -314,14 +432,33 @@ function StalledRow({ active }: { active: ActiveDownload }) {
   );
 }
 
-function InstallingRow({ modelId }: { modelId: string }) {
+function InstallingRow({
+  modelId,
+  source,
+}: {
+  modelId: string;
+  source: 'model' | 'dataset';
+}) {
   const { t } = useTranslation('status');
   const snap = useSnapshot(downloadsState);
-  // Venv step wins when present; host step (uv / python) is shared across
-  // whichever model triggered the install, so we surface it on every
-  // installing row that doesn't have its own venv step.
-  const step = snap.venvSteps[modelId] ?? snap.pythonHostStep;
-  const detail = step ? [step.stage, step.detail].filter(Boolean).join(' · ') : null;
+  const datasetSnap = useSnapshot(datasetsState);
+  // Dataset ingesting → derive detail from the active map's currentTable
+  // + jobIndex/jobCount; the dataset side has no separate venvSteps.
+  // Model installing → venv step wins when present; host step (uv /
+  // python) is shared across whichever model triggered the install, so
+  // we surface it on every installing row that doesn't have its own
+  // venv step.
+  let detail: string | null = null;
+  if (source === 'dataset') {
+    const d = datasetSnap.active[modelId];
+    if (d && d.jobCount > 0) {
+      const job = `${d.jobIndex + 1}/${d.jobCount}`;
+      detail = d.currentTable ? `ingesting ${d.currentTable} · ${job}` : `ingesting · ${job}`;
+    }
+  } else {
+    const step = snap.venvSteps[modelId] ?? snap.pythonHostStep;
+    detail = step ? [step.stage, step.detail].filter(Boolean).join(' · ') : null;
+  }
 
   return (
     <div className="flex flex-col gap-0.5 text-xs">
@@ -338,8 +475,24 @@ function InstallingRow({ modelId }: { modelId: string }) {
   );
 }
 
-function FailedRow({ modelId, error }: { modelId: string; error: string }) {
+function FailedRow({
+  modelId,
+  source,
+  error,
+}: {
+  modelId: string;
+  source: 'model' | 'dataset';
+  error: string;
+}) {
   const { t } = useTranslation('status');
+  const onDismiss =
+    source === 'dataset'
+      ? () => dismissDatasetError(modelId)
+      : () => dismissDownloadError(modelId);
+  const onRetry =
+    source === 'dataset'
+      ? () => void installVariant(modelId)
+      : () => void installModel(modelId);
   return (
     <div className="flex flex-col gap-1 text-xs">
       <div className="flex items-baseline justify-between font-mono">
@@ -352,14 +505,14 @@ function FailedRow({ modelId, error }: { modelId: string; error: string }) {
       <div className="flex justify-end gap-1.5">
         <button
           type="button"
-          onClick={() => dismissDownloadError(modelId)}
+          onClick={onDismiss}
           className="border-border hover:bg-muted/60 cursor-pointer rounded border px-2 py-0.5 text-[10px] uppercase tracking-wide"
         >
           {t('downloadsChip.dismissButton')}
         </button>
         <button
           type="button"
-          onClick={() => void installModel(modelId)}
+          onClick={onRetry}
           className="cursor-pointer rounded border border-blue-700 bg-blue-600 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
         >
           {t('downloadsChip.retryButton')}

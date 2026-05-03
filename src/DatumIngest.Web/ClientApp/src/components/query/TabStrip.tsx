@@ -7,6 +7,7 @@ import {
   Boxes,
   ChevronLeft,
   ChevronRight,
+  Database,
   FunctionSquare,
   Plus,
   Settings as SettingsIcon,
@@ -315,6 +316,7 @@ function TabChip({
   closeLabel: string;
 }) {
   const { t: tModels } = useTranslation('models');
+  const { t: tDatasets } = useTranslation('datasets');
   const { t: tSettingsNs } = useTranslation('settings');
   const { t: tDocs } = useTranslation('docs');
   // 'before' = drop indicator on the left edge; 'after' = right edge.
@@ -460,11 +462,13 @@ function TabChip({
   const displayTitle =
     kind === 'models'
       ? tModels('title')
-      : kind === 'settings'
-        ? tSettingsNs('title')
-        : kind === 'docs'
-          ? tDocs('title')
-          : title;
+      : kind === 'datasets'
+        ? tDatasets('title')
+        : kind === 'settings'
+          ? tSettingsNs('title')
+          : kind === 'docs'
+            ? tDocs('title')
+            : title;
 
   return (
     <div
@@ -507,13 +511,16 @@ function TabChip({
         <div className="bg-primary pointer-events-none absolute inset-y-0 right-0 w-0.5" />
       )}
       {kind === 'models' ? (
-        // Pinned tabs (Models / Settings / Docs) carry their own
-        // distinctive icon — clicking the chip just selects the tab.
-        // Run-style affordances now live in the leaf's vertical toolbar.
+        // Pinned tabs (Models / Datasets / Settings / Docs) carry their
+        // own distinctive icon — clicking the chip just selects the
+        // tab. Run-style affordances now live in the leaf's vertical
+        // toolbar.
         <>
           <Boxes className="text-primary size-3.5 shrink-0" />
           <ModelsDriftBadge />
         </>
+      ) : kind === 'datasets' ? (
+        <Database className="text-primary size-3.5 shrink-0" />
       ) : kind === 'settings' ? (
         <SettingsIcon className="text-primary size-3.5 shrink-0" />
       ) : kind === 'docs' ? (

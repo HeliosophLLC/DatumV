@@ -38,8 +38,8 @@ import {
   familyAccentClass,
   familyHoverBackgroundClass,
   familySelectedBackgroundClass,
-  taskIcon,
-} from '@/components/models/taskStyles';
+} from '@/components/shared/taskStyles';
+import { TaskChipIcon } from '@/components/shared/TaskChip';
 import { Button } from '@/components/ui/button';
 import {
   ResizableHandle,
@@ -564,24 +564,14 @@ function ModelListItem({
         </span>
         {(model.tasks ?? []).length > 0 && (
           <div className="flex w-full min-w-0 flex-nowrap gap-1 overflow-hidden pl-5">
-            {(model.tasks ?? []).map((task) => {
-              const family = taskFamilies.get(task.toLowerCase()) ?? '';
-              const Icon = taskIcon(task);
-              const label = taskLabel(t, task);
-              return (
-                <span
-                  key={task}
-                  title={label}
-                  aria-label={label}
-                  className={cn(
-                    'flex shrink-0 items-center justify-center rounded-xs border border-l-4 px-1 py-0.5 text-muted-foreground',
-                    familyAccentClass(family),
-                  )}
-                >
-                  <Icon className="size-3" />
-                </span>
-              );
-            })}
+            {(model.tasks ?? []).map((task) => (
+              <TaskChipIcon
+                key={task}
+                task={task}
+                family={taskFamilies.get(task.toLowerCase()) ?? ''}
+                label={taskLabel(t, task)}
+              />
+            ))}
           </div>
         )}
       </button>
@@ -702,24 +692,14 @@ function FamilyListItem({
         </span>
         {(group.lead.tasks ?? []).length > 0 && (
           <div className="flex w-full min-w-0 flex-nowrap gap-1 overflow-hidden pl-5">
-            {(group.lead.tasks ?? []).map((task) => {
-              const family = taskFamilies.get(task.toLowerCase()) ?? '';
-              const Icon = taskIcon(task);
-              const label = taskLabel(t, task);
-              return (
-                <span
-                  key={task}
-                  title={label}
-                  aria-label={label}
-                  className={cn(
-                    'flex shrink-0 items-center justify-center rounded-xs border border-l-4 px-1 py-0.5 text-muted-foreground',
-                    familyAccentClass(family),
-                  )}
-                >
-                  <Icon className="size-3" />
-                </span>
-              );
-            })}
+            {(group.lead.tasks ?? []).map((task) => (
+              <TaskChipIcon
+                key={task}
+                task={task}
+                family={taskFamilies.get(task.toLowerCase()) ?? ''}
+                label={taskLabel(t, task)}
+              />
+            ))}
           </div>
         )}
       </button>

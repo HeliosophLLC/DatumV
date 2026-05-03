@@ -29,12 +29,14 @@ import {
  *  - `models`: the model catalog browser. Always present as a pinned tab
  *    in the main window's first leaf — see `MODELS_TAB_ID` + the boot
  *    path's `ensureModelsTab` injection.
+ *  - `datasets`: the dataset catalog browser. Pinned alongside Models —
+ *    see `DATASETS_TAB_ID`.
  *  - `settings`: the app settings page. Pinned alongside Models in the
  *    main window's first leaf — see `SETTINGS_TAB_ID`.
  *  - `docs`: the bundled markdown documentation browser. Pinned
  *    alongside Models / Settings — see `DOCS_TAB_ID`.
  */
-export type TabKind = 'sql' | 'function' | 'models' | 'settings' | 'docs';
+export type TabKind = 'sql' | 'function' | 'models' | 'datasets' | 'settings' | 'docs';
 
 /**
  * Well-known ids for the permanent pinned tabs. Stable across boots so
@@ -43,11 +45,12 @@ export type TabKind = 'sql' | 'function' | 'models' | 'settings' | 'docs';
  * well as by `pinned`.
  */
 export const MODELS_TAB_ID = 'pinned-models';
+export const DATASETS_TAB_ID = 'pinned-datasets';
 export const SETTINGS_TAB_ID = 'pinned-settings';
 export const DOCS_TAB_ID = 'pinned-docs';
 
 /** Ordered list of all pinned tab kinds, in left-to-right strip order. */
-const PINNED_KINDS: readonly TabKind[] = ['models', 'settings', 'docs'];
+const PINNED_KINDS: readonly TabKind[] = ['settings', 'docs', 'models', 'datasets'];
 
 export interface Tab {
   /** Stable identifier; used as Monaco model key and execution-state key. */
@@ -280,11 +283,13 @@ function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
             ? 'function'
             : t.kind === 'models'
               ? 'models'
-              : t.kind === 'settings'
-                ? 'settings'
-                : t.kind === 'docs'
-                  ? 'docs'
-                  : 'sql';
+              : t.kind === 'datasets'
+                ? 'datasets'
+                : t.kind === 'settings'
+                  ? 'settings'
+                  : t.kind === 'docs'
+                    ? 'docs'
+                    : 'sql';
         tabs.push({
           id: t.id,
           title: t.title,
@@ -418,10 +423,10 @@ function createInitialState(): PanesState {
     return persisted;
   }
 
-  // First-ever boot: pinned Models / Settings / Docs tabs + one Untitled-1
-  // SQL tab. Pinned tabs take indices 0..N so they sit to the LEFT of
-  // user-created tabs on the strip, matching VS Code's "pinned tabs at
-  // the front" convention.
+  // First-ever boot: pinned Models / Datasets / Settings / Docs tabs +
+  // one Untitled-1 SQL tab. Pinned tabs take indices 0..N so they sit
+  // to the LEFT of user-created tabs on the strip, matching VS Code's
+  // "pinned tabs at the front" convention.
   const firstUntitled: Tab = {
     id: newTabId(),
     title: 'Untitled-1',
@@ -433,9 +438,10 @@ function createInitialState(): PanesState {
     kind: 'leaf',
     id: newLeafId(),
     tabs: [
-      createPinnedTab('models'),
       createPinnedTab('settings'),
       createPinnedTab('docs'),
+      createPinnedTab('models'),
+      createPinnedTab('datasets'),
       firstUntitled,
     ],
     activeTabId: firstUntitled.id,
@@ -447,6 +453,8 @@ function pinnedIdForKind(kind: TabKind): string {
   switch (kind) {
     case 'models':
       return MODELS_TAB_ID;
+    case 'datasets':
+      return DATASETS_TAB_ID;
     case 'settings':
       return SETTINGS_TAB_ID;
     case 'docs':
@@ -463,6 +471,8 @@ function pinnedTitleForKind(kind: TabKind): string {
   switch (kind) {
     case 'models':
       return 'Models';
+    case 'datasets':
+      return 'Datasets';
     case 'settings':
       return 'Settings';
     case 'docs':
@@ -492,19 +502,24 @@ function createPinnedTab(kind: TabKind): Tab {
  * localStorage predates one of these tabs.
  */
 function ensurePinnedTabs(state: PanesState): void {
-  const present = new Set<TabKind>();
-  forEachTab(state.root, (t) => {
-    if (PINNED_KINDS.includes(t.kind)) present.add(t.kind);
-  });
   const first = firstLeaf(state.root);
-  // Insert any missing pinned kinds in canonical order at the very front,
-  // walking the canonical list in reverse so each unshift lands in the
-  // right slot relative to the others.
-  for (let i = PINNED_KINDS.length - 1; i >= 0; i--) {
-    const kind = PINNED_KINDS[i];
-    if (present.has(kind)) continue;
-    first.tabs.unshift(createPinnedTab(kind));
+  // Pull every existing pinned tab out of the strip so we can re-insert
+  // them at the front in canonical order — handles both "missing kind
+  // not yet added" and "persisted state had pinned tabs in a stale
+  // order" (e.g. predated a new pinned kind being inserted mid-list).
+  const existing = new Map<TabKind, Tab>();
+  first.tabs = first.tabs.filter((t) => {
+    if (PINNED_KINDS.includes(t.kind)) {
+      existing.set(t.kind, t);
+      return false;
+    }
+    return true;
+  });
+  const canonical: Tab[] = [];
+  for (const kind of PINNED_KINDS) {
+    canonical.push(existing.get(kind) ?? createPinnedTab(kind));
   }
+  first.tabs = [...canonical, ...first.tabs];
 }
 
 export const panesState = proxy<PanesState>(createInitialState());

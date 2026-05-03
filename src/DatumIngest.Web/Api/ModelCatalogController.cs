@@ -69,6 +69,47 @@ public sealed class ModelCatalogController(
         return Content(text, "text/markdown");
     }
 
+    // GET /api/model-catalog/family-cards/{family}/assets/{**path} —
+    // serves screenshots / diagrams / etc. referenced from the family
+    // card markdown. The path is resolved against the manifest's
+    // `cards/<family>/` subtree with a traversal guard; anything that
+    // escapes 404s. Content type is inferred from the file extension —
+    // PhysicalFile lets ASP.NET handle range/etag automatically.
+    [HttpGet("family-cards/{family}/assets/{**path}")]
+    public ActionResult GetFamilyCardAsset(string family, string path)
+    {
+        string? abs = store.ResolveFamilyCardAssetPath(family, path);
+        if (abs is null) return NotFound();
+        return PhysicalFile(abs, ContentTypeForFile(abs));
+    }
+
+    // GET /api/model-catalog/models/{id}/hero — serves the entry's hero
+    // image. 404 when the entry didn't declare HeroImageFile or the
+    // file isn't present on disk.
+    [HttpGet("models/{id}/hero")]
+    public ActionResult GetHeroImage(string id)
+    {
+        string? abs = store.ResolveHeroImagePath(id);
+        if (abs is null) return NotFound();
+        return PhysicalFile(abs, ContentTypeForFile(abs));
+    }
+
+    private static string ContentTypeForFile(string path)
+    {
+        string ext = Path.GetExtension(path).ToLowerInvariant();
+        return ext switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            ".svg" => "image/svg+xml",
+            ".mp4" => "video/mp4",
+            ".webm" => "video/webm",
+            _ => "application/octet-stream",
+        };
+    }
+
     // POST /api/model-catalog/licenses/{id}/accept — records explicit
     // acceptance. Idempotent.
     [HttpPost("licenses/{id}/accept")]

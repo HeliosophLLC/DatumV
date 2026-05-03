@@ -1,6 +1,7 @@
 ﻿using System.Text.Json.Serialization;
 using DatumIngest.Catalog;
 using DatumIngest.Inference;
+using DatumIngest.DatasetLibrary;
 using DatumIngest.ModelLibrary;
 using DatumIngest.Models;
 using DatumIngest.Models.Calibration;
@@ -8,12 +9,14 @@ using DatumIngest.Models.Python;
 using DatumIngest.Pooling;
 using DatumIngest.Web.Catalog;
 using DatumIngest.Web.Compute;
+using DatumIngest.Web.Conversation;
 using DatumIngest.Web.Execution;
 using DatumIngest.Web.Hubs;
 using DatumIngest.Web.Llm;
 using DatumIngest.Web.Lsp;
 using DatumIngest.Web.ModelLibrary;
 using DatumIngest.Web.Settings;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace DatumIngest.Web.Hosting;
 
@@ -194,6 +197,7 @@ public static class WebHostExtensions
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "DatumIngest", "models"));
         services.AddModelLibrary(modelLibraryOptions);
+
         services.AddSingleton<IDownloadProgressReporter, SignalRDownloadProgressReporter>();
         // Python-env install events fan out to clients via the same hub
         // pattern. PythonEnvironmentManager picks this up through its
@@ -208,6 +212,37 @@ public static class WebHostExtensions
         if (options.ManageLocalCatalog)
         {
             services.AddSingleton<IModelInstaller, CatalogBackedModelInstaller>();
+
+            // Dataset library: manifest reader, path resolver, and the
+            // download + install pipeline. Lives inside the local-catalog
+            // block because DatasetDownloadService.RunIngestJobAsync needs
+            // the engine's Pool + IEnumerable<IFileFormat> registered by
+            // AddDatumIngest above — and SaaS hosts don't have a local
+            // catalog to land .datum files into anyway. Replaces the
+            // default NullDatasetDownloadProgressReporter (registered
+            // inside AddDatasetLibrary) with a SignalR-backed adapter,
+            // and the default DefaultKeepRawDownloadsPolicy with a
+            // settings.json-backed one so user preferences flow through.
+            string datasetCatalogRoot = options.CatalogRootPath ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "DatumIngest");
+            // Settings-side override (set via the Settings UI, persisted to
+            // settings.json) beats the host-config value. If neither is
+            // set, the cascade falls through to $DATUM_DATASETS and the
+            // per-user default.
+            string? effectiveDatasetsDir =
+                StartupSettingsLoader.LoadDatasetsDirectory(datasetCatalogRoot)
+                ?? options.DatasetsCacheDirectory
+                ?? Environment.GetEnvironmentVariable("DATUM_DATASETS")
+                ?? Path.Combine(datasetCatalogRoot, "datasets-cache");
+            DatasetLibraryOptions datasetLibraryOptions = new(
+                CatalogRootPath: datasetCatalogRoot,
+                DatasetsCacheDirectory: effectiveDatasetsDir);
+            services.AddDatasetLibrary(datasetLibraryOptions);
+            services.AddSingleton<IDatasetDownloadProgressReporter,
+                Web.DatasetLibrary.SignalRDatasetDownloadProgressReporter>();
+            services.AddSingleton<IKeepRawDownloadsPolicy,
+                Web.DatasetLibrary.SettingsBackedKeepRawDownloadsPolicy>();
         }
 
         services.AddControllers()
@@ -220,6 +255,17 @@ public static class WebHostExtensions
                     new JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase));
             });
         services.AddSignalR();
+        // StreamHub takes IConversationAgent in its constructor; SignalR
+        // resolves the hub via DI on every incoming connection, including
+        // connections that only carry server→client download-progress
+        // pushes. Chat is intentionally disabled (see the commented LLM
+        // wiring block above), but the hub still needs to be constructable
+        // or every WebSocket connect to /hubs/stream fails with
+        // InvalidOperationException and the server closes the connection —
+        // dropping the download-progress channel along with it. Register a
+        // null stand-in via TryAdd so a real registration (when chat is
+        // re-enabled) wins.
+        services.TryAddSingleton<IConversationAgent, NullConversationAgent>();
         services.AddOpenApiDocument(s =>
         {
             s.DocumentName = "v1";
