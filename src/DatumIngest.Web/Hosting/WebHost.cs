@@ -21,6 +21,7 @@ public static class WebHost
         });
         builder.WebHost.UseUrls(bootstrap.Url);
         builder.Services.AddDatumIngestWeb(bootstrap.Options);
+        builder.Services.AddFileFormats();
 
         var app = builder.Build();
         app.UseDatumIngestWeb();

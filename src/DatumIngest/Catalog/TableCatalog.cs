@@ -301,6 +301,38 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     internal Dictionary<string, ITableCatalog> Backends { get; }
 
     /// <summary>
+    /// Optional dataset pre-flight source. Hosts that ship a dataset
+    /// surface attach a <see cref="Execution.IPreFlightDatasetSource"/>
+    /// here so <c>FROM &lt;schema&gt;.&lt;table&gt;</c> references against the
+    /// dataset manifest trigger an install-required block at parse time
+    /// instead of a planner "table not found" later.
+    /// </summary>
+    public Execution.IPreFlightDatasetSource? DatasetPreFlightSource { get; set; }
+
+    /// <summary>
+    /// Registers <paramref name="backend"/> under <paramref name="schema"/> so
+    /// SQL references to <c>&lt;schema&gt;.&lt;table&gt;</c> route to it. Used by
+    /// host-side init services (dataset catalog binder, future bind-on-boot
+    /// extensions) to mount schemas after the core catalog has constructed.
+    /// One backend instance may be mounted under multiple schemas — the
+    /// router compares schema names, not backend identity.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// A backend is already mounted under <paramref name="schema"/>.
+    /// </exception>
+    public void MountSchemaBackend(string schema, ITableCatalog backend)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(schema);
+        ArgumentNullException.ThrowIfNull(backend);
+        if (Backends.ContainsKey(schema))
+        {
+            throw new ArgumentException(
+                $"A catalog backend is already mounted under schema '{schema}'.");
+        }
+        Backends[schema] = backend;
+    }
+
+    /// <summary>
     /// The current session <c>search_path</c>. Reads atomically; the
     /// returned list is immutable, so callers can capture a stable
     /// snapshot for the rest of their query. Mutated only by
@@ -880,8 +912,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         if (statement is InsertStatement or UpdateStatement or DeleteStatement)
         {
             PreFlightRequirements preflight = PreFlightWalker.WalkStatement(
-                statement, Models, CatalogVocabulary, Functions);
-            if (preflight.Models.Count > 0 || preflight.Suggestions.Count > 0)
+                statement, Models, CatalogVocabulary, Functions, DatasetPreFlightSource);
+            if (preflight.Models.Count > 0
+                || preflight.Datasets.Count > 0
+                || preflight.Suggestions.Count > 0)
             {
                 throw new PreFlightRequiredException(preflight);
             }
@@ -1024,8 +1058,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // until the user names the model directly). Empty result == no
         // blocker.
         PreFlightRequirements preflight = PreFlightWalker.Walk(
-            permuted, Models, CatalogVocabulary, Functions);
-        if (preflight.Models.Count > 0 || preflight.Suggestions.Count > 0)
+            permuted, Models, CatalogVocabulary, Functions, DatasetPreFlightSource);
+        if (preflight.Models.Count > 0
+            || preflight.Datasets.Count > 0
+            || preflight.Suggestions.Count > 0)
         {
             throw new PreFlightRequiredException(preflight);
         }
@@ -1315,19 +1351,20 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// <inheritdoc />
     public IEnumerator<ITableProvider> GetEnumerator()
     {
-        foreach (ITableProvider provider in FlatFileCatalog.ListTables())
+        // Walk every mounted backend. One backend instance can be mounted
+        // under multiple schemas (e.g. the dataset schema catalog) — dedup
+        // by reference so each provider yields exactly once. FlatFile /
+        // System / Virtual are visited first because of their canonical
+        // position at the front of the Backends dict; the dataset and any
+        // other dynamically-mounted backends follow.
+        HashSet<ITableCatalog> seen = new(ReferenceEqualityComparer.Instance);
+        foreach (ITableCatalog backend in Backends.Values)
         {
-            yield return provider;
-        }
-
-        foreach (ITableProvider provider in SystemCatalog.ListTables())
-        {
-            yield return provider;
-        }
-
-        foreach (ITableProvider provider in VirtualCatalog.ListTables())
-        {
-            yield return provider;
+            if (!seen.Add(backend)) continue;
+            foreach (ITableProvider provider in backend.ListTables())
+            {
+                yield return provider;
+            }
         }
     }
 

@@ -244,15 +244,17 @@ public sealed class DatasetDownloadServicePipelineTests : ServiceTestBase, IDisp
         bool slowSourceClient = false,
         IKeepRawDownloadsPolicy? keepRawPolicy = null)
     {
-        FakeManifestStore manifest = new(BuildManifest(requiresAcceptance));
+        FakeManifestStore manifest = new(BuildManifest());
         FakeLicenseAcceptanceService licenses = new(accepted: licenseAccepted);
         FakeSourceClient source = new(_fixtureZipBytes, slow: slowSourceClient);
         VersionedDatasetPathResolver paths = new(_cacheRoot, _ingestedRoot);
+        FakeLicenseRegistry registry = new(requiresAcceptance);
 
         return new DatasetDownloadService(
             store: manifest,
             sourceClients: [source],
             licenses: licenses,
+            licenseRegistry: registry,
             reporter: reporter,
             paths: paths,
             fileFormats: GetService<IEnumerable<IFileFormat>>(),
@@ -261,21 +263,40 @@ public sealed class DatasetDownloadServicePipelineTests : ServiceTestBase, IDisp
             logger: NullLogger<DatasetDownloadService>.Instance);
     }
 
-    private static DatasetCatalogManifest BuildManifest(bool requiresAcceptance)
+    // Single-license fake whose requiresAcceptance flag flips per-test
+    // so the license-gate exercises both branches without touching the
+    // central registry.
+    private sealed class FakeLicenseRegistry : ILicenseRegistry
     {
-        CatalogLicense license = new(
-            Title: "Test License",
-            Spdx: "TEST-1.0",
-            CanonicalUrl: "https://example.invalid/",
-            TextFile: "licenses/test.txt",
-            Summary: "Test.",
-            RequiresAcceptance: requiresAcceptance);
+        private readonly Dictionary<string, CatalogLicense> _licenses;
 
+        public FakeLicenseRegistry(bool requiresAcceptance)
+        {
+            _licenses = new Dictionary<string, CatalogLicense>(StringComparer.Ordinal)
+            {
+                ["test-license"] = new CatalogLicense(
+                    Title: "Test License",
+                    Spdx: "TEST-1.0",
+                    CanonicalUrl: "https://example.invalid/",
+                    TextFile: "test.txt",
+                    Summary: "Test.",
+                    RequiresAcceptance: requiresAcceptance),
+            };
+        }
+
+        public IReadOnlyDictionary<string, CatalogLicense> All => _licenses;
+        public CatalogLicense? GetMetadata(string licenseId)
+            => _licenses.TryGetValue(licenseId, out CatalogLicense? meta) ? meta : null;
+        public string? GetText(string licenseId)
+            => _licenses.ContainsKey(licenseId) ? "[test license text]" : null;
+    }
+
+    private static DatasetCatalogManifest BuildManifest()
+    {
         CatalogDatasetVersion version = new(
             Version: Version,
             Sources: [new HttpsSource([new HttpsFile("https://example.invalid/fixture.zip", "fixture.zip")])],
-            Ingest: [new CatalogIngestJob("fixture.zip", TableName)],
-            InstallSql: null);
+            Ingest: [new CatalogIngestJob("fixture.zip", TableName)]);
 
         DatasetVariant variant = new(
             Id: DatasetId,
@@ -299,7 +320,6 @@ public sealed class DatasetDownloadServicePipelineTests : ServiceTestBase, IDisp
 
         return new DatasetCatalogManifest(
             SchemaVersion: 1,
-            Licenses: new Dictionary<string, CatalogLicense>(StringComparer.Ordinal) { ["test-license"] = license },
             Datasets: [entry]);
     }
 

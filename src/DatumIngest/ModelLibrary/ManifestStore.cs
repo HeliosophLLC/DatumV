@@ -25,9 +25,6 @@ internal sealed class ManifestStore : IManifestStore
     public string ManifestDirectory { get; }
     public ICatalogVocabulary Vocabulary { get; }
 
-    // licenseId -> resolved absolute path to the textFile. Pre-resolved at
-    // load time so GetLicenseText is a plain File.ReadAllText.
-    private readonly Dictionary<string, string> _licenseTextPaths;
     // modelFamily -> resolved absolute path to the familyCardFile.
     // Populated at load time from the (validated) at-most-one mapping
     // discovered in ValidateFamilyCardFiles.
@@ -36,10 +33,12 @@ internal sealed class ManifestStore : IManifestStore
     // load time; entries with missing hero files log a warning at load
     // and don't get a path so ResolveHeroImagePath returns null.
     private readonly Dictionary<string, string> _heroImagePaths;
+    private readonly ILicenseRegistry _licenses;
     private readonly ILogger<ManifestStore> _logger;
 
-    public ManifestStore(ILogger<ManifestStore> logger)
+    public ManifestStore(ILicenseRegistry licenses, ILogger<ManifestStore> logger)
     {
+        _licenses = licenses;
         _logger = logger;
 
         string manifestPath = ResolveManifestPath();
@@ -55,24 +54,9 @@ internal sealed class ManifestStore : IManifestStore
             throw new InvalidOperationException($"Failed to deserialize {manifestPath}.");
         }
 
-        ValidateModels(manifest, manifestPath);
+        ValidateModels(manifest, manifestPath, _licenses);
         Manifest = manifest;
         Vocabulary = new CatalogVocabulary(manifest);
-
-        _licenseTextPaths = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach ((string id, CatalogLicense license) in manifest.Licenses)
-        {
-            // textFile is relative to the manifest's directory (models/).
-            string textPath = Path.GetFullPath(Path.Combine(manifestDir, license.TextFile));
-            if (File.Exists(textPath))
-            {
-                _licenseTextPaths[id] = textPath;
-            }
-            else
-            {
-                _logger.LogWarning("License {Id} textFile not found at {Path}", id, textPath);
-            }
-        }
 
         _familyCardPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (CatalogModel m in manifest.Models)
@@ -103,15 +87,8 @@ internal sealed class ManifestStore : IManifestStore
         }
 
         _logger.LogInformation(
-            "Catalog loaded: {Models} models, {Licenses} licenses, {Cards} family cards",
-            manifest.Models.Count, manifest.Licenses.Count, _familyCardPaths.Count);
-    }
-
-    public string? GetLicenseText(string licenseId)
-    {
-        return _licenseTextPaths.TryGetValue(licenseId, out string? path)
-            ? File.ReadAllText(path)
-            : null;
+            "Catalog loaded: {Models} models, {Cards} family cards",
+            manifest.Models.Count, _familyCardPaths.Count);
     }
 
     public string? GetFamilyCardMarkdown(string modelFamily)
@@ -173,7 +150,8 @@ internal sealed class ManifestStore : IManifestStore
     private static readonly HashSet<string> AllowedPreferredProviders =
         new(StringComparer.OrdinalIgnoreCase) { "cpu", "cuda", "directml", "coreml", "any" };
 
-    private static void ValidateModels(CatalogManifest manifest, string manifestPath)
+    private static void ValidateModels(
+        CatalogManifest manifest, string manifestPath, ILicenseRegistry licenses)
     {
         if (manifest.SchemaVersion != 2)
         {
@@ -205,6 +183,15 @@ internal sealed class ManifestStore : IManifestStore
                 throw new InvalidOperationException(
                     $"Catalog entry '{m.Id}' in {manifestPath} has an empty versions[] array. " +
                     "Every catalog entry must declare at least one version under the npm-style schema.");
+            }
+            foreach (string licenseId in m.LicenseIds)
+            {
+                if (licenses.GetMetadata(licenseId) is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Catalog entry '{m.Id}' in {manifestPath} references unknown license id " +
+                        $"'{licenseId}'. Licenses must be declared in the central licenses/index.json.");
+                }
             }
             if (m.Versions[0].Deprecated)
             {

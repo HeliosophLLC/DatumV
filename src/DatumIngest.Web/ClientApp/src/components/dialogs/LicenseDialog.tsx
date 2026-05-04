@@ -3,10 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { api } from '@/api';
 import { openDialog, resolveDialog } from '@/state/dialogs';
 import { Button } from '@/components/ui/button';
-import type { CatalogManifest, CatalogLicense } from '@/api/generated/openapi-client';
+import type { CatalogLicense } from '@/api/generated/openapi-client';
 
 // License-acceptance dialog. Loaded by DialogShell when the URL hash is
 // `#/dialog/confirmLicense?requestId=...&licenseId=...&modelDisplayName=...`.
@@ -58,12 +57,12 @@ export function LicenseDialog({
     let cancelled = false;
     (async () => {
       try {
-        const [manifest, text] = await Promise.all([
-          api.modelCatalog.getManifest(),
+        const [licenses, text] = await Promise.all([
+          fetchLicenseRegistry(),
           fetchLicenseText(licenseId),
         ]);
         if (cancelled) return;
-        const meta = pickLicense(manifest, licenseId);
+        const meta = licenses[licenseId];
         if (!meta) {
           setError(t('license.unknownLicense', { id: licenseId }));
           return;
@@ -255,12 +254,15 @@ function classifyLink(href: string): LinkKind {
   return { type: 'unknown' };
 }
 
-function pickLicense(manifest: CatalogManifest, id: string): CatalogLicense | null {
-  // Licenses dictionary is keyed by id; manifest comes back from NSwag
-  // as a possibly-undefined object. Be defensive.
-  const dict = manifest.licenses;
-  if (!dict) return null;
-  return (dict as Record<string, CatalogLicense | undefined>)[id] ?? null;
+async function fetchLicenseRegistry(): Promise<Record<string, CatalogLicense>> {
+  // Tiny dict (≤20 entries); the dialog fetches it on each open. Caching
+  // is fine to add later — license metadata is shipped content, not
+  // user-mutable, so the response is safe to memoize indefinitely.
+  const response = await window.fetch('/api/licenses', { credentials: 'include' });
+  if (!response.ok) {
+    throw new Error(`License registry fetch failed: ${response.status}`);
+  }
+  return (await response.json()) as Record<string, CatalogLicense>;
 }
 
 async function fetchLicenseText(id: string): Promise<string> {

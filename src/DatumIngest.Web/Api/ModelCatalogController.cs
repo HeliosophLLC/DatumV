@@ -17,6 +17,7 @@ public sealed record CatalogTaskInfo(
 [Route("api/model-catalog")]
 public sealed class ModelCatalogController(
     IManifestStore store,
+    ILicenseRegistry licenseRegistry,
     ILicenseAcceptanceService licenses,
     IModelDownloadService downloads,
     IModelPathResolver paths) : ControllerBase
@@ -52,7 +53,7 @@ public sealed class ModelCatalogController(
     [Produces("text/plain")]
     public ActionResult<string> GetLicenseText(string id)
     {
-        string? text = store.GetLicenseText(id);
+        string? text = licenseRegistry.GetText(id);
         if (text is null) return NotFound();
         return Content(text, "text/plain");
     }
@@ -115,7 +116,7 @@ public sealed class ModelCatalogController(
     [HttpPost("licenses/{id}/accept")]
     public async Task<IActionResult> AcceptLicense(string id, CancellationToken ct)
     {
-        if (!store.Manifest.Licenses.ContainsKey(id)) return NotFound();
+        if (licenseRegistry.GetMetadata(id) is null) return NotFound();
         await licenses.AcceptAsync(id, ct);
         return NoContent();
     }

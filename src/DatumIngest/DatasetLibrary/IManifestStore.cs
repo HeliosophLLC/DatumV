@@ -17,14 +17,10 @@ public interface IManifestStore
     DatasetCatalogManifest Manifest { get; }
 
     // Absolute path to the directory that holds datasets/catalog.json.
-    // Paths inside the manifest (license textFile, cardFile, hero
-    // images, ingest source paths) resolve relative to this directory.
+    // Paths inside the manifest (cardFile, hero images, ingest source
+    // paths) resolve relative to this directory. License text lives in
+    // the central ILicenseRegistry, not under this directory.
     string ManifestDirectory { get; }
-
-    // Returns the raw license text (markdown or plain text, depending on
-    // license) for the given license id. Null if the id is unknown or the
-    // referenced textFile is missing on disk.
-    string? GetLicenseText(string licenseId);
 
     // Returns the markdown body of the entry's card, or null when the
     // entry didn't declare a CardFile (or the entry doesn't exist).

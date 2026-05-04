@@ -13,6 +13,7 @@ namespace DatumIngest.Web.Api;
 [Route("api/dataset-catalog")]
 public sealed class DatasetCatalogController(
     IManifestStore store,
+    ILicenseRegistry licenseRegistry,
     ILicenseAcceptanceService licenses,
     IDatasetDownloadService downloads,
     IDatasetPathResolver paths) : ControllerBase
@@ -28,7 +29,7 @@ public sealed class DatasetCatalogController(
     [Produces("text/plain")]
     public ActionResult<string> GetLicenseText(string id)
     {
-        string? text = store.GetLicenseText(id);
+        string? text = licenseRegistry.GetText(id);
         if (text is null) return NotFound();
         return Content(text, "text/plain");
     }
@@ -92,7 +93,7 @@ public sealed class DatasetCatalogController(
     [HttpPost("licenses/{id}/accept")]
     public async Task<IActionResult> AcceptLicense(string id, CancellationToken ct)
     {
-        if (!store.Manifest.Licenses.ContainsKey(id)) return NotFound();
+        if (licenseRegistry.GetMetadata(id) is null) return NotFound();
         await licenses.AcceptAsync(id, ct);
         return NoContent();
     }

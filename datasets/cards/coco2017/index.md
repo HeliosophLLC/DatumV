@@ -32,7 +32,7 @@ Run a pretrained YOLOX detector over every COCO image:
 SELECT
   name,
   models.yolox_s(image) AS detections
-FROM datasets.coco_test2017_images
+FROM datasets.coco_test2017
 LIMIT 100;
 ```
 
@@ -44,7 +44,7 @@ SELECT
   d.label,
   d.score,
   d.box
-FROM datasets.coco_test2017_images AS i
+FROM datasets.coco_test2017 AS i
 CROSS JOIN UNNEST(models.yolox_s(i.image)) AS d
 WHERE d.score > 0.5;
 ```
@@ -53,7 +53,7 @@ Count detections by class across the whole split:
 
 ```sql
 SELECT d.label, COUNT(*) AS hits
-FROM datasets.coco_test2017_images AS i
+FROM datasets.coco_test2017 AS i
 CROSS JOIN UNNEST(models.yolox_s(i.image)) AS d
 WHERE d.score > 0.4
 GROUP BY d.label
@@ -66,7 +66,7 @@ Draw boxes for spot-checking:
 SELECT
   name,
   draw_boxes(image, models.yolox_s(image)) AS annotated
-FROM datasets.coco_test2017_images
+FROM datasets.coco_test2017
 LIMIT 12;
 ```
 

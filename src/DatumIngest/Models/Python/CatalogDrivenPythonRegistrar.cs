@@ -45,16 +45,19 @@ public static class CatalogDrivenPythonRegistrar
     /// <param name="catalog">Target catalog.</param>
     /// <param name="pythonEnvironments">Engine-managed Python toolchain — supplies the venv-scoped interpreter at load time.</param>
     /// <param name="manifest">Loaded <see cref="CatalogManifest"/>; the registrar reads <c>kind: "python"</c> entries and their <c>python</c> blocks.</param>
+    /// <param name="licenses">Central license registry; used to resolve each entry's first <c>licenseId</c> to an SPDX label for the registered <see cref="ModelCatalogEntry"/>.</param>
     /// <param name="scriptsDirectory">Engine-bundled <c>python/</c> directory. The catalog's <c>workerScript</c> field is a filename relative to this directory.</param>
     public static void RegisterAll(
         ModelCatalog catalog,
         IPythonEnvironmentManager pythonEnvironments,
         CatalogManifest manifest,
+        ILicenseRegistry licenses,
         string scriptsDirectory)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(pythonEnvironments);
         ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(licenses);
         ArgumentException.ThrowIfNullOrEmpty(scriptsDirectory);
 
         foreach (CatalogModel entry in manifest.Models)
@@ -69,7 +72,7 @@ public static class CatalogDrivenPythonRegistrar
             // so the entry doesn't sit in the catalog as "registered but
             // unusable."
             if (entry.Placeholder) continue;
-            RegisterOne(catalog, pythonEnvironments, entry, scriptsDirectory, manifest);
+            RegisterOne(catalog, pythonEnvironments, entry, scriptsDirectory, licenses);
         }
     }
 
@@ -78,7 +81,7 @@ public static class CatalogDrivenPythonRegistrar
         IPythonEnvironmentManager pythonEnvironments,
         CatalogModel entry,
         string scriptsDirectory,
-        CatalogManifest manifest)
+        ILicenseRegistry licenses)
     {
         CatalogPythonSpec spec = entry.Python!;
         string modelName = entry.Id.Replace('-', '_');
@@ -98,8 +101,7 @@ public static class CatalogDrivenPythonRegistrar
         // system.models. First wins — matches what RegisterBarkSmall
         // etc. used to hardcode.
         string? license = entry.LicenseIds.Count > 0
-            && manifest.Licenses.TryGetValue(entry.LicenseIds[0], out CatalogLicense? lic)
-            ? lic.Spdx
+            ? licenses.GetMetadata(entry.LicenseIds[0])?.Spdx
             : null;
 
         // Closure captures spec by reference. PythonBackedModel ctor

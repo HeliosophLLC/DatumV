@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 using DatumIngest.Catalog.Registries;
+using DatumIngest.ModelLibrary;
 
 using Microsoft.Extensions.Logging;
 
@@ -24,7 +25,6 @@ internal sealed class ManifestStore : IManifestStore
     public DatasetCatalogManifest Manifest { get; }
     public string ManifestDirectory { get; }
 
-    private readonly Dictionary<string, string> _licenseTextPaths;
     // entry name -> resolved absolute path to the entry's card markdown.
     private readonly Dictionary<string, string> _entryCardPaths;
     // entry name -> resolved absolute path to the entry's hero image.
@@ -34,10 +34,12 @@ internal sealed class ManifestStore : IManifestStore
     // variant id -> (entry, variant). Built once at load so the install
     // service doesn't need to scan the entire manifest on every probe.
     private readonly Dictionary<string, (DatasetEntry, DatasetVariant)> _variantsById;
+    private readonly ILicenseRegistry _licenses;
     private readonly ILogger<ManifestStore> _logger;
 
-    public ManifestStore(ILogger<ManifestStore> logger)
+    public ManifestStore(ILicenseRegistry licenses, ILogger<ManifestStore> logger)
     {
+        _licenses = licenses;
         _logger = logger;
 
         string manifestPath = ResolveManifestPath();
@@ -53,22 +55,8 @@ internal sealed class ManifestStore : IManifestStore
             throw new InvalidOperationException($"Failed to deserialize {manifestPath}.");
         }
 
-        ValidateDatasets(manifest, manifestPath);
+        ValidateDatasets(manifest, manifestPath, _licenses);
         Manifest = manifest;
-
-        _licenseTextPaths = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach ((string id, ModelLibrary.CatalogLicense license) in manifest.Licenses)
-        {
-            string textPath = Path.GetFullPath(Path.Combine(manifestDir, license.TextFile));
-            if (File.Exists(textPath))
-            {
-                _licenseTextPaths[id] = textPath;
-            }
-            else
-            {
-                _logger.LogWarning("Dataset license {Id} textFile not found at {Path}", id, textPath);
-            }
-        }
 
         _entryCardPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         _heroImagePaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -102,15 +90,8 @@ internal sealed class ManifestStore : IManifestStore
         }
 
         _logger.LogInformation(
-            "Dataset catalog loaded: {Entries} entries ({Variants} variants), {Licenses} licenses, {Cards} cards",
-            manifest.Datasets.Count, _variantsById.Count, manifest.Licenses.Count, _entryCardPaths.Count);
-    }
-
-    public string? GetLicenseText(string licenseId)
-    {
-        return _licenseTextPaths.TryGetValue(licenseId, out string? path)
-            ? File.ReadAllText(path)
-            : null;
+            "Dataset catalog loaded: {Entries} entries ({Variants} variants), {Cards} cards",
+            manifest.Datasets.Count, _variantsById.Count, _entryCardPaths.Count);
     }
 
     public string? GetEntryCardMarkdown(string entryName)
@@ -165,7 +146,8 @@ internal sealed class ManifestStore : IManifestStore
     /// the rules without writing a temp file and going through the
     /// disk-reading constructor.
     /// </summary>
-    internal static void ValidateDatasets(DatasetCatalogManifest manifest, string manifestPath)
+    internal static void ValidateDatasets(
+        DatasetCatalogManifest manifest, string manifestPath, ILicenseRegistry licenses)
     {
         if (manifest.SchemaVersion != 1)
         {
@@ -228,11 +210,11 @@ internal sealed class ManifestStore : IManifestStore
             }
             foreach (string licenseId in e.LicenseIds)
             {
-                if (!manifest.Licenses.ContainsKey(licenseId))
+                if (licenses.GetMetadata(licenseId) is null)
                 {
                     throw new InvalidOperationException(
                         $"Dataset entry '{e.Name}' in {manifestPath} references unknown license id " +
-                        $"'{licenseId}'. Licenses must be declared in the top-level licenses block.");
+                        $"'{licenseId}'. Licenses must be declared in the central licenses/index.json.");
                 }
             }
             if (!string.IsNullOrEmpty(e.CardFile))
@@ -244,6 +226,14 @@ internal sealed class ManifestStore : IManifestStore
                         $"Dataset entry '{e.Name}' in {manifestPath} references cardFile '{e.CardFile}' " +
                         $"but no file exists at '{cardPath}'.");
                 }
+            }
+            if (!IsValidSqlIdentifier(e.Schema))
+            {
+                throw new InvalidOperationException(
+                    $"Dataset entry '{e.Name}' in {manifestPath} declares schema '{e.Schema}', " +
+                    "which is not a valid SQL identifier. Use a single snake_case / lowercase " +
+                    "name (default 'datasets'); the engine binds installed variants into this " +
+                    "schema as `<schema>.<variantId>`.");
             }
             if (e.Variants is null || e.Variants.Count == 0)
             {
@@ -268,6 +258,14 @@ internal sealed class ManifestStore : IManifestStore
         {
             throw new InvalidOperationException(
                 $"Dataset entry '{entry.Name}' in {manifestPath} has a variant with missing/blank id.");
+        }
+        if (!IsValidSqlIdentifier(variant.Id))
+        {
+            throw new InvalidOperationException(
+                $"Dataset variant id '{variant.Id}' (in entry '{entry.Name}', {manifestPath}) " +
+                "is not a valid SQL identifier. Variant ids double as table names in the bound " +
+                "schema, so they must be snake_case / alphanumeric + underscore (no hyphens, " +
+                "no leading digit). Rename in catalog.json.");
         }
         if (!variantIdsAcrossManifest.Add(variant.Id))
         {
@@ -346,6 +344,27 @@ internal sealed class ManifestStore : IManifestStore
                 }
             }
         }
+    }
+
+    // Valid SQL identifier: starts with [a-z_], rest is [a-z0-9_]. Kept
+    // strict (lowercase only) so manifest authors can't accidentally
+    // emit camelCase ids that quote differently across SQL dialects.
+    // No reserved-word check — the catalog rejects collisions at bind
+    // time if a variant id ever matches a keyword.
+    private static bool IsValidSqlIdentifier(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return false;
+        char first = s[0];
+        if (!((first >= 'a' && first <= 'z') || first == '_')) return false;
+        for (int i = 1; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     // Resolution order:

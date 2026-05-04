@@ -1,4 +1,5 @@
 using DatumIngest.Catalog.Registries;
+using DatumIngest.DatasetLibrary;
 using DatumIngest.Execution.Contexts;
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
@@ -25,8 +26,15 @@ public static class CatalogManifestBuilder
     /// <summary>
     /// Constructs a manifest snapshotting every registered table's name and
     /// schema, plus every registered function name in the given registry.
+    /// When <paramref name="datasetBinder"/> is supplied, the manifest also
+    /// carries a <c>Datasets</c> list covering installed + discovered
+    /// variants from the dataset catalog so the LS can render rich hover
+    /// + autocomplete the uninstalled-yet shape.
     /// </summary>
-    public static LanguageServerManifest Build(TableCatalog catalog, FunctionRegistry functions)
+    public static LanguageServerManifest Build(
+        TableCatalog catalog,
+        FunctionRegistry functions,
+        DatasetSchemaBinder? datasetBinder = null)
     {
         List<TableSchemaEntry> tables = new();
         foreach (ITableProvider provider in catalog)
@@ -309,6 +317,9 @@ public static class CatalogManifestBuilder
             });
         }
 
+        IReadOnlyList<Manifest.DatasetEntry>? datasetEntries =
+            datasetBinder is null ? null : BuildDatasetEntries(datasetBinder);
+
         return new LanguageServerManifest
         {
             Tables = tables,
@@ -317,6 +328,7 @@ public static class CatalogManifestBuilder
             Models = models,
             Udfs = udfEntries,
             Procedures = procedureEntries,
+            Datasets = datasetEntries,
             // Capture the catalog's current search_path so the LSP can
             // resolve unqualified names against the same precedence the
             // engine uses at execution time. Snapshot — subsequent
@@ -330,6 +342,31 @@ public static class CatalogManifestBuilder
             // engine's startup wiring and covers every shipped context.
             FunctionContexts = BuildFunctionContextEntries(),
         };
+    }
+
+    private static IReadOnlyList<Manifest.DatasetEntry> BuildDatasetEntries(DatasetSchemaBinder binder)
+    {
+        List<Manifest.DatasetEntry> entries = new();
+        foreach (DatasetSchemaBinder.DatasetBindingDescriptor desc in binder.EnumerateBindings())
+        {
+            entries.Add(new Manifest.DatasetEntry
+            {
+                Schema = desc.Schema,
+                Name = desc.Table,
+                VariantId = desc.VariantId,
+                EntryName = desc.EntryName,
+                DisplayName = desc.DisplayName,
+                Version = desc.Version,
+                Modalities = desc.Modalities,
+                LicenseIds = desc.LicenseIds,
+                ApproxArchiveBytes = desc.ApproxArchiveBytes,
+                ApproxIngestedBytes = desc.ApproxIngestedBytes,
+                Status = desc.IsInstalled
+                    ? DatasetInstallStatus.Installed
+                    : DatasetInstallStatus.Discovered,
+            });
+        }
+        return entries;
     }
 
     /// <summary>

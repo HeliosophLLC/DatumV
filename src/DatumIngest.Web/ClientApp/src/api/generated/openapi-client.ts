@@ -1195,6 +1195,51 @@ export class LanguageClient {
     }
 }
 
+export class LicensesClient {
+    private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
+    private baseUrl: string;
+    protected jsonParseReviver: ((key: string, value: any) => any) | undefined = undefined;
+
+    constructor(baseUrl?: string, http?: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> }) {
+        this.http = http ? http : window as any;
+        this.baseUrl = baseUrl ?? "";
+    }
+
+    getAll(signal?: AbortSignal): Promise<{ [key: string]: CatalogLicense; }> {
+        let url_ = this.baseUrl + "/api/licenses";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processGetAll(_response);
+        });
+    }
+
+    protected processGetAll(response: Response): Promise<{ [key: string]: CatalogLicense; }> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as { [key: string]: CatalogLicense; };
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<{ [key: string]: CatalogLicense; }>(null as any);
+    }
+}
+
 export class LlmClient {
     private http: { fetch(url: RequestInfo, init?: RequestInit): Promise<Response> };
     private baseUrl: string;
@@ -2379,17 +2424,7 @@ export interface CreateConversationDto {
 
 export interface DatasetCatalogManifest {
     schemaVersion?: number;
-    licenses?: { [key: string]: CatalogLicense; };
     datasets?: DatasetEntry[];
-}
-
-export interface CatalogLicense {
-    title?: string;
-    spdx?: string;
-    canonicalUrl?: string;
-    textFile?: string;
-    summary?: string;
-    requiresAcceptance?: boolean;
 }
 
 export interface DatasetEntry {
@@ -2401,6 +2436,7 @@ export interface DatasetEntry {
     attributions?: string[];
     suitableForTasks?: string[] | undefined;
     variants?: DatasetVariant[];
+    schema?: string;
     cardFile?: string | undefined;
     heroImageFile?: string | undefined;
 }
@@ -2420,7 +2456,6 @@ export interface CatalogDatasetVersion {
     version?: string;
     sources?: CatalogSource[];
     ingest?: CatalogIngestJob[];
-    installSql?: string | undefined;
     deprecated?: boolean;
     deprecationReason?: string | undefined;
 }
@@ -2728,6 +2763,15 @@ export interface LangSqlRequest {
     sql?: string;
 }
 
+export interface CatalogLicense {
+    title?: string;
+    spdx?: string;
+    canonicalUrl?: string;
+    textFile?: string;
+    summary?: string;
+    requiresAcceptance?: boolean;
+}
+
 export interface InstalledLlm {
     name?: string;
     displayName?: string;
@@ -2737,7 +2781,6 @@ export interface InstalledLlm {
 
 export interface CatalogManifest {
     schemaVersion?: number;
-    licenses?: { [key: string]: CatalogLicense; };
     models?: CatalogModel[];
 }
 

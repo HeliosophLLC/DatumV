@@ -2,6 +2,7 @@
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
+using DatumIngest.Catalog;
 using DatumIngest.DatasetLibrary;
 
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -41,6 +42,24 @@ public static class DatasetLibraryServiceExtensions
             DefaultKeepRawDownloadsPolicy.Instance);
 
         services.AddSingleton<IDatasetDownloadService, DatasetDownloadService>();
+
+        // Catalog substrate: one DatasetSchemaCatalog instance owns every
+        // schema the manifest declares; the binder swaps the per-table
+        // snapshot atomically on boot and after every install/uninstall.
+        // The hosting layer (e.g. DatumIngest.Web's
+        // DatasetCatalogInitializationService) mounts the catalog into
+        // TableCatalog.Backends once both have constructed.
+        services.AddSingleton(sp =>
+        {
+            IManifestStore store = sp.GetRequiredService<IManifestStore>();
+            HashSet<string> schemas = new(StringComparer.OrdinalIgnoreCase);
+            foreach (DatasetEntry e in store.Manifest.Datasets)
+            {
+                schemas.Add(e.Schema);
+            }
+            return new DatasetSchemaCatalog(schemas);
+        });
+        services.AddSingleton<DatasetSchemaBinder>();
         return services;
     }
 }

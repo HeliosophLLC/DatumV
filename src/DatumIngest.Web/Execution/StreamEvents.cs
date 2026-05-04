@@ -32,7 +32,18 @@ internal sealed record PreFlightRequiredEvent(
     string Type,
     string Message,
     IReadOnlyList<PreFlightModelRequirementWire> Models,
+    IReadOnlyList<PreFlightDatasetRequirementWire> Datasets,
     IReadOnlyList<PreFlightSuggestionWire> Suggestions);
+
+internal sealed record PreFlightDatasetRequirementWire(
+    string TypedReference,
+    string Identifier,
+    string VariantId,
+    string EntryName,
+    string DisplayName,
+    string Version,
+    long ApproxArchiveBytes,
+    IReadOnlyList<PreFlightLicenseWire> Licenses);
 
 internal sealed record PreFlightModelRequirementWire(
     string TypedReference,

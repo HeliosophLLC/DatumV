@@ -1,6 +1,7 @@
 import { proxy } from 'valtio';
 import { postNdjson, postNdjsonMultipart } from './ndjson';
 import { downloadsState, installModel } from './downloads';
+import { datasetsState, installVariant } from './datasets';
 import { openDialog } from './dialogs';
 
 // Per-tab execution state. Lives in a side store rather than on the tab
@@ -197,6 +198,19 @@ export interface PreFlightModelRequirement {
   licenses: PreFlightLicense[];
 }
 
+// One catalog-known dataset reference the user wrote whose variant isn't
+// installed yet. Mirrors PreFlightDatasetRequirementWire on the server.
+export interface PreFlightDatasetRequirement {
+  typedReference: string;
+  identifier: string;
+  variantId: string;
+  entryName: string;
+  displayName: string;
+  version: string;
+  approxArchiveBytes: number;
+  licenses: PreFlightLicense[];
+}
+
 // One likely-typo function reference the user wrote.
 export interface PreFlightSuggestion {
   typedName: string;
@@ -208,6 +222,7 @@ export interface PreFlightSuggestion {
 export interface PreFlightBlock {
   message: string;
   models: PreFlightModelRequirement[];
+  datasets: PreFlightDatasetRequirement[];
   suggestions: PreFlightSuggestion[];
 }
 
@@ -467,6 +482,9 @@ async function presentPreFlightDialog(
   for (const id of Object.keys(downloadsState.installing)) {
     if (!inFlightIds.includes(id)) inFlightIds.push(id);
   }
+  for (const id of Object.keys(datasetsState.active)) {
+    if (!inFlightIds.includes(id)) inFlightIds.push(id);
+  }
   const { result } = openDialog<{
     install: boolean;
     acceptedLicenseIds: string[];
@@ -543,6 +561,16 @@ export function installPreFlightModels(tabId: string): void {
     // downloadsState.errors for the same surfaces.
     void installModel(m.catalogEntryId);
   }
+  const seenVariants = new Set<string>();
+  for (const d of exec.preFlight.datasets) {
+    if (seenVariants.has(d.variantId)) continue;
+    seenVariants.add(d.variantId);
+    // Mirror of the model skip: if the dataset variant is already
+    // downloading or ingesting, don't re-fire — the dataset state's
+    // active map keys on variant id and re-issuing would 409.
+    if (d.variantId in datasetsState.active) continue;
+    void installVariant(d.variantId, d.entryName);
+  }
   dismissPreFlight(tabId);
 }
 
@@ -607,6 +635,22 @@ type StreamEvent =
         supersededBy: string | null;
         versionDeprecated: boolean;
         versionDeprecationReason: string | null;
+        licenses: {
+          id: string;
+          title: string;
+          summary: string;
+          requiresAcceptance: boolean;
+          accepted: boolean;
+        }[];
+      }[];
+      datasets: {
+        typedReference: string;
+        identifier: string;
+        variantId: string;
+        entryName: string;
+        displayName: string;
+        version: string;
+        approxArchiveBytes: number;
         licenses: {
           id: string;
           title: string;
@@ -957,6 +1001,10 @@ function applyEvent(tabId: string, event: StreamEvent): void {
           // normalise so render code can always iterate. Defensive copy
           // each entry too so accept() mutations later stay local.
           licenses: (m.licenses ?? []).map((l) => ({ ...l })),
+        })),
+        datasets: (event.datasets ?? []).map((d) => ({
+          ...d,
+          licenses: (d.licenses ?? []).map((l) => ({ ...l })),
         })),
         suggestions: event.suggestions.map((s) => ({ ...s })),
       };

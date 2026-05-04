@@ -17,21 +17,27 @@ namespace DatumIngest.Tests.DatasetLibrary;
 /// </summary>
 public sealed class DatasetManifestLoadTests
 {
+    private static (LicenseRegistry licenses, ManifestStore store) LoadFromRepoRoot()
+    {
+        LicenseRegistry licenses = new(NullLogger<LicenseRegistry>.Instance);
+        ManifestStore store = new(licenses, NullLogger<ManifestStore>.Instance);
+        return (licenses, store);
+    }
+
     [Fact]
     public void RealManifest_LoadsCleanly_FromRepoRoot()
     {
-        ManifestStore store = new(NullLogger<ManifestStore>.Instance);
+        (_, ManifestStore store) = LoadFromRepoRoot();
 
         DatasetCatalogManifest manifest = store.Manifest;
         Assert.Equal(1, manifest.SchemaVersion);
         Assert.NotEmpty(manifest.Datasets);
-        Assert.NotEmpty(manifest.Licenses);
     }
 
     [Fact]
     public void RealManifest_ContainsCoco2017Entry_WithExpectedVariants()
     {
-        ManifestStore store = new(NullLogger<ManifestStore>.Instance);
+        (_, ManifestStore store) = LoadFromRepoRoot();
         DatasetEntry coco = Assert.Single(store.Manifest.Datasets,
             d => string.Equals(d.Name, "COCO 2017", StringComparison.OrdinalIgnoreCase));
 
@@ -41,9 +47,9 @@ public sealed class DatasetManifestLoadTests
         // shape (one HTTPS source for the split's zip, one ingest job
         // writing to the `images` table) is identical across all three —
         // assert it once per variant via the helper.
-        AssertImagesOnlyVariant(coco, "coco-test2017", "test2017.zip", minArchiveBytes: 6_000_000_000);
-        AssertImagesOnlyVariant(coco, "coco-val2017", "val2017.zip", minArchiveBytes: 500_000_000);
-        AssertImagesOnlyVariant(coco, "coco-train2017", "train2017.zip", minArchiveBytes: 17_000_000_000);
+        AssertImagesOnlyVariant(coco, "coco_test2017", "test2017.zip", minArchiveBytes: 6_000_000_000);
+        AssertImagesOnlyVariant(coco, "coco_val2017", "val2017.zip", minArchiveBytes: 500_000_000);
+        AssertImagesOnlyVariant(coco, "coco_train2017", "train2017.zip", minArchiveBytes: 17_000_000_000);
     }
 
     private static void AssertImagesOnlyVariant(
@@ -75,9 +81,9 @@ public sealed class DatasetManifestLoadTests
     [Fact]
     public void RealManifest_LicenseText_ResolvesForDeclaredLicenses()
     {
-        ManifestStore store = new(NullLogger<ManifestStore>.Instance);
+        (LicenseRegistry licenses, _) = LoadFromRepoRoot();
 
-        string? text = store.GetLicenseText("cc-by-4.0");
+        string? text = licenses.GetText("cc-by-4.0");
         Assert.NotNull(text);
         Assert.Contains("Creative Commons", text);
     }
@@ -85,7 +91,7 @@ public sealed class DatasetManifestLoadTests
     [Fact]
     public void RealManifest_EntryCardMarkdown_ResolvesForCoco2017()
     {
-        ManifestStore store = new(NullLogger<ManifestStore>.Instance);
+        (_, ManifestStore store) = LoadFromRepoRoot();
         string? card = store.GetEntryCardMarkdown("COCO 2017");
         Assert.NotNull(card);
         Assert.Contains("COCO", card);
@@ -94,10 +100,10 @@ public sealed class DatasetManifestLoadTests
     [Fact]
     public void RealManifest_FindVariant_ResolvesByIdToBothEntryAndVariant()
     {
-        ManifestStore store = new(NullLogger<ManifestStore>.Instance);
-        (DatasetEntry Entry, DatasetVariant Variant)? hit = store.FindVariant("coco-test2017");
+        (_, ManifestStore store) = LoadFromRepoRoot();
+        (DatasetEntry Entry, DatasetVariant Variant)? hit = store.FindVariant("coco_test2017");
         Assert.NotNull(hit);
         Assert.Equal("COCO 2017", hit.Value.Entry.Name);
-        Assert.Equal("coco-test2017", hit.Value.Variant.Id);
+        Assert.Equal("coco_test2017", hit.Value.Variant.Id);
     }
 }

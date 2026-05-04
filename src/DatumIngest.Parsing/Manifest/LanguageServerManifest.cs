@@ -69,6 +69,72 @@ public sealed class LanguageServerManifest
     /// the manifest is built without context support.
     /// </summary>
     public IReadOnlyList<FunctionContextEntry>? FunctionContexts { get; init; }
+
+    /// <summary>
+    /// Dataset variants surfaced by the dataset catalog binder. Each
+    /// entry pairs a <c>&lt;schema&gt;.&lt;name&gt;</c> table reference with the
+    /// metadata the editor needs to render rich hover (entry name,
+    /// version, modalities, sizes) and to surface uninstalled variants
+    /// in <c>&lt;schema&gt;.</c> completion with an
+    /// <c>installable</c> badge (mirroring the model side's discovered
+    /// rows). <see langword="null"/> when no dataset catalog is attached.
+    /// </summary>
+    public IReadOnlyList<DatasetEntry>? Datasets { get; init; }
+}
+
+/// <summary>
+/// Install state of a dataset variant on the current host. Parallels
+/// <see cref="ModelInstallStatus"/> for the dataset surface; today only
+/// the two states the binder cares about — installed or not.
+/// </summary>
+public enum DatasetInstallStatus
+{
+    /// <summary>The variant's <c>.datum</c> file(s) are on disk + bound; <c>&lt;schema&gt;.&lt;name&gt;</c> resolves through the catalog and is queryable.</summary>
+    Installed,
+    /// <summary>The manifest declares the variant but no install has produced its <c>.datum</c> yet. Surfaces in autocomplete with an <c>installable</c> badge; selecting it trips pre-flight.</summary>
+    Discovered,
+}
+
+/// <summary>
+/// A single dataset variant surfaced by <see cref="LanguageServerManifest"/>.
+/// Mirrors the entry/variant/version triple the dataset manifest declares,
+/// plus the install state and a couple of size figures so hover can
+/// render a useful card without consulting the runtime catalog.
+/// </summary>
+public sealed class DatasetEntry
+{
+    /// <summary>SQL schema the variant binds into (default <c>"datasets"</c>, per-entry override allowed).</summary>
+    public required string Schema { get; init; }
+
+    /// <summary>Bound table name — the <c>X</c> in <c>&lt;schema&gt;.X</c>. Single-job variants use the variant id verbatim; multi-job variants use <c>&lt;variantId&gt;_&lt;tableName&gt;</c>.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Install handle the downloader keys on. Same as <see cref="Name"/> for single-job variants; the prefix for multi-job.</summary>
+    public required string VariantId { get; init; }
+
+    /// <summary>Parent entry's user-facing name (e.g. <c>"COCO 2017"</c>).</summary>
+    public required string EntryName { get; init; }
+
+    /// <summary>Variant subtitle (e.g. <c>"test2017 (images)"</c>).</summary>
+    public required string DisplayName { get; init; }
+
+    /// <summary>Catalog version targeted by this binding (e.g. <c>"2017"</c>).</summary>
+    public required string Version { get; init; }
+
+    /// <summary>HF-style modality vocabulary from the entry (<c>["Image"]</c>, <c>["Text", "Image"]</c>, …).</summary>
+    public required IReadOnlyList<string> Modalities { get; init; }
+
+    /// <summary>License ids from the parent entry. Resolve metadata through the central license registry.</summary>
+    public required IReadOnlyList<string> LicenseIds { get; init; }
+
+    /// <summary>Approximate raw archive bytes (download size).</summary>
+    public required long ApproxArchiveBytes { get; init; }
+
+    /// <summary>Approximate ingested bytes (post-install on-disk footprint).</summary>
+    public required long ApproxIngestedBytes { get; init; }
+
+    /// <summary>Whether the variant is currently bound + queryable or merely declared.</summary>
+    public required DatasetInstallStatus Status { get; init; }
 }
 
 /// <summary>

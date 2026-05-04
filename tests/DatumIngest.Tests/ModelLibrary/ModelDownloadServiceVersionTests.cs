@@ -59,6 +59,7 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
             store:         store,
             sourceClients: [new NoOpSourceClient()],
             licenses:      new AlwaysAcceptedLicenseService(),
+            licenseRegistry: DatumIngest.Tests.Support.TestLicenseRegistry.Instance,
             reporter:      new NullProgressReporter(),
             installer:     installer,
             python:        new NullPythonEnvironmentManager(),
@@ -103,6 +104,7 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
         ModelDownloadService service = new(
             store: store, sourceClients: [new NoOpSourceClient()],
             licenses: new AlwaysAcceptedLicenseService(),
+            licenseRegistry: DatumIngest.Tests.Support.TestLicenseRegistry.Instance,
             reporter: new NullProgressReporter(),
             installer: installer, python: new NullPythonEnvironmentManager(),
             paths: paths, logger: NullLogger<ModelDownloadService>.Instance);
@@ -129,6 +131,7 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
             store: new FakeManifestStore(manifest),
             sourceClients: [new NoOpSourceClient()],
             licenses: new AlwaysAcceptedLicenseService(),
+            licenseRegistry: DatumIngest.Tests.Support.TestLicenseRegistry.Instance,
             reporter: new NullProgressReporter(),
             installer: new RecordingInstaller(),
             python: new NullPythonEnvironmentManager(),
@@ -161,6 +164,7 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
             store: new FakeManifestStore(manifest),
             sourceClients: [new NoOpSourceClient()],
             licenses: new AlwaysAcceptedLicenseService(),
+            licenseRegistry: DatumIngest.Tests.Support.TestLicenseRegistry.Instance,
             reporter: new NullProgressReporter(),
             installer: installer, python: new NullPythonEnvironmentManager(),
             paths: paths, logger: NullLogger<ModelDownloadService>.Instance);
@@ -196,6 +200,7 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
             store: new FakeManifestStore(manifest),
             sourceClients: [new NoOpSourceClient()],
             licenses: new AlwaysAcceptedLicenseService(),
+            licenseRegistry: DatumIngest.Tests.Support.TestLicenseRegistry.Instance,
             reporter: new NullProgressReporter(),
             installer: installer, python: new NullPythonEnvironmentManager(),
             paths: paths, logger: NullLogger<ModelDownloadService>.Instance);
@@ -227,6 +232,7 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
             store: new FakeManifestStore(manifest),
             sourceClients: [new NoOpSourceClient()],
             licenses: new AlwaysAcceptedLicenseService(),
+            licenseRegistry: DatumIngest.Tests.Support.TestLicenseRegistry.Instance,
             reporter: new NullProgressReporter(),
             installer: installer, python: new NullPythonEnvironmentManager(),
             paths: paths, logger: NullLogger<ModelDownloadService>.Instance);
@@ -269,7 +275,6 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
 
         return new CatalogManifest(
             SchemaVersion: 2,
-            Licenses: new Dictionary<string, CatalogLicense>(),
             Models: [model]);
 
         static IReadOnlyList<CatalogVersionModel> ToVersionModels(string[] identifiers)

@@ -219,7 +219,6 @@ public sealed class CatalogManifestBuilderTests : ServiceTestBase
             ApproxSizeMb: 100);
         CatalogManifest manifest = new(
             SchemaVersion: 2,
-            Licenses: new Dictionary<string, CatalogLicense>(),
             Models: [entry]);
         catalog.CatalogVocabulary = new CatalogVocabulary(manifest);
 

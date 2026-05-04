@@ -68,6 +68,7 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
             store:         manifest,
             sourceClients: [new NoOpSourceClient()],
             licenses:      new AlwaysAcceptedLicenseService(),
+            licenseRegistry: DatumIngest.Tests.Support.TestLicenseRegistry.Instance,
             reporter:      new NullProgressReporter(),
             installer:     installer,
             python:        new NullPythonEnvironmentManager(),
@@ -112,6 +113,7 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
             store:         store,
             sourceClients: [new NoOpSourceClient()],
             licenses:      new AlwaysAcceptedLicenseService(),
+            licenseRegistry: DatumIngest.Tests.Support.TestLicenseRegistry.Instance,
             reporter:      new NullProgressReporter(),
             installer:     installer,
             python:        new NullPythonEnvironmentManager(),
@@ -158,7 +160,6 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
             ApproxSizeMb: 0);
         return new CatalogManifest(
             SchemaVersion: 2,
-            Licenses: new Dictionary<string, CatalogLicense>(),
             Models: [model]);
     }
 
@@ -219,7 +220,6 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
 
         return new CatalogManifest(
             SchemaVersion: 2,
-            Licenses: new Dictionary<string, CatalogLicense>(),
             Models: [model]);
     }
 

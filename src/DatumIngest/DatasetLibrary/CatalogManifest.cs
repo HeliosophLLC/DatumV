@@ -26,7 +26,6 @@ namespace DatumIngest.DatasetLibrary;
 
 public sealed record DatasetCatalogManifest(
     int SchemaVersion,
-    IReadOnlyDictionary<string, CatalogLicense> Licenses,
     IReadOnlyList<DatasetEntry> Datasets);
 
 public sealed record DatasetEntry(
@@ -66,6 +65,13 @@ public sealed record DatasetEntry(
     // one element; a singleton variant is rendered without the tab
     // strip.
     IReadOnlyList<DatasetVariant> Variants,
+    // SQL schema the installed variants bind into. Default `datasets` so
+    // the common case reads as `datasets.<variantId>`; per-entry override
+    // lets authors spread very large catalogs across multiple schemas
+    // (e.g. `coco.train2017`, `image_classification.imagenet`) when they
+    // outgrow one namespace. Validated as a single SQL identifier at
+    // load time.
+    string Schema = "datasets",
     // Optional path (relative to the manifest directory) to a markdown
     // body describing the entry. The renderer uses ReactMarkdown with a
     // URL-rewrite that points relative asset references at the
@@ -80,10 +86,12 @@ public sealed record DatasetEntry(
     string? HeroImageFile = null);
 
 public sealed record DatasetVariant(
-    // SQL-resolvable identifier (e.g. `coco-test2017`). The install
+    // SQL-resolvable identifier (e.g. `coco_test2017`). The install
     // service keys on this; the user references it as
-    // `datasets.<id>(...)` in queries. Must be unique across the
-    // manifest, not just within the parent entry.
+    // `<schema>.<id>` (default schema `datasets`) in queries. Must be
+    // unique across the manifest, not just within the parent entry, and
+    // must be a valid SQL identifier (snake_case, no hyphens) since it
+    // doubles as the bound table name.
     string Id,
     // Variant-specific subtitle. Shown on the variant tab and the
     // active-variant header in the detail pane (e.g. "test2017
@@ -122,12 +130,6 @@ public sealed record DatasetVariant(
     /// </summary>
     [JsonIgnore]
     public IReadOnlyList<CatalogIngestJob> Ingest => Versions[0].Ingest;
-
-    /// <summary>
-    /// Shorthand for <c>Versions[0].InstallSql</c>.
-    /// </summary>
-    [JsonIgnore]
-    public string? InstallSql => Versions[0].InstallSql;
 }
 
 // One immutable, dated cut of a variant. Mirrors CatalogVersion on the
@@ -150,12 +152,6 @@ public sealed record CatalogDatasetVersion(
     // without any explicit extraction step. The output lands at
     // `<ingestedRoot>/<id>/<version>/<tableName>.datum`.
     IReadOnlyList<CatalogIngestJob> Ingest,
-    // Path (relative to the catalog.json directory) to the .sql file
-    // that registers this cut's catalog substrate views. Lives under
-    // the per-entry folder `sql/<catalog-id>/<version>.sql`. Optional —
-    // entries with no installSql just produce raw `.datum` files at the
-    // ingested root.
-    string? InstallSql = null,
     // Per-version deprecation.
     bool Deprecated = false,
     string? DeprecationReason = null);

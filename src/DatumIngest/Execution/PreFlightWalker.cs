@@ -73,13 +73,20 @@ internal static class PreFlightWalker
     /// The function registry — used for "is this bare name a real
     /// function?" checks and as a typo-suggestion candidate pool.
     /// </param>
+    /// <param name="datasetSource">
+    /// Optional dataset pre-flight source. Hosts that ship a dataset
+    /// catalog pass an implementation so <c>FROM &lt;schema&gt;.&lt;table&gt;</c>
+    /// table references against the manifest emit install requirements.
+    /// <see langword="null"/> for hosts without a dataset surface.
+    /// </param>
     public static PreFlightRequirements Walk(
         QueryExpression query,
         ModelCatalog? models,
         ICatalogVocabulary? vocabulary,
-        FunctionRegistry functions)
+        FunctionRegistry functions,
+        IPreFlightDatasetSource? datasetSource = null)
     {
-        Builder builder = new(models, vocabulary, functions);
+        Builder builder = new(models, vocabulary, functions, datasetSource);
         builder.VisitQuery(query);
         return builder.Build();
     }
@@ -87,7 +94,7 @@ internal static class PreFlightWalker
     /// <summary>
     /// Statement-level entrypoint. Dispatches to the right visit method
     /// for the top-level shape: pure queries delegate to
-    /// <see cref="Walk(QueryExpression, ModelCatalog?, ICatalogVocabulary?, FunctionRegistry)"/>;
+    /// <see cref="Walk(QueryExpression, ModelCatalog?, ICatalogVocabulary?, FunctionRegistry, IPreFlightDatasetSource?)"/>;
     /// <c>INSERT</c> / <c>UPDATE</c> / <c>DELETE</c> walk their own
     /// expression slots (WHERE, SET assignments, VALUES tuples,
     /// RETURNING projections). All other statement types (DDL, CALL,
@@ -105,9 +112,10 @@ internal static class PreFlightWalker
         Statement statement,
         ModelCatalog? models,
         ICatalogVocabulary? vocabulary,
-        FunctionRegistry functions)
+        FunctionRegistry functions,
+        IPreFlightDatasetSource? datasetSource = null)
     {
-        Builder builder = new(models, vocabulary, functions);
+        Builder builder = new(models, vocabulary, functions, datasetSource);
         switch (statement)
         {
             case QueryStatement qs:
@@ -136,23 +144,31 @@ internal static class PreFlightWalker
         private readonly ModelCatalog? _models;
         private readonly ICatalogVocabulary? _vocabulary;
         private readonly FunctionRegistry _functions;
+        private readonly IPreFlightDatasetSource? _datasetSource;
 
         private readonly List<PreFlightModelRequirement> _reqs = [];
+        private readonly List<PreFlightDatasetRequirement> _datasetReqs = [];
         private readonly List<PreFlightSuggestion> _suggestions = [];
         // Dedupe by typed reference so the same call site appearing
         // twice in a query (`SELECT models.foo(a), models.foo(b)`)
         // emits one requirement, not two.
         private readonly HashSet<string> _seenRefs = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenTypos = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _seenDatasetRefs = new(StringComparer.OrdinalIgnoreCase);
 
-        public Builder(ModelCatalog? models, ICatalogVocabulary? vocabulary, FunctionRegistry functions)
+        public Builder(
+            ModelCatalog? models,
+            ICatalogVocabulary? vocabulary,
+            FunctionRegistry functions,
+            IPreFlightDatasetSource? datasetSource)
         {
             _models = models;
             _vocabulary = vocabulary;
             _functions = functions;
+            _datasetSource = datasetSource;
         }
 
-        public PreFlightRequirements Build() => new(_reqs, _suggestions);
+        public PreFlightRequirements Build() => new(_reqs, _datasetReqs, _suggestions);
 
         public void VisitQuery(QueryExpression query)
         {
@@ -282,7 +298,37 @@ internal static class PreFlightWalker
                 case FunctionSource fn:
                     foreach (Expression arg in fn.Arguments) { VisitExpression(arg); }
                     break;
+                case TableReference tr:
+                    EvaluateTableReference(tr);
+                    break;
             }
+        }
+
+        private void EvaluateTableReference(TableReference tr)
+        {
+            if (_datasetSource is null || tr.SchemaName is null) return;
+            if (!_datasetSource.IsDatasetSchema(tr.SchemaName)) return;
+            if (!_datasetSource.TryDescribe(tr.SchemaName, tr.Name, out PreFlightDatasetCandidate? d))
+            {
+                // The schema is dataset-mounted but the table name doesn't
+                // resolve to a known variant. Could be a typo against the
+                // manifest; treat as opaque for now — the planner will
+                // surface the "table not found" error downstream. A future
+                // pass could suggest the closest known variant id.
+                return;
+            }
+            if (d.IsInstalled) return;
+            string typed = $"{tr.SchemaName}.{tr.Name}";
+            if (!_seenDatasetRefs.Add(typed)) return;
+            _datasetReqs.Add(new PreFlightDatasetRequirement(
+                TypedReference: typed,
+                Identifier: tr.Name,
+                VariantId: d.VariantId,
+                EntryName: d.EntryName,
+                DisplayName: d.DisplayName,
+                Version: d.Version,
+                ApproxArchiveBytes: d.ApproxArchiveBytes,
+                LicenseIds: d.LicenseIds));
         }
 
         private void VisitExpression(Expression expression)

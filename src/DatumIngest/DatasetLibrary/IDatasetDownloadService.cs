@@ -43,6 +43,16 @@ public interface IDatasetDownloadService
 
     // Deletes all `*.part` files inside the dataset's raw-cache folder.
     Task DeletePartialsAsync(string datasetId, CancellationToken ct = default);
+
+    // Fired after every terminal install / uninstall — the set of
+    // installed variants may have changed. The dataset schema binder
+    // subscribes so the catalog's bound-tables snapshot tracks reality
+    // without polling. At-most-one subscriber; the host init service
+    // sets this once after construction.
+    //
+    // Exceptions thrown by the callback are swallowed and logged so a
+    // misbehaving binder can't break the install pipeline.
+    Func<CancellationToken, Task>? OnVariantsChanged { get; set; }
 }
 
 // Per-dataset lifecycle state surfaced to the UI. Mirrors
@@ -50,11 +60,9 @@ public interface IDatasetDownloadService
 // transitions:
 //   NotDownloaded -> (download starts) -> Partial (download running, no
 //   .datum yet) -> Installed (every ingest job's .datum is on disk).
-// The model-side `Downloaded` state (files-on-disk + installSql not yet
-// run) doesn't exist here — datasets in PR 2 have no installSql; once
-// the .datum files are produced the dataset is usable. A future PR may
-// add a `Downloaded` state when dataset installSql lands for catalog
-// substrate views.
+// Datasets have no installSql step — the .datum files at known paths
+// are bound directly into the configured schema by the catalog (see
+// DatasetEntry.Schema), so being on disk is the only "ready" condition.
 public enum DatasetInstallState
 {
     NotDownloaded,

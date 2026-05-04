@@ -24,16 +24,6 @@
     "are deletable once ingest completes."
   ],
   "schemaVersion": 1,
-  "licenses": {
-    "cc-by-4.0": {
-      "title": "Creative Commons Attribution 4.0 International",
-      "spdx": "CC-BY-4.0",
-      "canonicalUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
-      "textFile": "licenses/cc-by-4.0.txt",
-      "summary": "Permissive license. Allows commercial use, modification, and redistribution. Requires attribution to the original author.",
-      "requiresAcceptance": false
-    }
-  },
   "datasets": [
     {
       "name": "COCO 2017",
@@ -55,7 +45,7 @@
       "heroImageFile": "cards/coco2017/hero.png",
       "variants": [
         {
-          "id": "coco-test2017",
+          "id": "coco_test2017",
           "displayName": "test2017 (images)",
           "summary": "40,670 unlabeled test images. Largest split; the held-out evaluation set with no public annotations. Best for image-only experiments — pretrained detectors / captioners / depth estimators run end-to-end without an annotation pipeline.",
           "approxArchiveBytes": 6646972416,
@@ -86,7 +76,7 @@
           ]
         },
         {
-          "id": "coco-val2017",
+          "id": "coco_val2017",
           "displayName": "val2017 (images)",
           "summary": "5,000 validation images. The standard COCO benchmark slice — every mAP / BLEU / CIDEr number you see reported in a paper is computed against this split. Annotations (bbox / segmentation / captions / keypoints) ship separately and require the JSON deserializer (deferred to a follow-up); this variant is images-only for now.",
           "approxArchiveBytes": 815585330,
@@ -117,7 +107,7 @@
           ]
         },
         {
-          "id": "coco-train2017",
+          "id": "coco_train2017",
           "displayName": "train2017 (images)",
           "summary": "118,287 training images. The largest 2017 split — used to train (or fine-tune) most COCO-pretrained detectors, segmenters, and captioners. Annotations ship separately and require the JSON deserializer (deferred to a follow-up); this variant is images-only for now. At ~18 GB it's by far the heaviest install in the family — reach for val2017 or test2017 first unless you genuinely need the training set on disk.",
           "approxArchiveBytes": 19309994224,

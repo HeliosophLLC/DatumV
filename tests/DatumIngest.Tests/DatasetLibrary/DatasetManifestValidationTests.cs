@@ -1,5 +1,6 @@
 using DatumIngest.DatasetLibrary;
 using DatumIngest.ModelLibrary;
+using DatumIngest.Tests.Support;
 
 // ManifestStore exists in both DatumIngest.DatasetLibrary and
 // DatumIngest.ModelLibrary; this file only exercises the dataset one.
@@ -21,7 +22,7 @@ public sealed class DatasetManifestValidationTests
     public void ValidManifest_Passes()
     {
         DatasetCatalogManifest manifest = BuildOneEntryManifest();
-        ManifestStore.ValidateDatasets(manifest, ManifestPath);
+        ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance);
     }
 
     [Fact]
@@ -29,7 +30,7 @@ public sealed class DatasetManifestValidationTests
     {
         DatasetCatalogManifest manifest = BuildOneEntryManifest() with { SchemaVersion = 99 };
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("schemaVersion", ex.Message);
     }
 
@@ -38,7 +39,7 @@ public sealed class DatasetManifestValidationTests
     {
         DatasetCatalogManifest manifest = WithEntry(BuildEntry() with { Summary = "  " });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("summary", ex.Message);
     }
 
@@ -47,7 +48,7 @@ public sealed class DatasetManifestValidationTests
     {
         DatasetCatalogManifest manifest = WithEntry(BuildEntry() with { Variants = [] });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("variants", ex.Message);
     }
 
@@ -62,10 +63,9 @@ public sealed class DatasetManifestValidationTests
         };
         DatasetCatalogManifest manifest = new(
             SchemaVersion: 1,
-            Licenses: BuildLicenses(),
             Datasets: [a, b]);
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("duplicate", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -87,10 +87,9 @@ public sealed class DatasetManifestValidationTests
         };
         DatasetCatalogManifest manifest = new(
             SchemaVersion: 1,
-            Licenses: BuildLicenses(),
             Datasets: [a, b]);
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("shared", ex.Message);
     }
 
@@ -107,7 +106,7 @@ public sealed class DatasetManifestValidationTests
         };
         DatasetCatalogManifest manifest = WithEntry(entry);
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("v1", ex.Message);
     }
 
@@ -119,7 +118,7 @@ public sealed class DatasetManifestValidationTests
             Variants = [BuildVariant() with { Id = "  " }],
         });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("id", ex.Message);
     }
 
@@ -134,7 +133,7 @@ public sealed class DatasetManifestValidationTests
             ],
         });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("sources", ex.Message);
     }
 
@@ -149,7 +148,7 @@ public sealed class DatasetManifestValidationTests
             ],
         });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("ingest", ex.Message);
     }
 
@@ -177,7 +176,7 @@ public sealed class DatasetManifestValidationTests
             ],
         });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("duplicate", ex.Message);
         Assert.Contains("images", ex.Message);
     }
@@ -190,7 +189,7 @@ public sealed class DatasetManifestValidationTests
             LicenseIds = ["nonexistent-license"],
         });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("nonexistent-license", ex.Message);
     }
 
@@ -199,7 +198,7 @@ public sealed class DatasetManifestValidationTests
     {
         DatasetCatalogManifest manifest = WithEntry(BuildEntry() with { Modalities = [] });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("modalities", ex.Message);
     }
 
@@ -211,7 +210,7 @@ public sealed class DatasetManifestValidationTests
             Modalities = ["NotAThing"],
         });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("NotAThing", ex.Message);
     }
 
@@ -226,7 +225,7 @@ public sealed class DatasetManifestValidationTests
         {
             Modalities = ["image"],
         });
-        ManifestStore.ValidateDatasets(manifest, ManifestPath);
+        ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance);
     }
 
     [Fact]
@@ -237,7 +236,7 @@ public sealed class DatasetManifestValidationTests
             SuitableForTasks = ["NotARealTask"],
         });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("NotARealTask", ex.Message);
     }
 
@@ -248,7 +247,7 @@ public sealed class DatasetManifestValidationTests
         {
             SuitableForTasks = ["LabeledObjectDetector", "ImageCaptioner"],
         });
-        ManifestStore.ValidateDatasets(manifest, ManifestPath);
+        ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance);
     }
 
     [Fact]
@@ -259,7 +258,7 @@ public sealed class DatasetManifestValidationTests
             CardFile = "cards/does-not-exist.md",
         });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("does-not-exist.md", ex.Message);
     }
 
@@ -272,7 +271,7 @@ public sealed class DatasetManifestValidationTests
             Variants = [BuildVariant() with { Versions = [deprecatedHead] }],
         });
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => ManifestStore.ValidateDatasets(manifest, ManifestPath));
+            () => ManifestStore.ValidateDatasets(manifest, ManifestPath, TestLicenseRegistry.Instance));
         Assert.Contains("deprecated", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -282,19 +281,7 @@ public sealed class DatasetManifestValidationTests
         => WithEntry(BuildEntry());
 
     private static DatasetCatalogManifest WithEntry(DatasetEntry entry)
-        => new(SchemaVersion: 1, Licenses: BuildLicenses(), Datasets: [entry]);
-
-    private static IReadOnlyDictionary<string, CatalogLicense> BuildLicenses()
-        => new Dictionary<string, CatalogLicense>(StringComparer.Ordinal)
-        {
-            ["cc-by-4.0"] = new(
-                Title: "Creative Commons Attribution 4.0",
-                Spdx: "CC-BY-4.0",
-                CanonicalUrl: "https://example.invalid/",
-                TextFile: "licenses/cc-by-4.0.txt",
-                Summary: "Permissive.",
-                RequiresAcceptance: false),
-        };
+        => new(SchemaVersion: 1, Datasets: [entry]);
 
     private static DatasetEntry BuildEntry()
         => new(
@@ -309,7 +296,7 @@ public sealed class DatasetManifestValidationTests
 
     private static DatasetVariant BuildVariant()
         => new(
-            Id: "coco-test2017",
+            Id: "coco_test2017",
             DisplayName: "test2017 (images)",
             Summary: "40,670 unlabeled test images.",
             ApproxArchiveBytes: 1_000_000_000,
@@ -322,6 +309,5 @@ public sealed class DatasetManifestValidationTests
         => new(
             Version: "2017",
             Sources: [new HttpsSource([new HttpsFile("https://example.invalid/test2017.zip", "test2017.zip")])],
-            Ingest: [new CatalogIngestJob("test2017.zip", "images")],
-            InstallSql: null);
+            Ingest: [new CatalogIngestJob("test2017.zip", "images")]);
 }

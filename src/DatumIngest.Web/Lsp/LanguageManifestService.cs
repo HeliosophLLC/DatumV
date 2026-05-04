@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.DatasetLibrary;
 using DatumIngest.LanguageServer;
 using DatumIngest.Manifest;
 
@@ -34,12 +35,21 @@ namespace DatumIngest.Web.Lsp;
 public sealed class LanguageManifestService
 {
     private readonly TableCatalog _catalog;
+    private readonly DatasetSchemaBinder? _datasetBinder;
     private readonly LanguageService _service = new();
     private readonly object _rebuildLock = new();
 
     public LanguageManifestService(TableCatalog catalog)
+        : this(catalog, datasetBinder: null) { }
+
+    public LanguageManifestService(TableCatalog catalog, DatasetSchemaBinder? datasetBinder)
     {
         _catalog = catalog;
+        _datasetBinder = datasetBinder;
+        if (datasetBinder is not null)
+        {
+            datasetBinder.BindingsChanged += Rebuild;
+        }
         Rebuild();
         Subscribe(catalog.Events);
     }
@@ -62,7 +72,8 @@ public sealed class LanguageManifestService
     {
         lock (_rebuildLock)
         {
-            LanguageServerManifest manifest = CatalogManifestBuilder.Build(_catalog, _catalog.Functions);
+            LanguageServerManifest manifest = CatalogManifestBuilder.Build(
+                _catalog, _catalog.Functions, _datasetBinder);
             _service.Initialize(manifest);
             CurrentManifest = manifest;
         }

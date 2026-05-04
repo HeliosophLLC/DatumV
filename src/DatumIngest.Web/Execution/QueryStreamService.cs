@@ -36,7 +36,7 @@ namespace DatumIngest.Web.Execution;
 public sealed class QueryStreamService
 {
     private readonly TableCatalog _catalog;
-    private readonly IManifestStore? _manifestStore;
+    private readonly ILicenseRegistry? _licenseRegistry;
     private readonly ILicenseAcceptanceService? _licenses;
 
     public QueryStreamService(TableCatalog catalog)
@@ -44,20 +44,20 @@ public sealed class QueryStreamService
         _catalog = catalog;
     }
 
-    // Preferred ctor for the web host — wires the manifest + license-
-    // acceptance services so pre-flight events can surface license info
-    // (title/summary/accepted flag) up front, sparing the install modal
-    // from racing 412/license retries after the user clicks Install.
-    // Standalone hosts that construct the service with just the catalog
-    // (CLI, tests) still work; the pre-flight projection then skips
-    // license enrichment and emits empty Licenses arrays.
+    // Preferred ctor for the web host — wires the central license
+    // registry + acceptance service so pre-flight events can surface
+    // license info (title/summary/accepted flag) up front, sparing the
+    // install modal from racing 412/license retries after the user
+    // clicks Install. Standalone hosts that construct with just the
+    // catalog (CLI, tests) still work; the pre-flight projection then
+    // skips license enrichment and emits empty Licenses arrays.
     public QueryStreamService(
         TableCatalog catalog,
-        IManifestStore manifestStore,
+        ILicenseRegistry licenseRegistry,
         ILicenseAcceptanceService licenses)
     {
         _catalog = catalog;
-        _manifestStore = manifestStore;
+        _licenseRegistry = licenseRegistry;
         _licenses = licenses;
     }
 
@@ -460,14 +460,17 @@ public sealed class QueryStreamService
     private async Task<PreFlightRequiredEvent> BuildPreFlightEventAsync(
         PreFlightRequiredException ex, CancellationToken ct)
     {
+        // Single source of truth for license metadata: the central
+        // registry, which both the model and dataset catalogs reference
+        // by id. Empty when no registry was wired (standalone hosts).
         IReadOnlyDictionary<string, CatalogLicense> licenseDict =
-            _manifestStore?.Manifest.Licenses
-                ?? (IReadOnlyDictionary<string, CatalogLicense>)new Dictionary<string, CatalogLicense>();
+            _licenseRegistry?.All
+            ?? (IReadOnlyDictionary<string, CatalogLicense>)new Dictionary<string, CatalogLicense>();
 
         // Pre-resolve acceptance state for the union of license ids
-        // referenced across all model requirements. Avoids re-querying the
-        // acceptance store per-row when the same license id appears on
-        // multiple models in the same batch.
+        // referenced across all model + dataset requirements. Avoids
+        // re-querying the acceptance store per-row when the same license
+        // id appears on multiple entries in the same batch.
         Dictionary<string, bool> acceptedById = new(StringComparer.Ordinal);
         if (_licenses is not null)
         {
@@ -482,36 +485,22 @@ public sealed class QueryStreamService
                     }
                 }
             }
+            foreach (PreFlightDatasetRequirement d in ex.Requirements.Datasets)
+            {
+                foreach (string id in d.LicenseIds)
+                {
+                    if (seen.Add(id))
+                    {
+                        acceptedById[id] = await _licenses.IsAcceptedAsync(id, ct).ConfigureAwait(false);
+                    }
+                }
+            }
         }
 
         List<PreFlightModelRequirementWire> models = new(ex.Requirements.Models.Count);
         foreach (PreFlightModelRequirement r in ex.Requirements.Models)
         {
-            List<PreFlightLicenseWire> licenses = new(r.LicenseIds.Count);
-            foreach (string id in r.LicenseIds)
-            {
-                if (!licenseDict.TryGetValue(id, out CatalogLicense? meta))
-                {
-                    // Unknown id slips through with sentinel metadata so the
-                    // UI still renders a badge and the user has something
-                    // to click on; the install-time gate would still catch
-                    // it as an error if the user proceeded.
-                    licenses.Add(new PreFlightLicenseWire(
-                        Id: id,
-                        Title: id,
-                        Summary: string.Empty,
-                        RequiresAcceptance: true,
-                        Accepted: false));
-                    continue;
-                }
-                bool accepted = acceptedById.TryGetValue(id, out bool a) && a;
-                licenses.Add(new PreFlightLicenseWire(
-                    Id: id,
-                    Title: meta.Title,
-                    Summary: meta.Summary,
-                    RequiresAcceptance: meta.RequiresAcceptance,
-                    Accepted: accepted));
-            }
+            List<PreFlightLicenseWire> licenses = BuildLicenseRows(r.LicenseIds, licenseDict, acceptedById);
 
             models.Add(new PreFlightModelRequirementWire(
                 r.TypedReference,
@@ -528,12 +517,55 @@ public sealed class QueryStreamService
                 r.VersionDeprecationReason,
                 licenses));
         }
+        List<PreFlightDatasetRequirementWire> datasets = new(ex.Requirements.Datasets.Count);
+        foreach (PreFlightDatasetRequirement d in ex.Requirements.Datasets)
+        {
+            List<PreFlightLicenseWire> licenses = BuildLicenseRows(d.LicenseIds, licenseDict, acceptedById);
+            datasets.Add(new PreFlightDatasetRequirementWire(
+                TypedReference: d.TypedReference,
+                Identifier: d.Identifier,
+                VariantId: d.VariantId,
+                EntryName: d.EntryName,
+                DisplayName: d.DisplayName,
+                Version: d.Version,
+                ApproxArchiveBytes: d.ApproxArchiveBytes,
+                Licenses: licenses));
+        }
         List<PreFlightSuggestionWire> suggestions = new(ex.Requirements.Suggestions.Count);
         foreach (PreFlightSuggestion s in ex.Requirements.Suggestions)
         {
             suggestions.Add(new PreFlightSuggestionWire(s.TypedName, s.Suggestion));
         }
-        return new PreFlightRequiredEvent("preflight_required", ex.Message, models, suggestions);
+        return new PreFlightRequiredEvent("preflight_required", ex.Message, models, datasets, suggestions);
+    }
+
+    private static List<PreFlightLicenseWire> BuildLicenseRows(
+        IReadOnlyList<string> licenseIds,
+        IReadOnlyDictionary<string, CatalogLicense> licenseDict,
+        IReadOnlyDictionary<string, bool> acceptedById)
+    {
+        List<PreFlightLicenseWire> rows = new(licenseIds.Count);
+        foreach (string id in licenseIds)
+        {
+            bool accepted = acceptedById.TryGetValue(id, out bool a) && a;
+            if (!licenseDict.TryGetValue(id, out CatalogLicense? meta))
+            {
+                rows.Add(new PreFlightLicenseWire(
+                    Id: id,
+                    Title: id,
+                    Summary: string.Empty,
+                    RequiresAcceptance: true,
+                    Accepted: accepted));
+                continue;
+            }
+            rows.Add(new PreFlightLicenseWire(
+                Id: id,
+                Title: meta.Title,
+                Summary: meta.Summary,
+                RequiresAcceptance: meta.RequiresAcceptance,
+                Accepted: accepted));
+        }
+        return rows;
     }
 
     private static async ValueTask WriteEventAsync(

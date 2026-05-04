@@ -38,10 +38,10 @@ public sealed class DatasetPathResolverTests : IDisposable
     {
         VersionedDatasetPathResolver resolver = NewResolver();
 
-        Assert.Equal(Path.Combine(_cacheRoot, "coco-test2017"),
-            resolver.GetRawCacheRoot("coco-test2017"));
-        Assert.Equal(Path.Combine(_catalogRoot, "datasets", "coco-test2017"),
-            resolver.GetIngestedRoot("coco-test2017"));
+        Assert.Equal(Path.Combine(_cacheRoot, "coco_test2017"),
+            resolver.GetRawCacheRoot("coco_test2017"));
+        Assert.Equal(Path.Combine(_catalogRoot, "datasets", "coco_test2017"),
+            resolver.GetIngestedRoot("coco_test2017"));
     }
 
     [Fact]
@@ -49,10 +49,10 @@ public sealed class DatasetPathResolverTests : IDisposable
     {
         VersionedDatasetPathResolver resolver = NewResolver();
 
-        Assert.Equal(Path.Combine(_cacheRoot, "coco-test2017", "2017"),
-            resolver.GetRawCacheRoot("coco-test2017", versionPin: "2017"));
-        Assert.Equal(Path.Combine(_catalogRoot, "datasets", "coco-test2017", "2017"),
-            resolver.GetIngestedRoot("coco-test2017", versionPin: "2017"));
+        Assert.Equal(Path.Combine(_cacheRoot, "coco_test2017", "2017"),
+            resolver.GetRawCacheRoot("coco_test2017", versionPin: "2017"));
+        Assert.Equal(Path.Combine(_catalogRoot, "datasets", "coco_test2017", "2017"),
+            resolver.GetIngestedRoot("coco_test2017", versionPin: "2017"));
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class DatasetPathResolverTests : IDisposable
     public void IsVersionOnDisk_ReturnsFalseWhenIngestedFolderMissing()
     {
         VersionedDatasetPathResolver resolver = NewResolver();
-        Assert.False(resolver.IsVersionOnDisk("coco-test2017", "2017"));
+        Assert.False(resolver.IsVersionOnDisk("coco_test2017", "2017"));
     }
 
     [Fact]
@@ -75,8 +75,8 @@ public sealed class DatasetPathResolverTests : IDisposable
     {
         VersionedDatasetPathResolver resolver = NewResolver();
         Directory.CreateDirectory(
-            Path.Combine(_catalogRoot, "datasets", "coco-test2017", "2017"));
-        Assert.True(resolver.IsVersionOnDisk("coco-test2017", "2017"));
+            Path.Combine(_catalogRoot, "datasets", "coco_test2017", "2017"));
+        Assert.True(resolver.IsVersionOnDisk("coco_test2017", "2017"));
     }
 
     [Fact]
@@ -87,8 +87,8 @@ public sealed class DatasetPathResolverTests : IDisposable
         // the .datum files under the ingested root, not the archive.
         VersionedDatasetPathResolver resolver = NewResolver();
         Directory.CreateDirectory(
-            Path.Combine(_cacheRoot, "coco-test2017", "2017"));
-        Assert.False(resolver.IsVersionOnDisk("coco-test2017", "2017"));
+            Path.Combine(_cacheRoot, "coco_test2017", "2017"));
+        Assert.False(resolver.IsVersionOnDisk("coco_test2017", "2017"));
     }
 
     [Fact]

@@ -12,14 +12,10 @@ public interface IManifestStore
     CatalogManifest Manifest { get; }
 
     // Absolute path to the directory that holds catalog.json. Paths inside
-    // the manifest (license textFile, installSql, future per-model assets)
-    // resolve relative to this directory.
+    // the manifest (installSql, family card files, hero images) resolve
+    // relative to this directory. License text lives in the central
+    // ILicenseRegistry, not under the per-manifest directory.
     string ManifestDirectory { get; }
-
-    // Returns the raw license text (markdown or plain text, depending on
-    // license) for the given license id. Null if the id is unknown or the
-    // referenced textFile is missing on disk.
-    string? GetLicenseText(string licenseId);
 
     // Returns the markdown body of the family card for `modelFamily`, or
     // null when no entry in that family declares a `familyCardFile`.

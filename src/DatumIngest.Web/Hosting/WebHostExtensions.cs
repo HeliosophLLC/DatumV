@@ -94,6 +94,11 @@ public static class WebHostExtensions
 
             services.AddHostedService<CatalogInitializationService>();
 
+            // Dataset catalog mount + bind. Runs after the model catalog
+            // init so the TableCatalog is fully ready before the dataset
+            // schemas mount.
+            services.AddHostedService<DatasetCatalogInitializationService>();
+
             // Language-intelligence host. Singleton because it owns one
             // LanguageService instance + the catalog-event subscriptions.
             // Hosted-service shim eagerly resolves it at startup so the

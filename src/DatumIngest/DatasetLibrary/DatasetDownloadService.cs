@@ -19,6 +19,7 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
     private readonly IManifestStore _store;
     private readonly IReadOnlyDictionary<string, IModelSourceClient> _sources;
     private readonly ILicenseAcceptanceService _licenses;
+    private readonly ILicenseRegistry _licenseRegistry;
     private readonly IDatasetDownloadProgressReporter _reporter;
     private readonly IDatasetPathResolver _paths;
     private readonly IEnumerable<IFileFormat> _fileFormats;
@@ -29,10 +30,14 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
     // Prevents two concurrent installs of the same datasetId.
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _active = new();
 
+    /// <inheritdoc/>
+    public Func<CancellationToken, Task>? OnVariantsChanged { get; set; }
+
     public DatasetDownloadService(
         IManifestStore store,
         IEnumerable<IModelSourceClient> sourceClients,
         ILicenseAcceptanceService licenses,
+        ILicenseRegistry licenseRegistry,
         IDatasetDownloadProgressReporter reporter,
         IDatasetPathResolver paths,
         IEnumerable<IFileFormat> fileFormats,
@@ -42,6 +47,7 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
     {
         _store = store;
         _licenses = licenses;
+        _licenseRegistry = licenseRegistry;
         _reporter = reporter;
         _paths = paths;
         _fileFormats = fileFormats;
@@ -118,7 +124,8 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
         // any bytes move.
         foreach (string licenseId in entry.LicenseIds)
         {
-            if (!_store.Manifest.Licenses.TryGetValue(licenseId, out ModelLibrary.CatalogLicense? license))
+            ModelLibrary.CatalogLicense? license = _licenseRegistry.GetMetadata(licenseId);
+            if (license is null)
             {
                 throw new InvalidOperationException(
                     $"Dataset entry '{entry.Name}' references unknown license {licenseId}.");
@@ -145,12 +152,27 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
         return Task.CompletedTask;
     }
 
-    public Task UninstallAsync(string variantId, CancellationToken ct = default)
+    public async Task UninstallAsync(string variantId, CancellationToken ct = default)
     {
         (_, DatasetVariant variant) = ResolveVariant(variantId);
         string idRoot = Path.Combine(_paths.IngestedDatasetsRoot, variant.Id);
         if (Directory.Exists(idRoot)) Directory.Delete(idRoot, recursive: true);
-        return Task.CompletedTask;
+        await NotifyVariantsChangedAsync().ConfigureAwait(false);
+    }
+
+    private async Task NotifyVariantsChangedAsync()
+    {
+        Func<CancellationToken, Task>? handler = OnVariantsChanged;
+        if (handler is null) return;
+        try
+        {
+            await handler(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Dataset OnVariantsChanged subscriber threw; binder may be out of sync.");
+        }
     }
 
     public Task<long> GetPartialBytesAsync(string variantId, CancellationToken ct = default)
@@ -204,9 +226,10 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
 
     // Sequential source-fallback loop, then per-job ingest. On failure at
     // any phase, OnFailed fires and partials stay on disk so a retry can
-    // reuse them. Mirrors the spirit of ModelDownloadService.RunDownloadAsync
-    // with the model-side `installSql` step replaced by the per-ingest-job
-    // Ingester call.
+    // reuse them. Mirrors the spirit of ModelDownloadService.RunDownloadAsync,
+    // minus the model-side installSql step — datasets bind directly into
+    // the configured schema via the catalog (see DatasetEntry.Schema), so
+    // once every job's .datum lands on disk the variant is callable.
     private async Task RunInstallAsync(
         DatasetVariant variant,
         CatalogDatasetVersion version,
@@ -311,6 +334,7 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
             await _reporter.OnInstalledAsync(
                 new DatasetInstalled(variant.Id), CancellationToken.None)
                 .ConfigureAwait(false);
+            await NotifyVariantsChangedAsync().ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

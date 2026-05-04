@@ -14,7 +14,6 @@ namespace DatumIngest.ModelLibrary;
 
 public sealed record CatalogManifest(
     int SchemaVersion,
-    IReadOnlyDictionary<string, CatalogLicense> Licenses,
     IReadOnlyList<CatalogModel> Models);
 
 public sealed record CatalogLicense(

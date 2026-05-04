@@ -37,6 +37,12 @@ public static class ModelLibraryServiceExtensions
         ModelLibraryOptions options)
     {
         services.AddSingleton(options);
+        // Central license registry (one licenses/index.json + text files
+        // at the repo root). Both the model catalog and the dataset
+        // catalog reference licenses by id from here. TryAddSingleton so
+        // tests / standalone hosts that register a stub registry first
+        // win.
+        services.TryAddSingleton<ILicenseRegistry, LicenseRegistry>();
         services.AddSingleton<IManifestStore, ManifestStore>();
         services.AddSingleton<ILicenseAcceptanceService, LicenseAcceptanceService>();
 

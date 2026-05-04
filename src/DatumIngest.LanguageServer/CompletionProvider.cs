@@ -198,6 +198,7 @@ public sealed class CompletionProvider
                     AddQualifiedColumns(items, zone.TableQualifier, zone.TvfAliasesInScope, zone.TableAliasesInScope, cteSchemas);
                     AddSchemaRoutines(items, zone.TableQualifier);
                     AddSchemaTables(items, zone.TableQualifier);
+                    AddDatasetVariants(items, zone.TableQualifier);
                 }
                 break;
 
@@ -405,6 +406,12 @@ public sealed class CompletionProvider
             string unqualified = table.Name[(dot + 1)..];
             if (!ContainsIgnoreCase(_manifest.SearchPath, schema)) continue;
             if (!seenUnqualified.Add(unqualified)) continue;
+            // Skip the bare-name shortcut when the unqualified name
+            // collides with a known schema (e.g. `system.datasets`'s
+            // shortcut `datasets` clashes with the `datasets` schema
+            // itself). AddSchemaNames will surface the schema; let the
+            // user drill explicitly to disambiguate.
+            if (IsKnownSchema(unqualified)) continue;
 
             items.Add(new CompletionItem
             {
@@ -811,8 +818,16 @@ public sealed class CompletionProvider
         TableSchemaEntry? table = _manifest.Tables.FirstOrDefault(
             entry => string.Equals(entry.Name, lookupName, StringComparison.OrdinalIgnoreCase));
 
-        if (table is null && !lookupName.Contains('.'))
+        if (table is null && !lookupName.Contains('.') && !IsKnownSchema(lookupName))
         {
+            // Walk search_path so `users.col` resolves through `public.users`
+            // when `users` isn't directly registered. Skip the walk when
+            // the qualifier IS a schema name — otherwise a `datasets.`
+            // prefix would erroneously resolve to `system.datasets` (the
+            // virtual table listing installed datasets) and spawn that
+            // table's columns instead of letting the schema-aware paths
+            // (AddSchemaTables / AddDatasetVariants) surface the schema's
+            // tables.
             foreach (string schema in _manifest.SearchPath)
             {
                 string qualified = $"{schema}.{lookupName}";
@@ -995,6 +1010,20 @@ public sealed class CompletionProvider
             if (_manifest.Models is not null && _manifest.Models.Count > 0)
             {
                 seen.Add("models");
+            }
+        }
+
+        if (include.HasFlag(SchemaSurfaces.Tables) && _manifest.Datasets is not null)
+        {
+            // Dataset variants surface as `<schema>.<name>` tables. The
+            // installed ones already light up via the Tables iteration
+            // above (their providers register under their schema), but
+            // for schemas whose ONLY entries are discovered the schema
+            // is invisible until install — undermining the autocomplete
+            // bootstrap. Walk the dataset list to fill in those names.
+            foreach (DatasetEntry dataset in _manifest.Datasets)
+            {
+                seen.Add(dataset.Schema);
             }
         }
 
@@ -1288,6 +1317,90 @@ public sealed class CompletionProvider
                 SortOrder = 0,
             });
         }
+    }
+
+    /// <summary>
+    /// Surfaces dataset variants from <see cref="LanguageServerManifest.Datasets"/>
+    /// for a <c>&lt;dataset-schema&gt;.</c> after-dot zone. Installed
+    /// variants already surface through <see cref="AddSchemaTables"/>
+    /// (the binder mounts their providers, so they live in
+    /// <see cref="LanguageServerManifest.Tables"/> too); this method
+    /// adds the "discovered" rows — declared in the manifest but not
+    /// yet installed — so the user can autocomplete them and have
+    /// pre-flight prompt an install on first use. Mirrors the model
+    /// side's `installable` badge convention.
+    /// </summary>
+    private void AddDatasetVariants(List<CompletionItem> items, string schema)
+    {
+        if (_manifest.Datasets is null) return;
+        foreach (DatasetEntry dataset in _manifest.Datasets)
+        {
+            if (dataset.Status != DatasetInstallStatus.Discovered) continue;
+            if (!string.Equals(dataset.Schema, schema, StringComparison.OrdinalIgnoreCase)) continue;
+
+            string sizeBadge = dataset.ApproxArchiveBytes > 0
+                ? $" · ~{FormatBytes(dataset.ApproxArchiveBytes)}"
+                : "";
+            string modalityBadge = dataset.Modalities.Count > 0
+                ? $"[{string.Join(", ", dataset.Modalities)}] "
+                : "";
+            items.Add(new CompletionItem
+            {
+                Label = dataset.Name,
+                LabelSuffix = "installable",
+                Kind = CompletionItemKind.Table,
+                Detail = $"{modalityBadge}{dataset.EntryName} — {dataset.DisplayName} (v{dataset.Version}){sizeBadge}",
+                InsertText = SqlIdentifier.QuoteIfNeeded(dataset.Name) is { } quoted && quoted != dataset.Name
+                    ? quoted
+                    : null,
+                Documentation = $"{dataset.EntryName} · {dataset.DisplayName} (v{dataset.Version})",
+                // Sort after installed tables so the queryable set leads.
+                SortOrder = 2,
+            });
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="name"/> matches a schema the catalog
+    /// surfaces — derived from registered table names + the dataset
+    /// manifest's declared schemas. Distinguishes a schema-qualified
+    /// reference (<c>datasets.coco_test2017</c>) from a bare table
+    /// reference (<c>users.id</c>) so the qualified-column path doesn't
+    /// erroneously expand a schema to a search_path-resolved table.
+    /// </summary>
+    private bool IsKnownSchema(string name)
+    {
+        foreach (TableSchemaEntry table in _manifest.Tables)
+        {
+            int dot = table.Name.IndexOf('.');
+            if (dot > 0
+                && string.Equals(table.Name[..dot], name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        if (_manifest.Datasets is not null)
+        {
+            foreach (DatasetEntry dataset in _manifest.Datasets)
+            {
+                if (string.Equals(dataset.Schema, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        const long KB = 1024;
+        const long MB = KB * 1024;
+        const long GB = MB * 1024;
+        if (bytes >= GB) return $"{bytes / (double)GB:F1} GB";
+        if (bytes >= MB) return $"{bytes / (double)MB:F0} MB";
+        if (bytes >= KB) return $"{bytes / (double)KB:F0} KB";
+        return $"{bytes} B";
     }
 
     private void AddSchemaRoutines(List<CompletionItem> items, string schema)

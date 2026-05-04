@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace DatumIngest.Execution;
 
 /// <summary>
@@ -40,8 +42,9 @@ public sealed class PreFlightRequiredException : ExecutionException
     private static string BuildMessage(PreFlightRequirements r)
     {
         int models = r.Models.Count;
+        int datasets = r.Datasets.Count;
         int suggestions = r.Suggestions.Count;
-        if (models == 0 && suggestions > 0)
+        if (models == 0 && datasets == 0 && suggestions > 0)
         {
             // Typo-only case: surface the first suggestion so CLI / tests
             // without pre-flight projection still get a readable hint.
@@ -51,13 +54,21 @@ public sealed class PreFlightRequiredException : ExecutionException
                 : $" (+{suggestions - 1} more)";
             return $"Unknown function '{first.TypedName}'. Did you mean '{first.Suggestion}'?{tail}";
         }
-        if (models > 0 && suggestions == 0)
+        if (models > 0 && datasets == 0 && suggestions == 0)
         {
             PreFlightModelRequirement first = r.Models[0];
             string tail = models == 1 ? string.Empty : $" (+{models - 1} more)";
             return $"Model '{first.TypedReference}' is not installed.{tail}";
         }
-        return $"Pre-flight blocked: {models} model(s) need install, {suggestions} likely typo(s).";
+        if (models == 0 && datasets > 0 && suggestions == 0)
+        {
+            PreFlightDatasetRequirement first = r.Datasets[0];
+            string tail = datasets == 1 ? string.Empty : $" (+{datasets - 1} more)";
+            return $"Dataset '{first.TypedReference}' is not installed.{tail}";
+        }
+        return
+            $"Pre-flight blocked: {models} model(s) need install, " +
+            $"{datasets} dataset(s) need install, {suggestions} likely typo(s).";
     }
 }
 
@@ -69,6 +80,7 @@ public sealed class PreFlightRequiredException : ExecutionException
 /// </summary>
 public sealed record PreFlightRequirements(
     IReadOnlyList<PreFlightModelRequirement> Models,
+    IReadOnlyList<PreFlightDatasetRequirement> Datasets,
     IReadOnlyList<PreFlightSuggestion> Suggestions);
 
 /// <summary>
@@ -113,12 +125,82 @@ public sealed record PreFlightModelRequirement(
     IReadOnlyList<string> LicenseIds);
 
 /// <summary>
+/// One dataset reference the user wrote whose variant isn't installed yet.
+/// Symmetrical to <see cref="PreFlightModelRequirement"/> for the
+/// <c>datasets.X</c> table-source surface — the UI offers an install
+/// flow before any operator is built.
+/// </summary>
+public sealed record PreFlightDatasetRequirement(
+    // The reference as the user typed it: "datasets.coco_test2017".
+    string TypedReference,
+    // The bound table name (no schema prefix). For single-job variants
+    // this is the variant id verbatim; for multi-job variants it's
+    // `<variantId>_<tableName>`.
+    string Identifier,
+    // The install handle the downloader keys on (the variant id).
+    string VariantId,
+    // Parent entry's user-facing name (e.g. "COCO 2017").
+    string EntryName,
+    // Variant subtitle (e.g. "test2017 (images)") for the install modal.
+    string DisplayName,
+    // Recommended catalog version (Versions[0].Version).
+    string Version,
+    // Approximate archive bytes for "this will download ~6.6 GB."
+    long ApproxArchiveBytes,
+    // License ids the user must accept before install. Empty when the
+    // entry has no licenseIds or all of them carry requiresAcceptance=false.
+    IReadOnlyList<string> LicenseIds);
+
+/// <summary>
 /// One likely-typo function reference the user wrote. The UI shows it as
 /// "did you mean …?" instead of executing the query.
 /// </summary>
 public sealed record PreFlightSuggestion(
     string TypedName,
     string Suggestion);
+
+/// <summary>
+/// Read-only window into the dataset catalog used by the pre-flight pass.
+/// Implemented by the dataset binder so PreFlight can resolve
+/// <c>&lt;schema&gt;.&lt;table&gt;</c> table references against the dataset
+/// manifest without coupling the execution layer to DatasetLibrary types
+/// directly. Hosts that don't ship a dataset surface pass
+/// <see langword="null"/>.
+/// </summary>
+public interface IPreFlightDatasetSource
+{
+    /// <summary>True when <paramref name="schema"/> is a schema the dataset
+    /// manifest binds tables into.</summary>
+    bool IsDatasetSchema(string schema);
+
+    /// <summary>
+    /// Tries to describe the table at <c>(schema, name)</c>. Returns true
+    /// with a populated candidate when the manifest knows the variant
+    /// (whether installed or not); false otherwise (typo / unmounted /
+    /// wrong schema). The candidate carries
+    /// <see cref="PreFlightDatasetCandidate.IsInstalled"/> so the walker
+    /// only emits a requirement when the install state warrants it.
+    /// </summary>
+    bool TryDescribe(
+        string schema,
+        string name,
+        [NotNullWhen(true)] out PreFlightDatasetCandidate? candidate);
+}
+
+/// <summary>
+/// Manifest-derived description of a dataset table the walker is
+/// asking about. Carries the install-modal payload (entry / display
+/// name / version / size / license) plus the install state so the
+/// walker can decide whether to emit a requirement.
+/// </summary>
+public sealed record PreFlightDatasetCandidate(
+    string VariantId,
+    string EntryName,
+    string DisplayName,
+    string Version,
+    long ApproxArchiveBytes,
+    IReadOnlyList<string> LicenseIds,
+    bool IsInstalled);
 
 /// <summary>
 /// Why pre-flight blocked a particular model reference.

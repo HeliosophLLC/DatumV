@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DatumIngest\DatumIngest.csproj" />
+    <ProjectReference Include="..\DatumIngest.Serialization\DatumIngest.Serialization.csproj" />
     <ProjectReference Include="..\DatumIngest.LanguageServer\DatumIngest.LanguageServer.csproj" />
   </ItemGroup>
 

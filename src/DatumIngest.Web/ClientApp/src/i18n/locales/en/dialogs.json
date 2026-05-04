@@ -10,13 +10,14 @@
   },
   "preflight": {
     "title": {
-      "install": "Install {count, plural, one {# model} other {# models}} to run this query",
+      "install": "Install {count, plural, one {# item} other {# items}} to run this query",
       "typo": "Check your query",
       "allInFlight": "Waiting on downloads"
     },
     "totalSize": "About {size} to download",
     "section": {
       "install": "Will install",
+      "installDatasets": "Will install (datasets)",
       "pinned": "Pinned version not on disk",
       "unknown": "Pinned version not in catalog",
       "suggestions": "Did you mean…?",

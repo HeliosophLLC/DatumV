@@ -211,12 +211,13 @@ public static class ModelHost
         // directory paths (--model-path / --voices-path); migrating it
         // to the catalog needs either scaffold-arg path templating or a
         // worker refactor, neither of which belongs in this PR.
-        CatalogManifest? catalogManifest = TryLoadCatalogManifest();
-        if (catalogManifest is not null)
+        (CatalogManifest? catalogManifest, ILicenseRegistry? licenseRegistry) =
+            TryLoadCatalogAndLicenses();
+        if (catalogManifest is not null && licenseRegistry is not null)
         {
             string scriptsDirectory = Path.Combine(AppContext.BaseDirectory, "python");
             CatalogDrivenPythonRegistrar.RegisterAll(
-                modelCatalog, pythonEnvironments, catalogManifest, scriptsDirectory);
+                modelCatalog, pythonEnvironments, catalogManifest, licenseRegistry, scriptsDirectory);
         }
 
         // Kokoro 82M TTS retired for the first release alongside the
@@ -308,17 +309,18 @@ public static class ModelHost
     /// doesn't break engine startup; the error surfaces in stderr
     /// instead.
     /// </summary>
-    private static CatalogManifest? TryLoadCatalogManifest()
+    private static (CatalogManifest?, ILicenseRegistry?) TryLoadCatalogAndLicenses()
     {
         try
         {
-            ManifestStore store = new(NullLogger<ManifestStore>.Instance);
-            return store.Manifest;
+            LicenseRegistry licenses = new(NullLogger<LicenseRegistry>.Instance);
+            ManifestStore store = new(licenses, NullLogger<ManifestStore>.Instance);
+            return (store.Manifest, licenses);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[builtin-models] failed to load catalog manifest: {ex.Message}");
-            return null;
+            return (null, null);
         }
     }
 }

@@ -1448,12 +1448,23 @@ public sealed class HoverProvider
             }
         }
 
-        if (table is null)
+        // Pair the table hit (if any) with a dataset row so installed
+        // datasets render with their entry / version / size context
+        // rather than the bare column list. Discovered datasets have no
+        // mounted provider, so the dataset row is the sole source.
+        DatasetEntry? dataset = FindDataset(name);
+
+        if (table is null && dataset is null)
         {
             return null;
         }
 
-        string label = string.Equals(table.Kind, "VIEW", StringComparison.OrdinalIgnoreCase)
+        if (dataset is not null)
+        {
+            return BuildDatasetHover(dataset, table);
+        }
+
+        string label = string.Equals(table!.Kind, "VIEW", StringComparison.OrdinalIgnoreCase)
             ? "View"
             : "Table";
         string header = $"**{label}: {table.Name}** ({table.Columns.Count} columns)\n\n";
@@ -1464,6 +1475,100 @@ public sealed class HoverProvider
         }));
 
         return header + columns;
+    }
+
+    // Resolves a hover target against the dataset manifest, accepting
+    // either the fully-qualified `<schema>.<name>` form or a bare name
+    // (in which case the dataset's declared schema must match by
+    // search-path walk). Returns null when nothing in
+    // <see cref="LanguageServerManifest.Datasets"/> matches.
+    private DatasetEntry? FindDataset(string name)
+    {
+        if (_manifest.Datasets is null) return null;
+
+        int dot = name.IndexOf('.');
+        if (dot > 0)
+        {
+            string schemaPart = name[..dot];
+            string namePart = name[(dot + 1)..];
+            foreach (DatasetEntry d in _manifest.Datasets)
+            {
+                if (string.Equals(d.Schema, schemaPart, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(d.Name, namePart, StringComparison.OrdinalIgnoreCase))
+                {
+                    return d;
+                }
+            }
+            return null;
+        }
+
+        // Bare name — walk the search path. Same precedence as table
+        // resolution, so the user's `SET search_path` survives the
+        // dataset hover too.
+        foreach (string schema in _manifest.SearchPath)
+        {
+            foreach (DatasetEntry d in _manifest.Datasets)
+            {
+                if (string.Equals(d.Schema, schema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(d.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return d;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static string BuildDatasetHover(DatasetEntry dataset, TableSchemaEntry? table)
+    {
+        string statusBadge = dataset.Status == DatasetInstallStatus.Discovered
+            ? " · *installable*"
+            : "";
+        string columnCount = table is not null ? $" ({table.Columns.Count} columns)" : "";
+        string header = $"**Dataset: {dataset.Schema}.{dataset.Name}**{columnCount}{statusBadge}\n\n";
+        string subtitle = $"*{dataset.EntryName} — {dataset.DisplayName} · v{dataset.Version}*\n\n";
+
+        List<string> meta = [];
+        if (dataset.Modalities.Count > 0)
+        {
+            meta.Add($"**Modalities:** {string.Join(", ", dataset.Modalities)}");
+        }
+        if (dataset.ApproxArchiveBytes > 0)
+        {
+            meta.Add($"**Download:** ~{FormatBytes(dataset.ApproxArchiveBytes)}");
+        }
+        if (dataset.ApproxIngestedBytes > 0)
+        {
+            meta.Add($"**Ingested:** ~{FormatBytes(dataset.ApproxIngestedBytes)}");
+        }
+        if (dataset.LicenseIds.Count > 0)
+        {
+            meta.Add($"**License:** {string.Join(", ", dataset.LicenseIds)}");
+        }
+        string metaBlock = meta.Count > 0 ? string.Join("\n\n", meta) + "\n\n" : "";
+
+        string columns = "";
+        if (table is not null && table.Columns.Count > 0)
+        {
+            columns = "---\n\n" + string.Join("\n", table.Columns.Select(column =>
+            {
+                string nullable = column.Nullable ? " *(nullable)*" : "";
+                return $"- `{column.Name}`: `{column.Kind}`{nullable}";
+            }));
+        }
+
+        return header + subtitle + metaBlock + columns;
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        const long KB = 1024;
+        const long MB = KB * 1024;
+        const long GB = MB * 1024;
+        if (bytes >= GB) return $"{bytes / (double)GB:F1} GB";
+        if (bytes >= MB) return $"{bytes / (double)MB:F0} MB";
+        if (bytes >= KB) return $"{bytes / (double)KB:F0} KB";
+        return $"{bytes} B";
     }
 
     private string? GetColumnHover(string name)

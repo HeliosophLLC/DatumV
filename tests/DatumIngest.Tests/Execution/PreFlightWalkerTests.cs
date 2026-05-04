@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.ModelLibrary;
@@ -40,7 +42,6 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
             ApproxSizeMb: 42);
         return new CatalogManifest(
             SchemaVersion: 2,
-            Licenses: new Dictionary<string, CatalogLicense>(),
             Models: [entry]);
     }
 
@@ -420,7 +421,6 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
             ApproxSizeMb: 42);
         CatalogManifest manifest = new(
             SchemaVersion: 2,
-            Licenses: new Dictionary<string, CatalogLicense>(),
             Models: [entry]);
         ICatalogVocabulary vocab = new CatalogVocabulary(manifest);
         FunctionRegistry functions = new();
@@ -435,6 +435,106 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
     }
 
     [Fact]
+    public void DatasetReference_UninstalledVariant_EmitsDatasetRequirement()
+    {
+        FunctionRegistry functions = new();
+        StubDatasetSource source = new(
+            schemas: ["datasets"],
+            candidates: new()
+            {
+                [("datasets", "coco_test2017")] = new PreFlightDatasetCandidate(
+                    VariantId: "coco_test2017",
+                    EntryName: "COCO 2017",
+                    DisplayName: "test2017 (images)",
+                    Version: "2017",
+                    ApproxArchiveBytes: 6_646_972_416,
+                    LicenseIds: ["cc-by-4.0"],
+                    IsInstalled: false),
+            });
+
+        QueryExpression q = Parse("SELECT * FROM datasets.coco_test2017");
+        PreFlightRequirements result = PreFlightWalker.Walk(
+            q, models: null, vocabulary: null, functions, source);
+
+        PreFlightDatasetRequirement req = Assert.Single(result.Datasets);
+        Assert.Equal("datasets.coco_test2017", req.TypedReference);
+        Assert.Equal("coco_test2017", req.Identifier);
+        Assert.Equal("coco_test2017", req.VariantId);
+        Assert.Equal("COCO 2017", req.EntryName);
+        Assert.Equal("2017", req.Version);
+        Assert.Equal(6_646_972_416, req.ApproxArchiveBytes);
+        Assert.Single(req.LicenseIds);
+        Assert.Empty(result.Models);
+        Assert.Empty(result.Suggestions);
+    }
+
+    [Fact]
+    public void DatasetReference_InstalledVariant_EmitsNothing()
+    {
+        FunctionRegistry functions = new();
+        StubDatasetSource source = new(
+            schemas: ["datasets"],
+            candidates: new()
+            {
+                [("datasets", "coco_test2017")] = new PreFlightDatasetCandidate(
+                    VariantId: "coco_test2017",
+                    EntryName: "COCO 2017",
+                    DisplayName: "test2017 (images)",
+                    Version: "2017",
+                    ApproxArchiveBytes: 6_646_972_416,
+                    LicenseIds: ["cc-by-4.0"],
+                    IsInstalled: true),
+            });
+
+        QueryExpression q = Parse("SELECT * FROM datasets.coco_test2017");
+        PreFlightRequirements result = PreFlightWalker.Walk(
+            q, models: null, vocabulary: null, functions, source);
+
+        Assert.Empty(result.Datasets);
+        Assert.Empty(result.Models);
+        Assert.Empty(result.Suggestions);
+    }
+
+    [Fact]
+    public void DatasetReference_NoDatasetSource_EmitsNothing()
+    {
+        FunctionRegistry functions = new();
+
+        QueryExpression q = Parse("SELECT * FROM datasets.coco_test2017");
+        PreFlightRequirements result = PreFlightWalker.Walk(
+            q, models: null, vocabulary: null, functions);
+
+        Assert.Empty(result.Datasets);
+    }
+
+    [Fact]
+    public void DatasetReference_RepeatedSiteInOneQuery_DedupesToOneRequirement()
+    {
+        FunctionRegistry functions = new();
+        StubDatasetSource source = new(
+            schemas: ["datasets"],
+            candidates: new()
+            {
+                [("datasets", "coco_test2017")] = new PreFlightDatasetCandidate(
+                    VariantId: "coco_test2017",
+                    EntryName: "COCO 2017",
+                    DisplayName: "test2017 (images)",
+                    Version: "2017",
+                    ApproxArchiveBytes: 6_646_972_416,
+                    LicenseIds: [],
+                    IsInstalled: false),
+            });
+
+        QueryExpression q = Parse(
+            "SELECT * FROM datasets.coco_test2017 AS a "
+            + "JOIN datasets.coco_test2017 AS b ON a.name = b.name");
+        PreFlightRequirements result = PreFlightWalker.Walk(
+            q, models: null, vocabulary: null, functions, source);
+
+        Assert.Single(result.Datasets);
+    }
+
+    [Fact]
     public void Vocabulary_ByPinnedAs_RespectsExplicitOverride()
     {
         CatalogManifest manifest = BuildManifestWithEntry(
@@ -446,5 +546,40 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
 
         Assert.True(vocab.ByPinnedAs.TryGetValue("foo@9999", out _));
         Assert.False(vocab.ByPinnedAs.TryGetValue("foo@20260529", out _));
+    }
+
+    // Hand-rolled IPreFlightDatasetSource for the dataset-reference tests.
+    // The real binder builds its candidate dict from the dataset manifest;
+    // the stub lets each test plant exactly the (schema, name) entries
+    // it cares about without standing up a full manifest store.
+    private sealed class StubDatasetSource : IPreFlightDatasetSource
+    {
+        private readonly HashSet<string> _schemas;
+        private readonly Dictionary<(string, string), PreFlightDatasetCandidate> _candidates;
+
+        public StubDatasetSource(
+            IReadOnlyCollection<string> schemas,
+            Dictionary<(string, string), PreFlightDatasetCandidate> candidates)
+        {
+            _schemas = new HashSet<string>(schemas, StringComparer.OrdinalIgnoreCase);
+            _candidates = candidates;
+        }
+
+        public bool IsDatasetSchema(string schema)
+            => _schemas.Contains(schema);
+
+        public bool TryDescribe(
+            string schema,
+            string name,
+            [NotNullWhen(true)] out PreFlightDatasetCandidate? candidate)
+        {
+            if (_candidates.TryGetValue((schema, name), out PreFlightDatasetCandidate? c))
+            {
+                candidate = c;
+                return true;
+            }
+            candidate = null;
+            return false;
+        }
     }
 }

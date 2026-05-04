@@ -1,0 +1,98 @@
+{
+  "_comment": [
+    "Centralized license registry. Both the model catalog (models/catalog.json)",
+    "and the dataset catalog (datasets/catalog.json) reference licenses",
+    "by id from this file — neither carries its own licenses{} block.",
+    "",
+    "Schema shape:",
+    "  - licenses{}: id → metadata. textFile paths resolve relative to",
+    "    this json's directory (i.e. <repo>/licenses/<name>.{txt,md}).",
+    "  - requiresAcceptance gates the per-license click-through in the",
+    "    install modals; ILicenseAcceptanceService tracks acceptance",
+    "    state globally by id so accepting once unblocks every entry",
+    "    (model or dataset) that references the same id."
+  ],
+  "schemaVersion": 1,
+  "licenses": {
+    "mit": {
+      "title": "MIT License",
+      "spdx": "MIT",
+      "canonicalUrl": "https://opensource.org/license/mit",
+      "textFile": "mit.txt",
+      "summary": "Permissive open-source license. Allows commercial use, modification, and redistribution. Only requires preserving the original copyright notice.",
+      "requiresAcceptance": false
+    },
+    "apache-2.0": {
+      "title": "Apache License 2.0",
+      "spdx": "Apache-2.0",
+      "canonicalUrl": "https://www.apache.org/licenses/LICENSE-2.0",
+      "textFile": "apache-2.0.txt",
+      "summary": "Permissive open-source license with an explicit patent grant. Allows commercial use, modification, and redistribution. Requires preserving copyright/notice/attribution.",
+      "requiresAcceptance": false
+    },
+    "cc-by-4.0": {
+      "title": "Creative Commons Attribution 4.0 International",
+      "spdx": "CC-BY-4.0",
+      "canonicalUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+      "textFile": "cc-by-4.0.txt",
+      "summary": "Permissive license. Allows commercial use, modification, and redistribution. Requires attribution to the original author.",
+      "requiresAcceptance": false
+    },
+    "bsd-2-clause": {
+      "title": "BSD 2-Clause License",
+      "spdx": "BSD-2-Clause",
+      "canonicalUrl": "https://opensource.org/license/bsd-2-clause",
+      "textFile": "bsd-2-clause.txt",
+      "summary": "Permissive open-source license, also known as the 'Simplified BSD' or 'FreeBSD' license. Allows commercial use, modification, and redistribution. Requires preserving copyright/notice in source + binary redistributions. The simpler sibling of BSD-3-Clause — drops the non-endorsement clause, so derivative products may use the upstream author's name without separate permission.",
+      "requiresAcceptance": false
+    },
+    "bsd-3-clause": {
+      "title": "BSD 3-Clause License",
+      "spdx": "BSD-3-Clause",
+      "canonicalUrl": "https://opensource.org/license/bsd-3-clause",
+      "textFile": "bsd-3-clause.txt",
+      "summary": "Permissive open-source license. Allows commercial use, modification, and redistribution. Requires preserving copyright/notice and forbids using the upstream author's name to endorse derivative products without permission.",
+      "requiresAcceptance": false
+    },
+    "creativeml-openrail-m": {
+      "title": "CreativeML OpenRAIL-M License",
+      "spdx": "CreativeML-OpenRAIL-M",
+      "canonicalUrl": "https://huggingface.co/spaces/CompVis/stable-diffusion-license",
+      "textFile": "creativeml-openrail-m.md",
+      "summary": "Open license with use-based restrictions. Commercial use OK. Prohibits CSAM, discrimination, automated legal/medical decision-making, misinformation generation, and similar misuse. Used by SD 1.x and its fine-tunes.",
+      "requiresAcceptance": true
+    },
+    "creativeml-openrail-pp-m": {
+      "title": "CreativeML OpenRAIL++-M License",
+      "spdx": "CreativeML-OpenRAIL-Plus-Plus-M",
+      "canonicalUrl": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md",
+      "textFile": "creativeml-openrail-pp-m.md",
+      "summary": "Stability AI variant of OpenRAIL-M for SDXL. Same use-based restrictions as OpenRAIL-M with tightened attribution clauses. Used by SDXL base and SDXL fine-tunes.",
+      "requiresAcceptance": true
+    },
+    "stability-ai-community": {
+      "title": "Stability AI Community License",
+      "spdx": "Stability-AI-Community",
+      "canonicalUrl": "https://stability.ai/community-license-agreement",
+      "textFile": "stability-ai-community.md",
+      "summary": "Source-available license from Stability AI. Free for research, individual use, and commercial use BELOW $1M annual revenue (above requires a Stability AI Enterprise License). Requires attribution and propagation of Stability's Acceptable Use Policy. Used by SD Turbo, SDXL Turbo, Stable Diffusion 3, and Stable Cascade.",
+      "requiresAcceptance": true
+    },
+    "llama-3.1-community": {
+      "title": "Llama 3.1 Community License",
+      "spdx": "Llama-3.1-Community",
+      "canonicalUrl": "https://www.llama.com/llama3_1/license/",
+      "textFile": "llama-3.1-community.md",
+      "summary": "Source-available license from Meta. Allows commercial use BELOW 700 million monthly active users (above requires a separate Meta license). Requires 'Built with Llama' attribution and prefixing derivative model names with 'Llama'. Subject to Meta's Acceptable Use Policy.",
+      "requiresAcceptance": true
+    },
+    "falcon-llm-license-2.0": {
+      "title": "TII Falcon-LLM License 2.0",
+      "spdx": "Falcon-LLM-2.0",
+      "canonicalUrl": "https://falconllm.tii.ae/falcon-terms-and-conditions.html",
+      "textFile": "falcon-llm-license-2.0.md",
+      "summary": "Custom permissive license from Technology Innovation Institute (TII), UAE. Allows commercial use, modification, and redistribution with attribution. Subject to TII's acceptable-use policy (no weapons / surveillance / defamation / CSAM use).",
+      "requiresAcceptance": true
+    }
+  }
+}

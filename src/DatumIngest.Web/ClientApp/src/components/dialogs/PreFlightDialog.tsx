@@ -14,6 +14,7 @@ import { resolveDialog, openDialog } from '@/state/dialogs';
 import { Button } from '@/components/ui/button';
 import type {
   PreFlightBlock,
+  PreFlightDatasetRequirement,
   PreFlightLicense,
   PreFlightModelRequirement,
   PreFlightReason,
@@ -71,8 +72,11 @@ export function PreFlightDialog({
     for (const m of block.models) {
       for (const l of m.licenses) if (l.accepted) s.add(l.id);
     }
+    for (const d of block.datasets) {
+      for (const l of d.licenses) if (l.accepted) s.add(l.id);
+    }
     return s;
-  }, [block.models]);
+  }, [block.models, block.datasets]);
   const [acceptedIds, setAcceptedIds] = useState<Set<string>>(initialAccepted);
 
   const inFlightSet = useMemo(() => new Set(inFlightIds), [inFlightIds]);
@@ -91,11 +95,21 @@ export function PreFlightDialog({
     () => grouped.installable.filter((m) => inFlightSet.has(m.catalogEntryId)),
     [grouped.installable, inFlightSet],
   );
-  const installCount = pendingInstall.length;
-  const totalSizeMb = pendingInstall.reduce(
-    (sum, m) => sum + (m.approxSizeMb ?? 0),
-    0,
+  const pendingDatasets = useMemo(
+    () => block.datasets.filter((d) => !inFlightSet.has(d.variantId)),
+    [block.datasets, inFlightSet],
   );
+  const inFlightDatasets = useMemo(
+    () => block.datasets.filter((d) => inFlightSet.has(d.variantId)),
+    [block.datasets, inFlightSet],
+  );
+  const installCount = pendingInstall.length + pendingDatasets.length;
+  const totalSizeMb =
+    pendingInstall.reduce((sum, m) => sum + (m.approxSizeMb ?? 0), 0)
+    + pendingDatasets.reduce(
+      (sum, d) => sum + Math.round(d.approxArchiveBytes / 1024 / 1024),
+      0,
+    );
 
   // True when the dialog has nothing actionable left for the user
   // beyond acknowledging — every installable row is already in flight,
@@ -104,17 +118,17 @@ export function PreFlightDialog({
   // dialog (instead of being a no-op because installCount === 0).
   const dismissOnly =
     installCount === 0 &&
-    inFlightInstall.length > 0 &&
+    (inFlightInstall.length > 0 || inFlightDatasets.length > 0) &&
     grouped.pinnedMissing.length === 0 &&
     grouped.pinnedUnknown.length === 0 &&
     block.suggestions.length === 0;
 
-  // Dedupe licenses across all model rows. Only licenses with
+  // Dedupe licenses across all model + dataset rows. Only licenses with
   // requiresAcceptance gate the Install button; informational licenses
   // render in the same section but never block.
   const uniqueLicenses = useMemo(
-    () => dedupeLicenses(block.models),
-    [block.models],
+    () => dedupeLicenses(block.models, block.datasets),
+    [block.models, block.datasets],
   );
   const gatingIds = useMemo(
     () => uniqueLicenses.filter((l) => l.requiresAcceptance).map((l) => l.id),
@@ -250,9 +264,9 @@ export function PreFlightDialog({
                 key={l.id}
                 license={l}
                 accepted={acceptedIds.has(l.id)}
-                modelDisplayName={firstModelTitleFor(block.models, l.id)}
+                modelDisplayName={firstModelTitleFor(block.models, block.datasets, l.id)}
                 onAccept={() =>
-                  onAcceptLicense(l.id, firstModelTitleFor(block.models, l.id))
+                  onAcceptLicense(l.id, firstModelTitleFor(block.models, block.datasets, l.id))
                 }
               />
             ))}
@@ -267,6 +281,19 @@ export function PreFlightDialog({
                 model={m}
                 acceptedIds={acceptedIds}
                 inFlight={inFlightSet.has(m.catalogEntryId)}
+              />
+            ))}
+          </Section>
+        )}
+
+        {block.datasets.length > 0 && (
+          <Section title={t('preflight.section.installDatasets')}>
+            {block.datasets.map((d) => (
+              <DatasetRow
+                key={d.typedReference}
+                dataset={d}
+                acceptedIds={acceptedIds}
+                inFlight={inFlightSet.has(d.variantId)}
               />
             ))}
           </Section>
@@ -536,6 +563,57 @@ function ModelRow({
   );
 }
 
+function DatasetRow({
+  dataset,
+  acceptedIds,
+  inFlight,
+}: {
+  dataset: PreFlightDatasetRequirement;
+  acceptedIds: Set<string>;
+  inFlight: boolean;
+}) {
+  const { t } = useTranslation('dialogs');
+  return (
+    <div className="border-border/60 bg-muted/20 mb-2 rounded-md border px-3 py-2 last:mb-0">
+      <div className="flex items-baseline justify-between gap-3">
+        <code className="text-foreground font-mono text-xs break-all">
+          {dataset.typedReference}
+        </code>
+        {inFlight ? (
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-sm bg-sky-500/15 px-1.5 py-0.5 text-[0.7rem] text-sky-700 dark:text-sky-300">
+            <Download className="size-3 animate-pulse" />
+            {t('preflight.downloading.pill')}
+          </span>
+        ) : (
+          dataset.approxArchiveBytes > 0 && (
+            <span className="text-muted-foreground shrink-0 text-[0.7rem]">
+              ~{formatSizeMb(Math.round(dataset.approxArchiveBytes / 1024 / 1024))}
+            </span>
+          )
+        )}
+      </div>
+      <div className="text-muted-foreground mt-1 text-[0.7rem]">
+        {dataset.entryName}
+        <span className="mx-1">·</span>
+        {dataset.displayName}
+        <span className="mx-1">·</span>
+        {t('preflight.versionLabel', { version: dataset.version })}
+      </div>
+      {dataset.licenses.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          {dataset.licenses.map((l) => (
+            <LicenseBadge
+              key={l.id}
+              license={l}
+              accepted={acceptedIds.has(l.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Compact per-license chip on each model row. Tone tracks state:
 // accepted (green check), gating-but-unaccepted (amber dot),
 // informational (muted). Title doubles as tooltip so cramped titles
@@ -634,6 +712,7 @@ function groupModels(models: PreFlightModelRequirement[]): GroupedModels {
 // is safe.
 function dedupeLicenses(
   models: PreFlightModelRequirement[],
+  datasets: PreFlightDatasetRequirement[],
 ): PreFlightLicense[] {
   const seen = new Map<string, PreFlightLicense>();
   for (const m of models) {
@@ -641,19 +720,30 @@ function dedupeLicenses(
       if (!seen.has(l.id)) seen.set(l.id, l);
     }
   }
+  for (const d of datasets) {
+    for (const l of d.licenses) {
+      if (!seen.has(l.id)) seen.set(l.id, l);
+    }
+  }
   return Array.from(seen.values());
 }
 
-// Pick a representative model id for a license — feeds the sub-dialog's
-// "Required to download X" header. LicenseDialog already tolerates the
-// empty-string fallback (renders no contextual line).
+// Pick a representative model / dataset name for a license — feeds the
+// sub-dialog's "Required to download X" header. LicenseDialog already
+// tolerates the empty-string fallback (renders no contextual line).
 function firstModelTitleFor(
   models: PreFlightModelRequirement[],
+  datasets: PreFlightDatasetRequirement[],
   licenseId: string,
 ): string {
   for (const m of models) {
     for (const l of m.licenses) {
       if (l.id === licenseId) return m.catalogEntryId;
+    }
+  }
+  for (const d of datasets) {
+    for (const l of d.licenses) {
+      if (l.id === licenseId) return d.entryName;
     }
   }
   return '';

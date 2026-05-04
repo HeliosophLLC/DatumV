@@ -16,6 +16,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
     private readonly IManifestStore _store;
     private readonly IReadOnlyDictionary<string, IModelSourceClient> _sources;
     private readonly ILicenseAcceptanceService _licenses;
+    private readonly ILicenseRegistry _licenseRegistry;
     private readonly IDownloadProgressReporter _reporter;
     private readonly IModelInstaller _installer;
     private readonly IPythonEnvironmentManager _python;
@@ -31,6 +32,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
         IManifestStore store,
         IEnumerable<IModelSourceClient> sourceClients,
         ILicenseAcceptanceService licenses,
+        ILicenseRegistry licenseRegistry,
         IDownloadProgressReporter reporter,
         IModelInstaller installer,
         IPythonEnvironmentManager python,
@@ -39,6 +41,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
     {
         _store = store;
         _licenses = licenses;
+        _licenseRegistry = licenseRegistry;
         _reporter = reporter;
         _installer = installer;
         _python = python;
@@ -143,7 +146,8 @@ internal sealed class ModelDownloadService : IModelDownloadService
         // Gate: every license that requiresAcceptance must be accepted.
         foreach (string licenseId in model.LicenseIds)
         {
-            if (!_store.Manifest.Licenses.TryGetValue(licenseId, out CatalogLicense? license))
+            CatalogLicense? license = _licenseRegistry.GetMetadata(licenseId);
+            if (license is null)
             {
                 throw new InvalidOperationException(
                     $"Model {modelId} references unknown license {licenseId}.");
@@ -201,7 +205,8 @@ internal sealed class ModelDownloadService : IModelDownloadService
         // reuse the entry-level license set without per-version lookups.
         foreach (string licenseId in model.LicenseIds)
         {
-            if (!_store.Manifest.Licenses.TryGetValue(licenseId, out CatalogLicense? license))
+            CatalogLicense? license = _licenseRegistry.GetMetadata(licenseId);
+            if (license is null)
             {
                 throw new InvalidOperationException(
                     $"Model {modelId} references unknown license {licenseId}.");

@@ -55,7 +55,7 @@ public sealed record DatasetTableIngested(
     long BytesWritten);
 
 // Terminal success event. All ingest jobs produced their .datum files
-// and any installSql (PR 5+) ran successfully.
+// and the variant is ready to bind into the configured schema.
 public sealed record DatasetInstalled(string DatasetId);
 
 public sealed record DatasetDownloadFailed(string DatasetId, string Error);
