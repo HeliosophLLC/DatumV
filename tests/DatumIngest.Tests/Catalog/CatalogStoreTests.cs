@@ -387,7 +387,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 7,
+              "version": 8,
               "udfs": [
                 {"schema": "public", "name": "shout", "file_path": "udfs/public/shout.sql"}
               ]
@@ -498,7 +498,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 7,
+              "version": 8,
               "udfs": [
                 {"schema": "public", "name": "good", "file_path": "udfs/public/good.sql"},
                 {"schema": "public", "name": "bad", "file_path": "udfs/public/bad.sql"}
@@ -524,7 +524,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 7,
+              "version": 8,
               "udfs": [
                 {"schema": "public", "name": "ghost", "file_path": "udfs/public/ghost.sql"}
               ]
@@ -551,7 +551,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 7,
+              "version": 8,
               "udfs": [
                 {"schema": "public", "name": "", "file_path": "udfs/public/good.sql"},
                 {"schema": "public", "name": "good", "file_path": "udfs/public/good.sql"}

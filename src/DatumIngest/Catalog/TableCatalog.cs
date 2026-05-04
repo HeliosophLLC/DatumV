@@ -138,8 +138,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         this.Functions.SetModelCatalogResolver(() => Models);
         this.Udfs = new UdfRegistry();
         this.Procedures = new ProcedureRegistry();
+        this.Views = new ViewRegistry();
         this.CatalogStore = catalogPath is null ? null : new CatalogStore(catalogPath);
-        this.Routines = new RoutineRegistrar(this, Udfs, Procedures, Functions, CatalogStore);
+        this.Routines = new RoutineRegistrar(this, Udfs, Procedures, Views, Functions, CatalogStore);
 
         // Construct the user-data (FlatFile) backend. The persist callback
         // wraps CatalogStore.Save with the facade's UDF / Procedure
@@ -152,7 +153,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             pool,
             SidecarRegistry,
             catalogDirectory,
-            persistManifest: () => CatalogStore?.Save(Udfs, Procedures, DeclaredModels));
+            persistManifest: () => CatalogStore?.Save(Udfs, Procedures, DeclaredModels, Views));
 
         // Construct the read-only backends. System holds host-attached
         // projections; Virtual holds the SQL-standard / engine-introspection
@@ -188,12 +189,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // time; construction is safe because no scan occurs here.
         SystemCatalog.Add(new Providers.UdfsTableProvider(pool, Udfs));
         SystemCatalog.Add(new Providers.ProceduresTableProvider(pool, Procedures));
+        SystemCatalog.Add(new Providers.ViewsTableProvider(pool, Views));
         SystemCatalog.Add(new Providers.SystemFilesProvider(pool, catalogDirectory, this));
         VirtualCatalog.Add(new Providers.InformationSchemaTablesProvider(pool, this));
         VirtualCatalog.Add(new Providers.InformationSchemaColumnsProvider(pool, this));
         VirtualCatalog.Add(new Providers.InformationSchemaSchemataProvider(pool));
         VirtualCatalog.Add(new Providers.InformationSchemaTableConstraintsProvider(pool, this));
         VirtualCatalog.Add(new Providers.InformationSchemaKeyColumnUsageProvider(pool, this));
+        VirtualCatalog.Add(new Providers.InformationSchemaViewsProvider(pool, Views));
         VirtualCatalog.Add(new Providers.DatumCatalogFunctionsProvider(pool, Functions));
         VirtualCatalog.Add(new Providers.DatumCatalogFunctionParametersProvider(pool, Functions));
         SystemCatalog.Add(new Providers.TaskContractsTableProvider(pool));
@@ -211,7 +214,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             // set (PR10a). The backend snapshots its own state.
             CatalogStore.SetFlatFileBackendStateProvider(FlatFileCatalog.SnapshotBackendState);
 
-            CatalogStoreLoadReport report = CatalogStore.Load(Udfs, Procedures);
+            CatalogStoreLoadReport report = CatalogStore.Load(Udfs, Procedures, Views);
             CatalogLoadReport = report;
 
             // The Load() call writes straight into _udfs without going
@@ -337,6 +340,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// descriptor whose body should run.
     /// </summary>
     public ProcedureRegistry Procedures { get; }
+
+    /// <summary>
+    /// Registry of named SQL views registered via <c>CREATE VIEW</c>. The
+    /// source planner consults this on every <c>TableReference</c>: a
+    /// matching qualified name expands inline as a subquery substitution,
+    /// before any table-provider lookup.
+    /// </summary>
+    public ViewRegistry Views { get; }
 
     /// <summary>
     /// Per-catalog map from <c>storeId</c> byte to <see cref="IBlobSource"/>. Each
@@ -895,6 +906,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
 
             case DropProcedureStatement drop:
                 Routines.ApplyDropProcedure(drop, sourceText);
+                return EmptyQueryPlan.Instance;
+
+            case CreateViewStatement createView:
+                Routines.ApplyCreateView(createView, sourceText);
+                return EmptyQueryPlan.Instance;
+
+            case DropViewStatement dropView:
+                Routines.ApplyDropView(dropView, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case CreateModelStatement createModel:

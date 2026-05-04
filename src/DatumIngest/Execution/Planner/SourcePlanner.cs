@@ -1,5 +1,6 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
 using DatumIngest.Parsing.Ast;
@@ -32,6 +33,18 @@ internal sealed class SourcePlanner
     private readonly TableCatalog _catalog;
     private readonly FunctionRegistry _functionRegistry;
     private readonly Func<SelectStatement, QueryOperator> _planStatement;
+
+    /// <summary>
+    /// Stack of views currently being expanded on the active call path.
+    /// Each entry is the qualified name of a view whose body is being
+    /// substituted in a containing FROM clause; pushed before recursing
+    /// into the substituted SELECT and popped on the way out. A reference
+    /// to a view already on the stack is a circular dependency and gets
+    /// rejected with a clear error. The stack is per-<see cref="SourcePlanner"/>
+    /// instance, which lives for one query plan, so cross-query expansions
+    /// can't interfere with one another.
+    /// </summary>
+    private readonly Stack<QualifiedName> _viewExpansionStack = new();
 
     public SourcePlanner(
         TableCatalog catalog,
@@ -89,6 +102,35 @@ internal sealed class SourcePlanner
             }
 
             return cteSource;
+        }
+
+        // View reference: a registered view at this (schema, name) gets
+        // expanded inline as a subquery substitution before any table
+        // lookup. The body's SELECT re-enters the planner through
+        // PlanSubquery, so column resolution and optimisation fall out
+        // naturally. Cycle detection sits on top of the per-plan
+        // expansion stack so direct (A → A) and indirect (A → B → A)
+        // self-references surface as clean planning errors.
+        if (_catalog.Views.TryResolve(tableRef.SchemaName, tableRef.Name, _catalog.SearchPath, out ViewDescriptor? view))
+        {
+            if (_viewExpansionStack.Contains(view.QualifiedName))
+            {
+                string chain = string.Join(" -> ",
+                    _viewExpansionStack.Reverse().Select(n => n.ToString()).Append(view.QualifiedName.ToString()));
+                throw new InvalidOperationException(
+                    $"Circular view reference detected: {chain}.");
+            }
+
+            _viewExpansionStack.Push(view.QualifiedName);
+            try
+            {
+                SubquerySource subquery = new(view.Body, tableRef.Alias ?? tableRef.Name);
+                return PlanSubquery(subquery);
+            }
+            finally
+            {
+                _viewExpansionStack.Pop();
+            }
         }
 
         // Resolve the table reference: explicit schema lands in exactly that schema;

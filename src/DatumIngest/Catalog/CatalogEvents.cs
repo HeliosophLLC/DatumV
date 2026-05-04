@@ -119,6 +119,25 @@ public sealed record ModelAlteredEvent(QualifiedName Name, ModelDescriptor? Befo
 /// <param name="SourceText">Verbatim SQL slice; null when built programmatically.</param>
 public sealed record ModelDroppedEvent(QualifiedName Name, ModelDescriptor? Before, string? SourceText);
 
+/// <summary>Raised after <c>CREATE VIEW</c> commits when no descriptor existed at the qualified name.</summary>
+/// <param name="Name">Qualified view name.</param>
+/// <param name="After">Descriptor of the newly created view.</param>
+/// <param name="SourceText">Verbatim SQL slice; null when built programmatically.</param>
+public sealed record ViewCreatedEvent(QualifiedName Name, ViewDescriptor After, string? SourceText);
+
+/// <summary>Raised after <c>CREATE OR REPLACE VIEW</c> commits over an existing descriptor.</summary>
+/// <param name="Name">Qualified view name.</param>
+/// <param name="Before">Descriptor immediately before the replacement.</param>
+/// <param name="After">Descriptor immediately after the replacement.</param>
+/// <param name="SourceText">Verbatim SQL slice; null when built programmatically.</param>
+public sealed record ViewAlteredEvent(QualifiedName Name, ViewDescriptor? Before, ViewDescriptor After, string? SourceText);
+
+/// <summary>Raised after <c>DROP VIEW</c> commits.</summary>
+/// <param name="Name">Qualified view name.</param>
+/// <param name="Before">Descriptor of the dropped view; null if it couldn't be captured pre-drop.</param>
+/// <param name="SourceText">Verbatim SQL slice; null when built programmatically.</param>
+public sealed record ViewDroppedEvent(QualifiedName Name, ViewDescriptor? Before, string? SourceText);
+
 /// <summary>
 /// Per-catalog event bus. One instance hangs off each <see cref="TableCatalog"/>
 /// via <see cref="TableCatalog.Events"/>. Subscribers attach to whichever typed
@@ -195,6 +214,15 @@ public sealed class CatalogEvents
     /// <summary>Raised after <c>DROP MODEL</c> commits.</summary>
     public event Action<ModelDroppedEvent>? ModelDropped;
 
+    /// <summary>Raised after <c>CREATE VIEW</c> commits.</summary>
+    public event Action<ViewCreatedEvent>? ViewCreated;
+
+    /// <summary>Raised after <c>CREATE OR REPLACE VIEW</c> commits over an existing descriptor.</summary>
+    public event Action<ViewAlteredEvent>? ViewAltered;
+
+    /// <summary>Raised after <c>DROP VIEW</c> commits.</summary>
+    public event Action<ViewDroppedEvent>? ViewDropped;
+
     // Raise methods are internal so only the catalog / routine registrar
     // can publish. Overload resolution picks the right channel per event
     // type so call sites stay readable (`_events.Raise(new FunctionCreatedEvent(...))`).
@@ -214,4 +242,7 @@ public sealed class CatalogEvents
     internal void Raise(ModelCreatedEvent e) => ModelCreated?.Invoke(e);
     internal void Raise(ModelAlteredEvent e) => ModelAltered?.Invoke(e);
     internal void Raise(ModelDroppedEvent e) => ModelDropped?.Invoke(e);
+    internal void Raise(ViewCreatedEvent e) => ViewCreated?.Invoke(e);
+    internal void Raise(ViewAlteredEvent e) => ViewAltered?.Invoke(e);
+    internal void Raise(ViewDroppedEvent e) => ViewDropped?.Invoke(e);
 }

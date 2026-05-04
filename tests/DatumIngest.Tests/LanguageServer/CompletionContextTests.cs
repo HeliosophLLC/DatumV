@@ -326,6 +326,30 @@ public sealed class CompletionContextTests : ServiceTestBase
     }
 
     [Fact]
+    public void Classify_AfterCreateOrReplace_ReturnsAfterCreate()
+    {
+        // `CREATE OR REPLACE |` should land in the same zone as bare CREATE
+        // so the menu offers FUNCTION / PROCEDURE / MODEL / VIEW.
+        CompletionZone zone = CompletionContext.Classify("CREATE OR REPLACE ", 18);
+
+        Assert.Equal(CompletionZoneKind.AfterCreate, zone.Kind);
+    }
+
+    [Fact]
+    public void AfterCreate_OffersView()
+    {
+        IReadOnlyList<string> keywords = KeywordRegistry.GetKeywords(CompletionZoneKind.AfterCreate);
+        Assert.Contains("VIEW", keywords);
+    }
+
+    [Fact]
+    public void AfterDrop_OffersView()
+    {
+        IReadOnlyList<string> keywords = KeywordRegistry.GetKeywords(CompletionZoneKind.AfterDrop);
+        Assert.Contains("VIEW", keywords);
+    }
+
+    [Fact]
     public void Classify_InsideCreateTableColumnList_ReturnsAfterCreateTableColumns()
     {
         CompletionZone zone = CompletionContext.Classify("CREATE TABLE #temp (col1 ", 25);

@@ -53,6 +53,9 @@ internal sealed class CatalogEventBroadcastService : IHostedService
     private Action<ModelCreatedEvent>? _onModelCreated;
     private Action<ModelAlteredEvent>? _onModelAltered;
     private Action<ModelDroppedEvent>? _onModelDropped;
+    private Action<ViewCreatedEvent>? _onViewCreated;
+    private Action<ViewAlteredEvent>? _onViewAltered;
+    private Action<ViewDroppedEvent>? _onViewDropped;
 
     public CatalogEventBroadcastService(
         TableCatalog catalog,
@@ -106,6 +109,13 @@ internal sealed class CatalogEventBroadcastService : IHostedService
         _onModelDropped = e => Broadcast(new CatalogChangedEvent(
             CatalogChangeKind.ModelDropped, e.Name.Schema, e.Name.Name, ChildName: null));
 
+        _onViewCreated = e => Broadcast(new CatalogChangedEvent(
+            CatalogChangeKind.ViewCreated, e.Name.Schema, e.Name.Name, ChildName: null));
+        _onViewAltered = e => Broadcast(new CatalogChangedEvent(
+            CatalogChangeKind.ViewAltered, e.Name.Schema, e.Name.Name, ChildName: null));
+        _onViewDropped = e => Broadcast(new CatalogChangedEvent(
+            CatalogChangeKind.ViewDropped, e.Name.Schema, e.Name.Name, ChildName: null));
+
         events.SchemaCreated += _onSchemaCreated;
         events.SchemaDropped += _onSchemaDropped;
         events.TableCreated += _onTableCreated;
@@ -122,6 +132,9 @@ internal sealed class CatalogEventBroadcastService : IHostedService
         events.ModelCreated += _onModelCreated;
         events.ModelAltered += _onModelAltered;
         events.ModelDropped += _onModelDropped;
+        events.ViewCreated += _onViewCreated;
+        events.ViewAltered += _onViewAltered;
+        events.ViewDropped += _onViewDropped;
 
         return Task.CompletedTask;
     }
@@ -146,6 +159,9 @@ internal sealed class CatalogEventBroadcastService : IHostedService
         if (_onModelCreated is not null) events.ModelCreated -= _onModelCreated;
         if (_onModelAltered is not null) events.ModelAltered -= _onModelAltered;
         if (_onModelDropped is not null) events.ModelDropped -= _onModelDropped;
+        if (_onViewCreated is not null) events.ViewCreated -= _onViewCreated;
+        if (_onViewAltered is not null) events.ViewAltered -= _onViewAltered;
+        if (_onViewDropped is not null) events.ViewDropped -= _onViewDropped;
 
         return Task.CompletedTask;
     }

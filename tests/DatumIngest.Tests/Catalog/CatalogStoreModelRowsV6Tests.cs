@@ -85,7 +85,7 @@ public sealed class CatalogStoreModelRowsV6Tests : ServiceTestBase, IDisposable
         CatalogStoreLoadException ex = Assert.Throws<CatalogStoreLoadException>(
             () => CreateCatalog(_catalogPath));
         Assert.Contains("version 5", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("requires version 7", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("requires version 8", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

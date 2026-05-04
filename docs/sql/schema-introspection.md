@@ -116,7 +116,7 @@ Schema and table names are case-insensitive.
 
 ### `information_schema`
 
-PostgreSQL-compatible metadata views reflecting all tables visible in the current catalog. Temp tables appear with `table_schema = 'temp'` and `table_type = 'TEMPORARY TABLE'`; all other sources appear under `schema = 'public'` as `'BASE TABLE'`.
+PostgreSQL-compatible metadata views reflecting all tables visible in the current catalog. Temp tables appear with `table_schema = 'temp'` and `table_type = 'TEMPORARY TABLE'`; all other sources appear under `schema = 'public'` as `'BASE TABLE'`. Registered SQL views (`CREATE VIEW`) surface here with `table_type = 'VIEW'` and are also listed in `information_schema.views` with their body source text.
 
 #### `information_schema.tables`
 
@@ -125,7 +125,7 @@ PostgreSQL-compatible metadata views reflecting all tables visible in the curren
 | `table_catalog` | String | Always `'datum'` |
 | `table_schema` | String | `'public'` or `'temp'` |
 | `table_name` | String | Table name as registered in the catalog |
-| `table_type` | String | `'BASE TABLE'` or `'TEMPORARY TABLE'` |
+| `table_type` | String | `'BASE TABLE'`, `'TEMPORARY TABLE'`, or `'VIEW'` |
 
 ```sql
 -- List all tables and their types
@@ -205,12 +205,38 @@ JOIN information_schema.key_column_usage  AS kcu
 ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
 ```
 
+#### `information_schema.views`
+
+Surfaces every registered SQL view with its body source text. Mirrors the SQL-standard / PostgreSQL shape.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `table_catalog` | String | Always `'datum'` |
+| `table_schema` | String | Schema the view lives in (typically `'public'`) |
+| `table_name` | String | Unqualified view name |
+| `view_definition` | String | Verbatim `CREATE VIEW` source text |
+| `check_option` | String | Always `'NONE'` — `WITH CHECK OPTION` is not supported |
+| `is_updatable` | String | Always `'NO'` — views are pure macros, not updatable targets |
+| `is_insertable_into` | String | Always `'NO'` |
+| `is_trigger_updatable` | String | Always `'NO'` |
+| `is_trigger_deletable` | String | Always `'NO'` |
+| `is_trigger_insertable_into` | String | Always `'NO'` |
+
+```sql
+-- List every registered view and its body
+SELECT table_schema, table_name, view_definition
+FROM information_schema.views
+ORDER BY table_schema, table_name
+```
+
+A lightweight `system.views` (`schema`, `name`, `source_text`) is also exposed for ad-hoc browsing — the same source text without the SQL-standard ceremony.
+
 #### `information_schema.schemata`
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `catalog_name` | String | Always `'datum'` |
-| `schema_name` | String | `'public'`, `'information_schema'`, `'datum_catalog'`, or `'models'`. The `'system'` schema (built-in scalars and `system.udfs` / `system.procedures` views) follows the PG `pg_catalog` convention and is hidden from this listing. |
+| `schema_name` | String | `'public'`, `'information_schema'`, `'datum_catalog'`, or `'models'`. The `'system'` schema (built-in scalars and `system.udfs` / `system.procedures` / `system.views` virtual tables) follows the PG `pg_catalog` convention and is hidden from this listing. |
 
 ```sql
 SELECT schema_name FROM information_schema.schemata

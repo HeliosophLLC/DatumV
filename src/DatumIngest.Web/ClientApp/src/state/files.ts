@@ -174,6 +174,9 @@ const RELEVANT_KINDS: ReadonlySet<CatalogChangeKind> = new Set([
   CatalogChangeKind.ModelCreated,
   CatalogChangeKind.ModelAltered,
   CatalogChangeKind.ModelDropped,
+  CatalogChangeKind.ViewCreated,
+  CatalogChangeKind.ViewAltered,
+  CatalogChangeKind.ViewDropped,
 ]);
 
 let subscribed = false;

@@ -502,6 +502,72 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.DoesNotContain(items, item => item.Label == "id");
     }
 
+    [Fact]
+    public void GetCompletions_AfterTableAliasDot_ResolvesToUnderlyingTableColumns()
+    {
+        // `FROM users u` binds `u` as an alias for `users`. Typing `u.` in
+        // the SELECT list must surface users' columns — without alias
+        // resolution the qualifier was looked up directly in the manifest,
+        // found nothing, and left the popup empty.
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT u. FROM users u", 9);
+
+        Assert.Contains(items, item => item.Label == "id");
+        Assert.Contains(items, item => item.Label == "name");
+        Assert.Contains(items, item => item.Label == "email");
+        Assert.DoesNotContain(items, item => item.Label == "order_id");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterSchemaDot_OffersTablesInThatSchema()
+    {
+        // Typing `FROM information_schema.` should surface the tables
+        // registered under that schema, not just routines or columns.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry
+                {
+                    Name = "information_schema.tables",
+                    Columns = [new TableColumnEntry { Name = "table_name", Kind = "String", Nullable = false }],
+                },
+                new TableSchemaEntry
+                {
+                    Name = "information_schema.columns",
+                    Columns = [new TableColumnEntry { Name = "column_name", Kind = "String", Nullable = false }],
+                },
+                new TableSchemaEntry
+                {
+                    Name = "public.users",
+                    Columns = [new TableColumnEntry { Name = "id", Kind = "Float32", Nullable = false }],
+                },
+            ],
+            Functions = [],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM information_schema.", 33);
+
+        Assert.Contains(items, item => item.Label == "tables" && item.Kind == CompletionItemKind.Table);
+        Assert.Contains(items, item => item.Label == "columns" && item.Kind == CompletionItemKind.Table);
+        // Tables from other schemas must not bleed in.
+        Assert.DoesNotContain(items, item => item.Label == "users");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterTableAliasDot_HonorsExplicitAsKeyword()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT u. FROM users AS u", 9);
+
+        Assert.Contains(items, item => item.Label == "id");
+        Assert.Contains(items, item => item.Label == "name");
+    }
+
     /// <summary>
     /// Regression: <c>CALL</c> followed by a space had no completion zone,
     /// so the classifier fell back to <see cref="CompletionZoneKind.StatementStart"/>
@@ -983,16 +1049,21 @@ public sealed class CompletionProviderTests : ServiceTestBase
     // ───────────────────── Quoted table name insert text ─────────────────────
 
     [Fact]
-    public void GetCompletions_TableWithDot_HasBracketQuotedInsertText()
+    public void GetCompletions_SchemaQualifiedTable_InsertsUnquotedDottedName()
     {
+        // Manifest entries are schema-qualified — the dot separates schema
+        // from table, so the inserted text must keep the dot bare. Wrapping
+        // the whole thing in quotes (the old behavior) produced
+        // "schema.table" which the parser reads as one quoted identifier
+        // and fails to resolve at execution time.
         LanguageServerManifest manifest = new()
         {
             Tables =
             [
                 new TableSchemaEntry
                 {
-                    Name = "adult.data",
-                    Columns = [new TableColumnEntry { Name = "age", Kind = "Float32", Nullable = false }],
+                    Name = "public.users",
+                    Columns = [new TableColumnEntry { Name = "id", Kind = "Float32", Nullable = false }],
                 },
             ],
             Functions = [],
@@ -1002,9 +1073,36 @@ public sealed class CompletionProviderTests : ServiceTestBase
 
         CompletionItem[] items = provider.GetCompletions("SELECT * FROM ", 14);
 
-        CompletionItem? tableItem = Array.Find(items, item => item.Label == "adult.data");
+        CompletionItem? tableItem = Array.Find(items, item => item.Label == "public.users");
         Assert.NotNull(tableItem);
-        Assert.Equal("\"adult.data\"", tableItem.InsertText);
+        Assert.Null(tableItem.InsertText);
+    }
+
+    [Fact]
+    public void GetCompletions_SchemaQualifiedTableWithReservedSegment_QuotesOnlyThatSegment()
+    {
+        // When a segment is a reserved keyword (here `order`), quote only
+        // that segment — not the whole dotted path.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry
+                {
+                    Name = "public.order",
+                    Columns = [new TableColumnEntry { Name = "id", Kind = "Float32", Nullable = false }],
+                },
+            ],
+            Functions = [],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM ", 14);
+
+        CompletionItem? tableItem = Array.Find(items, item => item.Label == "public.order");
+        Assert.NotNull(tableItem);
+        Assert.Equal("public.\"order\"", tableItem.InsertText);
     }
 
     [Fact]

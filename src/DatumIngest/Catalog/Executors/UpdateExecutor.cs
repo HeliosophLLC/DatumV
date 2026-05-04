@@ -739,6 +739,15 @@ internal static class UpdateExecutor
     /// </remarks>
     private static ITableProvider Validate(TableCatalog catalog, UpdateStatement update)
     {
+        // Block UPDATE against a view before the table resolver fires its
+        // misleading "table not found" diagnostic.
+        if (catalog.Views.TryResolve(update.SchemaName, update.TableName, catalog.SearchPath, out Registries.ViewDescriptor? targetView))
+        {
+            throw new QueryPlanException(
+                $"UPDATE '{targetView.QualifiedName}': '{targetView.QualifiedName}' is a view; " +
+                "UPDATE through a view is not supported. UPDATE the underlying table directly.");
+        }
+
         SchemaResolver resolver = new(catalog, catalog.SearchPath);
         QualifiedName qn = resolver.Resolve(update.SchemaName, update.TableName);
         if (!catalog.TryGetTable(qn.ToString(), out ITableProvider? provider))

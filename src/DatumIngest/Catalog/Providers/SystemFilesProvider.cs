@@ -11,9 +11,9 @@ namespace DatumIngest.Catalog.Providers;
 /// Virtual table that surfaces the on-disk contents of the catalog directory
 /// as a SQL-queryable view. Each file under the catalog root becomes one row;
 /// each row is classified by its location into a <c>kind</c> (data, udf,
-/// procedure, model, manifest, gitignore, data_sidecar, other) and joined
-/// against the in-memory registries so the <c>is_orphan</c> column flags
-/// files on disk that have no matching registry entry.
+/// procedure, model, view, manifest, gitignore, data_sidecar, other) and
+/// joined against the in-memory registries so the <c>is_orphan</c> column
+/// flags files on disk that have no matching registry entry.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -27,7 +27,7 @@ namespace DatumIngest.Catalog.Providers;
 /// Schema:
 /// <list type="table">
 ///   <item><term>path</term><description>Catalog-relative path, forward slashes.</description></item>
-///   <item><term>kind</term><description>One of <c>data</c>, <c>data_sidecar</c>, <c>udf</c>, <c>procedure</c>, <c>model</c>, <c>manifest</c>, <c>gitignore</c>, <c>other</c>.</description></item>
+///   <item><term>kind</term><description>One of <c>data</c>, <c>data_sidecar</c>, <c>udf</c>, <c>procedure</c>, <c>model</c>, <c>view</c>, <c>manifest</c>, <c>gitignore</c>, <c>other</c>.</description></item>
 ///   <item><term>schema</term><description>Parsed from path when the kind has one (<c>public</c> for <c>data/public/foo.datum</c>, <c>models</c> for model files); null otherwise.</description></item>
 ///   <item><term>name</term><description>Filename stem for <c>data</c>/<c>data_sidecar</c>/<c>udf</c>/<c>procedure</c>/<c>model</c>; null otherwise.</description></item>
 ///   <item><term>size_bytes</term><description>File size from <see cref="FileInfo.Length"/>.</description></item>
@@ -173,6 +173,10 @@ public sealed class SystemFilesProvider : NonSeekableTableProviderBase
                 referenced.Add(CatalogStore.ModelRelativePath(e.Name));
             }
         }
+        foreach (ViewDescriptor e in catalog.Views.Entries)
+        {
+            referenced.Add(CatalogStore.ViewRelativePath(e.SchemaName, e.Name));
+        }
 
         // Tables: ask the FlatFile backend for its on-disk paths. Each entry
         // already stores the path as catalog-relative; just normalise the
@@ -255,6 +259,12 @@ public sealed class SystemFilesProvider : NonSeekableTableProviderBase
             return ("model", "models", Path.GetFileNameWithoutExtension(parts[1]));
         }
 
+        if (root == "views" && parts.Length == 3
+            && parts[2].EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("view", parts[1], Path.GetFileNameWithoutExtension(parts[2]));
+        }
+
         return ("other", null, null);
     }
 
@@ -265,7 +275,7 @@ public sealed class SystemFilesProvider : NonSeekableTableProviderBase
     /// per-table generated state, not directly registered.
     /// </summary>
     internal static bool IsManagedKind(string kind) =>
-        kind is "udf" or "procedure" or "model" or "data";
+        kind is "udf" or "procedure" or "model" or "view" or "data";
 
     private static void FillRow(
         DataValue[] cells,

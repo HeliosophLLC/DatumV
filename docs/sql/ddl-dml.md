@@ -104,6 +104,42 @@ DROP TABLE IF EXISTS features
 
 For a persistent table this deletes the `.datum` file plus all companion sidecars (`.datum-blob`, `.datum-index`, `.datum-manifest`, `.datum-pkindex`, every `.datum-bptree-*`, and every `.datum-cindex-*`).
 
+### CREATE VIEW
+
+Registers a named substitution for a `SELECT` statement. Views are pure macros: the planner expands the stored body in for every FROM reference and re-plans, so a query against a view is exactly equivalent to inlining the body by hand.
+
+```sql
+CREATE VIEW active_users AS
+    SELECT id, name, last_seen FROM users WHERE active = TRUE
+```
+
+Subsequent queries reference the view like any other table:
+
+```sql
+SELECT name FROM active_users WHERE last_seen > '2026-01-01'
+```
+
+`CREATE OR REPLACE VIEW` overwrites an existing view at the same qualified name; `CREATE VIEW IF NOT EXISTS` is a no-op when the view already exists. Schema-qualified forms (`CREATE VIEW public.active_users AS …`) land the view in the named schema; unqualified names land in the first DDL-capable schema on the session search_path.
+
+A view registration is rejected when a base table already exists at the same qualified name — the planner expands the view first, so a name collision would silently shadow the table.
+
+Cycles between views — a view that references itself, or two views that reference each other — are detected at plan time and rejected with a `Circular view reference detected: …` diagnostic naming the chain.
+
+Views are not updatable: `INSERT INTO myview …`, `UPDATE myview SET …`, and `DELETE FROM myview …` are not supported. There is no `WITH CHECK OPTION` clause and no `CREATE MATERIALIZED VIEW` — views always re-expand at query time.
+
+### DROP VIEW
+
+Removes a registered view:
+
+```sql
+DROP VIEW active_users
+DROP VIEW IF EXISTS active_users
+```
+
+A view drop affects only the view registration; tables the view references are untouched. Queries planned after the drop that still reference the dropped view fail at name resolution.
+
+Registered views surface through three introspection paths: `SELECT * FROM system.views` returns `(schema, name, source_text)`; `SELECT * FROM information_schema.views` returns the SQL-standard shape (`table_catalog`, `table_schema`, `table_name`, `view_definition`, `check_option`, `is_updatable`, `is_insertable_into`, plus three `is_trigger_*` columns); `SELECT * FROM information_schema.tables` lists views with `table_type = 'VIEW'`.
+
 ### CREATE INDEX / CREATE UNIQUE INDEX
 
 Creates a maintained secondary index over one or more columns of a table. Single-column indexes are leftmost-prefix degenerate cases of composite indexes — the implementation, planner integration, and on-disk layout are uniform.

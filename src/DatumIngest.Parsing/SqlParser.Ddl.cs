@@ -1343,6 +1343,55 @@ public static partial class SqlParser
             SchemaName: qualifiedName.SchemaName);
 
     /// <summary>
+    /// <c>CREATE [OR REPLACE] VIEW</c> prefix. VIEW is recognised as a
+    /// contextual identifier (same pattern as MODEL) so user identifiers
+    /// named <c>view</c> still parse outside this position.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, bool> CreateViewPrefix =
+        (from createKw in Token.EqualTo(SqlToken.Create)
+         from orReplace in OrReplaceParser
+         from viewKw in Token.EqualTo(SqlToken.Identifier)
+             .Where(t => GetTokenText(t).Equals("VIEW", StringComparison.OrdinalIgnoreCase), "VIEW")
+         select orReplace)
+        .Try();
+
+    /// <summary>
+    /// Parses <c>CREATE [OR REPLACE] VIEW [IF NOT EXISTS] name AS SELECT ...</c>.
+    /// The body is a single <see cref="SelectStatement"/> — compound
+    /// queries (UNION / INTERSECT) aren't supported through views yet.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> CreateViewParser =
+        from orReplace in CreateViewPrefix
+        from ifNotExists in IfNotExistsParser
+        from qualifiedName in QualifiedTableNameParser
+        from asKw in Token.EqualTo(SqlToken.As)
+        from body in SP.Ref(() => SelectStatementParser!)
+        select (Statement)new CreateViewStatement(
+            qualifiedName.TableName,
+            body,
+            ifNotExists,
+            orReplace,
+            Span: null,
+            SchemaName: qualifiedName.SchemaName);
+
+    /// <summary>
+    /// Parses <c>DROP VIEW [IF EXISTS] name</c>. VIEW is a contextual
+    /// identifier; outside this position the bare token <c>view</c>
+    /// remains a usable name.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> DropViewParser =
+        from dropKw in Token.EqualTo(SqlToken.Drop)
+        from viewKw in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => GetTokenText(t).Equals("VIEW", StringComparison.OrdinalIgnoreCase), "VIEW")
+        from ifExists in IfExistsParser
+        from qualifiedName in QualifiedTableNameParser
+        select (Statement)new DropViewStatement(
+            qualifiedName.TableName,
+            ifExists,
+            Span: null,
+            SchemaName: qualifiedName.SchemaName);
+
+    /// <summary>
     /// <c>CREATE [OR REPLACE] MODEL</c> prefix. Mirrors
     /// <see cref="CreateProcedurePrefix"/> with the MODEL keyword; the
     /// <c>.Try()</c> wrapper backs off when the input is actually a

@@ -38,6 +38,18 @@ internal static class InsertExecutor
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(insert);
 
+        // A view at the resolved name should yield "views aren't updatable"
+        // rather than the table-resolver's misleading "table not found"
+        // diagnostic. Same precedence the planner uses for FROM
+        // resolution: schema-qualified hits exactly; unqualified walks
+        // search_path.
+        if (catalog.Views.TryResolve(insert.SchemaName, insert.TableName, catalog.SearchPath, out Registries.ViewDescriptor? targetView))
+        {
+            throw new InvalidOperationException(
+                $"INSERT INTO '{targetView.QualifiedName}': '{targetView.QualifiedName}' is a view; " +
+                "INSERT through a view is not supported. INSERT into the underlying table directly.");
+        }
+
         // Resolve via the session search_path. Explicit schema (post-S8
         // qualified parsing) bypasses the walk; unqualified targets fall
         // through to the first match on search_path. Resolve throws

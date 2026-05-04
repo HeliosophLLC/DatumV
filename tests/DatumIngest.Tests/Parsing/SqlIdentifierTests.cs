@@ -72,6 +72,27 @@ public class SqlIdentifierTests : ServiceTestBase
         Assert.Equal("\"col\"\"name\"", SqlIdentifier.QuoteIfNeeded("col\"name"));
     }
 
+    // ───────────────────── QuoteQualifiedIfNeeded ─────────────────────
+
+    [Fact]
+    public void QuoteQualifiedIfNeededLeavesBareDottedPathUnchanged()
+    {
+        Assert.Equal("public.users", SqlIdentifier.QuoteQualifiedIfNeeded("public.users"));
+    }
+
+    [Fact]
+    public void QuoteQualifiedIfNeededQuotesOnlySegmentsThatNeedIt()
+    {
+        Assert.Equal("public.\"order\"", SqlIdentifier.QuoteQualifiedIfNeeded("public.order"));
+    }
+
+    [Fact]
+    public void QuoteQualifiedIfNeededRoutesUnqualifiedThroughQuoteIfNeeded()
+    {
+        Assert.Equal("users", SqlIdentifier.QuoteQualifiedIfNeeded("users"));
+        Assert.Equal("\"order\"", SqlIdentifier.QuoteQualifiedIfNeeded("order"));
+    }
+
     // ───────────────────── Unquote ─────────────────────
 
     [Theory]

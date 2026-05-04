@@ -239,7 +239,7 @@ internal sealed partial class RoutineRegistrar
         // — re-saving would just rewrite identical bytes N times.
         if (!suppressSave)
         {
-            _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
+            _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels, _views);
         }
 
         if (displaced is null)
@@ -405,7 +405,7 @@ internal sealed partial class RoutineRegistrar
         // immediately below.
         _catalog.Models?.ResidencyManager.EvictAlways(removed.Name);
 
-        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
+        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels, _views);
 
         _catalog.Events.Raise(new ModelDroppedEvent(qn, removed, sourceText));
 

@@ -69,7 +69,7 @@ internal sealed partial class RoutineRegistrar
         _procedures.TryGet(qn, out ProcedureDescriptor? before);
 
         _procedures.Register(descriptor, replace: create.OrReplace);
-        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
+        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels, _views);
 
         if (before is null)
         {
@@ -97,7 +97,7 @@ internal sealed partial class RoutineRegistrar
         }
 
         _procedures.Unregister(proc.QualifiedName);
-        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
+        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels, _views);
 
         _catalog.Events.Raise(new ProcedureDroppedEvent(proc.QualifiedName, proc, sourceText));
     }

@@ -94,5 +94,9 @@ public sealed class LanguageManifestService
         events.ModelCreated += _ => Rebuild();
         events.ModelAltered += _ => Rebuild();
         events.ModelDropped += _ => Rebuild();
+
+        events.ViewCreated += _ => Rebuild();
+        events.ViewAltered += _ => Rebuild();
+        events.ViewDropped += _ => Rebuild();
     }
 }

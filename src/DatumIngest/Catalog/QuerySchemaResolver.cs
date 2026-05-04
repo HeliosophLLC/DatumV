@@ -1,3 +1,4 @@
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
@@ -15,6 +16,16 @@ public sealed class QuerySchemaResolver
 {
     private readonly TableCatalog _catalog;
     private readonly FunctionRegistry _functionRegistry;
+
+    /// <summary>
+    /// Stack of views currently being expanded during this resolver call.
+    /// Mirrors <see cref="Execution.Planner.SourcePlanner"/>'s cycle
+    /// detection — a reference to a view already on the stack is a
+    /// circular dependency and gets rejected. Per-instance, so each
+    /// resolver call (LSP manifest build, REST catalog request) has its
+    /// own protection without cross-call interference.
+    /// </summary>
+    private readonly Stack<QualifiedName> _viewExpansionStack = new();
 
     /// <summary>
     /// Creates a resolver backed by the given catalog, function registry,
@@ -43,6 +54,39 @@ public sealed class QuerySchemaResolver
         CancellationToken cancellationToken)
     {
         return ResolveAsyncCore(statement, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolves the projected output columns of <paramref name="statement"/>
+    /// — what the SELECT clause emits — rather than its FROM/JOIN source
+    /// columns. Use this when the caller wants the schema of a query's
+    /// result rows: e.g. CREATE VIEW body resolution surfaces only the
+    /// view's declared projection through hover / completion, not the
+    /// (much wider) set of columns the body's underlying tables expose.
+    /// </summary>
+    /// <param name="statement">The SELECT statement whose projection to resolve.</param>
+    /// <param name="outputAlias">
+    /// Logical name to stamp on each output column's
+    /// <see cref="ResolvedColumn.SourceTableOrAlias"/>. Callers from a
+    /// view path typically pass the view's qualified name so qualified
+    /// references downstream resolve correctly.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <remarks>
+    /// Internally synthesises a <see cref="SubquerySource"/> wrapping the
+    /// statement and dispatches through the same projection-aware path
+    /// the subquery resolver uses, so SELECT * / table.* / aliased
+    /// expressions / column-name deduplication all flow uniformly.
+    /// </remarks>
+    public async Task<ResolvedQuerySchema> ResolveProjectionAsync(
+        SelectStatement statement,
+        string outputAlias,
+        CancellationToken cancellationToken)
+    {
+        SubquerySource synthetic = new(statement, outputAlias);
+        IReadOnlyList<ResolvedColumn> columns =
+            await ResolveSubqueryAsync(synthetic, cancellationToken).ConfigureAwait(false);
+        return new ResolvedQuerySchema(columns);
     }
 
     /// <summary>
@@ -144,6 +188,32 @@ public sealed class QuerySchemaResolver
         {
             return await ResolveCommonTableExpressionAsync(
                 commonTableExpression, tableReference.Alias, commonTableExpressionsByName, cancellationToken).ConfigureAwait(false);
+        }
+
+        // View reference: resolve the body's SELECT projection by wrapping
+        // it as a synthetic subquery source. The existing subquery resolver
+        // handles SELECT * / table.* / aliased expressions correctly, so we
+        // get column-name-and-shape projection for free.
+        if (_catalog.Views.TryResolve(tableReference.SchemaName, tableReference.Name, _catalog.SearchPath, out ViewDescriptor? view))
+        {
+            if (_viewExpansionStack.Contains(view.QualifiedName))
+            {
+                string chain = string.Join(" -> ",
+                    _viewExpansionStack.Reverse().Select(n => n.ToString()).Append(view.QualifiedName.ToString()));
+                throw new InvalidOperationException(
+                    $"Circular view reference detected: {chain}.");
+            }
+
+            _viewExpansionStack.Push(view.QualifiedName);
+            try
+            {
+                SubquerySource subquery = new(view.Body, tableReference.Alias ?? tableReference.Name);
+                return await ResolveSubqueryAsync(subquery, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _viewExpansionStack.Pop();
+            }
         }
 
         Schema schema = _catalog[tableReference.Name].GetSchema();

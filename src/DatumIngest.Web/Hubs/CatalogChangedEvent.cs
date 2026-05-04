@@ -31,6 +31,10 @@ public enum CatalogChangeKind
     ModelCreated,
     ModelAltered,
     ModelDropped,
+
+    ViewCreated,
+    ViewAltered,
+    ViewDropped,
 }
 
 /// <summary>

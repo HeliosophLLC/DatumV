@@ -30,6 +30,15 @@ internal static class DeleteExecutor
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(delete);
 
+        // Block DELETE against a view before the table resolver fires its
+        // misleading "table not found" diagnostic.
+        if (catalog.Views.TryResolve(delete.SchemaName, delete.TableName, catalog.SearchPath, out Registries.ViewDescriptor? targetView))
+        {
+            throw new InvalidOperationException(
+                $"DELETE FROM '{targetView.QualifiedName}': '{targetView.QualifiedName}' is a view; " +
+                "DELETE through a view is not supported. DELETE from the underlying table directly.");
+        }
+
         SchemaResolver resolver = new(catalog, catalog.SearchPath);
         QualifiedName qn = resolver.Resolve(delete.SchemaName, delete.TableName);
         if (!catalog.TryGetTable(qn.ToString(), out ITableProvider? provider))

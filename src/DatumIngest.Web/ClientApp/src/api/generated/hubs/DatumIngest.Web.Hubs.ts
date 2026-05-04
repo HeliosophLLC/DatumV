@@ -65,6 +65,9 @@ export enum CatalogChangeKind {
     ModelCreated = 13,
     ModelAltered = 14,
     ModelDropped = 15,
+    ViewCreated = 16,
+    ViewAltered = 17,
+    ViewDropped = 18,
 }
 
 /** Transpiled from DatumIngest.Web.Hubs.CatalogChangedEvent */

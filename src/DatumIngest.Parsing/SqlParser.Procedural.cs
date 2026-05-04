@@ -696,6 +696,8 @@ public static partial class SqlParser
             .Or(DropProcedureParser.Try())
             .Or(CreateModelParser)
             .Or(DropModelParser.Try())
+            .Or(CreateViewParser)
+            .Or(DropViewParser.Try())
             .Or(EvictModelParser.Try())
             .Or(ResetCalibrationParser.Try())
             .Or(CallStatementParser.Try())

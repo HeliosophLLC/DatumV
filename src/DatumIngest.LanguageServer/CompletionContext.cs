@@ -74,6 +74,7 @@ public static class CompletionContext
                     VariablesInScope = ExtractVariablesInScope(outerTokens),
                     TablesInScope = ExtractTablesInScope(outerTokens),
                     TvfAliasesInScope = ExtractTvfAliasesInScope(outerTokens),
+                    TableAliasesInScope = ExtractTableAliasesInScope(outerTokens),
                 };
 
             case CursorContextKind.Code:
@@ -117,6 +118,10 @@ public static class CompletionContext
         // `r`); this companion map is the alias-to-function bridge.
         IReadOnlyDictionary<string, string> tvfAliasesInScope = ExtractTvfAliasesInScope(fullTokens);
 
+        // Plain-table FROM/JOIN aliases — used by AfterDot column resolution
+        // so `FROM users u` lets `u.` surface users' columns.
+        IReadOnlyDictionary<string, string> tableAliasesInScope = ExtractTableAliasesInScope(fullTokens);
+
         // Check if cursor is in the middle of typing an identifier (for prefix filtering).
         string? prefix = ExtractPrefix(textToCursor, tokens);
 
@@ -125,7 +130,7 @@ public static class CompletionContext
         if (tableQualifier is not null)
         {
             return new CompletionZone(
-                CompletionZoneKind.AfterDot, prefix, tableQualifier, variablesInScope, tablesInScope, tvfAliasesInScope);
+                CompletionZoneKind.AfterDot, prefix, tableQualifier, variablesInScope, tablesInScope, tvfAliasesInScope, tableAliasesInScope);
         }
 
         // Walk backwards through tokens to find the governing keyword.
@@ -139,7 +144,7 @@ public static class CompletionContext
         CompletionZoneKind zone = ClassifyFromTokens(tokens, hasPrefix: prefixIsLastToken);
 
         return new CompletionZone(
-            zone, prefix, TableQualifier: null, variablesInScope, tablesInScope, tvfAliasesInScope);
+            zone, prefix, TableQualifier: null, variablesInScope, tablesInScope, tvfAliasesInScope, tableAliasesInScope);
     }
 
     /// <summary>
@@ -297,6 +302,68 @@ public static class CompletionContext
 
     private static readonly IReadOnlyDictionary<string, string> EmptyTvfAliases =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Walks <c>FROM</c> / <c>JOIN</c> sources and returns a map from each
+    /// plain table source's explicit alias to the underlying table name
+    /// (possibly schema-qualified, like <c>public.users</c>). Companion to
+    /// <see cref="ExtractTablesInScope"/> — that helper records names for
+    /// column-source matching, while this map preserves the alias-to-table
+    /// link the completion provider needs to resolve <c>u.col</c> when the
+    /// user wrote <c>FROM users u</c>. TVF sources are intentionally
+    /// excluded; their alias resolution lives in <see cref="ExtractTvfAliasesInScope"/>.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> ExtractTableAliasesInScope(List<TokenInfo> tokens)
+    {
+        if (tokens.Count == 0) return EmptyTvfAliases;
+        Dictionary<string, string>? result = null;
+
+        for (int i = 0; i + 1 < tokens.Count; i++)
+        {
+            SqlToken k = tokens[i].Kind;
+            if (k != SqlToken.From && k != SqlToken.Join) continue;
+
+            int next = i + 1;
+            if (tokens[next].Kind != SqlToken.Identifier) continue;
+
+            string tableName = tokens[next].Text;
+            if (string.IsNullOrEmpty(tableName)) continue;
+
+            // Optional `schema.table` qualifier — keep the qualified form so
+            // the provider's manifest lookup matches the catalog's storage.
+            int afterName = next + 1;
+            if (afterName + 1 < tokens.Count
+                && tokens[afterName].Kind == SqlToken.Dot
+                && tokens[afterName + 1].Kind == SqlToken.Identifier)
+            {
+                tableName = $"{tableName}.{tokens[afterName + 1].Text}";
+                afterName += 2;
+            }
+
+            // TVF call — defer to ExtractTvfAliasesInScope so we don't
+            // mis-bind a function output to a persistent-table name.
+            if (afterName < tokens.Count && tokens[afterName].Kind == SqlToken.LeftParen)
+            {
+                continue;
+            }
+
+            int aliasIdx = afterName;
+            if (aliasIdx < tokens.Count && tokens[aliasIdx].Kind == SqlToken.As)
+            {
+                aliasIdx++;
+            }
+            if (aliasIdx >= tokens.Count || tokens[aliasIdx].Kind != SqlToken.Identifier) continue;
+
+            string alias = tokens[aliasIdx].Text;
+            if (string.IsNullOrEmpty(alias)) continue;
+
+            result ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // First-wins on alias clash — matches ExtractTvfAliasesInScope.
+            if (!result.ContainsKey(alias)) result[alias] = tableName;
+        }
+
+        return result ?? EmptyTvfAliases;
+    }
 
     /// <summary>
     /// Returns the token index that follows an optional <c>schema.</c>
@@ -1641,13 +1708,21 @@ internal readonly record struct CursorContext(CursorContextKind Kind, int Splice
 /// the TVF's declared output columns out of the manifest for both
 /// qualified (<c>vid.frame_index</c>) and unqualified column completions.
 /// </param>
+/// <param name="TableAliasesInScope">
+/// Map of FROM / JOIN table-source alias to the (possibly schema-qualified)
+/// underlying table name — e.g. <c>FROM users u</c> yields <c>u → users</c>.
+/// Lets the completion provider resolve <c>u.</c> to <c>users</c>'s columns
+/// without dragging alias-name lookups through the manifest. TVF aliases are
+/// kept in <see cref="TvfAliasesInScope"/> instead.
+/// </param>
 public sealed record CompletionZone(
     CompletionZoneKind Kind,
     string? Prefix,
     string? TableQualifier,
     IReadOnlyList<string>? VariablesInScope = null,
     IReadOnlyList<string>? TablesInScope = null,
-    IReadOnlyDictionary<string, string>? TvfAliasesInScope = null);
+    IReadOnlyDictionary<string, string>? TvfAliasesInScope = null,
+    IReadOnlyDictionary<string, string>? TableAliasesInScope = null);
 
 /// <summary>
 /// The kind of SQL context the cursor is in, determining which completions to offer.
@@ -1743,7 +1818,7 @@ public enum CompletionZoneKind
 
     // ───────────────────── DDL / DML zones ─────────────────────
 
-    /// <summary>After CREATE — offer TEMP, TEMPORARY, TABLE, INDEX, UNIQUE INDEX, FUNCTION, PROCEDURE, OR REPLACE.</summary>
+    /// <summary>After CREATE — offer TEMP, TEMPORARY, TABLE, INDEX, UNIQUE INDEX, FUNCTION, PROCEDURE, MODEL, VIEW, OR REPLACE.</summary>
     AfterCreate,
 
     /// <summary>After DROP — offer TABLE, INDEX, IF EXISTS.</summary>

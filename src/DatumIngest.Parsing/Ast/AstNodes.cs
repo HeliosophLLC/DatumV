@@ -1980,6 +1980,44 @@ public sealed record DropProcedureStatement(
     string? SchemaName = null) : Statement;
 
 /// <summary>
+/// <c>CREATE [OR REPLACE] VIEW [IF NOT EXISTS] name AS SELECT ...</c> —
+/// registers a named SELECT-statement substitution. Views are pure
+/// macros: the planner substitutes the stored body in for every FROM
+/// reference, then re-plans. No materialisation; no DML through views.
+/// </summary>
+/// <remarks>
+/// Direct and indirect cycles (a view referencing itself, or two views
+/// referencing each other) are detected at plan time and rejected with
+/// a "circular view reference" error.
+/// </remarks>
+/// <param name="Name">Unqualified view name; combined with <see cref="SchemaName"/>.</param>
+/// <param name="Body">The view's SELECT statement, captured verbatim as an AST.</param>
+/// <param name="IfNotExists">When <see langword="true"/>, no-op when the view already exists.</param>
+/// <param name="OrReplace">When <see langword="true"/>, overwrites an existing view at the same qualified name.</param>
+/// <param name="Span">Source location for diagnostics.</param>
+/// <param name="SchemaName">Optional schema qualifier; <see langword="null"/> picks the first DDL-capable schema on search_path.</param>
+public sealed record CreateViewStatement(
+    string Name,
+    SelectStatement Body,
+    bool IfNotExists = false,
+    bool OrReplace = false,
+    SourceSpan? Span = null,
+    string? SchemaName = null) : Statement;
+
+/// <summary>
+/// <c>DROP VIEW [IF EXISTS] name</c> — removes a previously registered view.
+/// </summary>
+/// <param name="Name">The view name to remove.</param>
+/// <param name="IfExists">When <see langword="true"/>, suppresses errors if the view does not exist.</param>
+/// <param name="Span">Source location of the view name for diagnostic reporting.</param>
+/// <param name="SchemaName">Optional schema qualifier; <see langword="null"/> walks search_path.</param>
+public sealed record DropViewStatement(
+    string Name,
+    bool IfExists = false,
+    SourceSpan? Span = null,
+    string? SchemaName = null) : Statement;
+
+/// <summary>
 /// <c>CALL namespace.functionname(arg1, arg2, ...)</c> — directly invokes a function
 /// (typically a UDF via <c>udf.name(...)</c>) or procedure (via <c>proc.name(...)</c>)
 /// as a top-level statement rather than inside a SELECT. The engine evaluates the call

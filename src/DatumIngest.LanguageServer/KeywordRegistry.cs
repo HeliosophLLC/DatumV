@@ -221,10 +221,10 @@ internal static class KeywordRegistry
             ["ALL", "SELECT"],
 
         [CompletionZoneKind.AfterCreate] =
-            ["TEMP", "TEMPORARY", "TABLE", "INDEX", "UNIQUE INDEX", "FUNCTION", "PROCEDURE", "MODEL", "OR REPLACE"],
+            ["TEMP", "TEMPORARY", "TABLE", "INDEX", "UNIQUE INDEX", "FUNCTION", "PROCEDURE", "MODEL", "VIEW", "OR REPLACE"],
 
         [CompletionZoneKind.AfterDrop] =
-            ["TABLE", "INDEX", "FUNCTION", "PROCEDURE", "MODEL", "IF EXISTS"],
+            ["TABLE", "INDEX", "FUNCTION", "PROCEDURE", "MODEL", "VIEW", "IF EXISTS"],
 
         // Model-runtime DDL completion. After `DROP MODEL` / `EVICT MODEL`
         // / `RESET CALIBRATION`, the only fixed keyword left is the

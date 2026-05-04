@@ -173,6 +173,45 @@ public sealed class SystemFilesProviderTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
+    public async Task View_ClassifiesAsView_AndIsNotOrphan()
+    {
+        TableCatalog catalog = CreateCatalog(_catalogPath);
+        catalog.Plan("CREATE TABLE t (a Int32, b String)");
+        catalog.Plan("CREATE VIEW v AS SELECT a FROM t");
+
+        List<FileRow> rows = await ScanAsync(catalog);
+
+        FileRow view = Assert.Single(rows, r => r.Kind == "view");
+        Assert.Equal("views/public/v.sql", view.Path);
+        Assert.Equal("public", view.Schema);
+        Assert.Equal("v", view.Name);
+        Assert.False(view.IsOrphan);
+        Assert.True(view.SizeBytes > 0);
+    }
+
+    [Fact]
+    public async Task ViewFile_WithoutManifestEntry_IsFlaggedOrphan()
+    {
+        // Pre-create the catalog so the directory exists + manifest is wired.
+        TableCatalog seed = CreateCatalog(_catalogPath);
+        seed.Plan("CREATE TABLE t (a Int32)");
+        seed.Plan("CREATE VIEW known AS SELECT a FROM t");
+
+        string orphanDir = Path.Combine(_scratchDir, "views", "public");
+        Directory.CreateDirectory(orphanDir);
+        File.WriteAllText(Path.Combine(orphanDir, "ghost.sql"),
+            "CREATE OR REPLACE VIEW ghost AS SELECT a FROM t");
+
+        List<FileRow> rows = await ScanAsync(seed);
+
+        FileRow known = rows.Single(r => r.Path == "views/public/known.sql");
+        Assert.False(known.IsOrphan);
+
+        FileRow ghost = rows.Single(r => r.Path == "views/public/ghost.sql");
+        Assert.True(ghost.IsOrphan);
+    }
+
+    [Fact]
     public async Task UdfFile_WithoutManifestEntry_IsFlaggedOrphan()
     {
         // Pre-create the catalog so the directory exists + manifest is wired.

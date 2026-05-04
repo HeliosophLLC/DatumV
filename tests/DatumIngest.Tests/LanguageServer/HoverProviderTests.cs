@@ -154,6 +154,53 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.Contains("users", result.Contents);
         Assert.Contains("id", result.Contents);
         Assert.Contains("name", result.Contents);
+        Assert.Contains("Table:", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_ViewName_RendersViewLabel()
+    {
+        // A manifest entry with Kind = "VIEW" should hover with "View:"
+        // rather than "Table:" so the editor surface matches the catalog
+        // semantics. Borrows the default manifest scaffold so name
+        // extraction and keyword tables aren't a confound.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry
+                {
+                    Name = "users",
+                    Kind = "VIEW",
+                    Columns =
+                    [
+                        new TableColumnEntry { Name = "id", Kind = "Float32", Nullable = false },
+                        new TableColumnEntry { Name = "name", Kind = "String", Nullable = true },
+                    ],
+                },
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    Name = "abs",
+                    Parameters = [new ParameterSignature { Name = "value", Kind = "Float32" }],
+                    ReturnType = "Float32",
+                    Description = "Absolute value.",
+                },
+            ],
+            Keywords = ["SELECT", "FROM", "WHERE"],
+        };
+        HoverProvider provider = new(manifest);
+
+        // Same SQL + offset shape as GetHover_TableName_ReturnsColumnList —
+        // only difference is Kind on the manifest entry — so we isolate
+        // the label rendering from any name-extraction confound.
+        HoverResult? result = provider.GetHover("SELECT * FROM users", 14);
+
+        Assert.NotNull(result);
+        Assert.Contains("View: users", result.Contents);
+        Assert.DoesNotContain("Table:", result.Contents);
     }
 
     // ───────────────────── Column hover ─────────────────────
@@ -200,6 +247,61 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.NotNull(result);
         Assert.Contains("frame", result.Contents);
         Assert.Contains("VideoFrame", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_BareTableAlias_ResolvesToUnderlyingTable()
+    {
+        // Hover on `u` (alias for `users` from `FROM users u`) must surface
+        // the users table card. Previously the manifest lookup found
+        // nothing named `u` and produced no hover at all.
+        HoverProvider provider = CreateProvider();
+
+        // Hover on the trailing alias `u` of `FROM users u`.
+        const string sql = "SELECT u.id FROM users u";
+        int offset = sql.LastIndexOf('u');
+
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("Table: users", result.Contents);
+        Assert.Contains("id", result.Contents);
+        Assert.Contains("name", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_BareTableAlias_InSecondStatementOfBatch_ResolvesToUnderlyingTable()
+    {
+        // Multi-statement batch — alias-collection used to stop at the
+        // first QueryStatement (EffectiveQuery only returns one), so the
+        // second statement's alias was invisible to hover.
+        HoverProvider provider = CreateProvider();
+
+        const string sql = "SELECT id FROM users; SELECT u.id FROM users u";
+        int offset = sql.LastIndexOf('u');
+
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("Table: users", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_QualifiedColumnThroughTableAlias_ResolvesToTableColumn()
+    {
+        // `u.id` where `u` is an alias for `users` — column hover should
+        // resolve through the alias to surface the users.id column entry.
+        HoverProvider provider = CreateProvider();
+
+        const string sql = "SELECT u.id FROM users u";
+        // "id" inside "u.id" starts at offset 9.
+        int offset = sql.IndexOf("u.id", StringComparison.Ordinal) + 2;
+
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("id", result.Contents);
+        Assert.Contains("Float32", result.Contents);
     }
 
     [Fact]

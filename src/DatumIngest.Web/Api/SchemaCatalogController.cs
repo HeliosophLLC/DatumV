@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Model;
 using DatumIngest.Web.Dtos.Schema;
 using Microsoft.AspNetCore.Mvc;
@@ -14,7 +15,8 @@ namespace DatumIngest.Web.Api;
 /// <remarks>
 /// Live updates flow through <see cref="DatumIngest.Web.Hubs.CatalogHub"/>:
 /// the client refetches on TableCreated / TableAltered / TableDropped /
-/// IndexCreated / IndexDropped / SchemaCreated / SchemaDropped kinds.
+/// IndexCreated / IndexDropped / SchemaCreated / SchemaDropped /
+/// ViewCreated / ViewAltered / ViewDropped kinds.
 /// </remarks>
 [ApiController]
 [Route("api/schema")]
@@ -24,7 +26,7 @@ public sealed class SchemaCatalogController(TableCatalog catalog) : ControllerBa
     /// Returns every queryable table with its full column + index metadata.
     /// </summary>
     [HttpGet("catalog")]
-    public ActionResult<SchemaCatalogDto> GetCatalog()
+    public async Task<ActionResult<SchemaCatalogDto>> GetCatalog(CancellationToken cancellationToken)
     {
         List<TableEntryDto> tables = [];
         foreach (ITableProvider provider in catalog)
@@ -86,6 +88,48 @@ public sealed class SchemaCatalogController(TableCatalog catalog) : ControllerBa
                 Kind: kind,
                 Columns: columns,
                 Indexes: indexes));
+        }
+
+        // Surface registered views alongside tables. View columns come from
+        // a static QuerySchemaResolver pass over the stored body — the same
+        // resolver the LSP runs for hover / completion — so the Catalog
+        // Explorer tree shows the projection users will see when they query
+        // the view. A body whose dependency isn't yet on the catalog
+        // degrades to an empty column list rather than failing the whole
+        // request.
+        QuerySchemaResolver viewResolver = new(catalog, catalog.Functions);
+        foreach (ViewDescriptor view in catalog.Views.Entries)
+        {
+            ColumnEntryDto[] viewColumns;
+            try
+            {
+                ResolvedQuerySchema resolved = await viewResolver
+                    .ResolveProjectionAsync(view.Body, view.QualifiedName.ToString(), cancellationToken)
+                    .ConfigureAwait(false);
+                viewColumns = new ColumnEntryDto[resolved.Columns.Count];
+                for (int i = 0; i < resolved.Columns.Count; i++)
+                {
+                    ResolvedColumn col = resolved.Columns[i];
+                    viewColumns[i] = new ColumnEntryDto(
+                        Ordinal: i + 1,
+                        Name: col.ColumnName,
+                        DataType: col.Kind.ToString(),
+                        IsArray: col.IsArray,
+                        IsNullable: col.Nullable,
+                        IsPrimaryKey: false);
+                }
+            }
+            catch
+            {
+                viewColumns = [];
+            }
+
+            tables.Add(new TableEntryDto(
+                Schema: view.SchemaName,
+                Name: view.Name,
+                Kind: "VIEW",
+                Columns: viewColumns,
+                Indexes: []));
         }
 
         // Stable ordering so the UI doesn't reshuffle between refetches.

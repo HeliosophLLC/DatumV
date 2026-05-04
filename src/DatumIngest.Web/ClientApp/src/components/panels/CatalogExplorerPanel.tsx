@@ -7,6 +7,7 @@ import {
   Calendar,
   CaseSensitive,
   Database,
+  Eye,
   FileBox,
   Folder,
   FolderOpen,
@@ -255,11 +256,17 @@ function TableNode({
       dataPath={tKey}
       label={
         <>
-          {/* Sky-blue Database — same data-kind palette as the Project
-              Explorer's `data` rows. Two-tone fill+text matches the
-              manila folder treatment so the icon reads as a chip rather
-              than a thin outline. */}
-          <Database className="size-3 shrink-0 fill-sky-200 text-sky-600 dark:fill-sky-900/40 dark:text-sky-400" />
+          {/* Tables: sky-blue Database — same data-kind palette as the
+              Project Explorer's `data` rows. Two-tone fill+text matches
+              the manila folder treatment so the icon reads as a chip
+              rather than a thin outline.
+              Views: cyan Eye — mirrors the Project Explorer's view
+              affordance so the kind is recognisable across both panels. */}
+          {isView ? (
+            <Eye className="size-3 shrink-0 text-cyan-600 dark:text-cyan-400" />
+          ) : (
+            <Database className="size-3 shrink-0 fill-sky-200 text-sky-600 dark:fill-sky-900/40 dark:text-sky-400" />
+          )}
           <span className="truncate font-mono">
             <span className="text-muted-foreground">{schema}.</span>
             {name}

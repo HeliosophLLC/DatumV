@@ -49,6 +49,56 @@ public static class CatalogManifestBuilder
             });
         }
 
+        // Surface registered views as table-shaped entries so FROM-clause
+        // completion, hover, and semantic analysis see them with the same
+        // affordances as base tables. Column resolution goes through
+        // QuerySchemaResolver — same path the engine uses for column-name
+        // checks elsewhere — and best-effort-degrades to an empty list when
+        // the body references something not yet on the catalog.
+        //
+        // Using ResolveProjectionAsync (not ResolveAsync) so the surfaced
+        // columns are the view's declared projection — what queries against
+        // the view actually see — rather than the wider FROM/JOIN column
+        // set the body happens to read from.
+        QuerySchemaResolver viewResolver = new(catalog, functions);
+        foreach (ViewDescriptor view in catalog.Views.Entries)
+        {
+            IReadOnlyList<TableColumnEntry> viewColumns;
+            try
+            {
+                ResolvedQuerySchema resolved = viewResolver
+                    .ResolveProjectionAsync(view.Body, view.QualifiedName.ToString(), CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                List<TableColumnEntry> columns = new(resolved.Columns.Count);
+                foreach (ResolvedColumn col in resolved.Columns)
+                {
+                    columns.Add(new TableColumnEntry
+                    {
+                        Name = col.ColumnName,
+                        Kind = col.IsArray ? $"Array<{col.Kind}>" : col.Kind.ToString(),
+                        Nullable = col.Nullable,
+                    });
+                }
+                viewColumns = columns;
+            }
+            catch (Exception)
+            {
+                // A view whose body can't currently be resolved (missing
+                // dependency, circular reference, parse drift) still
+                // surfaces as a name — completion is the immediate win,
+                // and columns will populate on the next manifest build
+                // once the dependency lands.
+                viewColumns = Array.Empty<TableColumnEntry>();
+            }
+
+            tables.Add(new TableSchemaEntry
+            {
+                Name = view.QualifiedName.ToString(),
+                Columns = viewColumns,
+                Kind = "VIEW",
+            });
+        }
+
         List<FunctionSignature> functionSigs = new();
 
         // Scalar functions carry static-abstract metadata (IFunction.Signatures)

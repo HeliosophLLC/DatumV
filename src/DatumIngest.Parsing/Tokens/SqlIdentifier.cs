@@ -55,6 +55,30 @@ public static partial class SqlIdentifier
     }
 
     /// <summary>
+    /// Quotes each segment of a dotted identifier path independently, then
+    /// re-joins with <c>.</c>. Use this for qualified names like
+    /// <c>schema.table</c> — passing the whole string to <see cref="QuoteIfNeeded(string)"/>
+    /// would treat the dot as part of a single identifier and emit
+    /// <c>"schema.table"</c>, which the parser reads as one quoted name and
+    /// fails to resolve. A name with no dot routes through
+    /// <see cref="QuoteIfNeeded(string)"/> unchanged.
+    /// </summary>
+    public static string QuoteQualifiedIfNeeded(string name)
+    {
+        if (string.IsNullOrEmpty(name) || name.IndexOf('.') < 0)
+        {
+            return QuoteIfNeeded(name);
+        }
+
+        string[] parts = name.Split('.');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            parts[i] = QuoteIfNeeded(parts[i]);
+        }
+        return string.Join('.', parts);
+    }
+
+    /// <summary>
     /// Strips surrounding double-quote or single-quote delimiters from a name
     /// if present, un-escaping doubled characters. Returns the bare name otherwise.
     /// </summary>

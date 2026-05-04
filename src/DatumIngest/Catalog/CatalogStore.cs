@@ -109,10 +109,17 @@ public sealed class CatalogStore
     ///     UDF / procedure / user-model fields from earlier versions are
     ///     removed. Catalog-installed model rows keep the v6 provenance shape.
     ///     </description></item>
+    ///   <item><description><c>8</c>: adds a top-level <c>views</c> section
+    ///     for SQL views registered via <c>CREATE VIEW</c>. Each entry
+    ///     carries <c>(schema, name, file_path)</c> following the v7 UDF
+    ///     shape; the body lives at <c>views/&lt;schema&gt;/&lt;name&gt;.sql</c>
+    ///     as verbatim <c>CREATE OR REPLACE VIEW</c> SQL. Rehydration runs
+    ///     synchronously inside <see cref="Load"/> — re-parsing a view body
+    ///     has no async dependencies.</description></item>
     /// </list>
-    /// Only v7 is accepted; older and newer versions both throw at load.
+    /// Only v8 is accepted; older and newer versions both throw at load.
     /// </summary>
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 8;
 
     private readonly string _path;
     private readonly object _writeLock = new();
@@ -174,7 +181,7 @@ public sealed class CatalogStore
     /// </summary>
     /// <remarks>
     /// Called by <see cref="TableCatalog"/> right after
-    /// <see cref="Load(UdfRegistry, ProcedureRegistry)"/> so the
+    /// <see cref="Load(UdfRegistry, ProcedureRegistry, ViewRegistry)"/> so the
     /// FlatFile backend can rehydrate every persistent table.
     /// </remarks>
     public FlatFileBackendState? LoadedFlatFileBackendState => _loadedFlatFileState;
@@ -189,24 +196,26 @@ public sealed class CatalogStore
     public IReadOnlyList<PendingModelEntry> LoadedModelEntries => _loadedModelEntries;
 
     /// <summary>
-    /// Loads the persisted state into <paramref name="udfs"/> and
-    /// <paramref name="procedures"/>. Returns a report describing what
-    /// loaded and what was skipped. Does not throw for a missing file —
-    /// that's a normal first-time-startup case.
+    /// Loads the persisted state into <paramref name="udfs"/>,
+    /// <paramref name="procedures"/>, and <paramref name="views"/>. Returns
+    /// a report describing what loaded and what was skipped. Does not
+    /// throw for a missing file — that's a normal first-time-startup case.
     /// </summary>
     /// <param name="udfs">The UDF registry to populate.</param>
     /// <param name="procedures">The procedure registry to populate.</param>
+    /// <param name="views">The view registry to populate.</param>
     /// <exception cref="CatalogStoreLoadException">
     /// The file exists but cannot be read or is not valid JSON. Individual
     /// bad entries are skipped (and reported) rather than throwing.
     /// </exception>
-    public CatalogStoreLoadReport Load(UdfRegistry udfs, ProcedureRegistry procedures)
+    public CatalogStoreLoadReport Load(UdfRegistry udfs, ProcedureRegistry procedures, ViewRegistry views)
     {
         if (!File.Exists(_path))
         {
             return new CatalogStoreLoadReport(
                 LoadedUdfs: 0, SkippedUdfs: 0,
                 LoadedProcedures: 0, SkippedProcedures: 0,
+                LoadedViews: 0, SkippedViews: 0,
                 Warnings: []);
         }
 
@@ -237,6 +246,7 @@ public sealed class CatalogStore
             return new CatalogStoreLoadReport(
                 LoadedUdfs: 0, SkippedUdfs: 0,
                 LoadedProcedures: 0, SkippedProcedures: 0,
+                LoadedViews: 0, SkippedViews: 0,
                 Warnings: []);
         }
 
@@ -364,9 +374,47 @@ public sealed class CatalogStore
             }
         }
 
+        int loadedViews = 0;
+        int skippedViews = 0;
+
+        foreach (CatalogFileViewEntry entry in parsed.Views ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(entry.Name))
+            {
+                skippedViews++;
+                warnings.Add("Skipping view entry with missing or empty 'name'.");
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(entry.FilePath))
+            {
+                skippedViews++;
+                warnings.Add($"Skipping view '{entry.Name}': manifest entry has no file_path.");
+                continue;
+            }
+
+            string? sourceText = TryReadSqlFile(catalogDirectory, entry.FilePath!, $"view '{entry.Schema}.{entry.Name}'", warnings);
+            if (sourceText is null) { skippedViews++; continue; }
+
+            ViewDescriptor? descriptor = TryRehydrateViewFromSource(
+                entry.Schema ?? "public", entry.Name!, sourceText, warnings);
+            if (descriptor is null) { skippedViews++; continue; }
+
+            try
+            {
+                views.Register(descriptor, replace: false);
+                loadedViews++;
+            }
+            catch (InvalidOperationException ex)
+            {
+                skippedViews++;
+                warnings.Add($"Skipping view '{entry.Name}': {ex.Message}");
+            }
+        }
+
         return new CatalogStoreLoadReport(
             loadedUdfs, skippedUdfs,
             loadedProcedures, skippedProcedures,
+            loadedViews, skippedViews,
             warnings);
     }
 
@@ -495,10 +543,44 @@ public sealed class CatalogStore
     }
 
     /// <summary>
+    /// Re-parses the verbatim <c>CREATE VIEW</c> SQL read from disk into a
+    /// fresh <see cref="ViewDescriptor"/>. A view body that no longer parses
+    /// (e.g. because a referenced syntax was removed) skips the view with a
+    /// warning rather than aborting the catalog load.
+    /// </summary>
+    private static ViewDescriptor? TryRehydrateViewFromSource(
+        string schemaName, string name, string sourceText, List<string> warnings)
+    {
+        Statement parsed;
+        try
+        {
+            parsed = SqlParser.ParseStatement(sourceText);
+        }
+        catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException || ex is FormatException)
+        {
+            warnings.Add($"Skipping view '{name}': source failed to parse — {ex.Message}");
+            return null;
+        }
+
+        if (parsed is not CreateViewStatement create)
+        {
+            warnings.Add($"Skipping view '{name}': persisted source did not parse as a CREATE VIEW statement.");
+            return null;
+        }
+
+        return new ViewDescriptor(
+            SchemaName: schemaName,
+            Name: create.Name,
+            Body: create.Body,
+            SourceText: sourceText);
+    }
+
+    /// <summary>
     /// Atomically persists the current state of <paramref name="udfs"/>,
-    /// <paramref name="procedures"/>, and <paramref name="models"/> to the
-    /// file. Writes to a sibling <c>.tmp</c> path and renames into place
-    /// so a crash never leaves a half-written file at the canonical location.
+    /// <paramref name="procedures"/>, <paramref name="models"/>, and
+    /// <paramref name="views"/> to the file. Writes to a sibling
+    /// <c>.tmp</c> path and renames into place so a crash never leaves a
+    /// half-written file at the canonical location.
     /// </summary>
     /// <param name="udfs">UDF registry to snapshot into the <c>udfs</c> section.</param>
     /// <param name="procedures">Procedure registry to snapshot into the <c>procedures</c> section.</param>
@@ -506,7 +588,10 @@ public sealed class CatalogStore
     /// when the caller has no models to persist (e.g. a test fixture
     /// stripped down to UDFs); the <c>models</c> section is then omitted
     /// from the output instead of written as an empty list.</param>
-    public void Save(UdfRegistry udfs, ProcedureRegistry procedures, ModelRegistry? models)
+    /// <param name="views">View registry to snapshot into the <c>views</c>
+    /// section. May be <see langword="null"/> for test fixtures with no
+    /// views to persist.</param>
+    public void Save(UdfRegistry udfs, ProcedureRegistry procedures, ModelRegistry? models, ViewRegistry? views)
     {
         lock (_writeLock)
         {
@@ -563,20 +648,34 @@ public sealed class CatalogStore
                         SourceText: EnsureOrReplace(e.SourceText ?? string.Empty)))
                     .ToList();
 
+            List<(string Schema, string Name, string FilePath, string SourceText)> viewFiles = views is null
+                ? new List<(string, string, string, string)>()
+                : views.Entries
+                    .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(e => (
+                        e.SchemaName,
+                        e.Name,
+                        FilePath: ViewRelativePath(e.SchemaName, e.Name),
+                        SourceText: EnsureOrReplace(e.SourceText)))
+                    .ToList();
+
             // Write per-file SQL before the JSON manifest — if we crash midway,
             // the manifest still points at the previous (consistent) set of
             // files until the rename below completes.
             foreach (var f in udfFiles) WriteSqlFile(directory, f.FilePath, f.SourceText);
             foreach (var f in procFiles) WriteSqlFile(directory, f.FilePath, f.SourceText);
             foreach (var f in userModelFiles) WriteSqlFile(directory, f.FilePath, f.SourceText);
+            foreach (var f in viewFiles) WriteSqlFile(directory, f.FilePath, f.SourceText);
 
-            // Reconcile orphans: anything in udfs/, procedures/, models/ that
-            // isn't in the current registry snapshot gets deleted. Drops and
-            // renames take effect through this pass — Save is the single
-            // source of disk truth.
+            // Reconcile orphans: anything in udfs/, procedures/, models/, or
+            // views/ that isn't in the current registry snapshot gets deleted.
+            // Drops and renames take effect through this pass — Save is the
+            // single source of disk truth.
             ReconcileOrphans(directory, "udfs", udfFiles.Select(f => f.FilePath));
             ReconcileOrphans(directory, "procedures", procFiles.Select(f => f.FilePath));
             ReconcileOrphans(directory, "models", userModelFiles.Select(f => f.FilePath));
+            ReconcileOrphans(directory, "views", viewFiles.Select(f => f.FilePath));
 
             CatalogFile file = new()
             {
@@ -614,6 +713,16 @@ public sealed class CatalogStore
                         })
                         .ToList()
                     : null,
+                Views = viewFiles.Count == 0
+                    ? null
+                    : viewFiles
+                        .Select(f => new CatalogFileViewEntry
+                        {
+                            Schema = f.Schema,
+                            Name = f.Name,
+                            FilePath = f.FilePath,
+                        })
+                        .ToList(),
                 Backends = flatFileState is null
                     ? null
                     : new CatalogFileBackends { FlatFile = flatFileState },
@@ -647,6 +756,13 @@ public sealed class CatalogStore
     /// </summary>
     internal static string ModelRelativePath(string name)
         => $"models/{name}.sql";
+
+    /// <summary>
+    /// Catalog-relative <c>.sql</c> path for a view:
+    /// <c>views/&lt;schema&gt;/&lt;name&gt;.sql</c>.
+    /// </summary>
+    internal static string ViewRelativePath(string schema, string name)
+        => $"views/{schema}/{name}.sql";
 
     /// <summary>
     /// Resolves a forward-slash catalog-relative path against
@@ -776,6 +892,7 @@ internal sealed class CatalogFile
     public List<CatalogFileUdfEntry>? Udfs { get; set; }
     public List<CatalogFileProcedureEntry>? Procedures { get; set; }
     public List<CatalogFileModelEntry>? Models { get; set; }
+    public List<CatalogFileViewEntry>? Views { get; set; }
 
     /// <summary>
     /// Per-backend persistent state. Each <see cref="ITableCatalog"/>
@@ -980,6 +1097,26 @@ internal sealed class CatalogFileModelEntry
 }
 
 /// <summary>
+/// One view entry in the persisted catalog (v8). Source text lives in the
+/// <c>.sql</c> file referenced by <see cref="FilePath"/> — the manifest only
+/// tracks identity + location.
+/// </summary>
+internal sealed class CatalogFileViewEntry
+{
+    /// <summary>Schema portion of the canonical name.</summary>
+    public string? Schema { get; set; }
+
+    /// <summary>Unqualified view name within the schema.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>
+    /// Forward-slash path (catalog-relative) to the <c>CREATE OR REPLACE VIEW</c>
+    /// <c>.sql</c> file. Conventionally <c>views/&lt;schema&gt;/&lt;name&gt;.sql</c>.
+    /// </summary>
+    public string? FilePath { get; set; }
+}
+
+/// <summary>
 /// Decoded, validated form of a <see cref="CatalogFileModelEntry"/> after
 /// <see cref="CatalogStore.Load"/>. Surfaced via
 /// <see cref="CatalogStore.LoadedModelEntries"/> so
@@ -1029,11 +1166,13 @@ public sealed record PendingModelEntry(
 [JsonSerializable(typeof(CatalogFileUdfEntry))]
 [JsonSerializable(typeof(CatalogFileProcedureEntry))]
 [JsonSerializable(typeof(CatalogFileModelEntry))]
+[JsonSerializable(typeof(CatalogFileViewEntry))]
 [JsonSerializable(typeof(List<FlatFileTableEntry>))]
 [JsonSerializable(typeof(List<FlatFileIndexEntry>))]
 [JsonSerializable(typeof(List<CatalogFileUdfEntry>))]
 [JsonSerializable(typeof(List<CatalogFileProcedureEntry>))]
 [JsonSerializable(typeof(List<CatalogFileModelEntry>))]
+[JsonSerializable(typeof(List<CatalogFileViewEntry>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     WriteIndented = true,
@@ -1051,6 +1190,8 @@ internal sealed partial class CatalogJsonContext : JsonSerializerContext
 /// <param name="SkippedUdfs">Number of UDFs that could not be loaded.</param>
 /// <param name="LoadedProcedures">Number of procedures successfully registered.</param>
 /// <param name="SkippedProcedures">Number of procedures that could not be loaded.</param>
+/// <param name="LoadedViews">Number of views successfully registered.</param>
+/// <param name="SkippedViews">Number of views that could not be loaded.</param>
 /// <param name="Warnings">
 /// Human-readable reasons each skipped entry was rejected. May also
 /// include version-mismatch notices.
@@ -1060,6 +1201,8 @@ public sealed record CatalogStoreLoadReport(
     int SkippedUdfs,
     int LoadedProcedures,
     int SkippedProcedures,
+    int LoadedViews,
+    int SkippedViews,
     IReadOnlyList<string> Warnings);
 
 /// <summary>

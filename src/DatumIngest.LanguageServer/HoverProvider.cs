@@ -51,6 +51,10 @@ public sealed class HoverProvider
         // No per-cursor scoping yet: an alias defined anywhere in the
         // statement is visible everywhere. Scope-aware lookup is a follow-up.
         Dictionary<string, FunctionSignature> tvfAliases = BuildTvfAliasMap(sql);
+        // Plain-table FROM/JOIN aliases — lets hover on a bare `t` from
+        // `FROM users t` resolve to the users table card, and lets
+        // `t.column` resolve column hovers through the same alias.
+        Dictionary<string, string> tableAliases = BuildTableAliasMap(sql);
         // CTE projection schemas — same global-scope simplification as the
         // TVF alias map. A bare CTE name or a FROM alias bound to a CTE
         // resolves to the CTE's derived output columns.
@@ -79,14 +83,14 @@ public sealed class HoverProvider
             && TemplateSpliceLocator.TryLocate(sql, cursorOffset, out var splice))
         {
             HoverResult? spliceHover = ResolveSpliceHover(
-                sql, cursorOffset, splice, tvfAliases, cteSchemas, declaredVariables);
+                sql, cursorOffset, splice, tvfAliases, tableAliases, cteSchemas, declaredVariables);
             if (spliceHover is not null) return spliceHover;
             // Locator hit but inner dispatch produced nothing — fall
             // through to the generic template hover so the user still
             // gets some context for the click.
         }
 
-        string? markdown = ResolveHoverMarkdown(hit, tokens, tvfAliases, cteSchemas, lambdaScopes, declaredVariables, out docKey);
+        string? markdown = ResolveHoverMarkdown(hit, tokens, tvfAliases, tableAliases, cteSchemas, lambdaScopes, declaredVariables, out docKey);
 
         if (markdown is null)
         {
@@ -118,6 +122,7 @@ public sealed class HoverProvider
         TokenHit hit,
         List<TokenHit> tokens,
         Dictionary<string, FunctionSignature> tvfAliases,
+        Dictionary<string, string> tableAliases,
         CteSchemaResult cteSchemas,
         IReadOnlyList<LambdaScope> lambdaScopes,
         Dictionary<string, string?> declaredVariables,
@@ -126,7 +131,7 @@ public sealed class HoverProvider
         docKey = null;
         return hit.Kind switch
         {
-            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, tvfAliases, cteSchemas, lambdaScopes, declaredVariables, out docKey),
+            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, tvfAliases, tableAliases, cteSchemas, lambdaScopes, declaredVariables, out docKey),
             SqlToken.TypeKeyword => TypeDescriptions.TryGetValue(hit.Text, out string? typeDesc) ? typeDesc : null,
             SqlToken.Arrow => "**`->`** Lambda arrow — separates parameter(s) from the body expression.\n\n" +
                 "Usage: `x -> expr` or `(a, b) -> expr` inside higher-order functions " +
@@ -168,6 +173,7 @@ public sealed class HoverProvider
         int cursorOffset,
         TemplateSpliceLocator.SpliceLocation splice,
         Dictionary<string, FunctionSignature> tvfAliases,
+        Dictionary<string, string> tableAliases,
         CteSchemaResult cteSchemas,
         Dictionary<string, string?> declaredVariables)
     {
@@ -180,7 +186,7 @@ public sealed class HoverProvider
             LambdaScopeWalker.FindActiveScopes(innerTokens, innerCursor);
 
         string? markdown = ResolveHoverMarkdown(
-            innerHit, innerTokens, tvfAliases, cteSchemas, innerLambdaScopes,
+            innerHit, innerTokens, tvfAliases, tableAliases, cteSchemas, innerLambdaScopes,
             declaredVariables, out string? docKey);
 
         if (markdown is null) return null;
@@ -247,6 +253,7 @@ public sealed class HoverProvider
         List<TokenHit> tokens,
         TokenHit currentToken,
         Dictionary<string, FunctionSignature> tvfAliases,
+        Dictionary<string, string> tableAliases,
         CteSchemaResult cteSchemas,
         IReadOnlyList<LambdaScope> lambdaScopes,
         Dictionary<string, string?> declaredVariables,
@@ -408,7 +415,14 @@ public sealed class HoverProvider
             string? structFieldHover = GetStructFieldHover(qualifier, name, cteSchemas);
             if (structFieldHover is not null) return structFieldHover;
 
-            return GetQualifiedColumnHover(qualifier, name);
+            // Plain FROM/JOIN alias: when the qualifier is `t` from
+            // `FROM users t`, resolve to `users` so column hovers light up.
+            string columnTableName = qualifier;
+            if (tableAliases.TryGetValue(qualifier, out string? aliasedTable))
+            {
+                columnTableName = aliasedTable;
+            }
+            return GetQualifiedColumnHover(columnTableName, name);
         }
 
         // Check if the identifier is a known virtual schema name itself (e.g. hovering over "information_schema").
@@ -428,6 +442,18 @@ public sealed class HoverProvider
         if (tableHover is not null)
         {
             return tableHover;
+        }
+
+        // Plain FROM/JOIN alias: hover on the `t` in `FROM users t` (or on
+        // any later bare reference to `t`) should surface the underlying
+        // table's hover card.
+        if (tableAliases.TryGetValue(name, out string? aliasedTableName))
+        {
+            string? aliasedTableHover = GetTableHover(aliasedTableName);
+            if (aliasedTableHover is not null)
+            {
+                return aliasedTableHover;
+            }
         }
 
         // Unqualified column referenced from a TVF source. Walk every TVF
@@ -917,23 +943,91 @@ public sealed class HoverProvider
             return result;
         }
 
-        // EffectiveQuery so TVF-alias enumeration survives a leading DECLARE
-        // (Query is null for multi-statement batches; the WITH/SELECT lives
-        // inside Statements as a QueryStatement).
-        QueryExpression? query = parseResult.EffectiveQuery;
-        if (query is null) return result;
-
-        foreach (FunctionSource source in EnumerateFunctionSources(query))
+        // Walk EVERY query reachable in the batch — a semicolon-separated
+        // file holds multiple QueryStatements, and EffectiveQuery only
+        // returns the first one, so the second statement's TVF sources
+        // would be invisible if we stopped there.
+        foreach (QueryExpression query in EnumerateAllQueries(parseResult))
         {
-            FunctionSignature? signature = LookupTvfSignature(source);
-            if (signature is null) continue;
-            string aliasKey = source.Alias ?? source.FunctionName;
-            // First-wins on alias clashes — preserves the natural document
-            // order so the leftmost source surfaces under shared aliases.
-            if (!result.ContainsKey(aliasKey)) result[aliasKey] = signature;
+            foreach (FunctionSource source in EnumerateFunctionSources(query))
+            {
+                FunctionSignature? signature = LookupTvfSignature(source);
+                if (signature is null) continue;
+                string aliasKey = source.Alias ?? source.FunctionName;
+                // First-wins on alias clashes — preserves the natural document
+                // order so the leftmost source surfaces under shared aliases.
+                if (!result.ContainsKey(aliasKey)) result[aliasKey] = signature;
+            }
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Builds an <c>alias → table-name</c> map by walking every
+    /// <see cref="TableReference"/> reachable from the parsed query. The
+    /// stored table name is schema-qualified when the user wrote it that
+    /// way (e.g. <c>public.users u</c> ⇒ <c>u → public.users</c>) so the
+    /// downstream manifest lookup matches the catalog's storage. Only
+    /// references with an explicit <c>Alias</c> contribute — the bare
+    /// table name itself doesn't need aliasing.
+    /// </summary>
+    private static Dictionary<string, string> BuildTableAliasMap(string sql)
+    {
+        Dictionary<string, string> result = new(StringComparer.OrdinalIgnoreCase);
+        ParseResult parseResult;
+        try
+        {
+            parseResult = SqlParser.TryParseRecovering(sql);
+        }
+        catch
+        {
+            return result;
+        }
+
+        // Walk EVERY query in the batch — see BuildTvfAliasMap for the
+        // rationale (EffectiveQuery only surfaces the first statement).
+        foreach (QueryExpression query in EnumerateAllQueries(parseResult))
+        {
+            foreach (TableReference table in EnumerateTableReferences(query))
+            {
+                if (table.Alias is null) continue;
+                string tableName = table.SchemaName is not null
+                    ? $"{table.SchemaName}.{table.Name}"
+                    : table.Name;
+                // First-wins on alias clash — matches BuildTvfAliasMap.
+                if (!result.ContainsKey(table.Alias)) result[table.Alias] = tableName;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Yields every <see cref="QueryExpression"/> reachable from
+    /// <paramref name="parseResult"/> — both the bare-query case and every
+    /// <see cref="QueryStatement"/> inside a semicolon-separated batch.
+    /// Lets per-hover analyses (alias maps, schema resolution) see all
+    /// statements in the file rather than just the first one
+    /// <see cref="ParseResult.EffectiveQuery"/> returns.
+    /// </summary>
+    private static IEnumerable<QueryExpression> EnumerateAllQueries(ParseResult parseResult)
+    {
+        // Statements supersedes Query when both are present — for a
+        // single-query batch ParseResult populates both, and yielding from
+        // Statements alone covers the multi-statement case too.
+        if (parseResult.Statements is not null)
+        {
+            foreach (Statement statement in parseResult.Statements)
+            {
+                if (statement is QueryStatement qs) yield return qs.Query;
+            }
+            yield break;
+        }
+        if (parseResult.Query is not null)
+        {
+            yield return parseResult.Query;
+        }
     }
 
     private FunctionSignature? LookupTvfSignature(FunctionSource source)
@@ -1018,6 +1112,76 @@ public sealed class HoverProvider
                 break;
             case SubquerySource sub:
                 foreach (FunctionSource inner in EnumerateInStatement(sub.Query))
+                    yield return inner;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Yields every <see cref="TableReference"/> reachable from
+    /// <paramref name="query"/>. Mirrors <see cref="EnumerateFunctionSources"/>
+    /// but targets plain table sources rather than TVF calls — used to
+    /// build the alias map so a bare alias hover resolves to its
+    /// underlying table.
+    /// </summary>
+    private static IEnumerable<TableReference> EnumerateTableReferences(QueryExpression query)
+    {
+        switch (query)
+        {
+            case SelectQueryExpression select:
+                foreach (TableReference t in EnumerateTableReferencesInStatement(select.Statement))
+                    yield return t;
+                break;
+            case CompoundQueryExpression compound:
+                foreach (TableReference t in EnumerateTableReferences(compound.Left))
+                    yield return t;
+                foreach (TableReference t in EnumerateTableReferences(compound.Right))
+                    yield return t;
+                break;
+        }
+    }
+
+    private static IEnumerable<TableReference> EnumerateTableReferencesInStatement(SelectStatement statement)
+    {
+        if (statement.CommonTableExpressions is not null)
+        {
+            foreach (CommonTableExpression cte in statement.CommonTableExpressions)
+            {
+                foreach (TableReference t in EnumerateTableReferences(cte.Body))
+                    yield return t;
+                if (cte.RecursiveQuery is not null)
+                {
+                    foreach (TableReference t in EnumerateTableReferencesInStatement(cte.RecursiveQuery))
+                        yield return t;
+                }
+            }
+        }
+
+        if (statement.From is not null)
+        {
+            foreach (TableReference t in EnumerateTableReferencesInSource(statement.From.Source))
+                yield return t;
+        }
+
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                foreach (TableReference t in EnumerateTableReferencesInSource(join.Source))
+                    yield return t;
+            }
+        }
+    }
+
+    private static IEnumerable<TableReference> EnumerateTableReferencesInSource(TableSource source)
+    {
+        switch (source)
+        {
+            case TableReference tr:
+                yield return tr;
+                break;
+            case SubquerySource sub:
+                foreach (TableReference inner in EnumerateTableReferencesInStatement(sub.Query))
                     yield return inner;
                 break;
         }
@@ -1289,7 +1453,10 @@ public sealed class HoverProvider
             return null;
         }
 
-        string header = $"**Table: {table.Name}** ({table.Columns.Count} columns)\n\n";
+        string label = string.Equals(table.Kind, "VIEW", StringComparison.OrdinalIgnoreCase)
+            ? "View"
+            : "Table";
+        string header = $"**{label}: {table.Name}** ({table.Columns.Count} columns)\n\n";
         string columns = string.Join("\n", table.Columns.Select(column =>
         {
             string nullable = column.Nullable ? " *(nullable)*" : "";

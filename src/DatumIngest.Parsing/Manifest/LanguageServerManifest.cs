@@ -266,6 +266,16 @@ public sealed class TableSchemaEntry
 
     /// <summary>The columns available in this table.</summary>
     public required IReadOnlyList<TableColumnEntry> Columns { get; init; }
+
+    /// <summary>
+    /// Source kind of this entry. <c>"TABLE"</c> (the default) for catalog
+    /// providers backed by row storage, <c>"VIEW"</c> for entries that
+    /// originate from a registered <c>CREATE VIEW</c>. Consumers that
+    /// only care about names (FROM completion, column resolution) can
+    /// ignore this; consumers that render the entry to the user (hover,
+    /// catalog explorer) switch labels on it.
+    /// </summary>
+    public string Kind { get; init; } = "TABLE";
 }
 
 /// <summary>

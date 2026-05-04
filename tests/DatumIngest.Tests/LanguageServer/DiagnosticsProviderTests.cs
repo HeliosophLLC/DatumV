@@ -1,6 +1,7 @@
 namespace DatumIngest.Tests.LanguageServer;
 
 using DatumIngest.LanguageServer;
+using DatumIngest.Manifest;
 
 /// <summary>
 /// Tests for <see cref="DiagnosticsProvider"/> — SQL parse error detection.
@@ -180,5 +181,86 @@ public sealed class DiagnosticsProviderTests : ServiceTestBase
 
         Assert.NotEmpty(diagnostics);
         Assert.Equal(DiagnosticSeverity.Error, diagnostics[0].Severity);
+    }
+
+    // ───────────────────── DML against a view ─────────────────────
+
+    private static LanguageServerManifest ManifestWithView() => new()
+    {
+        Tables =
+        [
+            new TableSchemaEntry
+            {
+                Name = "public.myview",
+                Kind = "VIEW",
+                Columns = [new TableColumnEntry { Name = "a", Kind = "Int32", Nullable = false }],
+            },
+            new TableSchemaEntry
+            {
+                Name = "public.realtable",
+                Kind = "TABLE",
+                Columns = [new TableColumnEntry { Name = "a", Kind = "Int32", Nullable = false }],
+            },
+        ],
+        Functions = [],
+        Keywords = [],
+        SearchPath = ["public"],
+    };
+
+    [Fact]
+    public void GetDiagnostics_InsertIntoView_ReturnsError()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "INSERT INTO myview VALUES (1)", ManifestWithView());
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Error
+            && d.Message.Contains("INSERT", System.StringComparison.OrdinalIgnoreCase)
+            && d.Message.Contains("view", System.StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void GetDiagnostics_UpdateView_ReturnsError()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "UPDATE myview SET a = 1", ManifestWithView());
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Error
+            && d.Message.Contains("UPDATE", System.StringComparison.OrdinalIgnoreCase)
+            && d.Message.Contains("view", System.StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void GetDiagnostics_DeleteFromView_ReturnsError()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "DELETE FROM myview", ManifestWithView());
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Error
+            && d.Message.Contains("DELETE", System.StringComparison.OrdinalIgnoreCase)
+            && d.Message.Contains("view", System.StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void GetDiagnostics_DmlAgainstRealTable_NoViewWarning()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "INSERT INTO realtable VALUES (1)", ManifestWithView());
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Message.Contains("view", System.StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void GetDiagnostics_QualifiedDmlOnView_ReturnsError()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "DELETE FROM public.myview", ManifestWithView());
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Error
+            && d.Message.Contains("view", System.StringComparison.OrdinalIgnoreCase));
     }
 }

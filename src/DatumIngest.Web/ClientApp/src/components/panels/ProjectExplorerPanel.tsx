@@ -355,6 +355,9 @@ function iconForKind(kind: string): {
     case 'model':
       // Violet — model bundles ("AI" sparkles read purple in most tooling)
       return { Icon: Sparkles, colorClass: 'text-violet-600 dark:text-violet-400' };
+    case 'view':
+      // Cyan eye — views are "look but don't touch" projections over tables
+      return { Icon: Eye, colorClass: 'text-cyan-600 dark:text-cyan-400' };
     case 'manifest':
       // Orange paper — JSON / config
       return {

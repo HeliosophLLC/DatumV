@@ -195,8 +195,9 @@ public sealed class CompletionProvider
                         AddModels(items);
                         break;
                     }
-                    AddQualifiedColumns(items, zone.TableQualifier, zone.TvfAliasesInScope, cteSchemas);
+                    AddQualifiedColumns(items, zone.TableQualifier, zone.TvfAliasesInScope, zone.TableAliasesInScope, cteSchemas);
                     AddSchemaRoutines(items, zone.TableQualifier);
+                    AddSchemaTables(items, zone.TableQualifier);
                 }
                 break;
 
@@ -383,7 +384,7 @@ public sealed class CompletionProvider
             string columnSummary = string.Join(", ", table.Columns.Select(
                 column => $"{column.Name}: {column.Kind}"));
 
-            string insertText = SqlIdentifier.QuoteIfNeeded(table.Name);
+            string insertText = SqlIdentifier.QuoteQualifiedIfNeeded(table.Name);
             items.Add(new CompletionItem
             {
                 Label = table.Name,
@@ -721,13 +722,14 @@ public sealed class CompletionProvider
 
     private void AddQualifiedColumns(List<CompletionItem> items, string tableQualifier)
     {
-        AddQualifiedColumns(items, tableQualifier, tvfAliases: null, cteSchemas: CteSchemaResolver.Empty);
+        AddQualifiedColumns(items, tableQualifier, tvfAliases: null, tableAliases: null, cteSchemas: CteSchemaResolver.Empty);
     }
 
     private void AddQualifiedColumns(
         List<CompletionItem> items,
         string tableQualifier,
         IReadOnlyDictionary<string, string>? tvfAliases,
+        IReadOnlyDictionary<string, string>? tableAliases,
         CteSchemaResult cteSchemas)
     {
         // TVF aliases first — when the user typed `vid.`, we want the
@@ -793,17 +795,27 @@ public sealed class CompletionProvider
             return;
         }
 
-        // tableQualifier is what the user typed before the dot — could be
-        // a schema-qualified name or just an unqualified table name.
+        // Resolve a FROM/JOIN alias to its underlying table before the
+        // manifest lookup — `FROM users u` should let `u.` find `users`
+        // even though `u` is never a registered table name.
+        string lookupName = tableQualifier;
+        if (tableAliases is not null
+            && tableAliases.TryGetValue(tableQualifier, out string? aliasedTable))
+        {
+            lookupName = aliasedTable;
+        }
+
+        // lookupName is the (possibly alias-resolved) table reference — could
+        // be a schema-qualified name or just an unqualified table name.
         // Manifest stores tables fully-qualified, so accept either.
         TableSchemaEntry? table = _manifest.Tables.FirstOrDefault(
-            entry => string.Equals(entry.Name, tableQualifier, StringComparison.OrdinalIgnoreCase));
+            entry => string.Equals(entry.Name, lookupName, StringComparison.OrdinalIgnoreCase));
 
-        if (table is null && !tableQualifier.Contains('.'))
+        if (table is null && !lookupName.Contains('.'))
         {
             foreach (string schema in _manifest.SearchPath)
             {
-                string qualified = $"{schema}.{tableQualifier}";
+                string qualified = $"{schema}.{lookupName}";
                 table = _manifest.Tables.FirstOrDefault(
                     entry => string.Equals(entry.Name, qualified, StringComparison.OrdinalIgnoreCase));
                 if (table is not null) break;
@@ -1245,6 +1257,39 @@ public sealed class CompletionProvider
     /// <c>{schema}.</c>. Procedures get a <c>[procedure]</c> tag so users
     /// see them as CALL-only targets distinct from regular functions.
     /// </summary>
+    /// <summary>
+    /// Adds completion items for every table whose schema matches
+    /// <paramref name="schema"/> — surfacing the unqualified table name
+    /// after a dot like <c>information_schema.</c>. Silently no-ops when
+    /// no manifest table sits in that schema (so calling this for an
+    /// alias qualifier like <c>t.</c> contributes nothing).
+    /// </summary>
+    private void AddSchemaTables(List<CompletionItem> items, string schema)
+    {
+        foreach (TableSchemaEntry table in _manifest.Tables)
+        {
+            int dot = table.Name.IndexOf('.');
+            if (dot <= 0) continue;
+            if (!string.Equals(table.Name[..dot], schema, StringComparison.OrdinalIgnoreCase)) continue;
+
+            string unqualified = table.Name[(dot + 1)..];
+            string columnSummary = string.Join(", ", table.Columns.Select(
+                column => $"{column.Name}: {column.Kind}"));
+
+            items.Add(new CompletionItem
+            {
+                Label = unqualified,
+                Kind = CompletionItemKind.Table,
+                Detail = $"Table ({table.Columns.Count} columns) — {table.Name}",
+                InsertText = SqlIdentifier.QuoteIfNeeded(unqualified) is { } quoted && quoted != unqualified
+                    ? quoted
+                    : null,
+                Documentation = columnSummary,
+                SortOrder = 0,
+            });
+        }
+    }
+
     private void AddSchemaRoutines(List<CompletionItem> items, string schema)
     {
         if (_manifest.Udfs is not null)

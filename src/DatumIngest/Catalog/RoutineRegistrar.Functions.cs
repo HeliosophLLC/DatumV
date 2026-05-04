@@ -52,7 +52,7 @@ internal sealed partial class RoutineRegistrar
             ApplyCreateMacroFunction(create, qn, sourceText);
         }
 
-        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
+        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels, _views);
 
         if (_udfs.TryGet(qn, out UdfDescriptor? after))
         {
@@ -414,7 +414,7 @@ internal sealed partial class RoutineRegistrar
         // call is idempotent for macro UDFs (no adapter ever existed) so
         // we don't need to gate it on IsProcedural.
         UnregisterProceduralAdapter(udf.QualifiedName);
-        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels);
+        _catalogStore?.Save(_udfs, _procedures, _catalog.DeclaredModels, _views);
 
         _catalog.Events.Raise(new FunctionDroppedEvent(udf.QualifiedName, udf, sourceText));
     }

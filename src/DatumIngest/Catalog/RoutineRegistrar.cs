@@ -30,28 +30,31 @@ internal sealed partial class RoutineRegistrar
     private readonly TableCatalog _catalog;
     private readonly UdfRegistry _udfs;
     private readonly ProcedureRegistry _procedures;
+    private readonly ViewRegistry _views;
     private readonly FunctionRegistry _functions;
     private readonly CatalogStore? _catalogStore;
 
     /// <summary>
     /// Wires the registrar to the catalog, registries, and (optional)
     /// persistent store it operates on. The instances are held by reference —
-    /// every mutation goes through the same UDF / procedure / function
-    /// registries the catalog exposes publicly, and every save targets the
-    /// same file. The catalog reference exists so the registrar can build
-    /// per-call <see cref="SchemaResolver"/> instances against the current
-    /// session search_path.
+    /// every mutation goes through the same UDF / procedure / view /
+    /// function registries the catalog exposes publicly, and every save
+    /// targets the same file. The catalog reference exists so the registrar
+    /// can build per-call <see cref="SchemaResolver"/> instances against
+    /// the current session search_path.
     /// </summary>
     public RoutineRegistrar(
         TableCatalog catalog,
         UdfRegistry udfs,
         ProcedureRegistry procedures,
+        ViewRegistry views,
         FunctionRegistry functions,
         CatalogStore? catalogStore)
     {
         _catalog = catalog;
         _udfs = udfs;
         _procedures = procedures;
+        _views = views;
         _functions = functions;
         _catalogStore = catalogStore;
     }

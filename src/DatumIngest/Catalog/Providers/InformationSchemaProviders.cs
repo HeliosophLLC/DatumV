@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using DatumIngest.Catalog.Registries;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -649,6 +650,122 @@ internal sealed class InformationSchemaSchemataProvider : NonSeekableTableProvid
         }
 
         yield return batch;
+
+        await Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// <c>information_schema.views</c> — lists every registered SQL view with
+/// its definition. Mirrors the SQL-standard / PostgreSQL shape. Query as
+/// <c>SELECT * FROM information_schema.views</c>.
+/// </summary>
+/// <remarks>
+/// Schema: <c>table_catalog</c>, <c>table_schema</c>, <c>table_name</c>,
+/// <c>view_definition</c>, <c>check_option</c>, <c>is_updatable</c>,
+/// <c>is_insertable_into</c>, <c>is_trigger_updatable</c>,
+/// <c>is_trigger_deletable</c>, <c>is_trigger_insertable_into</c>.
+/// <para>
+/// Views in DatumIngest are pure macros: the planner substitutes the body
+/// at every FROM reference and runs the expanded query. They are not
+/// updatable and do not support DML, so <c>is_updatable</c>,
+/// <c>is_insertable_into</c>, and the three <c>is_trigger_*</c> columns
+/// always report <c>"NO"</c>. <c>check_option</c> is always
+/// <c>"NONE"</c> — DatumIngest does not implement WITH CHECK OPTION.
+/// </para>
+/// </remarks>
+internal sealed class InformationSchemaViewsProvider : NonSeekableTableProviderBase
+{
+    /// <summary>The SQL-queryable name of this virtual table.</summary>
+    public const string TableName = "information_schema.views";
+
+    private static readonly Schema _schema = new(
+    [
+        new ColumnInfo("table_catalog",              DataKind.String, nullable: false),
+        new ColumnInfo("table_schema",               DataKind.String, nullable: false),
+        new ColumnInfo("table_name",                 DataKind.String, nullable: false),
+        new ColumnInfo("view_definition",            DataKind.String, nullable: false),
+        new ColumnInfo("check_option",               DataKind.String, nullable: false),
+        new ColumnInfo("is_updatable",               DataKind.String, nullable: false),
+        new ColumnInfo("is_insertable_into",         DataKind.String, nullable: false),
+        new ColumnInfo("is_trigger_updatable",       DataKind.String, nullable: false),
+        new ColumnInfo("is_trigger_deletable",       DataKind.String, nullable: false),
+        new ColumnInfo("is_trigger_insertable_into", DataKind.String, nullable: false),
+    ]);
+
+    private static readonly string[] ColumnNames =
+    [
+        "table_catalog", "table_schema", "table_name", "view_definition",
+        "check_option", "is_updatable", "is_insertable_into",
+        "is_trigger_updatable", "is_trigger_deletable", "is_trigger_insertable_into",
+    ];
+
+    private readonly ViewRegistry _registry;
+
+    /// <param name="pool">Buffer pool for renting row batches.</param>
+    /// <param name="registry">The view registry whose entries become rows.</param>
+    public InformationSchemaViewsProvider(Pool pool, ViewRegistry registry)
+        : base(pool, QualifiedName.Parse(TableName))
+    {
+        _registry = registry;
+    }
+
+    /// <inheritdoc/>
+    public override long GetRowCount() => _registry.Entries.Count;
+
+    /// <inheritdoc/>
+    public override Schema GetSchema() => _schema;
+
+    /// <inheritdoc/>
+    public override async IAsyncEnumerable<RowBatch> ScanAsync(
+        IReadOnlySet<string>? requiredColumns,
+        Expression? filterHint,
+        Arena? targetArena,
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
+        _ = requiredColumns;
+        _ = filterHint;
+
+        ViewDescriptor[] entries = _registry.Entries
+            .OrderBy(e => e.SchemaName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        ColumnLookup lookup = new(ColumnNames);
+        RowBatch? batch = null;
+
+        foreach (ViewDescriptor view in entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
+            DataValue[] values = Pool.RentDataValues(10);
+            values[0] = DataValue.FromString("datum", batch.Arena);
+            values[1] = DataValue.FromString(view.SchemaName, batch.Arena);
+            values[2] = DataValue.FromString(view.Name, batch.Arena);
+            values[3] = DataValue.FromString(view.SourceText, batch.Arena);
+            values[4] = DataValue.FromString("NONE", batch.Arena);
+            values[5] = DataValue.FromString("NO", batch.Arena);
+            values[6] = DataValue.FromString("NO", batch.Arena);
+            values[7] = DataValue.FromString("NO", batch.Arena);
+            values[8] = DataValue.FromString("NO", batch.Arena);
+            values[9] = DataValue.FromString("NO", batch.Arena);
+            batch.Add(values);
+
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
+        }
 
         await Task.CompletedTask;
     }

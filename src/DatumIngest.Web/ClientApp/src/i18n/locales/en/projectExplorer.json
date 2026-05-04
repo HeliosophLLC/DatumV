@@ -15,6 +15,7 @@
     "udf": "Function",
     "procedure": "Procedure",
     "model": "Model",
+    "view": "View",
     "manifest": "Catalog manifest",
     "gitignore": "Git config",
     "other": "Other"
