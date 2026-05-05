@@ -1,7 +1,10 @@
 using DatumIngest.Catalog;
 using DatumIngest.DatasetLibrary;
 using DatumIngest.Execution;
+using DatumIngest.Model;
 using DatumIngest.ModelLibrary;
+using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -56,6 +59,78 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
 
         Assert.True(binder.TryDescribe("datasets", "coco_train2017_annotations", out PreFlightDatasetCandidate? ann));
         Assert.Equal("coco_train2017", ann!.VariantId);
+    }
+
+    [Fact]
+    public void DropVariantBindings_ReleasesProvider_KeepsOthers()
+    {
+        // Two installed variants. Dropping one releases its provider; the
+        // other stays mounted with its same instance (so its open file
+        // handle isn't re-opened).
+        DatasetSchemaCatalog catalog = new(["datasets"]);
+        TrackingProvider p1 = new(CreatePool(), new QualifiedName("datasets", "coco_test2017"));
+        TrackingProvider p2 = new(CreatePool(), new QualifiedName("datasets", "coco_val2017"));
+        catalog.SetTables([p1, p2]);
+
+        DatasetSchemaBinder binder = BuildBinderWithCatalog(
+            entries: [
+                new DatumIngest.DatasetLibrary.DatasetEntry(
+                    Name: "COCO 2017",
+                    Summary: "fixture",
+                    Description: "fixture",
+                    Modalities: ["Image"],
+                    LicenseIds: ["cc-by-4.0"],
+                    Attributions: [],
+                    SuitableForTasks: null,
+                    Variants:
+                    [
+                        new DatasetVariant(
+                            Id: "coco_test2017",
+                            DisplayName: "test2017",
+                            Summary: null,
+                            ApproxArchiveBytes: 1, ApproxIngestedBytes: 1,
+                            ExpectedRowCounts: null, RequiresHfLogin: false,
+                            Versions: [new CatalogDatasetVersion("v1",
+                                [new HttpsSource([new HttpsFile("https://x/", "x")])],
+                                [new CatalogIngestJob("x", "images")])]),
+                        new DatasetVariant(
+                            Id: "coco_val2017",
+                            DisplayName: "val2017",
+                            Summary: null,
+                            ApproxArchiveBytes: 1, ApproxIngestedBytes: 1,
+                            ExpectedRowCounts: null, RequiresHfLogin: false,
+                            Versions: [new CatalogDatasetVersion("v1",
+                                [new HttpsSource([new HttpsFile("https://x/", "x")])],
+                                [new CatalogIngestJob("x", "images")])]),
+                    ]),
+            ],
+            catalog: catalog);
+
+        binder.DropVariantBindings("coco_test2017");
+
+        Assert.True(p1.Disposed);
+        Assert.False(p2.Disposed);
+        Assert.False(catalog.TryGetTable(new QualifiedName("datasets", "coco_test2017"), out _));
+        Assert.True(catalog.TryGetTable(new QualifiedName("datasets", "coco_val2017"), out _));
+    }
+
+    [Fact]
+    public void SetTables_DisposesPreviousProviderWhenReplacedBySameKey()
+    {
+        // Regression for the .datum handle leak: SetTables used to skip
+        // disposal when the key matched, even when the instance differed.
+        // Rebuilding after install creates a fresh provider per variant,
+        // so the old instance's open file handle would leak — and the
+        // next uninstall would hit a sharing violation on Directory.Delete.
+        DatasetSchemaCatalog catalog = new(["datasets"]);
+        TrackingProvider first = new(CreatePool(), new QualifiedName("datasets", "coco_test2017"));
+        catalog.SetTables([first]);
+
+        TrackingProvider second = new(CreatePool(), new QualifiedName("datasets", "coco_test2017"));
+        catalog.SetTables([second]);
+
+        Assert.True(first.Disposed);
+        Assert.False(second.Disposed);
     }
 
     [Fact]
@@ -128,6 +203,41 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
             logger: NullLogger<DatasetSchemaBinder>.Instance);
     }
 
+    private DatasetSchemaBinder BuildBinderWithCatalog(
+        IReadOnlyList<DatumIngest.DatasetLibrary.DatasetEntry> entries,
+        DatasetSchemaCatalog catalog)
+    {
+        DatasetCatalogManifest manifest = new(SchemaVersion: 1, Datasets: entries);
+        StubManifestStore store = new(manifest);
+        return new DatasetSchemaBinder(
+            manifest: store,
+            paths: new VersionedDatasetPathResolver(
+                datasetsCacheRoot: Path.GetTempPath(),
+                ingestedDatasetsRoot: Path.GetTempPath()),
+            downloads: new StubDownloadService(),
+            pool: CreatePool(),
+            catalog: catalog,
+            logger: NullLogger<DatasetSchemaBinder>.Instance);
+    }
+
+    // Minimal subclass of NonSeekableTableProviderBase — its base
+    // Dispose() flips the inherited Disposed flag, which the drop / replace
+    // tests assert on. Schema and ScanAsync aren't reached by the tests;
+    // they throw to make accidental use loud.
+    private sealed class TrackingProvider(Pool pool, QualifiedName name)
+        : DatumIngest.Catalog.Providers.NonSeekableTableProviderBase(pool, name)
+    {
+        public override long GetRowCount() => 0;
+        public override Schema GetSchema() => throw new NotSupportedException();
+        public override IAsyncEnumerable<RowBatch> ScanAsync(
+            IReadOnlySet<string>? requiredColumns,
+            Expression? filterHint,
+            Arena? targetArena,
+            CancellationToken cancellationToken,
+            TypeIdTranslationTable? typeIdTranslations = null)
+            => throw new NotSupportedException();
+    }
+
     private sealed class StubManifestStore : IManifestStore
     {
         public StubManifestStore(DatasetCatalogManifest manifest)
@@ -149,6 +259,7 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
     private sealed class StubDownloadService : IDatasetDownloadService
     {
         public Func<CancellationToken, Task>? OnVariantsChanged { get; set; }
+        public Action<string>? OnVariantUninstalling { get; set; }
 
         public Task<DatasetInstallState> ProbeAsync(string datasetId, CancellationToken ct = default)
             => Task.FromResult(DatasetInstallState.NotDownloaded);

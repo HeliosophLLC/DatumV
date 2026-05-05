@@ -67,11 +67,17 @@ internal sealed class DatasetCatalogInitializationService : IHostedService
         // bound-tables snapshot tracks reality without polling. At-most-
         // one subscriber by contract; we own this slot.
         _downloads.OnVariantsChanged = ct => _binder.RebuildAsync(ct);
+
+        // Release the variant's mounted provider BEFORE Directory.Delete
+        // fires. Without this hook the .datum handle stays open and the
+        // recursive delete throws a sharing violation on Windows.
+        _downloads.OnVariantUninstalling = variantId => _binder.DropVariantBindings(variantId);
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _downloads.OnVariantsChanged = null;
+        _downloads.OnVariantUninstalling = null;
         return Task.CompletedTask;
     }
 }

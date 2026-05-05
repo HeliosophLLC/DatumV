@@ -254,6 +254,7 @@ public sealed class DatasetsTableProviderTests : ServiceTestBase, IDisposable
         { _states = states; }
 
         public Func<CancellationToken, Task>? OnVariantsChanged { get; set; }
+        public Action<string>? OnVariantUninstalling { get; set; }
 
         public Task<DatasetInstallState> ProbeAsync(string datasetId, CancellationToken ct = default)
             => Task.FromResult(_states.TryGetValue(datasetId, out DatasetInstallState s) ? s : DatasetInstallState.NotDownloaded);

@@ -224,6 +224,40 @@ public sealed class DatasetSchemaBinder : IPreFlightDatasetSource
         BindingsChanged?.Invoke();
     }
 
+    /// <summary>
+    /// Drops the mounted providers belonging to <paramref name="variantId"/>
+    /// without going through the install-state probe. Used before
+    /// <see cref="IDatasetDownloadService.UninstallAsync"/> tears the
+    /// variant's ingested folder off disk — the
+    /// <see cref="DatumFileTableProviderV2"/> instances would otherwise
+    /// hold the <c>.datum</c> handles open and the recursive directory
+    /// delete would throw with a sharing violation. The other variants'
+    /// providers stay mounted (same instances, no disposal); only the
+    /// uninstalled variant's providers fall out and dispose, releasing
+    /// their handles.
+    /// </summary>
+    public void DropVariantBindings(string variantId)
+    {
+        HashSet<QualifiedName> toDrop = new();
+        foreach (CandidateRow row in _candidatesByQualifiedName.Values)
+        {
+            if (string.Equals(row.VariantId, variantId, StringComparison.Ordinal))
+            {
+                toDrop.Add(new QualifiedName(row.Schema, row.Table));
+            }
+        }
+        if (toDrop.Count == 0) return;
+
+        List<ITableProvider> remaining = new();
+        foreach (ITableProvider provider in _catalog.ListTables())
+        {
+            if (toDrop.Contains(provider.QualifiedName)) continue;
+            remaining.Add(provider);
+        }
+        _catalog.SetTables(remaining);
+        BindingsChanged?.Invoke();
+    }
+
     // ─────────────────── system.datasets enumeration ───────────────────
 
     /// <summary>

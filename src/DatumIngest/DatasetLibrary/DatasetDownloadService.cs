@@ -33,6 +33,9 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
     /// <inheritdoc/>
     public Func<CancellationToken, Task>? OnVariantsChanged { get; set; }
 
+    /// <inheritdoc/>
+    public Action<string>? OnVariantUninstalling { get; set; }
+
     public DatasetDownloadService(
         IManifestStore store,
         IEnumerable<IModelSourceClient> sourceClients,
@@ -155,6 +158,25 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
     public async Task UninstallAsync(string variantId, CancellationToken ct = default)
     {
         (_, DatasetVariant variant) = ResolveVariant(variantId);
+
+        // Release the binder's provider for this variant before the file
+        // system delete — DatumFileTableProviderV2 keeps the .datum
+        // handle open, and Directory.Delete would otherwise throw a
+        // sharing violation. Swallow any subscriber exception so a
+        // misbehaving binder can't block uninstall.
+        Action<string>? handler = OnVariantUninstalling;
+        if (handler is not null)
+        {
+            try { handler(variantId); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Dataset OnVariantUninstalling subscriber threw for {VariantId}; " +
+                    "proceeding with directory delete (may hit sharing violation).",
+                    variantId);
+            }
+        }
+
         string idRoot = Path.Combine(_paths.IngestedDatasetsRoot, variant.Id);
         if (Directory.Exists(idRoot)) Directory.Delete(idRoot, recursive: true);
         await NotifyVariantsChangedAsync().ConfigureAwait(false);

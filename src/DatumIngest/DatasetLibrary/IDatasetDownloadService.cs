@@ -53,6 +53,16 @@ public interface IDatasetDownloadService
     // Exceptions thrown by the callback are swallowed and logged so a
     // misbehaving binder can't break the install pipeline.
     Func<CancellationToken, Task>? OnVariantsChanged { get; set; }
+
+    // Fired immediately before <see cref="UninstallAsync"/> deletes a
+    // variant's ingested folder. The binder subscribes so its mounted
+    // <c>DatumFileTableProviderV2</c> for the variant can be torn down
+    // (releasing the .datum file handle) BEFORE the recursive delete
+    // hits the file system — otherwise the delete throws a sharing
+    // violation. At-most-one subscriber; the host init service wires
+    // this once. Exceptions are swallowed + logged so a misbehaving
+    // subscriber can't block uninstall.
+    Action<string>? OnVariantUninstalling { get; set; }
 }
 
 // Per-dataset lifecycle state surfaced to the UI. Mirrors

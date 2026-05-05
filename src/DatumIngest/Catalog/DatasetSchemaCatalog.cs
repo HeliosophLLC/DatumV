@@ -80,13 +80,23 @@ public sealed class DatasetSchemaCatalog : ITableCatalog
         }
         Dictionary<QualifiedName, ITableProvider> previous = _tables;
         _tables = snapshot;
+        // Dispose every previous provider whose instance is NOT kept in
+        // the new snapshot — both "key gone entirely" (uninstall) and
+        // "key kept but a fresh provider is replacing it" (rebuild after
+        // install / refresh). The instance check matters because each
+        // RebuildAsync constructs a new DatumFileTableProviderV2 even
+        // for unchanged variants; without this, the previous instance's
+        // open .datum handle leaks until GC, and a subsequent uninstall
+        // hits a sharing violation on Directory.Delete.
         foreach ((QualifiedName key, ITableProvider provider) in previous)
         {
-            if (!snapshot.ContainsKey(key))
+            if (snapshot.TryGetValue(key, out ITableProvider? kept)
+                && ReferenceEquals(kept, provider))
             {
-                try { provider.Dispose(); }
-                catch { /* best-effort */ }
+                continue;
             }
+            try { provider.Dispose(); }
+            catch { /* best-effort */ }
         }
     }
 
