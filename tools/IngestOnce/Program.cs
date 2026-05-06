@@ -5,6 +5,7 @@ using DatumIngest.Pooling;
 using DatumIngest.Serialization;
 using DatumIngest.Serialization.Csv;
 using DatumIngest.Serialization.Idx;
+using DatumIngest.Serialization.Json;
 using DatumIngest.Serialization.Zip;
 using DatumIngest.Tools.IngestOnce;
 
@@ -58,7 +59,7 @@ Console.WriteLine(
     $"batch {ingestionOptions.BatchByteTarget / (1024 * 1024)} MB");
 Console.WriteLine();
 
-FormatRegistry registry = new([new CsvFileFormat(), new IdxFileFormat(), new ZipFileFormat()]);
+FormatRegistry registry = new([new CsvFileFormat(), new IdxFileFormat(), new ZipFileFormat(), new JsonFileFormat()]);
 PoolBacking backing = new();
 Pool pool = new(backing);
 Ingester ingester = new(registry, pool);

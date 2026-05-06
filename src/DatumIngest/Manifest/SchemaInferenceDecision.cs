@@ -83,6 +83,14 @@ public enum SchemaInferenceReason
     /// is a best-effort default and may not reflect the intended type.
     /// </summary>
     AllNull,
+
+    /// <summary>
+    /// Column was kept as <see cref="Model.DataKind.Json"/> because at least one value
+    /// was a nested object/array, or because scalar values across rows did not share a
+    /// single primitive type. The original JSON shape is preserved for query-time access
+    /// via the <c>json_*</c> function family.
+    /// </summary>
+    KeptAsJson,
 }
 
 /// <summary>

@@ -6,7 +6,7 @@ param(
     # "GC Heap Alloc Ignore Free (Coarse Sampling) Stacks" view can attribute allocations.
     # gc-collect is the lower-overhead alternative that only shows collection events.
     [string]$Profile = "gc-verbose",
-    [string]$Source = "E:\Datasets\Chicago Crimes Dataset\Crimes_-_2001_to_Present_20260331.datum",
+    [string]$Source = "E:\Datasets\COCO2017\annotations_trainval2017\captions_train2017.json",
     [string]$Dest = "",
     [string]$Sql = "SELECT * LIMIT 5000",
     [string]$Duration = "00:20:30",
