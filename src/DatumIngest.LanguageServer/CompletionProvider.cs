@@ -167,6 +167,19 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.InFunctionArguments:
+                // Struct-literal slot: when the cursor sits inside a
+                // `{ field: value, … }` literal that is itself an argument
+                // (directly or wrapped in an array) of the enclosing call,
+                // and that parameter's declared kind resolves to a struct
+                // shape, surface the field names instead of the noisy
+                // catalog-wide column / function list. Only kicks in for
+                // key position (before the colon); past the colon the user
+                // is editing a value and falls through to the normal
+                // expression-style suggestions.
+                if (TryAddStructLiteralFields(items, sql, cursorOffset))
+                {
+                    break;
+                }
                 AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddAggregateFunctions(items);
@@ -1662,6 +1675,135 @@ public sealed class CompletionProvider
     /// UDFs, procedures, then built-in scalar / TVF entries — so user-
     /// defined functions surface their parameter names too.
     /// </summary>
+    /// <summary>
+    /// Surfaces struct-field completion when the cursor sits inside a
+    /// <c>{ field: value, … }</c> literal at a parameter slot whose declared
+    /// element kind is a struct (named vocabulary entry like
+    /// <c>ChatMessage</c>, inline <c>Struct&lt;…&gt;</c>, or
+    /// <c>Array&lt;Struct&gt;</c>). Returns <see langword="true"/> when the
+    /// caller should suppress the usual catalog-wide expression items so
+    /// the popup stays focused on field names. False (no items added) when:
+    /// the cursor isn't in a struct literal, the call doesn't resolve, the
+    /// active parameter has no struct shape, or the cursor sits past a
+    /// field's colon (value position — fall through to expression mode).
+    /// </summary>
+    private bool TryAddStructLiteralFields(List<CompletionItem> items, string sql, int cursorOffset)
+    {
+        if (!StructLiteralContext.TryResolve(sql, cursorOffset, out StructLiteralContext.Result ctx))
+        {
+            return false;
+        }
+        // Past the colon → value position. Don't take over; let expression-
+        // style completions render so the user can reference columns / vars
+        // / literals.
+        if (ctx.IsAfterColon) return false;
+
+        IReadOnlyList<StructFieldSignature>? fields = ResolveStructFieldsForCallSlot(
+            ctx.Call.FunctionName, ctx.Call.ActiveParameter);
+        if (fields is null || fields.Count == 0) return false;
+
+        HashSet<string> alreadyTyped = new(ctx.FieldNamesSoFar, StringComparer.OrdinalIgnoreCase);
+        foreach (StructFieldSignature field in fields)
+        {
+            if (alreadyTyped.Contains(field.Name)) continue;
+            items.Add(new CompletionItem
+            {
+                Label = field.Name,
+                Kind = CompletionItemKind.Property,
+                InsertText = $"{field.Name}: ",
+                Detail = $"{field.Kind} — field of {ctx.Call.FunctionName} parameter",
+                SortOrder = 0,
+            });
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Locates the struct-field list for the parameter at
+    /// <paramref name="argIndex"/> of the call named <paramref name="callName"/>.
+    /// Walks Models first (the model-side surface carries struct shapes
+    /// directly), then UDFs and procedures (single-shape positional lists),
+    /// then Functions (back-filled by <c>CatalogManifestBuilder</c> for
+    /// SQL-defined models that are dual-registered, and primary for
+    /// engine-defined scalars / aggregates / TVFs / window functions).
+    /// Returns <see langword="null"/> when nothing matches.
+    /// </summary>
+    private IReadOnlyList<StructFieldSignature>? ResolveStructFieldsForCallSlot(string callName, int argIndex)
+    {
+        int dot = callName.IndexOf('.');
+        string? explicitSchema = dot > 0 ? callName[..dot] : null;
+        string bareName = dot > 0 ? callName[(dot + 1)..] : callName;
+
+        if ((explicitSchema is null
+                || string.Equals(explicitSchema, "models", StringComparison.OrdinalIgnoreCase))
+            && _manifest.Models is not null)
+        {
+            foreach (ModelEntry model in _manifest.Models)
+            {
+                if (!string.Equals(model.Name, bareName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (model.Parameters is null || argIndex < 0 || argIndex >= model.Parameters.Count) continue;
+                if (model.Parameters[argIndex].StructFields is { Count: > 0 } modelFields)
+                {
+                    return modelFields;
+                }
+            }
+        }
+
+        if (_manifest.Udfs is not null)
+        {
+            foreach (UdfEntry udf in _manifest.Udfs)
+            {
+                if (!string.Equals(udf.Name, bareName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (explicitSchema is not null
+                    && !string.Equals(udf.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)) continue;
+                if (udf.Parameters is null || argIndex < 0 || argIndex >= udf.Parameters.Count) continue;
+                if (udf.Parameters[argIndex].StructFields is { Count: > 0 } udfFields)
+                {
+                    return udfFields;
+                }
+            }
+        }
+
+        if (_manifest.Procedures is not null)
+        {
+            foreach (ProcedureEntry proc in _manifest.Procedures)
+            {
+                if (!string.Equals(proc.Name, bareName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (explicitSchema is not null
+                    && !string.Equals(proc.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)) continue;
+                if (proc.Parameters is null || argIndex < 0 || argIndex >= proc.Parameters.Count) continue;
+                if (proc.Parameters[argIndex].StructFields is { Count: > 0 } procFields)
+                {
+                    return procFields;
+                }
+            }
+        }
+
+        foreach (FunctionSignature fn in _manifest.Functions)
+        {
+            if (!string.Equals(fn.Name, bareName, StringComparison.OrdinalIgnoreCase)) continue;
+            if (explicitSchema is not null
+                && !string.Equals(fn.SchemaName, explicitSchema, StringComparison.OrdinalIgnoreCase)) continue;
+            if (argIndex >= 0 && argIndex < fn.Parameters.Count
+                && fn.Parameters[argIndex].StructFields is { Count: > 0 } primary)
+            {
+                return primary;
+            }
+            if (fn.AdditionalParameterShapes is not null)
+            {
+                foreach (IReadOnlyList<ParameterSignature> variant in fn.AdditionalParameterShapes)
+                {
+                    if (argIndex >= 0 && argIndex < variant.Count
+                        && variant[argIndex].StructFields is { Count: > 0 } alt)
+                    {
+                        return alt;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     private void AddNamedArgumentNames(List<CompletionItem> items, string sql, int cursorOffset)
     {
         if (!EnclosingCallResolver.TryResolve(sql, cursorOffset, out EnclosingCallResolver.Result call))

@@ -651,9 +651,37 @@ internal sealed partial class RoutineRegistrar
                 kind = parsedKind;
                 isArray = parsedIsArray;
             }
-            infos[i] = new ModelParameterInfo(p.Name, kind, isArray, IsOptional: p.Default is not null);
+            IReadOnlyList<ModelStructFieldInfo>? structFields = kind == DataKind.Struct
+                ? ParameterStructFieldResolver.TryResolveShapes(p.TypeName) is { } shapes
+                    ? ToModelStructFields(shapes)
+                    : null
+                : null;
+            infos[i] = new ModelParameterInfo(
+                p.Name,
+                kind,
+                isArray,
+                IsOptional: p.Default is not null,
+                StructFields: structFields);
         }
         return infos;
+    }
+
+    private static ModelStructFieldInfo[] ToModelStructFields(IReadOnlyList<StructFieldShape> fields)
+    {
+        ModelStructFieldInfo[] result = new ModelStructFieldInfo[fields.Count];
+        for (int i = 0; i < fields.Count; i++)
+        {
+            StructFieldShape f = fields[i];
+            DataKind kind = DataKind.Unknown;
+            bool isArray = false;
+            if (TypeAnnotationResolver.TryParse(f.Kind, out DataKind parsedKind, out bool parsedIsArray))
+            {
+                kind = parsedKind;
+                isArray = parsedIsArray;
+            }
+            result[i] = new ModelStructFieldInfo(f.Name, kind, isArray, KindLabel: f.Kind);
+        }
+        return result;
     }
 
     /// <summary>

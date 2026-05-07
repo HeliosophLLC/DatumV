@@ -420,6 +420,7 @@ public static class CatalogManifestBuilder
                 Name = p.Name,
                 Kind = p.TypeName,
                 IsOptional = p.Default is not null,
+                StructFields = ParameterStructFieldResolver.TryResolveSignatures(p.TypeName),
             };
         }
         return sigs;
@@ -443,6 +444,7 @@ public static class CatalogManifestBuilder
                 Name = p.Name,
                 Kind = p.TypeName,
                 IsOptional = p.Default is not null,
+                StructFields = ParameterStructFieldResolver.TryResolveSignatures(p.TypeName),
             };
         }
         return sigs;
@@ -768,11 +770,10 @@ public static class CatalogManifestBuilder
     private static void BackfillModelStructFieldsOntoFunctionSignatures(
         List<FunctionSignature> functionSigs, List<ModelEntry> modelEntries)
     {
-        Dictionary<string, IReadOnlyList<StructFieldSignature>> byName =
-            new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, ModelEntry> byName = new(StringComparer.OrdinalIgnoreCase);
         foreach (ModelEntry m in modelEntries)
         {
-            if (m.OutputStructFields is not null) byName[m.Name] = m.OutputStructFields;
+            byName[m.Name] = m;
         }
         if (byName.Count == 0) return;
 
@@ -780,31 +781,148 @@ public static class CatalogManifestBuilder
         {
             FunctionSignature sig = functionSigs[i];
             if (!string.Equals(sig.SchemaName, "models", StringComparison.OrdinalIgnoreCase)) continue;
-            if (sig.OutputStructFields is not null) continue;
-            if (!byName.TryGetValue(sig.Name, out IReadOnlyList<StructFieldSignature>? fields)) continue;
+            if (!byName.TryGetValue(sig.Name, out ModelEntry? model)) continue;
 
-            // FunctionSignature is init-only, so emit a replacement carrying
-            // every existing field plus OutputStructFields. ReturnType also
-            // gets refreshed so the hover popup shows the full struct shape
-            // instead of bare `Struct`.
-            string refreshedReturnType = StructTypeAnnotation.Format(
-                fields.Select(f => new StructFieldShape(f.Name, f.Kind)).ToArray());
+            // Per-parameter struct fields rebound onto the function-signature
+            // copy of the model's parameter list so any caller that looks up
+            // `models.X(...)` parameters through Functions (e.g. the
+            // completion provider's ResolveParameterVariants path) sees the
+            // same struct shape the ModelEntry surface does.
+            IReadOnlyList<ParameterSignature> parameters = sig.Parameters;
+            if (model.Parameters is { Count: > 0 } modelParams
+                && AnyParameterHasStructFields(modelParams))
+            {
+                parameters = RebindParameterStructFields(sig.Parameters, modelParams);
+            }
+
+            // Output struct fields + refreshed ReturnType: only swap in when
+            // the model actually carries a non-null shape AND the function
+            // entry didn't already have one. Independent of the parameter
+            // rebind above so a model with struct-typed inputs but a scalar
+            // return doesn't get a bogus opaque output replaced.
+            IReadOnlyList<StructFieldSignature>? outputFields = sig.OutputStructFields;
+            string? returnType = sig.ReturnType;
+            if (outputFields is null && model.OutputStructFields is { Count: > 0 } modelOutput)
+            {
+                outputFields = modelOutput;
+                returnType = StructTypeAnnotation.Format(
+                    modelOutput.Select(f => new StructFieldShape(f.Name, f.Kind)).ToArray());
+            }
+
+            // Skip the rewrite when nothing changed — keeps the original
+            // FunctionSignature object identity for the vast majority of
+            // non-struct models.
+            if (ReferenceEquals(parameters, sig.Parameters)
+                && ReferenceEquals(outputFields, sig.OutputStructFields))
+            {
+                continue;
+            }
+
             functionSigs[i] = new FunctionSignature
             {
                 SchemaName = sig.SchemaName,
                 Name = sig.Name,
-                Parameters = sig.Parameters,
-                ReturnType = refreshedReturnType,
+                Parameters = parameters,
+                ReturnType = returnType,
                 Description = sig.Description,
                 Category = sig.Category,
                 IsTableValued = sig.IsTableValued,
                 OutputColumns = sig.OutputColumns,
                 AdditionalParameterShapes = sig.AdditionalParameterShapes,
-                OutputStructFields = fields,
+                OutputStructFields = outputFields,
                 IsAggregate = sig.IsAggregate,
                 IsWindowFunction = sig.IsWindowFunction,
             };
         }
+    }
+
+    private static bool AnyParameterHasStructFields(IReadOnlyList<ParameterSignature> parameters)
+    {
+        for (int i = 0; i < parameters.Count; i++)
+        {
+            if (parameters[i].StructFields is { Count: > 0 }) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Returns a copy of the function-signature parameter list where each
+    /// slot's <see cref="ParameterSignature.StructFields"/> is back-filled
+    /// from the matching positional slot of the model's parameter list
+    /// (matched by name when possible, otherwise by index). The function-
+    /// descriptor path (<see cref="BuildSignatureFromDescriptor"/>) loses
+    /// the named-type identity because <see cref="ParameterSpec"/> only
+    /// carries a <see cref="DataKindMatcher"/>, so this re-attaches the
+    /// shape from the parallel <see cref="ModelEntry.Parameters"/> list,
+    /// which preserved it via <see cref="Models.ModelParameterInfo.StructFields"/>.
+    /// </summary>
+    private static ParameterSignature[] RebindParameterStructFields(
+        IReadOnlyList<ParameterSignature> functionParameters,
+        IReadOnlyList<ParameterSignature> modelParameters)
+    {
+        ParameterSignature[] result = new ParameterSignature[functionParameters.Count];
+        for (int i = 0; i < functionParameters.Count; i++)
+        {
+            ParameterSignature p = functionParameters[i];
+            ParameterSignature? match = FindMatchingModelParameter(modelParameters, p.Name, i);
+            if (match?.StructFields is not { Count: > 0 } fields)
+            {
+                result[i] = p;
+                continue;
+            }
+            result[i] = new ParameterSignature
+            {
+                Name = p.Name,
+                Kind = p.Kind,
+                IsOptional = p.IsOptional,
+                LambdaContextName = p.LambdaContextName,
+                EnumValues = p.EnumValues,
+                StructFields = fields,
+            };
+        }
+        return result;
+    }
+
+    private static ParameterSignature? FindMatchingModelParameter(
+        IReadOnlyList<ParameterSignature> modelParameters, string name, int index)
+    {
+        for (int i = 0; i < modelParameters.Count; i++)
+        {
+            if (string.Equals(modelParameters[i].Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return modelParameters[i];
+            }
+        }
+        // Name lookup failed (alias or generic `input` label) — fall back to
+        // positional match when the lists have the same arity.
+        if (index >= 0 && index < modelParameters.Count)
+        {
+            return modelParameters[index];
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Translates a model's <see cref="Models.ModelStructFieldInfo"/> list —
+    /// captured at registration from the parameter's declared type
+    /// annotation — into manifest-side <see cref="StructFieldSignature"/>
+    /// entries. <see langword="null"/> when no fields were resolved (opaque
+    /// struct), so consumers can short-circuit the field-completion path.
+    /// </summary>
+    private static IReadOnlyList<StructFieldSignature>? BuildParameterStructFieldSignatures(
+        IReadOnlyList<Models.ModelStructFieldInfo>? structFields)
+    {
+        if (structFields is not { Count: > 0 } fields) return null;
+        StructFieldSignature[] result = new StructFieldSignature[fields.Count];
+        for (int i = 0; i < fields.Count; i++)
+        {
+            Models.ModelStructFieldInfo f = fields[i];
+            string fieldKind = !string.IsNullOrEmpty(f.KindLabel)
+                ? f.KindLabel
+                : (f.IsArray ? $"Array<{f.Kind}>" : f.Kind.ToString());
+            result[i] = new StructFieldSignature { Name = f.Name, Kind = fieldKind };
+        }
+        return result;
     }
 
     /// <summary>
@@ -915,6 +1033,7 @@ public static class CatalogManifestBuilder
                     Name = info.Name,
                     Kind = kindLabel,
                     IsOptional = info.IsOptional,
+                    StructFields = BuildParameterStructFieldSignatures(info.StructFields),
                 };
             }
             return result;

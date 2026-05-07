@@ -209,7 +209,20 @@ public sealed record ModelCatalogEntry(
 /// <param name="Kind">Element data kind. Combine with <paramref name="IsArray"/> for the full shape.</param>
 /// <param name="IsArray">True when the parameter was declared as a typed array.</param>
 /// <param name="IsOptional">True when the parameter has a default (call site may omit).</param>
-public sealed record ModelParameterInfo(string Name, DataKind Kind, bool IsArray, bool IsOptional);
+/// <param name="StructFields">
+/// When the element kind is <see cref="DataKind.Struct"/> AND the declared
+/// type name resolved to a known struct shape (a named vocabulary entry
+/// like <c>ChatMessage</c> or an inline <c>Struct&lt;name: Kind, …&gt;</c>),
+/// the ordered field list. Lets the language server suggest field names
+/// inside the struct literal at this parameter slot. <see langword="null"/>
+/// for non-struct parameters and for opaque bare <c>Struct</c>.
+/// </param>
+public sealed record ModelParameterInfo(
+    string Name,
+    DataKind Kind,
+    bool IsArray,
+    bool IsOptional,
+    IReadOnlyList<ModelStructFieldInfo>? StructFields = null);
 
 /// <summary>
 /// Per-field metadata for a struct-returning model's output. Drives the

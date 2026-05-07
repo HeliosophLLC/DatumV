@@ -2085,4 +2085,251 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.DoesNotContain(items, i => i.Label == "color");
         Assert.DoesNotContain(items, i => i.Label == "animate_frames");
     }
+
+    // ───────────────────── Struct-literal field completion ─────────────────────
+
+    private static LanguageServerManifest CreateChatModelManifest()
+    {
+        // Mimics what CatalogManifestBuilder emits for a SQL-defined chat
+        // model: a ModelEntry whose `messages` parameter carries the
+        // ChatMessage struct shape, and a paired `models.chat` function
+        // signature with the same shape back-filled by
+        // BackfillModelStructFieldsOntoFunctionSignatures. Both surfaces
+        // populate so the test asserts the provider's fallback ordering
+        // (Models first, then Functions) without surprises.
+        IReadOnlyList<StructFieldSignature> chatFields =
+        [
+            new StructFieldSignature { Name = "role", Kind = "String" },
+            new StructFieldSignature { Name = "content", Kind = "String" },
+        ];
+        return new LanguageServerManifest
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "chat",
+                    Parameters =
+                    [
+                        new ParameterSignature
+                        {
+                            Name = "messages",
+                            Kind = "Array<Struct>",
+                            StructFields = chatFields,
+                        },
+                    ],
+                    ReturnType = "String",
+                },
+            ],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "chat",
+                    Status = ModelInstallStatus.Available,
+                    OutputKind = "String",
+                    Parameters =
+                    [
+                        new ParameterSignature
+                        {
+                            Name = "messages",
+                            Kind = "Array<Struct>",
+                            StructFields = chatFields,
+                        },
+                    ],
+                },
+            ],
+            Keywords = ["SELECT"],
+        };
+    }
+
+    [Fact]
+    public void StructLiteralCompletion_AtKeyPosition_SurfacesFieldNames()
+    {
+        // Cursor inside `[{ | }]` of `models.chat(...)`. The provider must
+        // suggest the struct's field names (role, content) and suppress
+        // the catalog-wide column / function noise that would otherwise
+        // fire in InFunctionArguments.
+        CompletionProvider provider = new(CreateChatModelManifest());
+
+        const string sql = "SELECT models.chat([{ }])";
+        int cursor = sql.IndexOf("{ ") + 2;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "role" && i.Kind == CompletionItemKind.Property);
+        Assert.Contains(items, i => i.Label == "content" && i.Kind == CompletionItemKind.Property);
+    }
+
+    [Fact]
+    public void StructLiteralCompletion_AlreadyTypedField_NotSuggestedAgain()
+    {
+        // `{ role: 'user', | }` — `role` is already committed (followed
+        // by a colon) so it shouldn't re-surface; `content` still does.
+        CompletionProvider provider = new(CreateChatModelManifest());
+
+        const string sql = "SELECT models.chat([{ role: 'user', }])";
+        int cursor = sql.IndexOf("', ") + 3;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "content");
+        Assert.DoesNotContain(items, i => i.Label == "role");
+    }
+
+    [Fact]
+    public void StructLiteralCompletion_AfterColon_DoesNotTakeOver()
+    {
+        // After `role: |` the user is editing a field value. We should
+        // fall through to expression completion rather than offer field
+        // names. Verifies the IsAfterColon escape hatch: at minimum,
+        // neither field name appears as a Property item in this slot.
+        CompletionProvider provider = new(CreateChatModelManifest());
+
+        const string sql = "SELECT models.chat([{ role:  }])";
+        int cursor = sql.IndexOf("role: ") + "role: ".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        // No struct-field-name suggestions in value position.
+        Assert.DoesNotContain(items, i => i.Label == "role" && i.Kind == CompletionItemKind.Property);
+        Assert.DoesNotContain(items, i => i.Label == "content" && i.Kind == CompletionItemKind.Property);
+    }
+
+    [Fact]
+    public void StructLiteralCompletion_UnknownFunction_NoFieldSuggestions()
+    {
+        // No registered model / function matches the call name. The
+        // struct-literal path should bail and let the regular expression-
+        // context completions render.
+        CompletionProvider provider = new(CreateChatModelManifest());
+
+        const string sql = "SELECT models.unknown([{ }])";
+        int cursor = sql.IndexOf("{ ") + 2;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        // No surprise role/content items leak through from the chat model.
+        Assert.DoesNotContain(items, i => i.Label == "role" && i.Kind == CompletionItemKind.Property);
+        Assert.DoesNotContain(items, i => i.Label == "content" && i.Kind == CompletionItemKind.Property);
+    }
+
+    [Fact]
+    public void StructLiteralCompletion_UdfParameter_SurfacesFields()
+    {
+        // UDFs expose struct-field shapes on UdfEntry.Parameters. Cursor
+        // inside a `format_msg({|})` literal should suggest the field
+        // names. Mirrors the model-side completion test but routes through
+        // the UdfEntry branch of ResolveStructFieldsForCallSlot.
+        IReadOnlyList<StructFieldSignature> chatFields =
+        [
+            new StructFieldSignature { Name = "role", Kind = "String" },
+            new StructFieldSignature { Name = "content", Kind = "String" },
+        ];
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Udfs =
+            [
+                new UdfEntry
+                {
+                    SchemaName = "public",
+                    Name = "format_msg",
+                    ReturnType = "String",
+                    BodyKind = "macro",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "m", Kind = "ChatMessage", StructFields = chatFields },
+                    ],
+                },
+            ],
+            Keywords = ["SELECT"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql = "SELECT format_msg({ })";
+        int cursor = sql.IndexOf("{ ") + 2;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "role" && i.Kind == CompletionItemKind.Property);
+        Assert.Contains(items, i => i.Label == "content" && i.Kind == CompletionItemKind.Property);
+    }
+
+    [Fact]
+    public void StructLiteralCompletion_ProcedureParameter_SurfacesFields()
+    {
+        // Procedures are invoked via `CALL fn(...)` but the parser zone
+        // for cursor-inside-paren is the same `InFunctionArguments` as
+        // any other call. The Procedures branch of
+        // ResolveStructFieldsForCallSlot supplies the field shape.
+        IReadOnlyList<StructFieldSignature> chatFields =
+        [
+            new StructFieldSignature { Name = "role", Kind = "String" },
+            new StructFieldSignature { Name = "content", Kind = "String" },
+        ];
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Procedures =
+            [
+                new ProcedureEntry
+                {
+                    SchemaName = "public",
+                    Name = "log_msg",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "m", Kind = "ChatMessage", StructFields = chatFields },
+                    ],
+                },
+            ],
+            Keywords = ["CALL"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql = "CALL log_msg({ })";
+        int cursor = sql.IndexOf("{ ") + 2;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "role" && i.Kind == CompletionItemKind.Property);
+        Assert.Contains(items, i => i.Label == "content" && i.Kind == CompletionItemKind.Property);
+    }
+
+    [Fact]
+    public void StructLiteralCompletion_ScalarStructParameter_SurfacesFields()
+    {
+        // A scalar (non-array) struct parameter accepts a direct
+        // `{ … }` literal at its slot. Same field-completion behaviour
+        // applies — the `[ ]` array wrapper is incidental.
+        IReadOnlyList<StructFieldSignature> pointFields =
+        [
+            new StructFieldSignature { Name = "x", Kind = "Int32" },
+            new StructFieldSignature { Name = "y", Kind = "Int32" },
+        ];
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "use_point",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "p", Kind = "Struct", StructFields = pointFields },
+                    ],
+                    ReturnType = "String",
+                },
+            ],
+            Keywords = ["SELECT"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql = "SELECT models.use_point({ })";
+        int cursor = sql.IndexOf("{ ") + 2;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "x" && i.Kind == CompletionItemKind.Property);
+        Assert.Contains(items, i => i.Label == "y" && i.Kind == CompletionItemKind.Property);
+    }
 }

@@ -315,4 +315,154 @@ public sealed class CatalogManifestBuilderTests : ServiceTestBase
         Assert.NotNull(osc.Contexts);
         Assert.Contains("animation", osc.Contexts);
     }
+
+    [Fact]
+    public void Build_UdfWithChatMessageParameter_PopulatesStructFields()
+    {
+        // A UDF declared with a ChatMessage-typed parameter must surface
+        // the named vocabulary entry's per-field shape on UdfEntry so the
+        // completion provider can offer field names inside the call's
+        // struct literals.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE FUNCTION format_msg(m ChatMessage) RETURNS String AS 'placeholder'");
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, new FunctionRegistry());
+
+        UdfEntry udf = Assert.Single(
+            manifest.Udfs!, u => string.Equals(u.Name, "format_msg", StringComparison.OrdinalIgnoreCase));
+        ParameterSignature msg = Assert.Single(udf.Parameters!);
+        Assert.Equal("m", msg.Name);
+        Assert.NotNull(msg.StructFields);
+        Assert.Collection(msg.StructFields,
+            f => { Assert.Equal("role", f.Name); Assert.Equal("String", f.Kind); },
+            f => { Assert.Equal("content", f.Name); Assert.Equal("String", f.Kind); });
+    }
+
+    [Fact]
+    public void Build_UdfWithChatMessageArrayParameter_PopulatesStructFields()
+    {
+        // `Array<ChatMessage>` parameters resolve identically to the scalar
+        // form — the resolver strips the outer wrapper before looking up
+        // the named type.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE FUNCTION format_thread(ms Array<ChatMessage>) RETURNS String AS 'placeholder'");
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, new FunctionRegistry());
+
+        UdfEntry udf = Assert.Single(
+            manifest.Udfs!, u => string.Equals(u.Name, "format_thread", StringComparison.OrdinalIgnoreCase));
+        ParameterSignature ms = Assert.Single(udf.Parameters!);
+        Assert.NotNull(ms.StructFields);
+        Assert.Equal(2, ms.StructFields.Count);
+    }
+
+    [Fact]
+    public void Build_ProcedureWithChatMessageParameter_PopulatesStructFields()
+    {
+        // Procedures share the UdfParameter shape with UDFs, so the same
+        // resolver path applies. Verifies procedures don't drop the
+        // struct shape on the floor.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE PROCEDURE log_msg(m ChatMessage) AS BEGIN SELECT 1 END");
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, new FunctionRegistry());
+
+        ProcedureEntry proc = Assert.Single(
+            manifest.Procedures!, p => string.Equals(p.Name, "log_msg", StringComparison.OrdinalIgnoreCase));
+        ParameterSignature msg = Assert.Single(proc.Parameters!);
+        Assert.NotNull(msg.StructFields);
+        Assert.Collection(msg.StructFields,
+            f => Assert.Equal("role", f.Name),
+            f => Assert.Equal("content", f.Name));
+    }
+
+    [Fact]
+    public void Build_UdfWithInlineStructParameter_PopulatesStructFields()
+    {
+        // Inline `Struct<x: Int32, y: Int32>` resolves through the same
+        // path. No named-type lookup needed; StructTypeAnnotation parses
+        // the annotation directly.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE FUNCTION use_point(p Struct<x: Int32, y: Int32>) RETURNS Int32 AS 'placeholder'");
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, new FunctionRegistry());
+
+        UdfEntry udf = Assert.Single(
+            manifest.Udfs!, u => string.Equals(u.Name, "use_point", StringComparison.OrdinalIgnoreCase));
+        ParameterSignature p = Assert.Single(udf.Parameters!);
+        Assert.NotNull(p.StructFields);
+        Assert.Collection(p.StructFields,
+            f => { Assert.Equal("x", f.Name); Assert.Equal("Int32", f.Kind); },
+            f => { Assert.Equal("y", f.Name); Assert.Equal("Int32", f.Kind); });
+    }
+
+    [Fact]
+    public void Build_UdfWithScalarParameter_HasNoStructFields()
+    {
+        // A non-struct parameter (Int32, String, …) carries no StructFields
+        // — the resolver returns null and the manifest leaves the slot
+        // unset rather than emitting an empty list.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE FUNCTION double_it(x Int32) RETURNS Int32 AS x * 2");
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, new FunctionRegistry());
+
+        UdfEntry udf = Assert.Single(
+            manifest.Udfs!, u => string.Equals(u.Name, "double_it", StringComparison.OrdinalIgnoreCase));
+        Assert.Null(udf.Parameters![0].StructFields);
+    }
+
+    [Fact]
+    public void Build_StructParameter_PopulatesStructFieldsOnParameterSignature()
+    {
+        // A ModelCatalogEntry whose ParameterInfos snapshot carries a
+        // struct-shaped field list (the registrar's resolution of an
+        // `Array<ChatMessage>` annotation) must flow through to
+        // ParameterSignature.StructFields so the completion provider can
+        // surface field names inside the call's struct literal.
+        TableCatalog catalog = CreateCatalog();
+        ModelCatalog modelCatalog = new();
+        modelCatalog.Register(new ModelCatalogEntry(
+            Name: "chat_test",
+            Backend: "stub",
+            RelativePath: null,
+            InputKinds: [DataKind.Struct],
+            OutputKind: DataKind.String,
+            IsDeterministic: false,
+            Loader: _ => throw new InvalidOperationException("stub — never loaded in this test"),
+            Category: "llm",
+            DisplayName: "Chat Test",
+            ParameterInfos:
+            [
+                new ModelParameterInfo(
+                    Name: "messages",
+                    Kind: DataKind.Struct,
+                    IsArray: true,
+                    IsOptional: false,
+                    StructFields:
+                    [
+                        new ModelStructFieldInfo("role", DataKind.String, IsArray: false, KindLabel: "String"),
+                        new ModelStructFieldInfo("content", DataKind.String, IsArray: false, KindLabel: "String"),
+                    ]),
+            ]));
+        catalog.Models = modelCatalog;
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, new FunctionRegistry());
+
+        Assert.NotNull(manifest.Models);
+        ModelEntry model = Assert.Single(manifest.Models);
+        ParameterSignature messages = Assert.Single(model.Parameters!);
+        Assert.Equal("messages", messages.Name);
+        Assert.Equal("Array<Struct>", messages.Kind);
+        Assert.NotNull(messages.StructFields);
+        Assert.Collection(messages.StructFields,
+            f => { Assert.Equal("role", f.Name); Assert.Equal("String", f.Kind); },
+            f => { Assert.Equal("content", f.Name); Assert.Equal("String", f.Kind); });
+    }
+
 }

@@ -90,19 +90,39 @@ internal static class EnclosingCallResolver
     {
         result = default;
 
-        int depth = 0;
+        // Track brackets and braces too so the right-to-left scan doesn't
+        // pop the call paren when the cursor sits inside an array or
+        // struct literal whose own brackets sit at paren depth 0. Without
+        // this, a tokenized `f([{cursor}])` walking RTL would skip past
+        // the `[` / `{` as opaque tokens and treat their commas / inner
+        // tokens as paren-depth-0 content, miscounting the active slot.
+        int parenDepth = 0;
+        int bracketDepth = 0;
+        int braceDepth = 0;
         for (int i = tokens.Count - 1; i >= 0; i--)
         {
             SqlToken kind = tokens[i].Kind;
             switch (kind)
             {
                 case SqlToken.RightParen:
-                    depth++;
+                    parenDepth++;
                     continue;
                 case SqlToken.LeftParen:
-                    if (depth > 0) { depth--; continue; }
+                    if (parenDepth > 0) { parenDepth--; continue; }
                     // Unmatched left paren — i is the call's opening paren.
                     return TryReadFunctionContext(tokens, i, out result);
+                case SqlToken.RightBracket:
+                    bracketDepth++;
+                    continue;
+                case SqlToken.LeftBracket:
+                    if (bracketDepth > 0) bracketDepth--;
+                    continue;
+                case SqlToken.RightBrace:
+                    braceDepth++;
+                    continue;
+                case SqlToken.LeftBrace:
+                    if (braceDepth > 0) braceDepth--;
+                    continue;
                 default:
                     continue;
             }
@@ -137,22 +157,41 @@ internal static class EnclosingCallResolver
         // leading two tokens — if they're `identifier (:= | =>)`, record
         // the identifier as a supplied named argument. The active slot
         // (the one containing the cursor) is the count of completed
-        // commas.
+        // commas. Track bracket / brace depth alongside paren depth so a
+        // call like `f([{a:1}, {b:2}])` doesn't see the literal's inner
+        // commas as parameter separators.
         int slotStart = parenIndex + 1;
-        int depth = 0;
+        int parenDepth = 0;
+        int bracketDepth = 0;
+        int braceDepth = 0;
         List<string> names = new();
         int commaCount = 0;
         int searchEnd = tokens.Count;
         for (int j = slotStart; j < searchEnd; j++)
         {
             SqlToken kind = tokens[j].Kind;
-            if (kind == SqlToken.LeftParen) { depth++; continue; }
+            if (kind == SqlToken.LeftParen) { parenDepth++; continue; }
             if (kind == SqlToken.RightParen)
             {
-                if (depth > 0) { depth--; continue; }
+                if (parenDepth > 0) { parenDepth--; continue; }
                 break;
             }
-            if (kind == SqlToken.Comma && depth == 0)
+            if (kind == SqlToken.LeftBracket) { bracketDepth++; continue; }
+            if (kind == SqlToken.RightBracket)
+            {
+                if (bracketDepth > 0) bracketDepth--;
+                continue;
+            }
+            if (kind == SqlToken.LeftBrace) { braceDepth++; continue; }
+            if (kind == SqlToken.RightBrace)
+            {
+                if (braceDepth > 0) braceDepth--;
+                continue;
+            }
+            if (kind == SqlToken.Comma
+                && parenDepth == 0
+                && bracketDepth == 0
+                && braceDepth == 0)
             {
                 TryCaptureNamedArg(tokens, slotStart, j, names);
                 slotStart = j + 1;

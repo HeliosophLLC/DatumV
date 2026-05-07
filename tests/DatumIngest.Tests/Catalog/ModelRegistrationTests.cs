@@ -93,6 +93,66 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     }
 
     [Fact]
+    public void CreateModel_NamedStructArrayParameter_ResolvesStructFields()
+    {
+        // `Array<ChatMessage>` is the canonical chat-input shape. The
+        // registrar's BuildModelParameterInfos must resolve the named
+        // vocabulary entry into a per-field shape so the LanguageServer
+        // can offer field-name completion inside the call's struct
+        // literals. Without this, the parameter's metadata would carry
+        // only the opaque `(DataKind.Struct, IsArray=true)` pair and the
+        // field names would be invisible to tooling.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
+
+        catalog.Plan(
+            $"CREATE MODEL chat(messages Array<ChatMessage>) RETURNS String "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN 'hi' END");
+
+        ModelCatalogEntry? entry = catalog.Models.TryGetEntry("chat");
+        Assert.NotNull(entry);
+        Assert.NotNull(entry!.ParameterInfos);
+        ModelParameterInfo messages = Assert.Single(entry.ParameterInfos);
+        Assert.Equal("messages", messages.Name);
+        Assert.Equal(DataKind.Struct, messages.Kind);
+        Assert.True(messages.IsArray);
+        Assert.NotNull(messages.StructFields);
+        Assert.Collection(messages.StructFields,
+            f => { Assert.Equal("role", f.Name); Assert.Equal(DataKind.String, f.Kind); },
+            f => { Assert.Equal("content", f.Name); Assert.Equal(DataKind.String, f.Kind); });
+    }
+
+    [Fact]
+    public void CreateModel_InlineStructParameter_ResolvesStructFields()
+    {
+        // Inline `Struct<x: Int32, y: Int32>` (without a named vocabulary
+        // entry) must resolve to the same per-field shape as the named
+        // form. Verifies the inline-annotation branch of the registrar's
+        // BuildParameterStructFields path.
+        TableCatalog catalog = CreateCatalogWithDispatcher(out _);
+        catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
+        {
+            BatchSizePolicy = StaticBatchSizePolicy.Instance,
+        };
+
+        catalog.Plan(
+            $"CREATE MODEL inline_point(p Struct<x: Int32, y: Int32>) RETURNS String "
+            + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN 'p' END");
+
+        ModelCatalogEntry? entry = catalog.Models.TryGetEntry("inline_point");
+        Assert.NotNull(entry);
+        ModelParameterInfo param = Assert.Single(entry!.ParameterInfos!);
+        Assert.False(param.IsArray);
+        Assert.NotNull(param.StructFields);
+        Assert.Collection(param.StructFields,
+            f => Assert.Equal("x", f.Name),
+            f => Assert.Equal("y", f.Name));
+    }
+
+    [Fact]
     public void CreateModel_ExplicitModelsSchema_AcceptedAndNormalized()
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);

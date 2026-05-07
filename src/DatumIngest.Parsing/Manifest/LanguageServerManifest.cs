@@ -502,6 +502,19 @@ public sealed class ParameterSignature
     /// set (the default for plain String / numeric / other parameters).
     /// </summary>
     public IReadOnlyList<string>? EnumValues { get; init; }
+
+    /// <summary>
+    /// For parameters whose element type is a struct (either a named
+    /// vocabulary type like <c>ChatMessage</c> or an inline
+    /// <c>Struct&lt;name: Kind, …&gt;</c>), the ordered field shape. Drives
+    /// completion inside the struct-literal at this parameter slot — typing
+    /// <c>models.fn([{ |</c> surfaces the field names of each element.
+    /// Applies uniformly to scalar struct parameters and to
+    /// <c>Array&lt;Struct&gt;</c> parameters (in both cases the literal
+    /// shape inside <c>{ … }</c> is the same). <see langword="null"/> for
+    /// non-struct parameters and for opaque bare <c>Struct</c>.
+    /// </summary>
+    public IReadOnlyList<StructFieldSignature>? StructFields { get; init; }
 }
 
 /// <summary>
