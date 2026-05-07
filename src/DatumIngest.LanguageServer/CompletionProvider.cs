@@ -75,6 +75,12 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
+                // Set-returning functions (unnest, range, ...) are also valid
+                // at the top level of a SELECT projection — the planner's
+                // ProjectionSetReturningRewriter lifts them into a synthesized
+                // FROM source. Surface them in completion here so the user
+                // doesn't have to remember they exist.
+                AddTableValuedFunctions(items);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;

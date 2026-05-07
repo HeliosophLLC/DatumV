@@ -230,6 +230,33 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     [Fact]
+    public void GetCompletions_AfterSelect_OffersTableValuedFunctions()
+    {
+        // Set-returning functions are legal as the top-level expression of a
+        // SELECT projection (the planner's ProjectionSetReturningRewriter
+        // lifts them into a synthesized FROM source). Completion should
+        // surface them alongside scalar/aggregate/window functions.
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT  FROM users", 7);
+
+        Assert.Contains(items, item =>
+            item.Label == "unnest" && item.Kind == CompletionItemKind.Function);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterWhere_DoesNotOfferTableValuedFunctions()
+    {
+        // SRFs are rejected by the rewriter when used in WHERE / HAVING /
+        // ORDER BY / GROUP BY / QUALIFY — don't suggest them there.
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM users WHERE ", 26);
+
+        Assert.DoesNotContain(items, item => item.Label == "unnest");
+    }
+
+    [Fact]
     public void GetCompletions_AfterSelectWithPrefix_FiltersByPrefix()
     {
         CompletionProvider provider = CreateProvider();

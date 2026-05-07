@@ -55,6 +55,12 @@ public sealed class QueryPlanner
         // paths that call the planner directly.
         query = NamedArgPermuter.Permute(query, _functionRegistry, _catalog.Udfs, _catalog.SearchPath);
 
+        // Lift table-valued calls that appear as top-level SELECT projections
+        // into synthesized FROM sources. Must run before the function gate
+        // so the gate doesn't see the (now-lowered) TVF call in scalar
+        // position. After this pass projection-list SRFs are gone.
+        query = ProjectionSetReturningRewriter.Rewrite(query, _functionRegistry);
+
         // Plan-time function gate. The planner is only entered for top-level
         // queries — procedural UDF / model bodies are interpreted by their
         // respective adapters (`ProceduralUdfFunction`, `ProceduralModelFunction`)
@@ -181,6 +187,11 @@ public sealed class QueryPlanner
         // test fixtures and from PlanCompoundWithSubqueriesAsync's
         // recursion.
         query = NamedArgPermuter.Permute(query, _functionRegistry, _catalog.Udfs, _catalog.SearchPath);
+
+        // Lift table-valued calls in SELECT projections into synthesized
+        // FROM sources. Matches the sync Plan() pass so test fixtures and
+        // late-materialisation entry points behave identically.
+        query = ProjectionSetReturningRewriter.Rewrite(query, _functionRegistry);
 
         QueryOperator op = query switch
         {
