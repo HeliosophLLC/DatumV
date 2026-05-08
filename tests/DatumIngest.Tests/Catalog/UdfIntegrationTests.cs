@@ -218,20 +218,23 @@ public class UdfIntegrationTests : ServiceTestBase
     }
 
     [Fact]
-    public void Plan_ScalarPositionTableValuedFunction_RedirectsToFromClause()
+    public void Plan_TableValuedFunctionInProjection_LiftedIntoSynthesizedFromSource()
     {
-        // A TVF used as a scalar expression should get the same helpful
-        // "use it in a FROM clause" nudge the runtime evaluator gives.
-        // `range` is registered as a TVF (FunctionRegistry.CreateDefault).
+        // ProjectionSetReturningRewriter accepts a top-level TVF call in the
+        // SELECT projection list by lifting it into a synthesized FROM source
+        // (cross-joined laterally with the user's real FROM). The planner gate
+        // no longer rejects this shape; planning succeeds and the resulting
+        // operator tree executes as the row-multiplying form the user
+        // intended. The redirect-to-FROM message still fires for positions
+        // the rewriter doesn't handle (WHERE / HAVING / ORDER BY / etc.) —
+        // see ProjectionSetReturningTests.
         TableCatalog catalog = CreateCatalog("orders",
             columns: ["id"],
             new object[] { 1 });
 
-        Exception ex = Assert.ThrowsAny<Exception>(
-            () => catalog.Plan("SELECT range(10) FROM orders"));
-        Assert.Contains("range", ex.Message);
-        Assert.Contains("table-valued function", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("FROM clause", ex.Message, StringComparison.OrdinalIgnoreCase);
+        // Should plan without throwing. Uses valid args (range needs 2+).
+        IQueryPlan plan = catalog.Plan("SELECT range(1, 3) FROM orders");
+        Assert.NotNull(plan);
     }
 
     [Fact]
