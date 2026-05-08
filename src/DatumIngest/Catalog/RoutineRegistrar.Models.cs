@@ -679,7 +679,7 @@ internal sealed partial class RoutineRegistrar
                 kind = parsedKind;
                 isArray = parsedIsArray;
             }
-            result[i] = new ModelStructFieldInfo(f.Name, kind, isArray, KindLabel: f.Kind);
+            result[i] = new ModelStructFieldInfo(f.Name, kind, isArray, KindLabel: f.Kind, EnumValues: f.EnumValues);
         }
         return result;
     }

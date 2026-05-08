@@ -531,4 +531,16 @@ public sealed class StructFieldSignature
 
     /// <summary>Canonical kind string for the field's value (e.g. <c>"Int32"</c>, <c>"Array&lt;Float32&gt;"</c>).</summary>
     public required string Kind { get; init; }
+
+    /// <summary>
+    /// When the field accepts a string drawn from an enumerated set of
+    /// values (e.g. <c>ChatMessage.role</c> is one of
+    /// <c>'user'</c> / <c>'assistant'</c> / <c>'system'</c> / <c>'tool'</c>),
+    /// the canonical list. Sourced from the named type's
+    /// <c>NamedTypeDefinition.FieldEnumValues</c>; inline
+    /// <c>Struct&lt;…&gt;</c> annotations have no place to declare an enum
+    /// and always leave this <see langword="null"/>. Drives the language-
+    /// server's string-literal completion inside struct literals.
+    /// </summary>
+    public IReadOnlyList<string>? EnumValues { get; init; }
 }

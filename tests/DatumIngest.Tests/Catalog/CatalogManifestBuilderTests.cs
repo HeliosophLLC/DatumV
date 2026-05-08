@@ -401,6 +401,50 @@ public sealed class CatalogManifestBuilderTests : ServiceTestBase
     }
 
     [Fact]
+    public void Build_UdfWithChatMessageParameter_SurfacesFieldEnumValues()
+    {
+        // ChatMessage's `role` field declares a per-field enum vocabulary
+        // in NamedTypeRegistry.FieldEnumValues. The resolver must overlay
+        // those values onto the parsed shape so the LanguageServer can
+        // suggest 'user' / 'assistant' / 'system' / 'tool' inside a
+        // `{ role: '|' }` literal. Fields without an enum (`content`)
+        // stay null.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE FUNCTION format_msg(m ChatMessage) RETURNS String AS 'placeholder'");
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, new FunctionRegistry());
+
+        UdfEntry udf = Assert.Single(
+            manifest.Udfs!, u => string.Equals(u.Name, "format_msg", StringComparison.OrdinalIgnoreCase));
+        StructFieldSignature role = udf.Parameters![0].StructFields![0];
+        Assert.Equal("role", role.Name);
+        Assert.NotNull(role.EnumValues);
+        Assert.Equal(["user", "assistant", "system", "tool"], role.EnumValues);
+
+        StructFieldSignature content = udf.Parameters[0].StructFields![1];
+        Assert.Equal("content", content.Name);
+        Assert.Null(content.EnumValues);
+    }
+
+    [Fact]
+    public void Build_UdfWithInlineStructParameter_HasNoEnumValues()
+    {
+        // Inline `Struct<…>` annotations carry no enum metadata — there's
+        // no place to declare it in the annotation syntax. Verifies the
+        // overlay only applies to named-type entries.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE FUNCTION use_point(p Struct<x: Int32, y: Int32>) RETURNS Int32 AS 'placeholder'");
+
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, new FunctionRegistry());
+
+        UdfEntry udf = Assert.Single(
+            manifest.Udfs!, u => string.Equals(u.Name, "use_point", StringComparison.OrdinalIgnoreCase));
+        Assert.All(udf.Parameters![0].StructFields!, f => Assert.Null(f.EnumValues));
+    }
+
+    [Fact]
     public void Build_UdfWithScalarParameter_HasNoStructFields()
     {
         // A non-struct parameter (Int32, String, …) carries no StructFields

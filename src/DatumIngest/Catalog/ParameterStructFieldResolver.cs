@@ -53,11 +53,27 @@ internal static class ParameterStructFieldResolver
         foreach (NamedTypeRegistry.NamedTypeDefinition def in NamedTypeRegistry.Entries)
         {
             if (!string.Equals(def.Name, element, StringComparison.OrdinalIgnoreCase)) continue;
-            if (StructTypeAnnotation.TryParse(def.Description, out IReadOnlyList<StructFieldShape> named))
+            if (!StructTypeAnnotation.TryParse(def.Description, out IReadOnlyList<StructFieldShape> named))
             {
-                return named;
+                return null;
             }
-            return null;
+            // Overlay per-field enum vocabulary from the named type's
+            // metadata so the language server can suggest legal literals
+            // inside the struct's field values. Annotation strings don't
+            // encode enums; only the registry entry does.
+            if (def.FieldEnumValues is { Count: > 0 } enumValues)
+            {
+                StructFieldShape[] enriched = new StructFieldShape[named.Count];
+                for (int i = 0; i < named.Count; i++)
+                {
+                    StructFieldShape field = named[i];
+                    enriched[i] = enumValues.TryGetValue(field.Name, out IReadOnlyList<string>? values)
+                        ? new StructFieldShape(field.Name, field.Kind, values)
+                        : field;
+                }
+                return enriched;
+            }
+            return named;
         }
 
         return null;
@@ -77,7 +93,12 @@ internal static class ParameterStructFieldResolver
         StructFieldSignature[] result = new StructFieldSignature[shapes.Count];
         for (int i = 0; i < shapes.Count; i++)
         {
-            result[i] = new StructFieldSignature { Name = shapes[i].Name, Kind = shapes[i].Kind };
+            result[i] = new StructFieldSignature
+            {
+                Name = shapes[i].Name,
+                Kind = shapes[i].Kind,
+                EnumValues = shapes[i].EnumValues,
+            };
         }
         return result;
     }

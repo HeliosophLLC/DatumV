@@ -56,10 +56,21 @@ public static class NamedTypeRegistry
     /// in the topological pre-pass — composite types reference their
     /// dependencies by name (<c>byName["BoundingBox"]</c>).
     /// </param>
+    /// <param name="FieldEnumValues">
+    /// Optional per-field enumerated value vocabulary. Keyed by field name
+    /// (case-insensitive); each entry lists the legal string literals for
+    /// that field. Drives language-server completion inside struct literals
+    /// — typing <c>{ role: '|' }</c> for a <c>ChatMessage</c> surfaces the
+    /// declared role vocabulary. Engine-side validation is independent
+    /// (today the runtime accepts any String at the field; per-family chat
+    /// templates may still reject unsupported roles at execution time).
+    /// <see langword="null"/> when the type has no enum-constrained fields.
+    /// </param>
     public sealed record NamedTypeDefinition(
         string Name,
         string Description,
-        Func<TypeRegistry, IReadOnlyDictionary<string, int>, int> Build);
+        Func<TypeRegistry, IReadOnlyDictionary<string, int>, int> Build,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? FieldEnumValues = null);
 
     /// <summary>
     /// The 17-entry vocabulary, ordered topologically: primitives
@@ -261,6 +272,10 @@ public static class NamedTypeRegistry
             [
                 new("role", reg.InternScalarType(DataKind.String)),
                 new("content", reg.InternScalarType(DataKind.String)),
-            ])),
+            ]),
+            FieldEnumValues: new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["role"] = ["user", "assistant", "system", "tool"],
+            }),
     ];
 }

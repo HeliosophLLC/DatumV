@@ -156,6 +156,12 @@ public static class StructTypeAnnotation
 /// A single field in a parsed struct annotation. <see cref="Kind"/> is the
 /// canonical kind string for the field's type — <c>"Int32"</c>,
 /// <c>"Array&lt;Float32&gt;"</c>, even a nested <c>"Struct&lt;…&gt;"</c> for
-/// fields that are themselves structs.
+/// fields that are themselves structs. <see cref="EnumValues"/> carries an
+/// optional enumerated string vocabulary attached via metadata (e.g. a
+/// named type registry entry's per-field enum); the annotation string
+/// itself doesn't encode it.
 /// </summary>
-public sealed record StructFieldShape(string Name, string Kind);
+public sealed record StructFieldShape(
+    string Name,
+    string Kind,
+    IReadOnlyList<string>? EnumValues = null);

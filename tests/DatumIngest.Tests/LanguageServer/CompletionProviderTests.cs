@@ -2213,6 +2213,159 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     [Fact]
+    public void StructLiteralCompletion_StringEnumField_SurfacesValues()
+    {
+        // `{ role: '|' }` inside a call whose parameter declares ChatMessage-
+        // shaped fields with an enum on `role` must surface the legal role
+        // values inside the string literal. Mirrors the top-level
+        // `blend(_, 'add|')` enum surface but routes through the struct-
+        // field-aware path.
+        IReadOnlyList<StructFieldSignature> chatFields =
+        [
+            new StructFieldSignature
+            {
+                Name = "role",
+                Kind = "String",
+                EnumValues = ["user", "assistant", "system", "tool"],
+            },
+            new StructFieldSignature { Name = "content", Kind = "String" },
+        ];
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "chat",
+                    Status = ModelInstallStatus.Available,
+                    OutputKind = "String",
+                    Parameters =
+                    [
+                        new ParameterSignature
+                        {
+                            Name = "messages",
+                            Kind = "Array<Struct>",
+                            StructFields = chatFields,
+                        },
+                    ],
+                },
+            ],
+            Keywords = ["SELECT"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql = "SELECT models.chat([{ role: '' }])";
+        int cursor = sql.IndexOf("''") + 1; // between the two quotes
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "user" && i.Kind == CompletionItemKind.EnumMember);
+        Assert.Contains(items, i => i.Label == "assistant" && i.Kind == CompletionItemKind.EnumMember);
+        Assert.Contains(items, i => i.Label == "system" && i.Kind == CompletionItemKind.EnumMember);
+        Assert.Contains(items, i => i.Label == "tool" && i.Kind == CompletionItemKind.EnumMember);
+    }
+
+    [Fact]
+    public void StructLiteralCompletion_StringFieldWithoutEnum_NoSuggestions()
+    {
+        // `content: '|'` has no declared enum vocabulary — the popup
+        // should stay quiet rather than emit junk. Verifies the helper
+        // bails cleanly when the field's EnumValues is null.
+        IReadOnlyList<StructFieldSignature> chatFields =
+        [
+            new StructFieldSignature
+            {
+                Name = "role",
+                Kind = "String",
+                EnumValues = ["user", "assistant", "system", "tool"],
+            },
+            new StructFieldSignature { Name = "content", Kind = "String" },
+        ];
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "chat",
+                    Status = ModelInstallStatus.Available,
+                    OutputKind = "String",
+                    Parameters =
+                    [
+                        new ParameterSignature
+                        {
+                            Name = "messages",
+                            Kind = "Array<Struct>",
+                            StructFields = chatFields,
+                        },
+                    ],
+                },
+            ],
+            Keywords = ["SELECT"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql = "SELECT models.chat([{ content: '' }])";
+        int cursor = sql.IndexOf("''") + 1;
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        // No enum-member suggestions for an unconstrained string field.
+        Assert.DoesNotContain(items, i => i.Kind == CompletionItemKind.EnumMember);
+    }
+
+    [Fact]
+    public void StructLiteralCompletion_StringEnumField_PartialTyped_SurfacesValues()
+    {
+        // Cursor mid-string (`'us|'`) should still surface the enum
+        // vocabulary — Monaco filters the popup by the in-progress prefix
+        // on the editor side, but the provider must include every value.
+        IReadOnlyList<StructFieldSignature> chatFields =
+        [
+            new StructFieldSignature
+            {
+                Name = "role",
+                Kind = "String",
+                EnumValues = ["user", "assistant"],
+            },
+        ];
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "chat",
+                    Status = ModelInstallStatus.Available,
+                    OutputKind = "String",
+                    Parameters =
+                    [
+                        new ParameterSignature
+                        {
+                            Name = "messages",
+                            Kind = "Array<Struct>",
+                            StructFields = chatFields,
+                        },
+                    ],
+                },
+            ],
+            Keywords = ["SELECT"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql = "SELECT models.chat([{ role: 'us' }])";
+        int cursor = sql.IndexOf("'us") + 3; // after `us`, before the closing quote
+        CompletionItem[] items = provider.GetCompletions(sql, cursor);
+
+        Assert.Contains(items, i => i.Label == "user" && i.Kind == CompletionItemKind.EnumMember);
+        Assert.Contains(items, i => i.Label == "assistant" && i.Kind == CompletionItemKind.EnumMember);
+    }
+
+    [Fact]
     public void StructLiteralCompletion_UdfParameter_SurfacesFields()
     {
         // UDFs expose struct-field shapes on UdfEntry.Parameters. Cursor

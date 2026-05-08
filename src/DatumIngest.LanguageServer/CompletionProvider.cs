@@ -346,11 +346,19 @@ public sealed class CompletionProvider
             case CompletionZoneKind.InsideStringOrComment:
                 // Cursor is inside a string or comment — suppress all completions
                 // so e.g. ALTER doesn't get inserted while the user types a
-                // literal. One exception: when the string sits in a parameter
-                // slot whose matcher carries a `StringEnumMatcher` (e.g.
-                // `blend(content, 'add')`'s `mode`), surface those values so
-                // users see the legal vocabulary.
-                AddEnumValuesForStringParameter(items, sql, cursorOffset);
+                // literal. Two exceptions:
+                //   1. Top-level parameter slot whose matcher is a
+                //      `StringEnumMatcher` (e.g. `blend(_, 'add')`'s `mode`).
+                //   2. Struct-literal field whose declared shape carries
+                //      `EnumValues` (e.g. ChatMessage.role inside
+                //      `models.chat([{ role: '|' }])`).
+                // The struct-field path runs first; if it surfaces values it
+                // owns the popup. The top-level path remains the fallback so
+                // existing string-enum completions keep working.
+                if (!TryAddEnumValuesForStructFieldString(items, sql, cursorOffset))
+                {
+                    AddEnumValuesForStringParameter(items, sql, cursorOffset);
+                }
                 break;
 
             case CompletionZoneKind.AfterCall:
@@ -1687,6 +1695,52 @@ public sealed class CompletionProvider
     /// active parameter has no struct shape, or the cursor sits past a
     /// field's colon (value position — fall through to expression mode).
     /// </summary>
+    /// <summary>
+    /// When the cursor sits inside a string literal at a struct-field value
+    /// position (e.g. <c>models.chat([{ role: '|' }])</c>), looks up the
+    /// field's declared <see cref="StructFieldSignature.EnumValues"/> and
+    /// surfaces them as completion items. Returns <see langword="true"/>
+    /// when at least one value was emitted so the caller can suppress the
+    /// top-level <see cref="AddEnumValuesForStringParameter"/> fallback.
+    /// </summary>
+    private bool TryAddEnumValuesForStructFieldString(List<CompletionItem> items, string sql, int cursorOffset)
+    {
+        if (!StructLiteralContext.TryResolve(sql, cursorOffset, out StructLiteralContext.Result ctx))
+        {
+            return false;
+        }
+        if (!ctx.IsAfterColon || ctx.ActiveFieldName is null) return false;
+
+        IReadOnlyList<StructFieldSignature>? fields = ResolveStructFieldsForCallSlot(
+            ctx.Call.FunctionName, ctx.Call.ActiveParameter);
+        if (fields is null) return false;
+
+        IReadOnlyList<string>? values = null;
+        foreach (StructFieldSignature field in fields)
+        {
+            if (!string.Equals(field.Name, ctx.ActiveFieldName, StringComparison.OrdinalIgnoreCase)) continue;
+            values = field.EnumValues;
+            break;
+        }
+        if (values is null || values.Count == 0) return false;
+
+        foreach (string value in values)
+        {
+            items.Add(new CompletionItem
+            {
+                Label = value,
+                Kind = CompletionItemKind.EnumMember,
+                // Inside a string literal the opening quote already exists;
+                // insert the bare value so Monaco's word completion replaces
+                // any in-progress prefix between the quotes.
+                InsertText = value,
+                Detail = $"{ctx.ActiveFieldName} — field of {ctx.Call.FunctionName}",
+                SortOrder = 0,
+            });
+        }
+        return true;
+    }
+
     private bool TryAddStructLiteralFields(List<CompletionItem> items, string sql, int cursorOffset)
     {
         if (!StructLiteralContext.TryResolve(sql, cursorOffset, out StructLiteralContext.Result ctx))

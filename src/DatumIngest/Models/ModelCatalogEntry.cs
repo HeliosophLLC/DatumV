@@ -241,7 +241,20 @@ public sealed record ModelParameterInfo(
 /// so hover popups can show the full declared shape. Falls back to the
 /// kind name when no richer label is available.
 /// </param>
-public sealed record ModelStructFieldInfo(string Name, DataKind Kind, bool IsArray, string KindLabel);
+/// <param name="EnumValues">
+/// Optional enumerated string vocabulary for the field. Populated when the
+/// source annotation referenced a named type whose
+/// <c>NamedTypeRegistry</c> entry declared per-field enum values.
+/// Travels through to the manifest's <see cref="Manifest.StructFieldSignature.EnumValues"/>
+/// for language-server completion. <see langword="null"/> for unconstrained
+/// fields and for inline-struct annotations.
+/// </param>
+public sealed record ModelStructFieldInfo(
+    string Name,
+    DataKind Kind,
+    bool IsArray,
+    string KindLabel,
+    IReadOnlyList<string>? EnumValues = null);
 
 /// <summary>
 /// Context handed to a <see cref="ModelCatalogEntry.Loader"/> when first instantiating

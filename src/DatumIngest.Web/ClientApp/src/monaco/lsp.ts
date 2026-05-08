@@ -121,9 +121,14 @@ function registerHoverCommands(): void {
 function registerCompletionProvider(): void {
   monaco.languages.registerCompletionItemProvider('sql', {
     // The base set Monaco invokes on typed identifiers covers the rest;
-    // trigger chars are for cases the automatic invocation doesn't catch
-    // (after a space, after a dot qualifier).
-    triggerCharacters: [' ', '.'],
+    // trigger chars are for cases the automatic invocation doesn't catch:
+    //   ' ' / '.' — after a separator / qualifier (existing behaviour)
+    //   "'"       — opening a string literal so struct-field enum values
+    //               surface immediately (e.g. ChatMessage.role) without
+    //               the user needing Ctrl+Space
+    //   '{' / ',' — inside / between struct-literal field slots so field
+    //               names surface as soon as the user starts a record
+    triggerCharacters: [' ', '.', "'", '{', ','],
 
     async provideCompletionItems(model, position) {
       const sql = model.getValue();

@@ -920,7 +920,12 @@ public static class CatalogManifestBuilder
             string fieldKind = !string.IsNullOrEmpty(f.KindLabel)
                 ? f.KindLabel
                 : (f.IsArray ? $"Array<{f.Kind}>" : f.Kind.ToString());
-            result[i] = new StructFieldSignature { Name = f.Name, Kind = fieldKind };
+            result[i] = new StructFieldSignature
+            {
+                Name = f.Name,
+                Kind = fieldKind,
+                EnumValues = f.EnumValues,
+            };
         }
         return result;
     }
