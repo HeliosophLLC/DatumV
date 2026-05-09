@@ -126,6 +126,24 @@ internal static class ProjectionPushdown
                         references.Add((tableName, columnName));
                     }
                 }
+
+                // Function-source arguments fall into the same correlation hazard:
+                // `FROM t, unnest(t.tags)` (or CROSS JOIN LATERAL unnest(t.tags))
+                // needs `t.tags` to survive pushdown so the scan emits it for the
+                // lateral side to read. The IsLateral check matches the subquery
+                // arm — non-lateral function-source args can't reference outer
+                // columns anyway, so walking them is a no-op there.
+                if (join.IsLateral && join.Source is FunctionSource lateralFunction)
+                {
+                    foreach (Expression argument in lateralFunction.Arguments)
+                    {
+                        foreach ((string? tableName, string columnName) in
+                            ColumnReferenceCollector.Collect(argument))
+                        {
+                            references.Add((tableName, columnName));
+                        }
+                    }
+                }
             }
         }
 

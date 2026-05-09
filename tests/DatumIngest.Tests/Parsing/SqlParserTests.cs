@@ -659,6 +659,83 @@ public class SqlParserTests : ServiceTestBase
     }
 
     [Fact]
+    public void CommaJoin_LowersToCrossJoin()
+    {
+        // SQL-89 / PG comma-style join: `FROM a, b` is equivalent to
+        // `FROM a CROSS JOIN b` — surfaces as a single Cross JoinClause
+        // in the AST.
+        SelectStatement result = Parse("SELECT * FROM t1, t2");
+
+        TableReference from = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.Equal("t1", from.Name);
+
+        Assert.NotNull(result.Joins);
+        Assert.Single(result.Joins);
+        Assert.Equal(JoinType.Cross, result.Joins[0].Type);
+        Assert.Null(result.Joins[0].OnCondition);
+        Assert.False(result.Joins[0].IsLateral);
+        TableReference rhs = Assert.IsType<TableReference>(result.Joins[0].Source);
+        Assert.Equal("t2", rhs.Name);
+    }
+
+    [Fact]
+    public void CommaJoin_MultipleSources_AllCrossJoined()
+    {
+        SelectStatement result = Parse("SELECT * FROM a, b, c");
+
+        Assert.NotNull(result.Joins);
+        Assert.Equal(2, result.Joins.Count);
+        Assert.All(result.Joins, j => Assert.Equal(JoinType.Cross, j.Type));
+        Assert.Equal("b", Assert.IsType<TableReference>(result.Joins[0].Source).Name);
+        Assert.Equal("c", Assert.IsType<TableReference>(result.Joins[1].Source).Name);
+    }
+
+    [Fact]
+    public void CommaJoin_FunctionSource_IsImplicitlyLateral()
+    {
+        // PG semantics: function sources in FROM are implicitly LATERAL,
+        // so their arguments may reference columns of preceding sources.
+        SelectStatement result = Parse(
+            "SELECT t.id FROM t, unnest(t.tags)");
+
+        Assert.NotNull(result.Joins);
+        Assert.Single(result.Joins);
+        Assert.Equal(JoinType.Cross, result.Joins[0].Type);
+        Assert.True(result.Joins[0].IsLateral);
+        FunctionSource fn = Assert.IsType<FunctionSource>(result.Joins[0].Source);
+        Assert.Equal("unnest", fn.FunctionName);
+    }
+
+    [Fact]
+    public void CommaJoin_MixedWithExplicitJoin()
+    {
+        // Comma sources come first in textual order, followed by explicit
+        // JOIN clauses — the resulting Joins list preserves that order.
+        SelectStatement result = Parse(
+            "SELECT * FROM a, b CROSS JOIN c");
+
+        Assert.NotNull(result.Joins);
+        Assert.Equal(2, result.Joins.Count);
+        Assert.Equal("b", Assert.IsType<TableReference>(result.Joins[0].Source).Name);
+        Assert.Equal("c", Assert.IsType<TableReference>(result.Joins[1].Source).Name);
+        Assert.All(result.Joins, j => Assert.Equal(JoinType.Cross, j.Type));
+    }
+
+    [Fact]
+    public void CommaJoin_WithWhere_ParsesAsSql89Style()
+    {
+        // The classic SQL-89 equi-join form: `FROM a, b WHERE a.id = b.id`.
+        // Parses cleanly without confusing the comma for a SELECT-list one.
+        SelectStatement result = Parse(
+            "SELECT a.x FROM a, b WHERE a.id = b.id");
+
+        Assert.NotNull(result.From);
+        Assert.NotNull(result.Joins);
+        Assert.Single(result.Joins);
+        Assert.NotNull(result.Where);
+    }
+
+    [Fact]
     public void JoinWithTableAlias()
     {
         SelectStatement result = Parse(

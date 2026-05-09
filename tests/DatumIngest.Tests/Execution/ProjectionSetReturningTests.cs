@@ -94,6 +94,33 @@ public sealed class ProjectionSetReturningTests : ServiceTestBase
     }
 
     [Fact]
+    public async Task CommaJoinWithUnnest_LateralLyExpandsPerRow()
+    {
+        // SQL-89 / PG comma-style FROM list: `FROM t, unnest(t.col)` lowers
+        // to CROSS JOIN LATERAL — the function source implicitly correlates
+        // to outer columns of `t`. Each outer row's array expands into
+        // sum(array.length) rows.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("docs",
+            columns: ["id", "tags"],
+            new object?[] { 1f, new[] { "alpha", "beta" } },
+            new object?[] { 2f, new[] { "gamma" } }));
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT docs.id, tag.value FROM docs, unnest(docs.tags) AS tag",
+            catalog);
+
+        // 2 from row1 (alpha, beta) + 1 from row2 (gamma) = 3 rows.
+        Assert.Equal(3, results.Count);
+        Assert.Equal(1f, results[0]["id"].AsFloat32());
+        Assert.Equal("alpha", results[0]["value"].AsString());
+        Assert.Equal(1f, results[1]["id"].AsFloat32());
+        Assert.Equal("beta", results[1]["value"].AsString());
+        Assert.Equal(2f, results[2]["id"].AsFloat32());
+        Assert.Equal("gamma", results[2]["value"].AsString());
+    }
+
+    [Fact]
     public async Task TwoSetReturningFunctionsInProjection_Rejected()
     {
         TableCatalog catalog = CreateCatalog();

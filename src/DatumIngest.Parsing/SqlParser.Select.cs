@@ -460,6 +460,30 @@ public static partial class SqlParser
         from source in TableSourceParser
         select new FromClause(source);
 
+    /// <summary>
+    /// SQL-89 / PG comma-separated FROM sources: <c>FROM a, b, c</c>. Each
+    /// comma source is lowered to a synthetic <see cref="JoinClause"/> with
+    /// <see cref="JoinType.Cross"/> so the existing planner machinery
+    /// handles it uniformly with explicit <c>CROSS JOIN</c> syntax.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Implicit LATERAL.</strong> PG promotes a <see cref="FunctionSource"/>
+    /// in this position to LATERAL automatically — the function's arguments
+    /// may reference columns of preceding FROM items without the user
+    /// writing the keyword. <see cref="SubquerySource"/> and
+    /// <see cref="TableReference"/> stay non-lateral; a correlated subquery
+    /// still needs explicit <c>JOIN LATERAL</c> syntax.
+    /// </para>
+    /// </remarks>
+    private static readonly TokenListParser<SqlToken, JoinClause[]> CommaJoinSourcesParser =
+        (
+            from comma in Token.EqualTo(SqlToken.Comma)
+            from source in TableSourceParser
+            select new JoinClause(JoinType.Cross, source, OnCondition: null,
+                IsLateral: source is FunctionSource)
+        ).Many();
+
     // ───────────────────── JOIN clauses ─────────────────────
 
     /// <summary>Join type keyword combinations, including LATERAL and T-SQL APPLY variants.</summary>
@@ -680,6 +704,23 @@ public static partial class SqlParser
         if (fromClauses.Length == 0)
             return fromDefine;
         return fromDefine.Concat(fromClauses).ToArray();
+    }
+
+    /// <summary>
+    /// Concatenates the comma-style implicit cross joins with the explicit
+    /// JOIN clauses in textual order. Returns <see langword="null"/> when
+    /// both inputs are empty so the resulting <see cref="SelectStatement.Joins"/>
+    /// stays <see langword="null"/> for join-less queries.
+    /// </summary>
+    private static IReadOnlyList<JoinClause>? CombineJoins(JoinClause[] commaJoins, JoinClause[] explicitJoins)
+    {
+        if (commaJoins.Length == 0 && explicitJoins.Length == 0)
+            return null;
+        if (commaJoins.Length == 0)
+            return explicitJoins;
+        if (explicitJoins.Length == 0)
+            return commaJoins;
+        return commaJoins.Concat(explicitJoins).ToArray();
     }
 
     // ───────────────────── PIVOT clause ─────────────────────
@@ -964,6 +1005,7 @@ public static partial class SqlParser
         from letOrDefine in LetOrDefineParser
         from columns in ColumnList
         from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
+        from commaJoins in CommaJoinSourcesParser
         from joinClauses in JoinClausesParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
         from crossValidateClause in CrossValidateClauseParser.AsNullable().Try().OptionalOrDefault()
@@ -981,7 +1023,7 @@ public static partial class SqlParser
             columns,
             fromClause,
             intoClause,
-            joinClauses.Length > 0 ? joinClauses : null,
+            CombineJoins(commaJoins, joinClauses),
             whereClause,
             groupByClause,
             havingClause,
@@ -1010,6 +1052,7 @@ public static partial class SqlParser
         from letOrDefine in LetOrDefineParser
         from columns in ColumnList
         from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
+        from commaJoins in CommaJoinSourcesParser
         from joinClauses in JoinClausesParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
         from crossValidateClause in CrossValidateClauseParser.AsNullable().Try().OptionalOrDefault()
@@ -1024,7 +1067,7 @@ public static partial class SqlParser
             columns,
             fromClause,
             intoClause,
-            joinClauses.Length > 0 ? joinClauses : null,
+            CombineJoins(commaJoins, joinClauses),
             whereClause,
             groupByClause,
             havingClause,

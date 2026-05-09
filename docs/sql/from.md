@@ -46,7 +46,13 @@ FROM RANGE(0, 360) AS r
 SELECT t.name, r."Value" AS angle
 FROM data AS t
 CROSS JOIN RANGE(0, 360) AS r
+
+-- Or written as a comma-separated FROM list (SQL-89 / PostgreSQL style)
+SELECT t.name, r."Value" AS angle
+FROM data AS t, RANGE(0, 360) AS r
 ```
+
+Comma-separated FROM lists are equivalent to `CROSS JOIN`. See [JOIN](joins.md) for the full semantics, including the implicit-lateral rule for function sources in comma position.
 
 ## See Also
 

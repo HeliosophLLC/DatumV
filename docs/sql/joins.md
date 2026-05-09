@@ -23,6 +23,9 @@ SELECT * FROM images FULL OUTER JOIN captions ON images.image_id = captions.imag
 
 -- CROSS JOIN: cartesian product
 SELECT * FROM products CROSS JOIN departments
+
+-- Comma-separated FROM list (SQL-89 / PostgreSQL): equivalent to CROSS JOIN
+SELECT * FROM products, departments
 ```
 
 NULL keys never match (SQL three-valued logic). Hash join is used for INNER/LEFT/RIGHT/FULL OUTER; nested loop for CROSS.
@@ -67,6 +70,27 @@ LEFT JOIN captions cap ON i.image_id = cap.image_id
 - **NULL keys never match in any join type** — rows with NULL join keys are silently excluded from INNER JOIN results.
 - **LEFT JOIN preserves all left rows but right columns become NULL for non-matches** — filter carefully. A WHERE clause on a right-side column (e.g., `WHERE o.status = 'shipped'`) converts the LEFT JOIN into an INNER JOIN because NULLs fail the filter.
 - **CROSS JOIN produces N x M rows** — use only when you intentionally want every combination (e.g., generating all product-region pairs for a report template).
+
+### Comma-separated FROM list
+
+A comma-separated FROM list is equivalent to writing the same sources joined with `CROSS JOIN`. A WHERE clause then expresses the matching condition — the classic SQL-89 join style:
+
+```sql
+-- Equivalent to: SELECT ... FROM customers CROSS JOIN orders WHERE ...
+SELECT c.name, o.total_amount
+FROM customers c, orders o
+WHERE c.customer_id = o.customer_id
+```
+
+Any of the comma-separated sources may be a table, a subquery, or a table-valued function. A table-valued function in this position is implicitly lateral — its arguments may reference columns from sources written earlier in the FROM list:
+
+```sql
+-- unnest(t.tags) sees each row of t (implicit LATERAL on function sources)
+SELECT t.id, tag.value
+FROM tasks t, unnest(t.tags) AS tag
+```
+
+A correlated subquery in the comma position still requires the explicit `JOIN LATERAL` form — only function sources gain LATERAL semantics implicitly.
 
 ### LATERAL JOIN / APPLY
 
