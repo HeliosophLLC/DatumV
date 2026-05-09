@@ -15,14 +15,16 @@ namespace DatumIngest.Serialization.Tar;
 /// <para>
 /// Forward-only. Each <see cref="TarEntry.DataStream"/> is valid only until the
 /// next <see cref="TarReader.GetNextEntryAsync(bool, CancellationToken)"/>, so
-/// <see cref="MediaBagDeserializer"/> must fully consume the body before pulling
-/// the next entry — which it does, by streaming into the arena or pooled buffer
-/// before yielding the row.
+/// consumers must fully consume the body before pulling the next entry — which
+/// <see cref="MediaBag.MediaBagDeserializer"/> does by streaming into the arena
+/// or pooled buffer before yielding the row.
 /// </para>
 /// <para>
-/// Symbolic-link, hard-link, and directory entries are skipped. The same OS /
-/// editor metadata filter as ZIP is applied via <see cref="MediaBagFilter"/> so
-/// the noise rejection stays consistent across containers.
+/// Symbolic-link, hard-link, and directory entries are skipped because their
+/// payloads aren't byte streams. OS/editor metadata files (<c>__MACOSX/</c>,
+/// <c>.DS_Store</c>, …) are NOT filtered here — consumers apply
+/// <see cref="MediaBagFilter"/> on top when they want media-bag semantics, and
+/// raw consumers (<c>open_archive</c>) see every regular-file entry.
 /// </para>
 /// </remarks>
 public sealed class TarBagReader : IMediaBagReader
@@ -52,10 +54,9 @@ public sealed class TarBagReader : IMediaBagReader
 
             if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile))
                 continue;
-            if (MediaBagFilter.IsIgnorableMetadata(entry.Name)) continue;
             if (entry.DataStream is null) continue;
 
-            yield return new MediaBagEntry(entry.Name, entry.Length, entry.DataStream);
+            yield return new MediaBagEntry(entry.Name, entry.Length, entry.ModificationTime, entry.DataStream);
         }
     }
 }

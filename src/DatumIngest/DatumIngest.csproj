@@ -21,7 +21,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DatumIngest.Tests" />
-    <InternalsVisibleTo Include="DatumIngest.Serialization" />
     <InternalsVisibleTo Include="DatumIngest.Web" />
     <InternalsVisibleTo Include="index-inspect" />
   </ItemGroup>

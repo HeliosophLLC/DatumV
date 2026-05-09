@@ -522,16 +522,25 @@ public sealed partial class ExpressionEvaluator
     {
         if (!_likeRegexCache.TryGetValue(pattern, out Regex? regex))
         {
-            string regexPattern = "^" + Regex.Escape(pattern)
-                .Replace("%", ".*", StringComparison.Ordinal)
-                .Replace("_", ".", StringComparison.Ordinal) + "$";
-
-            regex = new Regex(regexPattern, RegexOptions.Compiled | RegexOptions.CultureInvariant);
+            regex = BuildLikeRegex(pattern);
             _likeRegexCache[pattern] = regex;
         }
 
         return regex.IsMatch(input);
     }
+
+    /// <summary>
+    /// Translates a SQL LIKE pattern to an anchored, case-sensitive <see cref="Regex"/>:
+    /// <c>%</c> → <c>.*</c>, <c>_</c> → <c>.</c>, everything else is regex-escaped.
+    /// Exposed for one-shot consumers outside the evaluator (e.g. the
+    /// <c>open_archive</c> TVF's path-pattern filter) that don't need the
+    /// evaluator's per-instance pattern cache.
+    /// </summary>
+    internal static Regex BuildLikeRegex(string pattern) =>
+        new("^" + Regex.Escape(pattern)
+                .Replace("%", ".*", StringComparison.Ordinal)
+                .Replace("_", ".", StringComparison.Ordinal) + "$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Case-insensitive ILIKE wildcard match. Same wildcard conversion

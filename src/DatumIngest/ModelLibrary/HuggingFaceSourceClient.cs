@@ -9,11 +9,21 @@ using Microsoft.Extensions.Logging;
 
 namespace DatumIngest.ModelLibrary;
 
-// IModelSourceClient implementation for HuggingFace Hub model repos. Two
-// operations matter:
+// IModelSourceClient implementation for HuggingFace Hub repos. Handles both
+// model and dataset repos; <see cref="HuggingFaceSource.RepoType"/>
+// discriminates between them and chooses the right API namespace:
+//
+//   RepoType "model"   (default for model-catalog entries):
+//     - Tree:     /api/models/{repo}/tree/{revision}?recursive=true
+//     - Download: /{repo}/resolve/{revision}/{path}
+//
+//   RepoType "dataset" (used by dataset-catalog HF mirrors):
+//     - Tree:     /api/datasets/{repo}/tree/{revision}?recursive=true
+//     - Download: /datasets/{repo}/resolve/{revision}/{path}
+//
+// Two operations matter:
 //
 //   1. ListFilesAsync (was: GetTreeAsync)
-//        GET https://huggingface.co/api/models/{repo}/tree/{revision}?recursive=true
 //        Returns every file under the repo at that revision, with size and
 //        (for LFS files) sha256 inside `lfs.oid`. Non-LFS files use the git
 //        blob OID — verification falls back to size-only for those.
@@ -21,7 +31,6 @@ namespace DatumIngest.ModelLibrary;
 //        matcher.
 //
 //   2. DownloadFileAsync
-//        GET https://huggingface.co/{repo}/resolve/{revision}/{path}
 //        For LFS files HF responds with a 302 to an S3-presigned URL good
 //        for ~10 minutes. HttpClient follows redirects automatically so
 //        that's transparent here. Caller pre-creates the file; we stream
@@ -68,7 +77,7 @@ internal sealed class HuggingFaceSourceClient : IModelSourceClient
     {
         HuggingFaceSource hf = Cast(source);
 
-        string url = $"api/models/{hf.Repo}/tree/{hf.Revision}?recursive=true";
+        string url = $"api/{RepoSegment(hf)}/{hf.Repo}/tree/{hf.Revision}?recursive=true";
         _logger.LogDebug("HF tree: {Url}", url);
 
         using HttpResponseMessage resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
@@ -109,7 +118,13 @@ internal sealed class HuggingFaceSourceClient : IModelSourceClient
         string partPath = destPath + ".part";
         Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
 
-        string url = $"{hf.Repo}/resolve/{hf.Revision}/{file.Path}";
+        // Resolve path differs between model and dataset namespaces: model
+        // repos live at the root (huggingface.co/{repo}/...), dataset repos
+        // are under /datasets/ (huggingface.co/datasets/{repo}/...).
+        string downloadPrefix = hf.RepoType.Equals("dataset", StringComparison.OrdinalIgnoreCase)
+            ? "datasets/"
+            : string.Empty;
+        string url = $"{downloadPrefix}{hf.Repo}/resolve/{hf.Revision}/{file.Path}";
 
         // How many bytes from a prior session are already on disk? Zero
         // means a fresh download.
@@ -230,6 +245,18 @@ internal sealed class HuggingFaceSourceClient : IModelSourceClient
             ?? throw new InvalidOperationException(
                 $"HuggingFaceSourceClient cannot handle {source.GetType().Name}; " +
                 "the source registry routed this entry to the wrong client.");
+
+    // Selects the API path segment for HF's tree endpoint. The HF Hub has
+    // two top-level namespaces — models and datasets — with otherwise
+    // identical tree/resolve semantics.
+    private static string RepoSegment(HuggingFaceSource hf)
+    {
+        if (hf.RepoType.Equals("model", StringComparison.OrdinalIgnoreCase)) { return "models"; }
+        if (hf.RepoType.Equals("dataset", StringComparison.OrdinalIgnoreCase)) { return "datasets"; }
+        throw new InvalidOperationException(
+            $"HuggingFaceSource.repoType '{hf.RepoType}' is not recognised. " +
+            "Expected 'model' (default) or 'dataset'.");
+    }
 
     // Stream the existing .part bytes through the hash to seed it. Used
     // before sending a Range request so the final hash matches HF's hash

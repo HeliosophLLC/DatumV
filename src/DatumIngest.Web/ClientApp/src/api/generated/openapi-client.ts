@@ -2468,6 +2468,7 @@ export interface HuggingFaceSource extends CatalogSource {
     repo?: string;
     revision?: string;
     include?: string[];
+    repoType?: string;
 }
 
 export interface GithubReleaseSource extends CatalogSource {

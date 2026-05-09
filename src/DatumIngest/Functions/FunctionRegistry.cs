@@ -924,6 +924,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Video.VideoHeightFunction>();
 
         // Audio
+        registry.RegisterScalar<Scalar.Audio.AudioDecodeFunction>();
         registry.RegisterScalar<Scalar.Audio.AudioSampleRateFunction>();
         registry.RegisterScalar<Scalar.Audio.AudioSamplesFunction>();
         registry.RegisterScalar<Scalar.Audio.AudioToMonoFunction>();
@@ -1100,6 +1101,10 @@ public sealed class FunctionRegistry
         registry.RegisterTableValued<TableValued.RangeFunction>();
         registry.RegisterTableValued<TableValued.VideoUnnestFramesFunction>();
         registry.RegisterTableValued<TableValued.UnnestFunction>();
+        registry.RegisterTableValued<TableValued.OpenArchiveFunction>();
+        registry.RegisterTableValued<TableValued.OpenFolderFunction>();
+        registry.RegisterTableValued<TableValued.ListFolderFunction>();
+        registry.RegisterTableValued<TableValued.ReadCsvFunction>();
 
         // Inference toolkit. Lives in its own `inference` schema so the
         // introspection surface (onnx_inspect, devices, ...) doesn't

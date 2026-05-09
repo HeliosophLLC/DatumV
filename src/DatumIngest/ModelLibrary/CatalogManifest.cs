@@ -285,10 +285,19 @@ public sealed record CatalogHardware(
 [JsonDerivedType(typeof(HttpsSource), "https")]
 public abstract record CatalogSource;
 
-// Files come from a HuggingFace Hub model repo at the given revision.
-// `Include` is a glob list filtered against the tree API's file listing —
-// most catalog entries pin one or two files; whole-repo entries (SD
-// bundles) use ["**/*"].
+// Files come from a HuggingFace Hub repo at the given revision. `Include`
+// is a glob list filtered against the tree API's file listing — most
+// catalog entries pin one or two files; whole-repo entries (SD bundles)
+// use ["**/*"].
+//
+// `RepoType` discriminates between HF's two top-level repo namespaces:
+//   - "model"   (default) — model weights / configs / tokenizers. Tree
+//                lives at /api/models/{repo}, downloads at /{repo}/resolve/...
+//   - "dataset" — dataset archives, parquet shards, etc. Tree lives at
+//                /api/datasets/{repo}, downloads at /datasets/{repo}/resolve/...
+// The default is "model" so existing catalog entries deserialize unchanged.
+// Dataset-catalog entries that reference an HF dataset mirror must set
+// "repoType": "dataset" explicitly.
 public sealed record HuggingFaceSource(
     string Repo,
     // Either "main" or a 40-char commit sha. Pinned shas give
@@ -296,7 +305,8 @@ public sealed record HuggingFaceSource(
     // haven't been uploaded yet — the downloader treats `placeholder: true`
     // on the parent CatalogModel as the gate.
     string Revision,
-    IReadOnlyList<string> Include) : CatalogSource;
+    IReadOnlyList<string> Include,
+    string RepoType = "model") : CatalogSource;
 
 // Files come from a GitHub release. `Repo` is "owner/name"; `Tag` is the
 // release tag (e.g. "v0.0.0"); `Files` is the literal asset filename list

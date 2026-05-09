@@ -66,6 +66,12 @@ public sealed class MediaBagDeserializer : IFormatDeserializer
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Bag readers return every regular-file entry; the media-bag contract
+            // additionally drops OS/editor metadata (__MACOSX/, .DS_Store, …) so
+            // the homogeneity probe doesn't fail on a Finder-injected resource fork.
+            // Raw consumers like the open_archive TVF skip this filter entirely.
+            if (MediaBagFilter.IsIgnorableMetadata(entry.FullName)) continue;
+
             long byteLength = entry.Length;
             if (byteLength <= 0 || byteLength > int.MaxValue)
             {
