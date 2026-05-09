@@ -21,11 +21,11 @@ public static class SerializationServiceExtensions
     {
         services.AddTransient<IFileFormat, CsvFileFormat>();
         services.AddTransient<IFileFormat, JsonFileFormat>();
+        services.AddTransient<IFileFormat, JsonLinesFileFormat>();
         //services.AddTransient<IFileFormat, ParquetFileFormat>();
         //services.AddTransient<IFileFormat, Hdf5FileFormat>();
         services.AddTransient<IFileFormat, IdxFileFormat>();
         services.AddTransient<IFileFormat, ZipFileFormat>();
-        services.AddTransient<IFileFormat, JsonFileFormat>();
 
         return services;
     }

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using DatumIngest.Functions.Json;
@@ -83,7 +82,7 @@ public sealed class JsonDeserializer : IFormatDeserializer
             DataValue[] values = context.Pool.RentDataValues(scan.ColumnNames.Length);
             batch ??= context.Pool.RentRowBatch(columnLookup, DefaultBatchSize);
 
-            FillRow(row, scan.ColumnNames, scan.Kinds, values, batch.Arena);
+            JsonRowMaterializer.FillRow(row, scan.ColumnNames, scan.Kinds, values, batch.Arena);
 
             batch.Add(values);
 
@@ -134,71 +133,6 @@ public sealed class JsonDeserializer : IFormatDeserializer
             default:
                 throw new InvalidDataException(
                     $"JSON root in '{filePath}' is {root.ValueKind}; expected an object or an array of objects.");
-        }
-    }
-
-    // ────────────────────── Row → DataValue[] ──────────────────────
-
-    private static void FillRow(
-        JsonElement row,
-        string[] columnNames,
-        DataKind[] kinds,
-        DataValue[] values,
-        Arena arena)
-    {
-        for (int i = 0; i < columnNames.Length; i++)
-        {
-            if (!row.TryGetProperty(columnNames[i], out JsonElement value)
-                || value.ValueKind == JsonValueKind.Null)
-            {
-                values[i] = DataValue.Null(kinds[i]);
-                continue;
-            }
-
-            values[i] = ConvertValue(value, kinds[i], arena);
-        }
-    }
-
-    /// <summary>
-    /// Materializes a single <see cref="JsonElement"/> as a <see cref="DataValue"/>
-    /// of the requested <paramref name="kind"/>. The scanner picked <paramref name="kind"/>
-    /// so the value is known to conform; mismatches indicate either a scanner bug or
-    /// a deeply nested element typed as <see cref="DataKind.Json"/> and fall through
-    /// to the JSON encoder.
-    /// </summary>
-    private static DataValue ConvertValue(JsonElement value, DataKind kind, Arena arena)
-    {
-        switch (kind)
-        {
-            case DataKind.Boolean:
-                return DataValue.FromBoolean(value.GetBoolean());
-
-            case DataKind.UInt8: return DataValue.FromUInt8((byte)value.GetInt64());
-            case DataKind.Int8: return DataValue.FromInt8((sbyte)value.GetInt64());
-            case DataKind.UInt16: return DataValue.FromUInt16((ushort)value.GetInt64());
-            case DataKind.Int16: return DataValue.FromInt16((short)value.GetInt64());
-            case DataKind.UInt32: return DataValue.FromUInt32((uint)value.GetInt64());
-            case DataKind.Int32: return DataValue.FromInt32((int)value.GetInt64());
-            case DataKind.UInt64: return DataValue.FromUInt64(value.GetUInt64());
-            case DataKind.Int64: return DataValue.FromInt64(value.GetInt64());
-
-            case DataKind.Int128:
-                return DataValue.FromInt128(Int128.Parse(
-                    value.GetRawText(), NumberStyles.Integer, CultureInfo.InvariantCulture));
-            case DataKind.UInt128:
-                return DataValue.FromUInt128(UInt128.Parse(
-                    value.GetRawText(), NumberStyles.Integer, CultureInfo.InvariantCulture));
-
-            case DataKind.Float32: return DataValue.FromFloat32((float)value.GetDouble());
-            case DataKind.Float64: return DataValue.FromFloat64(value.GetDouble());
-
-            case DataKind.String:
-                return DataValue.FromString(value.GetString()!, arena);
-
-            case DataKind.Json:
-            default:
-                byte[] cbor = CborJsonCodec.EncodeFromJsonText(value.GetRawText());
-                return DataValue.FromJson(cbor, arena);
         }
     }
 
