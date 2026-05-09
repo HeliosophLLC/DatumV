@@ -92,6 +92,41 @@ public static class TypeCoercion
     }
 
     /// <summary>
+    /// Shape-aware analog of <see cref="FindCommonKind"/>. Returns the
+    /// common (kind, IsArray, IsMultiDim) shape that both sides can
+    /// represent, or <see langword="null"/> when the shapes are
+    /// incompatible.
+    /// <para>
+    /// Stricter than <see cref="FindCommonKind"/>: the <c>IsArray</c>
+    /// flag must match on both sides (arrays don't unify with scalars),
+    /// and the <c>IsMultiDim</c> flag must match. For matching arrays the
+    /// element kind is unified via <see cref="FindCommonKind"/>; the
+    /// result is an array of the common element kind. For matching
+    /// scalars the behavior is identical to <see cref="FindCommonKind"/>.
+    /// </para>
+    /// <para>
+    /// Intended for SQL surfaces that require shape conformance —
+    /// <c>UNION</c> / <c>INTERSECT</c> / <c>EXCEPT</c> column-by-column
+    /// unification. <c>CASE</c> and <c>COALESCE</c> intentionally use
+    /// the kind-only path so a typed-array branch paired with a NULL
+    /// or scalar literal keeps its array-ness (a common LEFT-JOIN
+    /// gating pattern).
+    /// </para>
+    /// </summary>
+    public static (DataKind Kind, bool IsArray, bool IsMultiDim)? FindCommonShape(
+        DataKind kindA, bool isArrayA, bool isMultiDimA,
+        DataKind kindB, bool isArrayB, bool isMultiDimB)
+    {
+        if (isArrayA != isArrayB) return null;
+        if (isMultiDimA != isMultiDimB) return null;
+
+        DataKind? common = FindCommonKind(kindA, kindB);
+        if (common is null) return null;
+
+        return (common.Value, isArrayA, isMultiDimA);
+    }
+
+    /// <summary>
     /// Returns the immediate widening target for a given kind, or <c>null</c>
     /// if no further widening is possible.
     /// </summary>

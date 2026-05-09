@@ -10,7 +10,7 @@ namespace DatumIngest.Catalog.Executors;
 /// Owns the <c>CREATE TABLE … AS SELECT</c> pipeline for
 /// <see cref="TableCatalog.PlanAsync(Statement)"/>: derives the target
 /// schema statically from the source query's projection via
-/// <see cref="QuerySchemaResolver.ResolveProjectionAsync"/>, materialises
+/// <see cref="QuerySchemaResolver.ResolveProjectionAsync(QueryExpression, string, CancellationToken)"/>, materialises
 /// the table (in-memory for TEMP, an empty <c>.datum</c> file for
 /// persistent), then streams the source query's batches through an
 /// <see cref="IAppendSession"/> without buffering. On any mid-stream
@@ -67,18 +67,12 @@ internal static class CtasExecutor
         // Empty result sets still produce a populated schema this way —
         // matches PostgreSQL's "CREATE TABLE … AS SELECT … WHERE false"
         // semantics where the table is created empty rather than the
-        // statement failing for lack of an inferable schema.
-        if (ctas.Query is not SelectQueryExpression selectExpr)
-        {
-            throw new NotSupportedException(
-                $"CREATE TABLE '{ctas.TableName}' AS SELECT: only simple SELECT statements " +
-                "are supported as the source query. Compound queries (UNION/INTERSECT/EXCEPT) " +
-                "are not yet supported.");
-        }
-
+        // statement failing for lack of an inferable schema. Compound
+        // queries (UNION/INTERSECT/EXCEPT) flow through the same path
+        // — the resolver unifies branch column types per position.
         QuerySchemaResolver resolver = new(catalog, catalog.Functions);
         ResolvedQuerySchema projection = await resolver
-            .ResolveProjectionAsync(selectExpr.Statement, ctas.TableName, CancellationToken.None)
+            .ResolveProjectionAsync(ctas.Query, ctas.TableName, CancellationToken.None)
             .ConfigureAwait(false);
 
         Schema schema = BuildSchemaFromProjection(projection, ctas.TableName);

@@ -85,6 +85,77 @@ public class TypeCoercionTests : ServiceTestBase
         Assert.Equal(DataKind.String, TypeCoercion.FindCommonKind(DataKind.String, DataKind.String));
     }
 
+    // ─────────────── FindCommonShape ───────────────
+
+    [Fact]
+    public void FindCommonShape_ScalarScalar_WidensKindLikeFindCommonKind()
+    {
+        var result = TypeCoercion.FindCommonShape(
+            DataKind.Int32, isArrayA: false, isMultiDimA: false,
+            DataKind.Int64, isArrayB: false, isMultiDimB: false);
+
+        Assert.NotNull(result);
+        Assert.Equal(DataKind.Int64, result.Value.Kind);
+        Assert.False(result.Value.IsArray);
+        Assert.False(result.Value.IsMultiDim);
+    }
+
+    [Fact]
+    public void FindCommonShape_ArrayArray_SameElement_Unifies()
+    {
+        var result = TypeCoercion.FindCommonShape(
+            DataKind.Float32, isArrayA: true, isMultiDimA: false,
+            DataKind.Float32, isArrayB: true, isMultiDimB: false);
+
+        Assert.NotNull(result);
+        Assert.Equal(DataKind.Float32, result.Value.Kind);
+        Assert.True(result.Value.IsArray);
+    }
+
+    [Fact]
+    public void FindCommonShape_ArrayArray_WideningElementKind_Unifies()
+    {
+        // Int32[] + Int64[] → Int64[] — same widening rules as scalars,
+        // applied to the per-element kind.
+        var result = TypeCoercion.FindCommonShape(
+            DataKind.Int32, isArrayA: true, isMultiDimA: false,
+            DataKind.Int64, isArrayB: true, isMultiDimB: false);
+
+        Assert.NotNull(result);
+        Assert.Equal(DataKind.Int64, result.Value.Kind);
+        Assert.True(result.Value.IsArray);
+    }
+
+    [Fact]
+    public void FindCommonShape_ArrayPlusScalar_Rejected()
+    {
+        var result = TypeCoercion.FindCommonShape(
+            DataKind.Float32, isArrayA: true, isMultiDimA: false,
+            DataKind.Float32, isArrayB: false, isMultiDimB: false);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void FindCommonShape_MultiDimMismatch_Rejected()
+    {
+        var result = TypeCoercion.FindCommonShape(
+            DataKind.Float32, isArrayA: true, isMultiDimA: true,
+            DataKind.Float32, isArrayB: true, isMultiDimB: false);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void FindCommonShape_IncompatibleElementKinds_Rejected()
+    {
+        var result = TypeCoercion.FindCommonShape(
+            DataKind.String, isArrayA: false, isMultiDimA: false,
+            DataKind.Int32, isArrayB: false, isMultiDimB: false);
+
+        Assert.Null(result);
+    }
+
     // ─────────────── CoerceValue ───────────────
 
     [Fact]

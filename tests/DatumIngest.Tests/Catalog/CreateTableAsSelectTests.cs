@@ -222,6 +222,124 @@ public sealed class CreateTableAsSelectTests : ServiceTestBase, IAsyncLifetime
         Assert.Contains("specified more than once", ex.Message);
     }
 
+    // ───────────────────── Compound source queries ─────────────────────
+
+    [Fact]
+    public async Task Ctas_FromUnionAll_StreamsBothBranches()
+    {
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+        catalog.Plan("CREATE TEMP TABLE a (id Int32, name String)");
+        catalog.Plan("CREATE TEMP TABLE b (id Int32, name String)");
+        catalog.Plan("INSERT INTO a VALUES (1, 'alice')");
+        catalog.Plan("INSERT INTO b VALUES (2, 'bob')");
+
+        catalog.Plan(
+            "CREATE TEMP TABLE combined AS " +
+            "SELECT id, name FROM a UNION ALL SELECT id, name FROM b");
+
+        Schema schema = catalog["combined"].GetSchema();
+        Assert.Equal(["id", "name"], schema.Columns.Select(c => c.Name));
+        Assert.Equal(DataKind.Int32, schema.Columns[0].Kind);
+        Assert.Equal(DataKind.String, schema.Columns[1].Kind);
+        Assert.Equal(2, catalog["combined"].GetRowCount());
+    }
+
+    [Fact]
+    public void Ctas_FromUnion_WidensColumnKindAcrossBranches()
+    {
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+        catalog.Plan("CREATE TEMP TABLE narrow (id Int16)");
+        catalog.Plan("CREATE TEMP TABLE wide   (id Int64)");
+        catalog.Plan("INSERT INTO narrow VALUES (1)");
+        catalog.Plan("INSERT INTO wide   VALUES (2)");
+
+        catalog.Plan(
+            "CREATE TEMP TABLE combined AS " +
+            "SELECT id FROM narrow UNION ALL SELECT id FROM wide");
+
+        // Int16 and Int64 unify to Int64 per the type-coercion chain.
+        Schema schema = catalog["combined"].GetSchema();
+        Assert.Equal(DataKind.Int64, schema.Columns[0].Kind);
+    }
+
+    [Fact]
+    public void Ctas_FromUnion_ColumnNamesComeFromLeftBranch()
+    {
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+        catalog.Plan("CREATE TEMP TABLE left_src  (a Int32)");
+        catalog.Plan("CREATE TEMP TABLE right_src (b Int32)");
+
+        catalog.Plan(
+            "CREATE TEMP TABLE combined AS " +
+            "SELECT a FROM left_src UNION ALL SELECT b FROM right_src");
+
+        // PG semantics: the combined column is named after the leftmost
+        // branch's column (`a`), not the right's (`b`).
+        Schema schema = catalog["combined"].GetSchema();
+        Assert.Equal(["a"], schema.Columns.Select(c => c.Name));
+    }
+
+    [Fact]
+    public void Ctas_FromUnion_ArityMismatch_Rejected()
+    {
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+        catalog.Plan("CREATE TEMP TABLE one (a Int32)");
+        catalog.Plan("CREATE TEMP TABLE two (a Int32, b Int32)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("CREATE TEMP TABLE t AS SELECT a FROM one UNION ALL SELECT a, b FROM two"));
+        Assert.Contains("same number of columns", ex.Message);
+    }
+
+    [Fact]
+    public void Ctas_FromUnion_ArrayPlusScalarColumn_Rejected()
+    {
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+        catalog.Plan("CREATE TEMP TABLE arr (xs Float32[])");
+        catalog.Plan("CREATE TEMP TABLE sca (xs Float32)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("CREATE TEMP TABLE t AS SELECT xs FROM arr UNION ALL SELECT xs FROM sca"));
+        Assert.Contains("cannot be matched", ex.Message);
+    }
+
+    [Fact]
+    public void Ctas_FromUnion_IncompatibleKinds_Rejected()
+    {
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+        catalog.Plan("CREATE TEMP TABLE strs (x String)");
+        catalog.Plan("CREATE TEMP TABLE ints (x Int32)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("CREATE TEMP TABLE t AS SELECT x FROM strs UNION ALL SELECT x FROM ints"));
+        Assert.Contains("cannot be matched", ex.Message);
+    }
+
+    [Fact]
+    public async Task Ctas_FromIntersect_StreamsCommonRows()
+    {
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+        catalog.Plan("CREATE TEMP TABLE a (id Int32)");
+        catalog.Plan("CREATE TEMP TABLE b (id Int32)");
+        catalog.Plan("INSERT INTO a VALUES (1), (2), (3)");
+        catalog.Plan("INSERT INTO b VALUES (2), (3), (4)");
+
+        catalog.Plan(
+            "CREATE TEMP TABLE shared AS " +
+            "SELECT id FROM a INTERSECT SELECT id FROM b");
+
+        List<int> values = await ScanIntColumn(catalog["shared"], "id");
+        values.Sort();
+        Assert.Equal([2, 3], values);
+    }
+
     private static async Task<List<int>> ScanIntColumn(ITableProvider provider, string columnName)
     {
         List<int> values = new();

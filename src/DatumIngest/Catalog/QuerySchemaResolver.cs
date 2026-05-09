@@ -90,6 +90,102 @@ public sealed class QuerySchemaResolver
     }
 
     /// <summary>
+    /// Resolves the projected output columns of a <see cref="QueryExpression"/>,
+    /// covering both bare <c>SELECT</c> statements and compound queries
+    /// (<c>UNION</c> / <c>INTERSECT</c> / <c>EXCEPT</c>). Compound queries
+    /// recursively unify each leaf SELECT's projection — column names come
+    /// from the leftmost branch (PostgreSQL semantics), column types are
+    /// the per-position common shape via
+    /// <see cref="TypeCoercion.FindCommonShape"/>, and a column is
+    /// nullable if any branch's column is nullable.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when compound branches have differing column counts, or when
+    /// per-position column shapes are incompatible (e.g. <c>String</c> on
+    /// one branch and <c>Int32</c> on another, or array on one branch and
+    /// scalar on another).
+    /// </exception>
+    public async Task<ResolvedQuerySchema> ResolveProjectionAsync(
+        QueryExpression query,
+        string outputAlias,
+        CancellationToken cancellationToken)
+    {
+        switch (query)
+        {
+            case SelectQueryExpression select:
+                return await ResolveProjectionAsync(select.Statement, outputAlias, cancellationToken)
+                    .ConfigureAwait(false);
+
+            case CompoundQueryExpression compound:
+                return await ResolveCompoundProjectionAsync(compound, outputAlias, cancellationToken)
+                    .ConfigureAwait(false);
+
+            default:
+                throw new NotSupportedException(
+                    $"Cannot resolve projection schema for query expression of type " +
+                    $"'{query.GetType().Name}'.");
+        }
+    }
+
+    private async Task<ResolvedQuerySchema> ResolveCompoundProjectionAsync(
+        CompoundQueryExpression compound,
+        string outputAlias,
+        CancellationToken cancellationToken)
+    {
+        // Recurse through both arms — either side may itself be a
+        // compound, so the leftmost SELECT in a chain like
+        // (A UNION B) UNION C ends up the column-name source for the
+        // whole tree.
+        ResolvedQuerySchema left = await ResolveProjectionAsync(
+            compound.Left, outputAlias, cancellationToken).ConfigureAwait(false);
+        ResolvedQuerySchema right = await ResolveProjectionAsync(
+            compound.Right, outputAlias, cancellationToken).ConfigureAwait(false);
+
+        if (left.Columns.Count != right.Columns.Count)
+        {
+            throw new InvalidOperationException(
+                $"each {compound.OperationType.ToString().ToUpperInvariant()} query must have the " +
+                $"same number of columns (left has {left.Columns.Count}, " +
+                $"right has {right.Columns.Count}).");
+        }
+
+        ResolvedColumn[] unified = new ResolvedColumn[left.Columns.Count];
+        for (int i = 0; i < left.Columns.Count; i++)
+        {
+            ResolvedColumn l = left.Columns[i];
+            ResolvedColumn r = right.Columns[i];
+
+            (DataKind Kind, bool IsArray, bool IsMultiDim)? shape = TypeCoercion.FindCommonShape(
+                l.Kind, l.IsArray, l.IsMultiDim,
+                r.Kind, r.IsArray, r.IsMultiDim);
+            if (shape is null)
+            {
+                throw new InvalidOperationException(
+                    $"{compound.OperationType.ToString().ToUpperInvariant()} types " +
+                    $"{DescribeShape(l)} and {DescribeShape(r)} cannot be matched at column " +
+                    $"{i + 1} (\"{l.ColumnName}\").");
+            }
+
+            unified[i] = new ResolvedColumn(
+                ColumnName: l.ColumnName,
+                Kind: shape.Value.Kind,
+                Nullable: l.Nullable || r.Nullable,
+                SourceTableOrAlias: outputAlias,
+                IsArray: shape.Value.IsArray,
+                IsMultiDim: shape.Value.IsMultiDim);
+        }
+
+        return new ResolvedQuerySchema(unified);
+    }
+
+    private static string DescribeShape(ResolvedColumn column)
+    {
+        string kind = column.Kind.ToString();
+        if (!column.IsArray) return kind;
+        return column.IsMultiDim ? $"{kind}[][]" : $"{kind}[]";
+    }
+
+    /// <summary>
     /// Core resolution method. Builds the effective CTE scope by layering
     /// <paramref name="inheritedCommonTableExpressions"/> (the outer scope, passed
     /// from a CTE body that references sibling CTEs) under the statement's own

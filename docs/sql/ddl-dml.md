@@ -118,7 +118,17 @@ Rows stream batch-by-batch from the `SELECT` through the same append session `IN
 
 `CREATE TEMP TABLE name AS …` always lands the target in `public`; an explicit schema qualifier on the TEMP form is rejected. Unqualified persistent targets land in the first DDL-capable schema on the session `search_path`. The historical `AT 'path'` clause is rejected the same way it is on plain `CREATE TABLE`.
 
-Tableless projections (`SELECT 1, 2`) are supported and produce a single-row table. Compound queries (`UNION` / `INTERSECT` / `EXCEPT`) on the source side are not yet supported — wrap the compound in a `WITH` and `SELECT` from the CTE, or use `INSERT INTO target SELECT … UNION …` against a pre-created table.
+Tableless projections (`SELECT 1, 2`) are supported and produce a single-row table.
+
+Compound queries on the source side are supported (`UNION` / `UNION ALL` / `INTERSECT` / `EXCEPT`). The target table's column **names** come from the leftmost branch; column **types** are unified across every branch using the same widening rules `CASE` and `COALESCE` apply to numeric kinds (e.g. `Int32 UNION Int64` → `Int64`); nullability is the OR across branches. Branches with mismatched arity, incompatible scalar kinds (`String UNION Int32`), or array-vs-scalar mixes are rejected at planning time with a PG-style diagnostic.
+
+```sql
+-- Combined table with leftmost-branch names; INSERT'd from both branches.
+CREATE TABLE archive AS
+    SELECT id, payload FROM staging
+    UNION ALL
+    SELECT id, payload FROM hot_buffer
+```
 
 When the projection produces two columns with the same derived name (e.g. two unaliased references to the same column), the auto-name deduplication used by `SELECT` applies — names get a `_1` / `_2` suffix. Explicit aliases that collide (`SELECT x AS a, y AS a`) bypass dedup and are rejected at CTAS time, since they'd produce a duplicate-column schema.
 
