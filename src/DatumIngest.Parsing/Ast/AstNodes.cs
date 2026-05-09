@@ -1219,12 +1219,14 @@ public sealed record IdentitySpec(long Seed, long Step, bool AcceptUserValues = 
 /// <param name="IsTemp">When <see langword="true"/>, creates an in-memory temp table.</param>
 /// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the table already exists.</param>
 /// <param name="StoragePath">Optional explicit path (see <see cref="CreateTableStatement.StoragePath"/>).</param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> walks <c>search_path</c> to pick the first DDL-capable schema.</param>
 public sealed record CreateTableAsSelectStatement(
     string TableName,
     QueryExpression Query,
     bool IsTemp = false,
     bool IfNotExists = false,
-    string? StoragePath = null) : Statement;
+    string? StoragePath = null,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// <c>DROP TABLE [IF EXISTS] name</c> — removes a temporary table.

@@ -810,7 +810,8 @@ public static class ParameterBinder
                     BindQueryExpression(ctas.Query, parameters),
                     ctas.IsTemp,
                     ctas.IfNotExists,
-                    ctas.StoragePath);
+                    ctas.StoragePath,
+                    ctas.SchemaName);
 
             case AlterTableAddColumnStatement alter:
                 return new AlterTableAddColumnStatement(

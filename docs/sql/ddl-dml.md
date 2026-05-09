@@ -93,6 +93,35 @@ CREATE TEMP TABLE features (
 
 `CREATE TEMP TABLE` works in any catalog (no `.datum-catalog.json` required). The table dies when the catalog is disposed. Temp tables support all the same column modifiers as persistent tables, including `IDENTITY`, `DEFAULT`, and `PRIMARY KEY` — but PK uniqueness uses the in-memory `HashSet` path (no `.datum-pkindex` sidecar).
 
+### CREATE TABLE AS SELECT
+
+Creates a table and populates it from a `SELECT` in one statement:
+
+```sql
+-- Persistent target
+CREATE TABLE active_users AS
+    SELECT id, name, last_seen FROM users WHERE active = TRUE
+
+-- TEMP target (in-memory)
+CREATE TEMP TABLE scratch AS SELECT Value FROM RANGE(1, 1000)
+
+-- Schema-qualified
+CREATE TABLE reports.monthly AS SELECT month, total FROM orders
+
+-- Idempotent: IF NOT EXISTS short-circuits before the SELECT is planned
+CREATE TABLE IF NOT EXISTS active_users AS SELECT ... FROM users
+```
+
+The target table's schema is derived from the `SELECT` projection: column names come from the projection's column names (aliases when supplied, otherwise the auto-derived expression name); column kinds, nullability, and array shape come from the projection's resolved types. No `(column list)` syntax is accepted — to rename columns, use `AS` aliases inside the `SELECT`.
+
+Rows stream batch-by-batch from the `SELECT` through the same append session `INSERT … SELECT` uses — there's no full-result buffering. If the source query fails mid-stream the newly-created target table is dropped so the catalog never holds a half-populated CTAS target.
+
+`CREATE TEMP TABLE name AS …` always lands the target in `public`; an explicit schema qualifier on the TEMP form is rejected. Unqualified persistent targets land in the first DDL-capable schema on the session `search_path`. The historical `AT 'path'` clause is rejected the same way it is on plain `CREATE TABLE`.
+
+Tableless projections (`SELECT 1, 2`) are supported and produce a single-row table. Compound queries (`UNION` / `INTERSECT` / `EXCEPT`) on the source side are not yet supported — wrap the compound in a `WITH` and `SELECT` from the CTE, or use `INSERT INTO target SELECT … UNION …` against a pre-created table.
+
+When the projection produces two columns with the same derived name (e.g. two unaliased references to the same column), the auto-name deduplication used by `SELECT` applies — names get a `_1` / `_2` suffix. Explicit aliases that collide (`SELECT x AS a, y AS a`) bypass dedup and are rejected at CTAS time, since they'd produce a duplicate-column schema.
+
 ### DROP TABLE
 
 Removes a table from the catalog and deletes its backing files:
@@ -488,7 +517,7 @@ ALTER TABLE features DROP COLUMN risk_tier
 ALTER TABLE features DROP COLUMN IF EXISTS risk_tier
 ```
 
-The column block stays in the footer (marked `Tombstoned`) for compaction-time reclamation, but is hidden from `GetSchema()` and from subsequent scans. Dropping a column that's part of the table's `PRIMARY KEY` is rejected. Dropping a column that a computed column (`AS (expr)`) references is also rejected, naming every dependent column — drop the dependent column(s) first, or alter the expression to remove the reference.
+The column block stays in the footer (marked `Tombstoned`) for compaction-time reclamation, but is hidden from `GetSchema()` and from subsequent scans. Dropping a column that's part of the table's `PRIMARY KEY` is rejected. Dropping a column that a computed column (`AS (expr)`) references is also rejected, naming every dependent column — drop the dependent column(s) first, or alter the expression to remove the reference. Dropping the only remaining column on a table is also rejected — use `DROP TABLE` instead.
 
 **The column name is freed immediately on `DROP`.** A subsequent `ALTER TABLE ... ADD COLUMN <same-name> <kind>` succeeds and gets a fresh storage slot:
 

@@ -12,10 +12,15 @@ public sealed class Schema
     private readonly Dictionary<string, int> _nameIndex;
 
     /// <summary>
-    /// Creates a schema from the given columns.
+    /// Creates a schema from the given columns. Zero-column schemas are
+    /// permitted — they model intermediate shapes like the source side of
+    /// a tableless <c>SELECT</c> (mirrors <see cref="ColumnLookup.Empty"/>
+    /// at runtime). Persistence and DDL boundaries gate non-empty
+    /// schemas where users would expect a column-required error.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// Thrown when <paramref name="columns"/> is empty or contains duplicate names (case-insensitive).
+    /// Thrown when <paramref name="columns"/> contains duplicate names
+    /// (case-insensitive).
     /// </exception>
     public Schema(IReadOnlyList<ColumnInfo> columns)
         : this(columns, primaryKeyColumnIndices: null)
@@ -31,11 +36,6 @@ public sealed class Schema
         IReadOnlyList<ColumnInfo> columns,
         IReadOnlyList<int>? primaryKeyColumnIndices)
     {
-        if (columns.Count == 0)
-        {
-            throw new ArgumentException("A schema must contain at least one column.");
-        }
-
         _nameIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         for (int index = 0; index < columns.Count; index++)

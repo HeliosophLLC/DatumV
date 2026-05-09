@@ -207,6 +207,12 @@ public sealed class FlatFileCatalog : ITableCatalog
                 "recorded.");
         }
 
+        if (schema.Columns.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"CREATE TABLE '{name}': a persistent table must declare at least one column.");
+        }
+
         string targetPath = ResolveCreateTablePath(name);
         if (File.Exists(targetPath))
         {

@@ -81,9 +81,15 @@ public class SchemaTests : ServiceTestBase
     }
 
     [Fact]
-    public void SchemaRejectsEmptyColumnList()
+    public void SchemaAllowsEmptyColumnList()
     {
-        Assert.Throws<ArgumentException>(() => new Schema([]));
+        // Zero-column schemas model intermediate shapes like the source
+        // side of a tableless SELECT (mirrors ColumnLookup.Empty at
+        // runtime). Persistence and DDL boundaries gate non-empty
+        // schemas where users would expect a column-required error.
+        Schema schema = new([]);
+        Assert.Empty(schema.Columns);
+        Assert.Empty(schema.PrimaryKeyColumnIndices);
     }
 
     [Fact]

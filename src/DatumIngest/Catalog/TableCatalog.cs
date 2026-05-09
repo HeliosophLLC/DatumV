@@ -972,6 +972,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             case CreateTableStatement createTable:
                 return await TableExecutor.CreateTableAsync(this, createTable, sourceText).ConfigureAwait(false);
 
+            case CreateTableAsSelectStatement ctas:
+                return await CtasExecutor.ExecuteAsync(this, ctas, sourceText).ConfigureAwait(false);
+
             case DropTableStatement dropTable:
                 return TableExecutor.DropTable(this, dropTable, sourceText);
 

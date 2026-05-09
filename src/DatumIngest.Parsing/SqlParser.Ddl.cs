@@ -700,7 +700,8 @@ public static partial class SqlParser
             ? (from query in SP.Ref(() => QueryExpressionParser!)
                from path in AtPathParser
                select (Statement)new CreateTableAsSelectStatement(
-                   qualifiedName.TableName, query, IsTemp: isTemp, IfNotExists: ifNotExists, StoragePath: path))
+                   qualifiedName.TableName, query, IsTemp: isTemp, IfNotExists: ifNotExists, StoragePath: path,
+                   SchemaName: qualifiedName.SchemaName))
             : ColumnListWithOptionalPrimaryKeyParser
                 .Then(result => Token.EqualTo(SqlToken.RightParen)
                     .IgnoreThen(AtPathParser)

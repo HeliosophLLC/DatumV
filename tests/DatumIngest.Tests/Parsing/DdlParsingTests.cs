@@ -119,6 +119,18 @@ public class DdlParsingTests : ServiceTestBase
         Assert.Equal("summary", create.TableName);
     }
 
+    [Fact]
+    public void CreateTableAsSelect_SchemaQualifiedTarget_CapturesSchemaName()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TABLE reports.monthly AS SELECT month, total FROM orders");
+
+        CreateTableAsSelectStatement create = Assert.IsType<CreateTableAsSelectStatement>(statement);
+        Assert.Equal("reports", create.SchemaName);
+        Assert.Equal("monthly", create.TableName);
+        Assert.False(create.IsTemp);
+    }
+
     // ───────────────────── DROP TABLE ─────────────────────
 
     [Fact]

@@ -309,6 +309,17 @@ internal static class AlterTableExecutor
                 "dropped. Drop the PRIMARY KEY constraint first (e.g., " +
                 $"`ALTER TABLE {alter.TableName} DROP CONSTRAINT {alter.TableName}_pkey`).");
         }
+        if (schema.Columns.Count == 1)
+        {
+            // The on-disk .datum format requires at least one column;
+            // dropping the only column would leave the next append /
+            // rewrite without a valid schema. Reject at the DDL layer
+            // with an actionable message instead of letting a write-time
+            // failure surface later.
+            throw new InvalidOperationException(
+                $"Column '{alter.ColumnName}' is the only column on table '{alter.TableName}' and " +
+                "cannot be dropped. Drop the table instead with `DROP TABLE`.");
+        }
 
         // PG-style dependent-column check: a column referenced by any
         // computed (`GENERATED ALWAYS AS (...)`) column can't be
