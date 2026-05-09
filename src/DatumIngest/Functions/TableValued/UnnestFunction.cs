@@ -1,3 +1,4 @@
+using System.Formats.Cbor;
 using System.Runtime.CompilerServices;
 
 using DatumIngest.Manifest;
@@ -66,6 +67,17 @@ public sealed class UnnestFunction : ITableValuedFunctionMetadata, ITableValuedF
             // Output column kind follows the array's element kind, which
             // can't be expressed in a static schema. Hover renders "→ table".
             FixedOutputSchema: null),
+        // JSON-scalar variant: treats the value's CBOR payload as a JSON array
+        // and emits one Json row per element. Lets the user explore an
+        // ingested JSON array column without first projecting into a typed
+        // Array<T> shape — `SELECT * FROM coco, unnest(coco.annotations)`
+        // gives one row per annotation.
+        new TableValuedFunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("json", DataKindMatcher.Exact(DataKind.Json), IsArray: ArrayMatch.Scalar),
+            ],
+            FixedOutputSchema: null),
     ];
 
     string ITableValuedFunction.Name => Name;
@@ -101,13 +113,28 @@ public sealed class UnnestFunction : ITableValuedFunctionMetadata, ITableValuedF
             // PostgreSQL semantics: NULL array yields no rows.
             yield break;
         }
+
+        ColumnLookup lookup = new(["value"]);
+
+        // Json scalar input: decode the CBOR array and emit one Json row per
+        // element. Distinct from typed-array input because the value isn't
+        // IsArray — it's a scalar Json kind whose payload happens to be an
+        // array. The signature matcher accepts this via the second variant.
+        if (arr.Kind == DataKind.Json && !arr.IsArray)
+        {
+            await foreach (RowBatch batch in EmitJsonArrayElementsAsync(arr, lookup, context).ConfigureAwait(false))
+            {
+                yield return batch;
+            }
+            yield break;
+        }
+
         if (!arr.IsArray)
         {
             throw new ArgumentException(
-                $"unnest() expects an Array argument; got a scalar of kind {arr.Kind}.");
+                $"unnest() expects an Array argument or a Json scalar; got a scalar of kind {arr.Kind}.");
         }
 
-        ColumnLookup lookup = new(["value"]);
         await foreach (RowBatch batch in EmitElementsAsync(arr, lookup, context).ConfigureAwait(false))
         {
             yield return batch;
@@ -160,6 +187,75 @@ public sealed class UnnestFunction : ITableValuedFunctionMetadata, ITableValuedF
                 batch = null;
             }
         }
+
+        if (batch is not null)
+        {
+            yield return batch;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Emits one <see cref="DataKind.Json"/> row per element of the JSON
+    /// array carried by <paramref name="arr"/>'s CBOR payload. The output
+    /// column kind matches the input — i.e. <c>Json</c> — so downstream
+    /// queries can use the existing <c>json_*</c> function family (or the
+    /// future dot-access desugaring) to drill into each element. Throws when
+    /// the JSON value is not a top-level array — scalar/object roots have no
+    /// row-multiplication semantics.
+    /// </summary>
+    private static async IAsyncEnumerable<RowBatch> EmitJsonArrayElementsAsync(
+        ValueRef arr,
+        ColumnLookup lookup,
+        ExecutionContext context,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        cancellationToken = context.CancellationToken;
+
+        // Materialise to a managed byte[] so we can slice element windows out
+        // of the same backing buffer without re-decoding. CborReader requires
+        // ReadOnlyMemory; AsByteSpan gives us a span over the source already.
+        byte[] cbor = arr.AsByteSpan().ToArray();
+        int totalLen = cbor.Length;
+        CborReader reader = new(cbor, CborConformanceMode.Canonical);
+
+        if (reader.PeekState() != CborReaderState.StartArray)
+        {
+            throw new ArgumentException(
+                $"unnest() on a Json value requires the value to be a JSON array; "
+                + $"got CBOR state {reader.PeekState()}. Use json_value(...) to project "
+                + "a sub-element first, or wrap the source in a JSON array.");
+        }
+
+        reader.ReadStartArray();
+        RowBatch? batch = null;
+
+        while (reader.PeekState() != CborReaderState.EndArray)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Element byte window: position before reading, then skip the
+            // value to advance the cursor; the slice between is the element's
+            // canonical CBOR encoding, ready to be stored directly as a Json
+            // DataValue.
+            int startPos = totalLen - reader.BytesRemaining;
+            reader.SkipValue();
+            int endPos = totalLen - reader.BytesRemaining;
+            ReadOnlySpan<byte> elementSlice = cbor.AsSpan(startPos, endPos - startPos);
+
+            batch ??= context.RentRowBatch(lookup);
+            DataValue value = DataValue.FromJson(elementSlice, batch.Arena);
+            batch.Add([value]);
+
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        reader.ReadEndArray();
 
         if (batch is not null)
         {
