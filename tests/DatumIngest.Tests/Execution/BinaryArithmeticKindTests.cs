@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Execution;
 using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Execution;
@@ -14,7 +15,8 @@ namespace DatumIngest.Tests.Execution;
 /// <item>any float operand pulls the result into the wider float kind</item>
 /// <item>Decimal precedence over float and integer</item>
 /// <item>Int128 preservation</item>
-/// <item>Divide and Power return float regardless of operand kinds</item>
+/// <item>Power always returns float regardless of operand kinds</item>
+/// <item>Divide follows operand kinds PG-style; cast for fractional results</item>
 /// </list>
 /// </summary>
 public sealed class BinaryArithmeticKindTests : ServiceTestBase
@@ -195,22 +197,30 @@ public sealed class BinaryArithmeticKindTests : ServiceTestBase
         Assert.Equal((Int128)1007, rows[0]["r"].AsInt128());
     }
 
-    // ───────────────────── Divide / Power always float ─────────────────────
+    // ───────────────────── Divide / Power ─────────────────────
 
     [Fact]
-    public async Task Int_Divide_Int_ReturnsFloatNotIntegerTruncation()
+    public async Task Int_Divide_Int_TruncatesPostgresStyle()
     {
-        // SQL ergonomics: 5 / 2 → 2.5, NOT 2. Users who want truncated
-        // integer division can cast first.
         TableCatalog catalog = SingleRow(
             ("a", DataValue.FromInt32(5)),
             ("b", DataValue.FromInt32(2)));
         List<Row> rows = await ExecuteQueryAsync("SELECT a / b AS r FROM data", catalog);
 
+        Assert.Equal(DataKind.Int32, rows[0]["r"].Kind);
+        Assert.Equal(2, rows[0]["r"].AsInt32());
+    }
+
+    [Fact]
+    public async Task Int_Divide_Int_CastEscapeHatchYieldsFractional()
+    {
+        TableCatalog catalog = SingleRow(
+            ("a", DataValue.FromInt32(5)),
+            ("b", DataValue.FromInt32(2)));
+        List<Row> rows = await ExecuteQueryAsync("SELECT a::Float32 / b AS r FROM data", catalog);
+
         Assert.True(rows[0]["r"].Kind is DataKind.Float32 or DataKind.Float64);
-        // Read through Float32 since the promotion target for Int32 / Int32
-        // is Float32 (no Float64 operand to upgrade it).
-        Assert.Equal(2.5f, rows[0]["r"].AsFloat32());
+        Assert.Equal(2.5, rows[0]["r"].ToDouble());
     }
 
     [Fact]
@@ -237,6 +247,56 @@ public sealed class BinaryArithmeticKindTests : ServiceTestBase
 
         Assert.Equal(DataKind.Float32, rows[0]["r"].Kind);
         Assert.Equal(1024f, rows[0]["r"].AsFloat32());
+    }
+
+    // ───────────────────── Divide-by-zero is PG-strict ─────────────────────
+
+    [Fact]
+    public async Task IntDivide_ByZero_ThrowsDivisionByZero()
+    {
+        TableCatalog catalog = SingleRow(
+            ("a", DataValue.FromInt32(1)),
+            ("b", DataValue.FromInt32(0)));
+        ExecutionException ex = await Assert.ThrowsAnyAsync<ExecutionException>(
+            () => ExecuteQueryAsync("SELECT a / b AS r FROM data", catalog));
+        Assert.Contains("division by zero", ex.Message);
+    }
+
+    [Fact]
+    public async Task IntModulo_ByZero_ThrowsDivisionByZero()
+    {
+        TableCatalog catalog = SingleRow(
+            ("a", DataValue.FromInt32(1)),
+            ("b", DataValue.FromInt32(0)));
+        ExecutionException ex = await Assert.ThrowsAnyAsync<ExecutionException>(
+            () => ExecuteQueryAsync("SELECT a % b AS r FROM data", catalog));
+        Assert.Contains("division by zero", ex.Message);
+    }
+
+    [Fact]
+    public async Task DecimalDivide_ByZero_ThrowsDivisionByZero()
+    {
+        TableCatalog catalog = SingleRow(
+            ("a", DataValue.FromDecimal(1m)),
+            ("b", DataValue.FromDecimal(0m)));
+        ExecutionException ex = await Assert.ThrowsAnyAsync<ExecutionException>(
+            () => ExecuteQueryAsync("SELECT a / b AS r FROM data", catalog));
+        Assert.Contains("division by zero", ex.Message);
+    }
+
+    [Fact]
+    public async Task FloatDivide_ByZero_ReturnsNaN()
+    {
+        // Float division keeps IEEE semantics — NaN propagation matters for
+        // numeric kernels (tensor ops, normalization pipelines) where a hard
+        // throw would tear the batch down for a single bad row.
+        TableCatalog catalog = SingleRow(
+            ("a", DataValue.FromFloat64(1.0)),
+            ("b", DataValue.FromFloat64(0.0)));
+        List<Row> rows = await ExecuteQueryAsync("SELECT a / b AS r FROM data", catalog);
+
+        Assert.Equal(DataKind.Float64, rows[0]["r"].Kind);
+        Assert.True(double.IsNaN(rows[0]["r"].AsFloat64()));
     }
 
     // ───────────────────── Unary negate preserves kind ─────────────────────

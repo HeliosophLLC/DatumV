@@ -159,11 +159,10 @@ public sealed class ExpressionTypeResolverTests : ServiceTestBase
     }
 
     [Fact]
-    public void ResolveBinary_IntDivideInt_ReturnsFloat32()
+    public void ResolveBinary_IntDivideInt_StaysInt()
     {
-        // Divide always returns float (SQL "5 / 2 → 2.5" expectation).
-        // Both operands are Int64 but the result kind is Float32 because
-        // there's no Float64 operand to upgrade it.
+        // PG-style integer division: int / int → int (truncating). Cast an
+        // operand (5::float / 2) to obtain fractional results.
         DataKind? result = ExpressionTypeResolver.ResolveType(
             new BinaryExpression(
                 new LiteralExpression(5L),
@@ -172,7 +171,7 @@ public sealed class ExpressionTypeResolverTests : ServiceTestBase
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Float32, result);
+        Assert.Equal(DataKind.Int64, result);
     }
 
     [Fact]

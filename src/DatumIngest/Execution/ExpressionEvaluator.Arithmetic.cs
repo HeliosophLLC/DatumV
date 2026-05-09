@@ -13,9 +13,9 @@ public sealed partial class ExpressionEvaluator
     /// Evaluates a binary arithmetic operator (<c>+ - * / % **</c>) with
     /// runtime kind promotion. Picks a target kind from the operand kinds
     /// + operator (so <c>Int64 + Int64 → Int64</c>, <c>Decimal × Float → Float64</c>,
-    /// <c>5 / 2 → Float32</c> for SQL ergonomics) and applies the op in
-    /// that type. Result is always inline; the only allocation is the
-    /// returned <see cref="ValueRef"/> struct.
+    /// <c>5 / 2 → Int32</c> matching PostgreSQL integer division) and
+    /// applies the op in that type. Result is always inline; the only
+    /// allocation is the returned <see cref="ValueRef"/> struct.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -31,12 +31,13 @@ public sealed partial class ExpressionEvaluator
     /// </para>
     /// <para>
     /// <strong>Promotion rules.</strong> See
-    /// <see cref="PromoteArithmeticKind"/>. The short version: Power and
-    /// Divide always return float (preserving the SQL "5 / 2 → 2.5"
-    /// expectation); Decimal beats float; integer + integer stays
-    /// integer at the wider operand's bit width (Int8 + Int8 widens to
-    /// Int32 in C# style; Int64 stays Int64); strings get parsed as
-    /// Float64 the same way they did before.
+    /// <see cref="PromoteArithmeticKind"/>. The short version: Power
+    /// always returns float; Decimal beats float; integer + integer
+    /// stays integer at the wider operand's bit width (Int8 + Int8
+    /// widens to Int32 in C# style; Int64 stays Int64); strings get
+    /// parsed as Float64. Divide and Modulo follow the operand kinds
+    /// (PG-style integer division), so <c>5 / 2 → 2</c>; cast an
+    /// operand to obtain fractional results (<c>5::float / 2 → 2.5</c>).
     /// </para>
     /// </remarks>
     private static ValueRef DispatchArithmetic(ValueRef left, ValueRef right, BinaryOperator op)
@@ -74,11 +75,11 @@ public sealed partial class ExpressionEvaluator
 
     /// <summary>
     /// Computes the promoted result kind for a binary arithmetic
-    /// operator. Mirrors C# numeric promotion with SQL-ergonomic
-    /// adjustments — Divide always returns float so <c>5 / 2 → 2.5</c>
-    /// matches user expectation; integer arithmetic widens to Int32
-    /// (matching <c>byte + byte → int</c> in C#) so small literals
-    /// don't pin everything to Int8.
+    /// operator. Mirrors C# numeric promotion: integer arithmetic
+    /// widens to Int32 (matching <c>byte + byte → int</c> in C#) so
+    /// small literals don't pin everything to Int8. Divide follows
+    /// PostgreSQL — <c>int / int → int</c> (truncating); cast an
+    /// operand (<c>5::float / 2</c>) to obtain fractional results.
     /// </summary>
     internal static DataKind PromoteArithmeticKind(DataKind left, DataKind right, BinaryOperator op)
     {
@@ -94,14 +95,6 @@ public sealed partial class ExpressionEvaluator
             return AnyFloat64(left, right) || AnyDecimal(left, right)
                 ? DataKind.Float64
                 : DataKind.Float32;
-        }
-
-        // Divide: SQL ergonomics — always float so int / int → real number.
-        // Users wanting truncated integer division can cast first.
-        if (op == BinaryOperator.Divide)
-        {
-            if (AnyDecimal(left, right)) return DataKind.Decimal;
-            return AnyFloat64(left, right) ? DataKind.Float64 : DataKind.Float32;
         }
 
         // Decimal precedence over floats and integers (preserves precision).
@@ -214,11 +207,14 @@ public sealed partial class ExpressionEvaluator
             BinaryOperator.Add => ValueRef.FromInt32(unchecked(a + b)),
             BinaryOperator.Subtract => ValueRef.FromInt32(unchecked(a - b)),
             BinaryOperator.Multiply => ValueRef.FromInt32(unchecked(a * b)),
+            BinaryOperator.Divide => b != 0
+                ? ValueRef.FromInt32(a / b)
+                : throw new ExecutionException("division by zero"),
             BinaryOperator.Modulo => b != 0
                 ? ValueRef.FromInt32(a % b)
-                : ValueRef.Null(DataKind.Int32),
+                : throw new ExecutionException("division by zero"),
             _ => throw new InvalidOperationException(
-                $"Internal error: Int32 dispatch hit for {op} (Divide/Power should have promoted to float)."),
+                $"Internal error: Int32 dispatch hit for {op} (Power should have promoted to float)."),
         };
     }
 
@@ -231,9 +227,12 @@ public sealed partial class ExpressionEvaluator
             BinaryOperator.Add => ValueRef.FromInt64(unchecked(a + b)),
             BinaryOperator.Subtract => ValueRef.FromInt64(unchecked(a - b)),
             BinaryOperator.Multiply => ValueRef.FromInt64(unchecked(a * b)),
+            BinaryOperator.Divide => b != 0
+                ? ValueRef.FromInt64(a / b)
+                : throw new ExecutionException("division by zero"),
             BinaryOperator.Modulo => b != 0
                 ? ValueRef.FromInt64(a % b)
-                : ValueRef.Null(DataKind.Int64),
+                : throw new ExecutionException("division by zero"),
             _ => throw new InvalidOperationException(
                 $"Internal error: Int64 dispatch hit for {op}."),
         };
@@ -248,9 +247,12 @@ public sealed partial class ExpressionEvaluator
             BinaryOperator.Add => ValueRef.FromInt128(unchecked(a + b)),
             BinaryOperator.Subtract => ValueRef.FromInt128(unchecked(a - b)),
             BinaryOperator.Multiply => ValueRef.FromInt128(unchecked(a * b)),
+            BinaryOperator.Divide => b != Int128.Zero
+                ? ValueRef.FromInt128(a / b)
+                : throw new ExecutionException("division by zero"),
             BinaryOperator.Modulo => b != Int128.Zero
                 ? ValueRef.FromInt128(a % b)
-                : ValueRef.Null(DataKind.Int128),
+                : throw new ExecutionException("division by zero"),
             _ => throw new InvalidOperationException(
                 $"Internal error: Int128 dispatch hit for {op}."),
         };
@@ -301,10 +303,10 @@ public sealed partial class ExpressionEvaluator
             BinaryOperator.Multiply => ValueRef.FromDecimal(a * b),
             BinaryOperator.Divide => b != 0m
                 ? ValueRef.FromDecimal(a / b)
-                : ValueRef.Null(DataKind.Decimal),
+                : throw new ExecutionException("division by zero"),
             BinaryOperator.Modulo => b != 0m
                 ? ValueRef.FromDecimal(a % b)
-                : ValueRef.Null(DataKind.Decimal),
+                : throw new ExecutionException("division by zero"),
             _ => throw new InvalidOperationException(
                 $"Internal error: Decimal dispatch hit for {op}."),
         };

@@ -362,23 +362,17 @@ internal static class CteSchemaResolver
     /// <summary>
     /// Minimal numeric promotion mirroring the runtime's
     /// <c>ExpressionEvaluator.PromoteArithmeticKind</c> for the kinds a LET
-    /// body realistically touches. Divide is float-flavoured (SQL ergonomics
-    /// — <c>5 / 2 → 2.5</c>); Decimal beats float; Float64 beats Float32;
-    /// small integers widen to Int32. Returns <see langword="null"/> for
-    /// shapes outside this set so the caller surfaces <c>"?"</c> rather
-    /// than a wrong guess.
+    /// body realistically touches. Divide follows operand kinds PG-style
+    /// (<c>5 / 2 → 2</c>; cast for fractional results); Power always returns
+    /// float; Decimal beats float; Float64 beats Float32; small integers
+    /// widen to Int32. Returns <see langword="null"/> for shapes outside
+    /// this set so the caller surfaces <c>"?"</c> rather than a wrong guess.
     /// </summary>
     private static string? PromoteArithmeticKind(string leftKind, string rightKind, BinaryOperator op)
     {
         bool leftNum = IsNumericKind(leftKind, out bool leftIsDecimal, out bool leftIsFloat64, out bool leftIsFloat32);
         bool rightNum = IsNumericKind(rightKind, out bool rightIsDecimal, out bool rightIsFloat64, out bool rightIsFloat32);
         if (!leftNum || !rightNum) return null;
-
-        if (op == BinaryOperator.Divide)
-        {
-            if (leftIsDecimal || rightIsDecimal) return "Decimal";
-            return (leftIsFloat64 || rightIsFloat64) ? "Float64" : "Float32";
-        }
 
         if (op == BinaryOperator.Power)
         {

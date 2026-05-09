@@ -121,25 +121,27 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task BinaryDivide()
     {
+        // PG-style integer division: 20 / 4 â†’ 5 (Int32). Cast an operand
+        // (e.g. 20::Float32 / 4) to obtain fractional results.
         DataValue result = await _evaluator.EvaluateAsync(
             new BinaryExpression(
                 new LiteralExpression(20),
                 BinaryOperator.Divide,
                 new LiteralExpression(4)),
             Row.Empty);
-        Assert.Equal(5, result.AsFloat32());
+        Assert.Equal(5, result.AsInt32());
     }
 
     [Fact]
-    public async Task BinaryDivideByZero_ReturnsNaN()
+    public async Task BinaryDivideByZero_Throws()
     {
-        DataValue result = await _evaluator.EvaluateAsync(
-            new BinaryExpression(
-                new LiteralExpression(1),
-                BinaryOperator.Divide,
-                new LiteralExpression(0)),
-            Row.Empty);
-        Assert.True(float.IsNaN(result.AsFloat32()));
+        await Assert.ThrowsAsync<DatumIngest.Execution.ExecutionException>(async () =>
+            await _evaluator.EvaluateAsync(
+                new BinaryExpression(
+                    new LiteralExpression(1),
+                    BinaryOperator.Divide,
+                    new LiteralExpression(0)),
+                Row.Empty));
     }
 
     [Fact]
@@ -1027,7 +1029,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task DurationMultiply_WidensToScalar()
     {
-        // Duration * Scalar is not a Duration operation — widens both to float.
+        // Duration * Scalar is not a Duration operation ï¿½ widens both to float.
         Row row = MakeRow(
             ["d", "n"],
             DataValue.FromDuration(TimeSpan.FromHours(1)),
@@ -1349,7 +1351,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task IndexAccess_StructLiteral_UnknownField_ReturnsNull()
     {
-        // {x: 1}['z']  — field 'z' does not exist
+        // {x: 1}['z']  ï¿½ field 'z' does not exist
         IndexAccessExpression access = new(
             new StructLiteralExpression(
             [
@@ -1384,7 +1386,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     public async Task IndexAccess_StructColumnReference_ResolvesFieldViaSchema()
     {
         // Row has a struct column "info" with fields [name, score].
-        // Access info['score'] — evaluator needs schema to know field positions.
+        // Access info['score'] ï¿½ evaluator needs schema to know field positions.
         Arena arena = new();
         DataValue structValue = DataValue.FromUntypedStruct(
             [DataValue.FromString("alice"), DataValue.FromFloat32(9.5f)],
@@ -1474,7 +1476,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         // PG: timestamptz AT TZ 'NY' ? timestamp; timestamp AT TZ 'UTC' ?
         // timestamptz (reinterpret wall clock as UTC). For the round-trip to
         // recover the original instant, the second AT TIME ZONE must use the
-        // same zone the first call shifted into — i.e. 'America/New_York', not
+        // same zone the first call shifted into ï¿½ i.e. 'America/New_York', not
         // 'UTC'. (Going through 'UTC' would treat the NY wall clock as UTC
         // ticks, shifting the instant by 5h.)
         DateTimeOffset utc = new(2026, 6, 15, 18, 0, 0, TimeSpan.Zero);
@@ -1745,7 +1747,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task CanCast_FloatToInt_WithFraction_ReturnsTrue()
     {
-        // Truncation is allowed — only overflow returns false.
+        // Truncation is allowed ï¿½ only overflow returns false.
         // can_cast(3.14, Int32) is true because CAST(3.14 AS Int32) succeeds (returns 3).
         Row row = MakeRow(["x"], DataValue.FromFloat64(3.14));
         Expression expr = new FunctionCallExpression("can_cast",
@@ -1852,7 +1854,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task TryCast_NumericTruncation_Succeeds()
     {
-        // try_cast follows CAST semantics — truncation is allowed
+        // try_cast follows CAST semantics ï¿½ truncation is allowed
         Row row = MakeRow(["x"], DataValue.FromFloat64(3.99));
         Expression expr = new FunctionCallExpression("try_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
@@ -1970,7 +1972,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task Error_IncludesSourceSpan_FromFunctionCall()
     {
-        // date_add() with a String amount — not numeric, triggers validation error.
+        // date_add() with a String amount ï¿½ not numeric, triggers validation error.
         var span = new SourceSpan(7, 12, 30);
         var expr = new FunctionCallExpression("date_add",
             [
@@ -1991,7 +1993,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task Error_FallsBackToChildSpan_ForBinaryExpression()
     {
-        // BinaryExpression has no span itself — the enrichment should
+        // BinaryExpression has no span itself ï¿½ the enrichment should
         // walk to the left child's span.
         var childSpan = new SourceSpan(3, 10, 5);
         var expr = new BinaryExpression(
@@ -2010,7 +2012,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     public async Task Error_DoesNotDoubleWrap_OnRecursiveEvaluation()
     {
         // A nested expression where the inner node has a span and the outer
-        // node also has a span — should only wrap once (the innermost catch).
+        // node also has a span ï¿½ should only wrap once (the innermost catch).
         var innerSpan = new SourceSpan(5, 1, 10);
         var expr = new CastExpression(
             new CastExpression(
@@ -2028,7 +2030,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     public async Task Error_RethrowsUnchanged_WhenNoSpanAvailable()
     {
         // LiteralExpression has no span, and the value type (a bare object)
-        // is unsupported — should throw without wrapping.
+        // is unsupported ï¿½ should throw without wrapping.
         var expr = new LiteralExpression(new object());
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () => await _evaluator.EvaluateAsync(expr, Row.Empty));
