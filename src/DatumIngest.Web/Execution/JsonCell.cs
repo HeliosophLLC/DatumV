@@ -42,7 +42,12 @@ internal sealed record JsonCell(
     // get their own dedicated renderer on the client instead of being
     // flattened into a single JSON text body that inlines megabytes
     // of base64 / `[0.1, 0.2, ...]`.
-    IReadOnlyList<JsonStructField>? Fields = null);
+    IReadOnlyList<JsonStructField>? Fields = null,
+    // Populated for kind="json" when the value's JSON form was truncated
+    // to a bounded preview. `Text` holds the partial-but-still-valid JSON;
+    // this carries the total/shown counts so the front-end can render a
+    // "N of M shown" affordance without re-parsing.
+    JsonPreviewInfo? JsonPreview = null);
 
 internal sealed record JsonStructField(string Name, JsonCell Cell);
 

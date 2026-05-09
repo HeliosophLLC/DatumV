@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { AlertCircle, Ban, Braces, Brackets, Check, ChevronDown, Download, Film, Loader2, Music, Sigma } from 'lucide-react';
+import { AlertCircle, Ban, Braces, Brackets, Check, ChevronDown, Download, Film, Loader2, Maximize2, Music, Sigma } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import JsonView from '@uiw/react-json-view';
 import { darkTheme } from '@uiw/react-json-view/dark';
@@ -2190,27 +2190,51 @@ function StructCell({ cell }: { cell: JsonCell }) {
 // StructCell, so single-line JSON gets pretty-printed inside the modal.
 
 function JsonTextCell({ cell }: { cell: JsonCell }) {
+  const { t } = useTranslation('query');
   const [open, setOpen] = useState(false);
   const text = cell.text ?? '';
   const isArray = text.trimStart().startsWith('[');
   const treeValue = useMemo(() => cellToJsonValue(cell), [cell]);
+  const preview = cell.jsonPreview;
+  // When truncated, the grid chip becomes a count summary instead of the
+  // text snippet — for a 590k-element array the snippet is meaningless
+  // anyway, and the count tells the user what they're looking at.
+  const chipText = preview
+    ? t(preview.mode === 'array' ? 'jsonPreview.arrayChip' : 'jsonPreview.objectChip', {
+        shown: preview.shown,
+        total: preview.total,
+      })
+    : text;
+  // Truncated chips carry a metadata label ("16 of 591,753 items") rather
+  // than data, so they drop the mono font; non-truncated cells keep mono
+  // because the text IS the JSON payload. Both render as a clickable link
+  // with an explicit expand icon so the affordance is unambiguous in a
+  // dense table.
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
         title="json"
-        className="text-muted-foreground hover:text-foreground inline-flex max-w-full cursor-pointer items-center gap-1"
+        className="group text-primary hover:text-primary/80 inline-flex max-w-full cursor-pointer items-center gap-1"
       >
         {isArray ? (
           <Brackets className="size-3.5 shrink-0" />
         ) : (
           <Braces className="size-3.5 shrink-0" />
         )}
-        <span className="truncate font-mono">{text}</span>
+        <span
+          className={cn(
+            'truncate underline underline-offset-2 group-hover:decoration-2',
+            preview ? '' : 'font-mono',
+          )}
+        >
+          {chipText}
+        </span>
+        <Maximize2 className="size-3 shrink-0 opacity-70 group-hover:opacity-100" />
       </button>
       <MediaPreview open={open} onClose={() => setOpen(false)} title="json">
-        <JsonTreeView value={treeValue} />
+        <JsonTreeView value={treeValue} preview={preview} />
       </MediaPreview>
     </>
   );
@@ -2280,7 +2304,14 @@ function prettifyJson(text: string): string {
   }
 }
 
-function JsonTreeView({ value }: { value: unknown }) {
+function JsonTreeView({
+  value,
+  preview,
+}: {
+  value: unknown;
+  preview?: JsonCell['jsonPreview'];
+}) {
+  const { t } = useTranslation('query');
   const { theme } = useSnapshot(settingsState);
   const isDark =
     theme === 'dark'
@@ -2294,16 +2325,25 @@ function JsonTreeView({ value }: { value: unknown }) {
     value !== null && typeof value === 'object'
       ? (value as object)
       : { value };
+  const bannerKey =
+    preview?.mode === 'array' ? 'jsonPreview.arrayBanner' : 'jsonPreview.objectBanner';
   return (
-    <div className="h-[60vh] min-h-[300px] w-[80vw] max-w-[1100px] min-w-[480px] overflow-auto">
-      <JsonView
-        value={rootValue}
-        style={isDark ? darkTheme : lightTheme}
-        collapsed={3}
-        displayDataTypes={false}
-        enableClipboard={true}
-        shortenTextAfterLength={120}
-      />
+    <div className="flex h-[60vh] min-h-[300px] w-[80vw] max-w-[1100px] min-w-[480px] flex-col">
+      {preview ? (
+        <div className="border-border bg-muted/30 text-muted-foreground shrink-0 border-b px-3 py-2 text-xs">
+          {t(bannerKey, { shown: preview.shown, total: preview.total })}
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-auto">
+        <JsonView
+          value={rootValue}
+          style={isDark ? darkTheme : lightTheme}
+          collapsed={3}
+          displayDataTypes={false}
+          enableClipboard={true}
+          shortenTextAfterLength={120}
+        />
+      </div>
     </div>
   );
 }

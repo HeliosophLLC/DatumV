@@ -17,6 +17,12 @@
       }
     }
   },
+  "jsonPreview": {
+    "arrayChip": "{shown, number} of {total, number} {total, plural, one {item} other {items}}",
+    "objectChip": "{shown, number} of {total, number} {total, plural, one {field} other {fields}}",
+    "arrayBanner": "Showing the first {shown, number} of {total, number} {total, plural, one {item} other {items}}. Use unnest() to materialize the full array as rows.",
+    "objectBanner": "Showing the first {shown, number} of {total, number} {total, plural, one {field} other {fields}}."
+  },
   "newTab": "New tab",
   "newTabSql": "SQL Query",
   "newTabFunction": "Execute Function",

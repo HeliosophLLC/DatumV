@@ -98,8 +98,8 @@ internal static class WebCellFormatter
             ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, registry);
             try
             {
-                string text = CborJsonCodec.DecodeToJsonText(bytes);
-                return new JsonCell("json", Text: text);
+                (string text, JsonPreviewInfo? preview) = JsonPreviewBuilder.Build(bytes);
+                return new JsonCell("json", Text: text, JsonPreview: preview);
             }
             catch
             {

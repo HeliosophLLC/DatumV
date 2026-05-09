@@ -79,6 +79,16 @@ export interface JsonCell {
   // dedicated renderer (recursive `<CellValue>`) instead of being
   // flattened into a one-line JSON text body.
   fields?: { name: string; cell: JsonCell }[];
+  // Populated for kind="json" when the value's JSON form was truncated
+  // to a bounded preview. `text` still holds valid JSON (the first
+  // `shown` elements / fields), so JSON.parse + the tree renderer work
+  // unchanged; this surfaces "showing N of M" to the grid chip and
+  // modal banner without re-counting the parsed tree.
+  jsonPreview?: {
+    total: number;
+    shown: number;
+    mode: 'array' | 'object';
+  };
 }
 
 export interface CellResult {
