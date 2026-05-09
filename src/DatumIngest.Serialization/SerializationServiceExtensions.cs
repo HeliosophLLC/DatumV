@@ -2,6 +2,7 @@ using DatumIngest.Serialization;
 using DatumIngest.Serialization.Csv;
 using DatumIngest.Serialization.Idx;
 using DatumIngest.Serialization.Json;
+using DatumIngest.Serialization.Tar;
 using DatumIngest.Serialization.Zip;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -26,6 +27,7 @@ public static class SerializationServiceExtensions
         //services.AddTransient<IFileFormat, Hdf5FileFormat>();
         services.AddTransient<IFileFormat, IdxFileFormat>();
         services.AddTransient<IFileFormat, ZipFileFormat>();
+        services.AddTransient<IFileFormat, TarFileFormat>();
 
         return services;
     }

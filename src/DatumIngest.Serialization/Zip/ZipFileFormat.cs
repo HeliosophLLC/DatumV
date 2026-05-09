@@ -1,11 +1,15 @@
 using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Catalog;
+using DatumIngest.Serialization.MediaBag;
 
 namespace DatumIngest.Serialization.Zip;
 
 /// <summary>
 /// Format handler for ZIP archive files. Matches <c>.zip</c> extension and the
-/// ZIP local file header magic <c>PK\x03\x04</c>.
+/// ZIP local file header magic <c>PK\x03\x04</c>. The actual per-entry
+/// deserialization is delegated to <see cref="MediaBagDeserializer"/> via a
+/// <see cref="ZipBagReader"/>; the schema is decided by the homogeneous-media
+/// probe rather than baked into this format handler.
 /// </summary>
 public sealed class ZipFileFormat : IFileFormat
 {
@@ -20,7 +24,7 @@ public sealed class ZipFileFormat : IFileFormat
         string ext = descriptor.LogicalExtension;
         if (ext.Equals(".zip", StringComparison.OrdinalIgnoreCase))
         {
-            deserializer = new ZipDeserializer(descriptor);
+            deserializer = new MediaBagDeserializer(new ZipBagReader(descriptor));
             return true;
         }
 
@@ -30,7 +34,7 @@ public sealed class ZipFileFormat : IFileFormat
             && File.Exists(descriptor.FilePath)
             && HasZipMagic(descriptor.FilePath))
         {
-            deserializer = new ZipDeserializer(descriptor);
+            deserializer = new MediaBagDeserializer(new ZipBagReader(descriptor));
             return true;
         }
 

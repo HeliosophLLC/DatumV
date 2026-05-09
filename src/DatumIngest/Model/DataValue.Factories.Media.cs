@@ -645,7 +645,7 @@ public readonly partial struct DataValue
     /// <summary>
     /// Variant of <see cref="FromImageAtOffset(long, long, ushort, ushort, byte)"/> that
     /// also stamps a pre-computed 32-bit content hash into <c>_p6</c>. Use from ingest
-    /// paths that have the encoded bytes in hand (e.g. <c>ZipDeserializer</c>) so
+    /// paths that have the encoded bytes in hand (e.g. the media-bag deserializer) so
     /// downstream Equals / GetHashCode can short-circuit without bytes; pass the low
     /// 32 bits of <c>XxHash64</c> over the encoded image payload.
     /// </summary>
@@ -653,6 +653,37 @@ public readonly partial struct DataValue
         new(DataKind.Image, flags: DataValueFlags.InArena,
             offset: offset, length: length,
             width: width, height: height, channels: channels, hash32: hash32);
+
+    /// <summary>
+    /// Creates a <see cref="DataKind.Audio"/> value that references bytes already
+    /// written to an <see cref="IValueStore"/> at the given <paramref name="offset"/>
+    /// and <paramref name="length"/>. Mirrors <see cref="FromImageAtOffset(long, long)"/>
+    /// for audio — use when the encoded audio bytes were streamed directly into an
+    /// arena to avoid a managed <c>byte[]</c> allocation.
+    /// </summary>
+    public static DataValue FromAudioAtOffset(long offset, long length) =>
+        new(DataKind.Audio, flags: DataValueFlags.InArena, offset: offset, length: length);
+
+    /// <summary>
+    /// Variant of <see cref="FromAudioAtOffset(long, long)"/> that stamps inline
+    /// container metadata (sample-rate, channels, bit-depth, frame-count) plus a
+    /// pre-computed 32-bit content hash. Use from ingest paths that have parsed
+    /// the audio header in hand so accessors like <see cref="AudioSampleRate"/>
+    /// skip a full decode and cross-arena Equals short-circuits without re-reading
+    /// the bytes. Caps mirror <see cref="FromAudio(byte[], IValueStore, uint, byte, byte, uint)"/>.
+    /// </summary>
+    public static DataValue FromAudioAtOffset(
+        long offset, long length,
+        uint sampleRate, byte channels, byte bitDepth, uint frameCount,
+        uint hash32)
+    {
+        int packedP4 = PackAudioP4(sampleRate, channels, bitDepth);
+        return new(DataKind.Audio, flags: DataValueFlags.InArena,
+            offset: offset, length: length,
+            p4: packedP4,
+            p5: unchecked((int)frameCount),
+            p6: unchecked((int)hash32));
+    }
 
     /// <summary>
     /// Creates a byte-array value that references bytes already written to an

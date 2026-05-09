@@ -147,10 +147,10 @@ public sealed record CatalogDatasetVersion(
     // Jobs the installer runs after the source files are downloaded.
     // Each job's `sourcePath` names a file (relative to the raw cache
     // root) that the engine's FormatRegistry hands off to a deserializer
-    // — e.g. ZipDeserializer streams one image row per zip entry, so a
-    // bag-of-images archive produces a one-row-per-image `.datum`
-    // without any explicit extraction step. The output lands at
-    // `<ingestedRoot>/<id>/<version>/<tableName>.datum`.
+    // — e.g. MediaBagDeserializer streams one row per archive entry, so a
+    // homogeneous media archive (ZIP of images, TAR.GZ of FLACs, …) produces
+    // a one-row-per-file `.datum` without any explicit extraction step. The
+    // output lands at `<ingestedRoot>/<id>/<version>/<tableName>.datum`.
     IReadOnlyList<CatalogIngestJob> Ingest,
     // Per-version deprecation.
     bool Deprecated = false,

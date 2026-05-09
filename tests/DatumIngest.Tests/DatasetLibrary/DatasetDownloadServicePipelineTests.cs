@@ -19,7 +19,7 @@ namespace DatumIngest.Tests.DatasetLibrary;
 /// End-to-end pipeline tests for <see cref="DatasetDownloadService"/>.
 /// Wires the orchestrator against a stub source client that "downloads"
 /// a hand-built ZIP archive, then verifies the install pipeline drives
-/// <c>Ingester.IngestAsync</c> against the engine's <c>ZipDeserializer</c>
+/// <c>Ingester.IngestAsync</c> against the engine's <c>MediaBagDeserializer</c>
 /// and produces a <c>.datum</c> file at the expected path under the
 /// ingested-datasets root.
 /// </summary>

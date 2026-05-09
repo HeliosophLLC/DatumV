@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.IO.Compression;
 using DatumIngest.Catalog;
+using ICSharpCode.SharpZipLib.BZip2;
 
 namespace DatumIngest.Serialization;
 
@@ -11,17 +12,19 @@ namespace DatumIngest.Serialization;
 /// </summary>
 /// <remarks>
 /// <para>
-/// When the file path ends in <c>.gz</c> the descriptor treats it as gzip-compressed
-/// and transparently materializes a decompressed temp file on first
-/// <see cref="OpenAsync"/>. Subsequent opens reuse the same temp file, so formats that
-/// need seekable streams (ZIP, Parquet, HDF5) or perform multi-pass reads (CSV scan +
-/// ingest) both Just Work. Disposing the descriptor deletes the temp file.
+/// When the file path ends in <c>.gz</c> or <c>.bz2</c> the descriptor treats it
+/// as compressed and transparently materializes a decompressed temp file on first
+/// <see cref="OpenAsync"/>. Subsequent opens reuse the same temp file, so formats
+/// that need seekable streams (ZIP, Parquet, HDF5) or perform multi-pass reads
+/// (CSV scan + ingest) both Just Work. Disposing the descriptor deletes the temp
+/// file.
 /// </para>
 /// <para>
 /// Decompressed size is capped at <see cref="DefaultMaxDecompressedBytes"/> unless a
 /// larger limit is passed to the constructor. The cap exists to protect multi-tenant
-/// hosts from a rogue upload filling the disk — gzip typically expands 3–10× so a
-/// modestly sized archive can produce a very large decompressed payload.
+/// hosts from a rogue upload filling the disk — gzip and bzip2 routinely expand 3–10×
+/// (and bzip2 occasionally far more) so a modestly sized archive can produce a very
+/// large decompressed payload.
 /// </para>
 /// </remarks>
 public class FileFormatDescriptor : IDisposable
@@ -42,9 +45,9 @@ public class FileFormatDescriptor : IDisposable
     /// <param name="filePath">Absolute or relative path to the source file.</param>
     /// <param name="options">Optional format-specific key-value options (e.g. delimiter, header).</param>
     /// <param name="maxDecompressedBytes">
-    /// Maximum bytes permitted from decompressing a gzipped source. Exceeding this
-    /// aborts ingestion and deletes the partial temp file. Defaults to
-    /// <see cref="DefaultMaxDecompressedBytes"/>.
+    /// Maximum bytes permitted from decompressing a gzipped / bzipped source.
+    /// Exceeding this aborts ingestion and deletes the partial temp file.
+    /// Defaults to <see cref="DefaultMaxDecompressedBytes"/>.
     /// </param>
     public FileFormatDescriptor(
         string filePath,
@@ -128,7 +131,7 @@ public class FileFormatDescriptor : IDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A seekable stream positioned at the beginning of the data.</returns>
     /// <exception cref="InvalidDataException">
-    /// Thrown when the decompressed size of a gzipped source exceeds
+    /// Thrown when the decompressed size of a gzipped / bzipped source exceeds
     /// <see cref="DefaultMaxDecompressedBytes"/> (or the caller-provided override).
     /// </exception>
     public virtual async Task<Stream> OpenAsync(CancellationToken cancellationToken = default)
@@ -138,9 +141,9 @@ public class FileFormatDescriptor : IDisposable
             throw new ObjectDisposedException(nameof(FileFormatDescriptor));
         }
 
-        if (Compression == CompressionKind.Gzip && _materializedPath is null)
+        if (Compression != CompressionKind.None && _materializedPath is null)
         {
-            _materializedPath = await MaterializeGzipAsync(cancellationToken).ConfigureAwait(false);
+            _materializedPath = await MaterializeCompressedAsync(cancellationToken).ConfigureAwait(false);
         }
 
         return new FileStream(
@@ -164,7 +167,7 @@ public class FileFormatDescriptor : IDisposable
         }
     }
 
-    private async Task<string> MaterializeGzipAsync(CancellationToken cancellationToken)
+    private async Task<string> MaterializeCompressedAsync(CancellationToken cancellationToken)
     {
         string tempPath = Path.Combine(Path.GetTempPath(), $"datumingest-{Guid.NewGuid():N}.tmp");
 
@@ -172,7 +175,7 @@ public class FileFormatDescriptor : IDisposable
         {
             await using FileStream source = new(
                 FilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
-            await using GZipStream gz = new(source, CompressionMode.Decompress);
+            await using Stream decompressed = OpenDecompressionStream(source, Compression);
             await using FileStream dest = new(
                 tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true);
 
@@ -181,14 +184,14 @@ public class FileFormatDescriptor : IDisposable
             {
                 long totalBytes = 0;
                 int read;
-                while ((read = await gz.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)
+                while ((read = await decompressed.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)
                     .ConfigureAwait(false)) > 0)
                 {
                     totalBytes += read;
                     if (totalBytes > _maxDecompressedBytes)
                     {
                         throw new InvalidDataException(
-                            $"Gzip-decompressed size of '{FilePath}' exceeds the configured limit of " +
+                            $"Decompressed size of '{FilePath}' exceeds the configured limit of " +
                             $"{_maxDecompressedBytes:N0} bytes. Raise the limit via the " +
                             $"FileFormatDescriptor maxDecompressedBytes parameter or decompress " +
                             $"the source manually before ingestion.");
@@ -211,11 +214,28 @@ public class FileFormatDescriptor : IDisposable
         }
     }
 
+    private static Stream OpenDecompressionStream(Stream source, CompressionKind kind) => kind switch
+    {
+        CompressionKind.Gzip => new GZipStream(source, CompressionMode.Decompress),
+        // BZip2InputStream is synchronous-only — that's fine, the surrounding
+        // MaterializeCompressedAsync pumps it through async file IO on the way out.
+        CompressionKind.Bzip2 => new BZip2InputStream(source),
+        _ => throw new InvalidOperationException(
+            $"OpenDecompressionStream called with non-compressed kind '{kind}'."),
+    };
+
     private static CompressionKind DetectCompression(string filePath)
     {
-        return Path.GetExtension(filePath).Equals(".gz", StringComparison.OrdinalIgnoreCase)
-            ? CompressionKind.Gzip
-            : CompressionKind.None;
+        string ext = Path.GetExtension(filePath);
+        if (ext.Equals(".gz", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompressionKind.Gzip;
+        }
+        if (ext.Equals(".bz2", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompressionKind.Bzip2;
+        }
+        return CompressionKind.None;
     }
 
     private static void TryDelete(string path)

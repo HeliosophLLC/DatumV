@@ -69,9 +69,9 @@ public sealed class ImageWidthFunction : IFunction, IScalarFunction, IInlineMeta
         {
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
         }
-        // Fast path: PR7 inline metadata. When ingest populated the dimensions
-        // (ZipDeserializer + ImageHeaderParser), we read 4 bytes inline instead of
-        // running a full SkiaSharp decode just to read W/H.
+        // Fast path: inline metadata. When ingest populated the dimensions
+        // (MediaBagDeserializer + ImageHeaderParser), we read 4 bytes inline instead
+        // of running a full SkiaSharp decode just to read W/H.
         ushort inlineWidth = arg.InlineDataValue.ImageWidth;
         if (inlineWidth != 0)
         {

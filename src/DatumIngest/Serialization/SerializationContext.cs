@@ -50,7 +50,7 @@ public sealed class SerializationContext
 
     /// <summary>
     /// Advisory target bytes per batch. Honoured by deserializers that accumulate
-    /// variable-size payloads (e.g. <c>ZipDeserializer</c>); others ignore it.
+    /// variable-size payloads (e.g. <c>MediaBagDeserializer</c>); others ignore it.
     /// </summary>
     public int BatchByteTarget { get; }
 

@@ -27,9 +27,9 @@ public sealed record IngestionOptions
 
     /// <summary>
     /// Target bytes per deserializer batch. Deserializers that honour this (currently
-    /// <c>ZipDeserializer</c>) flush a batch once its arena reaches this size. Smaller
-    /// batches reduce the amount of data in flight ahead of the writer at the cost of
-    /// per-batch overhead. Default: 16 MB.
+    /// <c>MediaBagDeserializer</c> for ZIP / TAR archives) flush a batch once its arena
+    /// reaches this size. Smaller batches reduce the amount of data in flight ahead of
+    /// the writer at the cost of per-batch overhead. Default: 16 MB.
     /// </summary>
     public int BatchByteTarget { get; init; } = 16 * 1024 * 1024;
 

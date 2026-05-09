@@ -64,6 +64,42 @@ internal static class ImageDataValueFactory
         return DataValue.FromImage(bytes, store, width, height, channels);
     }
 
+    /// <summary>
+    /// Constructs a <see cref="DataKind.Image"/> <see cref="DataValue"/> referencing
+    /// encoded image bytes already appended to an arena at <paramref name="offset"/> /
+    /// <paramref name="length"/>. Stamps parsed <paramref name="dims"/> inline (when
+    /// present) so accessors skip a SkiaSharp decode, and stamps
+    /// <paramref name="hash32"/> for cross-arena Equals short-circuit. Use from
+    /// ingest paths that stream image bytes directly via
+    /// <see cref="Arena.AppendFromStream"/>.
+    /// </summary>
+    public static DataValue FromArenaOffset(long offset, int length, ImageDimensions? dims, uint hash32)
+    {
+        if (dims is { Width: > 0 and <= ushort.MaxValue, Height: > 0 and <= ushort.MaxValue } d)
+        {
+            return DataValue.FromImageAtOffset(offset, length,
+                (ushort)d.Width, (ushort)d.Height, ClampChannels(d.Channels), hash32);
+        }
+        return DataValue.FromImageAtOffset(offset, length);
+    }
+
+    /// <summary>
+    /// Constructs a <see cref="DataKind.Image"/> <see cref="DataValue"/> referencing
+    /// encoded image bytes already written to a <c>.datum-blob</c> sidecar at the
+    /// given absolute <paramref name="offset"/> / <paramref name="length"/>. Stamps
+    /// parsed <paramref name="dims"/> and <paramref name="hash32"/> inline; mirrors
+    /// <see cref="FromArenaOffset"/> for sidecar-backed bytes.
+    /// </summary>
+    public static DataValue FromSidecar(long offset, long length, ImageDimensions? dims, uint hash32, byte storeId = 0)
+    {
+        if (dims is { Width: > 0 and <= ushort.MaxValue, Height: > 0 and <= ushort.MaxValue } d)
+        {
+            return DataValue.FromImageInSidecar(offset, length, storeId,
+                (ushort)d.Width, (ushort)d.Height, ClampChannels(d.Channels), hash32);
+        }
+        return DataValue.FromImageInSidecar(offset, length, storeId);
+    }
+
     private static byte ClampChannels(int c) =>
         c is >= 0 and <= 255 ? (byte)c : (byte)0;
 }

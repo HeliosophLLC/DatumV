@@ -14,4 +14,12 @@ public enum CompressionKind
     /// Gzip compression (<c>.gz</c> extension, RFC 1952).
     /// </summary>
     Gzip = 1,
+
+    /// <summary>
+    /// Bzip2 compression (<c>.bz2</c> extension). Block-sort + Huffman; slower
+    /// than gzip on the wire but a common wrapper for older speech / scientific
+    /// corpora (LJSpeech, CMU Arctic). Decoded via SharpZipLib —
+    /// <see cref="System.IO.Compression"/> has no built-in bz2.
+    /// </summary>
+    Bzip2 = 2,
 }

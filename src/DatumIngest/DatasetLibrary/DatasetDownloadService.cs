@@ -378,9 +378,10 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
     }
 
     // One ingest job: route the named source path through the engine's
-    // FormatRegistry (e.g. ZipDeserializer for an image bag, ParquetFormat
-    // for a columnar source) and write the resulting RowBatches to
-    // `<ingestedDir>/<tableName>.datum` (+ optional sidecar `.datum-blob`).
+    // FormatRegistry (e.g. MediaBagDeserializer for a homogeneous media
+    // archive, ParquetFormat for a columnar source) and write the resulting
+    // RowBatches to `<ingestedDir>/<tableName>.datum` (+ optional sidecar
+    // `.datum-blob`).
     private async Task<IngestionResult> RunIngestJobAsync(
         string rawDir,
         string ingestedDir,
