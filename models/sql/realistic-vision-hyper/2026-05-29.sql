@@ -45,8 +45,8 @@ CREATE OR REPLACE MODEL realistic_vision_hyper(
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'realistic-vision-hyper/2026-05-29/text_encoder/model.onnx' AS text_encoder,
-      'realistic-vision-hyper/unet/model.onnx'         AS unet,
-      'realistic-vision-hyper/vae_decoder/model.onnx'  AS vae_decoder
+      'realistic-vision-hyper/2026-05-29/unet/model.onnx'         AS unet,
+      'realistic-vision-hyper/2026-05-29/vae_decoder/model.onnx'  AS vae_decoder
 AS BEGIN
   -- 1. CLIP-frame [BOS, ...ids, EOS, EOS, ..., EOS] of length 77.
   DECLARE input_ids Int64[] = tokenizer.encode_clip(

@@ -81,7 +81,7 @@ CREATE OR REPLACE MODEL triposr(
 ) RETURNS Mesh
 IMPLEMENTS MeshFromImage
 USING 'triposr/2026-05-29/triplane.onnx' AS triplane,
-      'triposr/nerf.onnx'     AS nerf
+      'triposr/2026-05-29/nerf.onnx'     AS nerf
 AS BEGIN
   -- Centre the subject in a canonical-margin square. Without this, photos
   -- where the subject occupies <50% of the frame get stretched into 512×512

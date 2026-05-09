@@ -21,8 +21,8 @@ CREATE OR REPLACE MODEL mo_di_hyper(
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'mo-di-hyper/2026-05-29/text_encoder/model.onnx' AS text_encoder,
-      'mo-di-hyper/unet/model.onnx'         AS unet,
-      'mo-di-hyper/vae_decoder/model.onnx'  AS vae_decoder
+      'mo-di-hyper/2026-05-29/unet/model.onnx'         AS unet,
+      'mo-di-hyper/2026-05-29/vae_decoder/model.onnx'  AS vae_decoder
 AS BEGIN
   DECLARE input_ids Int64[] = tokenizer.encode_clip(
     prompt, '../tokenizer/vocab.json', '../tokenizer/merges.txt');

@@ -34,8 +34,8 @@ CREATE OR REPLACE MODEL sd_turbo(
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'sd-turbo/2026-05-29/text_encoder/model.onnx' AS text_encoder,
-      'sd-turbo/unet/model.onnx'         AS unet,
-      'sd-turbo/vae_decoder/model.onnx'  AS vae_decoder
+      'sd-turbo/2026-05-29/unet/model.onnx'         AS unet,
+      'sd-turbo/2026-05-29/vae_decoder/model.onnx'  AS vae_decoder
 AS BEGIN
   DECLARE latent_dim Int32 = size / 8;
 

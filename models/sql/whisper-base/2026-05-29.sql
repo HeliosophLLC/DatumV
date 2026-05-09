@@ -57,7 +57,7 @@ CREATE OR REPLACE MODEL whisper_base(
 ) RETURNS String
 IMPLEMENTS AudioToText
 USING 'whisper-base/2026-05-29/onnx/encoder_model.onnx' AS encoder,
-      'whisper-base/onnx/decoder_model.onnx' AS decoder
+      'whisper-base/2026-05-29/onnx/decoder_model.onnx' AS decoder
 AS BEGIN
   -- 1. WAV bytes → mono 16 kHz Float32 samples.
   DECLARE samples Float32[] = audio_samples(16000, audio_to_mono(clip));

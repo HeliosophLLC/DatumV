@@ -29,9 +29,9 @@ CREATE OR REPLACE MODEL sdxl_turbo(
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'sdxl-turbo/2026-05-29/text_encoder/model.onnx'   AS text_encoder_1,
-      'sdxl-turbo/text_encoder_2/model.onnx' AS text_encoder_2,
-      'sdxl-turbo/unet/model.onnx'           AS unet,
-      'sdxl-turbo/vae_decoder/model.onnx'    AS vae_decoder
+      'sdxl-turbo/2026-05-29/text_encoder_2/model.onnx' AS text_encoder_2,
+      'sdxl-turbo/2026-05-29/unet/model.onnx'           AS unet,
+      'sdxl-turbo/2026-05-29/vae_decoder/model.onnx'    AS vae_decoder
 AS BEGIN
   -- 0. Derive latent side and a reusable Float32 of `size` for time_ids.
   --    The VAE downsamples by 8; if `size` isn't a multiple of 8 the UNet

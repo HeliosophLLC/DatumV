@@ -23,9 +23,9 @@ CREATE OR REPLACE MODEL florence2_caption_q8(
 ) RETURNS String
 IMPLEMENTS ImageCaptioner
 USING 'florence-2-base-ft-quantized/2026-05-29/vision_encoder_quantized.onnx' AS vision_encoder,
-      'florence-2-base-ft-quantized/embed_tokens_quantized.onnx'   AS embed_tokens,
-      'florence-2-base-ft-quantized/encoder_model_quantized.onnx'  AS encoder,
-      'florence-2-base-ft-quantized/decoder_model_quantized.onnx'  AS decoder
+      'florence-2-base-ft-quantized/2026-05-29/embed_tokens_quantized.onnx'   AS embed_tokens,
+      'florence-2-base-ft-quantized/2026-05-29/encoder_model_quantized.onnx'  AS encoder,
+      'florence-2-base-ft-quantized/2026-05-29/decoder_model_quantized.onnx'  AS decoder
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img, [768::Int32, 768::Int32],
@@ -73,9 +73,9 @@ CREATE OR REPLACE MODEL florence2_detailed_caption_q8(
 ) RETURNS String
 IMPLEMENTS ImageCaptioner
 USING 'florence-2-base-ft-quantized/2026-05-29/vision_encoder_quantized.onnx' AS vision_encoder,
-      'florence-2-base-ft-quantized/embed_tokens_quantized.onnx'   AS embed_tokens,
-      'florence-2-base-ft-quantized/encoder_model_quantized.onnx'  AS encoder,
-      'florence-2-base-ft-quantized/decoder_model_quantized.onnx'  AS decoder
+      'florence-2-base-ft-quantized/2026-05-29/embed_tokens_quantized.onnx'   AS embed_tokens,
+      'florence-2-base-ft-quantized/2026-05-29/encoder_model_quantized.onnx'  AS encoder,
+      'florence-2-base-ft-quantized/2026-05-29/decoder_model_quantized.onnx'  AS decoder
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img, [768::Int32, 768::Int32],
@@ -124,9 +124,9 @@ CREATE OR REPLACE MODEL florence2_more_detailed_caption_q8(
 ) RETURNS String
 IMPLEMENTS ImageCaptioner
 USING 'florence-2-base-ft-quantized/2026-05-29/vision_encoder_quantized.onnx' AS vision_encoder,
-      'florence-2-base-ft-quantized/embed_tokens_quantized.onnx'   AS embed_tokens,
-      'florence-2-base-ft-quantized/encoder_model_quantized.onnx'  AS encoder,
-      'florence-2-base-ft-quantized/decoder_model_quantized.onnx'  AS decoder
+      'florence-2-base-ft-quantized/2026-05-29/embed_tokens_quantized.onnx'   AS embed_tokens,
+      'florence-2-base-ft-quantized/2026-05-29/encoder_model_quantized.onnx'  AS encoder,
+      'florence-2-base-ft-quantized/2026-05-29/decoder_model_quantized.onnx'  AS decoder
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img, [768::Int32, 768::Int32],
@@ -181,9 +181,9 @@ CREATE OR REPLACE MODEL florence2_ocr_with_region_q8(
 ) RETURNS String
 IMPLEMENTS TextRecognizer
 USING 'florence-2-base-ft-quantized/2026-05-29/vision_encoder_quantized.onnx' AS vision_encoder,
-      'florence-2-base-ft-quantized/embed_tokens_quantized.onnx'   AS embed_tokens,
-      'florence-2-base-ft-quantized/encoder_model_quantized.onnx'  AS encoder,
-      'florence-2-base-ft-quantized/decoder_model_quantized.onnx'  AS decoder
+      'florence-2-base-ft-quantized/2026-05-29/embed_tokens_quantized.onnx'   AS embed_tokens,
+      'florence-2-base-ft-quantized/2026-05-29/encoder_model_quantized.onnx'  AS encoder,
+      'florence-2-base-ft-quantized/2026-05-29/decoder_model_quantized.onnx'  AS decoder
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img, [768::Int32, 768::Int32],

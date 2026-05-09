@@ -21,8 +21,8 @@ CREATE OR REPLACE MODEL openjourney_hyper(
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'openjourney-hyper/2026-05-29/text_encoder/model.onnx' AS text_encoder,
-      'openjourney-hyper/unet/model.onnx'         AS unet,
-      'openjourney-hyper/vae_decoder/model.onnx'  AS vae_decoder
+      'openjourney-hyper/2026-05-29/unet/model.onnx'         AS unet,
+      'openjourney-hyper/2026-05-29/vae_decoder/model.onnx'  AS vae_decoder
 AS BEGIN
   DECLARE input_ids Int64[] = tokenizer.encode_clip(
     prompt, '../tokenizer/vocab.json', '../tokenizer/merges.txt');

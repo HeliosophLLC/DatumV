@@ -21,7 +21,7 @@ CREATE OR REPLACE MODEL whisper_small(
 ) RETURNS String
 IMPLEMENTS AudioToText
 USING 'whisper-small/2026-05-29/onnx/encoder_model.onnx' AS encoder,
-      'whisper-small/onnx/decoder_model.onnx' AS decoder
+      'whisper-small/2026-05-29/onnx/decoder_model.onnx' AS decoder
 AS BEGIN
   DECLARE samples Float32[] = audio_samples(16000, audio_to_mono(clip));
   DECLARE mel Float32[] = audio_to_log_mel(samples, 80::Int32);

@@ -46,9 +46,9 @@ CREATE OR REPLACE MODEL florence2_caption(
 ) RETURNS String
 IMPLEMENTS ImageCaptioner
 USING 'florence-2-base-ft-fp16/2026-05-29/vision_encoder_fp16.onnx' AS vision_encoder,
-      'florence-2-base-ft-fp16/embed_tokens_fp16.onnx'   AS embed_tokens,
-      'florence-2-base-ft-fp16/encoder_model_fp16.onnx'  AS encoder,
-      'florence-2-base-ft-fp16/decoder_model_fp16.onnx'  AS decoder
+      'florence-2-base-ft-fp16/2026-05-29/embed_tokens_fp16.onnx'   AS embed_tokens,
+      'florence-2-base-ft-fp16/2026-05-29/encoder_model_fp16.onnx'  AS encoder,
+      'florence-2-base-ft-fp16/2026-05-29/decoder_model_fp16.onnx'  AS decoder
 AS BEGIN
   -- DaViT uses ImageNet normalization.
   DECLARE tensor Float32[] = image_to_tensor_chw(
@@ -115,9 +115,9 @@ CREATE OR REPLACE MODEL florence2_detailed_caption(
 ) RETURNS String
 IMPLEMENTS ImageCaptioner
 USING 'florence-2-base-ft-fp16/2026-05-29/vision_encoder_fp16.onnx' AS vision_encoder,
-      'florence-2-base-ft-fp16/embed_tokens_fp16.onnx'   AS embed_tokens,
-      'florence-2-base-ft-fp16/encoder_model_fp16.onnx'  AS encoder,
-      'florence-2-base-ft-fp16/decoder_model_fp16.onnx'  AS decoder
+      'florence-2-base-ft-fp16/2026-05-29/embed_tokens_fp16.onnx'   AS embed_tokens,
+      'florence-2-base-ft-fp16/2026-05-29/encoder_model_fp16.onnx'  AS encoder,
+      'florence-2-base-ft-fp16/2026-05-29/decoder_model_fp16.onnx'  AS decoder
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img,
@@ -170,9 +170,9 @@ CREATE OR REPLACE MODEL florence2_more_detailed_caption(
 ) RETURNS String
 IMPLEMENTS ImageCaptioner
 USING 'florence-2-base-ft-fp16/2026-05-29/vision_encoder_fp16.onnx' AS vision_encoder,
-      'florence-2-base-ft-fp16/embed_tokens_fp16.onnx'   AS embed_tokens,
-      'florence-2-base-ft-fp16/encoder_model_fp16.onnx'  AS encoder,
-      'florence-2-base-ft-fp16/decoder_model_fp16.onnx'  AS decoder
+      'florence-2-base-ft-fp16/2026-05-29/embed_tokens_fp16.onnx'   AS embed_tokens,
+      'florence-2-base-ft-fp16/2026-05-29/encoder_model_fp16.onnx'  AS encoder,
+      'florence-2-base-ft-fp16/2026-05-29/decoder_model_fp16.onnx'  AS decoder
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img, [768::Int32, 768::Int32],
@@ -227,9 +227,9 @@ CREATE OR REPLACE MODEL florence2_ocr_with_region(
 ) RETURNS String
 IMPLEMENTS TextRecognizer
 USING 'florence-2-base-ft-fp16/2026-05-29/vision_encoder_fp16.onnx' AS vision_encoder,
-      'florence-2-base-ft-fp16/embed_tokens_fp16.onnx'   AS embed_tokens,
-      'florence-2-base-ft-fp16/encoder_model_fp16.onnx'  AS encoder,
-      'florence-2-base-ft-fp16/decoder_model_fp16.onnx'  AS decoder
+      'florence-2-base-ft-fp16/2026-05-29/embed_tokens_fp16.onnx'   AS embed_tokens,
+      'florence-2-base-ft-fp16/2026-05-29/encoder_model_fp16.onnx'  AS encoder,
+      'florence-2-base-ft-fp16/2026-05-29/decoder_model_fp16.onnx'  AS decoder
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(
     img, [768::Int32, 768::Int32],

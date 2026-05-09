@@ -20,8 +20,8 @@ CREATE OR REPLACE MODEL dreamshaper_hyper(
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'dreamshaper-hyper/2026-05-29/text_encoder/model.onnx' AS text_encoder,
-      'dreamshaper-hyper/unet/model.onnx'         AS unet,
-      'dreamshaper-hyper/vae_decoder/model.onnx'  AS vae_decoder
+      'dreamshaper-hyper/2026-05-29/unet/model.onnx'         AS unet,
+      'dreamshaper-hyper/2026-05-29/vae_decoder/model.onnx'  AS vae_decoder
 AS BEGIN
   DECLARE input_ids Int64[] = tokenizer.encode_clip(
     prompt, '../tokenizer/vocab.json', '../tokenizer/merges.txt');

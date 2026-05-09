@@ -49,8 +49,8 @@
 CREATE OR REPLACE MODEL moondream2(img Image, prompt String) RETURNS String
 IMPLEMENTS VisualQA
 USING 'moondream2/2026-05-29/vision_encoder_fp16.onnx'        AS vision_encoder,
-      'moondream2/embed_tokens_fp16.onnx'          AS embed_tokens,
-      'moondream2/decoder_model_merged_fp16.onnx'  AS decoder
+      'moondream2/2026-05-29/embed_tokens_fp16.onnx'          AS embed_tokens,
+      'moondream2/2026-05-29/decoder_model_merged_fp16.onnx'  AS decoder
 AS BEGIN
   -- Step 1: SigLIP normalize — (raw/255 - 0.5)/0.5. Same mean/std as the
   -- ViT family (NOT ImageNet stats).

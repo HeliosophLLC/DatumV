@@ -45,7 +45,7 @@ CREATE OR REPLACE MODEL whisper_large_v3_turbo(
 ) RETURNS String
 IMPLEMENTS AudioToText
 USING 'whisper-large-v3-turbo/2026-05-29/onnx/encoder_model.onnx' AS encoder,
-      'whisper-large-v3-turbo/onnx/decoder_model.onnx' AS decoder
+      'whisper-large-v3-turbo/2026-05-29/onnx/decoder_model.onnx' AS decoder
 AS BEGIN
   -- 1. WAV bytes → mono 16 kHz Float32 samples.
   DECLARE samples Float32[] = audio_samples(16000, audio_to_mono(clip));

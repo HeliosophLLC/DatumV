@@ -34,9 +34,9 @@ CREATE OR REPLACE MODEL juggernaut_xl_lightning(
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'juggernaut-xl-lightning/2026-05-29/text_encoder/model.onnx'   AS text_encoder_1,
-      'juggernaut-xl-lightning/text_encoder_2/model.onnx' AS text_encoder_2,
-      'juggernaut-xl-lightning/unet/model.onnx'           AS unet,
-      'juggernaut-xl-lightning/vae_decoder/model.onnx'    AS vae_decoder
+      'juggernaut-xl-lightning/2026-05-29/text_encoder_2/model.onnx' AS text_encoder_2,
+      'juggernaut-xl-lightning/2026-05-29/unet/model.onnx'           AS unet,
+      'juggernaut-xl-lightning/2026-05-29/vae_decoder/model.onnx'    AS vae_decoder
 AS BEGIN
   -- 1. CLIP-frame input ids — both encoders consume the same 77-token sequence.
   DECLARE input_ids Int64[] = tokenizer.encode_clip(

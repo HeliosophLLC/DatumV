@@ -20,8 +20,8 @@ CREATE OR REPLACE MODEL epicrealism_hyper(
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'epicrealism-hyper/2026-05-29/text_encoder/model.onnx' AS text_encoder,
-      'epicrealism-hyper/unet/model.onnx'         AS unet,
-      'epicrealism-hyper/vae_decoder/model.onnx'  AS vae_decoder
+      'epicrealism-hyper/2026-05-29/unet/model.onnx'         AS unet,
+      'epicrealism-hyper/2026-05-29/vae_decoder/model.onnx'  AS vae_decoder
 AS BEGIN
   DECLARE input_ids Int64[] = tokenizer.encode_clip(
     prompt, '../tokenizer/vocab.json', '../tokenizer/merges.txt');
