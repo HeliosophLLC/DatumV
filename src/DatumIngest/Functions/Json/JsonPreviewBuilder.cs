@@ -1,9 +1,8 @@
 using System.Formats.Cbor;
 using System.Text;
 using System.Text.Json;
-using DatumIngest.Functions.Json;
 
-namespace DatumIngest.Web.Execution;
+namespace DatumIngest.Functions.Json;
 
 /// <summary>
 /// Builds a bounded JSON-text preview of a <c>DataKind.Json</c> value's CBOR payload.
@@ -25,7 +24,7 @@ namespace DatumIngest.Web.Execution;
 /// the only element of a list to "too big" gives users nothing to click on.
 /// </para>
 /// </remarks>
-internal static class JsonPreviewBuilder
+public static class JsonPreviewBuilder
 {
     /// <summary>
     /// Default per-cell preview cap on array/object element count. Matches
@@ -280,12 +279,13 @@ internal static class JsonPreviewBuilder
 }
 
 /// <summary>
-/// Truncation metadata for a <see cref="JsonCell"/> whose <c>Text</c> holds a
-/// partial preview of a larger array or object. Sent to the front-end so the
-/// grid can render a "N of M shown" chip and the modal can render a banner
-/// without having to count the parsed tree itself.
+/// Truncation metadata for a JSON cell whose accompanying text holds a partial
+/// preview of a larger array or object. Used by both the live-query cell
+/// formatter (<c>WebCellFormatter</c>) and the ingestion sample-preview
+/// pipeline (<c>SamplePreviewCollector</c>) so the front-end can render a
+/// "N of M shown" affordance without re-counting the parsed tree.
 /// </summary>
 /// <param name="Total">Total elements / fields in the original CBOR value.</param>
-/// <param name="Shown">Number actually emitted in <see cref="JsonCell.Text"/>.</param>
+/// <param name="Shown">Number actually emitted in the accompanying text.</param>
 /// <param name="Mode">Either <c>"array"</c> or <c>"object"</c>.</param>
-internal sealed record JsonPreviewInfo(int Total, int Shown, string Mode);
+public sealed record JsonPreviewInfo(int Total, int Shown, string Mode);

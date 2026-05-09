@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DatumIngest.Functions.Json;
 
 namespace DatumIngest.Ingestion.Sampling;
 
@@ -147,10 +148,36 @@ public static class SamplePreviewSerializer
 
                 writer.WriteEndArray();
                 break;
+            case JsonSamplePreview jsonPreview:
+                WriteJsonSamplePreview(writer, jsonPreview);
+                break;
             default:
                 writer.WriteStringValue(value.ToString());
                 break;
         }
+    }
+
+    /// <summary>
+    /// Writes a <see cref="JsonSamplePreview"/> as an inline object with a
+    /// <c>kind: "json"</c> discriminator. The <c>text</c> field carries
+    /// partial-but-valid JSON of the truncated value; <c>preview</c> carries
+    /// truncation metadata when present.
+    /// </summary>
+    private static void WriteJsonSamplePreview(Utf8JsonWriter writer, JsonSamplePreview value)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("kind", "json");
+        writer.WriteString("text", value.Text);
+        if (value.Preview is not null)
+        {
+            writer.WritePropertyName("preview");
+            writer.WriteStartObject();
+            writer.WriteNumber("total", value.Preview.Total);
+            writer.WriteNumber("shown", value.Preview.Shown);
+            writer.WriteString("mode", value.Preview.Mode);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndObject();
     }
 
     /// <summary>
@@ -166,8 +193,43 @@ public static class SamplePreviewSerializer
             JsonValueKind.String => element.GetString(),
             JsonValueKind.Number => element.GetSingle(),
             JsonValueKind.Array => ReadArray(element),
+            JsonValueKind.Object => ReadObject(element),
             _ => element.ToString(),
         };
+    }
+
+    /// <summary>
+    /// Reads an inline object cell. Currently only the
+    /// <see cref="JsonSamplePreview"/> envelope (discriminator <c>kind: "json"</c>)
+    /// is recognised; any other shape is preserved as a JSON-text string so
+    /// future envelope kinds round-trip even without explicit support here.
+    /// </summary>
+    private static object? ReadObject(JsonElement element)
+    {
+        if (!element.TryGetProperty("kind", out JsonElement kind)
+            || kind.ValueKind != JsonValueKind.String
+            || kind.GetString() != "json")
+        {
+            return element.GetRawText();
+        }
+
+        string text = element.TryGetProperty("text", out JsonElement textEl) && textEl.ValueKind == JsonValueKind.String
+            ? textEl.GetString() ?? string.Empty
+            : string.Empty;
+
+        JsonPreviewInfo? preview = null;
+        if (element.TryGetProperty("preview", out JsonElement previewEl)
+            && previewEl.ValueKind == JsonValueKind.Object)
+        {
+            int total = previewEl.TryGetProperty("total", out JsonElement t) ? t.GetInt32() : 0;
+            int shown = previewEl.TryGetProperty("shown", out JsonElement s) ? s.GetInt32() : 0;
+            string mode = previewEl.TryGetProperty("mode", out JsonElement m) && m.ValueKind == JsonValueKind.String
+                ? m.GetString() ?? "array"
+                : "array";
+            preview = new JsonPreviewInfo(total, shown, mode);
+        }
+
+        return new JsonSamplePreview(text, preview);
     }
 
     /// <summary>

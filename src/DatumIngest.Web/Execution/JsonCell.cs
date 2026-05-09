@@ -1,3 +1,5 @@
+using DatumIngest.Functions.Json;
+
 namespace DatumIngest.Web.Execution;
 
 internal sealed record JsonCell(

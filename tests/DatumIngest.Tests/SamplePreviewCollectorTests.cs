@@ -1,5 +1,6 @@
 namespace DatumIngest.Tests;
 
+using DatumIngest.Functions.Json;
 using DatumIngest.Ingestion.Sampling;
 using DatumIngest.Model;
 
@@ -243,6 +244,71 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
         Assert.Equal("other", deserialized.Samples[1][0]);
         Assert.Equal(2.0f, deserialized.Samples[1][1]);
         Assert.Null(deserialized.Samples[1][2]);
+    }
+
+    // ──────────────────── JSON cell preview ────────────────────
+
+    [Fact]
+    public void JsonValue_ProducesPreviewEnvelope()
+    {
+        ColumnLookup lookup = new(["doc"]);
+        Schema schema = new([new ColumnInfo("doc", DataKind.Json, nullable: false)]);
+        SamplePreviewCollector collector = new(sampleSize: 25);
+
+        byte[] cbor = CborJsonCodec.EncodeFromJsonText("""{"a":1,"b":"x"}""");
+        collector.Consider(MakeRow(lookup, DataValue.FromJson(cbor, _arena)), _arena);
+
+        SamplePreview preview = collector.Build(schema);
+
+        JsonSamplePreview cell = Assert.IsType<JsonSamplePreview>(preview.Samples[0][0]);
+        Assert.Null(cell.Preview); // small enough to fit in budget
+        // Round-trip the partial-but-valid JSON back to confirm correctness.
+        using System.Text.Json.JsonDocument parsed = System.Text.Json.JsonDocument.Parse(cell.Text);
+        Assert.Equal(1, parsed.RootElement.GetProperty("a").GetInt32());
+        Assert.Equal("x", parsed.RootElement.GetProperty("b").GetString());
+    }
+
+    [Fact]
+    public void LargeJsonArrayValue_TruncatesWithPreviewMetadata()
+    {
+        ColumnLookup lookup = new(["arr"]);
+        Schema schema = new([new ColumnInfo("arr", DataKind.Json, nullable: false)]);
+        SamplePreviewCollector collector = new(sampleSize: 25);
+
+        string bigJson = "[" + string.Join(",", System.Linq.Enumerable.Range(0, 500)) + "]";
+        byte[] cbor = CborJsonCodec.EncodeFromJsonText(bigJson);
+        collector.Consider(MakeRow(lookup, DataValue.FromJson(cbor, _arena)), _arena);
+
+        SamplePreview preview = collector.Build(schema);
+
+        JsonSamplePreview cell = Assert.IsType<JsonSamplePreview>(preview.Samples[0][0]);
+        Assert.NotNull(cell.Preview);
+        Assert.Equal(500, cell.Preview!.Total);
+        Assert.Equal(JsonPreviewBuilder.MaxElements, cell.Preview.Shown);
+        Assert.Equal("array", cell.Preview.Mode);
+    }
+
+    [Fact]
+    public void Serialize_Deserialize_Json_RoundTrips()
+    {
+        ColumnLookup lookup = new(["doc"]);
+        Schema schema = new([new ColumnInfo("doc", DataKind.Json, nullable: false)]);
+        SamplePreviewCollector collector = new(sampleSize: 25);
+
+        string bigJson = "[" + string.Join(",", System.Linq.Enumerable.Range(0, 50)) + "]";
+        byte[] cbor = CborJsonCodec.EncodeFromJsonText(bigJson);
+        collector.Consider(MakeRow(lookup, DataValue.FromJson(cbor, _arena)), _arena);
+
+        SamplePreview original = collector.Build(schema);
+        string json = SamplePreviewSerializer.Serialize(original);
+        SamplePreview? roundTripped = SamplePreviewSerializer.Deserialize(json);
+
+        Assert.NotNull(roundTripped);
+        JsonSamplePreview cell = Assert.IsType<JsonSamplePreview>(roundTripped!.Samples[0][0]);
+        Assert.NotNull(cell.Preview);
+        Assert.Equal(50, cell.Preview!.Total);
+        Assert.Equal(JsonPreviewBuilder.MaxElements, cell.Preview.Shown);
+        Assert.Equal("array", cell.Preview.Mode);
     }
 
     [Fact]

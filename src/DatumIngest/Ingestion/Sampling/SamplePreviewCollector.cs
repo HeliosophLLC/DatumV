@@ -1,5 +1,6 @@
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions.Image;
+using DatumIngest.Functions.Json;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
@@ -162,6 +163,7 @@ internal sealed class SamplePreviewCollector
                 {
                     SidecarImageRef imageRef => ResolveSidecarImage(imageRef, registry),
                     SidecarArrayRef arrayRef => ResolveSidecarFloat32Array(arrayRef, registry),
+                    SidecarJsonRef jsonRef => ResolveSidecarJson(jsonRef, registry),
                     _ => cells[col],
                 };
             }
@@ -182,6 +184,13 @@ internal sealed class SamplePreviewCollector
         ReadOnlySpan<byte> bytes = source.Read(refValue.Offset, refValue.Length);
         ReadOnlySpan<float> elements = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(bytes);
         return ConvertFloat32Array(elements);
+    }
+
+    private static object ResolveSidecarJson(SidecarJsonRef refValue, SidecarRegistry? registry)
+    {
+        IBlobSource source = ResolveBlobSource(refValue.StoreId, registry, "Json");
+        ReadOnlySpan<byte> bytes = source.Read(refValue.Offset, refValue.Length);
+        return BuildJsonPreview(bytes);
     }
 
     private static IBlobSource ResolveBlobSource(byte storeId, SidecarRegistry? registry, string payloadKind)
@@ -246,6 +255,20 @@ internal sealed class SamplePreviewCollector
             return ConvertFloat32Array(value.AsArraySpan<float>(store));
         }
 
+        // Json values: build a bounded JSON-text preview with truncation
+        // metadata, mirroring the live-query cell-preview path. Sidecar-backed
+        // values land as a deferred placeholder — the writer hasn't flushed
+        // yet, so we can't read the bytes here; Build() resolves the placeholder
+        // against a SidecarRegistry once the sidecar is finalised.
+        if (value.Kind == DataKind.Json && !value.IsArray)
+        {
+            if (value.IsInSidecar)
+            {
+                return new SidecarJsonRef(value.SidecarStoreId, value.SidecarOffset, value.SidecarLength);
+            }
+            return BuildJsonPreview(value.AsByteSpan(store, registry: null));
+        }
+
         return value.Kind switch
         {
             // Composite types need recursive conversion for JSON nesting.
@@ -263,6 +286,12 @@ internal sealed class SamplePreviewCollector
             // Everything else: scalar boxed CLR types (float, int, bool, etc.).
             _ => value.ToObject(),
         };
+    }
+
+    private static JsonSamplePreview BuildJsonPreview(ReadOnlySpan<byte> cbor)
+    {
+        (string text, JsonPreviewInfo? preview) = JsonPreviewBuilder.Build(cbor);
+        return new JsonSamplePreview(text, preview);
     }
 
     /// <summary>
@@ -320,6 +349,16 @@ internal sealed class SamplePreviewCollector
     /// truncated to the first <see cref="MaxArrayPreviewElements"/> for the preview.
     /// </summary>
     private sealed record SidecarArrayRef(byte StoreId, long Offset, long Length);
+
+    /// <summary>
+    /// Reservoir placeholder for sidecar-backed <see cref="DataKind.Json"/> cells.
+    /// Same role as <see cref="SidecarImageRef"/>: bytes aren't readable when
+    /// <see cref="Consider(Model.RowBatch, IValueStore)"/> runs, so the placeholder
+    /// defers preview construction to <see cref="Build(Schema, SidecarRegistry?)"/>.
+    /// On resolution the CBOR is decoded into a bounded JSON-text preview through
+    /// <see cref="Functions.Json.JsonPreviewBuilder"/>.
+    /// </summary>
+    private sealed record SidecarJsonRef(byte StoreId, long Offset, long Length);
 
     /// <summary>
     /// Decodes an image, resizes it to fit within <see cref="MaxThumbnailDimension"/>×<see cref="MaxThumbnailDimension"/>

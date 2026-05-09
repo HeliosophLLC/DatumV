@@ -1,3 +1,5 @@
+using DatumIngest.Functions.Json;
+
 namespace DatumIngest.Ingestion.Sampling;
 
 /// <summary>
@@ -28,3 +30,18 @@ public sealed class SamplePreview
 /// The lowercased <see cref="Model.DataKind"/> name (e.g. <c>"float32"</c>, <c>"image"</c>, <c>"vector"</c>).
 /// </param>
 public sealed record SampleFeature(string Name, string Kind);
+
+/// <summary>
+/// Cell value for a <see cref="Model.DataKind.Json"/> column in a
+/// <see cref="SamplePreview.Samples"/> row. Carries the partial-but-valid JSON
+/// text of the cell's CBOR payload alongside optional truncation metadata when
+/// the value exceeded the preview budget. Serialized inline as a JSON object
+/// of shape <c>{ "kind": "json", "text": "...", "preview": { "total": N,
+/// "shown": K, "mode": "array" } }</c> — the <c>kind</c> discriminator marks
+/// it for the deserializer so we don't conflate it with a regular embedded
+/// object literal.
+/// </summary>
+/// <param name="Text">Partial JSON text of the cell's value.</param>
+/// <param name="Preview">Truncation metadata; <c>null</c> when the value fit
+/// in the budget and the text is complete.</param>
+public sealed record JsonSamplePreview(string Text, JsonPreviewInfo? Preview);
