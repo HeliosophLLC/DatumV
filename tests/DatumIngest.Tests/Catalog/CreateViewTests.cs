@@ -230,7 +230,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             IQueryPlan plan = catalog.Plan("SELECT * FROM v");
-            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+            await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         });
         Assert.Contains("Circular", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -248,7 +248,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             IQueryPlan plan = catalog.Plan("SELECT * FROM v_a");
-            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+            await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         });
         Assert.Contains("Circular", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -277,7 +277,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
 
         IQueryPlan plan = catalog.Plan("SELECT schema, name FROM system.views");
         List<(string schema, string name)> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -335,7 +335,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         IQueryPlan plan = catalog.Plan(
             "SELECT table_schema, table_name, is_updatable, check_option FROM information_schema.views");
         List<(string schema, string name, string updatable, string check)> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -360,7 +360,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         IQueryPlan plan = catalog.Plan(
             "SELECT table_name, table_type FROM information_schema.tables WHERE table_name = 'v'");
         List<(string name, string type)> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -503,7 +503,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
     private static async Task<List<int>> CollectFirstColumnInts(IQueryPlan plan)
     {
         List<int> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {

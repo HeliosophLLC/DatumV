@@ -343,7 +343,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
 
         IQueryPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
         List<int> ids = new();
-        foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None).ToBlockingEnumerable())
+        foreach (RowBatch batch in ExecutePlanAsync(plan).ToBlockingEnumerable())
         {
             for (int i = 0; i < batch.Count; i++) ids.Add(batch[i][0].AsInt32());
         }
@@ -419,7 +419,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
     private static List<int> CollectIds(IQueryPlan plan)
     {
         List<int> ids = new();
-        foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None).ToBlockingEnumerable())
+        foreach (RowBatch batch in ExecutePlanAsync(plan).ToBlockingEnumerable())
         {
             for (int i = 0; i < batch.Count; i++) ids.Add(batch[i][0].AsInt32());
         }

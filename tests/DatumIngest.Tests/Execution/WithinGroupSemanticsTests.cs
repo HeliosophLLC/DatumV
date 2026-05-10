@@ -19,7 +19,7 @@ public sealed class WithinGroupSemanticsTests : ServiceTestBase
         DatumIngest.Execution.ExecutionContext ctx =
             CreateExecutionContext(catalog: catalog);
         List<Row> result = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(ctx.CancellationToken))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan, ctx.CancellationToken))
         {
             for (int i = 0; i < batch.Count; i++)
             {

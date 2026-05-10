@@ -57,7 +57,7 @@ public sealed class ImageToTensorChwFunctionTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
         IQueryPlan plan = catalog.Plan(sql);
         float[]? result = null;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {

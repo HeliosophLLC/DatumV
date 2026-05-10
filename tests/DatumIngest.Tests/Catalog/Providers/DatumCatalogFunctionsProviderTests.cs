@@ -26,7 +26,7 @@ public sealed class DatumCatalogFunctionsProviderTests : ServiceTestBase
             "SELECT body_scope FROM datum_catalog.functions WHERE function_name = 'infer'");
 
         List<string> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -49,7 +49,7 @@ public sealed class DatumCatalogFunctionsProviderTests : ServiceTestBase
             "SELECT body_scope FROM datum_catalog.functions WHERE function_name = 'upper'");
 
         List<string> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {

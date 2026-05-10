@@ -48,7 +48,7 @@ public sealed class OnnxInspectFunctionTests : ServiceTestBase
             $"SELECT kind, name, dtype, shape, is_dynamic FROM inference.onnx_inspect('file://{fixturePath}')");
 
         List<(string Kind, string Name, string Dtype, int[] Shape, bool IsDynamic)> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -96,7 +96,7 @@ public sealed class OnnxInspectFunctionTests : ServiceTestBase
                 "SELECT kind FROM inference.onnx_inspect('softmax.onnx')");
 
             int rowCount = 0;
-            await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+            await foreach (RowBatch batch in ExecutePlanAsync(plan))
             {
                 rowCount += batch.Count;
             }
@@ -120,7 +120,7 @@ public sealed class OnnxInspectFunctionTests : ServiceTestBase
 
         FileNotFoundException ex = await Assert.ThrowsAsync<FileNotFoundException>(async () =>
         {
-            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+            await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         });
 
         Assert.Contains(missing, ex.Message);

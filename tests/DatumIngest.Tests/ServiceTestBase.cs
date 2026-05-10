@@ -7,11 +7,9 @@ using DatumIngest.ModelLibrary;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
-using DatumIngest.Serialization;
 using DatumIngest.Tests.Infra;
 
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 namespace DatumIngest.Tests;
 
@@ -335,6 +333,11 @@ public abstract class ServiceTestBase : IDisposable
         QueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         return await plan.CollectRowsAsync(context);
+    }
+
+    protected static IAsyncEnumerable<RowBatch> ExecutePlanAsync(IQueryPlan plan, CancellationToken cancellationToken = default)
+    {
+        return plan.ExecuteAsync(cancellationToken);
     }
 
     public virtual void Dispose()

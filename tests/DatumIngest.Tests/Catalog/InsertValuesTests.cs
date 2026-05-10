@@ -1194,7 +1194,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         IQueryPlan plan = catalog.Plan("INSERT INTO t DEFAULT VALUES RETURNING *");
 
         List<DataValue[]> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(default))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int r = 0; r < batch.Count; r++)
             {

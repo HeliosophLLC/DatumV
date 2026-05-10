@@ -85,7 +85,7 @@ public sealed class ModelStreamingTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.echo_stream(name) FROM t");
 
         List<string> rowOutputs = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             Arena arena = batch.Arena;
             for (int i = 0; i < batch.Count; i++)

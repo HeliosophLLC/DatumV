@@ -142,7 +142,7 @@ public sealed class AllMiniLmL6V2SqlE2ETests : ServiceTestBase
         // result is arena-backed so we can't stash the DataValue and read it
         // later. Copy the float[] inside the loop.
         float[]? embedding = null;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {

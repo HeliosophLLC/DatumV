@@ -36,7 +36,7 @@ public sealed class ThreePartColumnExecutionTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE TABLE users (id Int32, name String)");
 
         IQueryPlan plan = catalog.Plan("SELECT public.users.id FROM public.users");
-        await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+        await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         // No exception = success criterion. Empty table → zero batches.
     }
 }

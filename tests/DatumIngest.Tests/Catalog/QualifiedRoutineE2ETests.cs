@@ -137,7 +137,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
 
         IQueryPlan plan = catalog.Plan("SELECT system.upper(s) FROM t");
         bool sawRow = false;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int r = 0; r < batch.Count; r++)
             {
@@ -204,7 +204,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         IQueryPlan plan = catalog.Plan("SELECT schema, name FROM system.udfs ORDER BY schema, name");
 
         List<(string schema, string name)> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int r = 0; r < batch.Count; r++)
             {
@@ -311,7 +311,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
     private static async Task<List<int>> CollectFirstColumnAsInt32Async(IQueryPlan plan)
     {
         List<int> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int r = 0; r < batch.Count; r++)
             {

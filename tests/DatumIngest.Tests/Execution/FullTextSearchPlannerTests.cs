@@ -218,7 +218,7 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
     private static async Task<List<int>> CollectFirstColumnInts(IQueryPlan plan)
     {
         List<int> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {

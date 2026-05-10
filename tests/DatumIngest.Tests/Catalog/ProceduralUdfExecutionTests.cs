@@ -19,7 +19,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
     private static async Task<List<DataValue>> CollectFirstColumnAsync(IQueryPlan plan)
     {
         List<DataValue> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -97,7 +97,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT twin() FROM data");
 
         List<string> rendered = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -399,7 +399,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT wrap(caption) FROM data");
 
         List<string> rendered = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -432,7 +432,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT rewrite(caption) FROM data");
 
         List<string> rendered = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -478,7 +478,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+            await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         });
 
         // Message should mention the parameter, the value, and the bounds.
@@ -540,7 +540,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+            await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         });
         Assert.Contains("lucky", ex.Message);
         Assert.Contains("CHECK", ex.Message);

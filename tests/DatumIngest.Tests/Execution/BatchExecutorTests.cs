@@ -1707,7 +1707,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+            await foreach (RowBatch batch in ExecutePlanAsync(plan))
             {
                 _ = batch;
             }

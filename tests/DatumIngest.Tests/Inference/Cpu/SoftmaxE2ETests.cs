@@ -70,7 +70,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         // Collect inside the iteration loop so the array data can be read
         // against the batch's arena before it's recycled.
         List<float[]> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -150,7 +150,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         IQueryPlan plan = catalog.Plan(
             "SELECT models.softmax_branch([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
 
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             // Drain — we care about the tracer events, not the values.
         }
@@ -206,7 +206,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         // Output correctness — the MIO path must produce the same softmax
         // result the lowered path used to. Compare against the canonical.
         List<float[]> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -262,7 +262,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         Assert.True(sawMio, "Plan tree must contain a Model Invocation operator for SQL-defined model bodies.");
 
         List<float[]> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -322,7 +322,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         // Execute end-to-end — every DECLARE binding must resolve across
         // the body's row-at-a-time interpretation.
         List<float[]> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -388,7 +388,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
             "SELECT models.softmax_dual([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
 
         List<float[]> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -430,7 +430,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+            await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         });
 
         // The error message should name the bad alias AND list available ones.

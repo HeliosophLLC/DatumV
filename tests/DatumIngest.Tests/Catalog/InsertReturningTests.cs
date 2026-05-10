@@ -344,7 +344,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
     private static async Task<List<DataValue[]>> CollectRows(IQueryPlan plan)
     {
         List<DataValue[]> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(default))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int r = 0; r < batch.Count; r++)
             {

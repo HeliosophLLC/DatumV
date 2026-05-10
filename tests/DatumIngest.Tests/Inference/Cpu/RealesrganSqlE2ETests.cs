@@ -126,7 +126,7 @@ public sealed class RealesrganSqlE2ETests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.realesrgan_x4v3(img) FROM data");
 
         bool sawRow = false;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {

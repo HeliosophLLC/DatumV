@@ -43,7 +43,7 @@ public sealed class Tier2InspectionTests : ServiceTestBase
             $"FROM inference.onnx_inspect_meta('file://{fixturePath}')");
 
         int rowCount = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -84,7 +84,7 @@ public sealed class Tier2InspectionTests : ServiceTestBase
 
         await Assert.ThrowsAsync<FileNotFoundException>(async () =>
         {
-            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+            await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         });
     }
 
@@ -100,7 +100,7 @@ public sealed class Tier2InspectionTests : ServiceTestBase
             $"FROM inference.infer_compatibility('file://{fixturePath}')");
 
         List<(string Backend, bool Supported, int Required, int Supported2, string Notes)> rows = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -133,7 +133,7 @@ public sealed class Tier2InspectionTests : ServiceTestBase
             $"SELECT inference.model_skeleton('file://{fixturePath}')");
 
         string? skeleton = null;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -163,7 +163,7 @@ public sealed class Tier2InspectionTests : ServiceTestBase
 
         Exception thrown = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+            await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         });
         Exception root = thrown;
         while (root.InnerException is not null) root = root.InnerException;

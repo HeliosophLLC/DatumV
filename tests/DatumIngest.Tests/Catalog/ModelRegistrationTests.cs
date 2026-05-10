@@ -378,7 +378,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.square(v) FROM data");
 
         List<DataValue> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1036,7 +1036,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.doubler(v) FROM data");
 
         List<DataValue> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1083,7 +1083,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         float[]? elements = null;
         bool isMultiDim = false;
         int ndim = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1140,7 +1140,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         float a = 0, b = 0, c = 0, d = 0;
         int rowsSeen = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1195,7 +1195,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         int total = 0, nd = 0, d1 = 0, d2 = 0;
         float elem = 0;
         int rowsSeen = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1245,7 +1245,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.adder(a, b) FROM data");
 
         List<DataValue> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1292,7 +1292,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.embed(a, b) FROM data");
 
         List<DataValue> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1338,7 +1338,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.pick_boxes(v) FROM data");
 
         List<DataValue> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1382,7 +1382,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.pick_first(v) FROM data");
 
         List<DataValue> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1422,7 +1422,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.doubler_compat(v) FROM data");
 
         List<DataValue> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1463,7 +1463,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.first_only(v) FROM data");
 
         List<DataValue> values = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1532,7 +1532,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.passthrough(v) FROM data");
 
         int rowCount = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             rowCount += batch.Count;
         }
@@ -1622,7 +1622,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.detector(v) FROM data");
 
         List<float> values = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1711,7 +1711,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.k_picker(v) FROM data");
 
         List<float> values = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -1779,7 +1779,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.passthrough2(v) FROM data");
 
         int rowCount = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             rowCount += batch.Count;
         }
@@ -1851,7 +1851,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.flex(v) FROM data");
 
         int rowCount = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             rowCount += batch.Count;
         }
@@ -1962,7 +1962,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.glpn_nyu(img) FROM data");
 
         int rowCount = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             rowCount += batch.Count;
         }
@@ -2029,7 +2029,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.once(v) FROM data");
 
         int rowCount = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             rowCount += batch.Count;
         }

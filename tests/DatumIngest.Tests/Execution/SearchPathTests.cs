@@ -50,7 +50,7 @@ public sealed class SearchPathTests : ServiceTestBase, IDisposable
         // Just exercise execution; udfs is empty so we just need a clean
         // run with no resolution error.
         int rowCount = 0;
-        await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch _ in ExecutePlanAsync(plan))
         {
             rowCount++;
         }
@@ -65,7 +65,7 @@ public sealed class SearchPathTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE TABLE users (id Int32)");
 
         IQueryPlan plan = catalog.Plan("SELECT id FROM users");
-        await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+        await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         // No exception is the success criterion.
     }
 

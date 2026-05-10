@@ -94,7 +94,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     private static async Task<long[]> CollectFirstArrayAsync(IQueryPlan plan)
     {
         long[]? result = null;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -110,7 +110,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     private static async Task<string> CollectFirstStringAsync(IQueryPlan plan)
     {
         string? result = null;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
@@ -200,7 +200,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     {
         Exception thrown = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await foreach (RowBatch _ in plan.ExecuteAsync(CancellationToken.None)) { }
+            await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         });
         Exception current = thrown;
         while (current.InnerException is not null) current = current.InnerException;
@@ -385,7 +385,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         IQueryPlan plan = catalog.Plan(
             $"SELECT tokenizer.encode_bert_pair(CAST(NULL AS String), 'cd', 'file://{bertVocab}') IS NULL");
         DataValue? value = null;
-        foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None)
+        foreach (RowBatch batch in ExecutePlanAsync(plan)
                      .ToBlockingEnumerable(CancellationToken.None))
         {
             value = batch[0][0];

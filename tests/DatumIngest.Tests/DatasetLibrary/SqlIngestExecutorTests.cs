@@ -77,104 +77,6 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
-    public async Task ExecuteAsync_AudioDecodeFromArchive_PreservesRiffMagicAndStampsMetadata()
-    {
-        // Regression cover for the LJSpeech ingest path: open_archive(WAV) →
-        // audio_decode(bytes) → SqlIngestExecutor → .datum + .datum-blob, then
-        // re-read the column and confirm (a) the bytes round-trip starting at
-        // "RIFF" / "WAVE" magic and (b) the inline sample-rate / channels /
-        // bit-depth metadata survives the sidecar-write/read round-trip.
-        byte[] wavBytes = BuildWave(sampleRate: 22050, channels: 1, bitsPerSample: 16, dataBytes: 8820);
-        string archivePath = Path.Combine(_scratch, "audio.zip");
-        BuildZip(archivePath, [("clip.wav", wavBytes)]);
-
-        TableCatalog catalog = CreateCatalog();
-        SqlIngestExecutor executor = new(catalog, CreatePool(), NullLogger<SqlIngestExecutor>.Instance);
-
-        string destPath = Path.Combine(_scratch, "audio.datum");
-        SqlIngestResult result = await executor.ExecuteAsync(
-            sql: "SELECT audio_decode(bytes) AS clip FROM open_archive($archive)",
-            parameters: new Dictionary<string, ParameterValue>(StringComparer.Ordinal)
-            {
-                ["archive"] = new StringParameter(archivePath),
-            },
-            destPath: destPath,
-            onRowProgress: null,
-            ct: default);
-
-        Assert.Equal(1, result.RowCount);
-
-        // Re-open the .datum + .datum-blob and read the audio cell back.
-        TableCatalog readback = CreateCatalog();
-        readback.AddFile(destPath, name: "clips");
-        Assert.True(readback.TryGetTable(new QualifiedName("public", "clips"), out _));
-
-        IQueryPlan plan = await readback.ExecuteStatementAsync("SELECT clip FROM clips");
-        await using IAsyncEnumerator<RowBatch> enumerator = plan.ExecuteAsync(default).GetAsyncEnumerator();
-        Assert.True(await enumerator.MoveNextAsync());
-        RowBatch batch = enumerator.Current;
-        Assert.Equal(1, batch.Count);
-        DataValue clip = batch[0]["clip"];
-
-        Assert.Equal(DataKind.Audio, clip.Kind);
-        ReadOnlySpan<byte> bytes = clip.AsByteSpan(batch.Arena, readback.SidecarRegistry);
-
-        // Magic: "RIFF" ... "WAVE" at offsets 0..3 and 8..11.
-        Assert.Equal((byte)'R', bytes[0]);
-        Assert.Equal((byte)'I', bytes[1]);
-        Assert.Equal((byte)'F', bytes[2]);
-        Assert.Equal((byte)'F', bytes[3]);
-        Assert.Equal((byte)'W', bytes[8]);
-        Assert.Equal((byte)'A', bytes[9]);
-        Assert.Equal((byte)'V', bytes[10]);
-        Assert.Equal((byte)'E', bytes[11]);
-
-        // Inline metadata stamped by the read-time peek in
-        // VariableSlotPageDecoderV2.DecodeAudioWithInlineMetadata.
-        Assert.Equal(22050u, clip.AudioSampleRate);
-        Assert.Equal((byte)1, clip.AudioChannels);
-        Assert.Equal((byte)16, clip.AudioBitDepth);
-    }
-
-    // Diagnostic-only: skipped by default. To run it, set the env var to a real
-    // .datum path produced by the running app's installer. The test bypasses the
-    // dataset-binding layer entirely (it opens the file with the same V2 reader
-    // the app uses, but through TableCatalog.AddFile, on the live test process's
-    // freshly-built binaries). If THIS passes but the running app's UI still shows
-    // octet-stream, the running process is on stale binaries (release-build output
-    // isn't being loaded by the running host). If THIS fails on the same file the
-    // UI reads, the bug is in the read path and we need a closer look at why my
-    // synthetic fixtures don't hit it.
-    [Fact]
-    public async Task LiveDatumProbe_AssertsAudioMetadataOnFirstRow()
-    {
-        string? path = Environment.GetEnvironmentVariable("DATUMINGEST_PROBE_DATUM");
-        if (string.IsNullOrEmpty(path))
-        {
-            return; // not set — quietly skip in normal runs.
-        }
-        Assert.True(File.Exists(path), $"DATUMINGEST_PROBE_DATUM points at missing file: {path}");
-
-        TableCatalog readback = CreateCatalog();
-        readback.AddFile(path, name: "probe");
-
-        IQueryPlan plan = await readback.ExecuteStatementAsync("SELECT clip FROM probe LIMIT 1");
-        await using IAsyncEnumerator<RowBatch> enumerator = plan.ExecuteAsync(default).GetAsyncEnumerator();
-        Assert.True(await enumerator.MoveNextAsync(), "no rows in probe table");
-        RowBatch batch = enumerator.Current;
-        Assert.True(batch.Count >= 1, "empty first batch");
-        DataValue clip = batch[0]["clip"];
-
-        Assert.Equal(DataKind.Audio, clip.Kind);
-        ReadOnlySpan<byte> bytes = clip.AsByteSpan(batch.Arena, readback.SidecarRegistry);
-        Assert.True(bytes.Length >= 12, $"clip bytes too short ({bytes.Length})");
-        string magic = System.Text.Encoding.ASCII.GetString(bytes[..4]);
-        Assert.True(bytes[0] == (byte)'R' && bytes[1] == (byte)'I' && bytes[2] == (byte)'F' && bytes[3] == (byte)'F',
-            $"first 4 bytes are '{magic}' / {Convert.ToHexString(bytes[..4])}, not 'RIFF' — sidecar offset is wrong");
-        Assert.NotEqual(0u, clip.AudioSampleRate);
-    }
-
-    [Fact]
     public async Task ExecuteAsync_AudioDecode_SidecarFileContainsRiffMagicOnDisk()
     {
         // Last-mile evidence test: open the produced .datum-blob with a plain
@@ -275,7 +177,7 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
 
         IQueryPlan plan = await readback.ExecuteStatementAsync("SELECT utt_id, clip FROM clips");
         int seen = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(default))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {

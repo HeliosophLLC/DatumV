@@ -132,7 +132,7 @@ public sealed class DptLargeSqlE2ETests : ServiceTestBase
         IQueryPlan plan = catalog.Plan("SELECT models.dpt_large(img) FROM data");
 
         bool sawRow = false;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {

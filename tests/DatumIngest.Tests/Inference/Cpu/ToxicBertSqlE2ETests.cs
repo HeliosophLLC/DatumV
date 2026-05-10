@@ -113,7 +113,7 @@ public sealed class ToxicBertSqlE2ETests : ServiceTestBase
         ];
 
         int rowsSeen = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
             for (int i = 0; i < batch.Count; i++)
             {
