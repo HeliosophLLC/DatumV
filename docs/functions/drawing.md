@@ -62,6 +62,24 @@ color_hex('#1234abcd')    -- (18, 52, 171, 205)  — 8-digit with alpha
 
 Invalid formats raise an error.
 
+### color_interpolate
+
+`color_interpolate(from Color, to Color, t)` → Color
+
+Linearly blends `from` toward `to` by fraction `t`: `t = 0` returns `from`, `t = 1` returns `to`, intermediate values mix the R, G, B, and A channels independently. `t` outside `[0, 1]` clamps to the endpoints rather than extrapolating, so passing an animation curve directly without bounds-management is safe.
+
+Pairs naturally with animation lambdas, waveform column positions, or any other normalised parameter:
+
+```sql
+-- Horizontal gradient across an animation
+color_interpolate(color_hex('#00d4ff'), color_hex('#ff00aa'), t)
+
+-- Amplitude-keyed gradient for waveform bars (loud parts pop)
+color_interpolate(color_hex('#333'), color_hex('#fff'), hi - lo)
+```
+
+Null in any argument propagates as null. Interpolation runs in sRGB byte space — fast and matches the look of CSS / canvas gradients, and consistent with the gradient computed by `draw_line`'s five-argument form. A perceptual-uniform variant can land separately when a real consumer asks for one.
+
 ## Shape primitives
 
 All shape primitives return a `Drawing` value. Geometry is in pixel coordinates relative to the eventual render target — the rasterizer does not apply implicit scaling.
@@ -74,6 +92,16 @@ Axis-aligned filled rectangle. `at` is the top-left corner; `size` is `(width, h
 
 ```sql
 draw_rect(point2d(13, 24), point2d(6, 24), color(101, 67, 33))
+```
+
+### stroke_rect
+
+`stroke_rect(at Point2D, size Point2D, stroke Color, width)` → Drawing
+
+Axis-aligned outlined (unfilled) rectangle. `at` and `size` follow the same convention as `draw_rect`; `width` is the stroke thickness in pixels. Negative width raises an error. The stroke is centred on the rectangle's geometric edge (Skia's default), so half the stroke width extends outside the `at..at+size` box.
+
+```sql
+stroke_rect(point2d(13, 24), point2d(6, 24), color(255, 200, 50), 1.5)
 ```
 
 ### draw_ellipse
@@ -99,12 +127,26 @@ draw_circle(point2d(16, 16), 4, color(255, 220, 100))
 ### draw_line
 
 `draw_line(start Point2D, end Point2D, stroke Color, width)` → Drawing
+`draw_line(start Point2D, end Point2D, start_color Color, end_color Color, width)` → Drawing
 
-Stroked line segment from `start` to `end` with the given color and stroke width (pixels). Negative width raises an error.
+Stroked line segment from `start` to `end` with the given stroke width (pixels). Negative width raises an error.
+
+The four-argument form paints a uniform colour. The five-argument form paints a **linear gradient** along the segment from `start_color` at `start` to `end_color` at `end` — useful for stacked rows of gradient bars (audio waveforms, spectrum plots, equalizers) without exploding the Drawing tree into many separate segments.
 
 ```sql
+-- Uniform stroke
 draw_line(point2d(0, 16), point2d(32, 16), color(80, 80, 80), 1.5)
+
+-- Vertical gradient bar: bright at the top, dim at the bottom
+draw_line(
+    point2d(t * 1200, 0),
+    point2d(t * 1200, 240),
+    color_hex('#00d4ff'),    -- start (top)
+    color_hex('#1a3a5c'),    -- end (bottom)
+    1)
 ```
+
+The gradient is computed in sRGB byte space, matching `color_interpolate`'s convention; mixing the two functions in the same picture produces consistent colour transitions.
 
 ### draw_polygon
 
@@ -599,4 +641,5 @@ A subtle but important property: `draw_particles` is a pure function of `(t, see
 
 - [Lambda Expressions](../sql/lambda-expressions.md) — the substrate for animation drivers and procedural-component UDFs.
 - [Image Functions](image.md) — what `render(...)` produces, and what subsequent pipelines consume.
+- [Audio Functions](audio.md) — the `audio_waveform_*` family produces Drawings via a `waveform` lambda context that inherits from `AnimationContext`.
 - [Functions Reference](string.md) — complete function listing across all categories.

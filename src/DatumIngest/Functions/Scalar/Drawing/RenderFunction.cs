@@ -248,8 +248,32 @@ internal static class DrawingRenderer
                 {
                     if (shape.Stroke is SKColor stroke)
                     {
-                        using SKPaint p = new() { Color = stroke, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = shape.StrokeWidth };
-                        canvas.DrawLine(shape.Position, shape.EndPoint, p);
+                        if (shape.StrokeEnd is SKColor strokeEnd)
+                        {
+                            // Linear gradient shader from start → end colour
+                            // along the segment axis. SKPaint.Color is the
+                            // fallback when no shader is set; the shader
+                            // takes precedence at draw time.
+                            using SKShader gradient = SKShader.CreateLinearGradient(
+                                shape.Position,
+                                shape.EndPoint,
+                                [stroke, strokeEnd],
+                                [0f, 1f],
+                                SKShaderTileMode.Clamp);
+                            using SKPaint p = new()
+                            {
+                                Shader = gradient,
+                                IsAntialias = true,
+                                Style = SKPaintStyle.Stroke,
+                                StrokeWidth = shape.StrokeWidth,
+                            };
+                            canvas.DrawLine(shape.Position, shape.EndPoint, p);
+                        }
+                        else
+                        {
+                            using SKPaint p = new() { Color = stroke, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = shape.StrokeWidth };
+                            canvas.DrawLine(shape.Position, shape.EndPoint, p);
+                        }
                     }
                 }
                 break;

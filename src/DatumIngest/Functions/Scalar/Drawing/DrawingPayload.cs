@@ -49,6 +49,7 @@ public abstract record DrawingPayload;
 /// <param name="Fill">Optional fill color. <see langword="null"/> = no fill (outline only when stroke is present).</param>
 /// <param name="Stroke">Optional stroke color. <see langword="null"/> = no stroke.</param>
 /// <param name="StrokeWidth">Stroke width in pixels. Ignored when <paramref name="Stroke"/> is <see langword="null"/>.</param>
+/// <param name="StrokeEnd">Optional second stroke color for line gradients. When set on a <see cref="ShapeKind.Line"/> shape, the renderer paints the stroke as a linear gradient from <paramref name="Stroke"/> at <paramref name="Position"/> to this color at <paramref name="EndPoint"/>. Ignored for other shape kinds.</param>
 public sealed record ShapeDrawing(
     ShapeKind Kind,
     SKPoint Position,
@@ -57,7 +58,8 @@ public sealed record ShapeDrawing(
     ImmutableArray<SKPoint> Points = default,
     SKColor? Fill = null,
     SKColor? Stroke = null,
-    float StrokeWidth = 1f) : DrawingPayload;
+    float StrokeWidth = 1f,
+    SKColor? StrokeEnd = null) : DrawingPayload;
 
 /// <summary>Shape variant selector for <see cref="ShapeDrawing"/>.</summary>
 public enum ShapeKind

@@ -1,5 +1,6 @@
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
+using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Execution;
@@ -661,7 +662,7 @@ public static class CommonSubexpressionEliminator
             ProjectOperator p => new ProjectOperator(
                 newSource,
                 p.Columns
-                    .Select(c => c with { Expression = RewriteWithHoists(c.Expression, hoists) })
+                    .Select(c => RewriteSelectColumnPreservingName(c, hoists))
                     .ToArray(),
                 p.LetBindings?
                     .Select(b => b with { Expression = RewriteWithHoists(b.Expression, hoists) })
@@ -834,10 +835,8 @@ public static class CommonSubexpressionEliminator
         SelectColumn[] rewrittenColumns = new SelectColumn[project.Columns.Count];
         for (int i = 0; i < project.Columns.Count; i++)
         {
-            rewrittenColumns[i] = project.Columns[i] with
-            {
-                Expression = RewriteWithHoists(project.Columns[i].Expression, fingerprintToColumn),
-            };
+            rewrittenColumns[i] = RewriteSelectColumnPreservingName(
+                project.Columns[i], fingerprintToColumn);
         }
 
         // BuildEnricherStack handles subsumption: when a hoisted expression
@@ -1061,6 +1060,42 @@ public static class CommonSubexpressionEliminator
                 break;
             // Leaves and unhandled kinds: no children to visit.
         }
+    }
+
+    /// <summary>
+    /// Rewrites a projection column's expression through <see cref="RewriteWithHoists"/>,
+    /// then — when the column had no explicit alias and the rewrite changed the
+    /// top-level derived name (typically because the whole expression collapsed
+    /// onto a hoisted <c>__cse_N</c> column reference) — preserves the original
+    /// derived name as an explicit alias so the output schema still surfaces it.
+    /// Without this, <c>SELECT audio_decode(bytes), render(audio_decode(bytes))</c>
+    /// would rename the first column to <c>__cse_0</c>.
+    /// </summary>
+    /// <remarks>
+    /// Star/table-star columns (<see cref="SelectAllColumns"/>,
+    /// <see cref="SelectTableColumns"/>) are pass-through: their dummy
+    /// <see cref="LiteralExpression"/> sentinel can't match a hoist fingerprint,
+    /// and they don't surface a derived name to schema build.
+    /// </remarks>
+    private static SelectColumn RewriteSelectColumnPreservingName(
+        SelectColumn column, IReadOnlyDictionary<string, string> hoists)
+    {
+        Expression rewritten = RewriteWithHoists(column.Expression, hoists);
+        if (column is SelectAllColumns or SelectTableColumns
+            || column.Alias is not null
+            || ReferenceEquals(rewritten, column.Expression))
+        {
+            return column with { Expression = rewritten };
+        }
+
+        string originalName = ColumnNameResolver.GetRawName(column.Expression);
+        string rewrittenName = ColumnNameResolver.GetRawName(rewritten);
+        if (string.Equals(originalName, rewrittenName, StringComparison.OrdinalIgnoreCase))
+        {
+            return column with { Expression = rewritten };
+        }
+
+        return column with { Expression = rewritten, Alias = originalName };
     }
 
     /// <summary>

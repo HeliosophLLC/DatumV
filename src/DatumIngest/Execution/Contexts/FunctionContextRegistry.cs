@@ -106,6 +106,7 @@ public sealed class FunctionContextRegistry
         registry.Register<PureContext>();
         registry.Register<AnimationContext>();
         registry.Register<ParticleContext>();
+        registry.Register<WaveformContext>();
         return registry;
     }
 }

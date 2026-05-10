@@ -11,8 +11,8 @@ namespace DatumIngest.Functions.Scalar.Drawing;
 /// <summary>
 /// <c>draw_rect(at Point2D, size Point2D, fill Color)</c> → Drawing.
 /// Axis-aligned filled rectangle at the given top-left position with the
-/// given width × height. Fill is required; stroke variants will follow in
-/// a later phase.
+/// given width × height. The stroked counterpart is
+/// <see cref="StrokeRectFunction"/>.
 /// </summary>
 public sealed class DrawRectFunction : IFunction, IScalarFunction
 {
@@ -64,6 +64,72 @@ public sealed class DrawRectFunction : IFunction, IScalarFunction
             Position: new SKPoint(at.X, at.Y),
             Size: new SKSize(size.X, size.Y),
             Fill: fill)));
+    }
+}
+
+/// <summary>
+/// <c>stroke_rect(at Point2D, size Point2D, stroke Color, width)</c> → Drawing.
+/// Axis-aligned outlined (unfilled) rectangle. The filled counterpart is
+/// <see cref="DrawRectFunction"/>.
+/// </summary>
+public sealed class StrokeRectFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "stroke_rect";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Drawing;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Constructs an outlined (unfilled) axis-aligned rectangle Drawing. "
+        + "'at' is the top-left corner; 'size' is (width, height) in pixels; "
+        + "'width' is the stroke thickness in pixels.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("at",     DataKindMatcher.Exact(DataKind.Point2D)),
+                new ParameterSpec("size",   DataKindMatcher.Exact(DataKind.Point2D)),
+                new ParameterSpec("stroke", DataKindMatcher.Exact(DataKind.Color)),
+                new ParameterSpec("width",  DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Drawing)),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<StrokeRectFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args[0].IsNull || args[1].IsNull || args[2].IsNull || args[3].IsNull)
+        {
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Drawing));
+        }
+        Vector2 at = args[0].AsPoint2D();
+        Vector2 size = args[1].AsPoint2D();
+        SKColor stroke = DrawingHelpers.ToSKColor(args[2]);
+        float width = args[3].ToFloat();
+        if (width < 0)
+        {
+            throw new FunctionArgumentException(Name, $"width must be non-negative; got {width}.");
+        }
+        return new ValueTask<ValueRef>(ValueRef.FromDrawing(new ShapeDrawing(
+            ShapeKind.Rectangle,
+            Position: new SKPoint(at.X, at.Y),
+            Size: new SKSize(size.X, size.Y),
+            Stroke: stroke,
+            StrokeWidth: width)));
     }
 }
 
@@ -200,7 +266,10 @@ public sealed class DrawLineFunction : IFunction, IScalarFunction
 
     /// <inheritdoc />
     public static string Description =>
-        "Constructs a stroked line segment Drawing from 'start' to 'end' with the given color and width.";
+        "Constructs a stroked line segment Drawing from 'start' to 'end'. The "
+        + "four-arg form paints a uniform colour; the five-arg form takes "
+        + "'start_color' and 'end_color' and paints a linear gradient along "
+        + "the segment.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -212,6 +281,17 @@ public sealed class DrawLineFunction : IFunction, IScalarFunction
                 new ParameterSpec("end",    DataKindMatcher.Exact(DataKind.Point2D)),
                 new ParameterSpec("stroke", DataKindMatcher.Exact(DataKind.Color)),
                 new ParameterSpec("width",  DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Drawing)),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("start",       DataKindMatcher.Exact(DataKind.Point2D)),
+                new ParameterSpec("end",         DataKindMatcher.Exact(DataKind.Point2D)),
+                new ParameterSpec("start_color", DataKindMatcher.Exact(DataKind.Color)),
+                new ParameterSpec("end_color",   DataKindMatcher.Exact(DataKind.Color)),
+                new ParameterSpec("width",       DataKindMatcher.Family(DataKindFamily.NumericScalar)),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Drawing)),
@@ -228,14 +308,29 @@ public sealed class DrawLineFunction : IFunction, IScalarFunction
         CancellationToken cancellationToken)
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
-        if (args[0].IsNull || args[1].IsNull || args[2].IsNull || args[3].IsNull)
+        for (int i = 0; i < args.Length; i++)
         {
-            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Drawing));
+            if (args[i].IsNull)
+            {
+                return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Drawing));
+            }
         }
         Vector2 start = args[0].AsPoint2D();
         Vector2 end = args[1].AsPoint2D();
         SKColor stroke = DrawingHelpers.ToSKColor(args[2]);
-        float width = args[3].ToFloat();
+
+        SKColor? strokeEnd;
+        float width;
+        if (args.Length == 5)
+        {
+            strokeEnd = DrawingHelpers.ToSKColor(args[3]);
+            width = args[4].ToFloat();
+        }
+        else
+        {
+            strokeEnd = null;
+            width = args[3].ToFloat();
+        }
         if (width < 0)
         {
             throw new FunctionArgumentException(Name, $"width must be non-negative; got {width}.");
@@ -246,7 +341,8 @@ public sealed class DrawLineFunction : IFunction, IScalarFunction
             Size: default,
             EndPoint: new SKPoint(end.X, end.Y),
             Stroke: stroke,
-            StrokeWidth: width)));
+            StrokeWidth: width,
+            StrokeEnd: strokeEnd)));
     }
 }
 

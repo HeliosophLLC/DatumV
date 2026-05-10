@@ -97,6 +97,43 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
     }
 
     [Fact]
+    public void TopLevelHoistedColumn_PreservesOriginalNameAsAlias()
+    {
+        // Regression: when CSE hoisted an expression that ALSO appears at the
+        // top level of a SELECT column, the column got rewritten to a bare
+        // ColumnReference(__cse_0). The output schema then derived the column
+        // name from the rewritten expression — surfacing "__cse_0" to users
+        // instead of the original "concat".
+        //
+        // Fix: preserve the original derived name as an explicit alias when
+        // the rewrite collapses the column's top-level expression.
+        TableCatalog catalog = Catalog2Cols();
+        QueryOperator plan = PlanQuery(
+            "SELECT concat(a, b), upper(concat(a, b)) FROM t", catalog);
+
+        ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+        Assert.IsType<RowEnricherOperator>(project.Source);
+
+        // First column: expression is now ColumnReference(__cse_0), but the
+        // column carries an Alias of "concat" so the output name survives.
+        ColumnReference col0 = Assert.IsType<ColumnReference>(project.Columns[0].Expression);
+        Assert.Equal("__cse_0", col0.ColumnName);
+        Assert.Equal("concat", project.Columns[0].Alias);
+    }
+
+    [Fact]
+    public void TopLevelHoistedColumn_ExplicitAliasPreserved()
+    {
+        // When the user already supplied an alias, CSE must not stomp it.
+        TableCatalog catalog = Catalog2Cols();
+        QueryOperator plan = PlanQuery(
+            "SELECT concat(a, b) AS joined, upper(concat(a, b)) FROM t", catalog);
+
+        ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+        Assert.Equal("joined", project.Columns[0].Alias);
+    }
+
+    [Fact]
     public void DuplicateColumnReferences_NotHoisted()
     {
         // Trivial leaves (column references) don't pay for hoisting.

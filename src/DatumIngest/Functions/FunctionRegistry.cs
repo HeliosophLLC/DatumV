@@ -890,7 +890,9 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Drawing.RenderFunction>();
         registry.RegisterScalar<Scalar.Drawing.ColorFunction>();
         registry.RegisterScalar<Scalar.Drawing.ColorHexFunction>();
+        registry.RegisterScalar<Scalar.Drawing.ColorInterpolateFunction>();
         registry.RegisterScalar<Scalar.Drawing.DrawRectFunction>();
+        registry.RegisterScalar<Scalar.Drawing.StrokeRectFunction>();
         registry.RegisterScalar<Scalar.Drawing.DrawEllipseFunction>();
         registry.RegisterScalar<Scalar.Drawing.DrawCircleFunction>();
         registry.RegisterScalar<Scalar.Drawing.DrawLineFunction>();
@@ -929,6 +931,10 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Audio.AudioSamplesFunction>();
         registry.RegisterScalar<Scalar.Audio.AudioToMonoFunction>();
         registry.RegisterScalar<Scalar.Audio.AudioToLogMelFunction>();
+        registry.RegisterScalar<Scalar.Audio.AudioWaveformEnvelopeFunction>();
+        registry.RegisterScalar<Scalar.Audio.AudioWaveformDrawingFunction>();
+        registry.RegisterScalar<Scalar.Audio.AudioWaveformPathFunction>();
+        registry.RegisterScalar<Scalar.Audio.AudioWaveformFunction>();
 
         // Spatial — PointCloud construction + accessors. Constructors consume an
         // Image-typed depth map (output of depth_map_to_image on MiDaS/DPT-family
