@@ -643,6 +643,17 @@ function rowsContainImageOrVideo(rows: readonly JsonCell[][]): boolean {
 // other column off-screen. User-resize is a follow-up.
 const COL_MIN_WIDTH = 60;
 const COL_MAX_WIDTH = 400;
+// Upper bound for user-driven resize. Higher than the auto-measurement
+// cap so a user can stretch out an image / long-string column far
+// beyond the content-fit width when they want to inspect it.
+const COL_RESIZE_MAX = 2000;
+// Image/video columns in tall-row mode size to give landscape thumbnails
+// enough horizontal room to use the full 64 px row height. 192 px ≈ 3:1
+// aspect at h-16, which covers most natural photo crops without
+// reserving so much that other columns get pushed off-screen. Falls
+// back to the text-measured width when that comes out wider (long
+// column names with type badges).
+const IMAGE_COL_MIN_WIDTH_MEDIA = 192;
 // Width of the leading row-number gutter, styled like the header. Tight
 // on purpose — fits ~4 digits comfortably, longer counts truncate with
 // an ellipsis. Sticky-left so it stays visible during horizontal scroll.
@@ -726,19 +737,25 @@ function measureColumnWidth(
   columnName: string,
   rows: readonly JsonCell[][],
   colIdx: number,
+  largeMediaMode: boolean,
 ): number {
   // Header: column name + space for the type badge (rendered next to
   // the name; flat allowance below).
   let widest = textWidth(columnName) + HEADER_BADGE_BUDGET;
 
   const sampleCount = Math.min(rows.length, SAMPLE_ROWS);
+  let hasImageOrVideo = false;
   for (let i = 0; i < sampleCount; i++) {
     const c = rows[i][colIdx];
     if (!c) continue;
+    if (!hasImageOrVideo && isImageOrVideoCell(c)) hasImageOrVideo = true;
     const w = textWidth(cellTextForMeasure(c));
     if (w > widest) widest = w;
   }
-  return Math.max(COL_MIN_WIDTH, Math.min(COL_MAX_WIDTH, Math.ceil(widest + COL_PADDING)));
+  const baseMin = largeMediaMode && hasImageOrVideo
+    ? IMAGE_COL_MIN_WIDTH_MEDIA
+    : COL_MIN_WIDTH;
+  return Math.max(baseMin, Math.min(COL_MAX_WIDTH, Math.ceil(widest + COL_PADDING)));
 }
 
 function cellTooltip(cell: JsonCell): string | undefined {
@@ -1072,10 +1089,50 @@ function CellTable({ cell }: { cell: CellResult }) {
   const colWidths = useMemo(() => {
     if (cell.schema === null) return [] as number[];
     return cell.schema.map((col, idx) =>
-      measureColumnWidth(col.name, cell.rows, idx),
+      measureColumnWidth(col.name, cell.rows, idx, largeMedia),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cell.schema, sampleSize]);
+  }, [cell.schema, sampleSize, largeMedia]);
+
+  // Per-column width overrides set by the user via the header resize
+  // handles. Merged on top of the measured widths so unresized columns
+  // keep tracking content-driven sizing; a resize "pins" that column
+  // for the rest of the session. Double-clicking the handle removes the
+  // override and reverts to measurement.
+  const [colWidthOverrides, setColWidthOverrides] = useState<Record<number, number>>({});
+  const effectiveColWidths = useMemo(
+    () => colWidths.map((w, i) => colWidthOverrides[i] ?? w),
+    [colWidths, colWidthOverrides],
+  );
+
+  // Active resize drag, tracked outside React state so the per-pixel
+  // mousemove handler doesn't need a re-render to read the start point.
+  // The override write itself does re-render, which is what drives the
+  // grid template update.
+  const resizeRef = useRef<{ colIdx: number; startX: number; startWidth: number } | null>(null);
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const s = resizeRef.current;
+      if (s === null) return;
+      const next = Math.max(
+        COL_MIN_WIDTH,
+        Math.min(COL_RESIZE_MAX, s.startWidth + (e.clientX - s.startX)),
+      );
+      setColWidthOverrides((prev) => ({ ...prev, [s.colIdx]: next }));
+    };
+    const onUp = () => {
+      if (resizeRef.current === null) return;
+      resizeRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
 
   const [selection, setSelection] = useState<Selection | null>(null);
   // Drag mode lives outside React state: mousemove during auto-scroll
@@ -1318,9 +1375,9 @@ function CellTable({ cell }: { cell: CellResult }) {
   // gutter; data columns scroll freely.
   const gridTemplateColumns = [
     `${ROW_NUMBER_WIDTH}px`,
-    ...colWidths.map((w) => `${w}px`),
+    ...effectiveColWidths.map((w) => `${w}px`),
   ].join(' ');
-  const totalWidth = ROW_NUMBER_WIDTH + colWidths.reduce((s, w) => s + w, 0);
+  const totalWidth = ROW_NUMBER_WIDTH + effectiveColWidths.reduce((s, w) => s + w, 0);
   const virtualRows = rowVirtualizer.getVirtualItems();
 
   const numRows = cell.rows.length;
@@ -1355,7 +1412,7 @@ function CellTable({ cell }: { cell: CellResult }) {
           sticky-left + bumped z so it stays pinned through both axes. */}
       <div
         className="bg-muted border-border sticky top-0 z-20 grid border-b font-medium"
-        style={{ gridTemplateColumns, minWidth: totalWidth }}
+        style={{ gridTemplateColumns, width: totalWidth }}
       >
         {/* Corner cell over the row-number gutter — click selects all. */}
         <div
@@ -1411,6 +1468,36 @@ function CellTable({ cell }: { cell: CellResult }) {
                   onSelect={(id) => setColumnMode(colIdx, id)}
                 />
               )}
+              {/* Resize handle. Sits over the right edge of the header
+                  cell (and visually over the cell border-r). Stops mousedown
+                  propagation so it doesn't begin a col-select. Double-click
+                  clears the override and lets the column revert to its
+                  measured content width. */}
+              <div
+                onMouseDown={(e) => {
+                  if (e.button !== 0) return;
+                  e.stopPropagation();
+                  e.preventDefault();
+                  resizeRef.current = {
+                    colIdx,
+                    startX: e.clientX,
+                    startWidth: effectiveColWidths[colIdx],
+                  };
+                  document.body.style.cursor = 'col-resize';
+                  document.body.style.userSelect = 'none';
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setColWidthOverrides((prev) => {
+                    if (!(colIdx in prev)) return prev;
+                    const next = { ...prev };
+                    delete next[colIdx];
+                    return next;
+                  });
+                }}
+                className="hover:bg-primary/50 absolute top-0 right-0 bottom-0 z-10 w-1.5 cursor-col-resize translate-x-1/2"
+                aria-hidden="true"
+              />
             </div>
           );
         })}
@@ -1423,7 +1510,7 @@ function CellTable({ cell }: { cell: CellResult }) {
         className="relative"
         style={{
           height: rowVirtualizer.getTotalSize(),
-          minWidth: totalWidth,
+          width: totalWidth,
         }}
       >
         {virtualRows.map((virtualRow) => {
