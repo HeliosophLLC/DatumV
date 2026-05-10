@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Execution;
 using DatumIngest.Inference;
@@ -103,7 +103,7 @@ public sealed class TwitterRobertaSentimentSqlE2ETests : ServiceTestBase
             [DataKind.String],
             [new object?[] { "I love this product, it's amazing!" }]));
 
-        IQueryPlan plan = catalog.Plan("SELECT models.twitter_roberta_sentiment(t) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.twitter_roberta_sentiment(t) FROM data");
 
         bool sawRow = false;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

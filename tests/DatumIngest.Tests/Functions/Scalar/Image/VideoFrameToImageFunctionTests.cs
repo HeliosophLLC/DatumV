@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
@@ -24,7 +24,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
     private static string SpikeVideoPath() => Path.Combine(
         AppContext.BaseDirectory, "Fixtures", "spike.mp4");
 
-    // ─────────────────────── Direct unit tests ───────────────────────
+    // ——————————————————————— Direct unit tests ———————————————————————
 
     [Fact]
     public async Task Materializes_FullResolution_SKBitmap()
@@ -78,7 +78,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
         Assert.Equal(DataKind.Image, result.Kind);
     }
 
-    // ─────────────────────── Target-dimension overloads ───────────────────────
+    // ——————————————————————— Target-dimension overloads ———————————————————————
 
     [Fact]
     public async Task TargetWidth_Only_PreservesSourceAspectRatio()
@@ -97,7 +97,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
 
         SKBitmap bmp = result.AsImage();
         Assert.Equal(640, bmp.Width);
-        // 1920×1080 → at width=640, height should be 360 (preserve 16:9 aspect).
+        // 1920x1080 → at width=640, height should be 360 (preserve 16:9 aspect).
         Assert.Equal(360, bmp.Height);
     }
 
@@ -107,7 +107,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
         using VideoRegistry registry = new();
         uint videoId = registry.RegisterPath(SpikeVideoPath());
 
-        // 384×384 — typical depth-model input. Source aspect is not preserved.
+        // 384x384 — typical depth-model input. Source aspect is not preserved.
         ValueRef result = await new VideoFrameToImageFunction().ExecuteAsync(
             new[]
             {
@@ -142,7 +142,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
                 default));
     }
 
-    // ─────────────────────── End-to-end SQL ───────────────────────
+    // ——————————————————————— End-to-end SQL ———————————————————————
 
     [Fact]
     public async Task EndToEnd_SelectVideoFrameToImageFromVideoUnnestFrames_DecodesImagesViaQueryEngine()
@@ -152,7 +152,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
         string sql = $"SELECT video_frame_to_image(frame) AS img FROM video_unnest_frames('{videoPath}', 0, 1, 3)";
 
         DatumIngest.Catalog.TableCatalog catalog = CreateCatalog();
-        IQueryPlan plan = catalog.Plan(sql);
+        StatementPlan plan = catalog.Plan(sql);
 
         int rowsSeen = 0;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -181,7 +181,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
         string videoPath = SpikeVideoPath().Replace('\\', '/');
         string sql = $"SELECT video_frame_to_image(frame, 384) AS img FROM video_unnest_frames('{videoPath}', 0, 1, 2)";
         DatumIngest.Catalog.TableCatalog catalog = CreateCatalog();
-        IQueryPlan plan = catalog.Plan(sql);
+        StatementPlan plan = catalog.Plan(sql);
 
         int rowsSeen = 0;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -214,7 +214,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
             "SELECT video_frame_to_image(f.frame, 384) AS img " +
             "FROM videos AS v " +
             "CROSS APPLY video_unnest_frames(v.video, 0, 1, 3) AS f";
-        IQueryPlan plan = catalog.Plan(sql);
+        StatementPlan plan = catalog.Plan(sql);
 
         int rowsSeen = 0;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -231,7 +231,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
         Assert.Equal(3, rowsSeen);
     }
 
-    // ─────────────────────── Helpers ───────────────────────
+    // ——————————————————————— Helpers ———————————————————————
 
     private EvaluationFrame MakeFrameWith(VideoRegistry registry)
     {

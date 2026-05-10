@@ -23,13 +23,13 @@ namespace DatumIngest.Execution.Operators;
 internal sealed class DmlReturningOperator : QueryOperator
 {
     private readonly TableCatalog _catalog;
-    private readonly Func<TableCatalog, Task<IQueryPlan>> _executeAsync;
+    private readonly Func<TableCatalog, Task<StatementPlan>> _executeAsync;
     private readonly string _operatorName;
     private readonly string _explainDetails;
 
     private DmlReturningOperator(
         TableCatalog catalog,
-        Func<TableCatalog, Task<IQueryPlan>> executeAsync,
+        Func<TableCatalog, Task<StatementPlan>> executeAsync,
         string operatorName,
         string explainDetails)
     {
@@ -63,8 +63,14 @@ internal sealed class DmlReturningOperator : QueryOperator
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
-        IQueryPlan innerPlan = await _executeAsync(_catalog).ConfigureAwait(false);
-        await foreach (RowBatch batch in innerPlan.ExecuteAsync(context.CancellationToken)
+        StatementPlan innerPlan = await _executeAsync(_catalog).ConfigureAwait(false);
+        // Forward the enclosing batch context so the inner plan's
+        // accountant + variable scope roll up under the outer query's
+        // lifetime. SelectPlan sets context.BatchContext on every execute
+        // path that reaches a DmlReturningOperator; the borrow-or-own
+        // overload falls back to a fresh BatchContext if it's somehow null.
+        await foreach (RowBatch batch in _catalog
+            .ExecuteAsync(innerPlan, context.BatchContext, context.CancellationToken)
             .ConfigureAwait(false))
         {
             yield return batch;

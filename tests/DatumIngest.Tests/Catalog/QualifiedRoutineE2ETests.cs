@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.LanguageServer;
 using DatumIngest.Manifest;
@@ -34,7 +34,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         catch { /* best-effort */ }
     }
 
-    // ───────────────────── DDL & registration ─────────────────────
+    // ————————————————————— DDL & registration —————————————————————
 
     [Fact]
     public void CreateFunction_Unqualified_LandsInPublic()
@@ -86,7 +86,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         Assert.False(catalog.Udfs.TryGet(new QualifiedName("public", "b"), out _));
     }
 
-    // ───────────────────── Call resolution ─────────────────────
+    // ————————————————————— Call resolution —————————————————————
 
     [Fact]
     public async Task UnqualifiedCall_ResolvesViaSearchPath()
@@ -96,7 +96,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         catalog.Plan("INSERT INTO t VALUES (5)");
         catalog.Plan("CREATE FUNCTION square(x INT32) AS x * x");
 
-        IQueryPlan plan = catalog.Plan("SELECT square(id) FROM t");
+        StatementPlan plan = catalog.Plan("SELECT square(id) FROM t");
         List<int> values = await CollectFirstColumnAsInt32Async(plan);
         Assert.Equal(new[] { 25 }, values);
     }
@@ -110,7 +110,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         catalog.Plan("INSERT INTO t VALUES (3)");
         catalog.Plan("CREATE FUNCTION myapp.dbl(x INT32) AS x + x");
 
-        IQueryPlan plan = catalog.Plan("SELECT myapp.dbl(id) FROM t");
+        StatementPlan plan = catalog.Plan("SELECT myapp.dbl(id) FROM t");
         List<int> values = await CollectFirstColumnAsInt32Async(plan);
         Assert.Equal(new[] { 6 }, values);
     }
@@ -135,7 +135,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE TABLE t (s STRING)");
         catalog.Plan("INSERT INTO t VALUES ('hello')");
 
-        IQueryPlan plan = catalog.Plan("SELECT system.upper(s) FROM t");
+        StatementPlan plan = catalog.Plan("SELECT system.upper(s) FROM t");
         bool sawRow = false;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
@@ -148,7 +148,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         Assert.True(sawRow);
     }
 
-    // ───────────────────── Persistence round-trip ─────────────────────
+    // ————————————————————— Persistence round-trip —————————————————————
 
     [Fact]
     public void Manifest_RoundTripsSchemaAcrossReopen()
@@ -191,7 +191,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         Assert.Contains("Delete the catalog directory", ex.Message);
     }
 
-    // ───────────────────── system.udfs / system.procedures ─────────────────────
+    // ————————————————————— system.udfs / system.procedures —————————————————————
 
     [Fact]
     public async Task SystemUdfs_ExposesSchemaColumn()
@@ -201,7 +201,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE FUNCTION myapp.classify(x INT32) AS x");
         catalog.Plan("CREATE FUNCTION shout(s STRING) AS upper(s)");
 
-        IQueryPlan plan = catalog.Plan("SELECT schema, name FROM system.udfs ORDER BY schema, name");
+        StatementPlan plan = catalog.Plan("SELECT schema, name FROM system.udfs ORDER BY schema, name");
 
         List<(string schema, string name)> rows = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -219,7 +219,7 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         }, rows);
     }
 
-    // ───────────────────── Language server ─────────────────────
+    // ————————————————————— Language server —————————————————————
 
     [Fact]
     public void Lsp_CompletionAfterSchemaDot_OffersUdfsInSchema()
@@ -306,9 +306,9 @@ public sealed class QualifiedRoutineE2ETests : ServiceTestBase, IDisposable
         Assert.Contains("CALL", result.Contents);
     }
 
-    // ───────────────────── Helpers ─────────────────────
+    // ————————————————————— Helpers —————————————————————
 
-    private static async Task<List<int>> CollectFirstColumnAsInt32Async(IQueryPlan plan)
+    private static async Task<List<int>> CollectFirstColumnAsInt32Async(StatementPlan plan)
     {
         List<int> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

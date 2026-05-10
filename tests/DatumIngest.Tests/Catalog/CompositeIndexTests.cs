@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.BTree.MutableBytes;
@@ -38,7 +38,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    // ──────────────────── CREATE INDEX — file lifecycle ────────────────────
+    // ———————————————————— CREATE INDEX — file lifecycle ————————————————————
 
     [Fact]
     public void CreateIndex_SingleColumn_CreatesSidecarFile()
@@ -93,7 +93,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.False(File.Exists(CompositeIndexPath("t", "idx_t_bc")));
     }
 
-    // ──────────────────── IF NOT EXISTS / IF EXISTS ────────────────────
+    // ———————————————————— IF NOT EXISTS / IF EXISTS ————————————————————
 
     [Fact]
     public void CreateIndex_IfNotExists_OnExistingIndex_IsNoOp()
@@ -139,7 +139,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             catalog.Plan("DROP INDEX idx_nonexistent"));
     }
 
-    // ──────────────────── Validation ────────────────────
+    // ———————————————————— Validation ————————————————————
 
     [Fact]
     public void CreateIndex_OnMissingTable_Throws()
@@ -178,7 +178,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
 
             // The planner must now route equality predicates against the
             // backfilled keys through the seek path.
-            IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
+            StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
             values = await CollectFirstColumnInts(plan);
         }
 
@@ -206,11 +206,11 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             catalog.Plan("INSERT INTO t VALUES (3, 30, 300)");
 
             // Backfilled row.
-            IQueryPlan planOld = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
+            StatementPlan planOld = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
             oldRowValues = await CollectFirstColumnInts(planOld);
 
             // Post-CREATE-INDEX INSERT.
-            IQueryPlan planNew = catalog.Plan("SELECT v FROM t WHERE a = 3 AND b = 30");
+            StatementPlan planNew = catalog.Plan("SELECT v FROM t WHERE a = 3 AND b = 30");
             newRowValues = await CollectFirstColumnInts(planNew);
         }
 
@@ -237,7 +237,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             catalog.Plan("CREATE INDEX shared_name ON t2 (a)"));
     }
 
-    // ──────────────────── INSERT maintenance ────────────────────
+    // ———————————————————— INSERT maintenance ————————————————————
 
     [Fact]
     public void Insert_AfterCreateIndex_PopulatesCompositeTree()
@@ -295,7 +295,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(2L, treeStatusCust.EntryCount);
     }
 
-    // ──────────────────── Catalog persistence across reopen ────────────────────
+    // ———————————————————— Catalog persistence across reopen ————————————————————
 
     [Fact]
     public void CreateIndex_SurvivesCatalogReopen()
@@ -324,7 +324,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(2L, tree.EntryCount);
     }
 
-    // ──────────────────── ALTER DROP COLUMN cascade ────────────────────
+    // ———————————————————— ALTER DROP COLUMN cascade ————————————————————
 
     [Fact]
     public void AlterTable_DropColumn_CascadesDependentIndex()
@@ -377,7 +377,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             reopened.Plan("DROP INDEX idx_t_b"));
     }
 
-    // ──────────────────── Phase 3: planner uses composite index ────────────────────
+    // ———————————————————— Phase 3: planner uses composite index ————————————————————
 
     [Fact]
     public async Task Select_FullCompositeMatch_ReturnsCorrectRow()
@@ -398,7 +398,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             "(2, 100, 30.0), " +
             "(2, 200, 40.0)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT amount FROM orders WHERE customer_id = 2 AND product_id = 200");
         List<double> amounts = await CollectFirstColumnDoubles(plan);
 
@@ -417,7 +417,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
         catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (1, 20, 200), (2, 10, 300), (2, 20, 400)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE b = 20 AND a = 1");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE b = 20 AND a = 1");
         List<int> values = await CollectFirstColumnInts(plan);
 
         Assert.Single(values);
@@ -436,7 +436,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
         catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (1, 20, 200), (2, 10, 300)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
         List<int> values = await CollectFirstColumnInts(plan);
 
         values.Sort();
@@ -456,7 +456,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         // Reopen and probe — the rehydrated provider must expose the
         // composite index so the planner can use it.
         using TableCatalog reopened = CreateCatalog(CatalogPath);
-        IQueryPlan plan = reopened.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
+        StatementPlan plan = reopened.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
         List<int> values = await CollectFirstColumnInts(plan);
 
         Assert.Single(values);
@@ -472,13 +472,13 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
         catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (2, 20, 200)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 99 AND b = 99");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 99 AND b = 99");
         List<int> values = await CollectFirstColumnInts(plan);
 
         Assert.Empty(values);
     }
 
-    // ──────────────────── Strategy assertions (EXPLAIN ANALYZE) ────────────────────
+    // ———————————————————— Strategy assertions (EXPLAIN ANALYZE) ————————————————————
 
     [Fact]
     public async Task Select_FullCompositeMatch_FiresExactSeekPath_NotChunkedScan()
@@ -493,7 +493,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
         catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (1, 20, 200), (2, 10, 300), (2, 20, 400)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 20");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 20");
         int? exactSeek = await GetScanExactSeekRowsAsync(plan);
 
         Assert.True(exactSeek.HasValue, "Scan should report an exact-seek count when an index satisfies the predicate.");
@@ -515,7 +515,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             "(1, 10, 110), (1, 20, 120), (1, 30, 130), " +
             "(2, 20, 220), (3, 20, 320)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 20");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 20");
         int? exactSeek = await GetScanExactSeekRowsAsync(plan);
 
         Assert.Equal(1, exactSeek);
@@ -538,7 +538,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             "(1, 10, 110), (1, 20, 120), (1, 30, 130), " +
             "(2, 20, 220)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
         int? exactSeek = await GetScanExactSeekRowsAsync(plan);
 
         // Strategy varies — the per-column auto-built tree on `a` may
@@ -548,7 +548,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.NotEqual(1, exactSeek);
     }
 
-    // ──────────────────── Phase 7: leftmost-prefix matching ────────────────────
+    // ———————————————————— Phase 7: leftmost-prefix matching ————————————————————
 
     [Fact]
     public async Task LeftmostPrefix_SingleColumnOnTwoColumnIndex_MatchesAllRows()
@@ -566,7 +566,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             "(2, 10, 210), (2, 20, 220), " +
             "(3, 30, 330)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
         List<int> values = await CollectFirstColumnInts(plan);
 
         values.Sort();
@@ -590,7 +590,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             "INSERT INTO t VALUES " +
             "(1, 10, 110), (1, 20, 120), (1, 30, 130), (2, 10, 210)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
         int? compositeHits = await GetScanCompositeSeekHitsAsync(plan);
 
         Assert.Equal(3, compositeHits);
@@ -610,7 +610,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
         catalog.Plan("INSERT INTO t VALUES (1, 10, 110), (2, 10, 210), (3, 20, 320)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE b = 10");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE b = 10");
         int? compositeHits = await GetScanCompositeSeekHitsAsync(plan);
 
         Assert.Null(compositeHits);
@@ -634,7 +634,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             "(1, 20, 100, 4), (1, 30, 100, 5), " +
             "(2, 10, 100, 6)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
         int? compositeHits = await GetScanCompositeSeekHitsAsync(plan);
         int? exactSeek = await GetScanExactSeekRowsAsync(plan);
 
@@ -659,7 +659,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             "INSERT INTO t VALUES " +
             "(1, 10, 110), (1, 20, 120), (2, 20, 220)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE b = 20");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE b = 20");
         List<int> values = await CollectFirstColumnInts(plan);
 
         values.Sort();
@@ -680,7 +680,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             "(1, 10, 100, 1), (1, 10, 200, 2), (1, 10, 300, 3), " +
             "(1, 20, 100, 4), (2, 10, 100, 5)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
         List<int> values = await CollectFirstColumnInts(plan);
 
         values.Sort();
@@ -704,14 +704,14 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             "(1, 10, 100, 1), (1, 20, 100, 2), (1, 30, 200, 3), " +
             "(2, 10, 100, 4)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND c = 100");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND c = 100");
         List<int> values = await CollectFirstColumnInts(plan);
 
         values.Sort();
         Assert.Equal(new[] { 1, 2 }, values);
     }
 
-    // ──────────────────── Phase 9: CREATE UNIQUE INDEX ────────────────────
+    // ———————————————————— Phase 9: CREATE UNIQUE INDEX ————————————————————
 
     [Fact]
     public void CreateUniqueIndex_OnEmptyTable_AllowsDistinctInserts()
@@ -851,7 +851,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             reopened.Plan("INSERT INTO users VALUES (2, 'a@example.com')"));
     }
 
-    // ──────────────────── Phase 4: mutation maintenance ────────────────────
+    // ———————————————————— Phase 4: mutation maintenance ————————————————————
 
     [Fact]
     public async Task Delete_RemovesRowFromCompositeIndexResults()
@@ -864,7 +864,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
 
         catalog.Plan("DELETE FROM t WHERE a = 2 AND b = 20");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
         List<int> values = await CollectFirstColumnInts(plan);
 
         Assert.Empty(values);
@@ -882,7 +882,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("DELETE FROM t WHERE a = 2 AND b = 20");
 
         // Non-deleted rows must still be findable via the index.
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
         List<int> values = await CollectFirstColumnInts(plan);
 
         Assert.Single(values);
@@ -903,7 +903,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
 
         catalog.Plan("UPDATE t SET v = 999 WHERE a = 2 AND b = 20");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
         List<int> values = await CollectFirstColumnInts(plan);
 
         Assert.Single(values);
@@ -924,17 +924,17 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
 
         catalog.Plan("UPDATE t SET b = 99 WHERE a = 2 AND b = 20");
 
-        IQueryPlan planNew = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 99");
+        StatementPlan planNew = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 99");
         List<int> newValues = await CollectFirstColumnInts(planNew);
         Assert.Single(newValues);
         Assert.Equal(200, newValues[0]);
 
-        IQueryPlan planOld = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
+        StatementPlan planOld = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
         List<int> oldValues = await CollectFirstColumnInts(planOld);
         Assert.Empty(oldValues);
     }
 
-    // ──────────────────── Weakness coverage (Phase 5c) ────────────────────
+    // ———————————————————— Weakness coverage (Phase 5c) ————————————————————
 
     [Fact]
     public async Task Insert_NullInIndexedColumn_RowSkippedFromCompositeIndex_QueryFallsBackToScan()
@@ -958,12 +958,12 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             // are skipped. Two entries should land in the tree.
             // `WHERE a IS NULL` falls back to scan (planner has no seek
             // for IS NULL); the row is still findable.
-            IQueryPlan planIsNull = catalog.Plan("SELECT v FROM t WHERE a IS NULL");
+            StatementPlan planIsNull = catalog.Plan("SELECT v FROM t WHERE a IS NULL");
             isNullValues = await CollectFirstColumnInts(planIsNull);
 
             // Full composite equality on the non-NULL rows uses the
             // seek path and finds the right one.
-            IQueryPlan planEq = catalog.Plan("SELECT v FROM t WHERE a = 4 AND b = 40");
+            StatementPlan planEq = catalog.Plan("SELECT v FROM t WHERE a = 4 AND b = 40");
             equalityValues = await CollectFirstColumnInts(planEq);
         }
 
@@ -991,7 +991,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
             catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (NULL, 20, 200), (3, NULL, 300), (4, 40, 400)");
             catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
 
-            IQueryPlan planEq = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
+            StatementPlan planEq = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
             equalityValues = await CollectFirstColumnInts(planEq);
         }
 
@@ -1109,11 +1109,11 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
                 "INSERT INTO t VALUES " +
                 "(1, 2, 'foo', 100), (1, 2, 'bar', 200), (1, 3, 'foo', 300)");
 
-            IQueryPlan plan = catalog.Plan(
+            StatementPlan plan = catalog.Plan(
                 "SELECT v FROM t WHERE a = 1 AND b = 2 AND c = 'foo'");
             values = await CollectFirstColumnInts(plan);
 
-            IQueryPlan planForExplain = catalog.Plan(
+            StatementPlan planForExplain = catalog.Plan(
                 "SELECT v FROM t WHERE a = 1 AND b = 2 AND c = 'foo'");
             exactSeek = await GetScanExactSeekRowsAsync(planForExplain);
         }
@@ -1220,7 +1220,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(new[] { 100 }, survived);
     }
 
-    private static async Task<List<int>> CollectFirstColumnInts(IQueryPlan plan)
+    private static async Task<List<int>> CollectFirstColumnInts(StatementPlan plan)
     {
         List<int> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1233,7 +1233,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         return values;
     }
 
-    private static async Task<List<double>> CollectFirstColumnDoubles(IQueryPlan plan)
+    private static async Task<List<double>> CollectFirstColumnDoubles(StatementPlan plan)
     {
         List<double> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1253,9 +1253,9 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
     /// verify the composite index was consulted, not just that the
     /// result rows were correct.
     /// </summary>
-    private static async Task<int?> GetScanExactSeekRowsAsync(IQueryPlan plan)
+    private static async Task<int?> GetScanExactSeekRowsAsync(StatementPlan plan)
     {
-        ExplainPlanNode root = await plan.AnalyzeAsync(CancellationToken.None);
+        ExplainPlanNode root = await AnalyzePlanAsync(plan);
         return FindScanNode(root)?.ExactSeekRowsFetched;
     }
 
@@ -1267,9 +1267,9 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
     /// fewest-positions tiebreak, so this counter is the precise signal that
     /// the composite-index code path was consulted.
     /// </summary>
-    private static async Task<int?> GetScanCompositeSeekHitsAsync(IQueryPlan plan)
+    private static async Task<int?> GetScanCompositeSeekHitsAsync(StatementPlan plan)
     {
-        ExplainPlanNode root = await plan.AnalyzeAsync(CancellationToken.None);
+        ExplainPlanNode root = await AnalyzePlanAsync(plan);
         return FindScanNode(root)?.CompositeIndexSeekHits;
     }
 

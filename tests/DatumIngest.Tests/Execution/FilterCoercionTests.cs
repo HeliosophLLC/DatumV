@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 
@@ -40,7 +40,7 @@ public sealed class FilterCoercionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (d Date, v Int32)");
         catalog.Plan("INSERT INTO t VALUES ('2026-01-01', 100), ('2026-01-02', 200), ('2026-01-03', 300)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE d = '2026-01-02'");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE d = '2026-01-02'");
         List<int> values = await CollectInts(plan);
 
         Assert.Single(values);
@@ -56,7 +56,7 @@ public sealed class FilterCoercionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (d Date, v Int32)");
         catalog.Plan("INSERT INTO t VALUES ('2026-01-01', 100), ('2026-01-02', 200)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE '2026-01-02' = d");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE '2026-01-02' = d");
         List<int> values = await CollectInts(plan);
 
         Assert.Single(values);
@@ -71,7 +71,7 @@ public sealed class FilterCoercionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (d Date, v Int32)");
         catalog.Plan("INSERT INTO t VALUES ('2026-01-01', 100), ('2026-01-05', 500), ('2026-01-10', 1000)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE d < '2026-01-05'");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE d < '2026-01-05'");
         List<int> values = await CollectInts(plan);
 
         Assert.Single(values);
@@ -89,7 +89,7 @@ public sealed class FilterCoercionTests : ServiceTestBase, IAsyncLifetime
             "('11111111-1111-1111-1111-111111111111', 1), " +
             "('22222222-2222-2222-2222-222222222222', 2)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT v FROM t WHERE id = '22222222-2222-2222-2222-222222222222'");
         List<int> values = await CollectInts(plan);
 
@@ -108,13 +108,13 @@ public sealed class FilterCoercionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (d Date, v Int32)");
         catalog.Plan("INSERT INTO t VALUES ('2026-01-01', 100)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE d = 'not-a-date'");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE d = 'not-a-date'");
         List<int> values = await CollectInts(plan);
 
         Assert.Empty(values);
     }
 
-    private static async Task<List<int>> CollectInts(IQueryPlan plan)
+    private static async Task<List<int>> CollectInts(StatementPlan plan)
     {
         List<int> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

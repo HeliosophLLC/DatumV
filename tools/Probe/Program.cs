@@ -292,7 +292,7 @@ for (int sqlIdx = 0; sqlIdx < sqls.Count; sqlIdx++)
             Console.WriteLine($"── SQL {sqlIdx + 1}/{sqls.Count} Run {iter}/{opts.Repeat} {new string('─', 60)}");
         }
 
-    IQueryPlan plan;
+    StatementPlan plan;
     try
     {
         plan = await catalog.PlanAsync(sql);
@@ -311,7 +311,7 @@ for (int sqlIdx = 0; sqlIdx < sqls.Count; sqlIdx++)
 
     try
     {
-        await foreach (RowBatch batch in plan.ExecuteAsync(cts.Token))
+        await foreach (RowBatch batch in catalog.ExecuteAsync(plan, cts.Token))
         {
             for (int i = 0; i < batch.Count; i++)
             {

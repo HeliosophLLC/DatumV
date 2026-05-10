@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 
@@ -29,7 +29,7 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    // ──────────────────── Basic shapes ────────────────────
+    // ———————————————————— Basic shapes ————————————————————
 
     [Fact]
     public async Task Returning_StarExpansion_YieldsPreDeleteImage()
@@ -39,7 +39,7 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
         catalog.Plan("INSERT INTO t (name) VALUES ('alice'), ('bob')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "DELETE FROM t WHERE name = 'alice' RETURNING *");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -60,7 +60,7 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, score Int32)");
         catalog.Plan("INSERT INTO t (score) VALUES (10), (20), (30)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "DELETE FROM t WHERE score > 15 RETURNING id, score");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -79,7 +79,7 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
         catalog.Plan("INSERT INTO t (name) VALUES ('alice')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "DELETE FROM t WHERE id = 1 RETURNING upper(name) AS shouted, id * 100 AS scaled");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -96,7 +96,7 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
         catalog.Plan("INSERT INTO t (name) VALUES ('alice')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "DELETE FROM t WHERE name = 'nobody' RETURNING id");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -113,7 +113,7 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
         catalog.Plan("INSERT INTO t (name) VALUES ('a'), ('b'), ('c')");
 
-        IQueryPlan plan = catalog.Plan("DELETE FROM t RETURNING id, name");
+        StatementPlan plan = catalog.Plan("DELETE FROM t RETURNING id, name");
 
         List<DataValue[]> rows = await CollectRows(plan);
         Assert.Equal(3, rows.Count);
@@ -124,7 +124,7 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(0, catalog["t"].GetRowCount());
     }
 
-    // ──────────────────── No-RETURNING regression ────────────────────
+    // ———————————————————— No-RETURNING regression ————————————————————
 
     [Fact]
     public async Task NoReturning_PlanYieldsNoRows()
@@ -134,14 +134,14 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
         catalog.Plan("INSERT INTO t (name) VALUES ('a')");
 
-        IQueryPlan plan = catalog.Plan("DELETE FROM t WHERE id = 1");
+        StatementPlan plan = catalog.Plan("DELETE FROM t WHERE id = 1");
 
         List<DataValue[]> rows = await CollectRows(plan);
         Assert.Empty(rows);
         Assert.Equal(0, catalog["t"].GetRowCount());
     }
 
-    // ──────────────────── Persistent target ────────────────────
+    // ———————————————————— Persistent target ————————————————————
 
     [Fact]
     public async Task Returning_OnPersistentTable_PreImageValues()
@@ -150,7 +150,7 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE conversations (id Int64 IDENTITY, title String)");
         catalog.Plan("INSERT INTO conversations (title) VALUES ('Old'), ('Keep')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "DELETE FROM conversations WHERE title = 'Old' RETURNING id, title");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -160,13 +160,13 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
 
         // Note: persistent providers report gross row count (includes
         // tombstones), so we verify the post-delete live-row set via SELECT.
-        IQueryPlan postSelect = catalog.Plan("SELECT title FROM conversations");
+        StatementPlan postSelect = catalog.Plan("SELECT title FROM conversations");
         List<DataValue[]> liveRows = await CollectRows(postSelect);
         Assert.Single(liveRows);
         Assert.Equal("Keep", liveRows[0][0].AsString());
     }
 
-    // ──────────────────── Modifying CTE (WITH … DELETE … RETURNING) ────────────────────
+    // ———————————————————— Modifying CTE (WITH … DELETE … RETURNING) ————————————————————
 
     [Fact]
     public async Task ModifyingCte_SelectFromCte_YieldsPreDeleteRows()
@@ -179,7 +179,7 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
         catalog.Plan("INSERT INTO t (name) VALUES ('alice'), ('bob')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "WITH removed AS (" +
             "  DELETE FROM t WHERE name = 'alice' RETURNING id, name" +
             ") " +
@@ -200,7 +200,7 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, score Int32)");
         catalog.Plan("INSERT INTO t (score) VALUES (10), (20), (30)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "WITH removed AS (" +
             "  DELETE FROM t RETURNING id, score" +
             ") " +
@@ -222,7 +222,7 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String, status String)");
         catalog.Plan("INSERT INTO t (name, status) VALUES ('alice', 'pending')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "WITH gone AS (DELETE FROM t RETURNING *) " +
             "SELECT * FROM gone");
 
@@ -251,9 +251,9 @@ public sealed class DeleteReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Contains("RETURNING", ex.Message);
     }
 
-    // ──────────────────── Helpers ────────────────────
+    // ———————————————————— Helpers ————————————————————
 
-    private static async Task<List<DataValue[]>> CollectRows(IQueryPlan plan)
+    private static async Task<List<DataValue[]>> CollectRows(StatementPlan plan)
     {
         List<DataValue[]> rows = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

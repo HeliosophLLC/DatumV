@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
@@ -15,7 +15,7 @@ public sealed class WithinGroupSemanticsTests : ServiceTestBase
 {
     private async Task<List<Row>> RunAsync(TableCatalog catalog, string sql)
     {
-        IQueryPlan plan = catalog.Plan(sql);
+        StatementPlan plan = catalog.Plan(sql);
         DatumIngest.Execution.ExecutionContext ctx =
             CreateExecutionContext(catalog: catalog);
         List<Row> result = new();
@@ -32,7 +32,7 @@ public sealed class WithinGroupSemanticsTests : ServiceTestBase
         return result;
     }
 
-    // ───────── Sort-modifier (STRING_AGG / ARRAY_AGG) ─────────
+    // ————————— Sort-modifier (STRING_AGG / ARRAY_AGG) —————————
 
     /// <summary>
     /// <c>STRING_AGG(expr, sep) WITHIN GROUP (ORDER BY x)</c> ought to use
@@ -78,7 +78,7 @@ public sealed class WithinGroupSemanticsTests : ServiceTestBase
         Assert.Equal(DataKind.Int32, arr.Kind);
     }
 
-    // ───────── Ordered-set (PERCENTILE_*, MODE) ─────────
+    // ————————— Ordered-set (PERCENTILE_*, MODE) —————————
 
     /// <summary>
     /// <c>PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary)</c> — ordered-set
@@ -127,7 +127,7 @@ public sealed class WithinGroupSemanticsTests : ServiceTestBase
         Assert.Equal(9, result[0]["peak"].AsInt32());
     }
 
-    // ───────── NotSupported ─────────
+    // ————————— NotSupported —————————
 
     /// <summary>
     /// Aggregates that don't model <c>WITHIN GROUP</c> reject the clause at

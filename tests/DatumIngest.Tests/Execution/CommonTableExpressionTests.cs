@@ -631,7 +631,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     /// <c>89 50 4E 47</c>).
     ///
     /// <strong>Important</strong>: the bug only surfaces through the
-    /// <c>QueryPlan</c> execution path, which runs
+    /// <c>SelectPlan</c> execution path, which runs
     /// <c>LiteralHoister</c> at plan construction to bake literal values
     /// into a plan-scoped <c>_hoistStore</c> arena. The direct
     /// <see cref="ServiceTestBase.ExecuteQueryAsync"/> path skips that step
@@ -648,7 +648,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             columns: ["n"],
             [0f], [1f], [2f]);
 
-        // Go through TableCatalog.PlanQuery → QueryPlan (internal). QueryPlan's
+        // Go through TableCatalog.PlanQuery → SelectPlan (internal). SelectPlan's
         // constructor runs LiteralHoister, which bakes literals into a
         // plan-scoped arena. This is the same path the Web BatchExecutor uses;
         // the simpler ExecuteQueryAsync path skips LiteralHoister and so does
@@ -672,17 +672,17 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             ") " +
             "SELECT n, arr FROM accumulated");
 
-        IQueryPlan plan = catalog.PlanQuery(query);
+        StatementPlan plan = catalog.PlanQuery(query);
 
         // The arr literal's DataValue carries an offset into the plan's
-        // _hoistStore (which QueryPlan.ExecuteAsync plumbs as context.Store
+        // _hoistStore (which SelectPlan.ExecuteAsync plumbs as context.Store
         // and therefore batch.Arena). The values are only readable while
         // their batch is alive — same constraint the Web layer's
         // QueryStreamService observes. Read+assert inline; don't copy
         // DataValues out and try to resolve them against a different arena.
         float[] expected = [488.91904f, 0f, 200f, 0f, 276.2173f, 112.5f, 0f, 0f, 1f];
         int rowsSeen = 0;
-        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None, batchContext: null))
+        await foreach (RowBatch batch in catalog.ExecuteAsync(plan, CancellationToken.None))
         {
             for (int i = 0; i < batch.Count; i++)
             {

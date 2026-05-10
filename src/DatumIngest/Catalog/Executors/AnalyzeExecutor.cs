@@ -19,7 +19,7 @@ internal static class AnalyzeExecutor
     /// At least one of the two must be supported, otherwise the table can't
     /// meaningfully be analysed.
     /// </summary>
-    public static async Task<IQueryPlan> ExecuteAsync(TableCatalog catalog, AnalyzeTableStatement analyze)
+    public static async Task<StatementPlan> ExecuteAsync(TableCatalog catalog, AnalyzeTableStatement analyze)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(analyze);
@@ -48,6 +48,6 @@ internal static class AnalyzeExecutor
         {
             await provider.RebuildIndexAsync().ConfigureAwait(false);
         }
-        return EmptyQueryPlan.Instance;
+        return DdlPlan.NoOp(catalog, "Analyze");
     }
 }

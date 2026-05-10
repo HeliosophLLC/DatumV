@@ -22,49 +22,74 @@ internal enum DmlReturningKind
 }
 
 /// <summary>
-/// <see cref="IQueryPlan"/> produced by the INSERT / UPDATE / DELETE executors
-/// when the parsed statement carries a <c>RETURNING</c> clause. Holds the
-/// captured row batch from the side-effect path (post-DEFAULT / post-IDENTITY
-/// inserted rows for INSERT, post-update images for UPDATE, pre-delete images
-/// for DELETE), projects each row through the RETURNING expressions, and yields
-/// the projection as one <see cref="RowBatch"/> per captured input batch.
+/// Composer <see cref="StatementPlan"/> for <c>INSERT / UPDATE / DELETE … RETURNING</c>.
+/// Owns a child <see cref="DmlPlan"/> (the side effect — populates a
+/// <see cref="CapturedRowsSource"/> with post-mutation rows) and the
+/// <see cref="CapturedRowsSource"/> itself; projects RETURNING columns
+/// over the captured rows and yields one output <see cref="RowBatch"/>
+/// per captured input batch.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Post-commit semantics.</b> By construction this plan only exists after
-/// the executor's commit has succeeded — the row capture happens after
-/// <see cref="IAppendSession.CommitAsync"/> / <c>UpdateRowsAsync</c> /
-/// <c>DeleteRows</c>. A DML that aborts mid-write throws before the plan is
-/// constructed and never yields rows. Matches PostgreSQL's contract that
-/// RETURNING rows are only observable for committed mutations.
+/// <b>Two construction modes.</b>
+/// </para>
+/// <list type="bullet">
+///   <item>
+///     <term>Composed (planner-time)</term>
+///     <description>Both <c>dmlPlan</c> and <c>capturedSource</c> supplied.
+///     <see cref="ExecuteImplAsync"/> first iterates the
+///     <see cref="DmlPlan"/> (which drains zero rows but populates the
+///     source as a side effect of applying the DML) and then iterates the
+///     source through the RETURNING projection. EXPLAIN sees both children
+///     under this composer node.</description>
+///   </item>
+///   <item>
+///     <term>Post-applied (legacy executor return)</term>
+///     <description>Only <c>capturedSource</c> supplied (the executor
+///     already ran inline and pre-populated it). The DmlPlan iteration is
+///     skipped; the projection iterates the source directly.</description>
+///   </item>
+/// </list>
+/// <para>
+/// <b>Post-commit semantics.</b> By construction the captured rows are
+/// produced only after the executor's commit has succeeded — the row
+/// capture happens after <see cref="IAppendSession.CommitAsync"/> /
+/// <c>UpdateRowsAsync</c> / <c>DeleteRows</c>. A DML that aborts
+/// mid-write throws before the source is populated. Matches PostgreSQL's
+/// contract that RETURNING rows are only observable for committed
+/// mutations.
 /// </para>
 /// <para>
-/// <b>Lifecycle.</b> The plan owns the captured batches (and any arena they
-/// reference) and returns them to the pool via <c>finally</c> in the iterator
-/// regardless of whether the consumer iterates fully, breaks early, or throws.
+/// <b>Lifecycle.</b> The composer owns the captured batches end-to-end
+/// and returns them to the pool via <c>finally</c> in the iterator,
+/// regardless of whether the consumer iterates fully, breaks early, or
+/// throws.
 /// </para>
 /// </remarks>
-internal sealed class DmlReturningPlan : IQueryPlan
+internal sealed class DmlReturningPlan : StatementPlan
 {
     private readonly DmlReturningKind _kind;
     private readonly string _tableName;
     private readonly Schema _targetSchema;
-    private readonly IReadOnlyList<RowBatch> _capturedBatches;
+    private readonly StatementPlan? _dmlPlan;
+    private readonly CapturedRowsSource _capturedSource;
     private readonly IReadOnlyList<SelectColumn> _returningColumns;
     private readonly TableCatalog _catalog;
 
-    public DmlReturningPlan(
+    private DmlReturningPlan(
         DmlReturningKind kind,
         string tableName,
         Schema targetSchema,
-        IReadOnlyList<RowBatch> capturedBatches,
+        StatementPlan? dmlPlan,
+        CapturedRowsSource capturedSource,
         IReadOnlyList<SelectColumn> returningColumns,
         TableCatalog catalog)
     {
         _kind = kind;
         _tableName = tableName;
         _targetSchema = targetSchema;
-        _capturedBatches = capturedBatches;
+        _dmlPlan = dmlPlan;
+        _capturedSource = capturedSource;
         _returningColumns = returningColumns;
         _catalog = catalog;
 
@@ -75,28 +100,94 @@ internal sealed class DmlReturningPlan : IQueryPlan
             DmlReturningKind.Delete => "DELETE",
             _ => "DML",
         };
-        ExplainTree = new ExplainPlanNode
+        ExplainPlanNode tree = new()
         {
             OperatorName = $"{kind}Returning",
-            Details = $"{verb} … RETURNING — applied at plan time; rows yielded post-commit",
+            Details = $"{verb} … RETURNING",
             EstimatedRows = 0,
         };
+        if (dmlPlan is not null)
+        {
+            tree.Children.Add(dmlPlan.ExplainTree);
+        }
+        tree.Children.Add(capturedSource.ExplainTree);
+        ExplainTree = tree;
+    }
+
+    /// <summary>
+    /// Composer-mode construction: the <paramref name="dmlPlan"/> applies
+    /// the side effect on iterate and populates <paramref name="capturedSource"/>;
+    /// the projection then reads from the source. Used by
+    /// <see cref="TableCatalog.PlanAsync(string)"/> for INSERT / UPDATE /
+    /// DELETE … RETURNING.
+    /// </summary>
+    public static DmlReturningPlan Compose(
+        DmlReturningKind kind,
+        string tableName,
+        Schema targetSchema,
+        StatementPlan dmlPlan,
+        CapturedRowsSource capturedSource,
+        IReadOnlyList<SelectColumn> returningColumns,
+        TableCatalog catalog)
+    {
+        ArgumentNullException.ThrowIfNull(dmlPlan);
+        ArgumentNullException.ThrowIfNull(capturedSource);
+        return new DmlReturningPlan(kind, tableName, targetSchema, dmlPlan, capturedSource, returningColumns, catalog);
+    }
+
+    /// <summary>
+    /// Legacy post-applied constructor. The executor has already run and
+    /// supplied the captured batches as a list; this overload wraps them
+    /// in a <see cref="CapturedRowsSource"/> internally. Used by the
+    /// eager <see cref="TableCatalog.ExecuteStatementAsync(string)"/>
+    /// path, where the side effect runs before the plan is built.
+    /// </summary>
+    public DmlReturningPlan(
+        DmlReturningKind kind,
+        string tableName,
+        Schema targetSchema,
+        IReadOnlyList<RowBatch> capturedBatches,
+        IReadOnlyList<SelectColumn> returningColumns,
+        TableCatalog catalog)
+        : this(kind, tableName, targetSchema, dmlPlan: null,
+               capturedSource: PrepopulateSource(catalog, capturedBatches),
+               returningColumns, catalog)
+    {
+    }
+
+    private static CapturedRowsSource PrepopulateSource(TableCatalog catalog, IReadOnlyList<RowBatch> batches)
+    {
+        CapturedRowsSource source = new(catalog);
+        foreach (RowBatch b in batches) source.Capture(b);
+        return source;
     }
 
     /// <inheritdoc />
-    public ExplainPlanNode ExplainTree { get; }
+    public override ExplainPlanNode ExplainTree { get; }
 
     /// <inheritdoc />
-    public Task<ExplainPlanNode> AnalyzeAsync(CancellationToken cancellationToken)
-        => Task.FromResult(ExplainTree);
+    public override TableCatalog Catalog => _catalog;
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(
+    protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext? batchContext)
+        BatchContext batchContext)
     {
-        _ = batchContext;
         cancellationToken.ThrowIfCancellationRequested();
+
+        // Composed mode: drain the child DmlPlan so its side effect runs
+        // and populates _capturedSource. The plan yields zero rows; we
+        // discard the loop body. Post-applied mode (legacy) skips this —
+        // the source was already populated externally.
+        if (_dmlPlan is not null)
+        {
+            await foreach (RowBatch _ in _dmlPlan
+                .ExecuteAsync(cancellationToken, batchContext)
+                .ConfigureAwait(false))
+            {
+                // DmlPlan yields nothing; this body is unreachable in practice.
+            }
+        }
 
         // Expand RETURNING to a flat list of (output column name, expression).
         // SelectAllColumns expands to every target column in declared order;
@@ -108,17 +199,23 @@ internal sealed class DmlReturningPlan : IQueryPlan
         // batch's arena (Source) and writes new ones into the corresponding
         // output batch's arena (Target). RETURNING expressions can reference
         // any captured column; outer rows / variables are not in scope.
-        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(accountant: batchContext?.Accountant,
-            types: batchContext?.Types, cancellationToken: cancellationToken);
+        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(
+            accountant: batchContext.Accountant,
+            types: batchContext.Types,
+            cancellationToken: cancellationToken);
         ExpressionEvaluator evaluator = context.CreateEvaluator();
 
         // Yield one output batch per captured input batch — preserves the
         // streaming shape of INSERT … SELECT (each source RowBatch becomes
         // one RETURNING RowBatch). VALUES has a single captured batch and
-        // therefore yields a single output batch.
+        // therefore yields a single output batch. We pull from
+        // CapturedRowsSource.Batches directly so the composer can own
+        // end-to-end disposal (iterating the source's ExecuteAsync would
+        // mark it executed and prevent the disposal pass below).
+        IReadOnlyList<RowBatch> captured = _capturedSource.Batches;
         try
         {
-            foreach (RowBatch capturedBatch in _capturedBatches)
+            foreach (RowBatch capturedBatch in captured)
             {
                 Arena outArena = new();
                 RowBatch outBatch = _catalog.Pool.RentRowBatch(
@@ -141,7 +238,7 @@ internal sealed class DmlReturningPlan : IQueryPlan
 
                 // Convention: consumer owns the batch after yield and is
                 // responsible for returning it to the pool. The outer
-                // QueryPlan wrapper / CTE materialiser does this. We
+                // SelectPlan wrapper / CTE materialiser does this. We
                 // intentionally do NOT return outBatch here.
                 yield return outBatch;
             }
@@ -151,9 +248,9 @@ internal sealed class DmlReturningPlan : IQueryPlan
             // Captured input batches are private to this plan — never
             // yielded out — so we own their lifecycle end-to-end. Return
             // them to the pool when iteration finishes (success or throw).
-            foreach (RowBatch captured in _capturedBatches)
+            foreach (RowBatch captured_ in captured)
             {
-                _catalog.Pool.ReturnRowBatch(captured);
+                _catalog.Pool.ReturnRowBatch(captured_);
             }
         }
     }

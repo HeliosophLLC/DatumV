@@ -36,8 +36,7 @@ public sealed record CellStartedBatchEvent(string CellId, string Kind) : BatchEv
 /// <summary>
 /// One <see cref="RowBatch"/> produced by a query/exec cell. The batch is
 /// live until the next event is emitted; consumers must process rows
-/// synchronously inside the event handler. Same auto-return contract as
-/// <see cref="IQueryPlan.ExecuteAsync(CancellationToken)"/>.
+/// synchronously inside the event handler.
 /// </summary>
 public sealed record CellRowBatchEvent(string CellId, RowBatch Batch) : BatchEvent;
 
@@ -134,30 +133,6 @@ public sealed class BatchExecutor
     /// of 32 levels of nested stored-procedure calls.
     /// </summary>
     public const int MaxProcedureCallDepth = 32;
-
-    /// <summary>
-    /// Internal control-flow signal raised by <see cref="BreakStatement"/>.
-    /// Caught by the innermost enclosing loop. If it escapes all loops the
-    /// batch / procedure entry points convert it to a clear
-    /// <see cref="InvalidOperationException"/>. Singleton for zero allocation.
-    /// </summary>
-    private sealed class LoopBreakSignal : Exception
-    {
-        public static readonly LoopBreakSignal Instance = new();
-        private LoopBreakSignal() : base("BREAK outside of a loop.") { }
-    }
-
-    /// <summary>
-    /// Internal control-flow signal raised by <see cref="ContinueStatement"/>.
-    /// Caught by the innermost enclosing loop's per-iteration wrapper. If it
-    /// escapes all loops the batch / procedure entry points convert it to a
-    /// clear <see cref="InvalidOperationException"/>.
-    /// </summary>
-    private sealed class LoopContinueSignal : Exception
-    {
-        public static readonly LoopContinueSignal Instance = new();
-        private LoopContinueSignal() : base("CONTINUE outside of a loop.") { }
-    }
 
     private readonly TableCatalog _catalog;
 
@@ -296,7 +271,7 @@ public sealed class BatchExecutor
     /// <strong>Row batch lifetime.</strong> A <see cref="CellRowBatchEvent"/>
     /// carries a <see cref="RowBatch"/> that is live for the duration of
     /// the <paramref name="onEvent"/> invocation. The auto-return
-    /// contract from <see cref="IQueryPlan.ExecuteAsync(CancellationToken)"/>
+    /// contract from <see cref="StatementPlan.ExecuteAsync(CancellationToken, BatchContext)"/>
     /// applies — the batch is recycled when the next event fires.
     /// </para>
     /// </remarks>
@@ -721,10 +696,10 @@ public sealed class BatchExecutor
                     // DROP / ALTER / ANALYZE / REINDEX for tables and
                     // functions / procedures), and all DML (INSERT /
                     // UPDATE / DELETE) — flows through TableCatalog.Plan.
-                    // Mutation/DDL statements return EmptyQueryPlan
-                    // (their work happened as a side effect of Plan);
-                    // query forms return a real plan whose batches stream
-                    // out as CellRowBatchEvents.
+                    // DDL plans (DdlPlan) apply their side effect on the
+                    // first ExecuteAsync iteration and yield zero rows;
+                    // DML plans apply side effects + yield RETURNING rows
+                    // when present; query plans stream their result.
                     //
                     // Aligning here means new statement types only need a
                     // case in TableCatalog.Plan — BatchExecutor picks them
@@ -733,18 +708,15 @@ public sealed class BatchExecutor
                     // CREATE PROCEDURE round-trip through catalog
                     // persistence.
                     {
-                        IQueryPlan plan = await _catalog.PlanAsync(stmt, sourceText, batchContext).ConfigureAwait(false);
-                        if (plan is not EmptyQueryPlan)
+                        StatementPlan plan = await _catalog.PlanAsync(stmt, sourceText, batchContext).ConfigureAwait(false);
+                        await foreach (RowBatch batch in plan
+                            .ExecuteAsync(ct, batchContext)
+                            .ConfigureAwait(false))
                         {
-                            await foreach (RowBatch batch in plan
-                                .ExecuteAsync(ct, batchContext)
-                                .ConfigureAwait(false))
-                            {
-                                await onEvent(new CellRowBatchEvent(cellId, batch)).ConfigureAwait(false);
-                                // Memory samples flow from the sidecar timer in
-                                // RunWithEventsAsync at 1Hz regardless of batch
-                                // cadence; no per-batch sample needed here.
-                            }
+                            await onEvent(new CellRowBatchEvent(cellId, batch)).ConfigureAwait(false);
+                            // Memory samples flow from the sidecar timer in
+                            // RunWithEventsAsync at 1Hz regardless of batch
+                            // cadence; no per-batch sample needed here.
                         }
                         break;
                     }
@@ -882,33 +854,7 @@ public sealed class BatchExecutor
     /// distinguish "missing" from the literal text "null".
     /// </summary>
     private static string? RenderForPrint(DataValue value, IValueStore store)
-    {
-        if (value.IsNull) return null;
-        object? managed = value.Kind switch
-        {
-            DataKind.Boolean => value.AsBoolean(),
-            DataKind.UInt8 => value.AsUInt8(),
-            DataKind.Int8 => value.AsInt8(),
-            DataKind.Int16 => value.AsInt16(),
-            DataKind.UInt16 => value.AsUInt16(),
-            DataKind.Int32 => value.AsInt32(),
-            DataKind.UInt32 => value.AsUInt32(),
-            DataKind.Int64 => value.AsInt64(),
-            DataKind.UInt64 => value.AsUInt64(),
-            DataKind.Float32 => value.AsFloat32(),
-            DataKind.Float64 => value.AsFloat64(),
-            DataKind.String => value.AsString(store),
-            _ => (object?)value,
-        };
-        return managed switch
-        {
-            null => null,
-            bool b => b ? "true" : "false",
-            string s => s,
-            IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
-            _ => managed.ToString(),
-        };
-    }
+        => ProceduralEvaluator.RenderForPrint(value, store);
 
     private async Task ExecuteDeclareAsync(
         DeclareStatement decl, BatchContext batchContext, CancellationToken ct)
@@ -965,14 +911,8 @@ public sealed class BatchExecutor
     /// Byte payloads materialise into managed memory so the binding survives
     /// any future arena recycle; inline scalars pass through unchanged.
     /// </summary>
-    private ValueRef LiftBoundaryValue(DataValue value, BatchContext batchContext)
-    {
-        using ExecutionContext context = _catalog.CreateExecutionContext(store: batchContext.VariableStore,
-            types: batchContext.Types,
-            accountant: batchContext.Accountant);
-        EvaluationFrame boundary = new(Row.Empty, batchContext.VariableStore, context);
-        return ExpressionEvaluator.ToValueRef(value, boundary);
-    }
+    private static ValueRef LiftBoundaryValue(DataValue value, BatchContext batchContext)
+        => ProceduralEvaluator.LiftBoundaryValue(value, batchContext);
 
     /// <summary>
     /// Returns the minimum required argument count for a procedure call:
@@ -1228,7 +1168,7 @@ public sealed class BatchExecutor
         BatchContext batchContext,
         CancellationToken ct)
     {
-        IQueryPlan plan = await _catalog.PlanAsync(statement, sourceText: null, batchContext).ConfigureAwait(false);
+        StatementPlan plan = await _catalog.PlanAsync(statement, sourceText: null, batchContext).ConfigureAwait(false);
 
         // Reuse one ExecutionContext across every row of every batch — the
         // ambient state (registries, accountant, types) is stable for the
@@ -1455,7 +1395,7 @@ public sealed class BatchExecutor
         CancellationToken ct)
     {
         QueryStatement sourceQuery = new(forIn.Source);
-        IQueryPlan plan = await _catalog.PlanAsync(sourceQuery, sourceText: null, batchContext).ConfigureAwait(false);
+        StatementPlan plan = await _catalog.PlanAsync(sourceQuery, sourceText: null, batchContext).ConfigureAwait(false);
 
         IReadOnlyList<string>? fieldNames = null;
         ushort rowTypeId = 0;
@@ -1568,236 +1508,6 @@ public sealed class BatchExecutor
         };
     }
 
-    /// <summary>
-    /// Walks <paramref name="expression"/> and replaces every
-    /// <see cref="SubqueryExpression"/> with a <see cref="LiteralExpression"/>
-    /// holding the result of executing the inner SELECT. Each inner SELECT is
-    /// run through the catalog's normal plan path with <paramref name="batchContext"/>
-    /// threaded so <c>@var</c> references inside the subquery resolve against
-    /// the procedural variable scope. Recurses through the common composable
-    /// expression types so subqueries hidden inside arithmetic, casts, or
-    /// function arguments still get folded.
-    /// </summary>
-    /// <remarks>
-    /// Currently descends through <see cref="BinaryExpression"/>,
-    /// <see cref="UnaryExpression"/>, <see cref="CastExpression"/>,
-    /// <see cref="IsNullExpression"/>, <see cref="FunctionCallExpression"/>,
-    /// <see cref="InExpression"/>, <see cref="BetweenExpression"/>, and
-    /// <see cref="CaseExpression"/>. Other shapes pass through unchanged —
-    /// extend the walker as new procedural patterns demand it.
-    /// </remarks>
-    private async Task<Expression> PrefoldSubqueriesAsync(
-        Expression expression, BatchContext batchContext, CancellationToken ct)
-    {
-        switch (expression)
-        {
-            case SubqueryExpression subquery:
-                return await FoldOneSubqueryAsync(subquery, batchContext, ct).ConfigureAwait(false);
-
-            case CastExpression cast:
-            {
-                Expression inner = await PrefoldSubqueriesAsync(cast.Expression, batchContext, ct)
-                    .ConfigureAwait(false);
-                return ReferenceEquals(inner, cast.Expression)
-                    ? cast
-                    : new CastExpression(inner, cast.TargetType, cast.Span);
-            }
-
-            case BinaryExpression binary:
-            {
-                Expression left = await PrefoldSubqueriesAsync(binary.Left, batchContext, ct)
-                    .ConfigureAwait(false);
-                Expression right = await PrefoldSubqueriesAsync(binary.Right, batchContext, ct)
-                    .ConfigureAwait(false);
-                return ReferenceEquals(left, binary.Left) && ReferenceEquals(right, binary.Right)
-                    ? binary
-                    : new BinaryExpression(left, binary.Operator, right);
-            }
-
-            case UnaryExpression unary:
-            {
-                Expression operand = await PrefoldSubqueriesAsync(unary.Operand, batchContext, ct)
-                    .ConfigureAwait(false);
-                return ReferenceEquals(operand, unary.Operand)
-                    ? unary
-                    : new UnaryExpression(unary.Operator, operand);
-            }
-
-            case IsNullExpression isNull:
-            {
-                Expression inner = await PrefoldSubqueriesAsync(isNull.Expression, batchContext, ct)
-                    .ConfigureAwait(false);
-                return ReferenceEquals(inner, isNull.Expression)
-                    ? isNull
-                    : new IsNullExpression(inner, isNull.Negated);
-            }
-
-            case FunctionCallExpression fn:
-            {
-                Expression[]? rewrittenArgs = null;
-                for (int i = 0; i < fn.Arguments.Count; i++)
-                {
-                    Expression rewritten = await PrefoldSubqueriesAsync(fn.Arguments[i], batchContext, ct)
-                        .ConfigureAwait(false);
-                    if (!ReferenceEquals(rewritten, fn.Arguments[i]))
-                    {
-                        rewrittenArgs ??= [.. fn.Arguments];
-                        rewrittenArgs[i] = rewritten;
-                    }
-                }
-                return rewrittenArgs is null
-                    ? fn
-                    : new FunctionCallExpression(fn.FunctionName, rewrittenArgs, fn.OrderBy, fn.Distinct, fn.Span, fn.WithinGroupOrderBy);
-            }
-
-            case InExpression inExpr:
-            {
-                Expression target = await PrefoldSubqueriesAsync(inExpr.Expression, batchContext, ct)
-                    .ConfigureAwait(false);
-                Expression[]? rewrittenValues = null;
-                for (int i = 0; i < inExpr.Values.Count; i++)
-                {
-                    Expression rewritten = await PrefoldSubqueriesAsync(inExpr.Values[i], batchContext, ct)
-                        .ConfigureAwait(false);
-                    if (!ReferenceEquals(rewritten, inExpr.Values[i]))
-                    {
-                        rewrittenValues ??= [.. inExpr.Values];
-                        rewrittenValues[i] = rewritten;
-                    }
-                }
-                return ReferenceEquals(target, inExpr.Expression) && rewrittenValues is null
-                    ? inExpr
-                    : new InExpression(target, rewrittenValues ?? inExpr.Values, inExpr.Negated);
-            }
-
-            case BetweenExpression between:
-            {
-                Expression target = await PrefoldSubqueriesAsync(between.Expression, batchContext, ct)
-                    .ConfigureAwait(false);
-                Expression low = await PrefoldSubqueriesAsync(between.Low, batchContext, ct)
-                    .ConfigureAwait(false);
-                Expression high = await PrefoldSubqueriesAsync(between.High, batchContext, ct)
-                    .ConfigureAwait(false);
-                return ReferenceEquals(target, between.Expression)
-                    && ReferenceEquals(low, between.Low)
-                    && ReferenceEquals(high, between.High)
-                    ? between
-                    : new BetweenExpression(target, low, high, between.Negated);
-            }
-
-            case CaseExpression caseExpr:
-            {
-                Expression? operand = caseExpr.Operand;
-                if (operand is not null)
-                {
-                    operand = await PrefoldSubqueriesAsync(operand, batchContext, ct)
-                        .ConfigureAwait(false);
-                }
-                WhenClause[]? rewrittenClauses = null;
-                for (int i = 0; i < caseExpr.WhenClauses.Count; i++)
-                {
-                    WhenClause clause = caseExpr.WhenClauses[i];
-                    Expression cond = await PrefoldSubqueriesAsync(clause.Condition, batchContext, ct)
-                        .ConfigureAwait(false);
-                    Expression result = await PrefoldSubqueriesAsync(clause.Result, batchContext, ct)
-                        .ConfigureAwait(false);
-                    if (!ReferenceEquals(cond, clause.Condition) || !ReferenceEquals(result, clause.Result))
-                    {
-                        rewrittenClauses ??= [.. caseExpr.WhenClauses];
-                        rewrittenClauses[i] = new WhenClause(cond, result);
-                    }
-                }
-                Expression? elseResult = caseExpr.ElseResult;
-                if (elseResult is not null)
-                {
-                    elseResult = await PrefoldSubqueriesAsync(elseResult, batchContext, ct)
-                        .ConfigureAwait(false);
-                }
-                bool unchanged = ReferenceEquals(operand, caseExpr.Operand)
-                    && rewrittenClauses is null
-                    && ReferenceEquals(elseResult, caseExpr.ElseResult);
-                return unchanged
-                    ? caseExpr
-                    : new CaseExpression(operand, rewrittenClauses ?? caseExpr.WhenClauses, elseResult, caseExpr.Span);
-            }
-
-            default:
-                return expression;
-        }
-    }
-
-    /// <summary>
-    /// Plans + executes the inner SELECT of a <see cref="SubqueryExpression"/>
-    /// and returns a <see cref="LiteralExpression"/> wrapping its single-row
-    /// single-column result. Mirrors SQL standard scalar-subquery semantics:
-    /// zero rows → NULL literal, more than one row → error.
-    /// </summary>
-    private async Task<Expression> FoldOneSubqueryAsync(
-        SubqueryExpression subquery, BatchContext batchContext, CancellationToken ct)
-    {
-        QueryStatement innerStatement = new(new SelectQueryExpression(subquery.Query));
-        IQueryPlan innerPlan = await _catalog.PlanAsync(innerStatement, sourceText: null, batchContext).ConfigureAwait(false);
-
-        DataValue captured = default;
-        bool haveValue = false;
-        bool tooManyRows = false;
-        await foreach (RowBatch batch in innerPlan
-            .ExecuteAsync(ct, batchContext)
-            .ConfigureAwait(false))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                ct.ThrowIfCancellationRequested();
-                if (haveValue)
-                {
-                    tooManyRows = true;
-                    break;
-                }
-                Row row = batch[i];
-                if (row.FieldCount != 1)
-                {
-                    throw new InvalidOperationException(
-                        $"Scalar subquery must return exactly one column, but returned {row.FieldCount}.");
-                }
-                // Stabilise into the procedure-lifetime store before the
-                // producing arena recycles on the next iteration.
-                captured = DataValueRetention.Stabilize(
-                    row[0], batch.Arena, batchContext.VariableStore);
-                haveValue = true;
-            }
-            if (tooManyRows) break;
-        }
-
-        if (tooManyRows)
-        {
-            throw new InvalidOperationException(
-                "Scalar subquery returned more than one row.");
-        }
-
-        if (!haveValue || captured.IsNull)
-        {
-            return new LiteralExpression(null);
-        }
-
-        // Materialise the DataValue into a CLR object suitable for
-        // LiteralExpression. The synthesise-SELECT path will re-pack via
-        // the literal lowerer, so primitives flow back through the engine
-        // without needing arena access.
-        object literal = captured.Kind switch
-        {
-            DataKind.Int8 => (object)(sbyte)captured.AsInt8(),
-            DataKind.Int16 => captured.AsInt16(),
-            DataKind.Int32 => captured.AsInt32(),
-            DataKind.Int64 => captured.AsInt64(),
-            DataKind.UInt8 => (sbyte)captured.AsUInt8(),
-            DataKind.Float32 => captured.AsFloat32(),
-            DataKind.Float64 => captured.AsFloat64(),
-            DataKind.String => captured.AsString(),
-            DataKind.Boolean => captured.AsBoolean(),
-            _ => captured.ToFloat(),
-        };
-        return new LiteralExpression(literal);
-    }
 
     /// <summary>
     /// Evaluates <paramref name="expression"/> by synthesising
@@ -1817,55 +1527,13 @@ public sealed class BatchExecutor
     /// <c>SET @x = (SELECT max(v) FROM t) + 1</c>, etc. — by running each
     /// inner SELECT through the same engine the user query path uses.
     /// </remarks>
-    private async Task<DataValue> EvaluateScalarAsync(
+    private Task<DataValue> EvaluateScalarAsync(
         Expression expression, BatchContext batchContext, CancellationToken ct)
-    {
-        Expression rewritten = await PrefoldSubqueriesAsync(expression, batchContext, ct)
-            .ConfigureAwait(false);
+        => ProceduralEvaluator.EvaluateScalarAsync(expression, batchContext, ct);
 
-        QueryStatement synthetic = new(
-            new SelectQueryExpression(
-                new SelectStatement(Columns: [new SelectColumn(rewritten)])));
-        IQueryPlan plan = await _catalog.PlanAsync(synthetic, sourceText: null, batchContext).ConfigureAwait(false);
-
-        DataValue stable = default;
-        bool captured = false;
-        await foreach (RowBatch batch in plan
-            .ExecuteAsync(ct, batchContext)
-            .ConfigureAwait(false))
-        {
-            if (captured) continue; // drain remainder; auto-pool happens on iteration
-            if (batch.Count > 0)
-            {
-                // Stabilise into the variable store while the producing
-                // arena is still alive (current batch's lifetime).
-                stable = DataValueRetention.Stabilize(
-                    batch[0][0], batch.Arena, batchContext.VariableStore);
-                captured = true;
-            }
-        }
-
-        if (!captured)
-        {
-            throw new InvalidOperationException(
-                "Procedural expression evaluation produced zero rows; expected exactly one.");
-        }
-        return stable;
-    }
-
-    private async Task<bool> EvaluatePredicateAsync(
+    private Task<bool> EvaluatePredicateAsync(
         Expression expression, BatchContext batchContext, CancellationToken ct)
-    {
-        DataValue value = await EvaluateScalarAsync(expression, batchContext, ct).ConfigureAwait(false);
-        // Three-valued logic: NULL is false for control-flow purposes,
-        // matching T-SQL (which treats NULL as "unknown" → branch not taken).
-        if (value.IsNull) return false;
-        if (value.Kind == DataKind.Boolean) return value.AsBoolean();
-
-        throw new InvalidOperationException(
-            $"Procedural predicate evaluated to {value.Kind} rather than Boolean. " +
-            "IF / WHILE predicates must be boolean-valued expressions.");
-    }
+        => ProceduralEvaluator.EvaluatePredicateAsync(expression, batchContext, ct);
 
     private static Dictionary<string, object?> SnapshotRootBindings(BatchContext batchContext)
     {

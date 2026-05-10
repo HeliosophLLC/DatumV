@@ -19,7 +19,7 @@ internal static class TableExecutor
     /// file for persistent), registers it with the catalog, and persists
     /// the entry in the catalog json (persistent only).
     /// </summary>
-    public static async Task<IQueryPlan> CreateTableAsync(
+    public static async Task<StatementPlan> CreateTableAsync(
         TableCatalog catalog, CreateTableStatement create, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
@@ -40,7 +40,7 @@ internal static class TableExecutor
 
         if (catalog.HasTable(existenceCheckName))
         {
-            if (create.IfNotExists) return EmptyQueryPlan.Instance;
+            if (create.IfNotExists) return DdlPlan.NoOp(catalog, "Table");
             throw new InvalidOperationException(
                 $"Table '{create.TableName}' already exists.");
         }
@@ -63,7 +63,7 @@ internal static class TableExecutor
             catalog.Add(new InMemoryTableProvider(catalog.Pool, create.TableName, schema));
             catalog.Events.Raise(new TableCreatedEvent(
                 new QualifiedName("public", create.TableName), schema, sourceText));
-            return EmptyQueryPlan.Instance;
+            return DdlPlan.NoOp(catalog, "Table");
         }
 
         // AT 'path' is no longer supported — table files always land at
@@ -97,7 +97,7 @@ internal static class TableExecutor
             create.PrimaryKeyConstraintName);
 
         catalog.Events.Raise(new TableCreatedEvent(qn, schema, sourceText));
-        return EmptyQueryPlan.Instance;
+        return DdlPlan.NoOp(catalog, "Table");
     }
 
     /// <summary>
@@ -106,7 +106,7 @@ internal static class TableExecutor
     /// <c>.datum</c> file (and companion sidecars), and updates the
     /// catalog json. <c>IF EXISTS</c> suppresses the not-found error.
     /// </summary>
-    public static IQueryPlan DropTable(TableCatalog catalog, DropTableStatement drop, string? sourceText = null)
+    public static StatementPlan DropTable(TableCatalog catalog, DropTableStatement drop, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(drop);
@@ -127,12 +127,12 @@ internal static class TableExecutor
 
         if (!catalog.TryResolveBackend(qn.Schema, out ITableCatalog? backend) || !backend.DropTable(qn))
         {
-            if (drop.IfExists) return EmptyQueryPlan.Instance;
+            if (drop.IfExists) return DdlPlan.NoOp(catalog, "Table");
             throw new InvalidOperationException(
                 $"Table '{drop.TableName}' is not registered in the catalog.");
         }
 
         catalog.Events.Raise(new TableDroppedEvent(qn, beforeSchema, sourceText));
-        return EmptyQueryPlan.Instance;
+        return DdlPlan.NoOp(catalog, "Table");
     }
 }

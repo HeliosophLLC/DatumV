@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar.Image;
@@ -50,12 +50,12 @@ public sealed class ImageToTensorChwFunctionTests : ServiceTestBase
         return (float[])result.Materialized!;
     }
 
-    // ─── Presets (SQL surface) ───────────────────────────────────────────────
+    // ——— Presets (SQL surface) ———————————————————————————————————————————————
 
     private async Task<float[]> CollectPresetAsync(string sql)
     {
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan plan = catalog.Plan(sql);
+        StatementPlan plan = catalog.Plan(sql);
         float[]? result = null;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
@@ -98,13 +98,13 @@ public sealed class ImageToTensorChwFunctionTests : ServiceTestBase
         Assert.Equal([0.26862954f, 0.26130258f, 0.27577711f], values);
     }
 
-    // ─── image_to_tensor_chw (direct invocation) ────────────────────────────
+    // ——— image_to_tensor_chw (direct invocation) ————————————————————————————
 
     [Fact]
     public async Task ImageToTensor_TwoArg_DividesPixelsBy255AndLaysOutNCHW()
     {
-        // Solid 2×2 RGB=(100, 200, 50). NCHW with N=1 gives a 12-element
-        // [R×4, G×4, B×4] layout.
+        // Solid 2x2 RGB=(100, 200, 50). NCHW with N=1 gives a 12-element
+        // [Rx4, Gx4, Bx4] layout.
         using SKBitmap bmp = SolidBitmap(2, 2, 100, 200, 50);
 
         float[] result = await InvokeAsync(ValueRef.FromImage(bmp), Int32Array(2, 2));
@@ -121,7 +121,7 @@ public sealed class ImageToTensorChwFunctionTests : ServiceTestBase
     [Fact]
     public async Task ImageToTensor_FourArg_AppliesMeanStdNormalize()
     {
-        // 1×1 RGB=(128, 64, 200) with mean=[0.5,0.5,0.5], std=[0.5,0.5,0.5] —
+        // 1x1 RGB=(128, 64, 200) with mean=[0.5,0.5,0.5], std=[0.5,0.5,0.5] —
         // symmetric normalize, easy mental math.
         using SKBitmap bmp = SolidBitmap(1, 1, 128, 64, 200);
 
@@ -140,7 +140,7 @@ public sealed class ImageToTensorChwFunctionTests : ServiceTestBase
     [Fact]
     public async Task ImageToTensor_ComposesWithImagenetValues()
     {
-        // 1×1 grey RGB=(127, 127, 127) with hand-typed ImageNet mean/std.
+        // 1x1 grey RGB=(127, 127, 127) with hand-typed ImageNet mean/std.
         // Cross-checks the math you'd get by combining image_to_tensor_chw with
         // imagenet_mean() / imagenet_std() at the SQL surface.
         using SKBitmap bmp = SolidBitmap(1, 1, 127, 127, 127);
@@ -160,7 +160,7 @@ public sealed class ImageToTensorChwFunctionTests : ServiceTestBase
     [Fact]
     public async Task ImageToTensor_ResizesToTargetDimensions()
     {
-        // 8×8 source → 224×224 target. Output must be 3 × 224 × 224 floats.
+        // 8x8 source → 224x224 target. Output must be 3 x 224 x 224 floats.
         using SKBitmap bmp = SolidBitmap(8, 8, 200, 200, 200);
 
         float[] result = await InvokeAsync(ValueRef.FromImage(bmp), Int32Array(224, 224));

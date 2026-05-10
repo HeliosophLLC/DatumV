@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Execution;
 using DatumIngest.Inference;
@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.Inference.Cpu;
 
 /// <summary>
 /// End-to-end test for the SQL-defined U²-Net Lite (u2netp) salient-object
-/// segmentation model. Picks the lite variant (~5 MB, ~10× faster than
+/// segmentation model. Picks the lite variant (~5 MB, ~10x faster than
 /// full u2net) for CI cycle time; full u2net shares the same SQL body
 /// modulo the ONNX path so coverage of one variant covers the other's
 /// composition.
@@ -114,8 +114,8 @@ public sealed class U2NetpSqlE2ETests : ServiceTestBase
 
         catalog.Plan(LoadCanonicalSql());
 
-        // 400×300 input — depth_map_to_image should resize the 320×320
-        // network-resolution mask back to 400×300.
+        // 400x300 input — depth_map_to_image should resize the 320x320
+        // network-resolution mask back to 400x300.
         using SKBitmap bmp = MakeSyntheticImage(width: 400, height: 300);
         using SKData encoded = SKImage.FromBitmap(bmp).Encode(SKEncodedImageFormat.Png, 90);
         byte[] imageBytes = encoded.ToArray();
@@ -127,7 +127,7 @@ public sealed class U2NetpSqlE2ETests : ServiceTestBase
             [DataKind.Image],
             [new object?[] { imageBytes }]));
 
-        IQueryPlan plan = catalog.Plan("SELECT models.u2netp(img) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.u2netp(img) FROM data");
 
         bool sawRow = false;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

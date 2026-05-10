@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Execution;
@@ -46,7 +46,7 @@ public sealed class SearchPathTests : ServiceTestBase, IDisposable
         // doesn't live in public.
         using TableCatalog catalog = CreateCatalog(_catalogPath);
 
-        IQueryPlan plan = catalog.Plan("SELECT name FROM udfs");
+        StatementPlan plan = catalog.Plan("SELECT name FROM udfs");
         // Just exercise execution; udfs is empty so we just need a clean
         // run with no resolution error.
         int rowCount = 0;
@@ -64,7 +64,7 @@ public sealed class SearchPathTests : ServiceTestBase, IDisposable
         using TableCatalog catalog = CreateCatalog(_catalogPath);
         catalog.Plan("CREATE TABLE users (id Int32)");
 
-        IQueryPlan plan = catalog.Plan("SELECT id FROM users");
+        StatementPlan plan = catalog.Plan("SELECT id FROM users");
         await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         // No exception is the success criterion.
     }
@@ -120,7 +120,7 @@ public sealed class SearchPathTests : ServiceTestBase, IDisposable
 
         // Even with default search_path that includes system, an explicit
         // qualifier goes straight to the named schema.
-        IQueryPlan plan = catalog.Plan("SELECT name FROM system.udfs");
+        StatementPlan plan = catalog.Plan("SELECT name FROM system.udfs");
         Assert.NotNull(plan);
     }
 

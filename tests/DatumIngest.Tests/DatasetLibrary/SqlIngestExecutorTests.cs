@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.IO.Compression;
 
 using DatumIngest.Catalog;
@@ -175,7 +175,7 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
         TableCatalog readback = CreateCatalog();
         readback.AddFile(destPath, name: "clips");
 
-        IQueryPlan plan = await readback.ExecuteStatementAsync("SELECT utt_id, clip FROM clips");
+        StatementPlan plan = await readback.ExecuteStatementAsync("SELECT utt_id, clip FROM clips");
         int seen = 0;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
@@ -222,7 +222,7 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
         Assert.Equal(1, result.RowCount);
     }
 
-    // ───────────────────────── Helpers ─────────────────────────
+    // ————————————————————————— Helpers —————————————————————————
 
     private static void BuildZip(string path, IReadOnlyList<(string name, byte[] bytes)> entries)
     {

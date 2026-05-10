@@ -32,8 +32,43 @@ namespace DatumIngest.Catalog.Executors;
 /// </remarks>
 internal static class InsertExecutor
 {
-    public static async Task<IQueryPlan> ExecuteAsync(
+    public static Task<StatementPlan> ExecuteAsync(
         TableCatalog catalog, InsertStatement insert, BatchContext? batchContext = null)
+        => ExecuteAsync(catalog, insert, preplannedSource: null, captureSink: null, batchContext);
+
+    /// <summary>
+    /// Source-plan-aware overload used by <see cref="Plans.DmlPlan.ForInsert"/>:
+    /// the source query is planned at <c>PlanAsync</c> time and threaded in
+    /// here so the planner-time / executor-time split is enforced and the
+    /// composed EXPLAIN tree shows the SELECT subtree under the INSERT
+    /// node. Pass <see langword="null"/> for <c>VALUES</c> /
+    /// <c>DEFAULT VALUES</c> insertion (no source query to compose); the
+    /// SELECT path will fall back to <see cref="TableCatalog.PlanQuery"/>
+    /// for back-compat with callers that haven't been migrated.
+    /// </summary>
+    public static Task<StatementPlan> ExecuteAsync(
+        TableCatalog catalog,
+        InsertStatement insert,
+        StatementPlan? preplannedSource,
+        BatchContext? batchContext = null)
+        => ExecuteAsync(catalog, insert, preplannedSource, captureSink: null, batchContext);
+
+    /// <summary>
+    /// Primary overload. When <paramref name="captureSink"/> is non-null,
+    /// post-mutation captured rows are routed into it (for a wrapping
+    /// <see cref="Plans.DmlReturningPlan"/> composer to project over) and
+    /// the executor returns <see cref="DdlPlan.NoOp"/>. When the sink is
+    /// null, behavior matches the legacy contract: a
+    /// <see cref="Plans.DmlReturningPlan"/> is constructed post-hoc from
+    /// the internal captured list (when RETURNING is set) or
+    /// <see cref="DdlPlan.NoOp"/> is returned otherwise.
+    /// </summary>
+    public static async Task<StatementPlan> ExecuteAsync(
+        TableCatalog catalog,
+        InsertStatement insert,
+        StatementPlan? preplannedSource,
+        Plans.CapturedRowsSource? captureSink,
+        BatchContext? batchContext = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(insert);
@@ -70,7 +105,10 @@ internal static class InsertExecutor
         }
 
         Schema targetSchema = provider.GetSchema();
-        bool captureRows = insert.Returning is not null;
+        // Capture is needed whenever the caller wants the post-mutation
+        // rows — either to project RETURNING (legacy path) or to feed a
+        // wrapping DmlReturningPlan composer through the sink.
+        bool captureRows = insert.Returning is not null || captureSink is not null;
         IReadOnlyList<RowBatch>? captured;
 
         switch (insert.Source)
@@ -104,7 +142,7 @@ internal static class InsertExecutor
 
             case InsertQuerySource queryRow:
                 captured = await ApplySelectAsync(
-                    catalog, provider, targetSchema, insert.ColumnNames, queryRow, captureRows, batchContext)
+                    catalog, provider, targetSchema, insert.ColumnNames, queryRow, preplannedSource, captureRows, batchContext)
                     .ConfigureAwait(false);
                 break;
 
@@ -113,7 +151,17 @@ internal static class InsertExecutor
                     $"Unrecognised INSERT source: {insert.Source.GetType().Name}.");
         }
 
-        if (captured is null) return EmptyQueryPlan.Instance;
+        if (captured is null) return DdlPlan.NoOp(catalog, "Insert", "no rows captured");
+
+        // Composer path: pour captured batches into the supplied sink so
+        // the parent DmlReturningPlan can project them. No DmlReturningPlan
+        // is constructed here — the caller (DmlPlan apply) discards our
+        // return value.
+        if (captureSink is not null)
+        {
+            foreach (RowBatch batch in captured) captureSink.Capture(batch);
+            return DdlPlan.NoOp(catalog, "Insert", "captured rows routed to composer sink");
+        }
 
         return new DmlReturningPlan(
             DmlReturningKind.Insert,
@@ -350,6 +398,7 @@ internal static class InsertExecutor
         Schema targetSchema,
         IReadOnlyList<string>? columnList,
         InsertQuerySource source,
+        StatementPlan? preplannedSource,
         bool captureRows,
         BatchContext? batchContext)
     {
@@ -359,7 +408,11 @@ internal static class InsertExecutor
         // ExecutionContext and accounts there. The accountant here is only
         // needed for the per-row DEFAULT-evaluation frames built below.
         MemoryAccountant accountant = batchContext is not null ? batchContext.Accountant : new MemoryAccountant();
-        IQueryPlan sourcePlan = catalog.PlanQuery(source.Query);
+        // Use the pre-planned source if DmlPlan.ForInsert supplied one
+        // (the composed-EXPLAIN path); otherwise fall back to planning
+        // here so the legacy InsertExecutor.ExecuteAsync(catalog, insert,
+        // batchContext) entry point still works.
+        StatementPlan sourcePlan = preplannedSource ?? catalog.PlanQuery(source.Query);
         ColumnLookup targetLookup = BuildTargetLookup(targetSchema);
 
         // PK uniqueness check — built once against the pre-INSERT
@@ -380,7 +433,7 @@ internal static class InsertExecutor
         try
         {
             await foreach (RowBatch sourceBatch in
-                sourcePlan.ExecuteAsync(CancellationToken.None).ConfigureAwait(false))
+                catalog.ExecuteAsync(sourcePlan, batchContext, CancellationToken.None).ConfigureAwait(false))
             {
                 if (sourceBatch.Count == 0) continue;
 
@@ -1480,7 +1533,7 @@ internal static class InsertExecutor
     private static async Task<Expression> FoldOneSubqueryAsync(
         SubqueryExpression subquery, TableCatalog catalog, CancellationToken ct)
     {
-        IQueryPlan innerPlan = catalog.PlanQuery(new SelectQueryExpression(subquery.Query));
+        StatementPlan innerPlan = catalog.PlanQuery(new SelectQueryExpression(subquery.Query));
 
         DataValue captured = default;
         bool haveValue = false;
@@ -1488,7 +1541,7 @@ internal static class InsertExecutor
         Arena foldArena = new();
         try
         {
-            await foreach (RowBatch batch in innerPlan.ExecuteAsync(ct).ConfigureAwait(false))
+            await foreach (RowBatch batch in catalog.ExecuteAsync(innerPlan, ct).ConfigureAwait(false))
             {
                 for (int i = 0; i < batch.Count; i++)
                 {

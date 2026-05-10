@@ -20,7 +20,7 @@ internal static class IndexExecutor
     /// <c>.datum-cindex-{name}</c> sidecar (and backfill it from existing
     /// rows), records the index in the catalog descriptor, and persists.
     /// </summary>
-    public static async Task<IQueryPlan> CreateIndexAsync(
+    public static async Task<StatementPlan> CreateIndexAsync(
         TableCatalog catalog, CreateIndexStatement create, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
@@ -43,7 +43,7 @@ internal static class IndexExecutor
         {
             if (create.IfNotExists && existingOwner.Equals(tableQn))
             {
-                return EmptyQueryPlan.Instance;
+                return DdlPlan.NoOp(catalog, "Index");
             }
             throw new InvalidOperationException(
                 $"Index '{create.IndexName}' already exists" +
@@ -93,7 +93,7 @@ internal static class IndexExecutor
         backend.RegisterIndex(tableQn, descriptor);
 
         catalog.Events.Raise(new IndexCreatedEvent(tableQn, descriptor, sourceText));
-        return EmptyQueryPlan.Instance;
+        return DdlPlan.NoOp(catalog, "Index");
     }
 
     private static IndexKind ResolveCreateIndexKind(CreateIndexStatement create)
@@ -235,7 +235,7 @@ internal static class IndexExecutor
     /// run after this see acceleration restored. In-memory tables have
     /// no acceleration sidecar, so REINDEX rejects them.
     /// </summary>
-    public static async Task<IQueryPlan> ReindexAsync(TableCatalog catalog, ReindexTableStatement reindex)
+    public static async Task<StatementPlan> ReindexAsync(TableCatalog catalog, ReindexTableStatement reindex)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(reindex);
@@ -256,7 +256,7 @@ internal static class IndexExecutor
         }
 
         await provider.RebuildIndexAsync().ConfigureAwait(false);
-        return EmptyQueryPlan.Instance;
+        return DdlPlan.NoOp(catalog, "Index");
     }
 
     /// <summary>
@@ -265,7 +265,7 @@ internal static class IndexExecutor
     /// <c>.datum-cindex-{name}</c> sidecar, removes the catalog entry, and
     /// persists.
     /// </summary>
-    public static IQueryPlan DropIndex(TableCatalog catalog, DropIndexStatement drop, string? sourceText = null)
+    public static StatementPlan DropIndex(TableCatalog catalog, DropIndexStatement drop, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(drop);
@@ -276,7 +276,7 @@ internal static class IndexExecutor
         // index-name-to-owning-table.
         if (!flatFile.TryGetIndexOwner(drop.IndexName, out QualifiedName tableName))
         {
-            if (drop.IfExists) return EmptyQueryPlan.Instance;
+            if (drop.IfExists) return DdlPlan.NoOp(catalog, "Index");
             throw new InvalidOperationException(
                 $"Index '{drop.IndexName}' is not registered in the catalog.");
         }
@@ -287,7 +287,7 @@ internal static class IndexExecutor
             // cleaning up the index map. Defensively remove the stale entry
             // and persist.
             flatFile.UnregisterIndex(drop.IndexName, out _);
-            if (drop.IfExists) return EmptyQueryPlan.Instance;
+            if (drop.IfExists) return DdlPlan.NoOp(catalog, "Index");
             throw new InvalidOperationException(
                 $"Index '{drop.IndexName}' references missing table '{tableName}'.");
         }
@@ -313,6 +313,6 @@ internal static class IndexExecutor
         flatFile.UnregisterIndex(drop.IndexName, out _);
 
         catalog.Events.Raise(new IndexDroppedEvent(tableName, descriptor, sourceText));
-        return EmptyQueryPlan.Instance;
+        return DdlPlan.NoOp(catalog, "Index");
     }
 }

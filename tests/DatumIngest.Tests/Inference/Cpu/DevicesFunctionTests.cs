@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Inference;
 using DatumIngest.Inference.OnnxRuntime;
 using DatumIngest.Model;
@@ -26,7 +26,7 @@ public sealed class DevicesFunctionTests : ServiceTestBase
 
     private record DeviceRow(string Backend, string Device, bool Available, string Reason, int EstimatedVramMb);
 
-    private static async Task<List<DeviceRow>> CollectRowsAsync(IQueryPlan plan)
+    private static async Task<List<DeviceRow>> CollectRowsAsync(StatementPlan plan)
     {
         List<DeviceRow> rows = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -49,7 +49,7 @@ public sealed class DevicesFunctionTests : ServiceTestBase
     public async Task Devices_OnnxRuntime_AlwaysIncludesCpuAvailable()
     {
         TableCatalog catalog = CreateCatalogWithDispatcher();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT backend, device, available, reason, estimated_vram_mb FROM inference.devices()");
 
         List<DeviceRow> rows = await CollectRowsAsync(plan);
@@ -64,7 +64,7 @@ public sealed class DevicesFunctionTests : ServiceTestBase
     public async Task Devices_EmitsRowsForEveryRecognisedDevice()
     {
         TableCatalog catalog = CreateCatalogWithDispatcher();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT backend, device, available, reason, estimated_vram_mb FROM inference.devices()");
 
         List<DeviceRow> rows = await CollectRowsAsync(plan);
@@ -81,7 +81,7 @@ public sealed class DevicesFunctionTests : ServiceTestBase
     public async Task Devices_UnreachableDevices_CarryReason()
     {
         TableCatalog catalog = CreateCatalogWithDispatcher();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT backend, device, available, reason, estimated_vram_mb FROM inference.devices() WHERE available = false");
 
         List<DeviceRow> rows = await CollectRowsAsync(plan);

@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 
@@ -33,7 +33,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    // ──────────────────── Happy path ────────────────────
+    // ———————————————————— Happy path ————————————————————
 
     [Fact]
     public async Task InsertValues_PositionalSingleRow_VisibleViaScan()
@@ -100,7 +100,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.True(rows[0][1].IsNull);
     }
 
-    // ──────────────────── VARCHAR / CHAR width enforcement ────────────────────
+    // ———————————————————— VARCHAR / CHAR width enforcement ————————————————————
 
     [Fact]
     public async Task InsertValues_VarcharWithinLimit_Stored()
@@ -185,7 +185,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.True(rows[0][0].IsNull);
     }
 
-    // ──────────────────── DEFAULT-fill (PR10b's payoff) ────────────────────
+    // ———————————————————— DEFAULT-fill (PR10b's payoff) ————————————————————
 
     [Fact]
     public async Task InsertValues_OmittedColumnWithDefault_FillsWithDefault()
@@ -236,7 +236,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(-1, rows[0][1].AsInt32());
     }
 
-    // ──────────────────── Numeric coercion ────────────────────
+    // ———————————————————— Numeric coercion ————————————————————
 
     [Fact]
     public async Task InsertValues_LiteralWidensFromInt8ToInt32()
@@ -309,7 +309,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(5f, rows[0][0].AsFloat32());
     }
 
-    // ──────────────────── 128-bit literal coercion ────────────────────
+    // ———————————————————— 128-bit literal coercion ————————————————————
 
     [Fact]
     public async Task InsertValues_SmallLiteralIntoInt128_Widens()
@@ -385,7 +385,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.Contains("Int64", ex.Message);
     }
 
-    // ──────────────────── Temporal / Decimal coercion ────────────────────
+    // ———————————————————— Temporal / Decimal coercion ————————————————————
 
     [Fact]
     public async Task InsertValues_NowExpression_StoresCurrentDateTime()
@@ -429,7 +429,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(1234m, rows[0][0].AsDecimal());
     }
 
-    // ──────────────────── Subqueries in VALUES ────────────────────
+    // ———————————————————— Subqueries in VALUES ————————————————————
 
     [Fact]
     public async Task InsertValues_ScalarSubquery_FoldsAtPlanTime()
@@ -499,7 +499,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.Contains("more than one row", ex.Message);
     }
 
-    // ──────────────────── Validation ────────────────────
+    // ———————————————————— Validation ————————————————————
 
     [Fact]
     public void InsertValues_RowArityMismatch_Throws()
@@ -607,7 +607,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(DataKind.Int32, scores.Kind);
     }
 
-    // ──────────────────── FixedShape array enforcement ────────────────────
+    // ———————————————————— FixedShape array enforcement ————————————————————
 
     [Fact]
     public async Task InsertValues_FixedShapeArrayMatchingLength_Succeeds()
@@ -711,7 +711,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
     // INSERT SELECT (the PR10c'-NotYetSupported case) — covered in
     // InsertSelectTests now that the path ships.
 
-    // ──────────────────── Persistent table ────────────────────
+    // ———————————————————— Persistent table ————————————————————
 
     [Fact]
     public async Task InsertValues_OnPersistentTable_VisibleAcrossReopen()
@@ -758,7 +758,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.Contains("nope", ex.Message);
     }
 
-    // ──────────────────── Helpers ────────────────────
+    // ———————————————————— Helpers ————————————————————
 
     /// <summary>Reads back (Int32, String) rows in scan order.</summary>
     private static async Task<List<(int id, string name)>> ScanAsTuples(ITableProvider provider)
@@ -822,7 +822,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         return rows;
     }
 
-    // ──────────────────── DEFAULT keyword in VALUES ────────────────────
+    // ———————————————————— DEFAULT keyword in VALUES ————————————————————
 
     [Fact]
     public async Task InsertValues_DefaultKeyword_ResolvesViaColumnDefault()
@@ -930,7 +930,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         Assert.Contains("note", ex.Message);
     }
 
-    // ──────────────────── INSERT … DEFAULT VALUES ────────────────────
+    // ———————————————————— INSERT … DEFAULT VALUES ————————————————————
     //
     // PG-compatible shorthand: "INSERT INTO t DEFAULT VALUES" inserts
     // exactly one row, treating every column as omitted. Each column's
@@ -1043,7 +1043,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         }
     }
 
-    // ──────────────────── QA probes: DEFAULT VALUES edge cases ────────────────────
+    // ———————————————————— QA probes: DEFAULT VALUES edge cases ————————————————————
 
     [Fact]
     public void InsertDefaultValues_ColumnListSupplied_RejectsBeforeAnyWrite()
@@ -1191,7 +1191,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan(
             "CREATE TEMP TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY, status String DEFAULT 'new')");
 
-        IQueryPlan plan = catalog.Plan("INSERT INTO t DEFAULT VALUES RETURNING *");
+        StatementPlan plan = catalog.Plan("INSERT INTO t DEFAULT VALUES RETURNING *");
 
         List<DataValue[]> rows = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

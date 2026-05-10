@@ -1053,7 +1053,7 @@ public sealed class JoinOperator : QueryOperator
 
             // Return the stabilised right-side row buffers to the pool. Under
             // one-arena-per-query the underlying payloads live in context.Store
-            // (owned by the QueryPlan), so this only releases the DataValue[]
+            // (owned by the SelectPlan), so this only releases the DataValue[]
             // rentals — not the values they reference.
             rightRows.Return();
         }

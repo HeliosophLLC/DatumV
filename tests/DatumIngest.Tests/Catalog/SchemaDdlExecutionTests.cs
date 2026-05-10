@@ -198,7 +198,7 @@ public sealed class SchemaDdlExecutionTests : ServiceTestBase, IDisposable
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'models'");
         // The presence of the schema in the projection is what the test
         // asserts; the actual row enumeration is covered by the

@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
@@ -335,9 +335,46 @@ public abstract class ServiceTestBase : IDisposable
         return await plan.CollectRowsAsync(context);
     }
 
-    protected static IAsyncEnumerable<RowBatch> ExecutePlanAsync(IQueryPlan plan, CancellationToken cancellationToken = default)
+    protected static IAsyncEnumerable<RowBatch> ExecutePlanAsync(
+        TableCatalog catalog,
+        StatementPlan plan,
+        CancellationToken cancellationToken = default)
     {
-        return plan.ExecuteAsync(cancellationToken);
+        return catalog.ExecuteAsync(plan, cancellationToken);
+    }
+
+    /// <summary>
+    /// Catalog-less overload: discovers the catalog from the plan's
+    /// <see cref="StatementPlan.Catalog"/> back-reference and delegates to
+    /// the catalog-explicit overload. Used by static test helpers that
+    /// have the plan but not the catalog in scope.
+    /// </summary>
+    protected static IAsyncEnumerable<RowBatch> ExecutePlanAsync(
+        StatementPlan plan,
+        CancellationToken cancellationToken = default)
+    {
+        TableCatalog catalog = (plan as StatementPlan)?.Catalog
+            ?? throw new InvalidOperationException(
+                $"ExecutePlanAsync(plan): plan of type {plan.GetType().Name} has no catalog " +
+                "back-reference. Use ExecutePlanAsync(catalog, plan, ct) and pass the catalog explicitly.");
+        return catalog.ExecuteAsync(plan, cancellationToken);
+    }
+
+    /// <summary>
+    /// EXPLAIN ANALYZE helper that mirrors
+    /// <see cref="ExecutePlanAsync(StatementPlan, CancellationToken)"/>:
+    /// discovers the catalog from the plan and runs the instrumented
+    /// analyze through the catalog's "batch of one" helper.
+    /// </summary>
+    protected static Task<ExplainPlanNode> AnalyzePlanAsync(
+        StatementPlan plan,
+        CancellationToken cancellationToken = default)
+    {
+        TableCatalog catalog = (plan as StatementPlan)?.Catalog
+            ?? throw new InvalidOperationException(
+                $"AnalyzePlanAsync(plan): plan of type {plan.GetType().Name} has no catalog " +
+                "back-reference. Build a BatchContext and call plan.AnalyzeAsync(ct, batchContext) directly.");
+        return catalog.AnalyzeAsync(plan, cancellationToken);
     }
 
     public virtual void Dispose()

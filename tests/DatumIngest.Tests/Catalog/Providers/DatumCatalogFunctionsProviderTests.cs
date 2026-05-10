@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
@@ -22,7 +22,7 @@ public sealed class DatumCatalogFunctionsProviderTests : ServiceTestBase
 
         // SELECT body_scope, function_name FROM datum_catalog.functions
         // WHERE function_name = 'infer'
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT body_scope FROM datum_catalog.functions WHERE function_name = 'infer'");
 
         List<string> values = new();
@@ -45,7 +45,7 @@ public sealed class DatumCatalogFunctionsProviderTests : ServiceTestBase
 
         // upper() is a vanilla scalar — must report 'none' so users filtering
         // for callable-anywhere functions (the default expectation) get it.
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT body_scope FROM datum_catalog.functions WHERE function_name = 'upper'");
 
         List<string> values = new();

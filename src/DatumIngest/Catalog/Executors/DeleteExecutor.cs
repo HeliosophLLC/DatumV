@@ -24,8 +24,25 @@ namespace DatumIngest.Catalog.Executors;
 /// </remarks>
 internal static class DeleteExecutor
 {
-    public static async Task<IQueryPlan> ExecuteAsync(
+    public static Task<StatementPlan> ExecuteAsync(
         TableCatalog catalog, DeleteStatement delete, BatchContext? batchContext = null)
+        => ExecuteAsync(catalog, delete, captureSink: null, batchContext);
+
+    /// <summary>
+    /// Primary overload. When <paramref name="captureSink"/> is non-null,
+    /// pre-delete captured rows are routed into it (for a wrapping
+    /// <see cref="Plans.DmlReturningPlan"/> composer to project over) and
+    /// the executor returns <see cref="DdlPlan.NoOp"/>. When the sink is
+    /// null, behavior matches the legacy contract: a
+    /// <see cref="Plans.DmlReturningPlan"/> is constructed post-hoc from
+    /// the internal captured list (when RETURNING is set) or
+    /// <see cref="DdlPlan.NoOp"/> is returned otherwise.
+    /// </summary>
+    public static async Task<StatementPlan> ExecuteAsync(
+        TableCatalog catalog,
+        DeleteStatement delete,
+        Plans.CapturedRowsSource? captureSink,
+        BatchContext? batchContext = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(delete);
@@ -57,7 +74,15 @@ internal static class DeleteExecutor
 
         if (captured is null || delete.Returning is null)
         {
-            return EmptyQueryPlan.Instance;
+            return DdlPlan.NoOp(catalog, "Delete", "no matching rows");
+        }
+
+        // Composer path: route captured rows into the sink for a wrapping
+        // DmlReturningPlan to project.
+        if (captureSink is not null)
+        {
+            foreach (RowBatch batch in captured) captureSink.Capture(batch);
+            return DdlPlan.NoOp(catalog, "Delete", "captured rows routed to composer sink");
         }
 
         return new DmlReturningPlan(

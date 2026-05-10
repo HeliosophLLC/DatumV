@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 
 using DatumIngest.Catalog;
@@ -91,7 +91,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         File.WriteAllText(_mergesPath, "", Encoding.UTF8);
     }
 
-    private static async Task<long[]> CollectFirstArrayAsync(IQueryPlan plan)
+    private static async Task<long[]> CollectFirstArrayAsync(StatementPlan plan)
     {
         long[]? result = null;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -107,7 +107,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         return result!;
     }
 
-    private static async Task<string> CollectFirstStringAsync(IQueryPlan plan)
+    private static async Task<string> CollectFirstStringAsync(StatementPlan plan)
     {
         string? result = null;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -127,7 +127,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     public async Task Encode_TokenizerJson_SegmentsKnownString()
     {
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT tokenizer.encode('hello', 'file://{_tokenizerJsonPath}')");
 
         long[] ids = await CollectFirstArrayAsync(plan);
@@ -140,9 +140,9 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     public async Task Encode_BpeForm_AgreesWithTokenizerJsonForm()
     {
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan planJson = catalog.Plan(
+        StatementPlan planJson = catalog.Plan(
             $"SELECT tokenizer.encode('cat dog', 'file://{_tokenizerJsonPath}')");
-        IQueryPlan planBpe = catalog.Plan(
+        StatementPlan planBpe = catalog.Plan(
             $"SELECT tokenizer.encode_bpe('cat dog', 'file://{_vocabJsonPath}', 'file://{_mergesPath}')");
 
         long[] idsJson = await CollectFirstArrayAsync(planJson);
@@ -162,12 +162,12 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         // round-trip property without whitespace keeps the assertion
         // independent of pre-tokenizer choice.
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan encodePlan = catalog.Plan(
+        StatementPlan encodePlan = catalog.Plan(
             $"SELECT tokenizer.encode('helloworld', 'file://{_tokenizerJsonPath}')");
         long[] ids = await CollectFirstArrayAsync(encodePlan);
 
         string idLiteral = "[" + string.Join(", ", ids.Select(id => $"CAST({id} AS Int64)")) + "]";
-        IQueryPlan decodePlan = catalog.Plan(
+        StatementPlan decodePlan = catalog.Plan(
             $"SELECT tokenizer.decode({idLiteral}, 'file://{_tokenizerJsonPath}')");
 
         string decoded = await CollectFirstStringAsync(decodePlan);
@@ -178,12 +178,12 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     public async Task EncodeDecode_RoundTrips_BpeForm()
     {
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan encodePlan = catalog.Plan(
+        StatementPlan encodePlan = catalog.Plan(
             $"SELECT tokenizer.encode_bpe('helloworld', 'file://{_vocabJsonPath}', 'file://{_mergesPath}')");
         long[] ids = await CollectFirstArrayAsync(encodePlan);
 
         string idLiteral = "[" + string.Join(", ", ids.Select(id => $"CAST({id} AS Int64)")) + "]";
-        IQueryPlan decodePlan = catalog.Plan(
+        StatementPlan decodePlan = catalog.Plan(
             $"SELECT tokenizer.decode_bpe({idLiteral}, 'file://{_vocabJsonPath}', 'file://{_mergesPath}')");
 
         string decoded = await CollectFirstStringAsync(decodePlan);
@@ -196,7 +196,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     /// Per-cell function failures get wrapped with a positional context;
     /// the diagnostic users want comes from the inner exception.
     /// </summary>
-    private static async Task<Exception> CaptureRootExceptionAsync(IQueryPlan plan)
+    private static async Task<Exception> CaptureRootExceptionAsync(StatementPlan plan)
     {
         Exception thrown = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
@@ -211,7 +211,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     public async Task Encode_RelativePath_ThrowsClearError()
     {
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT tokenizer.encode('hello', 'tokenizer.json')");
 
         Exception root = await CaptureRootExceptionAsync(plan);
@@ -223,7 +223,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     {
         TableCatalog catalog = CreateCatalog();
         string missing = Path.Combine(_tmpDir, "does-not-exist.json");
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT tokenizer.encode('hello', 'file://{missing}')");
 
         Exception root = await CaptureRootExceptionAsync(plan);
@@ -240,7 +240,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         // Field names match RoBERTa ONNX inputs (input_ids + attention_mask
         // only — no token_type_ids unlike BERT).
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan idsPlan = catalog.Plan(
+        StatementPlan idsPlan = catalog.Plan(
             $"SELECT tokenizer.encode_roberta('abc', 'file://{_tokenizerJsonPath}')['input_ids']");
         long[] inputIds = await CollectFirstArrayAsync(idsPlan);
 
@@ -253,7 +253,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         Assert.Equal(2L, inputIds[2]); // 'b'
         Assert.Equal(3L, inputIds[3]); // 'c'
 
-        IQueryPlan maskPlan = catalog.Plan(
+        StatementPlan maskPlan = catalog.Plan(
             $"SELECT tokenizer.encode_roberta('abc', 'file://{_tokenizerJsonPath}')['attention_mask']");
         long[] mask = await CollectFirstArrayAsync(maskPlan);
 
@@ -265,7 +265,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     public async Task EncodeRoberta_EmptyText_StillEmitsBosEosOnly()
     {
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT tokenizer.encode_roberta('', 'file://{_tokenizerJsonPath}')['input_ids']");
         long[] inputIds = await CollectFirstArrayAsync(plan);
 
@@ -311,17 +311,17 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         WriteBertVocab(bertVocab);
 
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan idsPlan = catalog.Plan(
+        StatementPlan idsPlan = catalog.Plan(
             $"SELECT tokenizer.encode_bert_pair('ab', 'cd', 'file://{bertVocab}')['input_ids']");
         long[] ids = await CollectFirstArrayAsync(idsPlan);
         Assert.Equal(new long[] { 2, 5, 32, 3, 7, 34, 3 }, ids);
 
-        IQueryPlan maskPlan = catalog.Plan(
+        StatementPlan maskPlan = catalog.Plan(
             $"SELECT tokenizer.encode_bert_pair('ab', 'cd', 'file://{bertVocab}')['attention_mask']");
         long[] mask = await CollectFirstArrayAsync(maskPlan);
         Assert.Equal(new long[] { 1, 1, 1, 1, 1, 1, 1 }, mask);
 
-        IQueryPlan typePlan = catalog.Plan(
+        StatementPlan typePlan = catalog.Plan(
             $"SELECT tokenizer.encode_bert_pair('ab', 'cd', 'file://{bertVocab}')['token_type_ids']");
         long[] types = await CollectFirstArrayAsync(typePlan);
         Assert.Equal(new long[] { 0, 0, 0, 0, 1, 1, 1 }, types);
@@ -336,7 +336,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         WriteBertVocab(bertVocab);
 
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT tokenizer.encode_bert_pair('a', 'b', 'file://{bertVocab}')['input_ids']");
         long[] ids = await CollectFirstArrayAsync(plan);
 
@@ -355,11 +355,11 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         WriteBertVocab(bertVocab);
 
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan idsPlan = catalog.Plan(
+        StatementPlan idsPlan = catalog.Plan(
             $"SELECT tokenizer.encode_bert_pair('aa bb', 'cc', 'file://{bertVocab}')['input_ids']");
         long[] ids = await CollectFirstArrayAsync(idsPlan);
 
-        IQueryPlan typePlan = catalog.Plan(
+        StatementPlan typePlan = catalog.Plan(
             $"SELECT tokenizer.encode_bert_pair('aa bb', 'cc', 'file://{bertVocab}')['token_type_ids']");
         long[] types = await CollectFirstArrayAsync(typePlan);
 
@@ -382,7 +382,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         WriteBertVocab(bertVocab);
 
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT tokenizer.encode_bert_pair(CAST(NULL AS String), 'cd', 'file://{bertVocab}') IS NULL");
         DataValue? value = null;
         foreach (RowBatch batch in ExecutePlanAsync(plan)
@@ -402,7 +402,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
             """{"version":"1.0","model":{"type":"Unigram","vocab":[],"unk_id":0}}""");
 
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT tokenizer.encode('hello', 'file://{unigramPath}')");
 
         Exception root = await CaptureRootExceptionAsync(plan);

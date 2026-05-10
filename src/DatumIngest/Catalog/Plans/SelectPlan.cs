@@ -8,18 +8,19 @@ using DatumIngest.Pooling;
 namespace DatumIngest.Catalog.Plans;
 
 /// <summary>
-/// Default <see cref="IQueryPlan"/> implementation. Hoists literals once
-/// at construction into a long-lived arena, then drives execution with a
-/// fresh per-call <see cref="ExecutionContext"/>.
+/// <see cref="StatementPlan"/> for SELECT and CALL (which the catalog
+/// lowers to a tableless SELECT). Hoists literals once at construction
+/// into a long-lived arena, then drives execution with a fresh per-call
+/// <see cref="ExecutionContext"/>.
 /// </summary>
-internal sealed class QueryPlan : IQueryPlan
+internal sealed class SelectPlan : StatementPlan
 {
     private readonly TableCatalog _catalog;
     private readonly FunctionRegistry _functions;
     private readonly QueryOperator _operator;
     private readonly Arena _hoistStore;
 
-    public QueryPlan(QueryOperator op, TableCatalog catalog, FunctionRegistry functions)
+    public SelectPlan(QueryOperator op, TableCatalog catalog, FunctionRegistry functions)
     {
         _catalog = catalog;
         _functions = functions;
@@ -33,17 +34,22 @@ internal sealed class QueryPlan : IQueryPlan
         // return cycles this arena's refcount; without the baseline, a balanced
         // cycle dips through 0 and `PoolBacking.TryReturn → Arena.Pool()` adds it
         // to the freelist, breaking subsequent rents and tripping the
-        // "already pooled" assertion. Released in `Dispose` (TODO when QueryPlan
+        // "already pooled" assertion. Released in `Dispose` (TODO when SelectPlan
         // becomes IDisposable; for now leak is bounded by query lifetime since
-        // QueryPlan and _hoistStore have the same scope).
+        // SelectPlan and _hoistStore have the same scope).
         _hoistStore.AddReference();
         _operator = op.RewriteExpressions(expr => LiteralHoister.Hoist(expr, _hoistStore));
     }
 
-    public ExplainPlanNode ExplainTree => QueryExplainer.Explain(_operator);
+    public override ExplainPlanNode ExplainTree => QueryExplainer.Explain(_operator);
 
-    public async Task<ExplainPlanNode> AnalyzeAsync(CancellationToken cancellationToken)
+    public override TableCatalog Catalog => _catalog;
+
+    public override async Task<ExplainPlanNode> AnalyzeAsync(
+        CancellationToken cancellationToken,
+        BatchContext batchContext)
     {
+        ArgumentNullException.ThrowIfNull(batchContext);
         InstrumentedOperator instrumented = InstrumentedOperator.InstrumentTree(_operator);
 
         // Plumb the hoist store as context.Store so any operator that needs to
@@ -52,12 +58,17 @@ internal sealed class QueryPlan : IQueryPlan
         // Without this, hoisted string literals >16 bytes are stranded in
         // _hoistStore and unreachable to operators downstream of the planner.
         // The factory snapshots the catalog's ModelTracer into the context.
+        // Borrow the batch's accountant + scope / store / type registry so
+        // residency accounting rolls up uniformly regardless of whether the
+        // analyze is standalone or nested inside a procedural batch.
         using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(
             store: _hoistStore,
+            types: batchContext.Types,
+            accountant: batchContext.Accountant,
+            variableScope: batchContext.VariableScope,
+            variableStore: batchContext.VariableStore,
+            batchContext: batchContext,
             cancellationToken: cancellationToken);
-        // Owned accountant — start 1Hz sampling so the per-query
-        // MemoryProfile is populated for inspection.
-        context.Accountant.StartProfiling();
 
         await foreach (RowBatch batch in instrumented.ExecuteAsync(context).WithCancellation(cancellationToken))
         {
@@ -69,9 +80,9 @@ internal sealed class QueryPlan : IQueryPlan
         return tree;
     }
 
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(
+    protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext? batchContext)
+        BatchContext batchContext)
     {
         // Plumb the hoist store as context.Store so any operator that needs to
         // resolve a hoisted-literal DataValue's payload (offsets reference
@@ -79,27 +90,18 @@ internal sealed class QueryPlan : IQueryPlan
         // Without this, hoisted string literals >16 bytes are stranded in
         // _hoistStore and unreachable to operators downstream of the planner.
         // Factory snapshots the catalog's ModelTracer. Procedural variable
-        // substrate (VariableScope / VariableStore) is borrowed from the
-        // enclosing batch context — null when running outside a procedural
-        // batch (every existing top-level query path); references to @var
-        // in that case throw at evaluation time.
+        // substrate (VariableScope / VariableStore) and the shared accountant
+        // are borrowed from the batch context — the batch owns both
+        // lifecycles and is responsible for starting profiling on the
+        // accountant before any plan runs.
         using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(
             store: _hoistStore,
-            types: batchContext?.Types,
-            // Inside a procedural batch, share the batch-scoped accountant so
-            // every query's residency rolls up under one budget. Standalone
-            // queries get an owned accountant constructed by the context.
-            accountant: batchContext?.Accountant,
-            variableScope: batchContext?.VariableScope,
-            variableStore: batchContext?.VariableStore,
+            types: batchContext.Types,
+            accountant: batchContext.Accountant,
+            variableScope: batchContext.VariableScope,
+            variableStore: batchContext.VariableStore,
+            batchContext: batchContext,
             cancellationToken: cancellationToken);
-        // Standalone query owns its accountant — start 1Hz sampling here.
-        // Inside a batch, the batch is responsible for starting sampling on
-        // its shared accountant, so we don't start it twice.
-        if (batchContext is null)
-        {
-            context.Accountant.StartProfiling();
-        }
 
         // Auto-return the previous batch when the consumer asks for the next one.
         // Consumers must finish using the current batch before iterating; in practice

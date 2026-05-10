@@ -1,4 +1,4 @@
-namespace DatumIngest.Tests.Execution;
+﻿namespace DatumIngest.Tests.Execution;
 
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -82,7 +82,7 @@ public sealed class ModelStreamingTests : ServiceTestBase
             new object?[] { "hi" });
         catalog.Models = models;
 
-        IQueryPlan plan = catalog.Plan("SELECT models.echo_stream(name) FROM t");
+        StatementPlan plan = catalog.Plan("SELECT models.echo_stream(name) FROM t");
 
         List<string> rowOutputs = [];
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

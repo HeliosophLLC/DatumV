@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Execution;
 using DatumIngest.Inference;
@@ -127,7 +127,7 @@ public sealed class MobileNetV2SqlE2ETests : ServiceTestBase
             [DataKind.Image],
             [new object?[] { imageBytes }]));
 
-        IQueryPlan plan = catalog.Plan("SELECT models.mobilenetv2(img) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.mobilenetv2(img) FROM data");
 
         bool sawRow = false;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

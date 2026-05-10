@@ -26,11 +26,11 @@ internal sealed class ConversationRegistry : IConversationRegistry
 
     public async Task<long> EnsureDefaultAsync(CancellationToken ct)
     {
-        IQueryPlan selectPlan = await _catalog
+        StatementPlan selectPlan = await _catalog
             .PlanAsync("SELECT id FROM conversations ORDER BY id DESC LIMIT 1")
             .ConfigureAwait(false);
 
-        await foreach (RowBatch batch in selectPlan.ExecuteAsync(ct).ConfigureAwait(false))
+        await foreach (RowBatch batch in _catalog.ExecuteAsync(selectPlan, ct).ConfigureAwait(false))
         {
             if (batch.Count == 0) continue;
             DataValue cell = batch[0][0];
@@ -56,11 +56,11 @@ internal sealed class ConversationRegistry : IConversationRegistry
             "INSERT INTO conversations (title, model) VALUES ($title, $model) RETURNING id");
         Statement bound = ParameterBinder.Bind(statement, parameters);
 
-        IQueryPlan plan = await _catalog
+        StatementPlan plan = await _catalog
             .ExecuteStatementAsync(bound)
             .ConfigureAwait(false);
 
-        await foreach (RowBatch batch in plan.ExecuteAsync(ct).ConfigureAwait(false))
+        await foreach (RowBatch batch in _catalog.ExecuteAsync(plan, ct).ConfigureAwait(false))
         {
             if (batch.Count == 0) continue;
             return batch[0][0].AsInt64();
@@ -72,14 +72,14 @@ internal sealed class ConversationRegistry : IConversationRegistry
 
     public async Task<IReadOnlyList<ConversationSummary>> ListAsync(CancellationToken ct)
     {
-        IQueryPlan plan = await _catalog
+        StatementPlan plan = await _catalog
             .PlanAsync(
                 "SELECT id, title, model, created_at FROM conversations " +
                 "ORDER BY id DESC")
             .ConfigureAwait(false);
 
         List<ConversationSummary> results = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(ct).ConfigureAwait(false))
+        await foreach (RowBatch batch in _catalog.ExecuteAsync(plan, ct).ConfigureAwait(false))
         {
             Arena arena = batch.Arena;
             for (int i = 0; i < batch.Count; i++)
@@ -100,8 +100,8 @@ internal sealed class ConversationRegistry : IConversationRegistry
             "SELECT id, title, model, created_at FROM conversations WHERE id = $id");
         Statement bound = ParameterBinder.Bind(statement, parameters);
 
-        IQueryPlan plan = await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
-        await foreach (RowBatch batch in plan.ExecuteAsync(ct).ConfigureAwait(false))
+        StatementPlan plan = await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
+        await foreach (RowBatch batch in _catalog.ExecuteAsync(plan, ct).ConfigureAwait(false))
         {
             if (batch.Count == 0) continue;
             return ReadSummary(batch[0], batch.Arena);

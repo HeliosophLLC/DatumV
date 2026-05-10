@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 
@@ -33,7 +33,7 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    // ──────────────────── Rewrite happens / falls through ────────────────────
+    // ———————————————————— Rewrite happens / falls through ————————————————————
 
     [Fact]
     public void Plan_WithIndexAndLiteralQuery_InjectsFullTextSearchOperator()
@@ -42,7 +42,7 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE messages (id Int32, body String)");
         catalog.Plan("CREATE INDEX idx_msg_body ON messages (body) USING FTS");
 
-        IQueryPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
+        StatementPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
 
         Assert.True(ContainsOperator(plan.ExplainTree, "FullTextSearch"));
         Assert.False(ContainsOperator(plan.ExplainTree, "Filter"));
@@ -55,7 +55,7 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE messages (id Int32, body String)");
         catalog.Plan("CREATE INDEX idx_msg_body ON messages (body) USING FTS");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT id FROM messages WHERE body @@ plainto_tsquery('fox')");
 
         Assert.True(ContainsOperator(plan.ExplainTree, "FullTextSearch"));
@@ -68,7 +68,7 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE messages (id Int32, body String)");
         // No CREATE INDEX — planner must not inject the FTS op.
 
-        IQueryPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
+        StatementPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
 
         Assert.False(ContainsOperator(plan.ExplainTree, "FullTextSearch"));
         Assert.True(ContainsOperator(plan.ExplainTree, "Filter"));
@@ -82,7 +82,7 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE INDEX idx_msg_body ON messages (body) USING FTS");
 
         // RHS is a column reference, not a literal — can't determine at plan time.
-        IQueryPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ q");
+        StatementPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ q");
 
         Assert.False(ContainsOperator(plan.ExplainTree, "FullTextSearch"));
         Assert.True(ContainsOperator(plan.ExplainTree, "Filter"));
@@ -97,7 +97,7 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE messages (id Int32, body String)");
         catalog.Plan("CREATE INDEX idx_msg_body ON messages (body) USING FTS");
 
-        IQueryPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ ''");
+        StatementPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ ''");
 
         Assert.False(ContainsOperator(plan.ExplainTree, "FullTextSearch"));
         Assert.True(ContainsOperator(plan.ExplainTree, "Filter"));
@@ -111,7 +111,7 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE messages (id Int32, body String)");
         catalog.Plan("CREATE INDEX idx_msg_body ON messages (body) USING FTS");
 
-        IQueryPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'the and or'");
+        StatementPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'the and or'");
 
         Assert.False(ContainsOperator(plan.ExplainTree, "FullTextSearch"));
         Assert.True(ContainsOperator(plan.ExplainTree, "Filter"));
@@ -126,14 +126,14 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE messages (id Int32, body String)");
         catalog.Plan("CREATE INDEX idx_msg_body ON messages (body) USING FTS");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT id FROM messages WHERE body @@ 'fox' AND id > 5");
 
         Assert.True(ContainsOperator(plan.ExplainTree, "FullTextSearch"));
         Assert.True(ContainsOperator(plan.ExplainTree, "Filter"));
     }
 
-    // ──────────────────── End-to-end execution through the rewrite ────────────────────
+    // ———————————————————— End-to-end execution through the rewrite ————————————————————
 
     [Fact]
     public async Task Execute_FtsAcceleratedQuery_MatchesExpectedRows()
@@ -147,7 +147,7 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
             "(3, 'fox jumped over')");
         catalog.Plan("CREATE INDEX idx_msg_body ON messages (body) USING FTS");
 
-        IQueryPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
+        StatementPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
 
         int[] ids = (await CollectFirstColumnInts(plan)).OrderBy(i => i).ToArray();
         Assert.Equal(new[] { 1, 3 }, ids);
@@ -166,7 +166,7 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
             "(8, 'cat eight')");
         catalog.Plan("CREATE INDEX idx_msg_body ON messages (body) USING FTS");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT id FROM messages WHERE body @@ 'fox' AND id > 5");
 
         int[] ids = (await CollectFirstColumnInts(plan)).OrderBy(i => i).ToArray();
@@ -185,7 +185,7 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
             "(3, 'cat brown')");
         catalog.Plan("CREATE INDEX idx_msg_body ON messages (body) USING FTS");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT id FROM messages WHERE body @@ plainto_tsquery('fox brown')");
 
         int[] ids = (await CollectFirstColumnInts(plan)).OrderBy(i => i).ToArray();
@@ -206,16 +206,16 @@ public sealed class FullTextSearchPlannerTests : ServiceTestBase, IAsyncLifetime
             "(2, 'cat sat on mat')");
         // Deliberately no CREATE INDEX.
 
-        IQueryPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
+        StatementPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
 
         List<int> ids = await CollectFirstColumnInts(plan);
         Assert.Single(ids);
         Assert.Equal(1, ids[0]);
     }
 
-    // ──────────────────── Helpers ────────────────────
+    // ———————————————————— Helpers ————————————————————
 
-    private static async Task<List<int>> CollectFirstColumnInts(IQueryPlan plan)
+    private static async Task<List<int>> CollectFirstColumnInts(StatementPlan plan)
     {
         List<int> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

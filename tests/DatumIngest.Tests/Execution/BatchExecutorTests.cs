@@ -23,7 +23,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         return await executor.ExecuteAsync(stmts, CancellationToken.None);
     }
 
-    // ───────────────────── DECLARE ─────────────────────
+    // ————————————————————— DECLARE —————————————————————
 
     [Fact]
     public async Task Declare_LiteralInitializer_BindsValue()
@@ -105,7 +105,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(3, Convert.ToInt32(result.FinalBindings["player_count"]));
     }
 
-    // ───────────────────── LIMIT / OFFSET with expressions ─────────────────────
+    // ————————————————————— LIMIT / OFFSET with expressions —————————————————————
 
     [Fact]
     public async Task Offset_WithProceduralVariable_SkipsCorrectRows()
@@ -163,7 +163,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(6L, Convert.ToInt64(result.FinalBindings["sum"]));
     }
 
-    // ───────────────────── DECLARE-with-subquery ─────────────────────
+    // ————————————————————— DECLARE-with-subquery —————————————————————
 
     [Fact]
     public async Task Declare_SubqueryInitializer_AggregateCount()
@@ -278,7 +278,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(3L, Convert.ToInt64(result.FinalBindings["count"]));
     }
 
-    // ───────────────────── var resolution ─────────────────────
+    // ————————————————————— var resolution —————————————————————
 
     [Fact]
     public async Task DeclareThenSelect_QueryReadsVariable()
@@ -305,7 +305,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(20, Convert.ToInt32(result.FinalBindings["b"]));
     }
 
-    // ───────────────────── SET ─────────────────────
+    // ————————————————————— SET —————————————————————
 
     [Fact]
     public async Task Set_OverwritesPriorValue()
@@ -332,7 +332,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             () => RunAsync("SET missing = 1"));
     }
 
-    // ───────────────────── BEGIN/END block scoping ─────────────────────
+    // ————————————————————— BEGIN/END block scoping —————————————————————
 
     [Fact]
     public async Task Block_InnerDeclaration_DoesNotLeakOutside()
@@ -369,7 +369,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.False(result.FinalBindings.ContainsKey("z"));
     }
 
-    // ───────────────────── IF / ELSE ─────────────────────
+    // ————————————————————— IF / ELSE —————————————————————
 
     [Fact]
     public async Task If_TrueBranch_RunsThen()
@@ -432,7 +432,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(20, Convert.ToInt32(result.FinalBindings["b"]));
     }
 
-    // ───────────────────── WHILE ─────────────────────
+    // ————————————————————— WHILE —————————————————————
 
     [Fact]
     public async Task While_LoopsUntilPredicateFalse()
@@ -544,7 +544,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Contains("cells", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    // ───────────────────── CALL inside batch ─────────────────────
+    // ————————————————————— CALL inside batch —————————————————————
 
     [Fact]
     public async Task Call_InBatch_ResolvesVariableFromScope()
@@ -563,7 +563,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             result.FinalBindings["msg"]);
     }
 
-    // ───────────────────── Combined integration ─────────────────────
+    // ————————————————————— Combined integration —————————————————————
 
     [Fact]
     public async Task FullProcedure_DeclareIfWhileSet_AccumulatesCorrectly()
@@ -585,7 +585,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(10, Convert.ToInt32(result.FinalBindings["i"]));
     }
 
-    // ───────────────────── FOR-counter ─────────────────────
+    // ————————————————————— FOR-counter —————————————————————
 
     [Fact]
     public async Task ForCounter_LoopsInclusivelyFromStartToEnd()
@@ -652,11 +652,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
             "  FOR j = 1 TO 4 SET total = total + 1; " +
             "END");
 
-        // 3 outer × 4 inner = 12 increments.
+        // 3 outer x 4 inner = 12 increments.
         Assert.Equal(12, Convert.ToInt32(result.FinalBindings["total"]));
     }
 
-    // ───────────────────── FOR-IN ─────────────────────
+    // ————————————————————— FOR-IN —————————————————————
 
     [Fact]
     public async Task ForIn_IteratesRowsFromTable_AccumulatesByOrdinal()
@@ -806,7 +806,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(203, Convert.ToInt32(result.FinalBindings["total"]));
     }
 
-    // ───────────────────── PRINT ─────────────────────
+    // ————————————————————— PRINT —————————————————————
 
     private async Task<List<CellPrintBatchEvent>> CollectPrintsAsync(string sql, TableCatalog? catalog = null)
     {
@@ -929,7 +929,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             prints.Select(p => p.Text));
     }
 
-    // ───────────────────── ASSERT / RAISE ─────────────────────
+    // ————————————————————— ASSERT / RAISE —————————————————————
 
     [Fact]
     public async Task Assert_PredicateTrue_ContinuesNormally()
@@ -1068,7 +1068,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(true, result.FinalBindings["cleaned"]);
     }
 
-    // ───────────────────── TRY / CATCH / FINALLY ─────────────────────
+    // ————————————————————— TRY / CATCH / FINALLY —————————————————————
 
     [Fact]
     public async Task Try_NoError_RunsTryBody_SkipsCatch()
@@ -1316,7 +1316,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(true, result.FinalBindings["outer_caught"]);
     }
 
-    // ───────────────────── BREAK / CONTINUE ─────────────────────
+    // ————————————————————— BREAK / CONTINUE —————————————————————
 
     [Fact]
     public async Task While_Break_ExitsLoopImmediately()
@@ -1426,7 +1426,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Break_BreaksOnlyInnermostLoop()
     {
         // Nested FOR; inner BREAK fires when j > i. Outer loop continues
-        // after each inner BREAK, so sum collects only j ≤ i for each
+        // after each inner BREAK, so sum collects only j â‰¤ i for each
         // (i, j) pair: i=1 → j=1; i=2 → j=1,2; i=3 → j=1,2,3.
         BatchResult result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
@@ -1469,7 +1469,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Contains("BREAK", ex.Message, StringComparison.Ordinal);
     }
 
-    // ───────────────────── Optional ; between statements ─────────────────────
+    // ————————————————————— Optional ; between statements —————————————————————
 
     [Fact]
     public async Task Batch_NoSemicolonAfterEnd_ParsesNextStatement()
@@ -1518,7 +1518,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(11, Convert.ToInt32(result.FinalBindings["a"]));
     }
 
-    // ───────────────────── DECLARE coerces initializer to declared type ─────────────────────
+    // ————————————————————— DECLARE coerces initializer to declared type —————————————————————
 
     [Fact]
     public async Task Declare_WithDeclaredType_CoercesInitializerToDeclaredKind()
@@ -1535,7 +1535,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(0L, Convert.ToInt64(result.FinalBindings["sum"]));
     }
 
-    // ───────────────────── Multi-variable SELECT assignment ─────────────────────
+    // ————————————————————— Multi-variable SELECT assignment —————————————————————
 
     [Fact]
     public async Task SelectAssign_NoFrom_SingleAssignment_BindsValue()
@@ -1692,7 +1692,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(6L, Convert.ToInt64(result.FinalBindings["sum"]));
     }
 
-    // ───────────────────── Top-level var without batch context ─────────────────────
+    // ————————————————————— Top-level var without batch context —————————————————————
 
     [Fact]
     public async Task BareSelect_OutsideBatch_UndeclaredName_Throws()
@@ -1703,7 +1703,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // (no row schema). The evaluator wraps the failure in
         // ExpressionEvaluationException with source-span context.
         TableCatalog catalog = CreateCatalog();
-        IQueryPlan plan = catalog.Plan("SELECT x");
+        StatementPlan plan = catalog.Plan("SELECT x");
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
@@ -1714,7 +1714,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         });
     }
 
-    // ───────────────────── Catalog dispatch alignment ─────────────────────
+    // ————————————————————— Catalog dispatch alignment —————————————————————
 
     /// <summary>
     /// Regression: every DDL/DML statement type must flow through BatchExecutor

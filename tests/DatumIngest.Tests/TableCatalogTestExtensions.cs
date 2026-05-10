@@ -21,12 +21,12 @@ namespace DatumIngest.Tests;
 /// </remarks>
 internal static class TableCatalogTestExtensions
 {
-    public static IQueryPlan Plan(this TableCatalog catalog, string sql) =>
+    public static StatementPlan Plan(this TableCatalog catalog, string sql) =>
         catalog.ExecuteStatementAsync(sql).GetAwaiter().GetResult();
 
-    public static IQueryPlan Plan(this TableCatalog catalog, Statement statement) =>
+    public static StatementPlan Plan(this TableCatalog catalog, Statement statement) =>
         catalog.ExecuteStatementAsync(statement).GetAwaiter().GetResult();
 
-    public static IQueryPlan Plan(this TableCatalog catalog, Statement statement, string? sourceText) =>
+    public static StatementPlan Plan(this TableCatalog catalog, Statement statement, string? sourceText) =>
         catalog.ExecuteStatementAsync(statement, sourceText).GetAwaiter().GetResult();
 }

@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Execution;
 using DatumIngest.Inference;
@@ -105,7 +105,7 @@ public sealed class ToxicBertSqlE2ETests : ServiceTestBase
                 new object?[] { "You are a stupid idiot and I hate you." },
             ]));
 
-        IQueryPlan plan = catalog.Plan("SELECT models.toxic_bert(t) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.toxic_bert(t) FROM data");
 
         HashSet<string> validLabels =
         [

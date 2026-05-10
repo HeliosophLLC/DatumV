@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Execution;
 using DatumIngest.Inference;
@@ -17,7 +17,7 @@ namespace DatumIngest.Tests.Inference.Cpu;
 /// model. Validates the dynamic-spatial-dim infer() flow (input shape
 /// passed as <c>[1, 3, ih, iw]</c> derived from the row's image dims),
 /// the no-resize <c>image_to_tensor_chw</c> path (target_size = original
-/// H×W), and the 4× output dimensions through <c>tensor_to_image_chw</c>.
+/// HxW), and the 4x output dimensions through <c>tensor_to_image_chw</c>.
 /// </summary>
 /// <remarks>
 /// Deletion-candidate test for the Real-ESRGAN migration. Pure
@@ -65,7 +65,7 @@ public sealed class RealesrganSqlE2ETests : ServiceTestBase
 
     private static SKBitmap MakeSyntheticImage(int width = 64, int height = 48)
     {
-        // Tiny input — the 4× upscale keeps the test fast (256×192 output).
+        // Tiny input — the 4x upscale keeps the test fast (256x192 output).
         SKBitmap bmp = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         using SKCanvas canvas = new(bmp);
         canvas.Clear(SKColors.LightYellow);
@@ -111,7 +111,7 @@ public sealed class RealesrganSqlE2ETests : ServiceTestBase
 
         catalog.Plan(LoadCanonicalSql());
 
-        // 64×48 input → 256×192 output (4× on each axis).
+        // 64x48 input → 256x192 output (4x on each axis).
         using SKBitmap bmp = MakeSyntheticImage(width: 64, height: 48);
         using SKData encoded = SKImage.FromBitmap(bmp).Encode(SKEncodedImageFormat.Png, 90);
         byte[] imageBytes = encoded.ToArray();
@@ -123,7 +123,7 @@ public sealed class RealesrganSqlE2ETests : ServiceTestBase
             [DataKind.Image],
             [new object?[] { imageBytes }]));
 
-        IQueryPlan plan = catalog.Plan("SELECT models.realesrgan_x4v3(img) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.realesrgan_x4v3(img) FROM data");
 
         bool sawRow = false;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -138,8 +138,8 @@ public sealed class RealesrganSqlE2ETests : ServiceTestBase
                 byte[] outBytes = cell.AsImage(batch.Arena);
                 using SKBitmap upscaled = SKBitmap.Decode(outBytes);
                 Assert.NotNull(upscaled);
-                Assert.Equal(256, upscaled.Width);  // 64 × 4
-                Assert.Equal(192, upscaled.Height); // 48 × 4
+                Assert.Equal(256, upscaled.Width);  // 64 x 4
+                Assert.Equal(192, upscaled.Height); // 48 x 4
             }
         }
         Assert.True(sawRow, "expected at least one output row");

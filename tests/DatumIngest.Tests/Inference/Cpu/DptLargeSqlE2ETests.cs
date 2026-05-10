@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Execution;
 using DatumIngest.Inference;
@@ -116,8 +116,8 @@ public sealed class DptLargeSqlE2ETests : ServiceTestBase
 
         catalog.Plan(LoadCanonicalSql());
 
-        // 480×320 input — depth_map_to_image should resize the 384×384
-        // network-resolution output back to 480×320.
+        // 480x320 input — depth_map_to_image should resize the 384x384
+        // network-resolution output back to 480x320.
         using SKBitmap bmp = MakeSyntheticImage(width: 480, height: 320);
         using SKData encoded = SKImage.FromBitmap(bmp).Encode(SKEncodedImageFormat.Png, 90);
         byte[] imageBytes = encoded.ToArray();
@@ -129,7 +129,7 @@ public sealed class DptLargeSqlE2ETests : ServiceTestBase
             [DataKind.Image],
             [new object?[] { imageBytes }]));
 
-        IQueryPlan plan = catalog.Plan("SELECT models.dpt_large(img) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.dpt_large(img) FROM data");
 
         bool sawRow = false;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

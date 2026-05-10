@@ -46,7 +46,7 @@ string sql = opts.SqlFile is not null
 
 using TableCatalog catalog = TableCatalog.FromFile(opts.DatumPath, opts.TableName);
 
-IQueryPlan plan;
+StatementPlan plan;
 try
 {
     plan = await catalog.PlanAsync(sql);
@@ -89,7 +89,7 @@ bool truncated = false;
 
 try
 {
-    await foreach (RowBatch batch in plan.ExecuteAsync(cts.Token))
+    await foreach (RowBatch batch in catalog.ExecuteAsync(plan, cts.Token))
     {
         batchCount++;
 

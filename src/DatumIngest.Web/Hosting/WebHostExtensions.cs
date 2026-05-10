@@ -170,7 +170,7 @@ public static class WebHostExtensions
         services.AddSingleton<ICurrentContextResolver, LocalCurrentContextResolver>();
 
         // Compute boundary. The factory is singleton (routing is stateless);
-        // ICatalogService is scoped â€” resolved once per request, lives through it,
+        // ICatalogService is scoped — resolved once per request, lives through it,
         // released at end. Swap UnboundCatalogServiceFactory for an in-process+gRPC
         // router when actual catalog ops are wired.
         services.AddSingleton<ICatalogServiceFactory, UnboundCatalogServiceFactory>();

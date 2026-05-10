@@ -1,5 +1,8 @@
+using System.Text;
 using DatumIngest.Catalog;
 using DatumIngest.Execution;
+using DatumIngest.Parsing;
+using DatumIngest.Parsing.Ast;
 using DatumIngest.Web.Dtos.Execution;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,8 +11,10 @@ namespace DatumIngest.Web.Api;
 /// <summary>
 /// EXPLAIN endpoint companion to <see cref="QueryStreamController"/>.
 /// Plans the supplied SQL and returns the rendered static EXPLAIN tree —
-/// no query execution. EXPLAIN ANALYZE is intentionally out of scope here;
-/// add a follow-up endpoint when the UI wants runtime metrics.
+/// no query execution. Accepts a multi-statement batch; each statement
+/// is planned independently and the rendered trees are concatenated with
+/// separator headers. EXPLAIN ANALYZE is intentionally out of scope
+/// here; add a follow-up endpoint when the UI wants runtime metrics.
 /// </summary>
 [ApiController]
 [Route("api/query")]
@@ -23,33 +28,48 @@ public sealed class QueryExplainController(TableCatalog catalog) : ControllerBas
             return BadRequest(new QueryExplainResponse(Plan: null, Error: "sql is required"));
         }
 
-        IQueryPlan plan;
+        IReadOnlyList<(Statement Statement, string SourceText)> statements;
         try
         {
-            // PlanAsync is side-effect-free for DDL/DML (returns a deferred
-            // plan that only runs the statement on iteration). EXPLAIN reads
-            // ExplainTree without iterating, so `EXPLAIN DELETE FROM users`
-            // never actually deletes — the deferral keeps this endpoint safe.
-            // Planning is synchronous in practice (PlanAsync wraps a sync
-            // body in Task.FromResult) — call .GetAwaiter().GetResult on the
-            // returned Task to keep the controller signature synchronous.
-            plan = await catalog.PlanAsync(request.Sql);
+            // Batch parse: supports `SELECT 1; SELECT 2; …`. A single
+            // statement input yields a one-element list — the single-
+            // statement render path falls out naturally below.
+            statements = SqlParser.ParseBatchWithText(request.Sql);
         }
         catch (Exception ex)
         {
             return Ok(new QueryExplainResponse(Plan: null, Error: ex.Message));
         }
 
-        ExplainPlanNode tree;
-        try
+        if (statements.Count == 0)
         {
-            tree = plan.ExplainTree;
-        }
-        catch (Exception ex)
-        {
-            return Ok(new QueryExplainResponse(Plan: null, Error: ex.Message));
+            return Ok(new QueryExplainResponse(Plan: null, Error: "no statements parsed"));
         }
 
-        return Ok(new QueryExplainResponse(Plan: tree.Render(), Error: null));
+        // Plan each statement and stitch their rendered trees. PlanAsync
+        // is side-effect-free for every statement type (every plan only
+        // applies side effects inside ExecuteImplAsync, never inside
+        // ExplainTree), so iterating the rendered trees here is safe even
+        // for batches containing DDL / DML.
+        StringBuilder builder = new();
+        for (int i = 0; i < statements.Count; i++)
+        {
+            if (statements.Count > 1)
+            {
+                builder.Append("── Statement ").Append(i + 1).Append(" of ").Append(statements.Count).AppendLine(" ──");
+            }
+            try
+            {
+                StatementPlan plan = await catalog.PlanAsync(statements[i].Statement, statements[i].SourceText).ConfigureAwait(false);
+                builder.Append(plan.ExplainTree.Render());
+            }
+            catch (Exception ex)
+            {
+                builder.Append("[error] ").AppendLine(ex.Message);
+            }
+            if (i + 1 < statements.Count) builder.AppendLine();
+        }
+
+        return Ok(new QueryExplainResponse(Plan: builder.ToString(), Error: null));
     }
 }

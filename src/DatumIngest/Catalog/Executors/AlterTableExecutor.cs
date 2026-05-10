@@ -21,7 +21,7 @@ internal static class AlterTableExecutor
     /// later-PR concern), and computed columns (<c>AS expr</c>) are
     /// reserved for a future PR.
     /// </summary>
-    public static async Task<IQueryPlan> AddColumnAsync(
+    public static async Task<StatementPlan> AddColumnAsync(
         TableCatalog catalog, AlterTableAddColumnStatement alter, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
@@ -256,7 +256,7 @@ internal static class AlterTableExecutor
         {
             catalog.Events.Raise(new TableAlteredEvent(qn, beforeSchema, afterProvider.GetSchema(), sourceText));
         }
-        return EmptyQueryPlan.Instance;
+        return DdlPlan.NoOp(catalog, "AlterTable");
     }
 
     /// <summary>
@@ -264,7 +264,7 @@ internal static class AlterTableExecutor
     /// is soft-dropped (tombstoned) on the underlying provider; the
     /// data block stays on disk for compaction-time reclamation.
     /// </summary>
-    public static IQueryPlan DropColumn(TableCatalog catalog, AlterTableDropColumnStatement alter, string? sourceText = null)
+    public static StatementPlan DropColumn(TableCatalog catalog, AlterTableDropColumnStatement alter, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(alter);
@@ -294,7 +294,7 @@ internal static class AlterTableExecutor
         }
         if (!columnPresent)
         {
-            if (alter.IfExists) return EmptyQueryPlan.Instance;
+            if (alter.IfExists) return DdlPlan.NoOp(catalog, "AlterTable");
             throw new InvalidOperationException(
                 $"Column '{alter.ColumnName}' does not exist on table '{alter.TableName}'.");
         }
@@ -407,7 +407,7 @@ internal static class AlterTableExecutor
         {
             catalog.Events.Raise(new TableAlteredEvent(qn, beforeSchema, afterProvider.GetSchema(), sourceText));
         }
-        return EmptyQueryPlan.Instance;
+        return DdlPlan.NoOp(catalog, "AlterTable");
     }
 
     /// <summary>
@@ -417,7 +417,7 @@ internal static class AlterTableExecutor
     /// names produce a PG-flavored "does not exist" error (suppressed by
     /// <c>IF EXISTS</c>).
     /// </summary>
-    public static async Task<IQueryPlan> DropConstraintAsync(
+    public static async Task<StatementPlan> DropConstraintAsync(
         TableCatalog catalog, AlterTableDropConstraintStatement alter, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
@@ -444,7 +444,7 @@ internal static class AlterTableExecutor
             Schema schema = provider.GetSchema();
             if (schema.PrimaryKeyColumnIndices.Count == 0)
             {
-                if (alter.IfExists) return EmptyQueryPlan.Instance;
+                if (alter.IfExists) return DdlPlan.NoOp(catalog, "AlterTable");
                 throw new InvalidOperationException(
                     $"constraint \"{alter.ConstraintName}\" of relation \"{alter.TableName}\" does not exist");
             }
@@ -461,12 +461,12 @@ internal static class AlterTableExecutor
             {
                 catalog.Events.Raise(new TableAlteredEvent(qn, beforeSchema, afterProvider.GetSchema(), sourceText));
             }
-            return EmptyQueryPlan.Instance;
+            return DdlPlan.NoOp(catalog, "AlterTable");
         }
 
         // Name didn't match the PK convention. In v1 there are no other
         // droppable constraint names, so this is always "does not exist".
-        if (alter.IfExists) return EmptyQueryPlan.Instance;
+        if (alter.IfExists) return DdlPlan.NoOp(catalog, "AlterTable");
         throw new InvalidOperationException(
             $"constraint \"{alter.ConstraintName}\" of relation \"{alter.TableName}\" does not exist");
     }
@@ -476,7 +476,7 @@ internal static class AlterTableExecutor
     /// Validates that the column exists and (for DROP IDENTITY without
     /// IF EXISTS) that the attribute being dropped is actually present.
     /// </summary>
-    public static async Task<IQueryPlan> AlterColumnDropAsync(
+    public static async Task<StatementPlan> AlterColumnDropAsync(
         TableCatalog catalog, AlterTableAlterColumnDropStatement alter, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
@@ -513,7 +513,7 @@ internal static class AlterTableExecutor
             case AlterColumnDropTarget.Identity:
                 if (column.Identity is null)
                 {
-                    if (alter.IfExists) return EmptyQueryPlan.Instance;
+                    if (alter.IfExists) return DdlPlan.NoOp(catalog, "AlterTable");
                     throw new InvalidOperationException(
                         $"column \"{alter.ColumnName}\" of relation \"{alter.TableName}\" is not an IDENTITY column");
                 }
@@ -533,7 +533,7 @@ internal static class AlterTableExecutor
                 // constraint"). Silent no-op with IF EXISTS.
                 if (column.Nullable)
                 {
-                    if (alter.IfExists) return EmptyQueryPlan.Instance;
+                    if (alter.IfExists) return DdlPlan.NoOp(catalog, "AlterTable");
                     throw new InvalidOperationException(
                         $"column \"{alter.ColumnName}\" of relation \"{alter.TableName}\" does not have a NOT NULL constraint");
                 }
@@ -549,7 +549,7 @@ internal static class AlterTableExecutor
         {
             catalog.Events.Raise(new TableAlteredEvent(qn, schema, afterProvider.GetSchema(), sourceText));
         }
-        return EmptyQueryPlan.Instance;
+        return DdlPlan.NoOp(catalog, "AlterTable");
     }
 
     /// <summary>
@@ -558,7 +558,7 @@ internal static class AlterTableExecutor
     /// <c>SetColumnNotNullAsync</c> handles the scan-for-NULLs validation
     /// and the descriptor flip; this method just resolves the column index.
     /// </summary>
-    public static async Task<IQueryPlan> AlterColumnSetAsync(
+    public static async Task<StatementPlan> AlterColumnSetAsync(
         TableCatalog catalog, AlterTableAlterColumnSetStatement alter, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
@@ -606,7 +606,7 @@ internal static class AlterTableExecutor
         {
             catalog.Events.Raise(new TableAlteredEvent(qn, schema, afterProvider.GetSchema(), sourceText));
         }
-        return EmptyQueryPlan.Instance;
+        return DdlPlan.NoOp(catalog, "AlterTable");
     }
 
     /// <summary>

@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Execution;
@@ -64,7 +64,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         // literal kind inference doesn't currently coalesce numeric
         // literals to Float32, so we cast each scalar and let the array
         // constructor pick that up.
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT models.softmax([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
 
         // Collect inside the iteration loop so the array data can be read
@@ -147,7 +147,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
             $"  RETURN result " +
             $"END");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT models.softmax_branch([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
 
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -167,7 +167,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
     /// through <see cref="ModelInvocationOperator"/> + <c>ProceduralModelAdapter</c>.
     /// The InferOperator lowering path was deleted because it paid for
     /// repeated arena retention + sidecar re-decode at every operator
-    /// boundary, measuring ~20× slower per row than the unified MIO path.
+    /// boundary, measuring ~20x slower per row than the unified MIO path.
     /// Cross-row batching for batchable shapes now lives on
     /// <c>InferFunction.ExecuteBatchAsync</c> instead of being structural.
     /// This test pins the plan shape (Model Invocation node, no Infer) so
@@ -188,7 +188,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
             $"USING 'file://{fixturePath}' " +
             $"AS BEGIN RETURN infer(x) END");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT models.softmax_lowered([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
 
         ExplainPlanNode tree = plan.ExplainTree;
@@ -250,7 +250,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
             $"USING 'file://{fixturePath}' " +
             $"AS BEGIN RETURN infer(x, [CAST(3 AS Int32)]) END");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT models.softmax_shaped([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
 
         ExplainPlanNode tree = plan.ExplainTree;
@@ -311,7 +311,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
             $"  RETURN result " +
             $"END");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT models.softmax_chained([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
 
         ExplainPlanNode tree = plan.ExplainTree;
@@ -384,7 +384,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
             "Multi-session models must not carry an implicit 'default' alias.");
 
         // End-to-end execution: chained softmax via named dispatch.
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT models.softmax_dual([CAST(1.0 AS Float32), CAST(2.0 AS Float32), CAST(3.0 AS Float32)]) FROM data");
 
         List<float[]> rows = new();
@@ -425,7 +425,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
             $"USING 'file://{fixturePath}' AS encoder " +
             $"AS BEGIN RETURN infer('decodr', x) END"); // typo: 'decodr' not 'encoder'
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT models.softmax_typo([CAST(1.0 AS Float32), CAST(2.0 AS Float32)]) FROM data");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>

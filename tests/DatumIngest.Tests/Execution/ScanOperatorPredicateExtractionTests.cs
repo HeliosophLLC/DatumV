@@ -48,7 +48,7 @@ public sealed class ScanOperatorPredicateExtractionTests : ServiceTestBase, IAsy
         catalog.Plan("CREATE INDEX idx_t_b ON t (b)");
         catalog.Plan("INSERT INTO t VALUES (1, 10, 11), (2, 20, 22), (3, 30, 33)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 OR b = 20");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 OR b = 20");
         int? exactSeek = await GetScanExactSeekRowsAsync(plan);
 
         Assert.Null(exactSeek);
@@ -84,7 +84,7 @@ public sealed class ScanOperatorPredicateExtractionTests : ServiceTestBase, IAsy
             "(2, 40, 400, 240), " +
             "(3, 50, 500, 350)");
 
-        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND (b = 20 OR c = 300)");
+        StatementPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND (b = 20 OR c = 300)");
         int? exactSeek = await GetScanExactSeekRowsAsync(plan);
 
         // a=1 → 3 rows. If OR were wrongly extracted, the picker would settle
@@ -92,9 +92,9 @@ public sealed class ScanOperatorPredicateExtractionTests : ServiceTestBase, IAsy
         Assert.Equal(3, exactSeek);
     }
 
-    private static async Task<int?> GetScanExactSeekRowsAsync(IQueryPlan plan)
+    private static async Task<int?> GetScanExactSeekRowsAsync(StatementPlan plan)
     {
-        ExplainPlanNode root = await plan.AnalyzeAsync(CancellationToken.None);
+        ExplainPlanNode root = await AnalyzePlanAsync(plan);
         return FindScanNode(root)?.ExactSeekRowsFetched;
     }
 

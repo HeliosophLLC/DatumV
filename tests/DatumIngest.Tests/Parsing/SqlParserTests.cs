@@ -126,7 +126,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Null(tableColumns.ExcludedColumns);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ SELECT * REPLACE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— SELECT * REPLACE —————————————————————
 
     [Fact]
     public void SelectStarReplace()
@@ -217,7 +217,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("column_name", column.ColumnName);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Literals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Literals —————————————————————
 
     [Fact]
     public void SelectNumberLiteral()
@@ -228,9 +228,9 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal((sbyte)42, literal.Value);
     }
 
-    // â”€â”€â”€â”€â”€ Numeric literal narrowing: integers â”€â”€â”€â”€â”€
+    // ————— Numeric literal narrowing: integers —————
 
-    // â”€â”€â”€â”€â”€ Numeric literal narrowing: positive integers â”€â”€â”€â”€â”€
+    // ————— Numeric literal narrowing: positive integers —————
 
     [Theory]
     [InlineData("0", (sbyte)0)]
@@ -277,7 +277,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal(expected, literal.Value);
     }
 
-    // â”€â”€â”€â”€â”€ Numeric literal narrowing: negative integers â”€â”€â”€â”€â”€
+    // ————— Numeric literal narrowing: negative integers —————
     // Note: negative literals are parsed as UnaryExpression(Negate, positive_literal),
     // so the literal value itself is always positive. We test negation indirectly.
 
@@ -292,14 +292,14 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal((short)128, literal.Value);
     }
 
-    // â”€â”€â”€â”€â”€ Numeric literal narrowing: floating-point â”€â”€â”€â”€â”€
+    // ————— Numeric literal narrowing: floating-point —————
     // Whole-number decimals like 1.0 narrow to integer (Truncate(1.0)==1.0).
     // Fractional decimals stay as double unless float roundtrip is exact.
 
     [Fact]
     public void NumericLiteral_WholeDecimal_NarrowsToInteger()
     {
-        // 1.0 â†’ Truncate(1.0)==1.0 â†’ sbyte(1)
+        // 1.0 → Truncate(1.0)==1.0 → sbyte(1)
         LiteralExpression literal = Assert.IsType<LiteralExpression>(
             Parse("SELECT 1.0 FROM t").Columns[0].Expression);
         Assert.IsType<sbyte>(literal.Value);
@@ -319,7 +319,7 @@ public class SqlParserTests : ServiceTestBase
     [Fact]
     public void NumericLiteral_Pi_StaysDouble()
     {
-        // 3.14: (double)(float)3.14 != 3.14 due to precision loss â†’ stays double
+        // 3.14: (double)(float)3.14 != 3.14 due to precision loss → stays double
         LiteralExpression literal = Assert.IsType<LiteralExpression>(
             Parse("SELECT 3.14 FROM t").Columns[0].Expression);
         Assert.IsType<double>(literal.Value);
@@ -347,7 +347,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Null(literal.Value);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Function calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Function calls —————————————————————
 
     [Fact]
     public void SelectFunctionCall()
@@ -386,7 +386,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Empty(function.Arguments);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ WHERE clause â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— WHERE clause —————————————————————
 
     [Fact]
     public void WhereSimpleComparison()
@@ -577,7 +577,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.True(between.Negated);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ JOIN clauses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— JOIN clauses —————————————————————
 
     [Fact]
     public void InnerJoin()
@@ -754,7 +754,7 @@ public class SqlParserTests : ServiceTestBase
 
     /// <summary>
     /// Table aliases without the AS keyword must be supported in both FROM
-    /// and JOIN clauses â€” SQL standard bare alias syntax.
+    /// and JOIN clauses — SQL standard bare alias syntax.
     /// </summary>
     [Fact]
     public void BareTableAlias_FromClause()
@@ -767,7 +767,7 @@ public class SqlParserTests : ServiceTestBase
     }
 
     /// <summary>
-    /// Bare table alias in a JOIN clause â€” no AS keyword.
+    /// Bare table alias in a JOIN clause — no AS keyword.
     /// </summary>
     [Fact]
     public void BareTableAlias_JoinClause()
@@ -785,7 +785,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("i", joined.Alias);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ INTO clause â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— INTO clause —————————————————————
 
     [Fact]
     public void IntoParquet()
@@ -843,7 +843,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal(104857600L, result.Into.Shard.Value);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ORDER BY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— ORDER BY —————————————————————
 
     [Fact]
     public void OrderByAscending()
@@ -888,7 +888,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal(SortDirection.Descending, result.OrderBy.Items[1].Direction);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ LIMIT / OFFSET â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— LIMIT / OFFSET —————————————————————
 
     [Fact]
     public void LimitClause()
@@ -910,7 +910,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal(20, Convert.ToInt32(((LiteralExpression)result.Offset!).Value));
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Subqueries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Subqueries —————————————————————
 
     [Fact]
     public void SubqueryInFrom()
@@ -951,7 +951,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("inner_q", inner.Alias);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Function source in FROM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Function source in FROM —————————————————————
 
     [Fact]
     public void FunctionSourceInFrom()
@@ -1020,7 +1020,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("r", joined.Alias);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ LATERAL / APPLY joins â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— LATERAL / APPLY joins —————————————————————
 
     [Fact]
     public void CrossJoinLateral_FunctionSource()
@@ -1146,7 +1146,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.False(result.Joins[0].IsLateral);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Arithmetic expressions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Arithmetic expressions —————————————————————
 
     [Fact]
     public void ArithmeticPrecedence()
@@ -1227,7 +1227,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal(BinaryOperator.Modulo, modulo.Operator);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ CAST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— CAST —————————————————————
 
     [Fact]
     public void CastExpression()
@@ -1242,7 +1242,7 @@ public class SqlParserTests : ServiceTestBase
     public void PostfixCast_DesugarsToCastExpression()
     {
         // PG-style `x::Type` postfix cast lowers to the same AST as
-        // CAST(x AS Type) â€” pure syntactic sugar.
+        // CAST(x AS Type) — pure syntactic sugar.
         SelectStatement result = Parse("SELECT x::Float32 FROM t");
 
         CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
@@ -1288,7 +1288,7 @@ public class SqlParserTests : ServiceTestBase
     [Fact]
     public void PostfixCast_InterleavesWithIndexAccess()
     {
-        // `a[0]::Int32` â€” index first, then cast.
+        // `a[0]::Int32` — index first, then cast.
         SelectStatement result = Parse("SELECT a[0]::Int32 FROM t");
 
         CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
@@ -1296,7 +1296,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.IsType<IndexAccessExpression>(cast.Expression);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Temporal constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Temporal constants —————————————————————
 
     [Fact]
     public void CurrentDate_ParsesAsTemporalConstant()
@@ -1376,7 +1376,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.IsType<CurrentTimestampExpression>(result.Columns[0].Expression);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ PG-style typed temporal literals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— PG-style typed temporal literals —————————————————————
 
     [Fact]
     public void DateLiteral_LowersToCastToDate()
@@ -1498,7 +1498,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Contains("not yet supported", ex.Message);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Complex queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Complex queries —————————————————————
 
     [Fact]
     public void FullQueryWithAllClauses()
@@ -1565,7 +1565,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal(false, falseVal.Value);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Quoted table names â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Quoted table names —————————————————————
 
     [Fact]
     public void SelectFromDoubleQuotedTableName()
@@ -1587,7 +1587,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("adult.data", table.Name);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ GROUP BY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— GROUP BY —————————————————————
 
     [Fact]
     public void GroupBySingleColumn()
@@ -1725,7 +1725,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Single(result.GroupBy.Expressions);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ CASE expressions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— CASE expressions —————————————————————
 
     [Fact]
     public void SearchedCaseExpression()
@@ -1814,7 +1814,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.NotNull(inner.ElseResult);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Lambda expressions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Lambda expressions —————————————————————
 
     [Fact]
     public void SingleParameterLambda_InFunctionArgument()
@@ -1915,7 +1915,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("x", column.ColumnName);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Array literal sugar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Array literal sugar —————————————————————
 
     [Fact]
     public void ArrayLiteral_DesugarsToArrayFunction()
@@ -2018,7 +2018,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.IsType<LambdaExpression>(outer.Arguments[1]);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Window functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Window functions —————————————————————
 
     [Fact]
     public void WindowFunction_RowNumber_OverEmpty()
@@ -2160,7 +2160,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.IsType<UnboundedFollowingBound>(window.Window.Frame.End);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ DISTINCT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— DISTINCT —————————————————————
 
     [Fact]
     public void SelectDistinct_SetsDistinctFlag()
@@ -2238,7 +2238,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.True(func.Distinct);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ WITHIN GROUP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ———————————————————— WITHIN GROUP ————————————————————
 
     /// <summary>
     /// <c>MODE() WITHIN GROUP (ORDER BY col)</c> parses as a FunctionCallExpression
@@ -2334,7 +2334,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("salary", expr.ColumnName);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Struct literal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Struct literal —————————————————————
 
     [Fact]
     public void StructLiteral_SingleField()
@@ -2397,7 +2397,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("exp", result.Columns[1].Alias);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Index access (bracket operator) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Index access (bracket operator) —————————————————————
 
     [Fact]
     public void IndexAccess_OnColumnReference_IntegerIndex()
@@ -2483,7 +2483,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.IsType<BinaryExpression>(result.Where);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ typeof() and type literals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— typeof() and type literals —————————————————————
 
     [Fact]
     public void TypeLiteral_ParsedInExpression()
@@ -2540,7 +2540,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("Int32", whenValue.TypeName);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ IS [NOT] Type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— IS [NOT] Type —————————————————————
 
     [Fact]
     public void IsType_DesugarsToTypeofEquals()
@@ -2593,7 +2593,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.True(isNull.Negated);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Type-narrowing bind (x AS Int32 y AND ...) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Type-narrowing bind (x AS Int32 y AND ...) —————————————————————
 
     [Fact]
     public void TypeNarrow_DesugarsToCanCastAndCast()
@@ -2696,7 +2696,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal(BinaryOperator.And, and.Operator);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Error message quality (deep failures inside subqueries) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Error message quality (deep failures inside subqueries) —————————————————————
 
     [Fact]
     public void OffsetWithVariable_InsideSubquery_ParsesSuccessfully()
@@ -2720,7 +2720,7 @@ public class SqlParserTests : ServiceTestBase
     public void SubqueryWithMalformedClause_ErrorPointsAtMalformedClauseNotAtFromParen()
     {
         // Same shape as the OFFSET case but with a different malformed
-        // inner clause â€” pins the general behaviour: `(` at table-source
+        // inner clause — pins the general behaviour: `(` at table-source
         // position commits to subquery, so any inner failure surfaces at
         // its real position.
         const string sql =
@@ -2757,7 +2757,7 @@ public class SqlParserTests : ServiceTestBase
         // works around that by factoring CreateFunctionParser into a
         // `.Try()`-protected prefix and an unprotected body. Post-PG
         // alignment, the leading `@` on a variable is no longer a valid
-        // lexeme â€” using `DECLARE @x ...` triggers a tokenizer/parser error
+        // lexeme — using `DECLARE @x ...` triggers a tokenizer/parser error
         // that exercises the same deep-error path the original report did.
         const string sql =
             "CREATE FUNCTION Test()\n" +
@@ -2792,11 +2792,11 @@ public class SqlParserTests : ServiceTestBase
     public void DeclareWithLegacyAtSign_InsideCreateProcedureBody_ErrorPointsAtBadDeclare()
     {
         // Symmetric to the CREATE FUNCTION case: CREATE PROCEDURE has the
-        // same prefix-factored shape so a parse error in its BEGINâ€¦END body
+        // same prefix-factored shape so a parse error in its BEGIN…END body
         // surfaces at the bad statement, not at the outer CREATE.
         const string sql =
             "CREATE PROCEDURE Test() AS BEGIN\n" +
-            "  DECLARE @x String\n" + // illegal @ sigil on x â€” line 2
+            "  DECLARE @x String\n" + // illegal @ sigil on x — line 2
             "  RETURN\n" +
             "END";
 
@@ -2815,7 +2815,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.IsType<CreateProcedureStatement>(stmt);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Concat operator (||) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————— Concat operator (||) —————————————————————
 
     [Fact]
     public void ConcatOperator_DesugarsToConcatFunctionCall()
@@ -2878,7 +2878,7 @@ public class SqlParserTests : ServiceTestBase
     {
         SelectStatement result = Parse("SELECT 'a' || 'b' || 'c' FROM t");
 
-        // Left-associative: ((a || b) || c) â†’ concat(concat('a','b'), 'c').
+        // Left-associative: ((a || b) || c) → concat(concat('a','b'), 'c').
         // The variadic concat() flattens at evaluation time.
         FunctionCallExpression outer = Assert.IsType<FunctionCallExpression>(
             result.Columns[0].Expression);
@@ -2908,7 +2908,7 @@ public class SqlParserTests : ServiceTestBase
     [Fact]
     public void ConcatOperator_BindsAtAdditiveLevel_LowerThanComparison()
     {
-        // 'a' || 'b' = 'ab' parses as ('a' || 'b') = 'ab' â€” same as +/-,
+        // 'a' || 'b' = 'ab' parses as ('a' || 'b') = 'ab' — same as +/-,
         // higher precedence than comparison.
         SelectStatement result = Parse("SELECT 1 FROM t WHERE 'a' || 'b' = 'ab'");
 

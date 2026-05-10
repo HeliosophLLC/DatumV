@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 
@@ -30,7 +30,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    // ──────────────────── Basic shapes ────────────────────
+    // ———————————————————— Basic shapes ————————————————————
 
     [Fact]
     public async Task Returning_StarExpansion_YieldsPostUpdateImage()
@@ -40,7 +40,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String, status String)");
         catalog.Plan("INSERT INTO t (name, status) VALUES ('alice', 'pending'), ('bob', 'pending')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "UPDATE t SET status = 'active' WHERE name = 'alice' RETURNING *");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -59,7 +59,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, score Int32)");
         catalog.Plan("INSERT INTO t (score) VALUES (10), (20), (30)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "UPDATE t SET score = score + 100 WHERE score > 15 RETURNING id, score");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -76,7 +76,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
         catalog.Plan("INSERT INTO t (name) VALUES ('alice')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "UPDATE t SET name = 'bob' RETURNING upper(name) AS shouted, name");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -94,7 +94,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, score Int32)");
         catalog.Plan("INSERT INTO t (score) VALUES (10)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "UPDATE t SET score = 999 WHERE score > 9999 RETURNING id, score");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -110,7 +110,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, status String)");
         catalog.Plan("INSERT INTO t (status) VALUES ('a'), ('b'), ('c')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "UPDATE t SET status = 'X' RETURNING id, status");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -122,7 +122,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         }
     }
 
-    // ──────────────────── No-op rows (PG: WHERE-matched rows always surface) ────────────────────
+    // ———————————————————— No-op rows (PG: WHERE-matched rows always surface) ————————————————————
 
     [Fact]
     public async Task Returning_WhereMatchedButNoOp_StillSurfacesRow()
@@ -134,7 +134,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, status String)");
         catalog.Plan("INSERT INTO t (status) VALUES ('pending')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "UPDATE t SET status = 'pending' WHERE status = 'pending' RETURNING id, status");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -143,7 +143,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal("pending", rows[0][1].AsString());
     }
 
-    // ──────────────────── No-RETURNING regression ────────────────────
+    // ———————————————————— No-RETURNING regression ————————————————————
 
     [Fact]
     public async Task NoReturning_PlanYieldsNoRows()
@@ -153,13 +153,13 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, status String)");
         catalog.Plan("INSERT INTO t (status) VALUES ('a')");
 
-        IQueryPlan plan = catalog.Plan("UPDATE t SET status = 'b'");
+        StatementPlan plan = catalog.Plan("UPDATE t SET status = 'b'");
 
         List<DataValue[]> rows = await CollectRows(plan);
         Assert.Empty(rows);
     }
 
-    // ──────────────────── Persistent target ────────────────────
+    // ———————————————————— Persistent target ————————————————————
 
     [Fact]
     public async Task Returning_OnPersistentTable_PostImageValues()
@@ -168,7 +168,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE conversations (id Int64 IDENTITY, title String)");
         catalog.Plan("INSERT INTO conversations (title) VALUES ('Old')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "UPDATE conversations SET title = 'New' WHERE id = 1 RETURNING id, title");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -177,7 +177,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal("New", rows[0][1].AsString());
     }
 
-    // ──────────────────── UPDATE … FROM RETURNING ────────────────────
+    // ———————————————————— UPDATE … FROM RETURNING ————————————————————
 
     [Fact]
     public async Task ReturningFrom_LastMatchWins_PostImageReflectsFinalSet()
@@ -192,7 +192,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE updates (target_id Int32, new_status String)");
         catalog.Plan("INSERT INTO updates VALUES (1, 'first'), (1, 'second')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "UPDATE target SET status = updates.new_status " +
             "FROM updates WHERE target.id = updates.target_id " +
             "RETURNING target.id, target.status");
@@ -218,7 +218,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE updates (target_id Int32, new_status String)");
         catalog.Plan("INSERT INTO updates VALUES (99, 'never')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "UPDATE target SET status = updates.new_status " +
             "FROM updates WHERE target.id = updates.target_id " +
             "RETURNING target.id");
@@ -227,7 +227,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Empty(rows);
     }
 
-    // ──────────────────── GENERATED column dependents ────────────────────
+    // ———————————————————— GENERATED column dependents ————————————————————
 
     [Fact]
     public async Task Returning_GeneratedDependent_ReflectsRecomputedValue()
@@ -242,7 +242,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
             ")");
         catalog.Plan("INSERT INTO t (base) VALUES (10)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "UPDATE t SET base = 50 WHERE id = 1 RETURNING base, doubled");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -251,7 +251,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(100, rows[0][1].AsInt32()); // 50 * 2 — recomputed
     }
 
-    // ──────────────────── Modifying CTE (WITH … UPDATE … RETURNING) ────────────────────
+    // ———————————————————— Modifying CTE (WITH … UPDATE … RETURNING) ————————————————————
 
     [Fact]
     public async Task ModifyingCte_SelectFromCte_YieldsPostUpdateRows()
@@ -264,7 +264,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, status String)");
         catalog.Plan("INSERT INTO t (status) VALUES ('pending'), ('pending')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "WITH activated AS (" +
             "  UPDATE t SET status = 'active' WHERE id = 1 RETURNING id, status" +
             ") " +
@@ -285,7 +285,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, score Int32)");
         catalog.Plan("INSERT INTO t (score) VALUES (10), (20), (30)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "WITH bumped AS (" +
             "  UPDATE t SET score = score + 100 RETURNING id, score" +
             ") " +
@@ -305,7 +305,7 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String, status String)");
         catalog.Plan("INSERT INTO t (name, status) VALUES ('alice', 'old')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "WITH upd AS (UPDATE t SET status = 'new' RETURNING *) " +
             "SELECT * FROM upd");
 
@@ -334,9 +334,9 @@ public sealed class UpdateReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Contains("RETURNING", ex.Message);
     }
 
-    // ──────────────────── Helpers ────────────────────
+    // ———————————————————— Helpers ————————————————————
 
-    private static async Task<List<DataValue[]>> CollectRows(IQueryPlan plan)
+    private static async Task<List<DataValue[]>> CollectRows(StatementPlan plan)
     {
         List<DataValue[]> rows = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

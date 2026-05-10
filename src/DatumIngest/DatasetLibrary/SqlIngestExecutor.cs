@@ -90,7 +90,7 @@ internal sealed class SqlIngestExecutor
         }
 
         Statement bound = ParameterBinder.Bind(parsed, parameters);
-        IQueryPlan plan = await _catalog
+        StatementPlan plan = await _catalog
             .ExecuteStatementAsync(bound, sourceText: sql, batchContext: null)
             .ConfigureAwait(false);
 
@@ -107,7 +107,7 @@ internal sealed class SqlIngestExecutor
 
         try
         {
-            await foreach (RowBatch batch in plan.ExecuteAsync(ct).ConfigureAwait(false))
+            await foreach (RowBatch batch in _catalog.ExecuteAsync(plan, ct).ConfigureAwait(false))
             {
                 if (!schemaDetector.IsDetected)
                 {

@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 
@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class NamedArgumentExecutionTests : ServiceTestBase
 {
-    private static async Task<List<DataValue>> CollectFirstColumnAsync(IQueryPlan plan)
+    private static async Task<List<DataValue>> CollectFirstColumnAsync(StatementPlan plan)
     {
         List<DataValue> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -35,7 +35,7 @@ public sealed class NamedArgumentExecutionTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("t", columns: ["id"], new object?[] { 1 });
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT assert_true(true, message := 'ok') AS r FROM t");
         List<DataValue> values = await CollectFirstColumnAsync(plan);
 
@@ -52,7 +52,7 @@ public sealed class NamedArgumentExecutionTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("t", columns: ["id"], new object?[] { 1 });
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT assert_true(true, message => 'ok') AS r FROM t");
         List<DataValue> values = await CollectFirstColumnAsync(plan);
 
@@ -71,7 +71,7 @@ public sealed class NamedArgumentExecutionTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("t", columns: ["id"], new object?[] { 1 });
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT assert_true(message := 'ok', condition := true) AS r FROM t");
         List<DataValue> values = await CollectFirstColumnAsync(plan);
 
@@ -126,11 +126,11 @@ public sealed class NamedArgumentExecutionTests : ServiceTestBase
         catalog.Plan(
             "CREATE FUNCTION subtract(a INT32, b INT32) RETURNS INT32 BEGIN RETURN a - b END");
 
-        IQueryPlan positional = catalog.Plan("SELECT subtract(10, 3) AS r FROM t");
+        StatementPlan positional = catalog.Plan("SELECT subtract(10, 3) AS r FROM t");
         List<DataValue> positionalValues = await CollectFirstColumnAsync(positional);
         Assert.Equal(7, positionalValues[0].AsInt32());
 
-        IQueryPlan reordered = catalog.Plan("SELECT subtract(b := 3, a := 10) AS r FROM t");
+        StatementPlan reordered = catalog.Plan("SELECT subtract(b := 3, a := 10) AS r FROM t");
         List<DataValue> reorderedValues = await CollectFirstColumnAsync(reordered);
         Assert.Equal(7, reorderedValues[0].AsInt32());
     }
@@ -148,7 +148,7 @@ public sealed class NamedArgumentExecutionTests : ServiceTestBase
         catalog.Plan(
             "CREATE FUNCTION add_with_default(a INT32, b INT32 = 100) RETURNS INT32 BEGIN RETURN a + b END");
 
-        IQueryPlan plan = catalog.Plan("SELECT add_with_default(a := 5) AS r FROM t");
+        StatementPlan plan = catalog.Plan("SELECT add_with_default(a := 5) AS r FROM t");
         List<DataValue> values = await CollectFirstColumnAsync(plan);
 
         Assert.Equal(105, values[0].AsInt32());

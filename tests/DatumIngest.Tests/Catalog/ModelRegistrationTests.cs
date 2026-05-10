@@ -57,7 +57,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         $"CREATE MODEL classify(x INT32) RETURNS INT32 USING '{_absoluteUsingPath}' " +
         $"AS BEGIN {body} END";
 
-    // ───────────────────── CREATE MODEL ─────────────────────
+    // ————————————————————— CREATE MODEL —————————————————————
 
     [Fact]
     public void CreateModel_RegistersInDeclaredModels()
@@ -280,7 +280,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.False(firstSession.Disposed);
     }
 
-    // ───────────────────── DROP MODEL ─────────────────────
+    // ————————————————————— DROP MODEL —————————————————————
 
     [Fact]
     public async Task DropModel_RemovesFromRegistryAndDisposesSessions()
@@ -336,7 +336,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         catalog.Plan("DROP MODEL IF EXISTS never_registered");
     }
 
-    // ───────────────────── Scalar dispatch into SQL-defined models ─────────────────────
+    // ————————————————————— Scalar dispatch into SQL-defined models —————————————————————
     //
     // The hoister-blocks-SQL-models gap: when a query references
     // `models.<sql_defined>()`, ModelInvocationHoister sees the `models.`
@@ -375,7 +375,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL square(x INT32) RETURNS INT32 USING '{_absoluteUsingPath}' " +
             $"AS BEGIN RETURN x * x END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.square(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.square(v) FROM data");
 
         List<DataValue> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -400,7 +400,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Contains("'models' schema", ex.Message);
     }
 
-    // ───────────────────── IMPLEMENTS contract enforcement ─────────────────────
+    // ————————————————————— IMPLEMENTS contract enforcement —————————————————————
 
     [Fact]
     public void CreateModel_Implements_MatchingSignature_RegistersWithTaskName()
@@ -492,7 +492,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     {
         // TextGenerator requires 1 required param. If the model marks its
         // single param as optional (with a default), the contract is
-        // violated — required-param-count (0) ≠ contract-input-count (1).
+        // violated — required-param-count (0) â‰  contract-input-count (1).
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
         DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
@@ -643,7 +643,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Equal("ScoredClass", descriptor.ReturnTypeName);
     }
 
-    // ───────────────────── Pass A body-walk RETURN typecheck ─────────────────────
+    // ————————————————————— Pass A body-walk RETURN typecheck —————————————————————
 
     [Fact]
     public void CreateModel_PassA_StructLiteralReturn_MatchingFields_Registers()
@@ -767,13 +767,13 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             new QualifiedName("models", "via_decl"), out _));
     }
 
-    // ───────────────────── Pass B body-walk RETURN typecheck ─────────────────────
+    // ————————————————————— Pass B body-walk RETURN typecheck —————————————————————
 
     [Fact]
     public void CreateModel_PassB_VariableRefReturn_WrongDeclareType_Throws()
     {
         // RETURNS ScoredClass + DECLARE r BoundingBox; RETURN r.
-        // The DECLARE's annotated type drives Pass B: BoundingBox ≠
+        // The DECLARE's annotated type drives Pass B: BoundingBox â‰ 
         // ScoredClass, so the registrar should throw at CREATE time.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
@@ -960,7 +960,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Contains("ScoredClass", ex.Message);
     }
 
-    // ───────────────────── infer() runtime bridge (Phase 3b) ─────────────────────
+    // ————————————————————— infer() runtime bridge (Phase 3b) —————————————————————
 
     [Fact]
     public void Infer_OutsideModelBody_ThrowsAtPlanTime()
@@ -1033,7 +1033,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL doubler(x Float32) RETURNS Float32 USING '{_absoluteUsingPath}' " +
             $"AS BEGIN RETURN infer(x) END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.doubler(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.doubler(v) FROM data");
 
         List<DataValue> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1051,9 +1051,9 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     [Fact]
     public async Task Infer_RankTwoOutput_ProducesMultiDimValue()
     {
-        // ONNX-tensor outputs with rank ≥ 2 surface as multi-dim DataValues so
+        // ONNX-tensor outputs with rank â‰¥ 2 surface as multi-dim DataValues so
         // SQL bracket-access (m[y, x]) and array_shape() see the declared shape.
-        // The stub emits a 2×3 Float32 matrix; the model returns it directly via
+        // The stub emits a 2x3 Float32 matrix; the model returns it directly via
         // `RETURN infer(x)` and the test asserts the resulting value's
         // IsMultiDim / Ndim / GetShape / element values.
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
@@ -1074,7 +1074,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL gen_matrix(x Float32) RETURNS Array<Float32> USING '{_absoluteUsingPath}' " +
             $"AS BEGIN RETURN infer(x) END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.gen_matrix(v) AS m FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.gen_matrix(v) AS m FROM data");
 
         // Multi-dim values are arena-backed; read shape/elements within the foreach
         // before the batch arena is released, then capture the materialized values.
@@ -1128,9 +1128,9 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL gen_matrix(x Float32) RETURNS Array<Float32> USING '{_absoluteUsingPath}' " +
             $"AS BEGIN RETURN infer(x) END");
 
-        // Row-major: [10, 11, 12, 13, 14, 15] in a 2×3 shape (1-based) →
+        // Row-major: [10, 11, 12, 13, 14, 15] in a 2x3 shape (1-based) →
         //   m[1, 1] = 10, m[1, 3] = 12, m[2, 1] = 13, m[2, 3] = 15
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT models.gen_matrix(v) AS m," +
             "       models.gen_matrix(v)[1, 1] AS a," +
             "       models.gen_matrix(v)[1, 3] AS b," +
@@ -1184,7 +1184,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL gen_matrix(x Float32) RETURNS Array<Float32> USING '{_absoluteUsingPath}' " +
             $"AS BEGIN RETURN infer(x) END");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT cardinality(models.gen_matrix(v))         AS total," +
             "       array_ndims(models.gen_matrix(v))         AS nd," +
             "       array_length(models.gen_matrix(v), 1)     AS d1," +
@@ -1242,7 +1242,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL adder(a Int64, b Int64) RETURNS Float32 USING '{_absoluteUsingPath}' "
             + $"AS BEGIN RETURN infer({{input_a: a, input_b: b}}) END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.adder(a, b) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.adder(a, b) FROM data");
 
         List<DataValue> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1289,7 +1289,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             + $"{{input_ids: [CAST(1 AS Int32), CAST(1 AS Int32)], "
             + $"attention_mask: [CAST(1 AS Int32), CAST(1 AS Int32)]}}) END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.embed(a, b) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.embed(a, b) FROM data");
 
         List<DataValue> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1335,7 +1335,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             + "  RETURN boxes[1] "
             + "END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.pick_boxes(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.pick_boxes(v) FROM data");
 
         List<DataValue> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1379,7 +1379,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             + "  RETURN logits[1] "
             + "END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.pick_first(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.pick_first(v) FROM data");
 
         List<DataValue> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1419,7 +1419,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL doubler_compat(x Float32) RETURNS Float32 USING '{_absoluteUsingPath}' "
             + "AS BEGIN RETURN infer(x) END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.doubler_compat(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.doubler_compat(v) FROM data");
 
         List<DataValue> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1437,7 +1437,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     public async Task Infer_MultiOutputSession_StillEmitsFirstOutputOnly()
     {
         // Compat path: plain infer() against a multi-output session keeps
-        // returning the FIRST declared output (the U²-Net / all-MiniLM
+        // returning the FIRST declared output (the UÂ²-Net / all-MiniLM
         // expectation). The struct emit is reserved for infer_outputs().
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
         catalog.Models = new ModelCatalog(modelDirectory: Path.GetTempPath())
@@ -1460,7 +1460,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             + "  RETURN logits[1] "
             + "END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.first_only(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.first_only(v) FROM data");
 
         List<DataValue> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1475,7 +1475,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Equal(4.0f, values[0].AsFloat32());
     }
 
-    // ───────────────────── Batched dispatch ─────────────────────
+    // ————————————————————— Batched dispatch —————————————————————
 
     /// <summary>
     /// SQL-defined model with a straight-line body (DECLARE/RETURN-only)
@@ -1529,7 +1529,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL passthrough(x Float32[]) RETURNS Float32[] "
             + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN infer(x) END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.passthrough(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.passthrough(v) FROM data");
 
         int rowCount = 0;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1619,7 +1619,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             + "  RETURN outputs['boxes'] "
             + "END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.detector(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.detector(v) FROM data");
 
         List<float> values = [];
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1708,7 +1708,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             + "  RETURN array_get(intr, 1, 1, 1, 1) "
             + "END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.k_picker(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.k_picker(v) FROM data");
 
         List<float> values = [];
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1776,7 +1776,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             + $"  RETURN infer(x, [CAST(1 AS Int32), CAST(3 AS Int32)]) "
             + $"END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.passthrough2(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.passthrough2(v) FROM data");
 
         int rowCount = 0;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1811,7 +1811,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
                 runCallCount++;
                 IInferenceTensor incoming = bag["input"];
                 observedShape = incoming.Shape.ToArray();
-                // Single-channel output the same H×W per row; emit zeros.
+                // Single-channel output the same HxW per row; emit zeros.
                 int batchN = incoming.Shape[0];
                 int h = incoming.Shape[2];
                 int w = incoming.Shape[3];
@@ -1848,7 +1848,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             + $"  RETURN infer(x, [CAST(1 AS Int32), CAST(3 AS Int32), CAST(4 AS Int32), CAST(4 AS Int32)]) "
             + $"END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.flex(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.flex(v) FROM data");
 
         int rowCount = 0;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -1866,7 +1866,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     /// <c>models/sql/glpn-nyu.sql</c>'s first CREATE MODEL (the visualization
     /// variant returning Image) through the columnar batched dispatch with a
     /// stub session whose input shape mirrors the real ONNX export
-    /// (<c>[-1, 3, -1, -1]</c>, dynamic batch + dynamic H×W). The body's
+    /// (<c>[-1, 3, -1, -1]</c>, dynamic batch + dynamic HxW). The body's
     /// <c>infer(tensor, [1, 3, 480, 480])</c> 2-arg form provides the
     /// trailing dims via the literal, so cross-row batching kicks in even
     /// against the fully-flexible session. Three input rows → one packed
@@ -1941,7 +1941,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         };
 
         // Three small bitmaps encoded to PNG bytes. image_to_tensor_chw
-        // stretch-resizes every row to 480×480 internally, so per-row element
+        // stretch-resizes every row to 480x480 internally, so per-row element
         // counts agree and the explicit [1, 3, 480, 480] shape literal is
         // uniform across rows. InMemoryTableProvider needs DataKind.Image
         // explicitly so byte[] cells materialise as Image rather than UInt8[].
@@ -1959,7 +1959,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         catalog.Plan(sqlSource);
 
-        IQueryPlan plan = catalog.Plan("SELECT models.glpn_nyu(img) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.glpn_nyu(img) FROM data");
 
         int rowCount = 0;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -2026,7 +2026,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             $"CREATE MODEL once(x Float32[]) RETURNS Float32[] "
             + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN infer(x) END");
 
-        IQueryPlan plan = catalog.Plan("SELECT models.once(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.once(v) FROM data");
 
         int rowCount = 0;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -2038,7 +2038,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         Assert.Equal(1, runCallCount);
     }
 
-    // ───────────────────── Stubs ─────────────────────
+    // ————————————————————— Stubs —————————————————————
 
     /// <summary>
     /// Minimal <see cref="IInferenceDispatcher"/> for registrar tests.
@@ -2146,7 +2146,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             });
 
         /// <summary>
-        /// Single Float32-input, single Float32 rank-2 output stub: emits a 2×3
+        /// Single Float32-input, single Float32 rank-2 output stub: emits a 2x3
         /// matrix derived from the scalar input. Exercises the multi-dim output
         /// construction path — the resulting <c>infer()</c> ValueRef should
         /// carry <see cref="DataValue.IsMultiDim"/> with shape <c>[2, 3]</c>.

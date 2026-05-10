@@ -46,7 +46,7 @@ internal sealed class MessageGraph : IMessageGraph
 
         Statement statement = SqlParser.ParseStatement(InsertSql);
         Statement bound = ParameterBinder.Bind(statement, parameters);
-        // ExecuteStatementAsync runs INSERT inline and returns EmptyQueryPlan
+        // ExecuteStatementAsync runs INSERT inline and returns a DdlPlan.NoOp
         // — no need to iterate the result.
         await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
     }
@@ -65,9 +65,9 @@ internal sealed class MessageGraph : IMessageGraph
             "FROM messages WHERE conversation_id = $conversation_id ORDER BY id ASC");
         Statement bound = ParameterBinder.Bind(statement, parameters);
 
-        IQueryPlan plan = await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
+        StatementPlan plan = await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
         List<MessageRecord> results = new();
-        await foreach (RowBatch batch in plan.ExecuteAsync(ct).ConfigureAwait(false))
+        await foreach (RowBatch batch in _catalog.ExecuteAsync(plan, ct).ConfigureAwait(false))
         {
             // Strings only stay inline when they fit in the DataValue
             // struct (~27 bytes UTF-8). Message content is variable-length

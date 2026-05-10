@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Indexing.Fts;
@@ -34,7 +34,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    // ──────────────────── File lifecycle ────────────────────
+    // ———————————————————— File lifecycle ————————————————————
 
     [Fact]
     public void CreateIndex_UsingFts_CreatesSidecarFile()
@@ -93,7 +93,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.False(provider!.TryGetTextSearchIndex("body", out _));
     }
 
-    // ──────────────────── Backfill on populated tables ────────────────────
+    // ———————————————————— Backfill on populated tables ————————————————————
 
     [Fact]
     public void CreateIndex_UsingFts_OnPopulatedTable_BackfillsPostings()
@@ -155,7 +155,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(2, index!.FindPostings("fox").Count);
     }
 
-    // ──────────────────── Catalog persistence ────────────────────
+    // ———————————————————— Catalog persistence ————————————————————
 
     [Fact]
     public void CreateIndex_UsingFts_SurvivesCatalogReopen()
@@ -174,7 +174,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.Single(index.FindPostings("fox"));
     }
 
-    // ──────────────────── Validation errors ────────────────────
+    // ———————————————————— Validation errors ————————————————————
 
     [Fact]
     public void CreateIndex_UsingFts_NonStringColumn_Throws()
@@ -265,7 +265,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.Contains("WITH options", ex.Message);
     }
 
-    // ──────────────────── Incremental maintenance (H1') ────────────────────
+    // ———————————————————— Incremental maintenance (H1') ————————————————————
 
     [Fact]
     public void Insert_AfterCreateIndex_PostingsReflectNewRows()
@@ -341,7 +341,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
             "(2, 'lazy dog'), " +
             "(3, 'fox jumped')");
 
-        IQueryPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
+        StatementPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
         List<int> ids = new();
         foreach (RowBatch batch in ExecutePlanAsync(plan).ToBlockingEnumerable())
         {
@@ -407,16 +407,16 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
 
         catalog.Plan("UPDATE messages SET body = 'new wolf' WHERE id = 1");
 
-        IQueryPlan wolfPlan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'wolf'");
+        StatementPlan wolfPlan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'wolf'");
         List<int> wolfIds = CollectIds(wolfPlan);
         Assert.Equal(new[] { 1 }, wolfIds);
 
-        IQueryPlan foxPlan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
+        StatementPlan foxPlan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
         List<int> foxIds = CollectIds(foxPlan);
         Assert.Equal(new[] { 2 }, foxIds);
     }
 
-    private static List<int> CollectIds(IQueryPlan plan)
+    private static List<int> CollectIds(StatementPlan plan)
     {
         List<int> ids = new();
         foreach (RowBatch batch in ExecutePlanAsync(plan).ToBlockingEnumerable())
@@ -427,7 +427,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         return ids;
     }
 
-    // ──────────────────── DROP TABLE / ALTER DROP COLUMN cascade (H2 / H3) ────────────────────
+    // ———————————————————— DROP TABLE / ALTER DROP COLUMN cascade (H2 / H3) ————————————————————
 
     [Fact]
     public void DropTable_RemovesFtsSidecarFile()
@@ -495,7 +495,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.Single(index!.FindPostings("fox"));
     }
 
-    // ──────────────────── DELETE smoke test ────────────────────
+    // ———————————————————— DELETE smoke test ————————————————————
 
     [Fact]
     public void Delete_WithoutReindex_FilterPathStillReturnsCorrectRows()
@@ -519,7 +519,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("DELETE FROM messages WHERE id = 1");
 
         // Query without an FTS index (the filter path) — must be correct.
-        IQueryPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
+        StatementPlan plan = catalog.Plan("SELECT id FROM messages WHERE body @@ 'fox'");
         List<int> ids = CollectIds(plan);
         Assert.Equal(new[] { 2 }, ids);
     }

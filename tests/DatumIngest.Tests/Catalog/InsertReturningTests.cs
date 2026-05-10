@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 
@@ -30,7 +30,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    // ──────────────────── Basic VALUES + RETURNING ────────────────────
+    // ———————————————————— Basic VALUES + RETURNING ————————————————————
 
     [Fact]
     public async Task Returning_SingleColumn_YieldsOneRowOneColumn()
@@ -39,7 +39,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
 
-        IQueryPlan plan = catalog.Plan("INSERT INTO t (name) VALUES ('alice') RETURNING id");
+        StatementPlan plan = catalog.Plan("INSERT INTO t (name) VALUES ('alice') RETURNING id");
 
         List<DataValue[]> rows = await CollectRows(plan);
         Assert.Single(rows);
@@ -54,7 +54,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String, status String DEFAULT 'pending')");
 
-        IQueryPlan plan = catalog.Plan("INSERT INTO t (name) VALUES ('alice') RETURNING *");
+        StatementPlan plan = catalog.Plan("INSERT INTO t (name) VALUES ('alice') RETURNING *");
 
         List<DataValue[]> rows = await CollectRows(plan);
         Assert.Single(rows);
@@ -71,7 +71,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "INSERT INTO t (name) VALUES ('a'), ('b'), ('c') RETURNING id, name");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -88,7 +88,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32 IDENTITY(100, 5), name String)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "INSERT INTO t (name) VALUES ('a') RETURNING id * 2 AS doubled, upper(name) AS shouted");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -108,7 +108,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan(
             "CREATE TEMP TABLE t (id Int64 IDENTITY, name String, label String DEFAULT 'unset')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "INSERT INTO t (name) VALUES ('a') RETURNING label, id");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -117,7 +117,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(1L, rows[0][1].AsInt64());
     }
 
-    // ──────────────────── No-RETURNING regression ────────────────────
+    // ———————————————————— No-RETURNING regression ————————————————————
 
     [Fact]
     public async Task NoReturning_PlanYieldsNoRows()
@@ -128,7 +128,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
 
-        IQueryPlan plan = catalog.Plan("INSERT INTO t (name) VALUES ('alice')");
+        StatementPlan plan = catalog.Plan("INSERT INTO t (name) VALUES ('alice')");
 
         List<DataValue[]> rows = await CollectRows(plan);
         Assert.Empty(rows);
@@ -136,7 +136,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(1, catalog["t"].GetRowCount());
     }
 
-    // ──────────────────── Persistent target ────────────────────
+    // ———————————————————— Persistent target ————————————————————
 
     [Fact]
     public async Task Returning_OnPersistentTable_RoundTripsIdentity()
@@ -145,7 +145,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE conversations (id Int64 IDENTITY, title String)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "INSERT INTO conversations (title) VALUES ('Chat') RETURNING id, title");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -154,7 +154,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal("Chat", rows[0][1].AsString());
     }
 
-    // ──────────────────── INSERT … SELECT … RETURNING (C1d) ────────────────────
+    // ———————————————————— INSERT … SELECT … RETURNING (C1d) ————————————————————
 
     [Fact]
     public async Task ReturningSelect_PicksUpIdentitiesFromSource()
@@ -167,7 +167,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, name String)");
         catalog.Plan("INSERT INTO src VALUES ('alice'), ('bob'), ('carol')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "INSERT INTO dst (name) SELECT name FROM src RETURNING id, name");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -186,7 +186,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, n Int32, status String DEFAULT 'new')");
         catalog.Plan("INSERT INTO src VALUES (10), (20)");
 
-        IQueryPlan plan = catalog.Plan("INSERT INTO dst (n) SELECT n FROM src RETURNING *");
+        StatementPlan plan = catalog.Plan("INSERT INTO dst (n) SELECT n FROM src RETURNING *");
 
         List<DataValue[]> rows = await CollectRows(plan);
         Assert.Equal(2, rows.Count);
@@ -209,7 +209,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE src (n Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, n Int32)");
 
-        IQueryPlan plan = catalog.Plan("INSERT INTO dst (n) SELECT n FROM src RETURNING id");
+        StatementPlan plan = catalog.Plan("INSERT INTO dst (n) SELECT n FROM src RETURNING id");
 
         List<DataValue[]> rows = await CollectRows(plan);
         Assert.Empty(rows);
@@ -225,7 +225,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, src_id Int32, name String)");
         catalog.Plan("INSERT INTO src VALUES (1, 'a'), (2, 'b'), (3, 'c')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "INSERT INTO dst (src_id, name) SELECT id, name FROM src WHERE id >= 2 RETURNING id, src_id");
 
         List<DataValue[]> rows = await CollectRows(plan);
@@ -234,7 +234,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal((2L, 3), (rows[1][0].AsInt64(), rows[1][1].AsInt32()));
     }
 
-    // ──────────────────── WITH cte AS (INSERT … RETURNING) (C1e) ────────────────────
+    // ———————————————————— WITH cte AS (INSERT … RETURNING) (C1e) ————————————————————
 
     [Fact]
     public async Task ModifyingCte_SelectFromCte_YieldsReturningRows()
@@ -246,7 +246,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE conversations (id Int64 IDENTITY, title String)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "WITH new_conv AS (" +
             "  INSERT INTO conversations (title) VALUES ('Chat') RETURNING id, title" +
             ") " +
@@ -267,7 +267,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, n Int32)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "WITH inserted AS (" +
             "  INSERT INTO t (n) VALUES (10), (20), (30) RETURNING id, n" +
             ") " +
@@ -288,7 +288,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String, status String DEFAULT 'new')");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "WITH ins AS (INSERT INTO t (name) VALUES ('alice') RETURNING *) " +
             "SELECT * FROM ins");
 
@@ -326,7 +326,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, n Int32)");
         catalog.Plan("INSERT INTO src VALUES (1), (2), (3)");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "WITH copied AS (" +
             "  INSERT INTO dst (n) SELECT n FROM src RETURNING id, n" +
             ") " +
@@ -339,9 +339,9 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal((3L, 3), (rows[2][0].AsInt64(), rows[2][1].AsInt32()));
     }
 
-    // ──────────────────── Helpers ────────────────────
+    // ———————————————————— Helpers ————————————————————
 
-    private static async Task<List<DataValue[]>> CollectRows(IQueryPlan plan)
+    private static async Task<List<DataValue[]>> CollectRows(StatementPlan plan)
     {
         List<DataValue[]> rows = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

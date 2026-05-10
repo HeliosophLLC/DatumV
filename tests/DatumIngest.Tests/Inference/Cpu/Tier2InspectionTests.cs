@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Inference;
 using DatumIngest.Inference.OnnxRuntime;
 using DatumIngest.Model;
@@ -29,7 +29,7 @@ public sealed class Tier2InspectionTests : ServiceTestBase
         return catalog;
     }
 
-    // ─── inference.onnx_inspect_meta ──────────────────────────────────────────
+    // ——— inference.onnx_inspect_meta ——————————————————————————————————————————
 
     [Fact]
     public async Task OnnxInspectMeta_FixtureSoftmax_ReturnsSingleRowWithExpectedShape()
@@ -38,7 +38,7 @@ public sealed class Tier2InspectionTests : ServiceTestBase
         Assert.True(File.Exists(fixturePath));
 
         TableCatalog catalog = CreateCatalogWithDispatcher();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT producer_name, producer_version, opset, ir_version, required_ops, file_size_bytes " +
             $"FROM inference.onnx_inspect_meta('file://{fixturePath}')");
 
@@ -79,7 +79,7 @@ public sealed class Tier2InspectionTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalogWithDispatcher();
         string missing = Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.onnx");
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT producer_name FROM inference.onnx_inspect_meta('file://{missing}')");
 
         await Assert.ThrowsAsync<FileNotFoundException>(async () =>
@@ -88,14 +88,14 @@ public sealed class Tier2InspectionTests : ServiceTestBase
         });
     }
 
-    // ─── inference.infer_compatibility ───────────────────────────────────────
+    // ——— inference.infer_compatibility ———————————————————————————————————————
 
     [Fact]
     public async Task InferCompatibility_FixtureSoftmax_OrtBackendSupports()
     {
         string fixturePath = FixturePath();
         TableCatalog catalog = CreateCatalogWithDispatcher();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT backend, supported, opset_required, opset_supported, notes " +
             $"FROM inference.infer_compatibility('file://{fixturePath}')");
 
@@ -122,14 +122,14 @@ public sealed class Tier2InspectionTests : ServiceTestBase
         Assert.Equal("", ort.Notes);
     }
 
-    // ─── inference.model_skeleton ────────────────────────────────────────────
+    // ——— inference.model_skeleton ————————————————————————————————————————————
 
     [Fact]
     public async Task ModelSkeleton_FixtureSoftmax_GeneratesPlausibleTemplate()
     {
         string fixturePath = FixturePath();
         TableCatalog catalog = CreateCatalogWithDispatcher();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT inference.model_skeleton('file://{fixturePath}')");
 
         string? skeleton = null;
@@ -158,7 +158,7 @@ public sealed class Tier2InspectionTests : ServiceTestBase
     public async Task ModelSkeleton_RelativePath_ThrowsClearError()
     {
         TableCatalog catalog = CreateCatalogWithDispatcher();
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT inference.model_skeleton('model.onnx')");
 
         Exception thrown = await Assert.ThrowsAnyAsync<Exception>(async () =>

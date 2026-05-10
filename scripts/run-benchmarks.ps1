@@ -103,7 +103,7 @@ $sb = [System.Text.StringBuilder]::new()
 
 $envEmitted = $false
 # BDN writes UTF-8; Get-Content on PS 5.1 defaults to ASCII/Windows-1252 detection,
-# which mojibakes UTF-8 multi-byte chars (e.g. `→` becomes `â†’`).
+# which mojibakes UTF-8 multi-byte chars (e.g. `→` becomes `→`).
 # Read explicitly as UTF-8 so non-ASCII method names survive the stitch.
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 foreach ($report in $reports) {

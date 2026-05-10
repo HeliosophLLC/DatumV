@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Models;
@@ -16,7 +16,7 @@ namespace DatumIngest.Tests.Catalog;
 /// </summary>
 public class ProceduralUdfExecutionTests : ServiceTestBase
 {
-    private static async Task<List<DataValue>> CollectFirstColumnAsync(IQueryPlan plan)
+    private static async Task<List<DataValue>> CollectFirstColumnAsync(StatementPlan plan)
     {
         List<DataValue> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -29,7 +29,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         return values;
     }
 
-    // ───────────────────── Smallest viable procedural UDF ─────────────────────
+    // ————————————————————— Smallest viable procedural UDF —————————————————————
 
     [Fact]
     public async Task SingleReturn_EvaluatesBodyExpression()
@@ -43,7 +43,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
 
         catalog.Plan(
             "CREATE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END");
-        IQueryPlan plan = catalog.Plan("SELECT sq(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT sq(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Single(values);
@@ -66,13 +66,13 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
                 "DECLARE y INT32 = x + 1; " +
                 "RETURN y * 2 " +
             "END");
-        IQueryPlan plan = catalog.Plan("SELECT step(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT step(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Equal(8, values[0].AsInt32());
     }
 
-    // ───────────────────── Per-call evaluation semantics ─────────────────────
+    // ————————————————————— Per-call evaluation semantics —————————————————————
 
     [Fact]
     public async Task DeclareWithRandom_EvaluatesOncePerCall()
@@ -94,7 +94,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
                 "DECLARE x FLOAT32 = random(0.0, 1.0); " +
                 "RETURN concat(CAST(x AS STRING), '/', CAST(x AS STRING)) " +
             "END");
-        IQueryPlan plan = catalog.Plan("SELECT twin() FROM data");
+        StatementPlan plan = catalog.Plan("SELECT twin() FROM data");
 
         List<string> rendered = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -111,7 +111,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         Assert.Equal(halves[0], halves[1]);
     }
 
-    // ───────────────────── Control flow ─────────────────────
+    // ————————————————————— Control flow —————————————————————
 
     [Fact]
     public async Task IfElseBranches_BothPathsReturn_PicksMatchingBranch()
@@ -128,7 +128,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             "CREATE FUNCTION abs2(x INT32) RETURNS INT32 BEGIN " +
                 "IF x < 0 RETURN -x ELSE RETURN x " +
             "END");
-        IQueryPlan plan = catalog.Plan("SELECT abs2(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT abs2(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Equal(2, values.Count);
@@ -136,7 +136,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         Assert.Equal(4, values[1].AsInt32());
     }
 
-    // ───────────────────── Casting + IS NOT NULL ─────────────────────
+    // ————————————————————— Casting + IS NOT NULL —————————————————————
 
     [Fact]
     public async Task ReturnsTypeMismatch_CoercesViaImplicitCast()
@@ -152,7 +152,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             "CREATE FUNCTION half(x INT32) RETURNS INT32 BEGIN " +
                 "RETURN x / 2.0 " +
             "END");
-        IQueryPlan plan = catalog.Plan("SELECT half(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT half(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Equal(DataKind.Int32, values[0].Kind);
@@ -170,7 +170,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
 
         catalog.Plan(
             "CREATE FUNCTION sq(x INT32 IS NOT NULL) RETURNS INT32 BEGIN RETURN x * x END");
-        IQueryPlan plan = catalog.Plan("SELECT sq(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT sq(v) FROM data");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => CollectFirstColumnAsync(plan));
@@ -179,7 +179,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         Assert.Contains("must not be null", fullMessage, StringComparison.OrdinalIgnoreCase);
     }
 
-    // ───────────────────── Composition ─────────────────────
+    // ————————————————————— Composition —————————————————————
 
     [Fact]
     public async Task ProceduralCallsMacro_ResolvesNestedDispatch()
@@ -197,7 +197,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             "CREATE FUNCTION quad(x INT32) RETURNS INT32 BEGIN " +
                 "RETURN dbl(dbl(x)) " +
             "END");
-        IQueryPlan plan = catalog.Plan("SELECT quad(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT quad(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Equal(12, values[0].AsInt32());
@@ -218,13 +218,13 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             "CREATE FUNCTION inc2(x INT32) RETURNS INT32 BEGIN " +
                 "RETURN inc(inc(x)) " +
             "END");
-        IQueryPlan plan = catalog.Plan("SELECT inc2(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT inc2(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Equal(6, values[0].AsInt32());
     }
 
-    // ───────────────────── Cycle detection ─────────────────────
+    // ————————————————————— Cycle detection —————————————————————
 
     [Fact]
     public async Task DirectRecursion_ThrowsCyclicError()
@@ -240,7 +240,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             "CREATE FUNCTION recurse(x INT32) RETURNS INT32 BEGIN " +
                 "RETURN recurse(x) " +
             "END");
-        IQueryPlan plan = catalog.Plan("SELECT recurse(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT recurse(v) FROM data");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => CollectFirstColumnAsync(plan));
@@ -263,7 +263,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             "CREATE FUNCTION a(x INT32) RETURNS INT32 BEGIN RETURN b(x) END");
         catalog.Plan(
             "CREATE FUNCTION b(x INT32) RETURNS INT32 BEGIN RETURN a(x) END");
-        IQueryPlan plan = catalog.Plan("SELECT a(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT a(v) FROM data");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => CollectFirstColumnAsync(plan));
@@ -271,7 +271,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         Assert.Contains("Cyclic", fullMessage, StringComparison.OrdinalIgnoreCase);
     }
 
-    // ───────────────────── Lifecycle ─────────────────────
+    // ————————————————————— Lifecycle —————————————————————
 
     [Fact]
     public async Task DropFunction_RemovesProceduralAdapter()
@@ -291,7 +291,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             // Both planning paths must reject the call. Different
             // implementations might fail at plan time vs execute time;
             // either is acceptable as long as the user sees the name.
-            IQueryPlan plan = catalog.Plan("SELECT sq(v) FROM data");
+            StatementPlan plan = catalog.Plan("SELECT sq(v) FROM data");
             return CollectFirstColumnAsync(plan);
         });
 
@@ -312,7 +312,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             "CREATE FUNCTION transform(x INT32) RETURNS INT32 BEGIN RETURN x + 1 END");
         catalog.Plan(
             "CREATE OR REPLACE FUNCTION transform(x INT32) RETURNS INT32 BEGIN RETURN x * 100 END");
-        IQueryPlan plan = catalog.Plan("SELECT transform(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT transform(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Equal(500, values[0].AsInt32());
@@ -334,7 +334,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         catalog.Plan("CREATE FUNCTION transform(x INT32) AS x + 1");
         catalog.Plan(
             "CREATE OR REPLACE FUNCTION transform(x INT32) RETURNS INT32 BEGIN RETURN x * 100 END");
-        IQueryPlan plan = catalog.Plan("SELECT transform(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT transform(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Equal(500, values[0].AsInt32());
@@ -355,13 +355,13 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             "CREATE FUNCTION transform(x INT32) RETURNS INT32 BEGIN RETURN x + 1 END");
         catalog.Plan(
             "CREATE OR REPLACE FUNCTION transform(x INT32) AS x * 100");
-        IQueryPlan plan = catalog.Plan("SELECT transform(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT transform(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Equal(500, values[0].AsInt32());
     }
 
-    // ───────────────────── models.X dispatch from procedural body ─────────────────────
+    // ————————————————————— models.X dispatch from procedural body —————————————————————
 
     private static ModelCatalog BuildEchoCatalog()
     {
@@ -396,7 +396,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
             "CREATE FUNCTION wrap(s STRING) RETURNS STRING BEGIN " +
                 "RETURN models.echo(s) " +
             "END");
-        IQueryPlan plan = catalog.Plan("SELECT wrap(caption) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT wrap(caption) FROM data");
 
         List<string> rendered = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -429,7 +429,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
                 "DECLARE prompt STRING = concat('rewrite: ', caption); " +
                 "RETURN models.echo(prompt) " +
             "END");
-        IQueryPlan plan = catalog.Plan("SELECT rewrite(caption) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT rewrite(caption) FROM data");
 
         List<string> rendered = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -444,7 +444,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         Assert.Equal("rewrite: describe a forest", rendered[0]);
     }
 
-    // ───────────────────── Parameter CHECK clauses (Slice C + D) ─────────────────────
+    // ————————————————————— Parameter CHECK clauses (Slice C + D) —————————————————————
 
     [Fact]
     public async Task CheckClause_InRange_Passes()
@@ -458,7 +458,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         catalog.Plan(
             "CREATE FUNCTION clamp01(x FLOAT32 CHECK (x BETWEEN 0 AND 1)) " +
             "RETURNS FLOAT32 BEGIN RETURN x END");
-        IQueryPlan plan = catalog.Plan("SELECT clamp01(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT clamp01(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Equal(0.5f, values[0].AsFloat32());
@@ -474,7 +474,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         catalog.Plan(
             "CREATE FUNCTION clamp01(x FLOAT32 CHECK (x BETWEEN 0 AND 1)) " +
             "RETURNS FLOAT32 BEGIN RETURN x END");
-        IQueryPlan plan = catalog.Plan("SELECT clamp01(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT clamp01(v) FROM data");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
@@ -499,13 +499,13 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         catalog.Plan(
             "CREATE FUNCTION clamp01(x FLOAT32 CHECK (x BETWEEN 0 AND 1)) " +
             "RETURNS FLOAT32 BEGIN RETURN x END");
-        IQueryPlan plan = catalog.Plan("SELECT clamp01(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT clamp01(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.True(values[0].IsNull);
     }
 
-    // ───────────────────── CustomCheck (escape-hatch CHECK shapes) ─────────────────────
+    // ————————————————————— CustomCheck (escape-hatch CHECK shapes) —————————————————————
 
     [Fact]
     public async Task CustomCheck_DisjunctiveExpression_PassesAllowedValue()
@@ -520,7 +520,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         catalog.Plan(
             "CREATE FUNCTION lucky(x INT32 CHECK (x = 7 OR x = 42)) " +
             "RETURNS INT32 BEGIN RETURN x END");
-        IQueryPlan plan = catalog.Plan("SELECT lucky(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT lucky(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Equal(42, values[0].AsInt32());
@@ -536,7 +536,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         catalog.Plan(
             "CREATE FUNCTION lucky(x INT32 CHECK (x = 7 OR x = 42)) " +
             "RETURNS INT32 BEGIN RETURN x END");
-        IQueryPlan plan = catalog.Plan("SELECT lucky(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT lucky(v) FROM data");
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
@@ -564,7 +564,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         catalog.Plan(
             "CREATE FUNCTION echo_threshold(t FLOAT32) RETURNS FLOAT32 " +
             "BEGIN RETURN t * CAST(1 AS FLOAT32) END");
-        IQueryPlan plan = catalog.Plan("SELECT echo_threshold(0.9) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT echo_threshold(0.9) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Single(values);
@@ -587,7 +587,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         catalog.Plan(
             "CREATE FUNCTION lucky(x INT32 CHECK (x = 7 OR x = 42)) " +
             "RETURNS INT32 BEGIN RETURN x END");
-        IQueryPlan plan = catalog.Plan("SELECT lucky(v) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT lucky(v) FROM data");
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.True(values[0].IsNull);

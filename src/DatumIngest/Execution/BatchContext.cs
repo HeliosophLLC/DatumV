@@ -67,7 +67,7 @@ public sealed class BatchContext : IDisposable
         Catalog = catalog;
         VariableStore = new Arena();
         // Baseline reference owned by this batch context. Released exactly
-        // once on Dispose. Mirrors the QueryPlan._hoistStore pattern.
+        // once on Dispose. Mirrors the SelectPlan._hoistStore pattern.
         VariableStore.AddReference();
         Types = new TypeRegistry();
         Accountant = new MemoryAccountant(
@@ -138,6 +138,19 @@ public sealed class BatchContext : IDisposable
     /// instead of running until the call stack overflows.
     /// </summary>
     public int ProcedureCallDepth { get; init; }
+
+    /// <summary>
+    /// Optional sink for <c>PRINT</c> diagnostic output. When set, plan
+    /// classes that execute a <c>PRINT</c> statement (currently
+    /// <c>Plans.ProceduralLeafPlan</c>) invoke this delegate with the
+    /// rendered string; <see langword="null"/> when the PRINT is silently
+    /// dropped. <c>BatchExecutor.RunWithEventsAsync</c> wires its own
+    /// <c>CellPrintBatchEvent</c> emitter through here so PRINTs
+    /// surface to procedural-batch consumers; standalone
+    /// <c>catalog.ExecuteAsync(plan, ct)</c> callers can subscribe by
+    /// setting this before iteration.
+    /// </summary>
+    public Action<string?>? PrintSink { get; set; }
 
     /// <summary>
     /// Lifts <paramref name="value"/> from <paramref name="sourceStore"/>

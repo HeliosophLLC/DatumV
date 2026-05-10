@@ -435,7 +435,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// that want to observe per-dispatch shape + timing — the interactive
     /// shell wires this up via <c>.trace on</c>; production deployments
     /// can attach metric-emitting or structured-logging implementations.
-    /// <see cref="QueryPlan"/> reads this value when constructing each
+    /// <see cref="Plans.SelectPlan"/> reads this value when constructing each
     /// query's <see cref="DatumIngest.Execution.ExecutionContext"/>, so
     /// toggling at runtime affects subsequently planned queries.
     /// </summary>
@@ -761,8 +761,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         VideoRegistry? videoRegistry = null,
         VariableScope? variableScope = null,
         Arena? variableStore = null,
+        BatchContext? batchContext = null,
         CancellationToken cancellationToken = default)
-        => new(this, memoryBudgetBytes, store, types, accountant, videoRegistry, variableScope, variableStore, cancellationToken)
+        => new(this, memoryBudgetBytes, store, types, accountant, videoRegistry, variableScope, variableStore, batchContext, cancellationToken)
         {
             // Snapshot the catalog's tracer into the per-query context.
             // Setting / clearing TableCatalog.ModelTracer at runtime affects
@@ -773,10 +774,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
 
     /// <summary>
     /// Parses and plans <paramref name="sql"/> against this catalog, returning an
-    /// <see cref="IQueryPlan"/> that may be inspected (<see cref="IQueryPlan.ExplainTree"/>),
-    /// analyzed (<see cref="IQueryPlan.AnalyzeAsync"/>), or executed
-    /// (<see cref="IQueryPlan.ExecuteAsync(CancellationToken)"/>). Literal payloads are pre-materialized
-    /// (hoisted) into a plan-scoped arena so per-row evaluation skips re-encoding.
+    /// <see cref="StatementPlan"/> that may be inspected (<see cref="StatementPlan.ExplainTree"/>),
+    /// analyzed (<see cref="StatementPlan.AnalyzeAsync"/>), or executed. Literal payloads
+    /// are pre-materialized (hoisted) into a plan-scoped arena so per-row evaluation skips re-encoding.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -799,7 +799,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// test assembly.
     /// </para>
     /// </remarks>
-    public Task<IQueryPlan> PlanAsync(string sql)
+    public Task<StatementPlan> PlanAsync(string sql)
     {
         Statement statement = SqlParser.ParseStatement(sql);
         return PlanAsync(statement, sql);
@@ -809,27 +809,27 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// Plans an already-parsed <see cref="Statement"/>. Pure — no side
     /// effects until the returned plan is iterated.
     /// </summary>
-    public Task<IQueryPlan> PlanAsync(Statement statement)
+    public Task<StatementPlan> PlanAsync(Statement statement)
         => PlanAsync(statement, sourceText: null, batchContext: null);
 
     /// <summary>
     /// Plans an already-parsed <see cref="Statement"/> with the original
     /// source-text slice. Pure — no side effects until iteration.
     /// </summary>
-    public Task<IQueryPlan> PlanAsync(Statement statement, string? sourceText)
+    public Task<StatementPlan> PlanAsync(Statement statement, string? sourceText)
         => PlanAsync(statement, sourceText, batchContext: null);
 
     /// <summary>
-    /// Canonical planning entry point. Returns an <see cref="IQueryPlan"/>
+    /// Canonical planning entry point. Returns an <see cref="StatementPlan"/>
     /// that has NOT yet executed any side effects. Iterating
-    /// <c>IQueryPlan.ExecuteAsync</c> applies them; reading
-    /// <see cref="IQueryPlan.ExplainTree"/> does not.
+    /// <c>StatementPlan.ExecuteAsync</c> applies them; reading
+    /// <see cref="StatementPlan.ExplainTree"/> does not.
     /// </summary>
     /// <remarks>
     /// <para>
     /// For pure queries (<see cref="QueryStatement"/>, <see cref="CallStatement"/>)
-    /// the returned plan is a <see cref="QueryPlan"/> as before. For DDL and
-    /// DML statements the returned plan is a <see cref="DeferredStatementPlan"/>
+    /// the returned plan is a <see cref="Plans.SelectPlan"/> as before. For DDL and
+    /// DML statements the returned plan is a <see cref="Plans.DdlPlan"/>
     /// that wraps <see cref="ExecuteStatementAsync(Statement, string?, BatchContext?)"/>
     /// and only invokes it on iteration. This makes <c>EXPLAIN CREATE TABLE</c>
     /// and <c>EXPLAIN DELETE</c> safe — they never iterate the plan.
@@ -842,28 +842,283 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// reach the same end-state through either entry point.
     /// </para>
     /// </remarks>
-    public Task<IQueryPlan> PlanAsync(Statement statement, string? sourceText, BatchContext? batchContext)
+    public async Task<StatementPlan> PlanAsync(Statement statement, string? sourceText, BatchContext? batchContext)
     {
         // Pure queries: plan eagerly (the planner has no side effects, just builds an operator tree).
         if (statement is QueryStatement queryStatement)
         {
-            return Task.FromResult<IQueryPlan>(PlanQuery(queryStatement.Query));
+            return PlanQuery(queryStatement.Query);
         }
         if (statement is CallStatement call)
         {
-            return Task.FromResult<IQueryPlan>(PlanCall(call));
+            return PlanCall(call);
         }
-        // Everything else (DDL, DML, etc.) carries a side effect — defer it.
-        return Task.FromResult<IQueryPlan>(new DeferredStatementPlan(this, statement, sourceText, batchContext));
+
+        // CTAS is a composable plan: CtasPlan owns a child SelectPlan so
+        // EXPLAIN walks the full SELECT subtree under the CTAS node
+        // without applying any catalog mutation.
+        if (statement is CreateTableAsSelectStatement ctas)
+        {
+            return await Plans.CtasPlan.PlanAsync(this, ctas, sourceText).ConfigureAwait(false);
+        }
+
+        // DML plans own their source plans at plan time (where applicable):
+        // INSERT … SELECT carries a real child SelectPlan; UPDATE / DELETE
+        // drivers stay internal to the executor. Pre-flight gating for DML
+        // (PreFlightWalker) still runs eagerly here so EXPLAIN INSERT/
+        // UPDATE/DELETE surfaces missing-model / missing-dataset errors
+        // before the planner builds the source tree.
+        if (statement is InsertStatement or UpdateStatement or DeleteStatement)
+        {
+            PreFlightRequirements preflight = PreFlightWalker.WalkStatement(
+                statement, Models, CatalogVocabulary, Functions, DatasetPreFlightSource);
+            if (preflight.Models.Count > 0
+                || preflight.Datasets.Count > 0
+                || preflight.Suggestions.Count > 0)
+            {
+                throw new PreFlightRequiredException(preflight);
+            }
+        }
+        if (statement is InsertStatement insert)
+        {
+            // INSERT … SELECT composes a child source plan; VALUES /
+            // DEFAULT VALUES has no source query to plan.
+            StatementPlan? sourcePlan = insert.Source is InsertQuerySource queryRow
+                ? PlanQuery(queryRow.Query)
+                : null;
+            if (insert.Returning is null)
+            {
+                return Plans.DmlPlan.ForInsert(this, insert, sourcePlan);
+            }
+            // RETURNING: compose DmlPlan + CapturedRowsSource + projection.
+            // Falls back to bare DmlPlan when target resolution fails at
+            // plan time, so the executor surfaces the cleaner diagnostic
+            // ("table not found" / "is a view" / "read-only provider") at
+            // execute time instead of double-reporting it here.
+            if (TryResolveDmlTargetSchema(insert.SchemaName, insert.TableName, out Schema? targetSchema))
+            {
+                Plans.CapturedRowsSource capturedSource = new(this);
+                Plans.DmlPlan dml = Plans.DmlPlan.ForInsert(this, insert, sourcePlan, capturedSource);
+                return Plans.DmlReturningPlan.Compose(
+                    Plans.DmlReturningKind.Insert, insert.TableName, targetSchema,
+                    dml, capturedSource, insert.Returning, this);
+            }
+            return Plans.DmlPlan.ForInsert(this, insert, sourcePlan);
+        }
+        if (statement is UpdateStatement update)
+        {
+            if (update.Returning is null)
+            {
+                return Plans.DmlPlan.ForUpdate(this, update);
+            }
+            if (TryResolveDmlTargetSchema(update.SchemaName, update.TableName, out Schema? targetSchema))
+            {
+                Plans.CapturedRowsSource capturedSource = new(this);
+                Plans.DmlPlan dml = Plans.DmlPlan.ForUpdate(this, update, capturedSource);
+                return Plans.DmlReturningPlan.Compose(
+                    Plans.DmlReturningKind.Update, update.TableName, targetSchema,
+                    dml, capturedSource, update.Returning, this);
+            }
+            return Plans.DmlPlan.ForUpdate(this, update);
+        }
+        if (statement is DeleteStatement delete)
+        {
+            if (delete.Returning is null)
+            {
+                return Plans.DmlPlan.ForDelete(this, delete);
+            }
+            if (TryResolveDmlTargetSchema(delete.SchemaName, delete.TableName, out Schema? targetSchema))
+            {
+                Plans.CapturedRowsSource capturedSource = new(this);
+                Plans.DmlPlan dml = Plans.DmlPlan.ForDelete(this, delete, capturedSource);
+                return Plans.DmlReturningPlan.Compose(
+                    Plans.DmlReturningKind.Delete, delete.TableName, targetSchema,
+                    dml, capturedSource, delete.Returning, this);
+            }
+            return Plans.DmlPlan.ForDelete(this, delete);
+        }
+
+        // Procedural statements (BEGIN…END / IF / WHILE / FOR / DECLARE /
+        // SET / PRINT) compose at plan time so EXPLAIN of a procedural
+        // batch shows the full structure. Child plans are recursively
+        // planned through this method. Runtime execution still flows
+        // through BatchExecutor's AST walk in this step — the plan
+        // classes' ExecuteImplAsync throws until a future step migrates
+        // the procedural runtime into the plans.
+        if (statement is BlockStatement block)
+        {
+            List<StatementPlan> children = new(block.Statements.Count);
+            foreach (Statement child in block.Statements)
+            {
+                children.Add(await PlanAsync(child, sourceText, batchContext).ConfigureAwait(false));
+            }
+            return new Plans.BlockPlan(this, block, children);
+        }
+        else if (statement is IfStatement ifs)
+        {
+            StatementPlan thenPlan = await PlanAsync(ifs.Then, sourceText, batchContext).ConfigureAwait(false);
+            StatementPlan? elsePlan = ifs.Else is not null
+                ? await PlanAsync(ifs.Else, sourceText, batchContext).ConfigureAwait(false)
+                : null;
+            return new Plans.IfPlan(this, ifs, thenPlan, elsePlan);
+        }
+        else if (statement is WhileStatement loop)
+        {
+            StatementPlan bodyPlan = await PlanAsync(loop.Body, sourceText, batchContext).ConfigureAwait(false);
+            return new Plans.WhilePlan(this, loop, bodyPlan);
+        }
+        else if (statement is ForCounterStatement forC)
+        {
+            StatementPlan bodyPlan = await PlanAsync(forC.Body, sourceText, batchContext).ConfigureAwait(false);
+            return new Plans.ForCounterPlan(this, forC, bodyPlan);
+        }
+        else if (statement is ForInStatement forIn)
+        {
+            StatementPlan sourcePlan = PlanQuery(forIn.Source);
+            StatementPlan bodyPlan = await PlanAsync(forIn.Body, sourceText, batchContext).ConfigureAwait(false);
+            return new Plans.ForInPlan(this, forIn, sourcePlan, bodyPlan);
+        }
+        else if (statement is DeclareStatement decl)
+        {
+            return Plans.ProceduralLeafPlan.ForDeclare(this, decl);
+        }
+        else if (statement is SetStatement set)
+        {
+            return Plans.ProceduralLeafPlan.ForSet(this, set);
+        }
+        else if (statement is PrintStatement print)
+        {
+            return Plans.ProceduralLeafPlan.ForPrint(this, print);
+        }
+        else if (statement is BreakStatement breakStmt)
+        {
+            return Plans.ProceduralLeafPlan.ForBreak(this, breakStmt);
+        }
+        else if (statement is ContinueStatement continueStmt)
+        {
+            return Plans.ProceduralLeafPlan.ForContinue(this, continueStmt);
+        }
+
+        // Everything else (executor-backed DDL — CREATE / DROP / ALTER /
+        // ANALYZE / REINDEX / SET search_path) routes through a generic
+        // DdlPlan whose apply delegate calls ExecuteStatementAsync at
+        // iterate time. EXPLAIN reads the tree without iterating, so the
+        // executor never fires for a pure EXPLAIN. Per-statement DdlPlan
+        // factories with richer Details ("AlterTable target=foo op=DROP
+        // COLUMN bar") are a follow-up — the current shape gets the
+        // structural guarantee in place.
+        _ = batchContext;
+        string operatorName = statement.GetType().Name;
+        if (operatorName.EndsWith("Statement", StringComparison.Ordinal))
+        {
+            operatorName = operatorName[..^"Statement".Length];
+        }
+        return new Plans.DdlPlan(
+            this,
+            operatorName,
+            details: "deferred to ExecuteStatementAsync",
+            apply: async _ =>
+            {
+                await ExecuteStatementAsync(statement, sourceText, batchContext: null).ConfigureAwait(false);
+            });
+    }
+
+    /// <summary>
+    /// Best-effort target-schema resolution for DML composition. Returns
+    /// the live <see cref="Schema"/> when the (schema, table) qualifier
+    /// resolves through the search path and the provider is registered;
+    /// returns <see langword="false"/> when any step fails so the caller
+    /// can fall back to a bare <see cref="Plans.DmlPlan"/> and let the
+    /// executor surface the precise diagnostic at apply time.
+    /// </summary>
+    private bool TryResolveDmlTargetSchema(
+        string? schemaName,
+        string tableName,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Schema? schema)
+    {
+        try
+        {
+            SchemaResolver resolver = new(this, SearchPath);
+            QualifiedName qn = resolver.Resolve(schemaName, tableName);
+            if (TryGetTable(qn.ToString(), out ITableProvider? provider))
+            {
+                schema = provider.GetSchema();
+                return true;
+            }
+        }
+        catch
+        {
+            // Resolution exceptions (missing schema, ambiguous, etc.) fall
+            // through to the executor for the canonical diagnostic.
+        }
+        schema = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Convenience "batch of one" executor: constructs a fresh
+    /// <see cref="BatchContext"/> against this catalog, starts profiling on
+    /// its <see cref="MemoryAccountant"/>, and streams the plan's output.
+    /// The context is disposed when the iterator finishes (success, break,
+    /// or throw). For procedural batches that share a context across many
+    /// plans, call <c>plan.ExecuteAsync(ct, batchContext)</c> directly with
+    /// the shared <see cref="BatchContext"/>.
+    /// </summary>
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(
+        StatementPlan plan,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        using BatchContext batchContext = new(this);
+        batchContext.Accountant.StartProfiling();
+        await foreach (RowBatch batch in plan.ExecuteAsync(cancellationToken, batchContext).ConfigureAwait(false))
+        {
+            yield return batch;
+        }
+    }
+
+    /// <summary>
+    /// Borrow-or-own overload used by executors that may or may not be
+    /// running inside a procedural batch. When <paramref name="batchContext"/>
+    /// is non-null the executor's context is threaded straight through so
+    /// the source plan inherits the same accountant / variable scope; when
+    /// null this falls back to the owned-lifetime
+    /// <see cref="ExecuteAsync(StatementPlan, CancellationToken)"/>.
+    /// </summary>
+    internal IAsyncEnumerable<RowBatch> ExecuteAsync(
+        StatementPlan plan,
+        BatchContext? batchContext,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return batchContext is not null
+            ? plan.ExecuteAsync(cancellationToken, batchContext)
+            : ExecuteAsync(plan, cancellationToken);
+    }
+
+    /// <summary>
+    /// Convenience "batch of one" analyzer: same lifetime story as
+    /// <see cref="ExecuteAsync(StatementPlan, CancellationToken)"/>, runs the
+    /// plan under instrumentation, and returns the populated EXPLAIN
+    /// ANALYZE tree.
+    /// </summary>
+    public async Task<ExplainPlanNode> AnalyzeAsync(
+        StatementPlan plan,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        using BatchContext batchContext = new(this);
+        batchContext.Accountant.StartProfiling();
+        return await plan.AnalyzeAsync(cancellationToken, batchContext).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Parses and eagerly executes <paramref name="sql"/>. DDL and DML side
-    /// effects apply at call time. Returns an <see cref="IQueryPlan"/> for
+    /// effects apply at call time. Returns an <see cref="StatementPlan"/> for
     /// any remaining row stream (empty for no-RETURNING DML and DDL; a
     /// row-yielding plan for SELECT, CALL, and <c>… RETURNING</c>).
     /// </summary>
-    public Task<IQueryPlan> ExecuteStatementAsync(string sql)
+    public Task<StatementPlan> ExecuteStatementAsync(string sql)
     {
         Statement statement = SqlParser.ParseStatement(sql);
         return ExecuteStatementAsync(statement, sql);
@@ -873,7 +1128,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// Eagerly executes an already-parsed <see cref="Statement"/>. See
     /// <see cref="ExecuteStatementAsync(string)"/>.
     /// </summary>
-    public Task<IQueryPlan> ExecuteStatementAsync(Statement statement)
+    public Task<StatementPlan> ExecuteStatementAsync(Statement statement)
         => ExecuteStatementAsync(statement, sourceText: null, batchContext: null);
 
     /// <summary>
@@ -881,14 +1136,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// source-text slice for DDL persistence. See
     /// <see cref="ExecuteStatementAsync(string)"/>.
     /// </summary>
-    public Task<IQueryPlan> ExecuteStatementAsync(Statement statement, string? sourceText)
+    public Task<StatementPlan> ExecuteStatementAsync(Statement statement, string? sourceText)
         => ExecuteStatementAsync(statement, sourceText, batchContext: null);
 
     /// <summary>
     /// Canonical eager statement dispatch. DDL applies as a side effect
-    /// (returning <see cref="EmptyQueryPlan"/>); queries return a plan
-    /// whose batches stream on <c>IQueryPlan.ExecuteAsync</c>; DML
-    /// executes inline and returns either <see cref="EmptyQueryPlan"/> or a
+    /// (returning <see cref="Plans.DdlPlan"/>); queries return a plan
+    /// whose batches stream on <c>StatementPlan.ExecuteAsync</c>; DML
+    /// executes inline and returns either <see cref="Plans.DdlPlan"/> or a
     /// <c>RETURNING</c> plan.
     /// </summary>
     /// <remarks>
@@ -901,7 +1156,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// have the per-statement slice; callers that built the AST
     /// programmatically pass <see langword="null"/>.
     /// </remarks>
-    public async Task<IQueryPlan> ExecuteStatementAsync(Statement statement, string? sourceText, BatchContext? batchContext)
+    public async Task<StatementPlan> ExecuteStatementAsync(Statement statement, string? sourceText, BatchContext? batchContext)
     {
         // Parse-time pre-flight covers DML shapes (INSERT / UPDATE /
         // DELETE) that don't flow through PlanQuery. Pure queries skip
@@ -928,43 +1183,43 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
 
             case CreateFunctionStatement create:
                 Routines.ApplyCreateFunction(create, sourceText);
-                return EmptyQueryPlan.Instance;
+                return DdlPlan.NoOp(this, "CreateFunction");
 
             case DropFunctionStatement drop:
                 Routines.ApplyDropFunction(drop, sourceText);
-                return EmptyQueryPlan.Instance;
+                return DdlPlan.NoOp(this, "DropFunction");
 
             case CreateProcedureStatement create:
                 Routines.ApplyCreateProcedure(create, sourceText);
-                return EmptyQueryPlan.Instance;
+                return DdlPlan.NoOp(this, "CreateProcedure");
 
             case DropProcedureStatement drop:
                 Routines.ApplyDropProcedure(drop, sourceText);
-                return EmptyQueryPlan.Instance;
+                return DdlPlan.NoOp(this, "DropProcedure");
 
             case CreateViewStatement createView:
                 Routines.ApplyCreateView(createView, sourceText);
-                return EmptyQueryPlan.Instance;
+                return DdlPlan.NoOp(this, "CreateView");
 
             case DropViewStatement dropView:
                 Routines.ApplyDropView(dropView, sourceText);
-                return EmptyQueryPlan.Instance;
+                return DdlPlan.NoOp(this, "DropView");
 
             case CreateModelStatement createModel:
                 await Routines.ApplyCreateModelAsync(createModel, sourceText).ConfigureAwait(false);
-                return EmptyQueryPlan.Instance;
+                return DdlPlan.NoOp(this, "CreateModel");
 
             case DropModelStatement dropModel:
                 Routines.ApplyDropModel(dropModel, sourceText);
-                return EmptyQueryPlan.Instance;
+                return DdlPlan.NoOp(this, "DropModel");
 
             case EvictModelStatement evictModel:
                 Routines.ApplyEvictModel(evictModel, sourceText);
-                return EmptyQueryPlan.Instance;
+                return DdlPlan.NoOp(this, "EvictModel");
 
             case ResetCalibrationStatement resetCalibration:
                 Routines.ApplyResetCalibration(resetCalibration, sourceText);
-                return EmptyQueryPlan.Instance;
+                return DdlPlan.NoOp(this, "ResetCalibration");
 
             case CallStatement call:
                 return PlanCall(call);
@@ -973,7 +1228,19 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                 return await TableExecutor.CreateTableAsync(this, createTable, sourceText).ConfigureAwait(false);
 
             case CreateTableAsSelectStatement ctas:
-                return await CtasExecutor.ExecuteAsync(this, ctas, sourceText).ConfigureAwait(false);
+            {
+                // Plan into a CtasPlan (or DdlPlan.NoOp for IF NOT EXISTS
+                // early-bail), then iterate to apply the side effect — this
+                // path is the eager-execute contract direct callers rely on.
+                StatementPlan plan = await Plans.CtasPlan.PlanAsync(this, ctas, sourceText).ConfigureAwait(false);
+                if (plan is Plans.CtasPlan)
+                {
+                    await foreach (RowBatch _ in ExecuteAsync(plan, batchContext, CancellationToken.None).ConfigureAwait(false))
+                    {
+                    }
+                }
+                return DdlPlan.NoOp(this, "CreateTableAsSelect");
+            }
 
             case DropTableStatement dropTable:
                 return TableExecutor.DropTable(this, dropTable, sourceText);
@@ -1000,23 +1267,23 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                 return await AnalyzeExecutor.ExecuteAsync(this, analyze).ConfigureAwait(false);
 
             case AlterTableAddColumnStatement alterAdd:
-                if (alterAdd.TableIfExists && !TryGetTable(ResolveDdlName(alterAdd.SchemaName, alterAdd.TableName).ToString(), out _)) return EmptyQueryPlan.Instance;
+                if (alterAdd.TableIfExists && !TryGetTable(ResolveDdlName(alterAdd.SchemaName, alterAdd.TableName).ToString(), out _)) return DdlPlan.NoOp(this, "AlterTable", "ADD COLUMN — table not found, IF EXISTS skipped");
                 return await AlterTableExecutor.AddColumnAsync(this, alterAdd, sourceText).ConfigureAwait(false);
 
             case AlterTableDropColumnStatement alterDrop:
-                if (alterDrop.TableIfExists && !TryGetTable(ResolveDdlName(alterDrop.SchemaName, alterDrop.TableName).ToString(), out _)) return EmptyQueryPlan.Instance;
+                if (alterDrop.TableIfExists && !TryGetTable(ResolveDdlName(alterDrop.SchemaName, alterDrop.TableName).ToString(), out _)) return DdlPlan.NoOp(this, "AlterTable", "DROP COLUMN — table not found, IF EXISTS skipped");
                 return AlterTableExecutor.DropColumn(this, alterDrop, sourceText);
 
             case AlterTableDropConstraintStatement alterDropConstraint:
-                if (alterDropConstraint.TableIfExists && !TryGetTable(ResolveDdlName(alterDropConstraint.SchemaName, alterDropConstraint.TableName).ToString(), out _)) return EmptyQueryPlan.Instance;
+                if (alterDropConstraint.TableIfExists && !TryGetTable(ResolveDdlName(alterDropConstraint.SchemaName, alterDropConstraint.TableName).ToString(), out _)) return DdlPlan.NoOp(this, "AlterTable", "DROP CONSTRAINT — table not found, IF EXISTS skipped");
                 return await AlterTableExecutor.DropConstraintAsync(this, alterDropConstraint, sourceText).ConfigureAwait(false);
 
             case AlterTableAlterColumnDropStatement alterColumnDrop:
-                if (alterColumnDrop.TableIfExists && !TryGetTable(ResolveDdlName(alterColumnDrop.SchemaName, alterColumnDrop.TableName).ToString(), out _)) return EmptyQueryPlan.Instance;
+                if (alterColumnDrop.TableIfExists && !TryGetTable(ResolveDdlName(alterColumnDrop.SchemaName, alterColumnDrop.TableName).ToString(), out _)) return DdlPlan.NoOp(this, "AlterTable", "ALTER COLUMN DROP — table not found, IF EXISTS skipped");
                 return await AlterTableExecutor.AlterColumnDropAsync(this, alterColumnDrop, sourceText).ConfigureAwait(false);
 
             case AlterTableAlterColumnSetStatement alterColumnSet:
-                if (alterColumnSet.TableIfExists && !TryGetTable(ResolveDdlName(alterColumnSet.SchemaName, alterColumnSet.TableName).ToString(), out _)) return EmptyQueryPlan.Instance;
+                if (alterColumnSet.TableIfExists && !TryGetTable(ResolveDdlName(alterColumnSet.SchemaName, alterColumnSet.TableName).ToString(), out _)) return DdlPlan.NoOp(this, "AlterTable", "ALTER COLUMN SET — table not found, IF EXISTS skipped");
                 return await AlterTableExecutor.AlterColumnSetAsync(this, alterColumnSet, sourceText).ConfigureAwait(false);
 
             case InsertStatement insert:
@@ -1035,7 +1302,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         }
     }
 
-    private IQueryPlan PlanCall(CallStatement call)
+    private StatementPlan PlanCall(CallStatement call)
     {
         // Lower CALL udf.fn(args) to SELECT udf.fn(args) — a tableless query
         // against the implicit single-row source. UDF inlining and model hoisting
@@ -1047,7 +1314,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         return PlanQuery(syntheticQuery);
     }
 
-    internal IQueryPlan PlanQuery(QueryExpression query)
+    internal StatementPlan PlanQuery(QueryExpression query)
     {
         // PG-style named arguments — rewrite fn(a := 1, b => 2) into the
         // canonical positional shape before UdfInliner / planner passes,
@@ -1072,7 +1339,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         QueryExpression inlined = UdfInliner.Inline(permuted, Udfs, SearchPath, Procedures);
         QueryPlanner planner = new(this, Functions);
         QueryOperator op = planner.Plan(inlined);
-        return new QueryPlan(op, this, Functions);
+        return new SelectPlan(op, this, Functions);
     }
 
     /// <summary>

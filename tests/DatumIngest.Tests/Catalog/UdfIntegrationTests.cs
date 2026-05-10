@@ -157,7 +157,7 @@ public class UdfIntegrationTests : ServiceTestBase
         // Plan a query that uses the UDF. After Plan, the operator tree
         // should contain `upper(name)` (the substituted body), not a UDF
         // call.
-        IQueryPlan plan = catalog.Plan("SELECT shout(name) FROM orders");
+        StatementPlan plan = catalog.Plan("SELECT shout(name) FROM orders");
         ExplainPlanNode tree = plan.ExplainTree;
 
         // The plan's text representation should reference upper(name),
@@ -233,7 +233,7 @@ public class UdfIntegrationTests : ServiceTestBase
             new object[] { 1 });
 
         // Should plan without throwing. Uses valid args (range needs 2+).
-        IQueryPlan plan = catalog.Plan("SELECT range(1, 3) FROM orders");
+        StatementPlan plan = catalog.Plan("SELECT range(1, 3) FROM orders");
         Assert.NotNull(plan);
     }
 

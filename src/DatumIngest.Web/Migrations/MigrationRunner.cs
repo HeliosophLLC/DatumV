@@ -70,7 +70,7 @@ internal sealed class MigrationRunner
         {
             ct.ThrowIfCancellationRequested();
             // DDL applies as a side effect during ExecuteStatementAsync; DML
-            // executes inline. Either way we discard the returned EmptyQueryPlan.
+            // executes inline. Either way we discard the returned no-op DdlPlan.
             await _catalog.ExecuteStatementAsync(statement).ConfigureAwait(false);
         }
     }
@@ -85,11 +85,11 @@ internal sealed class MigrationRunner
             return 0;
         }
 
-        IQueryPlan plan = await _catalog
+        StatementPlan plan = await _catalog
             .PlanAsync("SELECT max(version) FROM __schema_migrations")
             .ConfigureAwait(false);
 
-        await foreach (RowBatch batch in plan.ExecuteAsync(ct).ConfigureAwait(false))
+        await foreach (RowBatch batch in _catalog.ExecuteAsync(plan, ct).ConfigureAwait(false))
         {
             if (batch.Count == 0) continue;
             DataValue cell = batch[0][0];

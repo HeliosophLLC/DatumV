@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Inference;
 using DatumIngest.Inference.OnnxRuntime;
 using DatumIngest.Model;
@@ -44,7 +44,7 @@ public sealed class OnnxInspectFunctionTests : ServiceTestBase
 
         TableCatalog catalog = CreateCatalogWithRealDispatcher();
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT kind, name, dtype, shape, is_dynamic FROM inference.onnx_inspect('file://{fixturePath}')");
 
         List<(string Kind, string Name, string Dtype, int[] Shape, bool IsDynamic)> rows = new();
@@ -92,7 +92,7 @@ public sealed class OnnxInspectFunctionTests : ServiceTestBase
 
             TableCatalog catalog = CreateCatalogWithRealDispatcher(modelDirectory: tempDir);
 
-            IQueryPlan plan = catalog.Plan(
+            StatementPlan plan = catalog.Plan(
                 "SELECT kind FROM inference.onnx_inspect('softmax.onnx')");
 
             int rowCount = 0;
@@ -115,7 +115,7 @@ public sealed class OnnxInspectFunctionTests : ServiceTestBase
         TableCatalog catalog = CreateCatalogWithRealDispatcher();
 
         string missing = Path.Combine(Path.GetTempPath(), $"does-not-exist-{Guid.NewGuid():N}.onnx");
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             $"SELECT kind FROM inference.onnx_inspect('file://{missing}')");
 
         FileNotFoundException ex = await Assert.ThrowsAsync<FileNotFoundException>(async () =>

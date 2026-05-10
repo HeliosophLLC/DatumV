@@ -72,6 +72,10 @@ public sealed class ExecutionContext : IDisposable
     /// from a surrounding <see cref="BatchContext"/>.</param>
     /// <param name="variableStore">Optional procedure-lifetime variable arena,
     /// paired with <paramref name="variableScope"/>.</param>
+    /// <param name="batchContext">Back-reference to the enclosing
+    /// <see cref="BatchContext"/>. Set by <c>SelectPlan</c> at execute /
+    /// analyze time; <see langword="null"/> for ad-hoc planner runs and
+    /// test fixtures that build the context directly.</param>
     internal ExecutionContext(
         TableCatalog catalog,
         long? memoryBudgetBytes = null,
@@ -81,9 +85,11 @@ public sealed class ExecutionContext : IDisposable
         VideoRegistry? videoRegistry = null,
         VariableScope? variableScope = null,
         Arena? variableStore = null,
+        BatchContext? batchContext = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(catalog);
+        BatchContext = batchContext;
         CancellationToken = cancellationToken;
         FunctionRegistry = catalog.Functions;
         Catalog = catalog;
@@ -94,7 +100,7 @@ public sealed class ExecutionContext : IDisposable
             // mid-query batch returns can't drop refcount to 0 and pool it
             // (which would trip "Arena is already pooled" on the next batch
             // rent that adds it back). Caller-supplied stores are assumed to
-            // already carry a baseline owned by the caller (e.g. QueryPlan
+            // already carry a baseline owned by the caller (e.g. SelectPlan
             // adds the baseline for its `_hoistStore`).
             Store = new Arena();
             Store.AddReference();
@@ -486,6 +492,18 @@ public sealed class ExecutionContext : IDisposable
     /// top-level queries outside any procedural batch.
     /// </summary>
     public VariableScope? VariableScope { get; init; }
+
+    /// <summary>
+    /// Back-reference to the <see cref="BatchContext"/> this execution
+    /// context was derived from. Set by <c>SelectPlan</c> at execute /
+    /// analyze time so operators that drain nested plans
+    /// (e.g. <see cref="Operators.DmlReturningOperator"/>) can forward the
+    /// batch-required <see cref="StatementPlan.ExecuteAsync(CancellationToken, BatchContext)"/>
+    /// contract without reconstructing one from the borrowed substrate.
+    /// <see langword="null"/> on contexts not derived from a plan execute
+    /// (test fixtures, ad-hoc planner runs).
+    /// </summary>
+    public BatchContext? BatchContext { get; }
 
     /// <summary>
     /// Sidecar registry borrowed from the active <see cref="Catalog"/>. Each

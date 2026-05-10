@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Catalog.Plans;
 using DatumIngest.Inference;
@@ -136,7 +136,7 @@ public sealed class AllMiniLmL6V2SqlE2ETests : ServiceTestBase
         catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["text"], [new object?[] { "hello world" }]));
 
-        IQueryPlan plan = catalog.Plan("SELECT models.all_minilm_l6_v2(text) FROM data");
+        StatementPlan plan = catalog.Plan("SELECT models.all_minilm_l6_v2(text) FROM data");
 
         // Read the array out while the batch's arena is still alive; the
         // result is arena-backed so we can't stash the DataValue and read it

@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Catalog.Registries;
 using DatumIngest.Model;
 
@@ -52,7 +52,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("INSERT INTO t VALUES (1, 10), (2, 20), (3, 30)");
         catalog.Plan("CREATE VIEW v AS SELECT a FROM t WHERE b > 10");
 
-        IQueryPlan plan = catalog.Plan("SELECT * FROM v");
+        StatementPlan plan = catalog.Plan("SELECT * FROM v");
         List<int> values = await CollectFirstColumnInts(plan);
 
         Assert.Equal(new[] { 2, 3 }, values);
@@ -66,7 +66,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("INSERT INTO t VALUES (1, 10), (2, 20)");
         catalog.Plan("CREATE VIEW v AS SELECT a, b FROM t");
 
-        IQueryPlan plan = catalog.Plan("SELECT v.a FROM v WHERE v.b = 20");
+        StatementPlan plan = catalog.Plan("SELECT v.a FROM v WHERE v.b = 20");
         List<int> values = await CollectFirstColumnInts(plan);
 
         Assert.Equal(new[] { 2 }, values);
@@ -80,7 +80,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("INSERT INTO t VALUES (1), (2)");
         catalog.Plan("CREATE VIEW public.v AS SELECT a FROM t");
 
-        IQueryPlan plan = catalog.Plan("SELECT a FROM public.v");
+        StatementPlan plan = catalog.Plan("SELECT a FROM public.v");
         List<int> values = await CollectFirstColumnInts(plan);
 
         Assert.Equal(new[] { 1, 2 }, values);
@@ -229,7 +229,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            IQueryPlan plan = catalog.Plan("SELECT * FROM v");
+            StatementPlan plan = catalog.Plan("SELECT * FROM v");
             await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         });
         Assert.Contains("Circular", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -247,7 +247,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            IQueryPlan plan = catalog.Plan("SELECT * FROM v_a");
+            StatementPlan plan = catalog.Plan("SELECT * FROM v_a");
             await foreach (RowBatch _ in ExecutePlanAsync(plan)) { }
         });
         Assert.Contains("Circular", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -262,7 +262,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE VIEW v_inner AS SELECT a FROM t WHERE a > 1");
         catalog.Plan("CREATE VIEW v_outer AS SELECT a FROM v_inner");
 
-        IQueryPlan plan = catalog.Plan("SELECT a FROM v_outer");
+        StatementPlan plan = catalog.Plan("SELECT a FROM v_outer");
         List<int> values = await CollectFirstColumnInts(plan);
 
         Assert.Equal(new[] { 2, 3 }, values);
@@ -275,7 +275,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE TABLE t (a Int32)");
         catalog.Plan("CREATE VIEW v AS SELECT a FROM t");
 
-        IQueryPlan plan = catalog.Plan("SELECT schema, name FROM system.views");
+        StatementPlan plan = catalog.Plan("SELECT schema, name FROM system.views");
         List<(string schema, string name)> rows = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {
@@ -304,7 +304,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         Assert.Equal(1, reopened.CatalogLoadReport!.LoadedViews);
 
         // And the substituted body still resolves columns.
-        IQueryPlan plan = reopened.Plan("SELECT * FROM v");
+        StatementPlan plan = reopened.Plan("SELECT * FROM v");
         List<int> values = await CollectFirstColumnInts(plan);
         Assert.Equal(new[] { 2 }, values);
     }
@@ -332,7 +332,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE TABLE t (a Int32, b Int32)");
         catalog.Plan("CREATE VIEW v AS SELECT a FROM t WHERE b > 0");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT table_schema, table_name, is_updatable, check_option FROM information_schema.views");
         List<(string schema, string name, string updatable, string check)> rows = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -357,7 +357,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE TABLE t (a Int32)");
         catalog.Plan("CREATE VIEW v AS SELECT a FROM t");
 
-        IQueryPlan plan = catalog.Plan(
+        StatementPlan plan = catalog.Plan(
             "SELECT table_name, table_type FROM information_schema.tables WHERE table_name = 'v'");
         List<(string name, string type)> rows = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -500,7 +500,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         Assert.Empty(viewEntry!.Columns);
     }
 
-    private static async Task<List<int>> CollectFirstColumnInts(IQueryPlan plan)
+    private static async Task<List<int>> CollectFirstColumnInts(StatementPlan plan)
     {
         List<int> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
