@@ -1,5 +1,6 @@
 using DatumIngest.Catalog;
 using DatumIngest.DatasetLibrary;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.ModelLibrary;
@@ -67,7 +68,7 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
         // Two installed variants. Dropping one releases its provider; the
         // other stays mounted with its same instance (so its open file
         // handle isn't re-opened).
-        DatasetSchemaCatalog catalog = new(["datasets"]);
+        DatasetSchemaCatalog catalog = new(["datasets"], new SidecarRegistry());
         TrackingProvider p1 = new(CreatePool(), new QualifiedName("datasets", "coco_test2017"));
         TrackingProvider p2 = new(CreatePool(), new QualifiedName("datasets", "coco_val2017"));
         catalog.SetTables([p1, p2]);
@@ -92,7 +93,7 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
                             ExpectedRowCounts: null, RequiresHfLogin: false,
                             Versions: [new CatalogDatasetVersion("v1",
                                 [new HttpsSource([new HttpsFile("https://x/", "x")])],
-                                [new CatalogIngestJob("x", "images")])]),
+                                [new CatalogIngestJob(TableName: "images", SourcePath: "x")])]),
                         new DatasetVariant(
                             Id: "coco_val2017",
                             DisplayName: "val2017",
@@ -101,7 +102,7 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
                             ExpectedRowCounts: null, RequiresHfLogin: false,
                             Versions: [new CatalogDatasetVersion("v1",
                                 [new HttpsSource([new HttpsFile("https://x/", "x")])],
-                                [new CatalogIngestJob("x", "images")])]),
+                                [new CatalogIngestJob(TableName: "images", SourcePath: "x")])]),
                     ]),
             ],
             catalog: catalog);
@@ -122,7 +123,7 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
         // Rebuilding after install creates a fresh provider per variant,
         // so the old instance's open file handle would leak — and the
         // next uninstall would hit a sharing violation on Directory.Delete.
-        DatasetSchemaCatalog catalog = new(["datasets"]);
+        DatasetSchemaCatalog catalog = new(["datasets"], new SidecarRegistry());
         TrackingProvider first = new(CreatePool(), new QualifiedName("datasets", "coco_test2017"));
         catalog.SetTables([first]);
 
@@ -180,7 +181,7 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
                             Sources: [new HttpsSource([new HttpsFile("https://example.invalid/x.zip", "x.zip")])],
                             Ingest:
                             [
-                                .. ingestTables.Select(t => new CatalogIngestJob($"{t}.zip", t)),
+                                .. ingestTables.Select(t => new CatalogIngestJob(TableName: t, SourcePath: $"{t}.zip")),
                             ]),
                     ]),
             ],
@@ -191,7 +192,7 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
             Datasets: [entry]);
 
         StubManifestStore store = new(manifest);
-        DatasetSchemaCatalog catalog = new([schema]);
+        DatasetSchemaCatalog catalog = new([schema], new SidecarRegistry());
         return new DatasetSchemaBinder(
             manifest: store,
             paths: new VersionedDatasetPathResolver(
@@ -282,5 +283,8 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
 
         public Task DeletePartialsAsync(string datasetId, CancellationToken ct = default)
             => Task.CompletedTask;
+
+        public Task<int> SweepStagingDirsAsync(CancellationToken ct = default)
+            => Task.FromResult(0);
     }
 }

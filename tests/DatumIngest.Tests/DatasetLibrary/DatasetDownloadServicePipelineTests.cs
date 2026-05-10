@@ -250,6 +250,14 @@ public sealed class DatasetDownloadServicePipelineTests : ServiceTestBase, IDisp
         VersionedDatasetPathResolver paths = new(_cacheRoot, _ingestedRoot);
         FakeLicenseRegistry registry = new(requiresAcceptance);
 
+        // SQL-shape ingest path isn't exercised in this fixture; pass the
+        // real catalog from the test base so the dependency resolves but
+        // never fires.
+        SqlIngestExecutor sqlExecutor = new(
+            CreateCatalog(),
+            GetService<Pool>(),
+            NullLogger<SqlIngestExecutor>.Instance);
+
         return new DatasetDownloadService(
             store: manifest,
             sourceClients: [source],
@@ -260,6 +268,7 @@ public sealed class DatasetDownloadServicePipelineTests : ServiceTestBase, IDisp
             fileFormats: GetService<IEnumerable<IFileFormat>>(),
             pool: GetService<Pool>(),
             keepRawPolicy: keepRawPolicy ?? DefaultKeepRawDownloadsPolicy.Instance,
+            sqlIngestExecutor: sqlExecutor,
             logger: NullLogger<DatasetDownloadService>.Instance);
     }
 
@@ -296,7 +305,7 @@ public sealed class DatasetDownloadServicePipelineTests : ServiceTestBase, IDisp
         CatalogDatasetVersion version = new(
             Version: Version,
             Sources: [new HttpsSource([new HttpsFile("https://example.invalid/fixture.zip", "fixture.zip")])],
-            Ingest: [new CatalogIngestJob("fixture.zip", TableName)]);
+            Ingest: [new CatalogIngestJob(TableName: TableName, SourcePath: "fixture.zip")]);
 
         DatasetVariant variant = new(
             Id: DatasetId,

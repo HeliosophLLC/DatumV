@@ -342,6 +342,43 @@ public readonly partial struct DataValue
         BuildSidecar(DataKind.Audio, offset, length, storeId);
 
     /// <summary>
+    /// Variant of <see cref="FromAudioInSidecar(long, long, byte)"/> that also stamps
+    /// inline sample-rate / channels / bit-depth / frame-count and a pre-computed
+    /// content hash. Layout matches the in-arena Audio metadata path
+    /// (see <see cref="FromAudio(byte[], IValueStore, uint, byte, byte, uint)"/>):
+    /// <c>_p4</c> holds the packed (sampleRate, channels, bitDepth) triple,
+    /// <c>_p5</c> holds <c>frameCount</c>, <c>_p6</c> holds the low 32 bits of
+    /// <c>XxHash64</c>. The shared accessors (<see cref="AudioSampleRate"/>,
+    /// <see cref="AudioFrameCount"/>, …) read the same bits without checking
+    /// <c>InArena</c>/<c>InSidecar</c>.
+    /// </summary>
+    public static DataValue FromAudioInSidecar(
+        long offset, long length, byte storeId,
+        uint sampleRate, byte channels = 0, byte bitDepth = 0, uint frameCount = 0, uint hash32 = 0)
+    {
+        if (offset < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(offset), offset, "Sidecar offset must be non-negative.");
+        }
+        if (length < 0 || length > SidecarLengthMax)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(length), length,
+                $"Sidecar length must be in [0, {SidecarLengthMax}] (40-bit cap).");
+        }
+        int packedP4 = PackAudioP4(sampleRate, channels, bitDepth);
+        return new(
+            DataKind.Audio,
+            flags: DataValueFlags.InSidecar,
+            offset: offset, length: length,
+            p4: packedP4,
+            p5: unchecked((int)frameCount),
+            p6: unchecked((int)hash32),
+            charCount: storeId);
+    }
+
+    /// <summary>
     /// Creates a <see cref="DataKind.Video"/> value whose encoded bytes live in a
     /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar(long, long, byte)"/>.
     /// </summary>

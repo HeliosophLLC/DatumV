@@ -21,6 +21,11 @@ public interface IDatasetDownloadProgressReporter
     // in the version's `ingest[]` array.
     ValueTask OnIngestingAsync(DatasetIngesting ingesting, CancellationToken ct);
 
+    // Periodic in-flight row count while an ingest job is running.
+    // Optional from the consumer's perspective — phase transitions still
+    // flow through OnIngestingAsync / OnTableIngestedAsync.
+    ValueTask OnIngestProgressAsync(DatasetIngestProgress progress, CancellationToken ct);
+
     // Emitted after each ingest job's .datum file lands on disk. The
     // terminal success event is OnInstalledAsync, fired after every
     // job's OnIngestedAsync.
@@ -47,6 +52,8 @@ public sealed class NullDatasetDownloadProgressReporter : IDatasetDownloadProgre
     public ValueTask OnCompleteAsync(DatasetDownloadComplete complete, CancellationToken ct)
         => ValueTask.CompletedTask;
     public ValueTask OnIngestingAsync(DatasetIngesting ingesting, CancellationToken ct)
+        => ValueTask.CompletedTask;
+    public ValueTask OnIngestProgressAsync(DatasetIngestProgress progress, CancellationToken ct)
         => ValueTask.CompletedTask;
     public ValueTask OnTableIngestedAsync(DatasetTableIngested ingested, CancellationToken ct)
         => ValueTask.CompletedTask;

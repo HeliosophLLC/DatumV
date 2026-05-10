@@ -41,6 +41,15 @@ public static class DatasetLibraryServiceExtensions
         services.TryAddSingleton<IKeepRawDownloadsPolicy>(
             DefaultKeepRawDownloadsPolicy.Instance);
 
+        // SQL-shape ingest executor — uses the live TableCatalog (which
+        // must be registered by the host) to plan + execute the catalog
+        // author's SELECT and stream the result rows into a .datum file.
+        // Hosts that don't register a TableCatalog (CLI tools that don't
+        // open any datasets) will only see catalog-load errors if a SQL-
+        // shape job actually runs, so this is safe to register
+        // unconditionally.
+        services.AddSingleton<SqlIngestExecutor>();
+
         services.AddSingleton<IDatasetDownloadService, DatasetDownloadService>();
 
         // Catalog substrate: one DatasetSchemaCatalog instance owns every
@@ -57,7 +66,11 @@ public static class DatasetLibraryServiceExtensions
             {
                 schemas.Add(e.Schema);
             }
-            return new DatasetSchemaCatalog(schemas);
+            // Reuse the hosting TableCatalog's SidecarRegistry so dataset reads
+            // share the storeId space with every other catalog backend.
+            DatumIngest.Catalog.TableCatalog catalog =
+                sp.GetRequiredService<DatumIngest.Catalog.TableCatalog>();
+            return new DatasetSchemaCatalog(schemas, catalog.SidecarRegistry);
         });
         services.AddSingleton<DatasetSchemaBinder>();
         return services;

@@ -114,7 +114,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
                     $"Column kind {_column.Kind} produced a reference-type array DataValue but no IBlobSink " +
                     "was supplied. Reference arrays cannot be encoded inline.");
             }
-            if (store is null)
+            else if (store is null)
             {
                 throw new InvalidOperationException(
                     $"Column kind {_column.Kind} produced a reference-type array DataValue but no IValueStore " +
@@ -181,7 +181,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
                     $"Column kind {_column.Kind} produced an arena-backed DataValue but no IBlobSink " +
                     "was supplied. VariableSlotPageEncoderV2 requires a sidecar to absorb non-inline payloads.");
             }
-            if (store is null)
+            else if (store is null)
             {
                 throw new InvalidOperationException(
                     $"Column kind {_column.Kind} produced an arena-backed DataValue but no IValueStore " +
@@ -406,7 +406,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
                 nameof(length), length,
                 $"Sidecar payload length must be in [0, {lengthMax}] (5-byte cap).");
         }
-        if (offset < 0)
+        else if (offset < 0)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(offset), offset, "Sidecar payload offset must be non-negative.");

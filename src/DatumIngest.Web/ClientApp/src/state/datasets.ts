@@ -7,6 +7,7 @@ import {
   onDatasetDownloadProgress,
   onDatasetDownloadStarted,
   onDatasetIngesting,
+  onDatasetIngestProgress,
   onDatasetInstalled,
   onDatasetTableIngested,
 } from '@/api/hub';
@@ -69,6 +70,10 @@ export interface ActiveDatasetInstall {
   currentTable: string;
   jobIndex: number;
   jobCount: number;
+  // Live row count from the in-flight ingest job (current table only).
+  // Reset to 0 when a new DatasetIngesting event arrives for the next job.
+  // Undefined while downloading / starting.
+  rowsWrittenSoFar?: number;
   startedAt: number;
   samples: readonly ProgressSample[];
 }
@@ -589,8 +594,19 @@ onDatasetIngesting((event) => {
     currentTable: event.currentTable ?? '',
     jobIndex: event.jobIndex ?? 0,
     jobCount: event.jobCount ?? 0,
+    // Per-table counter — reset whenever the server moves to the next job.
+    rowsWrittenSoFar: 0,
     startedAt: existing?.startedAt ?? Date.now(),
     samples: existing?.samples ?? [],
+  };
+});
+
+onDatasetIngestProgress((event) => {
+  const existing = datasetsState.active[event.datasetId];
+  if (!existing) return;
+  datasetsState.active[event.datasetId] = {
+    ...existing,
+    rowsWrittenSoFar: event.rowsWrittenSoFar ?? existing.rowsWrittenSoFar ?? 0,
   };
 });
 

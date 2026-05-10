@@ -51,18 +51,20 @@ public static class AudioDataValueFactory
 
     /// <summary>
     /// Constructs a <see cref="DataKind.Audio"/> <see cref="DataValue"/> referencing
-    /// encoded audio bytes already written to a <c>.datum-blob</c> sidecar. The
-    /// underlying <see cref="DataValue.FromAudioInSidecar(long, long, byte)"/> does not
-    /// carry inline metadata today, so <paramref name="meta"/> and
-    /// <paramref name="hash32"/> are currently dropped; <c>audio_*</c> accessors fall
-    /// through to a full decode for sidecar-backed audio. The parameters are kept on
-    /// the signature so that adding a metadata-bearing <c>FromAudioInSidecar</c>
-    /// overload later is a single-line wire-up.
+    /// encoded audio bytes already written to a <c>.datum-blob</c> sidecar. When
+    /// <paramref name="meta"/> carries a non-zero sample rate, the metadata-bearing
+    /// <see cref="DataValue.FromAudioInSidecar(long, long, byte, uint, byte, byte, uint, uint)"/>
+    /// overload is used so <c>audio_sample_rate()</c> and friends skip a full decode;
+    /// otherwise the no-metadata factory is used and accessors return zero sentinels.
     /// </summary>
     public static DataValue FromSidecar(long offset, long length, AudioMetadata? meta, uint hash32, byte storeId = 0)
     {
-        _ = meta;
-        _ = hash32;
+        if (meta is { SampleRate: > 0 })
+        {
+            return DataValue.FromAudioInSidecar(
+                offset, length, storeId,
+                meta.SampleRate, meta.Channels, meta.BitDepth, meta.FrameCount, hash32);
+        }
         return DataValue.FromAudioInSidecar(offset, length, storeId);
     }
 }

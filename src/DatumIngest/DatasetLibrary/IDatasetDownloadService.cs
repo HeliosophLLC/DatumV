@@ -44,6 +44,14 @@ public interface IDatasetDownloadService
     // Deletes all `*.part` files inside the dataset's raw-cache folder.
     Task DeletePartialsAsync(string datasetId, CancellationToken ct = default);
 
+    // Walks the ingested-datasets root and deletes every `.staging-*`
+    // directory left over from a crashed mid-install (process kill, OS
+    // panic). Called once at boot from DatasetCatalogInitializationService
+    // before the binder probes — staging dirs would otherwise accumulate
+    // and waste disk. Returns the number of dirs swept; errors per-dir are
+    // logged and the sweep continues.
+    Task<int> SweepStagingDirsAsync(CancellationToken ct = default);
+
     // Fired after every terminal install / uninstall — the set of
     // installed variants may have changed. The dataset schema binder
     // subscribes so the catalog's bound-tables snapshot tracks reality

@@ -167,8 +167,8 @@ public sealed class DatasetManifestValidationTests
                         {
                             Ingest =
                             [
-                                new CatalogIngestJob("a.zip", "images"),
-                                new CatalogIngestJob("b.zip", "images"),
+                                new CatalogIngestJob(TableName: "images", SourcePath: "a.zip"),
+                                new CatalogIngestJob(TableName: "images", SourcePath: "b.zip"),
                             ],
                         },
                     ],
@@ -309,5 +309,5 @@ public sealed class DatasetManifestValidationTests
         => new(
             Version: "2017",
             Sources: [new HttpsSource([new HttpsFile("https://example.invalid/test2017.zip", "test2017.zip")])],
-            Ingest: [new CatalogIngestJob("test2017.zip", "images")]);
+            Ingest: [new CatalogIngestJob(TableName: "images", SourcePath: "test2017.zip")]);
 }

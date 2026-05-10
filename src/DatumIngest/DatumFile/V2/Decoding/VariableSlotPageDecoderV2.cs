@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
+using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Functions.Audio;
 using DatumIngest.Functions.Image;
 using DatumIngest.IO;
 using DatumIngest.Model;
@@ -183,7 +185,7 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
             DataKind.Image
                 => DecodeImageWithInlineDimensions(offset, length),
             DataKind.Audio
-                => DataValue.FromAudioInSidecar(offset, length, _sidecarStoreId),
+                => DecodeAudioWithInlineMetadata(offset, length),
             DataKind.Video
                 => DataValue.FromVideoInSidecar(offset, length, _sidecarStoreId),
             DataKind.Json
@@ -223,6 +225,43 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
                 (ushort)dims.Width, (ushort)dims.Height, ClampChannels(dims.Channels));
         }
         return DataValue.FromImageInSidecar(offset, length, _sidecarStoreId);
+    }
+
+    /// <summary>
+    /// Constructs a sidecar-backed <see cref="DataKind.Audio"/> <see cref="DataValue"/>
+    /// and opportunistically stamps inline sample-rate / channels / bit-depth /
+    /// frame-count plus the low 32 bits of <c>XxHash64</c> over the peeked prefix.
+    /// Mirrors <see cref="DecodeImageWithInlineDimensions"/>: peeks the first
+    /// <see cref="HeaderPeekBytes"/> bytes of the encoded audio (WAV RIFF header,
+    /// FLAC STREAMINFO, MP3 ID3v2/frame, OGG ident page all fit comfortably) and
+    /// routes through <see cref="AudioHeaderParser"/>. Unrecognised / malformed
+    /// inputs fall back to the no-metadata factory; <c>audio_sample_rate()</c>
+    /// and friends fall through to a full decode.
+    /// </summary>
+    /// <remarks>
+    /// The hash stamp is over the peeked prefix only — not the full encoded
+    /// blob — so it is NOT comparable with the in-arena Audio hash (which covers
+    /// the whole byte payload). It still serves the Equals/GetHashCode fast-paths
+    /// for sidecar-vs-sidecar comparisons within the same .datum file because
+    /// both sides peek the same prefix.
+    /// </remarks>
+    private DataValue DecodeAudioWithInlineMetadata(long offset, long length)
+    {
+        if (_sidecarSource is null)
+        {
+            return DataValue.FromAudioInSidecar(offset, length, _sidecarStoreId);
+        }
+        long peekLength = Math.Min(length, HeaderPeekBytes);
+        ReadOnlySpan<byte> header = _sidecarSource.Read(offset, peekLength);
+        AudioMetadata? meta = AudioHeaderParser.TryParseHeader(header);
+        if (meta is { SampleRate: > 0 })
+        {
+            uint hash32 = unchecked((uint)XxHash64.HashToUInt64(header));
+            return DataValue.FromAudioInSidecar(
+                offset, length, _sidecarStoreId,
+                meta.SampleRate, meta.Channels, meta.BitDepth, meta.FrameCount, hash32);
+        }
+        return DataValue.FromAudioInSidecar(offset, length, _sidecarStoreId);
     }
 
     /// <summary>Header-peek window for opportunistic dimension extraction at decode time.</summary>

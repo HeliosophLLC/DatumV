@@ -628,14 +628,14 @@ Return file name with extension from path.
 SELECT get_filename('/data/images/photo.jpg') -- 'photo.jpg'
 ```
 
-### get_file_extension
+### get_filename_ext
 
-`get_file_extension(path)` → String | QU: 1
+`get_filename_ext(path)` → String | QU: 1
 
-Return extension (with dot) from path.
+Return extension (without dot) from path.
 
 ```sql
-SELECT get_file_extension('/data/images/photo.jpg') -- '.jpg'
+SELECT get_filename_ext('/data/images/photo.jpg') -- 'jpg'
 ```
 
 ### get_path

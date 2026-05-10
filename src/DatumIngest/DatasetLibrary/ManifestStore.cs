@@ -323,17 +323,29 @@ internal sealed class ManifestStore : IManifestStore
             HashSet<string> tableNames = new(StringComparer.OrdinalIgnoreCase);
             foreach (CatalogIngestJob job in v.Ingest)
             {
-                if (string.IsNullOrWhiteSpace(job.SourcePath))
-                {
-                    throw new InvalidOperationException(
-                        $"Dataset variant '{variant.Id}' version '{v.Version}' in {manifestPath} " +
-                        "has an ingest job with missing/blank sourcePath.");
-                }
                 if (string.IsNullOrWhiteSpace(job.TableName))
                 {
                     throw new InvalidOperationException(
                         $"Dataset variant '{variant.Id}' version '{v.Version}' in {manifestPath} " +
                         "has an ingest job with missing/blank tableName.");
+                }
+                bool hasDirect = !string.IsNullOrWhiteSpace(job.SourcePath);
+                bool hasSql = !string.IsNullOrWhiteSpace(job.SqlFile);
+                if (hasDirect == hasSql)
+                {
+                    throw new InvalidOperationException(
+                        $"Dataset variant '{variant.Id}' version '{v.Version}' ingest job " +
+                        $"'{job.TableName}' in {manifestPath} must set exactly one of " +
+                        "`sourcePath` (direct ingest) or `sqlFile` (SQL ingest); " +
+                        (hasDirect ? "both are set." : "neither is set."));
+                }
+                if (hasSql && string.IsNullOrWhiteSpace(job.Archive))
+                {
+                    throw new InvalidOperationException(
+                        $"Dataset variant '{variant.Id}' version '{v.Version}' ingest job " +
+                        $"'{job.TableName}' in {manifestPath} declares `sqlFile` but no " +
+                        "`archive` field. SQL ingests need an archive name so the install " +
+                        "pipeline can bind $archive + $archive_stem.");
                 }
                 if (!tableNames.Add(job.TableName))
                 {

@@ -32,6 +32,7 @@ import type {
   DatasetDownloadProgressDto as DatasetDownloadProgress,
   DatasetDownloadCompleteDto as DatasetDownloadComplete,
   DatasetIngestingDto as DatasetIngesting,
+  DatasetIngestProgressDto as DatasetIngestProgress,
   DatasetTableIngestedDto as DatasetTableIngested,
   DatasetInstalledDto as DatasetInstalled,
   DatasetDownloadFailedDto as DatasetDownloadFailed,
@@ -57,6 +58,7 @@ export type {
   DatasetDownloadProgress,
   DatasetDownloadComplete,
   DatasetIngesting,
+  DatasetIngestProgress,
   DatasetTableIngested,
   DatasetInstalled,
   DatasetDownloadFailed,
@@ -116,6 +118,7 @@ const dsStartedHandlers: Set<Handler<DatasetDownloadStarted>> = new Set();
 const dsProgressHandlers: Set<Handler<DatasetDownloadProgress>> = new Set();
 const dsCompleteHandlers: Set<Handler<DatasetDownloadComplete>> = new Set();
 const dsIngestingHandlers: Set<Handler<DatasetIngesting>> = new Set();
+const dsIngestProgressHandlers: Set<Handler<DatasetIngestProgress>> = new Set();
 const dsTableIngestedHandlers: Set<Handler<DatasetTableIngested>> = new Set();
 const dsInstalledHandlers: Set<Handler<DatasetInstalled>> = new Set();
 const dsFailedHandlers: Set<Handler<DatasetDownloadFailed>> = new Set();
@@ -186,6 +189,8 @@ export const onDatasetDownloadComplete = (handler: Handler<DatasetDownloadComple
   subscribe(dsCompleteHandlers, handler);
 export const onDatasetIngesting = (handler: Handler<DatasetIngesting>) =>
   subscribe(dsIngestingHandlers, handler);
+export const onDatasetIngestProgress = (handler: Handler<DatasetIngestProgress>) =>
+  subscribe(dsIngestProgressHandlers, handler);
 export const onDatasetTableIngested = (handler: Handler<DatasetTableIngested>) =>
   subscribe(dsTableIngestedHandlers, handler);
 export const onDatasetInstalled = (handler: Handler<DatasetInstalled>) =>
@@ -272,6 +277,9 @@ const dispatcher: IStreamHubClient = {
   },
   async onDatasetIngesting(event: DatasetIngesting): Promise<void> {
     fanOut(dsIngestingHandlers, event);
+  },
+  async onDatasetIngestProgress(event: DatasetIngestProgress): Promise<void> {
+    fanOut(dsIngestProgressHandlers, event);
   },
   async onDatasetTableIngested(event: DatasetTableIngested): Promise<void> {
     fanOut(dsTableIngestedHandlers, event);

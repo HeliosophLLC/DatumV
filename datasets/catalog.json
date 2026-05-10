@@ -138,6 +138,291 @@
           ]
         }
       ]
+    },
+    {
+      "name": "LibriSpeech",
+      "summary": "1,000 hours of read English speech derived from LibriVox audiobooks, segmented into ~10s utterances and paired with sentence-level transcripts. The reference benchmark for English ASR.",
+      "description": "Every modern English speech recognizer reports word error rate against the test-clean / test-other splits. All variants share the same recording pipeline (16 kHz FLAC, sentence-aligned) and the same transcript format (one `<utterance-id> <text>` line per row in colocated `.trans.txt` files) — they differ only in speaker pool size, hours of audio, and audio quality. Pick a split: `dev-clean` / `test-clean` for noise-free held-out evaluation; `dev-other` / `test-other` for the harder, noisier eval; `train-clean-100` for a tractable training cut; `train-clean-360` and `train-other-500` to assemble the full 960-hour training corpus.",
+      "modalities": ["Audio"],
+      "licenseIds": ["cc-by-4.0"],
+      "attributions": [
+        "Panayotov, Chen, Povey, Khudanpur (LibriSpeech, ICASSP 2015)",
+        "LibriVox volunteer narrators (public-domain audiobook recordings)",
+        "Project Gutenberg (source texts)"
+      ],
+      "suitableForTasks": [
+        "AudioToText",
+        "AudioToTextTimed"
+      ],
+      "variants": [
+        {
+          "id": "librispeech_dev_clean",
+          "displayName": "dev-clean",
+          "summary": "5.4 hours / 2,703 utterances from 40 speakers. Clean held-out development set used to tune ASR hyperparameters before reporting on test-clean.",
+          "approxArchiveBytes": 353304576,
+          "approxIngestedBytes": 353304576,
+          "expectedRowCounts": { "utterances": 2703 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.openslr.org/resources/12/dev-clean.tar.gz",
+                      "destFile": "dev-clean.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "sourcePath": "dev-clean.tar.gz",
+                  "tableName": "utterances"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "librispeech_dev_other",
+          "displayName": "dev-other",
+          "summary": "5.3 hours / 2,864 utterances from 33 speakers. Noisier development set — recordings the alignment heuristic flagged as harder to transcribe. Used to tune robustness before reporting on test-other.",
+          "approxArchiveBytes": 329252864,
+          "approxIngestedBytes": 329252864,
+          "expectedRowCounts": { "utterances": 2864 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.openslr.org/resources/12/dev-other.tar.gz",
+                      "destFile": "dev-other.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "sourcePath": "dev-other.tar.gz",
+                  "tableName": "utterances"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "librispeech_test_clean",
+          "displayName": "test-clean",
+          "summary": "5.4 hours / 2,620 utterances from 40 speakers. The standard clean ASR evaluation slice — every WER number in the literature reports against this split. Speakers are disjoint from the training set.",
+          "approxArchiveBytes": 362807296,
+          "approxIngestedBytes": 362807296,
+          "expectedRowCounts": { "utterances": 2620 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.openslr.org/resources/12/test-clean.tar.gz",
+                      "destFile": "test-clean.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "sourcePath": "test-clean.tar.gz",
+                  "tableName": "utterances"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "librispeech_test_other",
+          "displayName": "test-other",
+          "summary": "5.1 hours / 2,939 utterances from 33 speakers. Noisier ASR evaluation slice paired with test-clean. WER on test-other is typically 2–3× higher than test-clean for the same model — the headline robustness number.",
+          "approxArchiveBytes": 343932928,
+          "approxIngestedBytes": 343932928,
+          "expectedRowCounts": { "utterances": 2939 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.openslr.org/resources/12/test-other.tar.gz",
+                      "destFile": "test-other.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "sourcePath": "test-other.tar.gz",
+                  "tableName": "utterances"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "librispeech_train_clean_100",
+          "displayName": "train-clean-100",
+          "summary": "100.6 hours / 28,539 utterances from 251 speakers. The smallest training cut — fits in memory and trains end-to-end on a single GPU in hours. Reach for this first when prototyping an ASR recipe.",
+          "approxArchiveBytes": 6764573491,
+          "approxIngestedBytes": 6764573491,
+          "expectedRowCounts": { "utterances": 28539 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.openslr.org/resources/12/train-clean-100.tar.gz",
+                      "destFile": "train-clean-100.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "sourcePath": "train-clean-100.tar.gz",
+                  "tableName": "utterances"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "librispeech_train_clean_360",
+          "displayName": "train-clean-360",
+          "summary": "363.6 hours / 104,014 utterances from 921 speakers. Combine with train-clean-100 for the standard 460-hour clean training corpus most published recipes target.",
+          "approxArchiveBytes": 24696061952,
+          "approxIngestedBytes": 24696061952,
+          "expectedRowCounts": { "utterances": 104014 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.openslr.org/resources/12/train-clean-360.tar.gz",
+                      "destFile": "train-clean-360.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "sourcePath": "train-clean-360.tar.gz",
+                  "tableName": "utterances"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "librispeech_train_other_500",
+          "displayName": "train-other-500",
+          "summary": "496.7 hours / 148,688 utterances from 1,166 speakers. The noisier training cut. Combined with train-clean-100 + train-clean-360 this rounds out the full 960-hour LibriSpeech training set. ~30 GB on disk — by far the heaviest variant.",
+          "approxArchiveBytes": 32212254720,
+          "approxIngestedBytes": 32212254720,
+          "expectedRowCounts": { "utterances": 148688 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.openslr.org/resources/12/train-other-500.tar.gz",
+                      "destFile": "train-other-500.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "sourcePath": "train-other-500.tar.gz",
+                  "tableName": "utterances"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "LJSpeech",
+      "summary": "A single-speaker English speech corpus: ~24 hours of a US English female voice reading short passages from seven non-fiction LibriVox audiobooks. The canonical small-scale TTS / single-voice-ASR dataset.",
+      "description": "Released in 2017 by Keith Ito, LJSpeech 1.1 is the dataset most TTS papers reach for when prototyping — small enough to fit on a laptop, clean enough to train a vocoder against in hours rather than days, and consistent enough that single-voice models converge without per-speaker conditioning. The texts are 19th- and early-20th-century non-fiction passages whose copyrights have expired; the audio was recorded by a LibriVox volunteer and dedicated to the public domain. This variant ingests audio only — the `metadata.csv` transcript file is ignored, mirroring how `coco_test2017` ingests images without annotations. Use it to validate the audio pipeline end-to-end: 13,100 short WAV clips, all 22.05 kHz mono 16-bit, no encoding surprises.",
+      "modalities": ["Audio"],
+      "licenseIds": ["public-domain"],
+      "attributions": [
+        "Keith Ito (LJSpeech 1.1, 2017)",
+        "LibriVox volunteer narrators (source audio)"
+      ],
+      "suitableForTasks": [
+        "AudioToText",
+        "AudioToTextTimed",
+        "AudioEmbedder",
+        "VoiceActivityDetector"
+      ],
+      "cardFile": "ljspeech_audio/index.md",
+      "variants": [
+        {
+          "id": "ljspeech_audio",
+          "displayName": "1.1 (audio only)",
+          "summary": "13,100 short WAV clips, ~24 hours total at 22.05 kHz mono 16-bit. Audio only — the sibling metadata.csv (transcripts + normalized text) ships in the same archive but is skipped by this variant.",
+          "approxArchiveBytes": 3183309763,
+          "approxIngestedBytes": 3810000000,
+          "expectedRowCounts": { "audio": 13100 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1.1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/LJ-Speech-Dataset",
+                  "revision": "81d7ce28576278f81036034a94b4cf87180daf17",
+                  "include": ["LJSpeech-1.1.tar.gz"]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "audio",
+                  "archive": "LJSpeech-1.1.tar.gz",
+                  "sqlFile": "ljspeech_audio/audio.sql"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

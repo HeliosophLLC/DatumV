@@ -62,6 +62,7 @@ public interface IStreamHubClient
     Task OnDatasetDownloadProgress(DatasetDownloadProgressDto progress);
     Task OnDatasetDownloadComplete(DatasetDownloadCompleteDto complete);
     Task OnDatasetIngesting(DatasetIngestingDto ingesting);
+    Task OnDatasetIngestProgress(DatasetIngestProgressDto progress);
     Task OnDatasetTableIngested(DatasetTableIngestedDto ingested);
     Task OnDatasetInstalled(DatasetInstalledDto installed);
     Task OnDatasetDownloadFailed(DatasetDownloadFailedDto failed);

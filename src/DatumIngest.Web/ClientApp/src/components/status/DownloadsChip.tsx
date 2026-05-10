@@ -453,7 +453,12 @@ function InstallingRow({
     const d = datasetSnap.active[modelId];
     if (d && d.jobCount > 0) {
       const job = `${d.jobIndex + 1}/${d.jobCount}`;
-      detail = d.currentTable ? `ingesting ${d.currentTable} · ${job}` : `ingesting · ${job}`;
+      const base = d.currentTable ? `ingesting ${d.currentTable} · ${job}` : `ingesting · ${job}`;
+      // Append the live row counter when we've seen at least one progress
+      // tick from the SQL ingest path. Hidden until then so direct-shape
+      // ingests (no SqlIngestExecutor) don't show a stuck "0 rows".
+      const rows = d.rowsWrittenSoFar ?? 0;
+      detail = rows > 0 ? `${base} · ${rows.toLocaleString()} rows` : base;
     }
   } else {
     const step = snap.venvSteps[modelId] ?? snap.pythonHostStep;

@@ -54,7 +54,7 @@ public sealed class DatasetManifestIntegrationTests : ServiceTestBase, IDisposab
         TouchDatumFile("coco_test2017", "2017", "images");
         TableCatalog catalog = CreateCatalog();
 
-        DatasetSchemaCatalog datasetCatalog = new(["datasets"]);
+        DatasetSchemaCatalog datasetCatalog = new(["datasets"], catalog.SidecarRegistry);
         catalog.MountSchemaBackend("datasets", datasetCatalog);
 
         // Synthetic provider mimicking a mounted dataset table.
@@ -124,7 +124,7 @@ public sealed class DatasetManifestIntegrationTests : ServiceTestBase, IDisposab
                         new CatalogDatasetVersion(
                             Version: "2017",
                             Sources: [new HttpsSource([new HttpsFile("https://example.invalid/x.zip", "x.zip")])],
-                            Ingest: [new CatalogIngestJob("x.zip", "images")]),
+                            Ingest: [new CatalogIngestJob(TableName: "images", SourcePath: "x.zip")]),
                     ]),
             ]);
         DatasetCatalogManifest manifest = new(SchemaVersion: 1, Datasets: [entry]);
@@ -168,5 +168,6 @@ public sealed class DatasetManifestIntegrationTests : ServiceTestBase, IDisposab
         public Task<IReadOnlyDictionary<string, long>> GetAllPartialBytesAsync(CancellationToken ct = default)
             => Task.FromResult<IReadOnlyDictionary<string, long>>(new Dictionary<string, long>());
         public Task DeletePartialsAsync(string datasetId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<int> SweepStagingDirsAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 }

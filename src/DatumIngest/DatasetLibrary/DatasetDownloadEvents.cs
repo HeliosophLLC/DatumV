@@ -44,6 +44,18 @@ public sealed record DatasetIngesting(
     int JobIndex,
     int JobCount);
 
+// Periodic in-flight progress while an ingest job is running. Fires on a
+// row-count cadence the SQL-ingest path defines (every N rows, ~once per
+// SignalR-friendly tick). RowsWrittenSoFar is the cumulative count for
+// the current table — not across the whole variant. UIs surface it as a
+// live counter on the install card / status chip; absence is benign
+// (the existing DatasetIngesting/DatasetTableIngested transitions still
+// drive phase changes), so older clients ignore it without breakage.
+public sealed record DatasetIngestProgress(
+    string DatasetId,
+    string CurrentTable,
+    long RowsWrittenSoFar);
+
 // One ingest job finished. RowsWritten / BytesWritten come from the
 // returned IngestionResult so the UI can surface real totals (eg.
 // "ingested 40,670 rows / 6.3 GB"). When all jobs complete, the service

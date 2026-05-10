@@ -2487,8 +2487,10 @@ export interface HttpsFile {
 }
 
 export interface CatalogIngestJob {
-    sourcePath?: string;
     tableName?: string;
+    sourcePath?: string | undefined;
+    sqlFile?: string | undefined;
+    archive?: string | undefined;
 }
 
 export type DatasetInstallState = "notDownloaded" | "partial" | "installed";

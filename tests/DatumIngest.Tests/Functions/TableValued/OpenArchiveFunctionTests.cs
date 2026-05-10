@@ -18,14 +18,25 @@ namespace DatumIngest.Tests.Functions.TableValued;
 /// </summary>
 public sealed class OpenArchiveFunctionTests : ServiceTestBase
 {
-    private static async Task<List<Row>> CollectAsync(IAsyncEnumerable<RowBatch> batches)
+    // open_archive yields batches backed by per-batch arenas (see "Arena
+    // isolation" remark on the function): each row's payload coordinates resolve
+    // against batch.Arena, not the per-query Store. We Stabilize each value into
+    // ctx.Store while the batch arena is still alive so the test helpers can
+    // continue to read through ctx.Store after collection.
+    private static async Task<List<Row>> CollectAsync(IAsyncEnumerable<RowBatch> batches, ExecutionContext ctx)
     {
         List<Row> rows = [];
         await foreach (RowBatch batch in batches)
         {
             for (int i = 0; i < batch.Count; i++)
             {
-                rows.Add(batch[i]);
+                Row source = batch[i];
+                DataValue[] stabilized = new DataValue[source.FieldCount];
+                for (int f = 0; f < source.FieldCount; f++)
+                {
+                    stabilized[f] = DataValueRetention.Stabilize(source[f], batch.Arena, ctx.Store);
+                }
+                rows.Add(new Row(source.ColumnLookup, stabilized));
             }
         }
         return rows;
@@ -100,7 +111,7 @@ public sealed class OpenArchiveFunctionTests : ServiceTestBase
             OpenArchiveFunction fn = new();
             ExecutionContext ctx = CreateExecutionContext();
             List<Row> rows = await CollectAsync(
-                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(zipPath)], ctx));
+                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(zipPath)], ctx), ctx);
 
             Assert.Equal(3, rows.Count);
             Assert.Equal("a.txt", PathOf(rows[0]));
@@ -132,7 +143,7 @@ public sealed class OpenArchiveFunctionTests : ServiceTestBase
             OpenArchiveFunction fn = new();
             ExecutionContext ctx = CreateExecutionContext();
             List<Row> rows = await CollectAsync(
-                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(zipPath)], ctx));
+                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(zipPath)], ctx), ctx);
 
             Row row = Assert.Single(rows);
             Assert.False(row["modified"].IsNull);
@@ -164,7 +175,7 @@ public sealed class OpenArchiveFunctionTests : ServiceTestBase
             OpenArchiveFunction fn = new();
             ExecutionContext ctx = CreateExecutionContext();
             List<Row> rows = await CollectAsync(
-                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(zipPath)], ctx));
+                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(zipPath)], ctx), ctx);
 
             Assert.Empty(rows);
         }
@@ -191,7 +202,7 @@ public sealed class OpenArchiveFunctionTests : ServiceTestBase
             OpenArchiveFunction fn = new();
             ExecutionContext ctx = CreateExecutionContext();
             List<Row> rows = await CollectAsync(
-                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(tarPath)], ctx));
+                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(tarPath)], ctx), ctx);
 
             Assert.Equal(2, rows.Count);
             Assert.Equal("first.txt", PathOf(rows[0]));
@@ -232,7 +243,7 @@ public sealed class OpenArchiveFunctionTests : ServiceTestBase
                         ValueRef.FromString(zipPath),
                         ValueRef.FromString("%.txt"),
                     ],
-                    ctx));
+                    ctx), ctx);
 
             Assert.Equal(2, rows.Count);
             Assert.Equal("a.txt", PathOf(rows[0]));
@@ -260,7 +271,7 @@ public sealed class OpenArchiveFunctionTests : ServiceTestBase
             ExecutionContext ctx = CreateExecutionContext();
             // No path_pattern arg — implicit default '%'.
             List<Row> rows = await CollectAsync(
-                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(zipPath)], ctx));
+                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(zipPath)], ctx), ctx);
 
             Assert.Equal(2, rows.Count);
         }
@@ -286,7 +297,7 @@ public sealed class OpenArchiveFunctionTests : ServiceTestBase
                         ValueRef.FromString(zipPath),
                         ValueRef.FromString(""),
                     ],
-                    ctx));
+                    ctx), ctx);
 
             Assert.Empty(rows);
         }
@@ -317,7 +328,7 @@ public sealed class OpenArchiveFunctionTests : ServiceTestBase
             OpenArchiveFunction fn = new();
             ExecutionContext ctx = CreateExecutionContext();
             List<Row> rows = await CollectAsync(
-                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(zipPath)], ctx));
+                ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(zipPath)], ctx), ctx);
 
             Assert.Equal(3, rows.Count);
             Assert.Contains(rows, r => PathOf(r) == "__MACOSX/foo");

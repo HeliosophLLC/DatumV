@@ -78,7 +78,7 @@ export function DatasetDetail({ entry }: { entry: DatasetEntrySnapshot }) {
 
   return (
     <div className="flex flex-col">
-      <HeroBand entryName={entry.name} />
+      <HeroBand key={entry.name} entryName={entry.name} />
 
       <div className="flex flex-col gap-4 px-6 py-5">
         <header className="min-w-0">
@@ -398,11 +398,20 @@ function InFlightProgress({ variantId }: { variantId: string }) {
     );
   }
 
-  const label = t('progress.ingesting', {
-    table: entry.currentTable || '—',
-    jobIndex: entry.jobIndex,
-    jobCount: entry.jobCount,
-  });
+  const rowsSoFar = entry.rowsWrittenSoFar ?? 0;
+  const label =
+    rowsSoFar > 0
+      ? t('progress.ingestingWithRows', {
+          table: entry.currentTable || '—',
+          jobIndex: entry.jobIndex,
+          jobCount: entry.jobCount,
+          rows: rowsSoFar.toLocaleString(),
+        })
+      : t('progress.ingesting', {
+          table: entry.currentTable || '—',
+          jobIndex: entry.jobIndex,
+          jobCount: entry.jobCount,
+        });
   return (
     <div className="border-border flex items-center gap-2 rounded-xs border px-3 py-2 text-xs">
       <Loader2 className="text-primary size-3.5 animate-spin" />

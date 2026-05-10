@@ -100,7 +100,7 @@ public class Ingester(
         // be captured (needed for the sample-preview read pass) and so
         // the deserializer can target it as the IBlobSink for image-bearing
         // rows.
-        string sidecarPath = SidecarPathFor(destination.FilePath);
+        string sidecarPath = IngesterHelpers.SidecarPathFor(destination.FilePath);
         SidecarWriteStore sidecar = new(sidecarPath);
         ulong sidecarFingerprint = sidecar.Fingerprint;
         bool sidecarMaterialized;
@@ -132,7 +132,7 @@ public class Ingester(
 
                     if (schemaDetector.IsDetected)
                     {
-                        ColumnDescriptorV2[] descriptors = ToV2Descriptors(schemaDetector.Schema);
+                        ColumnDescriptorV2[] descriptors = IngesterHelpers.ToV2Descriptors(schemaDetector.Schema);
                         writer.Initialize(descriptors);
                         initialized = true;
                     }
@@ -174,7 +174,7 @@ public class Ingester(
 
             if (!initialized)
             {
-                writer.Initialize(ToV2Descriptors(new Schema([])));
+                writer.Initialize(IngesterHelpers.ToV2Descriptors(new Schema([])));
             }
 
             writer.FinalizeWriter();
@@ -251,38 +251,4 @@ public class Ingester(
         }
     }
 
-    /// <summary>
-    /// Returns the companion sidecar path for a given <c>.datum</c> output path.
-    /// Strips the <c>.datum</c> extension if present and appends <c>.datum-blob</c>;
-    /// otherwise appends <c>.datum-blob</c> to the full path.
-    /// </summary>
-    private static string SidecarPathFor(string datumPath)
-    {
-        return Path.ChangeExtension(datumPath, SidecarConstants.FileExtension);
-    }
-
-    /// <summary>
-    /// Converts a <see cref="Schema"/> to the v2 column-descriptor list.
-    /// Encoder kind is picked by <see cref="ColumnDescriptorV2.EncoderFor"/>;
-    /// nullability comes from <see cref="ColumnInfo.Nullable"/>; array shape
-    /// rides through directly via <see cref="ColumnInfo.IsArray"/>.
-    /// </summary>
-    private static ColumnDescriptorV2[] ToV2Descriptors(Schema schema)
-    {
-        ColumnDescriptorV2[] descriptors = new ColumnDescriptorV2[schema.Columns.Count];
-        for (int i = 0; i < schema.Columns.Count; i++)
-        {
-            ColumnInfo col = schema.Columns[i];
-            descriptors[i] = new ColumnDescriptorV2(
-                Name: col.Name,
-                Kind: col.Kind,
-                Encoder: ColumnDescriptorV2.EncoderFor(col.Kind, col.IsArray),
-                IsNullable: col.Nullable,
-                IsArray: col.IsArray,
-                FixedShape: col.FixedShape,
-                MaxLength: col.MaxLength,
-                IsBlankPadded: col.IsBlankPadded);
-        }
-        return descriptors;
-    }
 }

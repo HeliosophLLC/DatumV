@@ -192,11 +192,17 @@ public sealed partial class ExpressionEvaluator
             return ValueRef.FromInline(value);
         }
 
-        // Non-inline single-value byte blobs.
+        // Non-inline single-value byte blobs. Forward the originating DataValue
+        // as the metadata carrier so the inline accessor fast path
+        // (audio_sample_rate, image_width, etc.) reads stamped sample-rate /
+        // dimensions / etc. instead of the zero sentinel — without this, an
+        // arena- or sidecar-backed media value reaching a function argument
+        // loses its inline metadata at the DataValue → ValueRef hop and every
+        // *_*() metadata accessor downstream returns NULL.
         if (value.Kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud or DataKind.Mesh)
         {
             ReadOnlySpan<byte> bytes = value.AsByteSpan(frame.Source, frame.SidecarRegistry);
-            return ValueRef.FromBytes(value.Kind, bytes.ToArray());
+            return ValueRef.FromBytesWithMetadata(value, bytes.ToArray());
         }
 
         if (value.Kind == DataKind.Struct)

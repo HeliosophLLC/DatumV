@@ -735,6 +735,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalarAlias<Scalar.Strings.TrimFunction>("btrim");
         registry.RegisterScalar<Scalar.Strings.LtrimFunction>();
         registry.RegisterScalar<Scalar.Strings.RtrimFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpReplaceFunction>();
 
         // Fulltext family
         registry.RegisterScalar<Scalar.Fulltext.PlainToTsqueryFunction>();

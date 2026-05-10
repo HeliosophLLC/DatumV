@@ -38,10 +38,18 @@ namespace DatumIngest.Functions.TableValued;
 /// <strong>Streaming.</strong> Batches are bounded by either the operator's
 /// row capacity or a 16 MB arena-bytes watermark, whichever comes first. For a
 /// 10 GB FLAC archive that means ~50 entries per batch (at typical ~300 KB
-/// FLACs), the body bytes flow into the query arena, the batch flushes to the
-/// downstream writer, and the next batch reuses the rented row slots. The
-/// per-query arena is shared across batches in the standard one-arena-per-query
-/// model; file-backed storage handles spillover past the in-memory budget.
+/// FLACs), the body bytes flow into a per-batch arena, the batch flushes to
+/// the downstream writer, and the next batch rents a fresh recycled arena.
+/// </para>
+/// <para>
+/// <strong>Arena isolation.</strong> This TVF deliberately bypasses the
+/// one-arena-per-query model and rents its own arena per yielded batch. A
+/// multi-GB media archive would otherwise pile every entry's bytes into the
+/// shared per-query Store and blow the per-arena anonymous-reservation cap
+/// long before reaching the writer. With per-batch arenas the downstream
+/// consumer's <c>ReturnRowBatch</c> drops the arena's last reference and the
+/// bytes recycle back to the pool; only the live in-flight batch's worth of
+/// bytes (the 16 MB watermark) is resident at any moment.
 /// </para>
 /// </remarks>
 public sealed class OpenArchiveFunction : ITableValuedFunctionMetadata, ITableValuedFunction
@@ -157,7 +165,13 @@ public sealed class OpenArchiveFunction : ITableValuedFunctionMetadata, ITableVa
 
             if (batch is null)
             {
-                batch = context.RentRowBatch(OutputColumnLookup);
+                // Per-batch arena (see "Arena isolation" remark): rent a fresh
+                // arena from the pool instead of the per-query Store, so the
+                // entry bytes streamed into this batch are released the moment
+                // the downstream consumer returns the batch.
+                batch = context.Pool.RentRowBatch(OutputColumnLookup, context.BatchSize, arena: null);
+                batch.Types = context.Types;
+                batch.TypeIdTranslations = context.TypeIdTranslations;
                 batchStartBytes = batch.Arena.BytesWritten;
             }
 

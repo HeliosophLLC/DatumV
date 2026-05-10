@@ -385,6 +385,44 @@ public readonly struct ValueRef
     }
 
     /// <summary>
+    /// Wraps a managed byte payload plus a metadata-carrier <see cref="DataValue"/>
+    /// for the blob-kind round-trip (<see cref="DataKind.Image"/> /
+    /// <see cref="DataKind.Audio"/> / <see cref="DataKind.Video"/> /
+    /// <see cref="DataKind.PointCloud"/> / <see cref="DataKind.Mesh"/>). Used at the
+    /// <see cref="DataValue"/> → <see cref="ValueRef"/> boundary in the evaluator
+    /// when an arena- or sidecar-backed media value is lifted into a function
+    /// argument: <see cref="FromBytes(DataKind, byte[], bool)"/> stamps a
+    /// metadata-less <c>Null(kind)</c> carrier and silently strips inline
+    /// sample-rate / dimensions / etc., breaking the
+    /// inline-accessor elision fast path and its
+    /// <see cref="DataValue"/>-fallback both — they read inline metadata off the
+    /// carrier and get zero. This factory keeps <paramref name="metadataCarrier"/>'s
+    /// kind tag and per-kind inline-metadata bytes (<c>_p4</c>+<c>_p5</c>+<c>_p6</c>)
+    /// intact so <c>audio_sample_rate</c>, <c>image_width</c>, etc. read the
+    /// stamped values rather than the zero sentinel.
+    /// </summary>
+    /// <param name="metadataCarrier">
+    /// The originating <see cref="DataValue"/>. Provides the kind tag and
+    /// inline-metadata bits that the inline-accessor fast path reads. The
+    /// carrier's storage flags (InArena / InSidecar) and offset/length bytes
+    /// are not relied on — the materialized <paramref name="value"/> is the
+    /// authoritative payload from this point on.
+    /// </param>
+    /// <param name="value">The encoded byte payload.</param>
+    public static ValueRef FromBytesWithMetadata(DataValue metadataCarrier, byte[] value)
+    {
+        if (metadataCarrier.Kind is not (DataKind.Image or DataKind.Audio or DataKind.Video
+            or DataKind.Json or DataKind.PointCloud or DataKind.Mesh))
+        {
+            throw new ArgumentException(
+                $"FromBytesWithMetadata is only valid for Image/Audio/Video/Json/PointCloud/Mesh; "
+                + $"got {metadataCarrier.Kind}.",
+                nameof(metadataCarrier));
+        }
+        return new(metadataCarrier, value);
+    }
+
+    /// <summary>
     /// Decoded bitmap value. Produced by models and image functions that construct
     /// the output bitmap directly, avoiding an intermediate encode/decode round-trip.
     /// The bitmap is GC-managed; arena encoding (PNG, lossless) happens once at

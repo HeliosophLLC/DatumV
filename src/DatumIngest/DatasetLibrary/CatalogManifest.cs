@@ -156,10 +156,27 @@ public sealed record CatalogDatasetVersion(
     bool Deprecated = false,
     string? DeprecationReason = null);
 
-// One ingest job inside a CatalogDatasetVersion. SourcePath is a path
-// relative to the version's raw cache root pointing at the source the
-// engine's FormatRegistry handles directly. TableName is the file stem
-// of the produced `.datum`.
+// One ingest job inside a CatalogDatasetVersion. Two shapes — exactly
+// one is set per job, enforced by the manifest validator:
+//
+//   * "Direct" shape — SourcePath is a path relative to the version's raw
+//     cache root pointing at the source the engine's FormatRegistry
+//     handles directly (zip → bag-of-files, csv → table, parquet → table,
+//     …). Used by image-bag and one-file-per-table datasets.
+//
+//   * "SQL" shape — SqlFile names a .sql script (relative to the manifest
+//     directory) that produces the ingested rows. Archive names the source
+//     file the script primarily targets (relative to raw cache); its
+//     absolute path is bound as the $archive parameter, and its base name
+//     stripped of compound extensions (e.g. `LJSpeech-1.1.tar.gz` →
+//     `LJSpeech-1.1`) is bound as $archive_stem so SQL can reference the
+//     top-level dir inside the archive without hard-coding it.
+//
+// TableName is the file stem of the produced `.datum` in either shape and
+// follows the single-job / multi-job naming rule the binder uses when
+// computing the bound table name in the configured schema.
 public sealed record CatalogIngestJob(
-    string SourcePath,
-    string TableName);
+    string TableName,
+    string? SourcePath = null,
+    string? SqlFile = null,
+    string? Archive = null);

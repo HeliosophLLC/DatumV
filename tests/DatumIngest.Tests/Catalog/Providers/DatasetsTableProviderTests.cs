@@ -1,6 +1,7 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.DatasetLibrary;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Model;
 using DatumIngest.ModelLibrary;
 using DatumIngest.Pooling;
@@ -212,7 +213,7 @@ public sealed class DatasetsTableProviderTests : ServiceTestBase, IDisposable
                 new CatalogDatasetVersion(
                     Version: "2017",
                     Sources: [new HttpsSource([new HttpsFile("https://example.invalid/x.zip", "x.zip")])],
-                    Ingest: [.. ingestTables.Select(t => new CatalogIngestJob($"{t}.zip", t))]),
+                    Ingest: [.. ingestTables.Select(t => new CatalogIngestJob(TableName: t, SourcePath: $"{t}.zip"))]),
             ]);
 
     private DatasetSchemaBinder BuildBinder(
@@ -222,7 +223,8 @@ public sealed class DatasetsTableProviderTests : ServiceTestBase, IDisposable
         DatasetCatalogManifest manifest = new(SchemaVersion: 1, Datasets: entries);
         StubManifestStore store = new(manifest);
         DatasetSchemaCatalog catalog = new(
-            entries.Select(e => e.Schema).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+            entries.Select(e => e.Schema).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            new SidecarRegistry());
         VersionedDatasetPathResolver paths = new(
             datasetsCacheRoot: Path.GetTempPath(),
             ingestedDatasetsRoot: _ingestedRoot);
@@ -266,5 +268,6 @@ public sealed class DatasetsTableProviderTests : ServiceTestBase, IDisposable
         public Task<IReadOnlyDictionary<string, long>> GetAllPartialBytesAsync(CancellationToken ct = default)
             => Task.FromResult<IReadOnlyDictionary<string, long>>(new Dictionary<string, long>());
         public Task DeletePartialsAsync(string datasetId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<int> SweepStagingDirsAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 }

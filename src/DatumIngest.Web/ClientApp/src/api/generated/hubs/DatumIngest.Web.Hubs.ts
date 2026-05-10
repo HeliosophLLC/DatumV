@@ -130,6 +130,16 @@ export type DatasetIngestingDto = {
     jobCount: number;
 }
 
+/** Transpiled from DatumIngest.Web.Hubs.DatasetIngestProgressDto */
+export type DatasetIngestProgressDto = {
+    /** Transpiled from string */
+    datasetId: string;
+    /** Transpiled from string */
+    currentTable: string;
+    /** Transpiled from long */
+    rowsWrittenSoFar: number;
+}
+
 /** Transpiled from DatumIngest.Web.Hubs.DatasetTableIngestedDto */
 export type DatasetTableIngestedDto = {
     /** Transpiled from string */

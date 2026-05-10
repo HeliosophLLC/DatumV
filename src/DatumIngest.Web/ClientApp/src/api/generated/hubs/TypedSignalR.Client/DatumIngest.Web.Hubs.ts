@@ -3,7 +3,7 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { IStreamResult, Subject } from '@microsoft/signalr';
-import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto } from '../DatumIngest.Web.Hubs';
+import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetIngestProgressDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto } from '../DatumIngest.Web.Hubs';
 
 export type ICatalogHub = {
     /**
@@ -221,6 +221,11 @@ export type IStreamHubClient = {
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onDatasetIngesting(ingesting: DatasetIngestingDto): Promise<void>;
+    /**
+    * @param progress Transpiled from DatumIngest.Web.Hubs.DatasetIngestProgressDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onDatasetIngestProgress(progress: DatasetIngestProgressDto): Promise<void>;
     /**
     * @param ingested Transpiled from DatumIngest.Web.Hubs.DatasetTableIngestedDto
     * @returns Transpiled from System.Threading.Tasks.Task

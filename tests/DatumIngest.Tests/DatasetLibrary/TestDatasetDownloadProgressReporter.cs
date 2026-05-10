@@ -22,6 +22,7 @@ public sealed class TestDatasetDownloadProgressReporter : IDatasetDownloadProgre
     public ConcurrentBag<DatasetDownloadProgress> Progresses { get; } = [];
     public ConcurrentBag<DatasetDownloadComplete> Completes { get; } = [];
     public ConcurrentBag<DatasetIngesting> Ingestings { get; } = [];
+    public ConcurrentBag<DatasetIngestProgress> IngestProgresses { get; } = [];
     public ConcurrentBag<DatasetTableIngested> TableIngesteds { get; } = [];
     public ConcurrentBag<DatasetInstalled> Installeds { get; } = [];
     public ConcurrentBag<DatasetDownloadFailed> Faileds { get; } = [];
@@ -66,6 +67,12 @@ public sealed class TestDatasetDownloadProgressReporter : IDatasetDownloadProgre
     public ValueTask OnIngestingAsync(DatasetIngesting e, CancellationToken ct)
     {
         Ingestings.Add(e);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask OnIngestProgressAsync(DatasetIngestProgress e, CancellationToken ct)
+    {
+        IngestProgresses.Add(e);
         return ValueTask.CompletedTask;
     }
 

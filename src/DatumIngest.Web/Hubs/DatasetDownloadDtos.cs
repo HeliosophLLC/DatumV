@@ -37,6 +37,12 @@ public sealed record DatasetIngestingDto(
     int JobCount);
 
 [TranspilationSource]
+public sealed record DatasetIngestProgressDto(
+    string DatasetId,
+    string CurrentTable,
+    long RowsWrittenSoFar);
+
+[TranspilationSource]
 public sealed record DatasetTableIngestedDto(
     string DatasetId,
     string Table,

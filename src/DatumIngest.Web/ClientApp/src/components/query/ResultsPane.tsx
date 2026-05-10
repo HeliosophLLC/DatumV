@@ -1561,21 +1561,6 @@ function CellTable({ cell }: { cell: CellResult }) {
                   key={colIdx}
                   onMouseDown={(e) => {
                     if (e.button !== 0) return;
-                    // Single-click on the chip/button inside a media or
-                    // struct cell is reserved for the preview-modal open
-                    // gesture — skip selection-start so we don't fight
-                    // it. Shift+click overrides: extending a range
-                    // through a media cell is standard spreadsheet UX.
-                    if (!e.shiftKey) {
-                      const target = e.target as HTMLElement;
-                      if (target.closest('button') !== null) return;
-                      if (
-                        target.tagName === 'IMG'
-                        && target.classList.contains('cursor-zoom-in')
-                      ) {
-                        return;
-                      }
-                    }
                     scrollRef.current?.focus();
                     beginSelection('cell', virtualRow.index, colIdx, e.shiftKey);
                   }}

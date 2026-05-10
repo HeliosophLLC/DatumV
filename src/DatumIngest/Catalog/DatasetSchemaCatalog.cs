@@ -1,5 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 
+using DatumIngest.Catalog.Providers;
+using DatumIngest.DatumFile.Sidecar;
+
 namespace DatumIngest.Catalog;
 
 /// <summary>
@@ -29,6 +32,10 @@ namespace DatumIngest.Catalog;
 public sealed class DatasetSchemaCatalog : ITableCatalog
 {
     private readonly HashSet<string> _schemas;
+    // Shared registry owned by the hosting TableCatalog. We don't construct
+    // it ourselves so dataset-bound DataValues resolve through the same
+    // storeId space as everything else the query reads.
+    private readonly SidecarRegistry _sidecarRegistry;
     // Atomic snapshot. SetTables swaps the reference wholesale so a
     // concurrent reader walking ListTables() never sees a torn dict.
     private volatile Dictionary<QualifiedName, ITableProvider> _tables = new();
@@ -38,10 +45,21 @@ public sealed class DatasetSchemaCatalog : ITableCatalog
     /// register a provider whose <see cref="QualifiedName.Schema"/> falls
     /// outside this set is an error.
     /// </summary>
-    public DatasetSchemaCatalog(IEnumerable<string> schemas)
+    /// <param name="schemas">Schemas this backend owns.</param>
+    /// <param name="sidecarRegistry">
+    /// The hosting <see cref="TableCatalog"/>'s registry. Each provider's
+    /// sidecar is registered here at <see cref="SetTables"/> time so
+    /// sidecar-backed DataValues produced by dataset reads resolve through
+    /// the same storeId space the query engine uses for every other table.
+    /// Without this wiring, the catalog formatter / consumer reads bytes at
+    /// the storeId-zero slot and misses the dataset's actual sidecar.
+    /// </param>
+    public DatasetSchemaCatalog(IEnumerable<string> schemas, SidecarRegistry sidecarRegistry)
     {
         ArgumentNullException.ThrowIfNull(schemas);
+        ArgumentNullException.ThrowIfNull(sidecarRegistry);
         _schemas = new HashSet<string>(schemas, StringComparer.OrdinalIgnoreCase);
+        _sidecarRegistry = sidecarRegistry;
     }
 
     /// <inheritdoc/>
@@ -76,6 +94,27 @@ public sealed class DatasetSchemaCatalog : ITableCatalog
                 throw new ArgumentException(
                     $"DatasetSchemaCatalog: duplicate provider for '{p.QualifiedName}'. " +
                     "The binder must produce a unique (schema, name) per variant.");
+            }
+
+            // Wire the provider into the shared SidecarRegistry — mirrors what
+            // FlatFileCatalog.RegisterProviderSidecar does for user-DDL tables.
+            // Without this, the provider's scan still works (it passes its own
+            // IBlobSource directly to OpenPageDecoder), but every sidecar-backed
+            // DataValue it emits carries the default storeId of 0, which the
+            // downstream cell formatter / consumer-side AsByteSpan(arena, registry)
+            // call resolves against whatever (unrelated) source happens to hold
+            // slot 0 in the registry — surfacing wrong bytes (octet-stream chips
+            // on Audio, broken Image thumbnails, etc.). Sidecar metadata that
+            // landed inline on the DataValue (via DecodeAudioWithInlineMetadata
+            // and friends) keeps working because the inline accessors read off
+            // the value's struct fields and bypass the registry entirely — only
+            // byte-reading consumers see the breakage.
+            if (p is IDatumFileTableProvider datumProvider
+                && datumProvider.Sidecar is { } source
+                && datumProvider.SidecarRegistry is null)
+            {
+                datumProvider.SidecarRegistry = _sidecarRegistry;
+                datumProvider.SidecarStoreId = _sidecarRegistry.Register(source);
             }
         }
         Dictionary<QualifiedName, ITableProvider> previous = _tables;

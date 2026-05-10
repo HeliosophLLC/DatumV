@@ -4,7 +4,7 @@
 // @ts-nocheck
 import type { HubConnection, IStreamResult, Subject } from '@microsoft/signalr';
 import type { ICatalogHub, IStreamHub, ICatalogHubClient, IStreamHubClient } from './DatumIngest.Web.Hubs';
-import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto } from '../DatumIngest.Web.Hubs';
+import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetIngestProgressDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto } from '../DatumIngest.Web.Hubs';
 
 
 // components
@@ -214,6 +214,7 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
         const __onDatasetDownloadProgress = (...args: [DatasetDownloadProgressDto]) => receiver.onDatasetDownloadProgress(...args);
         const __onDatasetDownloadComplete = (...args: [DatasetDownloadCompleteDto]) => receiver.onDatasetDownloadComplete(...args);
         const __onDatasetIngesting = (...args: [DatasetIngestingDto]) => receiver.onDatasetIngesting(...args);
+        const __onDatasetIngestProgress = (...args: [DatasetIngestProgressDto]) => receiver.onDatasetIngestProgress(...args);
         const __onDatasetTableIngested = (...args: [DatasetTableIngestedDto]) => receiver.onDatasetTableIngested(...args);
         const __onDatasetInstalled = (...args: [DatasetInstalledDto]) => receiver.onDatasetInstalled(...args);
         const __onDatasetDownloadFailed = (...args: [DatasetDownloadFailedDto]) => receiver.onDatasetDownloadFailed(...args);
@@ -242,6 +243,7 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
         connection.on("OnDatasetDownloadProgress", __onDatasetDownloadProgress);
         connection.on("OnDatasetDownloadComplete", __onDatasetDownloadComplete);
         connection.on("OnDatasetIngesting", __onDatasetIngesting);
+        connection.on("OnDatasetIngestProgress", __onDatasetIngestProgress);
         connection.on("OnDatasetTableIngested", __onDatasetTableIngested);
         connection.on("OnDatasetInstalled", __onDatasetInstalled);
         connection.on("OnDatasetDownloadFailed", __onDatasetDownloadFailed);
@@ -271,6 +273,7 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
             { methodName: "OnDatasetDownloadProgress", method: __onDatasetDownloadProgress },
             { methodName: "OnDatasetDownloadComplete", method: __onDatasetDownloadComplete },
             { methodName: "OnDatasetIngesting", method: __onDatasetIngesting },
+            { methodName: "OnDatasetIngestProgress", method: __onDatasetIngestProgress },
             { methodName: "OnDatasetTableIngested", method: __onDatasetTableIngested },
             { methodName: "OnDatasetInstalled", method: __onDatasetInstalled },
             { methodName: "OnDatasetDownloadFailed", method: __onDatasetDownloadFailed }

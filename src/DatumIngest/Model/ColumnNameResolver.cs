@@ -1,3 +1,4 @@
+using DatumIngest.Execution;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Model;
@@ -21,6 +22,7 @@ public static class ColumnNameResolver
         {
             ColumnReference columnReference => columnReference.ColumnName,
             FunctionCallExpression functionCall => functionCall.FunctionName,
+            InlineAccessorExpression accessor => InlineAccessorDescriptors.Get(accessor.Field).FunctionName,
             StructLiteralExpression => "struct",
             ScanExpression scan => scan.OutputAliases[0],
             _ => "expression",

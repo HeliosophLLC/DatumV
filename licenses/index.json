@@ -38,6 +38,14 @@
       "summary": "Permissive license. Allows commercial use, modification, and redistribution. Requires attribution to the original author.",
       "requiresAcceptance": false
     },
+    "public-domain": {
+      "title": "Public Domain",
+      "spdx": "CC-PDDC",
+      "canonicalUrl": "https://creativecommons.org/publicdomain/",
+      "textFile": "public-domain.md",
+      "summary": "No rights reserved. The work has been dedicated to the public domain (or its copyright has expired). Free for any use — commercial or non-commercial — with no attribution requirement, though attribution remains good practice for traceability.",
+      "requiresAcceptance": false
+    },
     "bsd-2-clause": {
       "title": "BSD 2-Clause License",
       "spdx": "BSD-2-Clause",

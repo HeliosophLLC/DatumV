@@ -39,6 +39,7 @@
     "downloading": "Downloading {current} ({fileIndex} of {fileCount})",
     "downloadComplete": "Download complete, preparing ingest…",
     "ingesting": "Ingesting {table} ({jobIndex} of {jobCount})",
+    "ingestingWithRows": "Ingesting {table} ({jobIndex} of {jobCount}) — {rows} rows",
     "installed": "Installed"
   },
   "filters": {

@@ -5,7 +5,10 @@
 using System.Collections.Concurrent;
 using System.Text;
 
+using DatumIngest.Execution;
 using DatumIngest.Ingestion;
+using DatumIngest.Manifest;
+using DatumIngest.Model;
 using DatumIngest.ModelLibrary;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
@@ -25,6 +28,7 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
     private readonly IEnumerable<IFileFormat> _fileFormats;
     private readonly Pool _pool;
     private readonly IKeepRawDownloadsPolicy _keepRawPolicy;
+    private readonly SqlIngestExecutor _sqlIngestExecutor;
     private readonly ILogger<DatasetDownloadService> _logger;
 
     // Prevents two concurrent installs of the same datasetId.
@@ -46,6 +50,7 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
         IEnumerable<IFileFormat> fileFormats,
         Pool pool,
         IKeepRawDownloadsPolicy keepRawPolicy,
+        SqlIngestExecutor sqlIngestExecutor,
         ILogger<DatasetDownloadService> logger)
     {
         _store = store;
@@ -56,6 +61,7 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
         _fileFormats = fileFormats;
         _pool = pool;
         _keepRawPolicy = keepRawPolicy;
+        _sqlIngestExecutor = sqlIngestExecutor;
         _logger = logger;
 
         // Build the per-type dispatch table once. The same IModelSourceClient
@@ -87,11 +93,19 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
             return Task.FromResult(DatasetInstallState.NotDownloaded);
         }
 
+        // Count .datum files that are non-empty. A zero-byte file means the
+        // writer never made it past Initialize — probably a crash mid-ingest
+        // before the staging→version rename was wired. We treat it as Partial
+        // so the UI surfaces a reinstall affordance instead of letting the
+        // catalog binder fail to mount a "ghost" variant.
         int present = 0;
         foreach (CatalogIngestJob job in variant.Versions[0].Ingest)
         {
             string datumPath = Path.Combine(ingestedDir, $"{job.TableName}.datum");
-            if (File.Exists(datumPath)) present++;
+            if (File.Exists(datumPath) && new FileInfo(datumPath).Length > 0)
+            {
+                present++;
+            }
         }
 
         if (present == 0) return Task.FromResult(DatasetInstallState.NotDownloaded);
@@ -244,6 +258,34 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
         return Task.CompletedTask;
     }
 
+    public Task<int> SweepStagingDirsAsync(CancellationToken ct = default)
+    {
+        string root = _paths.IngestedDatasetsRoot;
+        if (!Directory.Exists(root)) return Task.FromResult(0);
+
+        int swept = 0;
+        foreach (string variantDir in Directory.EnumerateDirectories(root))
+        {
+            ct.ThrowIfCancellationRequested();
+            foreach (string staging in Directory.EnumerateDirectories(variantDir, ".staging-*"))
+            {
+                try
+                {
+                    Directory.Delete(staging, recursive: true);
+                    swept++;
+                    _logger.LogInformation("Swept orphan ingest staging dir {StagingDir}", staging);
+                }
+                catch (IOException ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Could not delete orphan staging dir {StagingDir}; will retry on next boot",
+                        staging);
+                }
+            }
+        }
+        return Task.FromResult(swept);
+    }
+
     // ────────────────────── orchestration ──────────────────────
 
     // Sequential source-fallback loop, then per-job ingest. On failure at
@@ -319,24 +361,72 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
                 .ConfigureAwait(false);
 
             // ── 2. Ingest phase ──
-            Directory.CreateDirectory(ingestedDir);
-            int jobCount = version.Ingest.Count;
-            for (int jobIndex = 0; jobIndex < jobCount; jobIndex++)
+            // Atomic install: write the .datum + .datum-blob files to a
+            // sibling `.staging-<guid>/` dir, then Directory.Move it onto
+            // the final version path after every job has finalized. On
+            // Windows the move is a single rename within the same volume
+            // (same parent dir), so the catalog binder either sees the
+            // full version dir or nothing — no half-written .datums for
+            // RebuildAsync to choke on. Process kills mid-ingest leave the
+            // staging dir orphaned; SweepStagingDirs (called at startup
+            // from the catalog init service) reaps those before the binder
+            // probes.
+            string variantDir = Path.GetDirectoryName(ingestedDir)!;
+            Directory.CreateDirectory(variantDir);
+            string stagingDir = Path.Combine(variantDir, $".staging-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(stagingDir);
+            bool stagingCommitted = false;
+
+            try
             {
-                ct.ThrowIfCancellationRequested();
-                CatalogIngestJob job = version.Ingest[jobIndex];
+                int jobCount = version.Ingest.Count;
+                for (int jobIndex = 0; jobIndex < jobCount; jobIndex++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    CatalogIngestJob job = version.Ingest[jobIndex];
 
-                await _reporter.OnIngestingAsync(
-                    new DatasetIngesting(variant.Id, job.TableName, jobIndex + 1, jobCount), ct)
-                    .ConfigureAwait(false);
+                    await _reporter.OnIngestingAsync(
+                        new DatasetIngesting(variant.Id, job.TableName, jobIndex + 1, jobCount), ct)
+                        .ConfigureAwait(false);
 
-                IngestionResult result = await RunIngestJobAsync(
-                    rawDir, ingestedDir, job, ct).ConfigureAwait(false);
+                    IngestionResult result = await RunIngestJobAsync(
+                        variant.Id, rawDir, stagingDir, job, ct).ConfigureAwait(false);
 
-                await _reporter.OnTableIngestedAsync(
-                    new DatasetTableIngested(
-                        variant.Id, job.TableName, result.RowCount, result.BytesWritten),
-                    CancellationToken.None).ConfigureAwait(false);
+                    await _reporter.OnTableIngestedAsync(
+                        new DatasetTableIngested(
+                            variant.Id, job.TableName, result.RowCount, result.BytesWritten),
+                        CancellationToken.None).ConfigureAwait(false);
+                }
+
+                // All jobs landed in staging — flip into place. If the
+                // destination already exists (rare: a concurrent install
+                // got there first), drop our staging dir and keep theirs
+                // rather than racing the move.
+                if (Directory.Exists(ingestedDir))
+                {
+                    _logger.LogInformation(
+                        "{VariantId}: version dir already present at {Dest}; discarding staging dir",
+                        variant.Id, ingestedDir);
+                }
+                else
+                {
+                    Directory.Move(stagingDir, ingestedDir);
+                }
+                stagingCommitted = true;
+            }
+            finally
+            {
+                if (!stagingCommitted && Directory.Exists(stagingDir))
+                {
+                    try { Directory.Delete(stagingDir, recursive: true); }
+                    catch (IOException ex)
+                    {
+                        _logger.LogWarning(ex,
+                            "{VariantId}: failed to clean up staging dir at {StagingDir}; " +
+                            "the startup sweep will retry on next boot",
+                            variant.Id, stagingDir);
+                    }
+                }
             }
 
             // ── 3. Raw-cache cleanup per user preference ──
@@ -383,12 +473,21 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
     // RowBatches to `<ingestedDir>/<tableName>.datum` (+ optional sidecar
     // `.datum-blob`).
     private async Task<IngestionResult> RunIngestJobAsync(
+        string variantId,
         string rawDir,
         string ingestedDir,
         CatalogIngestJob job,
         CancellationToken ct)
     {
-        string sourcePath = Path.Combine(rawDir, job.SourcePath);
+        // SQL-shape jobs route through SqlIngestExecutor; direct-shape
+        // through the engine's FormatRegistry-driven Ingester below. The
+        // manifest validator guarantees exactly one shape is set per
+        // job, so the branch is total.
+        if (!string.IsNullOrWhiteSpace(job.SqlFile))
+        {
+            return await RunSqlIngestJobAsync(variantId, rawDir, ingestedDir, job, ct).ConfigureAwait(false);
+        }
+        string sourcePath = Path.Combine(rawDir, job.SourcePath!);
         if (!File.Exists(sourcePath))
         {
             throw new FileNotFoundException(
@@ -411,6 +510,126 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
         OutputDescriptor destination = new(destPath);
 
         return await ingester.IngestAsync(source, destination, ct).ConfigureAwait(false);
+    }
+
+    // SQL-shape ingest. Reads the script from `<manifestDir>/<job.SqlFile>`,
+    // binds `$archive` (absolute path of `<rawDir>/<job.Archive>`) and
+    // `$archive_stem` (basename stripped of compound archive extensions),
+    // and streams rows from the planner straight into a fresh .datum.
+    // The IngestionResult returned uses synthetic stats — Manifest and
+    // Schema fields stay empty; downstream consumers that need them are
+    // a follow-up.
+    private async Task<IngestionResult> RunSqlIngestJobAsync(
+        string variantId,
+        string rawDir,
+        string ingestedDir,
+        CatalogIngestJob job,
+        CancellationToken ct)
+    {
+        string sqlScriptPath = Path.Combine(_store.ManifestDirectory, job.SqlFile!);
+        if (!File.Exists(sqlScriptPath))
+        {
+            throw new FileNotFoundException(
+                $"Ingest job '{job.TableName}' references sqlFile '{job.SqlFile}' " +
+                $"but no file was found at '{sqlScriptPath}'.",
+                sqlScriptPath);
+        }
+        string sql = await File.ReadAllTextAsync(sqlScriptPath, ct).ConfigureAwait(false);
+
+        string archivePath = Path.Combine(rawDir, job.Archive!);
+        if (!File.Exists(archivePath))
+        {
+            throw new FileNotFoundException(
+                $"Ingest job '{job.TableName}' SQL targets archive '{job.Archive}' " +
+                $"but the file '{archivePath}' is missing after download.",
+                archivePath);
+        }
+
+        string archiveStem = StripCompoundArchiveExtensions(job.Archive!);
+
+        // The parameter values are short strings — bind via the no-arena
+        // overload so the executor's binding doesn't depend on the
+        // download service holding an arena.
+        Dictionary<string, ParameterValue> parameters = new(StringComparer.Ordinal)
+        {
+            ["archive"]      = new StringParameter(archivePath),
+            ["archive_stem"] = new StringParameter(archiveStem),
+        };
+
+        string destPath = Path.Combine(ingestedDir, $"{job.TableName}.datum");
+        // Fan the executor's row-count callback out to the reporter so the
+        // UI sees a live counter while the SQL ingest is running. Fire-and-
+        // forget — the executor invokes onRowProgress synchronously and we
+        // don't want to block batch processing on a SignalR round-trip.
+        // OnIngestProgressAsync is responsible for its own ordering across
+        // ticks (the reporter implementation can drop / coalesce as needed).
+        void EmitRowProgress(long rowsSoFar)
+        {
+            _ = _reporter.OnIngestProgressAsync(
+                new DatasetIngestProgress(variantId, job.TableName, rowsSoFar),
+                CancellationToken.None);
+        }
+        SqlIngestResult result = await _sqlIngestExecutor.ExecuteAsync(
+            sql, parameters, destPath, onRowProgress: EmitRowProgress, ct).ConfigureAwait(false);
+
+        long bytesWritten;
+        try { bytesWritten = new FileInfo(destPath).Length; }
+        catch (FileNotFoundException) { bytesWritten = 0; }
+
+        // Construct a minimally-populated IngestionResult. The
+        // OnTableIngested event reads only RowCount + BytesWritten; the
+        // rest (schema / manifest / sample / scan pass metrics) stays
+        // empty in this v1 SQL path — adding stats / sampling collection
+        // for SQL ingest is a follow-up.
+        QueryResultsManifest emptyManifest = new()
+        {
+            RowCount = result.RowCount,
+            GeneratedAtUtc = DateTime.UtcNow,
+            Features = Array.Empty<FeatureManifest>(),
+        };
+        PassMetrics ingestPass = new(
+            RowCount: result.RowCount,
+            BatchCount: result.BatchCount,
+            BytesRead: 0,
+            ArenaBytesWritten: 0,
+            Elapsed: TimeSpan.Zero);
+        return new IngestionResult(
+            OutputPath: destPath,
+            RowCount: result.RowCount,
+            BytesWritten: bytesWritten,
+            Schema: new Schema([]),
+            Manifest: emptyManifest,
+            Sample: null,
+            ScanPass: null,
+            IngestPass: ingestPass);
+    }
+
+    // Strip compound archive extensions in the order they appear, so
+    // `LJSpeech-1.1.tar.gz` → `LJSpeech-1.1`. Single extensions handled
+    // by ChangeExtension. Anything not on the recognised list is left
+    // alone (the manifest validator should reject those at load time
+    // once we tighten the schema; for now, pass-through is safer than
+    // partial stripping).
+    private static string StripCompoundArchiveExtensions(string archiveName)
+    {
+        string name = Path.GetFileName(archiveName);
+        string[] doubleExtensions = [".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst"];
+        foreach (string ext in doubleExtensions)
+        {
+            if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+            {
+                return name[..^ext.Length];
+            }
+        }
+        string[] singleExtensions = [".zip", ".tgz", ".tbz2", ".gz", ".bz2", ".xz", ".zst", ".tar"];
+        foreach (string ext in singleExtensions)
+        {
+            if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+            {
+                return name[..^ext.Length];
+            }
+        }
+        return name;
     }
 
     // Single-source download attempt. Throws on any failure — the outer

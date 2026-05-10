@@ -39,6 +39,11 @@ internal sealed class SignalRDatasetDownloadProgressReporter(
             new DatasetIngestingDto(e.DatasetId, e.CurrentTable, e.JobIndex, e.JobCount))
             .ConfigureAwait(false);
 
+    public async ValueTask OnIngestProgressAsync(DatasetIngestProgress e, CancellationToken ct)
+        => await hub.Clients.All.OnDatasetIngestProgress(
+            new DatasetIngestProgressDto(e.DatasetId, e.CurrentTable, e.RowsWrittenSoFar))
+            .ConfigureAwait(false);
+
     public async ValueTask OnTableIngestedAsync(DatasetTableIngested e, CancellationToken ct)
         => await hub.Clients.All.OnDatasetTableIngested(
             new DatasetTableIngestedDto(e.DatasetId, e.Table, e.RowsWritten, e.BytesWritten))

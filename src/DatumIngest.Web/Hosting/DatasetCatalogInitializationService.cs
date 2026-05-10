@@ -61,6 +61,19 @@ internal sealed class DatasetCatalogInitializationService : IHostedService
         // re-registration.
         _catalog.Add(new DatasetsTableProvider(_pool, _binder));
 
+        // Reap orphan ingest staging dirs left behind by crashed installs
+        // BEFORE the binder probes. Without this, the next install on the
+        // same variant either races a stale staging dir (and the rename
+        // fails) or just leaks disk space across boots.
+        int sweptCount = await _downloads
+            .SweepStagingDirsAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (sweptCount > 0)
+        {
+            _logger.LogInformation(
+                "Reaped {Count} orphan ingest staging directories at boot.", sweptCount);
+        }
+
         await _binder.RebuildAsync(cancellationToken).ConfigureAwait(false);
 
         // Subscribe the binder to every terminal install/uninstall so the
