@@ -708,7 +708,7 @@ public sealed class BatchExecutor
                     // CREATE PROCEDURE round-trip through catalog
                     // persistence.
                     {
-                        StatementPlan plan = await _catalog.PlanAsync(stmt, sourceText, batchContext).ConfigureAwait(false);
+                        StatementPlan plan = await _catalog.PlanAsync(stmt, sourceText).ConfigureAwait(false);
                         await foreach (RowBatch batch in plan
                             .ExecuteAsync(ct, batchContext)
                             .ConfigureAwait(false))
@@ -1168,7 +1168,7 @@ public sealed class BatchExecutor
         BatchContext batchContext,
         CancellationToken ct)
     {
-        StatementPlan plan = await _catalog.PlanAsync(statement, sourceText: null, batchContext).ConfigureAwait(false);
+        StatementPlan plan = await _catalog.PlanAsync(statement, sourceText: null).ConfigureAwait(false);
 
         // Reuse one ExecutionContext across every row of every batch — the
         // ambient state (registries, accountant, types) is stable for the
@@ -1395,7 +1395,7 @@ public sealed class BatchExecutor
         CancellationToken ct)
     {
         QueryStatement sourceQuery = new(forIn.Source);
-        StatementPlan plan = await _catalog.PlanAsync(sourceQuery, sourceText: null, batchContext).ConfigureAwait(false);
+        StatementPlan plan = await _catalog.PlanAsync(sourceQuery, sourceText: null).ConfigureAwait(false);
 
         IReadOnlyList<string>? fieldNames = null;
         ushort rowTypeId = 0;

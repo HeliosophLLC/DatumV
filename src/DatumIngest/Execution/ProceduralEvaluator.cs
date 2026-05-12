@@ -41,7 +41,7 @@ internal static class ProceduralEvaluator
             new SelectQueryExpression(
                 new SelectStatement(Columns: [new SelectColumn(rewritten)])));
         StatementPlan plan = await batchContext.Catalog
-            .PlanAsync(synthetic, sourceText: null, batchContext)
+            .PlanAsync(synthetic, sourceText: null)
             .ConfigureAwait(false);
 
         DataValue stable = default;
@@ -335,7 +335,7 @@ internal static class ProceduralEvaluator
     {
         QueryStatement innerStatement = new(new SelectQueryExpression(subquery.Query));
         StatementPlan innerPlan = await batchContext.Catalog
-            .PlanAsync(innerStatement, sourceText: null, batchContext)
+            .PlanAsync(innerStatement, sourceText: null)
             .ConfigureAwait(false);
 
         DataValue captured = default;

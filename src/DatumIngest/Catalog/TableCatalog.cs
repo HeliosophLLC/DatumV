@@ -810,14 +810,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// effects until the returned plan is iterated.
     /// </summary>
     public Task<StatementPlan> PlanAsync(Statement statement)
-        => PlanAsync(statement, sourceText: null, batchContext: null);
-
-    /// <summary>
-    /// Plans an already-parsed <see cref="Statement"/> with the original
-    /// source-text slice. Pure — no side effects until iteration.
-    /// </summary>
-    public Task<StatementPlan> PlanAsync(Statement statement, string? sourceText)
-        => PlanAsync(statement, sourceText, batchContext: null);
+        => PlanAsync(statement, sourceText: null);
 
     /// <summary>
     /// Canonical planning entry point. Returns an <see cref="StatementPlan"/>
@@ -842,7 +835,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// reach the same end-state through either entry point.
     /// </para>
     /// </remarks>
-    public async Task<StatementPlan> PlanAsync(Statement statement, string? sourceText, BatchContext? batchContext)
+    public async Task<StatementPlan> PlanAsync(Statement statement, string? sourceText)
     {
         // Pure queries: plan eagerly (the planner has no side effects, just builds an operator tree).
         if (statement is QueryStatement queryStatement)
@@ -950,32 +943,32 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             List<StatementPlan> children = new(block.Statements.Count);
             foreach (Statement child in block.Statements)
             {
-                children.Add(await PlanAsync(child, sourceText, batchContext).ConfigureAwait(false));
+                children.Add(await PlanAsync(child, sourceText).ConfigureAwait(false));
             }
             return new Plans.BlockPlan(this, block, children);
         }
         else if (statement is IfStatement ifs)
         {
-            StatementPlan thenPlan = await PlanAsync(ifs.Then, sourceText, batchContext).ConfigureAwait(false);
+            StatementPlan thenPlan = await PlanAsync(ifs.Then, sourceText).ConfigureAwait(false);
             StatementPlan? elsePlan = ifs.Else is not null
-                ? await PlanAsync(ifs.Else, sourceText, batchContext).ConfigureAwait(false)
+                ? await PlanAsync(ifs.Else, sourceText).ConfigureAwait(false)
                 : null;
             return new Plans.IfPlan(this, ifs, thenPlan, elsePlan);
         }
         else if (statement is WhileStatement loop)
         {
-            StatementPlan bodyPlan = await PlanAsync(loop.Body, sourceText, batchContext).ConfigureAwait(false);
+            StatementPlan bodyPlan = await PlanAsync(loop.Body, sourceText).ConfigureAwait(false);
             return new Plans.WhilePlan(this, loop, bodyPlan);
         }
         else if (statement is ForCounterStatement forC)
         {
-            StatementPlan bodyPlan = await PlanAsync(forC.Body, sourceText, batchContext).ConfigureAwait(false);
+            StatementPlan bodyPlan = await PlanAsync(forC.Body, sourceText).ConfigureAwait(false);
             return new Plans.ForCounterPlan(this, forC, bodyPlan);
         }
         else if (statement is ForInStatement forIn)
         {
             StatementPlan sourcePlan = PlanQuery(forIn.Source);
-            StatementPlan bodyPlan = await PlanAsync(forIn.Body, sourceText, batchContext).ConfigureAwait(false);
+            StatementPlan bodyPlan = await PlanAsync(forIn.Body, sourceText).ConfigureAwait(false);
             return new Plans.ForInPlan(this, forIn, sourcePlan, bodyPlan);
         }
         else if (statement is DeclareStatement decl)
@@ -1007,7 +1000,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // factories with richer Details ("AlterTable target=foo op=DROP
         // COLUMN bar") are a follow-up — the current shape gets the
         // structural guarantee in place.
-        _ = batchContext;
         string operatorName = statement.GetType().Name;
         if (operatorName.EndsWith("Statement", StringComparison.Ordinal))
         {
