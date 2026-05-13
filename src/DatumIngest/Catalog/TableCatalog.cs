@@ -1001,17 +1001,25 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         {
             return Plans.RoutinePlan.ForCreateFunction(this, createFn, sourceText);
         }
-        if (statement is DropFunctionStatement dropFn)
+        else if (statement is DropFunctionStatement dropFn)
         {
             return Plans.RoutinePlan.ForDropFunction(this, dropFn, sourceText);
         }
-        if (statement is CreateProcedureStatement createProc)
+        else if (statement is CreateProcedureStatement createProc)
         {
             return Plans.RoutinePlan.ForCreateProcedure(this, createProc, sourceText);
         }
-        if (statement is DropProcedureStatement dropProc)
+        else if (statement is DropProcedureStatement dropProc)
         {
             return Plans.RoutinePlan.ForDropProcedure(this, dropProc, sourceText);
+        }
+        else if (statement is CreateViewStatement createView)
+        {
+            return Plans.ViewPlan.ForCreateView(this, createView, sourceText);
+        }
+        else if (statement is DropViewStatement dropView)
+        {
+            return Plans.ViewPlan.ForDropView(this, dropView, sourceText);
         }
 
         // Everything else (executor-backed DDL — CREATE / DROP / ALTER /
@@ -1196,28 +1204,28 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                 return PlanQuery(queryStatement.Query);
 
             case CreateFunctionStatement create:
-                return await DrainRoutinePlanAsync(
+                return await DrainSideEffectPlanAsync(
                     Plans.RoutinePlan.ForCreateFunction(this, create, sourceText), batchContext).ConfigureAwait(false);
 
             case DropFunctionStatement drop:
-                return await DrainRoutinePlanAsync(
+                return await DrainSideEffectPlanAsync(
                     Plans.RoutinePlan.ForDropFunction(this, drop, sourceText), batchContext).ConfigureAwait(false);
 
             case CreateProcedureStatement create:
-                return await DrainRoutinePlanAsync(
+                return await DrainSideEffectPlanAsync(
                     Plans.RoutinePlan.ForCreateProcedure(this, create, sourceText), batchContext).ConfigureAwait(false);
 
             case DropProcedureStatement drop:
-                return await DrainRoutinePlanAsync(
+                return await DrainSideEffectPlanAsync(
                     Plans.RoutinePlan.ForDropProcedure(this, drop, sourceText), batchContext).ConfigureAwait(false);
 
             case CreateViewStatement createView:
-                Routines.ApplyCreateView(createView, sourceText);
-                return DdlPlan.NoOp(this, "CreateView");
+                return await DrainSideEffectPlanAsync(
+                    Plans.ViewPlan.ForCreateView(this, createView, sourceText), batchContext).ConfigureAwait(false);
 
             case DropViewStatement dropView:
-                Routines.ApplyDropView(dropView, sourceText);
-                return DdlPlan.NoOp(this, "DropView");
+                return await DrainSideEffectPlanAsync(
+                    Plans.ViewPlan.ForDropView(this, dropView, sourceText), batchContext).ConfigureAwait(false);
 
             case CreateModelStatement createModel:
                 await Routines.ApplyCreateModelAsync(createModel, sourceText).ConfigureAwait(false);
@@ -1321,13 +1329,12 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// (optional) <see cref="BatchContext"/>, then returns a
     /// <see cref="DdlPlan.NoOp"/> marker carrying the same operator
     /// label. Used by the eager <see cref="ExecuteStatementAsync(Statement, string?, BatchContext?)"/>
-    /// dispatch for plan families (routines, etc.) whose side effect must
-    /// only live inside the plan's <c>ExecuteImplAsync</c> — the caller
-    /// gets the same observable behaviour as the legacy direct-mutation
-    /// switch branch.
+    /// dispatch for plan families whose side effect must only live inside
+    /// the plan's <c>ExecuteImplAsync</c> — the caller gets the same
+    /// observable behaviour as the legacy direct-mutation switch branch.
     /// </summary>
-    private async Task<StatementPlan> DrainRoutinePlanAsync(
-        Plans.RoutinePlan plan, BatchContext? batchContext)
+    private async Task<StatementPlan> DrainSideEffectPlanAsync(
+        StatementPlan plan, BatchContext? batchContext)
     {
         await foreach (RowBatch _ in ExecuteAsync(plan, batchContext, CancellationToken.None).ConfigureAwait(false))
         {
