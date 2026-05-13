@@ -74,16 +74,16 @@ internal sealed class DmlReturningPlan : StatementPlan
     private readonly StatementPlan? _dmlPlan;
     private readonly CapturedRowsSource _capturedSource;
     private readonly IReadOnlyList<SelectColumn> _returningColumns;
-    private readonly TableCatalog _catalog;
 
     private DmlReturningPlan(
+        TableCatalog catalog,
         DmlReturningKind kind,
         string tableName,
         Schema targetSchema,
         StatementPlan? dmlPlan,
         CapturedRowsSource capturedSource,
-        IReadOnlyList<SelectColumn> returningColumns,
-        TableCatalog catalog)
+        IReadOnlyList<SelectColumn> returningColumns)
+        : base(catalog)
     {
         _kind = kind;
         _tableName = tableName;
@@ -91,7 +91,6 @@ internal sealed class DmlReturningPlan : StatementPlan
         _dmlPlan = dmlPlan;
         _capturedSource = capturedSource;
         _returningColumns = returningColumns;
-        _catalog = catalog;
 
         string verb = kind switch
         {
@@ -132,7 +131,7 @@ internal sealed class DmlReturningPlan : StatementPlan
     {
         ArgumentNullException.ThrowIfNull(dmlPlan);
         ArgumentNullException.ThrowIfNull(capturedSource);
-        return new DmlReturningPlan(kind, tableName, targetSchema, dmlPlan, capturedSource, returningColumns, catalog);
+        return new DmlReturningPlan(catalog, kind, tableName, targetSchema, dmlPlan, capturedSource, returningColumns);
     }
 
     /// <summary>
@@ -143,15 +142,15 @@ internal sealed class DmlReturningPlan : StatementPlan
     /// path, where the side effect runs before the plan is built.
     /// </summary>
     public DmlReturningPlan(
+        TableCatalog catalog,
         DmlReturningKind kind,
         string tableName,
         Schema targetSchema,
         IReadOnlyList<RowBatch> capturedBatches,
-        IReadOnlyList<SelectColumn> returningColumns,
-        TableCatalog catalog)
-        : this(kind, tableName, targetSchema, dmlPlan: null,
+        IReadOnlyList<SelectColumn> returningColumns)
+        : this(catalog, kind, tableName, targetSchema, dmlPlan: null,
                capturedSource: PrepopulateSource(catalog, capturedBatches),
-               returningColumns, catalog)
+               returningColumns)
     {
     }
 
@@ -164,9 +163,6 @@ internal sealed class DmlReturningPlan : StatementPlan
 
     /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
-
-    /// <inheritdoc />
-    public override TableCatalog Catalog => _catalog;
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
@@ -199,7 +195,7 @@ internal sealed class DmlReturningPlan : StatementPlan
         // batch's arena (Source) and writes new ones into the corresponding
         // output batch's arena (Target). RETURNING expressions can reference
         // any captured column; outer rows / variables are not in scope.
-        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(
+        using DatumIngest.Execution.ExecutionContext context = Catalog.CreateExecutionContext(
             accountant: batchContext.Accountant,
             types: batchContext.Types,
             cancellationToken: cancellationToken);
@@ -218,7 +214,7 @@ internal sealed class DmlReturningPlan : StatementPlan
             foreach (RowBatch capturedBatch in captured)
             {
                 Arena outArena = new();
-                RowBatch outBatch = _catalog.Pool.RentRowBatch(
+                RowBatch outBatch = Catalog.Pool.RentRowBatch(
                     outputLookup, capacity: capturedBatch.Count, arena: outArena);
 
                 for (int rowIdx = 0; rowIdx < capturedBatch.Count; rowIdx++)
@@ -226,7 +222,7 @@ internal sealed class DmlReturningPlan : StatementPlan
                     Row capturedRow = capturedBatch[rowIdx];
                     EvaluationFrame frame = new(capturedRow, capturedBatch.Arena, outArena, context);
 
-                    DataValue[] outRow = _catalog.Pool.RentDataValues(projection.Count);
+                    DataValue[] outRow = Catalog.Pool.RentDataValues(projection.Count);
                     for (int colIdx = 0; colIdx < projection.Count; colIdx++)
                     {
                         ValueRef result = await evaluator.EvaluateAsValueRefAsync(
@@ -250,7 +246,7 @@ internal sealed class DmlReturningPlan : StatementPlan
             // them to the pool when iteration finishes (success or throw).
             foreach (RowBatch captured_ in captured)
             {
-                _catalog.Pool.ReturnRowBatch(captured_);
+                Catalog.Pool.ReturnRowBatch(captured_);
             }
         }
     }

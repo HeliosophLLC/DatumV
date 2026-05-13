@@ -43,7 +43,6 @@ namespace DatumIngest.Catalog.Plans;
 /// </remarks>
 internal sealed class DmlPlan : StatementPlan
 {
-    private readonly TableCatalog _catalog;
     private readonly StatementPlan? _sourcePlan;
     private readonly Func<BatchContext, Task> _apply;
     private int _executed;
@@ -54,8 +53,8 @@ internal sealed class DmlPlan : StatementPlan
         string details,
         StatementPlan? sourcePlan,
         Func<BatchContext, Task> apply)
+        : base(catalog)
     {
-        _catalog = catalog;
         _sourcePlan = sourcePlan;
         _apply = apply;
 
@@ -145,13 +144,9 @@ internal sealed class DmlPlan : StatementPlan
     }
 
     /// <inheritdoc />
-    public override TableCatalog Catalog => _catalog;
-
-    /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
 
     /// <inheritdoc />
-#pragma warning disable CS1998 // Async method lacks 'await' operators — pure-side-effect plan yields no rows.
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
         BatchContext batchContext)
@@ -172,7 +167,6 @@ internal sealed class DmlPlan : StatementPlan
         await _apply(batchContext).ConfigureAwait(false);
         yield break;
     }
-#pragma warning restore CS1998
 
     private static string DescribeTarget(string? schemaName, string tableName) =>
         schemaName is null ? tableName : $"{schemaName}.{tableName}";

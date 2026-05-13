@@ -41,7 +41,6 @@ namespace DatumIngest.Catalog.Plans;
 /// </remarks>
 internal sealed class DdlPlan : StatementPlan
 {
-    private readonly TableCatalog _catalog;
     private readonly Func<CancellationToken, Task> _apply;
     private int _executed;
 
@@ -50,10 +49,10 @@ internal sealed class DdlPlan : StatementPlan
         string operatorName,
         string details,
         Func<CancellationToken, Task> apply)
+        : base(catalog)
     {
-        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(apply);
-        _catalog = catalog;
+
         _apply = apply;
         ExplainTree = new ExplainPlanNode
         {
@@ -75,9 +74,6 @@ internal sealed class DdlPlan : StatementPlan
         => new(catalog, operatorName, details, _ => Task.CompletedTask);
 
     /// <inheritdoc />
-    public override TableCatalog Catalog => _catalog;
-
-    /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
 
     /// <inheritdoc />
@@ -92,9 +88,10 @@ internal sealed class DdlPlan : StatementPlan
                 "Statement plans represent a single pending execution; re-plan the statement to apply it again.");
         }
 
-        _ = batchContext;
         cancellationToken.ThrowIfCancellationRequested();
+
         await _apply(cancellationToken).ConfigureAwait(false);
+        
         yield break;
     }
 }

@@ -30,14 +30,12 @@ namespace DatumIngest.Catalog.Plans;
 /// </remarks>
 internal sealed class CapturedRowsSource : StatementPlan
 {
-    private readonly TableCatalog _catalog;
     private readonly List<RowBatch> _captured = new();
     private int _executed;
 
     public CapturedRowsSource(TableCatalog catalog, string label = "post-mutation image")
+        : base(catalog)
     {
-        ArgumentNullException.ThrowIfNull(catalog);
-        _catalog = catalog;
         ExplainTree = new ExplainPlanNode
         {
             OperatorName = "CapturedRows",
@@ -67,9 +65,6 @@ internal sealed class CapturedRowsSource : StatementPlan
     public IReadOnlyList<RowBatch> Batches => _captured;
 
     /// <inheritdoc />
-    public override TableCatalog Catalog => _catalog;
-
-    /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
 
     /// <inheritdoc />
@@ -84,8 +79,9 @@ internal sealed class CapturedRowsSource : StatementPlan
                 "CapturedRowsSource has already been iterated. " +
                 "Statement plans represent a single pending execution; the composer iterates the source once.");
         }
-        _ = batchContext;
+        
         cancellationToken.ThrowIfCancellationRequested();
+
         foreach (RowBatch batch in _captured)
         {
             cancellationToken.ThrowIfCancellationRequested();

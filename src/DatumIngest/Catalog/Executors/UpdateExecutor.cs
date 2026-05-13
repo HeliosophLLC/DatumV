@@ -77,12 +77,12 @@ internal static class UpdateExecutor
         }
 
         return new DmlReturningPlan(
+            catalog,
             DmlReturningKind.Update,
             update.TableName,
             provider.GetSchema(),
             captured,
-            update.Returning,
-            catalog);
+            update.Returning);
     }
 
     private static async Task<IReadOnlyList<RowBatch>?> ExecuteSimpleAsync(

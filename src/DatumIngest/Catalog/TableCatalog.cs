@@ -257,7 +257,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
 
     private CatalogStore? CatalogStore { get; }
 
-    private RoutineRegistrar Routines { get; }
+    internal RoutineRegistrar Routines { get; }
 
     /// <summary>
     /// Internal accessor for the user-data backend so per-statement
@@ -992,6 +992,28 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             return Plans.ProceduralLeafPlan.ForContinue(this, continueStmt);
         }
 
+        // Routine DDL — CREATE/DROP FUNCTION + PROCEDURE — composes
+        // directly into a RoutinePlan whose ExecuteImplAsync calls
+        // Routines.Apply* at iterate time. EXPLAIN reads the structured
+        // node (operator + qn/param count) without firing the registry
+        // mutation.
+        if (statement is CreateFunctionStatement createFn)
+        {
+            return Plans.RoutinePlan.ForCreateFunction(this, createFn, sourceText);
+        }
+        if (statement is DropFunctionStatement dropFn)
+        {
+            return Plans.RoutinePlan.ForDropFunction(this, dropFn, sourceText);
+        }
+        if (statement is CreateProcedureStatement createProc)
+        {
+            return Plans.RoutinePlan.ForCreateProcedure(this, createProc, sourceText);
+        }
+        if (statement is DropProcedureStatement dropProc)
+        {
+            return Plans.RoutinePlan.ForDropProcedure(this, dropProc, sourceText);
+        }
+
         // Everything else (executor-backed DDL — CREATE / DROP / ALTER /
         // ANALYZE / REINDEX / SET search_path) routes through a generic
         // DdlPlan whose apply delegate calls ExecuteStatementAsync at
@@ -1174,20 +1196,20 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                 return PlanQuery(queryStatement.Query);
 
             case CreateFunctionStatement create:
-                Routines.ApplyCreateFunction(create, sourceText);
-                return DdlPlan.NoOp(this, "CreateFunction");
+                return await DrainRoutinePlanAsync(
+                    Plans.RoutinePlan.ForCreateFunction(this, create, sourceText), batchContext).ConfigureAwait(false);
 
             case DropFunctionStatement drop:
-                Routines.ApplyDropFunction(drop, sourceText);
-                return DdlPlan.NoOp(this, "DropFunction");
+                return await DrainRoutinePlanAsync(
+                    Plans.RoutinePlan.ForDropFunction(this, drop, sourceText), batchContext).ConfigureAwait(false);
 
             case CreateProcedureStatement create:
-                Routines.ApplyCreateProcedure(create, sourceText);
-                return DdlPlan.NoOp(this, "CreateProcedure");
+                return await DrainRoutinePlanAsync(
+                    Plans.RoutinePlan.ForCreateProcedure(this, create, sourceText), batchContext).ConfigureAwait(false);
 
             case DropProcedureStatement drop:
-                Routines.ApplyDropProcedure(drop, sourceText);
-                return DdlPlan.NoOp(this, "DropProcedure");
+                return await DrainRoutinePlanAsync(
+                    Plans.RoutinePlan.ForDropProcedure(this, drop, sourceText), batchContext).ConfigureAwait(false);
 
             case CreateViewStatement createView:
                 Routines.ApplyCreateView(createView, sourceText);
@@ -1292,6 +1314,25 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                     $"Statement type '{statement.GetType().Name}' is not yet supported by PlanAsync. " +
                     $"Use the dedicated APIs (e.g. AddFile for file registration) or extend PlanAsync to dispatch this statement.");
         }
+    }
+
+    /// <summary>
+    /// Iterates a side-effect-only plan to completion under the caller's
+    /// (optional) <see cref="BatchContext"/>, then returns a
+    /// <see cref="DdlPlan.NoOp"/> marker carrying the same operator
+    /// label. Used by the eager <see cref="ExecuteStatementAsync(Statement, string?, BatchContext?)"/>
+    /// dispatch for plan families (routines, etc.) whose side effect must
+    /// only live inside the plan's <c>ExecuteImplAsync</c> — the caller
+    /// gets the same observable behaviour as the legacy direct-mutation
+    /// switch branch.
+    /// </summary>
+    private async Task<StatementPlan> DrainRoutinePlanAsync(
+        Plans.RoutinePlan plan, BatchContext? batchContext)
+    {
+        await foreach (RowBatch _ in ExecuteAsync(plan, batchContext, CancellationToken.None).ConfigureAwait(false))
+        {
+        }
+        return DdlPlan.NoOp(this, plan.ExplainTree.OperatorName);
     }
 
     private StatementPlan PlanCall(CallStatement call)

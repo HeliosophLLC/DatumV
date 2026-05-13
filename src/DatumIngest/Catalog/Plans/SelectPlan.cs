@@ -15,14 +15,13 @@ namespace DatumIngest.Catalog.Plans;
 /// </summary>
 internal sealed class SelectPlan : StatementPlan
 {
-    private readonly TableCatalog _catalog;
     private readonly FunctionRegistry _functions;
     private readonly QueryOperator _operator;
     private readonly Arena _hoistStore;
 
     public SelectPlan(QueryOperator op, TableCatalog catalog, FunctionRegistry functions)
+        : base(catalog)
     {
-        _catalog = catalog;
         _functions = functions;
 
         // Hoist once into a plan-scoped store so the resulting LiteralValueExpression
@@ -43,8 +42,6 @@ internal sealed class SelectPlan : StatementPlan
 
     public override ExplainPlanNode ExplainTree => QueryExplainer.Explain(_operator);
 
-    public override TableCatalog Catalog => _catalog;
-
     public override async Task<ExplainPlanNode> AnalyzeAsync(
         CancellationToken cancellationToken,
         BatchContext batchContext)
@@ -61,7 +58,7 @@ internal sealed class SelectPlan : StatementPlan
         // Borrow the batch's accountant + scope / store / type registry so
         // residency accounting rolls up uniformly regardless of whether the
         // analyze is standalone or nested inside a procedural batch.
-        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(
+        using DatumIngest.Execution.ExecutionContext context = Catalog.CreateExecutionContext(
             store: _hoistStore,
             types: batchContext.Types,
             accountant: batchContext.Accountant,
@@ -72,7 +69,7 @@ internal sealed class SelectPlan : StatementPlan
 
         await foreach (RowBatch batch in instrumented.ExecuteAsync(context).WithCancellation(cancellationToken))
         {
-            _catalog.Pool.ReturnRowBatch(batch);
+            Catalog.Pool.ReturnRowBatch(batch);
         }
 
         ExplainPlanNode tree = QueryExplainer.Explain(instrumented);
@@ -94,7 +91,7 @@ internal sealed class SelectPlan : StatementPlan
         // are borrowed from the batch context — the batch owns both
         // lifecycles and is responsible for starting profiling on the
         // accountant before any plan runs.
-        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(
+        using DatumIngest.Execution.ExecutionContext context = Catalog.CreateExecutionContext(
             store: _hoistStore,
             types: batchContext.Types,
             accountant: batchContext.Accountant,
@@ -114,7 +111,7 @@ internal sealed class SelectPlan : StatementPlan
             {
                 if (previous is not null)
                 {
-                    _catalog.Pool.ReturnRowBatch(previous);
+                    Catalog.Pool.ReturnRowBatch(previous);
                 }
                 previous = batch;
                 yield return batch;
@@ -124,7 +121,7 @@ internal sealed class SelectPlan : StatementPlan
         {
             if (previous is not null)
             {
-                _catalog.Pool.ReturnRowBatch(previous);
+                Catalog.Pool.ReturnRowBatch(previous);
             }
         }
     }

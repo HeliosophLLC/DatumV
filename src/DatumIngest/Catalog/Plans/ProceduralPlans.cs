@@ -16,14 +16,13 @@ namespace DatumIngest.Catalog.Plans;
 /// </summary>
 internal sealed class ProceduralLeafPlan : StatementPlan
 {
-    private readonly TableCatalog _catalog;
     private readonly Statement _statement;
 
     public ProceduralLeafPlan(TableCatalog catalog, Statement statement, string operatorName, string details)
+        : base(catalog)
     {
-        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(statement);
-        _catalog = catalog;
+
         _statement = statement;
         ExplainTree = new ExplainPlanNode
         {
@@ -71,9 +70,6 @@ internal sealed class ProceduralLeafPlan : StatementPlan
         ArgumentNullException.ThrowIfNull(statement);
         return new ProceduralLeafPlan(catalog, statement, "Continue", "skips to next iteration");
     }
-
-    /// <inheritdoc />
-    public override TableCatalog Catalog => _catalog;
 
     /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
@@ -170,16 +166,14 @@ internal sealed class ProceduralLeafPlan : StatementPlan
 /// </summary>
 internal sealed class BlockPlan : StatementPlan
 {
-    private readonly TableCatalog _catalog;
     private readonly BlockStatement _statement;
     private readonly IReadOnlyList<StatementPlan> _children;
 
     public BlockPlan(TableCatalog catalog, BlockStatement statement, IReadOnlyList<StatementPlan> children)
+        : base(catalog)
     {
-        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(children);
-        _catalog = catalog;
         _statement = statement;
         _children = children;
 
@@ -195,9 +189,6 @@ internal sealed class BlockPlan : StatementPlan
         }
         ExplainTree = tree;
     }
-
-    /// <inheritdoc />
-    public override TableCatalog Catalog => _catalog;
 
     /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
@@ -244,8 +235,8 @@ internal sealed class IfPlan : StatementPlan
     private readonly StatementPlan? _elsePlan;
 
     public IfPlan(TableCatalog catalog, IfStatement statement, StatementPlan thenPlan, StatementPlan? elsePlan)
+        : base(catalog)
     {
-        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(thenPlan);
         _catalog = catalog;
@@ -270,9 +261,6 @@ internal sealed class IfPlan : StatementPlan
         }
         ExplainTree = tree;
     }
-
-    /// <inheritdoc />
-    public override TableCatalog Catalog => _catalog;
 
     /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
@@ -308,16 +296,15 @@ internal sealed class WhilePlan : StatementPlan
     /// <summary>Cap on iterations to guarantee termination of malformed loops.</summary>
     private const int IterationCap = 1_000_000;
 
-    private readonly TableCatalog _catalog;
     private readonly WhileStatement _statement;
     private readonly StatementPlan _bodyPlan;
 
     public WhilePlan(TableCatalog catalog, WhileStatement statement, StatementPlan bodyPlan)
+        :  base(catalog)
     {
-        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(bodyPlan);
-        _catalog = catalog;
+
         _statement = statement;
         _bodyPlan = bodyPlan;
 
@@ -332,9 +319,6 @@ internal sealed class WhilePlan : StatementPlan
         tree.Children.Add(bodyNode);
         ExplainTree = tree;
     }
-
-    /// <inheritdoc />
-    public override TableCatalog Catalog => _catalog;
 
     /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
@@ -403,16 +387,15 @@ internal sealed class WhilePlan : StatementPlan
 /// </summary>
 internal sealed class ForCounterPlan : StatementPlan
 {
-    private readonly TableCatalog _catalog;
     private readonly ForCounterStatement _statement;
     private readonly StatementPlan _bodyPlan;
 
     public ForCounterPlan(TableCatalog catalog, ForCounterStatement statement, StatementPlan bodyPlan)
+        : base(catalog)
     {
-        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(bodyPlan);
-        _catalog = catalog;
+
         _statement = statement;
         _bodyPlan = bodyPlan;
 
@@ -427,9 +410,6 @@ internal sealed class ForCounterPlan : StatementPlan
         tree.Children.Add(bodyNode);
         ExplainTree = tree;
     }
-
-    /// <inheritdoc />
-    public override TableCatalog Catalog => _catalog;
 
     /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
@@ -517,7 +497,6 @@ internal sealed class ForCounterPlan : StatementPlan
 /// </summary>
 internal sealed class ForInPlan : StatementPlan
 {
-    private readonly TableCatalog _catalog;
     private readonly ForInStatement _statement;
     private readonly StatementPlan _sourcePlan;
     private readonly StatementPlan _bodyPlan;
@@ -527,12 +506,12 @@ internal sealed class ForInPlan : StatementPlan
         ForInStatement statement,
         StatementPlan sourcePlan,
         StatementPlan bodyPlan)
+        : base(catalog)
     {
-        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(sourcePlan);
         ArgumentNullException.ThrowIfNull(bodyPlan);
-        _catalog = catalog;
+
         _statement = statement;
         _sourcePlan = sourcePlan;
         _bodyPlan = bodyPlan;
@@ -553,9 +532,6 @@ internal sealed class ForInPlan : StatementPlan
     }
 
     /// <inheritdoc />
-    public override TableCatalog Catalog => _catalog;
-
-    /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
 
     /// <inheritdoc />
@@ -571,7 +547,7 @@ internal sealed class ForInPlan : StatementPlan
 
         // Reuse one ExecutionContext across the loop — ambient state is
         // stable for the duration of the FOR-IN.
-        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(
+        using DatumIngest.Execution.ExecutionContext context = Catalog.CreateExecutionContext(
             store: batchContext.VariableStore,
             types: batchContext.Types,
             accountant: batchContext.Accountant,

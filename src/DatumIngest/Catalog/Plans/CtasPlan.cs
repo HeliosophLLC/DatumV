@@ -37,7 +37,6 @@ namespace DatumIngest.Catalog.Plans;
 /// </remarks>
 internal sealed class CtasPlan : StatementPlan
 {
-    private readonly TableCatalog _catalog;
     private readonly CreateTableAsSelectStatement _ctas;
     private readonly string? _sourceText;
     private readonly Schema _targetSchema;
@@ -54,8 +53,8 @@ internal sealed class CtasPlan : StatementPlan
         QualifiedName targetName,
         ITableCatalog targetBackend,
         StatementPlan sourcePlan)
+        : base(catalog)
     {
-        _catalog = catalog;
         _ctas = ctas;
         _sourceText = sourceText;
         _targetSchema = targetSchema;
@@ -177,9 +176,6 @@ internal sealed class CtasPlan : StatementPlan
     }
 
     /// <inheritdoc />
-    public override TableCatalog Catalog => _catalog;
-
-    /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
 
     /// <inheritdoc />
@@ -201,15 +197,15 @@ internal sealed class CtasPlan : StatementPlan
         ITableProvider provider;
         if (_ctas.IsTemp)
         {
-            InMemoryTableProvider inMemory = new(_catalog.Pool, _ctas.TableName, _targetSchema);
-            provider = _catalog.Add(inMemory);
+            InMemoryTableProvider inMemory = new(Catalog.Pool, _ctas.TableName, _targetSchema);
+            provider = Catalog.Add(inMemory);
         }
         else
         {
             provider = _targetBackend.CreatePersistentTable(_targetName, _targetSchema, primaryKeyConstraintName: null);
         }
 
-        _catalog.Events.Raise(new TableCreatedEvent(_targetName, _targetSchema, _sourceText));
+        Catalog.Events.Raise(new TableCreatedEvent(_targetName, _targetSchema, _sourceText));
 
         // Stream the child source plan into the new table. Source projection
         // names line up with target column names by construction (target

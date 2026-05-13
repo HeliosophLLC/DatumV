@@ -38,19 +38,24 @@ namespace DatumIngest.Catalog;
 public abstract class StatementPlan
 {
     /// <summary>
+    /// Initializes a new <see cref="StatementPlan"/> instance.
+    /// </summary>
+    public StatementPlan(TableCatalog catalog)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        Catalog = catalog;
+    }
+
+    /// <summary>
     /// The static EXPLAIN tree — operator structure, cardinality estimates,
     /// pruning annotations, and warnings. Reading does not execute the plan.
     /// </summary>
     public abstract ExplainPlanNode ExplainTree { get; }
 
     /// <summary>
-    /// The <see cref="TableCatalog"/> this plan was built against, or
-    /// <see langword="null"/> for stateless plans. Used by host code that
-    /// wants a "batch of one" iteration without threading the catalog
-    /// separately — see
-    /// <see cref="TableCatalog.ExecuteAsync(StatementPlan, CancellationToken)"/>.
+    /// Gets the <see cref="TableCatalog"/> this plan was built against.
     /// </summary>
-    public virtual TableCatalog? Catalog => null;
+    public TableCatalog Catalog { get; }
 
     /// <summary>
     /// Default: returns the static <see cref="ExplainTree"/>. Side-effect

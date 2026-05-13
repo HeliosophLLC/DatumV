@@ -86,12 +86,12 @@ internal static class DeleteExecutor
         }
 
         return new DmlReturningPlan(
+            catalog,
             DmlReturningKind.Delete,
             delete.TableName,
             provider.GetSchema(),
             captured,
-            delete.Returning,
-            catalog);
+            delete.Returning);
     }
 
     private static async Task<IReadOnlyList<RowBatch>?> ApplyAsync(

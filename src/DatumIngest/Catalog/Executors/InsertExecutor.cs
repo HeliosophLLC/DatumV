@@ -164,12 +164,12 @@ internal static class InsertExecutor
         }
 
         return new DmlReturningPlan(
+            catalog,
             DmlReturningKind.Insert,
             insert.TableName,
             targetSchema,
             captured,
-            insert.Returning!,
-            catalog);
+            insert.Returning!);
     }
 
     private static async Task<RowBatch?> ApplyValuesAsync(
