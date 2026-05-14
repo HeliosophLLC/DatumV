@@ -1037,6 +1037,18 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         {
             return Plans.ModelPlan.ForResetCalibration(this, resetCalibration, sourceText);
         }
+        else if (statement is CreateSchemaStatement createSchema)
+        {
+            return Plans.SchemaPlan.ForCreateSchema(this, createSchema, sourceText);
+        }
+        else if (statement is DropSchemaStatement dropSchema)
+        {
+            return Plans.SchemaPlan.ForDropSchema(this, dropSchema, sourceText);
+        }
+        else if (statement is SetSearchPathStatement setSearchPath)
+        {
+            return Plans.SchemaPlan.ForSetSearchPath(this, setSearchPath);
+        }
 
         // Everything else (executor-backed DDL — CREATE / DROP / ALTER /
         // ANALYZE / REINDEX / SET search_path) routes through a generic
@@ -1284,13 +1296,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                 return TableExecutor.DropTable(this, dropTable, sourceText);
 
             case CreateSchemaStatement createSchema:
-                return SchemaExecutor.CreateSchema(this, createSchema, sourceText);
+                return await DrainSideEffectPlanAsync(
+                    Plans.SchemaPlan.ForCreateSchema(this, createSchema, sourceText), batchContext).ConfigureAwait(false);
 
             case DropSchemaStatement dropSchema:
-                return SchemaExecutor.DropSchema(this, dropSchema, sourceText);
+                return await DrainSideEffectPlanAsync(
+                    Plans.SchemaPlan.ForDropSchema(this, dropSchema, sourceText), batchContext).ConfigureAwait(false);
 
             case SetSearchPathStatement setSearchPath:
-                return SchemaExecutor.SetSearchPath(this, setSearchPath);
+                return await DrainSideEffectPlanAsync(
+                    Plans.SchemaPlan.ForSetSearchPath(this, setSearchPath), batchContext).ConfigureAwait(false);
 
             case CreateIndexStatement createIndex:
                 return await IndexExecutor.CreateIndexAsync(this, createIndex, sourceText).ConfigureAwait(false);

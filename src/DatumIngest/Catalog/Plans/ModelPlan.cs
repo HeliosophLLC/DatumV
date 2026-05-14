@@ -41,7 +41,6 @@ internal sealed class ModelPlan : StatementPlan
         string operatorName,
         string details) : base(catalog)
     {
-        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(routineRegistrar);
         ArgumentNullException.ThrowIfNull(statement);
 
