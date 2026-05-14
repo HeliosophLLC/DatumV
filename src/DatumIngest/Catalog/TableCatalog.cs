@@ -1021,6 +1021,22 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         {
             return Plans.ViewPlan.ForDropView(this, dropView, sourceText);
         }
+        else if (statement is CreateModelStatement createModel)
+        {
+            return Plans.ModelPlan.ForCreateModel(this, createModel, sourceText);
+        }
+        else if (statement is DropModelStatement dropModel)
+        {
+            return Plans.ModelPlan.ForDropModel(this, dropModel, sourceText);
+        }
+        else if (statement is EvictModelStatement evictModel)
+        {
+            return Plans.ModelPlan.ForEvictModel(this, evictModel, sourceText);
+        }
+        else if (statement is ResetCalibrationStatement resetCalibration)
+        {
+            return Plans.ModelPlan.ForResetCalibration(this, resetCalibration, sourceText);
+        }
 
         // Everything else (executor-backed DDL — CREATE / DROP / ALTER /
         // ANALYZE / REINDEX / SET search_path) routes through a generic
@@ -1228,20 +1244,20 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                     Plans.ViewPlan.ForDropView(this, dropView, sourceText), batchContext).ConfigureAwait(false);
 
             case CreateModelStatement createModel:
-                await Routines.ApplyCreateModelAsync(createModel, sourceText).ConfigureAwait(false);
-                return DdlPlan.NoOp(this, "CreateModel");
+                return await DrainSideEffectPlanAsync(
+                    Plans.ModelPlan.ForCreateModel(this, createModel, sourceText), batchContext).ConfigureAwait(false);
 
             case DropModelStatement dropModel:
-                Routines.ApplyDropModel(dropModel, sourceText);
-                return DdlPlan.NoOp(this, "DropModel");
+                return await DrainSideEffectPlanAsync(
+                    Plans.ModelPlan.ForDropModel(this, dropModel, sourceText), batchContext).ConfigureAwait(false);
 
             case EvictModelStatement evictModel:
-                Routines.ApplyEvictModel(evictModel, sourceText);
-                return DdlPlan.NoOp(this, "EvictModel");
+                return await DrainSideEffectPlanAsync(
+                    Plans.ModelPlan.ForEvictModel(this, evictModel, sourceText), batchContext).ConfigureAwait(false);
 
             case ResetCalibrationStatement resetCalibration:
-                Routines.ApplyResetCalibration(resetCalibration, sourceText);
-                return DdlPlan.NoOp(this, "ResetCalibration");
+                return await DrainSideEffectPlanAsync(
+                    Plans.ModelPlan.ForResetCalibration(this, resetCalibration, sourceText), batchContext).ConfigureAwait(false);
 
             case CallStatement call:
                 return PlanCall(call);
