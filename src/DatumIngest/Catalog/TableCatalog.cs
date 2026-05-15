@@ -1049,6 +1049,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         {
             return Plans.SchemaPlan.ForSetSearchPath(this, setSearchPath);
         }
+        else if (statement is CreateTableStatement createTable)
+        {
+            return Plans.TablePlan.ForCreateTable(this, createTable, sourceText);
+        }
+        else if (statement is DropTableStatement dropTable)
+        {
+            return Plans.TablePlan.ForDropTable(this, dropTable, sourceText);
+        }
 
         // Everything else (executor-backed DDL — CREATE / DROP / ALTER /
         // ANALYZE / REINDEX / SET search_path) routes through a generic
@@ -1275,7 +1283,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                 return PlanCall(call);
 
             case CreateTableStatement createTable:
-                return await TableExecutor.CreateTableAsync(this, createTable, sourceText).ConfigureAwait(false);
+                return await DrainSideEffectPlanAsync(
+                    Plans.TablePlan.ForCreateTable(this, createTable, sourceText), batchContext).ConfigureAwait(false);
 
             case CreateTableAsSelectStatement ctas:
             {
@@ -1293,7 +1302,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             }
 
             case DropTableStatement dropTable:
-                return TableExecutor.DropTable(this, dropTable, sourceText);
+                return await DrainSideEffectPlanAsync(
+                    Plans.TablePlan.ForDropTable(this, dropTable, sourceText), batchContext).ConfigureAwait(false);
 
             case CreateSchemaStatement createSchema:
                 return await DrainSideEffectPlanAsync(
