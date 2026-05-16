@@ -991,13 +991,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         {
             return Plans.ProceduralLeafPlan.ForContinue(this, continueStmt);
         }
-
-        // Routine DDL — CREATE/DROP FUNCTION + PROCEDURE — composes
-        // directly into a RoutinePlan whose ExecuteImplAsync calls
-        // Routines.Apply* at iterate time. EXPLAIN reads the structured
-        // node (operator + qn/param count) without firing the registry
-        // mutation.
-        if (statement is CreateFunctionStatement createFn)
+        else if (statement is CreateFunctionStatement createFn)
         {
             return Plans.RoutinePlan.ForCreateFunction(this, createFn, sourceText);
         }
@@ -1072,6 +1066,26 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         else if (statement is AnalyzeTableStatement analyze)
         {
             return Plans.IndexPlan.ForAnalyze(this, analyze);
+        }
+        else if (statement is AlterTableAddColumnStatement alterAdd)
+        {
+            return Plans.AlterTablePlan.ForAddColumn(this, alterAdd, sourceText);
+        }
+        else if (statement is AlterTableDropColumnStatement alterDropCol)
+        {
+            return Plans.AlterTablePlan.ForDropColumn(this, alterDropCol, sourceText);
+        }
+        else if (statement is AlterTableDropConstraintStatement alterDropConstraint)
+        {
+            return Plans.AlterTablePlan.ForDropConstraint(this, alterDropConstraint, sourceText);
+        }
+        else if (statement is AlterTableAlterColumnDropStatement alterColumnDrop)
+        {
+            return Plans.AlterTablePlan.ForAlterColumnDrop(this, alterColumnDrop, sourceText);
+        }
+        else if (statement is AlterTableAlterColumnSetStatement alterColumnSet)
+        {
+            return Plans.AlterTablePlan.ForAlterColumnSet(this, alterColumnSet, sourceText);
         }
 
         // Everything else (executor-backed DDL — CREATE / DROP / ALTER /
@@ -1350,24 +1364,24 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                     Plans.IndexPlan.ForAnalyze(this, analyze), batchContext).ConfigureAwait(false);
 
             case AlterTableAddColumnStatement alterAdd:
-                if (alterAdd.TableIfExists && !TryGetTable(ResolveDdlName(alterAdd.SchemaName, alterAdd.TableName).ToString(), out _)) return DdlPlan.NoOp(this, "AlterTable", "ADD COLUMN — table not found, IF EXISTS skipped");
-                return await AlterTableExecutor.AddColumnAsync(this, alterAdd, sourceText).ConfigureAwait(false);
+                return await DrainSideEffectPlanAsync(
+                    Plans.AlterTablePlan.ForAddColumn(this, alterAdd, sourceText), batchContext).ConfigureAwait(false);
 
             case AlterTableDropColumnStatement alterDrop:
-                if (alterDrop.TableIfExists && !TryGetTable(ResolveDdlName(alterDrop.SchemaName, alterDrop.TableName).ToString(), out _)) return DdlPlan.NoOp(this, "AlterTable", "DROP COLUMN — table not found, IF EXISTS skipped");
-                return AlterTableExecutor.DropColumn(this, alterDrop, sourceText);
+                return await DrainSideEffectPlanAsync(
+                    Plans.AlterTablePlan.ForDropColumn(this, alterDrop, sourceText), batchContext).ConfigureAwait(false);
 
             case AlterTableDropConstraintStatement alterDropConstraint:
-                if (alterDropConstraint.TableIfExists && !TryGetTable(ResolveDdlName(alterDropConstraint.SchemaName, alterDropConstraint.TableName).ToString(), out _)) return DdlPlan.NoOp(this, "AlterTable", "DROP CONSTRAINT — table not found, IF EXISTS skipped");
-                return await AlterTableExecutor.DropConstraintAsync(this, alterDropConstraint, sourceText).ConfigureAwait(false);
+                return await DrainSideEffectPlanAsync(
+                    Plans.AlterTablePlan.ForDropConstraint(this, alterDropConstraint, sourceText), batchContext).ConfigureAwait(false);
 
             case AlterTableAlterColumnDropStatement alterColumnDrop:
-                if (alterColumnDrop.TableIfExists && !TryGetTable(ResolveDdlName(alterColumnDrop.SchemaName, alterColumnDrop.TableName).ToString(), out _)) return DdlPlan.NoOp(this, "AlterTable", "ALTER COLUMN DROP — table not found, IF EXISTS skipped");
-                return await AlterTableExecutor.AlterColumnDropAsync(this, alterColumnDrop, sourceText).ConfigureAwait(false);
+                return await DrainSideEffectPlanAsync(
+                    Plans.AlterTablePlan.ForAlterColumnDrop(this, alterColumnDrop, sourceText), batchContext).ConfigureAwait(false);
 
             case AlterTableAlterColumnSetStatement alterColumnSet:
-                if (alterColumnSet.TableIfExists && !TryGetTable(ResolveDdlName(alterColumnSet.SchemaName, alterColumnSet.TableName).ToString(), out _)) return DdlPlan.NoOp(this, "AlterTable", "ALTER COLUMN SET — table not found, IF EXISTS skipped");
-                return await AlterTableExecutor.AlterColumnSetAsync(this, alterColumnSet, sourceText).ConfigureAwait(false);
+                return await DrainSideEffectPlanAsync(
+                    Plans.AlterTablePlan.ForAlterColumnSet(this, alterColumnSet, sourceText), batchContext).ConfigureAwait(false);
 
             case InsertStatement insert:
                 return await InsertExecutor.ExecuteAsync(this, insert, batchContext).ConfigureAwait(false);
