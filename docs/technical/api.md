@@ -2,149 +2,6 @@
 
 DatumIngest exposes a C# API for embedding ingestion, query execution, schema resolution, and manifest generation into .NET applications.
 
-## Manifest
-
-### Generation
-
-```csharp
-StatisticsCollector collector = new();
-ColumnInteractionCollector interactionCollector = new();
-// ... feed rows ...
-
-IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-IReadOnlyList<ColumnInteractionResult> interactions = interactionCollector.GetInteractions();
-Dictionary<string, DataKind> kinds = new() { ["id"] = DataKind.Float32, ["name"] = DataKind.String };
-
-QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, rowCount, interactions);
-string json = ManifestSerializer.Serialize("data", manifest);
-await ManifestSerializer.WriteToFileAsync("data", manifest, "manifest.json");
-```
-
-### Serialization
-
-`ManifestSerializer` reads and writes the JSON form. The container shape is `SourceManifest` — a dictionary keyed by table name that supports multi-table sources — and there are overloads for the common single-table case that accept `(tableName, QueryResultsManifest)` directly.
-
-```csharp
-// Single-table form
-string json = ManifestSerializer.Serialize("data", manifest);
-await ManifestSerializer.WriteToFileAsync("data", manifest, "data.datum-manifest");
-
-// Multi-table form
-await ManifestSerializer.WriteToFileAsync(sourceManifest, "multi.datum-manifest");
-
-// Deserialize
-SourceManifest? loaded = ManifestSerializer.Deserialize(json);
-if (loaded is not null
-    && loaded.Tables.TryGetValue("data", out QueryResultsManifest? perTable))
-{
-    // ...
-}
-```
-
-When the query planner has a manifest available for a source, it uses it to:
-- Override the scan operator's estimated row count with the manifest's authoritative `RowCount`.
-- Attach per-column `FeatureManifest` statistics for downstream cardinality estimation.
-
-## Ingestion
-
-`Ingester` converts a source file into a single `.datum` v2 columnar file (plus an optional `.datum-blob` sidecar for non-inline payloads), collecting schema, statistics, and a sample preview along the way. Each call processes one source file → one `.datum` file.
-
-### Basic usage
-
-```csharp
-Ingester ingester = new(formatRegistry, pool);
-
-FileFormatDescriptor source = new("data.csv");
-OutputDescriptor destination = new("data.datum");
-
-IngestionResult result = await ingester.IngestAsync(source, destination);
-
-string outputPath = result.OutputPath;
-long rows = result.RowCount;
-long bytes = result.BytesWritten;
-Schema schema = result.Schema;
-QueryResultsManifest manifest = result.Manifest;
-SamplePreview? preview = result.Sample;
-```
-
-`FileFormatDescriptor` and `OutputDescriptor` both accept an optional `IReadOnlyDictionary<string, string>` of format-specific options (CSV delimiter, header policy, etc.). Subclass `OutputDescriptor` and override `OpenAsync` to redirect the write to a custom stream (in-memory testing, compression wrappers, cloud storage).
-
-For memory-constrained / multi-tenant hosts, pass `IngestionOptions.MultiTenantServer`:
-
-```csharp
-IngestionResult result = await ingester.IngestAsync(
-    source, destination, IngestionOptions.MultiTenantServer);
-```
-
-### Sample preview
-
-During ingestion, 25 representative rows are collected via reservoir sampling (Algorithm R), producing a uniform random sample regardless of dataset size. The preview is on `IngestionResult.Sample`:
-
-```csharp
-SamplePreview? preview = result.Sample;
-if (preview is null) return;
-
-// Features describe the column structure
-foreach (SampleFeature feature in preview.Features)
-{
-    Console.WriteLine($"{feature.Name}: {feature.Kind}");
-}
-
-// Samples contains the row data as JSON-friendly primitives
-foreach (object?[] row in preview.Samples)
-{
-    Console.WriteLine(string.Join(", ", row));
-}
-```
-
-Sample values are converted to JSON-friendly representations:
-
-| Data kind | JSON representation |
-|-----------|---------------------|
-| Float32, UInt8, Boolean | Number or boolean primitive |
-| String, Date, DateTime, Time, Duration, Uuid | String (ISO 8601 for temporal types) |
-| Vector | Flat numeric array `[1.0, 2.0, 3.0]` |
-| Matrix | Nested array `[[1.0, 2.0], [3.0, 4.0]]` |
-| Tensor | Recursively nested arrays following shape dimensions |
-| Image | `"base64://…"` — resized to fit 64×64 max (aspect-preserving), re-encoded as PNG |
-| UInt8Array | `"[binary data]"` sentinel string |
-| Array | Recursively converted element array |
-
-### Serialization
-
-`SamplePreviewSerializer` reads and writes the preview as JSON:
-
-```csharp
-// Serialize to string
-string json = SamplePreviewSerializer.Serialize(preview);
-
-// Write to file
-await SamplePreviewSerializer.WriteToFileAsync(preview, "data.csv.datum-sample");
-
-// Deserialize
-SamplePreview? loaded = SamplePreviewSerializer.Deserialize(json);
-```
-
-## Schema Serialization
-
-`SchemaSerializer` reads and writes `.datum-schema` sidecar files. Like manifests, schemas are wrapped in a `SourceSchema` container keyed by table name:
-
-```csharp
-// Serialize a single-table schema
-string json = SchemaSerializer.Serialize("data", schema);
-await SchemaSerializer.WriteToFileAsync("data", schema, "data.csv.datum-schema");
-
-// Serialize a multi-table schema
-SourceSchema sourceSchema = result.Schema;
-await SchemaSerializer.WriteToFileAsync(sourceSchema, "multi.json.datum-schema");
-
-// Deserialize
-SourceSchema? loaded = SchemaSerializer.Deserialize(json);
-Schema? tableSchema = loaded?.Tables["data"];
-```
-
-A `.datum-schema` sidecar lets a provider skip its own schema inference (e.g. sampling the first N rows of a CSV) and hand the cached schema straight back from `ITableProvider.GetSchema()`.
-
 ## Executing SQL
 
 The primary surface for running SQL against a `TableCatalog` is the ADO.NET-style trio in `DatumIngest.Data` — `InProcessDatumDbConnection`, `InProcessDatumDbCommand`, `InProcessDatumDbReader`. The connection is a thin handle over a catalog; the command holds SQL text plus a parameter collection; the reader streams rows.
@@ -283,6 +140,129 @@ The cost model selectivity table:
 | `OR` | s₁ + s₂ − s₁×s₂ | s₁ + s₂ − s₁×s₂ |
 
 NDV is the estimated distinct count from the manifest's HyperLogLog sketch (±2% accuracy). Per-node estimates are exposed on `node.EstimatedRows`.
+
+## Manifest
+
+### Generation
+
+```csharp
+StatisticsCollector collector = new();
+ColumnInteractionCollector interactionCollector = new();
+// ... feed rows ...
+
+IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+IReadOnlyList<ColumnInteractionResult> interactions = interactionCollector.GetInteractions();
+Dictionary<string, DataKind> kinds = new() { ["id"] = DataKind.Float32, ["name"] = DataKind.String };
+
+QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, rowCount, interactions);
+string json = ManifestSerializer.Serialize("data", manifest);
+await ManifestSerializer.WriteToFileAsync("data", manifest, "manifest.json");
+```
+
+### Serialization
+
+`ManifestSerializer` reads and writes the JSON form. The container shape is `SourceManifest` — a dictionary keyed by table name that supports multi-table sources — and there are overloads for the common single-table case that accept `(tableName, QueryResultsManifest)` directly.
+
+```csharp
+// Single-table form
+string json = ManifestSerializer.Serialize("data", manifest);
+await ManifestSerializer.WriteToFileAsync("data", manifest, "data.datum-manifest");
+
+// Multi-table form
+await ManifestSerializer.WriteToFileAsync(sourceManifest, "multi.datum-manifest");
+
+// Deserialize
+SourceManifest? loaded = ManifestSerializer.Deserialize(json);
+if (loaded is not null
+    && loaded.Tables.TryGetValue("data", out QueryResultsManifest? perTable))
+{
+    // ...
+}
+```
+
+When the query planner has a manifest available for a source, it uses it to:
+- Override the scan operator's estimated row count with the manifest's authoritative `RowCount`.
+- Attach per-column `FeatureManifest` statistics for downstream cardinality estimation.
+
+## Ingestion
+
+`Ingester` converts a source file into a single `.datum` v2 columnar file (plus an optional `.datum-blob` sidecar for non-inline payloads), collecting schema, statistics, and a sample preview along the way. Each call processes one source file → one `.datum` file.
+
+### Basic usage
+
+```csharp
+Ingester ingester = new(formatRegistry, pool);
+
+FileFormatDescriptor source = new("data.csv");
+OutputDescriptor destination = new("data.datum");
+
+IngestionResult result = await ingester.IngestAsync(source, destination);
+
+string outputPath = result.OutputPath;
+long rows = result.RowCount;
+long bytes = result.BytesWritten;
+Schema schema = result.Schema;
+QueryResultsManifest manifest = result.Manifest;
+SamplePreview? preview = result.Sample;
+```
+
+`FileFormatDescriptor` and `OutputDescriptor` both accept an optional `IReadOnlyDictionary<string, string>` of format-specific options (CSV delimiter, header policy, etc.). Subclass `OutputDescriptor` and override `OpenAsync` to redirect the write to a custom stream (in-memory testing, compression wrappers, cloud storage).
+
+For memory-constrained / multi-tenant hosts, pass `IngestionOptions.MultiTenantServer`:
+
+```csharp
+IngestionResult result = await ingester.IngestAsync(
+    source, destination, IngestionOptions.MultiTenantServer);
+```
+
+### Sample preview
+
+During ingestion, 25 representative rows are collected via reservoir sampling (Algorithm R), producing a uniform random sample regardless of dataset size. The preview is on `IngestionResult.Sample`:
+
+```csharp
+SamplePreview? preview = result.Sample;
+if (preview is null) return;
+
+// Features describe the column structure
+foreach (SampleFeature feature in preview.Features)
+{
+    Console.WriteLine($"{feature.Name}: {feature.Kind}");
+}
+
+// Samples contains the row data as JSON-friendly primitives
+foreach (object?[] row in preview.Samples)
+{
+    Console.WriteLine(string.Join(", ", row));
+}
+```
+
+Sample values are converted to JSON-friendly representations:
+
+| Data kind | JSON representation |
+|-----------|---------------------|
+| Float32, UInt8, Boolean | Number or boolean primitive |
+| String, Date, DateTime, Time, Duration, Uuid | String (ISO 8601 for temporal types) |
+| Vector | Flat numeric array `[1.0, 2.0, 3.0]` |
+| Matrix | Nested array `[[1.0, 2.0], [3.0, 4.0]]` |
+| Tensor | Recursively nested arrays following shape dimensions |
+| Image | `"base64://…"` — resized to fit 64×64 max (aspect-preserving), re-encoded as PNG |
+| UInt8Array | `"[binary data]"` sentinel string |
+| Array | Recursively converted element array |
+
+### Serialization
+
+`SamplePreviewSerializer` reads and writes the preview as JSON:
+
+```csharp
+// Serialize to string
+string json = SamplePreviewSerializer.Serialize(preview);
+
+// Write to file
+await SamplePreviewSerializer.WriteToFileAsync(preview, "data.csv.datum-sample");
+
+// Deserialize
+SamplePreview? loaded = SamplePreviewSerializer.Deserialize(json);
+```
 
 ## Schema Introspection
 
