@@ -134,10 +134,10 @@ internal static class InsertExecutor
         IReadOnlyList<string>? columnList,
         InsertValuesSource values,
         bool captureRows,
-        BatchContext? batchContext)
+        BatchContext batchContext)
     {
         // See UpdateExecutor for the non-null fallback rationale.
-        MemoryAccountant accountant = batchContext is not null ? batchContext.Accountant : new MemoryAccountant();
+        MemoryAccountant accountant = batchContext.Accountant;
         if (values.Rows.Count == 0)
         {
             // Nothing to insert. Don't open a session — keeps the
@@ -271,7 +271,10 @@ internal static class InsertExecutor
                             // Mirrors BatchExecutor.PrefoldSubqueriesAsync for the
                             // INSERT-VALUES path.
                             sourceExpr = await PrefoldSubqueriesAsync(
-                                sourceExpr, catalog, CancellationToken.None).ConfigureAwait(false);
+                                sourceExpr,
+                                catalog,
+                                batchContext,
+                                CancellationToken.None).ConfigureAwait(false);
 
                             ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
                                 sourceExpr, frame, CancellationToken.None).ConfigureAwait(false);
@@ -388,7 +391,7 @@ internal static class InsertExecutor
         try
         {
             await foreach (RowBatch sourceBatch in
-                catalog.ExecuteAsync(sourcePlan, batchContext, CancellationToken.None).ConfigureAwait(false))
+                sourcePlan.ExecuteAsync(CancellationToken.None, batchContext).ConfigureAwait(false))
             {
                 if (sourceBatch.Count == 0) continue;
 
@@ -1426,17 +1429,20 @@ internal static class InsertExecutor
     /// scalar shapes, so subqueries must be folded before evaluation.
     /// </summary>
     private static async Task<Expression> PrefoldSubqueriesAsync(
-        Expression expression, TableCatalog catalog, CancellationToken ct)
+        Expression expression,
+        TableCatalog catalog, 
+        BatchContext batchContext,
+        CancellationToken ct)
     {
         switch (expression)
         {
             case SubqueryExpression subquery:
-                return await FoldOneSubqueryAsync(subquery, catalog, ct).ConfigureAwait(false);
+                return await FoldOneSubqueryAsync(subquery, catalog, batchContext, ct).ConfigureAwait(false);
 
             case BinaryExpression binary:
             {
-                Expression left = await PrefoldSubqueriesAsync(binary.Left, catalog, ct).ConfigureAwait(false);
-                Expression right = await PrefoldSubqueriesAsync(binary.Right, catalog, ct).ConfigureAwait(false);
+                Expression left = await PrefoldSubqueriesAsync(binary.Left, catalog, batchContext, ct).ConfigureAwait(false);
+                Expression right = await PrefoldSubqueriesAsync(binary.Right, catalog, batchContext, ct).ConfigureAwait(false);
                 return ReferenceEquals(left, binary.Left) && ReferenceEquals(right, binary.Right)
                     ? binary
                     : new BinaryExpression(left, binary.Operator, right);
@@ -1444,7 +1450,7 @@ internal static class InsertExecutor
 
             case UnaryExpression unary:
             {
-                Expression operand = await PrefoldSubqueriesAsync(unary.Operand, catalog, ct).ConfigureAwait(false);
+                Expression operand = await PrefoldSubqueriesAsync(unary.Operand, catalog, batchContext, ct).ConfigureAwait(false);
                 return ReferenceEquals(operand, unary.Operand)
                     ? unary
                     : new UnaryExpression(unary.Operator, operand);
@@ -1452,7 +1458,7 @@ internal static class InsertExecutor
 
             case CastExpression cast:
             {
-                Expression inner = await PrefoldSubqueriesAsync(cast.Expression, catalog, ct).ConfigureAwait(false);
+                Expression inner = await PrefoldSubqueriesAsync(cast.Expression, catalog, batchContext, ct).ConfigureAwait(false);
                 return ReferenceEquals(inner, cast.Expression)
                     ? cast
                     : new CastExpression(inner, cast.TargetType, cast.Span);
@@ -1463,7 +1469,7 @@ internal static class InsertExecutor
                 Expression[]? rewrittenArgs = null;
                 for (int i = 0; i < fn.Arguments.Count; i++)
                 {
-                    Expression rewritten = await PrefoldSubqueriesAsync(fn.Arguments[i], catalog, ct).ConfigureAwait(false);
+                    Expression rewritten = await PrefoldSubqueriesAsync(fn.Arguments[i], catalog, batchContext, ct).ConfigureAwait(false);
                     if (!ReferenceEquals(rewritten, fn.Arguments[i]))
                     {
                         rewrittenArgs ??= fn.Arguments.ToArray();
@@ -1486,7 +1492,10 @@ internal static class InsertExecutor
     /// one row → error.
     /// </summary>
     private static async Task<Expression> FoldOneSubqueryAsync(
-        SubqueryExpression subquery, TableCatalog catalog, CancellationToken ct)
+        SubqueryExpression subquery,
+        TableCatalog catalog,
+        BatchContext batchContext,
+        CancellationToken ct)
     {
         StatementPlan innerPlan = catalog.PlanQuery(new SelectQueryExpression(subquery.Query));
 
@@ -1496,7 +1505,7 @@ internal static class InsertExecutor
         Arena foldArena = new();
         try
         {
-            await foreach (RowBatch batch in catalog.ExecuteAsync(innerPlan, ct).ConfigureAwait(false))
+            await foreach (RowBatch batch in innerPlan.ExecuteAsync(ct, batchContext).ConfigureAwait(false))
             {
                 for (int i = 0; i < batch.Count; i++)
                 {

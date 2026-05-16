@@ -125,8 +125,8 @@ internal sealed class DmlReturningOperator : QueryOperator
             capturedBatches: sink.Batches,
             returningColumns: _returningColumns);
 
-        await foreach (RowBatch batch in _catalog
-            .ExecuteAsync(projection, batchContext, context.CancellationToken)
+        await foreach (RowBatch batch in projection
+            .ExecuteAsync(context.CancellationToken, batchContext)
             .ConfigureAwait(false))
         {
             yield return batch;

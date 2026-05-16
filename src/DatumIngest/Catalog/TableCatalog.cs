@@ -1188,25 +1188,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     }
 
     /// <summary>
-    /// Borrow-or-own overload used by executors that may or may not be
-    /// running inside a procedural batch. When <paramref name="batchContext"/>
-    /// is non-null the executor's context is threaded straight through so
-    /// the source plan inherits the same accountant / variable scope; when
-    /// null this falls back to the owned-lifetime
-    /// <see cref="ExecuteAsync(StatementPlan, CancellationToken)"/>.
-    /// </summary>
-    internal IAsyncEnumerable<RowBatch> ExecuteAsync(
-        StatementPlan plan,
-        BatchContext? batchContext,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(plan);
-        return batchContext is not null
-            ? plan.ExecuteAsync(cancellationToken, batchContext)
-            : ExecuteAsync(plan, cancellationToken);
-    }
-
-    /// <summary>
     /// Convenience "batch of one" analyzer: same lifetime story as
     /// <see cref="ExecuteAsync(StatementPlan, CancellationToken)"/>, runs the
     /// plan under instrumentation, and returns the populated EXPLAIN

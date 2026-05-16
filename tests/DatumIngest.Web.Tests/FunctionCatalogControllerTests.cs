@@ -1,5 +1,6 @@
 using DatumIngest.Catalog;
 using DatumIngest.Functions;
+using DatumIngest.Model;
 using DatumIngest.Pooling;
 using DatumIngest.Web.Api;
 using DatumIngest.Web.Dtos.Functions;
@@ -260,7 +261,10 @@ public sealed class FunctionCatalogControllerTests
         foreach (string sql in createStatements)
         {
             StatementPlan plan = await catalog.PlanAsync(sql);
-            await catalog.ExecuteAsync(plan).DrainAsync();
+            await foreach (RowBatch batch in catalog.ExecuteAsync(plan, CancellationToken.None).ConfigureAwait(false))
+            {
+                // Drain the async enumerable
+            }
         }
         return catalog;
     }
