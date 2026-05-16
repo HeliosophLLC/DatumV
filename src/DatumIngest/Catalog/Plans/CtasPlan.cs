@@ -120,7 +120,11 @@ internal sealed class CtasPlan : StatementPlan
 
         if (catalog.HasTable(existenceCheckName))
         {
-            if (ctas.IfNotExists) return DdlPlan.NoOp(catalog, "CreateTableAsSelect", "table already exists; IF NOT EXISTS skipped");
+            if (ctas.IfNotExists)
+            {
+                return DdlPlan.NoOp(catalog, "CreateTableAsSelect", "table already exists; IF NOT EXISTS skipped");
+            }
+            
             throw new InvalidOperationException(
                 $"Table '{ctas.TableName}' already exists.");
         }
@@ -181,7 +185,7 @@ internal sealed class CtasPlan : StatementPlan
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         if (Interlocked.Exchange(ref _executed, 1) != 0)
         {
@@ -218,7 +222,7 @@ internal sealed class CtasPlan : StatementPlan
         {
             session = provider.BeginAppend();
             await foreach (RowBatch batch in _sourcePlan
-                .ExecuteAsync(cancellationToken, batchContext)
+                .ExecuteAsync(cancellationToken, context)
                 .ConfigureAwait(false))
             {
                 if (batch.Count == 0) continue;

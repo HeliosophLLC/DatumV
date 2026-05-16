@@ -194,7 +194,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         // reference outer columns by name. The child context borrows
         // ambient state from frame.Context; Store/VariableScope/VariableStore
         // override that to point at this call's per-call arena + scope.
-        using DatumIngest.Execution.ExecutionContext bodyContext = frame.Context!.Derive(
+        using Execution.ExecutionContext bodyContext = frame.Context.Derive(
             store: variableStore,
             variableScope: scope,
             variableStore: variableStore);
@@ -262,7 +262,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         // bodyContext, but built once here so checkEvaluator + paramEvaluator
         // share it. Borrows ambient state from frame.Context; overrides
         // Store/VariableScope/VariableStore to point at this call's arena.
-        using DatumIngest.Execution.ExecutionContext paramContext = frame.Context!.Derive(
+        using Execution.ExecutionContext paramContext = frame.Context.Derive(
             store: variableStore,
             variableScope: scope,
             variableStore: variableStore);

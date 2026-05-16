@@ -117,7 +117,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (a Int32)");
         catalog.Plan("CREATE INDEX idx_t_a ON t (a)");
 
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE INDEX idx_t_a ON t (a)"));
     }
 
@@ -135,7 +135,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
     {
         using TableCatalog catalog = CreateCatalog(CatalogPath);
 
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<ExecutionException>(() =>
             catalog.Plan("DROP INDEX idx_nonexistent"));
     }
 
@@ -146,7 +146,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
     {
         using TableCatalog catalog = CreateCatalog(CatalogPath);
 
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE INDEX idx_x ON missing_table (col)"));
     }
 
@@ -157,7 +157,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
 
         catalog.Plan("CREATE TABLE t (a Int32)");
 
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE INDEX idx_t_b ON t (b)"));
     }
 
@@ -233,7 +233,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE INDEX shared_name ON t1 (a)");
 
         // PG semantics: index names are catalog-global.
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE INDEX shared_name ON t2 (a)"));
     }
 
@@ -339,7 +339,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
 
         // Index file is gone; the index name is no longer registered.
         Assert.False(File.Exists(CompositeIndexPath("t", "idx_t_b")));
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<ExecutionException>(() =>
             catalog.Plan("DROP INDEX idx_t_b"));
     }
 
@@ -373,7 +373,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog reopened = CreateCatalog(CatalogPath);
 
         // After reopen, the dropped index name is gone from the catalog.
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<ExecutionException>(() =>
             reopened.Plan("DROP INDEX idx_t_b"));
     }
 
@@ -1298,7 +1298,7 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
 
         // After reopen the index name should be gone — re-issuing DROP
         // (without IF EXISTS) must throw.
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<ExecutionException>(() =>
             reopened.Plan("DROP INDEX idx_t_a"));
     }
 }

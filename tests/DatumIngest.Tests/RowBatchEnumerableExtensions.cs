@@ -4,7 +4,7 @@ namespace DatumIngest.Catalog;
 
 /// <summary>
 /// Convenience extensions over the <see cref="IAsyncEnumerable{RowBatch}"/>
-/// streams produced by <see cref="StatementPlan.ExecuteAsync(CancellationToken, DatumIngest.Execution.BatchContext)"/>
+/// streams produced by <see cref="StatementPlan.ExecuteAsync(CancellationToken, DatumIngest.Execution.ExecutionContext)"/>
 /// and <see cref="TableCatalog.ExecuteAsync(StatementPlan, CancellationToken)"/>.
 /// </summary>
 public static class RowBatchEnumerableExtensions

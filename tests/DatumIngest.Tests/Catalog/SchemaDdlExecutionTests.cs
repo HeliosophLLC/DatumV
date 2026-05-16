@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Execution;
 
 namespace DatumIngest.Tests.Catalog;
 
@@ -59,7 +60,7 @@ public sealed class SchemaDdlExecutionTests : ServiceTestBase, IDisposable
         using TableCatalog catalog = CreateCatalog(_catalogPath);
         catalog.Plan("CREATE SCHEMA myapp");
 
-        Assert.Throws<InvalidOperationException>(() => catalog.Plan("CREATE SCHEMA myapp"));
+        Assert.Throws<ExecutionException>(() => catalog.Plan("CREATE SCHEMA myapp"));
     }
 
     [Fact]

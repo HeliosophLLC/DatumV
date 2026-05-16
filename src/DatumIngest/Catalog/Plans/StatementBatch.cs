@@ -104,10 +104,10 @@ public sealed class StatementBatch : PreparedSql
     /// </summary>
     public async IAsyncEnumerable<StatementPlan> StreamChildPlansAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
-        ArgumentNullException.ThrowIfNull(batchContext);
-        _ = batchContext;
+        ArgumentNullException.ThrowIfNull(context);
+
         foreach ((Statement statement, string? sourceText) in _entries)
         {
             cancellationToken.ThrowIfCancellationRequested();

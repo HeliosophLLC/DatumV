@@ -246,9 +246,9 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
         int spillerOnly = consolidated.ReferenceCount;
 
         // Create a context with a tiny batch size so replay yields multiple batches.
-        ExecutionContext smallBatchContext = CreateExecutionContext(batchSize: 2);
+        ExecutionContext smallContext = CreateExecutionContext(batchSize: 2);
 
-        await foreach (RowBatch replay in spiller.ReplayAsync(smallBatchContext, lookup))
+        await foreach (RowBatch replay in spiller.ReplayAsync(smallContext, lookup))
         {
             // While the batch is alive its rent of the arena bumps the count above the
             // spiller's baseline.

@@ -19,8 +19,8 @@ namespace DatumIngest.Execution;
 /// <para>
 /// <strong>One accountant per query or per batch.</strong> Standalone queries
 /// have their <see cref="ExecutionContext"/> construct and own one. Procedural
-/// batches own one on <see cref="BatchContext"/> and pass it to every child
-/// <see cref="ExecutionContext"/>; the child borrows. This lets every
+/// batches own one at the outer <see cref="ExecutionContext"/> and child
+/// derived contexts borrow. This lets every
 /// materializing operator in a plan, every <see cref="VariableScope"/>-bound
 /// payload, and every DML buffer report into the same counter — so "I'm
 /// already over budget at operator entry, spill immediately" works.
@@ -75,8 +75,9 @@ public sealed class MemoryAccountant : IDisposable
     /// the residency counter still tracks bytes for profiling.</param>
     /// <param name="arenaBytesProbe">Returns the current primary-arena byte
     /// count at sample time. Pass <c>() =&gt; context.Store.BytesWritten</c>
-    /// for a standalone query or <c>() =&gt; batchContext.VariableStore.BytesWritten</c>
-    /// for a procedural batch. <c>null</c> records zero arena bytes in samples.</param>
+    /// for a standalone query or  procedural batch. <c>null</c> records
+    /// zero arena bytes in samples.
+    /// </param>
     public MemoryAccountant(long? memoryBudgetBytes = null, Func<long>? arenaBytesProbe = null)
     {
         MemoryBudgetBytes = memoryBudgetBytes ?? DefaultMemoryBudgetBytes;

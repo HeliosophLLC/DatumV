@@ -2,6 +2,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Catalog.Plans;
 using DatumIngest.Execution;
 using DatumIngest.Model;
+using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Data;
 
@@ -14,7 +15,7 @@ namespace DatumIngest.Data;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The reader owns the (per-execute) <see cref="BatchContext"/> and the
+/// The reader owns the (per-execute) <see cref="ExecutionContext"/> and the
 /// active plan's <see cref="IAsyncEnumerator{T}"/>; disposing the reader
 /// closes both. Batch lifetime is a private detail — the underlying
 /// plan iterator returns the prior batch to the pool on each advance,
@@ -42,8 +43,8 @@ namespace DatumIngest.Data;
 public sealed class InProcessDatumDbReader : IAsyncDisposable
 {
     private readonly PreparedSql _prepared;
-    private readonly BatchContext _batchContext;
-    private readonly bool _ownsBatchContext;
+    private readonly ExecutionContext _context;
+    private readonly bool _ownsContext;
     private readonly CancellationToken _cancellationToken;
 
     // For batch mode: the child-plan enumerator we advance via NextResultAsync.
@@ -62,16 +63,16 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
 
     private InProcessDatumDbReader(
         PreparedSql prepared,
-        BatchContext batchContext,
-        bool ownsBatchContext,
+        ExecutionContext context,
+        bool ownsContext,
         CancellationToken cancellationToken,
         IAsyncEnumerator<StatementPlan>? childPlanEnumerator,
         IAsyncEnumerator<RowBatch>? batchEnumerator,
         RowBatch? prefetched)
     {
         _prepared = prepared;
-        _batchContext = batchContext;
-        _ownsBatchContext = ownsBatchContext;
+        _context = context;
+        _ownsContext = ownsContext;
         _cancellationToken = cancellationToken;
         _childPlanEnumerator = childPlanEnumerator;
         _batchEnumerator = batchEnumerator;
@@ -80,51 +81,51 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
 
     internal static async Task<InProcessDatumDbReader> OpenAsync(
         PreparedSql prepared,
-        BatchContext batchContext,
-        bool ownsBatchContext,
+        ExecutionContext context,
+        bool ownsContext,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(prepared);
-        ArgumentNullException.ThrowIfNull(batchContext);
+        ArgumentNullException.ThrowIfNull(context);
 
         try
         {
             return prepared switch
             {
                 StatementPlan plan => await OpenSinglePlanAsync(
-                    plan, batchContext, ownsBatchContext, cancellationToken).ConfigureAwait(false),
+                    plan, context, ownsContext, cancellationToken).ConfigureAwait(false),
                 StatementBatch batch => await OpenBatchAsync(
-                    batch, batchContext, ownsBatchContext, cancellationToken).ConfigureAwait(false),
+                    batch, context, ownsContext, cancellationToken).ConfigureAwait(false),
                 _ => throw new NotSupportedException(
                     $"InProcessDatumDbReader: unknown PreparedSql subtype '{prepared.GetType().Name}'."),
             };
         }
         catch
         {
-            if (ownsBatchContext) batchContext.Dispose();
+            if (ownsContext) context.Dispose();
             throw;
         }
     }
 
     private static async Task<InProcessDatumDbReader> OpenSinglePlanAsync(
-        StatementPlan plan, BatchContext batchContext, bool ownsBatchContext, CancellationToken ct)
+        StatementPlan plan, ExecutionContext context, bool ownsContext, CancellationToken ct)
     {
         IAsyncEnumerator<RowBatch> batchEnumerator = plan
-            .ExecuteAsync(ct, batchContext)
+            .ExecuteAsync(ct, context)
             .GetAsyncEnumerator(ct);
         RowBatch? prefetched = await PrefetchFirstBatchAsync(batchEnumerator).ConfigureAwait(false);
         return new InProcessDatumDbReader(
-            plan, batchContext, ownsBatchContext, ct,
+            plan, context, ownsContext, ct,
             childPlanEnumerator: null,
             batchEnumerator: batchEnumerator,
             prefetched);
     }
 
     private static async Task<InProcessDatumDbReader> OpenBatchAsync(
-        StatementBatch batch, BatchContext batchContext, bool ownsBatchContext, CancellationToken ct)
+        StatementBatch batch, ExecutionContext context, bool ownsContext, CancellationToken ct)
     {
         IAsyncEnumerator<StatementPlan> childPlanEnumerator = batch
-            .StreamChildPlansAsync(ct, batchContext)
+            .StreamChildPlansAsync(ct, context)
             .GetAsyncEnumerator(ct);
 
         // Open the first child's batch enumerator. If the batch is empty
@@ -134,12 +135,12 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
         if (await childPlanEnumerator.MoveNextAsync().ConfigureAwait(false))
         {
             StatementPlan firstChild = childPlanEnumerator.Current;
-            batchEnumerator = firstChild.ExecuteAsync(ct, batchContext).GetAsyncEnumerator(ct);
+            batchEnumerator = firstChild.ExecuteAsync(ct, context).GetAsyncEnumerator(ct);
             prefetched = await PrefetchFirstBatchAsync(batchEnumerator).ConfigureAwait(false);
         }
 
         return new InProcessDatumDbReader(
-            batch, batchContext, ownsBatchContext, ct,
+            batch, context, ownsContext, ct,
             childPlanEnumerator,
             batchEnumerator,
             prefetched);
@@ -264,7 +265,7 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
         }
 
         StatementPlan nextChild = _childPlanEnumerator.Current;
-        _batchEnumerator = nextChild.ExecuteAsync(_cancellationToken, _batchContext).GetAsyncEnumerator(_cancellationToken);
+        _batchEnumerator = nextChild.ExecuteAsync(_cancellationToken, _context).GetAsyncEnumerator(_cancellationToken);
         _currentBatch = await PrefetchFirstBatchAsync(_batchEnumerator).ConfigureAwait(false);
         _rowIndex = -1;
         _firstReadConsumed = false;
@@ -334,7 +335,7 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
         {
             await _childPlanEnumerator.DisposeAsync().ConfigureAwait(false);
         }
-        if (_ownsBatchContext) _batchContext.Dispose();
+        if (_ownsContext) _context.Dispose();
     }
 
     private RowBatch CurrentBatch()

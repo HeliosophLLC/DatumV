@@ -7,8 +7,7 @@ namespace DatumIngest.Tests.Execution;
 /// <summary>
 /// Substrate-only tests for <see cref="VariableScope"/>: push/pop, declare,
 /// set, lookup, scope-walk semantics. Uses inline ValueRef forms
-/// (bool, int) so no arena interaction is required — payload-store
-/// semantics are covered separately in <see cref="BatchContextTests"/>.
+/// (bool, int) so no arena interaction is required.
 /// </summary>
 public sealed class VariableScopeTests : ServiceTestBase
 {

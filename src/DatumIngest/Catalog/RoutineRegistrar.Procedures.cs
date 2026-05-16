@@ -221,21 +221,22 @@ internal sealed partial class RoutineRegistrar
     private async ValueTask ValidateDefaultsAgainstChecksAsync(
         IReadOnlyList<UdfParameter> parameters,
         string contextLabel,
+        DatumIngest.Execution.ExecutionContext context,
         CancellationToken cancellationToken)
     {
         Arena scratch = new();
-        MemoryAccountant accountant = new();
-        VariableScope checkScope = new(accountant);
+        VariableScope checkScope = new(context.Accountant);
         // Scope-bound evaluator so CustomCheck expressions resolve the
         // parameter name to the just-evaluated default value (and any
-        // earlier parameter to its evaluated default).
-        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(
+        // earlier parameter to its evaluated default). The check scope and
+        // scratch arena are isolated to this validation pass; everything
+        // else (accountant, types, video registry) is borrowed from the
+        // caller's context.
+        using Execution.ExecutionContext checkContext = context.Derive(
             store: scratch,
-            accountant: accountant,
             variableScope: checkScope,
-            variableStore: scratch,
-            cancellationToken: cancellationToken);
-        ExpressionEvaluator evaluator = context.CreateEvaluator();
+            variableStore: scratch);
+        ExpressionEvaluator evaluator = checkContext.CreateEvaluator();
         EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, scratch);
 
         for (int i = 0; i < parameters.Count; i++)

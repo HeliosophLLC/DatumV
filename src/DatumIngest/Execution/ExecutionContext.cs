@@ -9,41 +9,25 @@ using DatumIngest.Pooling;
 namespace DatumIngest.Execution;
 
 /// <summary>
+/// Receives <c>PRINT</c> diagnostic output rendered as text.
+/// <see cref="ExecutionContext.PrintSink"/> is guaranteed non-null at all
+/// times; assign <see langword="null"/> to reset it to the no-op handler.
+/// </summary>
+public delegate void PrintHandler(string? text);
+
+/// <summary>
 /// Shared context passed through the operator tree during query execution.
 /// Carries the cancellation token, function registry, and table catalog.
 /// </summary>
 public sealed class ExecutionContext : IDisposable
 {
+    private static readonly PrintHandler NoOpPrintSink = static _ => { };
+
     private int _disposeCount;
     private readonly bool _ownsStore;
     private readonly bool _ownsAccountant;
     private readonly bool _ownsVideoRegistry;
-
-    /// <summary>
-    /// Creates a new execution context from an existing context, copying all properties. Useful for creating a child
-    /// </summary>
-    public ExecutionContext(ExecutionContext context)
-    {
-        CancellationToken = context.CancellationToken;
-        FunctionRegistry = context.FunctionRegistry;
-        Catalog = context.Catalog;
-        Pool = context.Pool;
-        Store = context.Store;
-        Accountant = context.Accountant;
-        BatchSize = context.BatchSize;
-        AssertionDiagnostics = context.AssertionDiagnostics;
-        MaxStratifyClasses = context.MaxStratifyClasses;
-        Types = context.Types;
-        VideoRegistry = context.VideoRegistry;
-        // Copy contexts borrow the Store baseline, the accountant, and the video
-        // registry from the parent — disposing a child must not tear down any of
-        // the parent's resources. The video registry holds warm FFmpeg decoder
-        // state that must outlive any single child query.
-        _ownsStore = false;
-        _ownsAccountant = false;
-        _ownsVideoRegistry = false;
-    }
-
+    private readonly bool _ownsVariableStore;
 
     /// <summary>
     /// Creates a new execution context against <paramref name="catalog"/>.
@@ -54,7 +38,6 @@ public sealed class ExecutionContext : IDisposable
     /// separate parameters.
     /// </summary>
     /// <param name="catalog">Registry of named tables and provider factories.</param>
-    /// <param name="cancellationToken">Cancellation token for cooperative cancellation.</param>
     /// <param name="memoryBudgetBytes">Memory budget in bytes for operators that
     /// support spill-to-disk. Pass <see cref="long.MaxValue"/> for effectively-unbounded
     /// memory. Ignored when <paramref name="accountant"/> is non-null — the supplied
@@ -64,18 +47,18 @@ public sealed class ExecutionContext : IDisposable
     /// <param name="types">Optional pre-existing type registry to share across
     /// multiple query contexts (e.g. across queries within a single procedural batch).</param>
     /// <param name="accountant">Optional existing <see cref="MemoryAccountant"/>
-    /// to share with the surrounding scope (typically a <see cref="BatchContext"/>'s
+    /// to share with the surrounding scope (typically a <see cref="ExecutionContext"/>'s
     /// accountant). When <see langword="null"/>, the context constructs and owns its own.</param>
     /// <param name="videoRegistry">Optional pre-existing <see cref="Model.VideoRegistry"/>
     /// to share with a surrounding scope.</param>
     /// <param name="variableScope">Optional procedural variable scope, threaded
-    /// from a surrounding <see cref="BatchContext"/>.</param>
+    /// from a surrounding <see cref="ExecutionContext"/>.</param>
     /// <param name="variableStore">Optional procedure-lifetime variable arena,
     /// paired with <paramref name="variableScope"/>.</param>
-    /// <param name="batchContext">Back-reference to the enclosing
-    /// <see cref="BatchContext"/>. Set by <c>SelectPlan</c> at execute /
-    /// analyze time; <see langword="null"/> for ad-hoc planner runs and
-    /// test fixtures that build the context directly.</param>
+    /// <param name="printSink">
+    /// Optional <c>PRINT</c> handler. Defaults to a no-op delegate that ignores all input; assign a non-null delegate to capture output.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token for cooperative cancellation.</param>
     internal ExecutionContext(
         TableCatalog catalog,
         long? memoryBudgetBytes = null,
@@ -85,15 +68,18 @@ public sealed class ExecutionContext : IDisposable
         VideoRegistry? videoRegistry = null,
         VariableScope? variableScope = null,
         Arena? variableStore = null,
-        BatchContext? batchContext = null,
+        PrintHandler? printSink = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(catalog);
-        BatchContext = batchContext;
+
         CancellationToken = cancellationToken;
         FunctionRegistry = catalog.Functions;
         Catalog = catalog;
         Pool = catalog.Pool;
+        Types = types ?? new TypeRegistry();
+        PrintSink = printSink ?? NoOpPrintSink;
+
         if (store is null)
         {
             // We own this arena's lifetime — give it a baseline reference so
@@ -111,6 +97,7 @@ public sealed class ExecutionContext : IDisposable
             Store = store;
             _ownsStore = false;
         }
+
         if (accountant is null)
         {
             Accountant = new MemoryAccountant(
@@ -123,10 +110,7 @@ public sealed class ExecutionContext : IDisposable
             Accountant = accountant;
             _ownsAccountant = false;
         }
-        // When a caller passes a TypeRegistry (typically a procedural BatchContext
-        // sharing one across loop iterations), reuse it so type-ids stamped on
-        // values in one query remain resolvable in downstream queries.
-        Types = types ?? new TypeRegistry();
+        
         if (videoRegistry is null)
         {
             VideoRegistry = new VideoRegistry();
@@ -137,8 +121,28 @@ public sealed class ExecutionContext : IDisposable
             VideoRegistry = videoRegistry;
             _ownsVideoRegistry = false;
         }
-        VariableScope = variableScope;
-        VariableStore = variableStore;
+
+        // Every context carries a procedure-lifetime arena + variable
+        // scope chain. Single-statement queries simply never declare into
+        // them; multi-statement procedural batches do. Caller-supplied
+        // values are borrowed (e.g. a Derive that shares the parent's
+        // scope); when neither is supplied we allocate a fresh pair and
+        // own their lifetime, disposing the arena on Dispose. The owned
+        // arena is not pool-tracked (Arena pooling fires through
+        // PoolBacking.RentArena registration, which this allocation
+        // bypasses), so straight Dispose is the right release path —
+        // refcount semantics don't apply.
+        if (variableStore is null)
+        {
+            VariableStore = new Arena();
+            _ownsVariableStore = true;
+        }
+        else
+        {
+            VariableStore = variableStore;
+            _ownsVariableStore = false;
+        }
+        VariableScope = variableScope ?? new VariableScope(Accountant);
     }
 
     /// <summary>
@@ -151,7 +155,7 @@ public sealed class ExecutionContext : IDisposable
     /// handles. Holds the warm FFmpeg decoder state for each registered video; the
     /// dictionary is empty (and consumes no FFmpeg state) for queries that touch no
     /// video columns. Lifetime: owned by this context when constructed without a
-    /// registry argument; borrowed from a <see cref="BatchContext"/> when a procedural
+    /// registry argument; borrowed from a <see cref="ExecutionContext"/> when a procedural
     /// batch is in scope. See <see cref="Model.VideoRegistry"/> for the materialisation
     /// model.
     /// </summary>
@@ -198,8 +202,7 @@ public sealed class ExecutionContext : IDisposable
     /// <strong>One arena per query.</strong> Earlier designs had per-batch arenas
     /// (rented from a pool) plus a separate plan-scoped hoist store. That model
     /// produced a "which arena does this DataValue reference?" ambiguity that
-    /// every consumer had to resolve correctly — and got wrong every few weeks
-    /// (Demo 1.5 hoist bug, BytesWritten heuristic, ConcatFunction recurrence).
+    /// every consumer had to resolve correctly — and got wrong every few weeks.
     /// Collapsing to one arena per query removes the ambiguity: <c>IsInArena</c>
     /// unambiguously means "in this arena", consumers pass a single store, no
     /// routing decisions.
@@ -272,7 +275,7 @@ public sealed class ExecutionContext : IDisposable
     /// <see cref="VariableScope"/>, and DML executor in this query. Forwards the
     /// budget check (<see cref="MemoryAccountant.WouldExceedBudget"/>) and
     /// residency notifications. Lifetime: owned by this context when constructed
-    /// without an accountant argument; borrowed from a <see cref="BatchContext"/>
+    /// without an accountant argument; borrowed from a <see cref="ExecutionContext"/>
     /// when a procedural batch is in scope. See <see cref="MemoryAccountant"/>
     /// for the full residency / arena-bytes / sampling model.
     /// </summary>
@@ -374,7 +377,7 @@ public sealed class ExecutionContext : IDisposable
     /// <summary>
     /// Builds an <see cref="EvaluationFrame"/> with distinct source / target
     /// arenas. Use when reads come from one store and materialised results
-    /// must land in another (e.g. <see cref="BatchContext.Declare"/> reading
+    /// must land in another (e.g. <see cref="ExecutionContext.Declare"/> reading
     /// from a producing query's arena and writing into the variable store).
     /// No <see cref="EvaluationFrame.LambdaInvoker"/> is wired; build via
     /// <c>ExpressionEvaluator.CreateFrame</c> if you need lambda
@@ -382,6 +385,43 @@ public sealed class ExecutionContext : IDisposable
     /// </summary>
     public EvaluationFrame CreateFrame(Row row, IValueStore source, IValueStore target)
         => new(row, source, target, this, outerRow: OuterRow);
+
+    /// <summary>
+    /// Lifts <paramref name="value"/> from <paramref name="sourceStore"/>
+    /// into a managed-payload <see cref="ValueRef"/> and binds it to
+    /// <paramref name="name"/> in the topmost frame of
+    /// <see cref="VariableScope"/>. Throws if the name is already declared
+    /// in the topmost frame. When <paramref name="structFieldNames"/> is
+    /// non-<see langword="null"/>, the names attach to this binding so
+    /// downstream <c>@var['field']</c> access can resolve a position.
+    /// </summary>
+    public void Declare(
+        string name,
+        DataValue value,
+        IValueStore sourceStore,
+        IReadOnlyList<string>? structFieldNames = null)
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
+        EvaluationFrame frame = CreateFrame(Row.Empty, sourceStore, VariableStore);
+        ValueRef bound = ExpressionEvaluator.ToValueRef(value, frame);
+        VariableScope.Declare(name, bound, structFieldNames);
+    }
+
+    /// <summary>
+    /// Lifts <paramref name="value"/> from <paramref name="sourceStore"/>
+    /// into a managed-payload <see cref="ValueRef"/> and updates the
+    /// existing binding. Walks the scope chain outward to find the frame
+    /// holding the name. Throws if the name is unbound.
+    /// </summary>
+    public void Set(string name, DataValue value, IValueStore sourceStore)
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
+        EvaluationFrame frame = CreateFrame(Row.Empty, sourceStore, VariableStore);
+        ValueRef bound = ExpressionEvaluator.ToValueRef(value, frame);
+        VariableScope.Set(name, bound);
+    }
 
     /// <summary>
     /// Returns a child context derived from this one. Every parameter defaults to
@@ -416,21 +456,28 @@ public sealed class ExecutionContext : IDisposable
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
 
-        // Pass non-null values for store/accountant/videoRegistry so the new
-        // context's constructor sets _ownsX = false — the child borrows from
-        // the parent (or from the explicit override). Disposing the child is
-        // a no-op for the inherited resources.
+        // Pass non-null values for every owned resource (Store, Accountant,
+        // VideoRegistry, VariableStore, VariableScope) through the
+        // constructor so the new context's _ownsX flags all land on false —
+        // the child borrows, and disposing the child is a no-op for the
+        // inherited resources. VariableStore/VariableScope MUST flow
+        // through the constructor (not an object initializer) because the
+        // constructor's null-default allocates a fresh owned arena + scope,
+        // and the initializer would only overwrite the property while
+        // leaving _ownsVariableStore = true — a setup that would have the
+        // child release the parent's arena on Dispose.
         return new ExecutionContext(
             Catalog,
             store: store ?? Store,
             types: types ?? Types,
             accountant: accountant ?? Accountant,
             videoRegistry: videoRegistry ?? VideoRegistry,
-            cancellationToken: CancellationToken)
+            variableScope: variableScope ?? VariableScope,
+            variableStore: variableStore ?? VariableStore,
+            cancellationToken: CancellationToken,
+            printSink: PrintSink)
         {
             OuterRow = outerRow ?? OuterRow,
-            VariableStore = variableStore ?? VariableStore,
-            VariableScope = variableScope ?? VariableScope,
             RowLimit = RowLimit,
             MaxRecursionDepth = MaxRecursionDepth,
             DegreeOfParallelism = DegreeOfParallelism,
@@ -439,6 +486,44 @@ public sealed class ExecutionContext : IDisposable
             MaxStratifyClasses = MaxStratifyClasses,
             ModelTracer = ModelTracer,
             SpillDirectory = SpillDirectory,
+            ProcedureCallDepth = ProcedureCallDepth
+        };
+    }
+
+    /// <summary>
+    /// Returns a child context that borrows every parent slot but replaces
+    /// <see cref="RowLimit"/> with <paramref name="rowLimit"/>. Used by blocking /
+    /// fan-out operators (<c>DISTINCT</c>, <c>GROUP BY</c>) to strip an inherited
+    /// row limit so child operators don't pick limit-shape strategies, and by
+    /// <c>LIMIT</c> to tighten the propagated hint. Separate from
+    /// <see cref="Derive"/> because <see langword="null"/> is a meaningful
+    /// override here (it clears the limit) and would collide with Derive's
+    /// "null = inherit" convention.
+    /// </summary>
+    public ExecutionContext WithRowLimit(int? rowLimit)
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+        return new ExecutionContext(
+            Catalog,
+            store: Store,
+            types: Types,
+            accountant: Accountant,
+            videoRegistry: VideoRegistry,
+            variableScope: VariableScope,
+            variableStore: VariableStore,
+            cancellationToken: CancellationToken,
+            printSink: PrintSink)
+        {
+            OuterRow = OuterRow,
+            RowLimit = rowLimit,
+            MaxRecursionDepth = MaxRecursionDepth,
+            DegreeOfParallelism = DegreeOfParallelism,
+            BatchSize = BatchSize,
+            AssertionDiagnostics = AssertionDiagnostics,
+            MaxStratifyClasses = MaxStratifyClasses,
+            ModelTracer = ModelTracer,
+            SpillDirectory = SpillDirectory,
+            ProcedureCallDepth = ProcedureCallDepth
         };
     }
 
@@ -468,42 +553,54 @@ public sealed class ExecutionContext : IDisposable
 
     /// <summary>
     /// Borrowed reference to the enclosing batch's variable-payload arena.
-    /// When this query is running inside a procedural batch, the procedural
-    /// executor sets this from <see cref="BatchContext.VariableStore"/> so
-    /// the evaluator can resolve variable reads against
-    /// the procedure-lifetime arena rather than the per-query
-    /// <see cref="Store"/>. <see langword="null"/> for top-level queries
-    /// outside any procedural batch.
+    /// Procedure-lifetime arena holding bound variable payloads.
+    /// Distinct from the per-query <see cref="Store"/>: variable bindings
+    /// must survive across child queries inside a procedural batch
+    /// (whose <see cref="Store"/> rent/return cycle would otherwise free
+    /// their payloads), so they live here instead. Always non-null —
+    /// single-statement queries simply never bind into it.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <strong>Borrowed, not owned.</strong> The <see cref="BatchContext"/>
-    /// holds the baseline reference; this property is a read-only handle.
-    /// The per-query <see cref="Store"/> rent/return cycle never touches
-    /// its refcount, so it survives every child query's lifetime.
-    /// </para>
+    /// Ownership: when the constructor is not handed a borrow it allocates
+    /// a fresh arena (not registered with the pool, so straight Dispose
+    /// is the right release path) and disposes it on Dispose. Borrowed
+    /// handles (e.g. a Derive that shares the parent's substrate) are
+    /// not touched at Dispose.
     /// </remarks>
-    public Arena? VariableStore { get; init; }
+    public Arena VariableStore { get; }
 
     /// <summary>
-    /// Borrowed reference to the enclosing batch's variable scope chain.
-    /// Walked by the evaluator (innermost frame first) when resolving
-    /// variable reads. <see langword="null"/> for
-    /// top-level queries outside any procedural batch.
+    /// Procedural variable scope chain. Walked by the evaluator (innermost
+    /// frame first) when resolving an unqualified column reference as a
+    /// variable. Always non-null and starts with one root frame already
+    /// pushed — additional frames are pushed/popped by <c>BEGIN</c> /
+    /// <c>END</c>, lambda invocation, and procedural-loop scopes.
     /// </summary>
-    public VariableScope? VariableScope { get; init; }
+    public VariableScope VariableScope { get; }
 
     /// <summary>
-    /// Back-reference to the <see cref="BatchContext"/> this execution
-    /// context was derived from. Set by <c>SelectPlan</c> at execute /
-    /// analyze time so operators that drain nested plans
-    /// (e.g. <see cref="Operators.DmlReturningOperator"/>) can forward the
-    /// batch-required <see cref="StatementPlan.ExecuteAsync(CancellationToken, BatchContext)"/>
-    /// contract without reconstructing one from the borrowed substrate.
-    /// <see langword="null"/> on contexts not derived from a plan execute
-    /// (test fixtures, ad-hoc planner runs).
+    /// Number of procedure-call frames above this context. The top-level
+    /// batch is depth 0; the body of a <c>CALL proc.X(...)</c> runs at
+    /// depth 1; any <c>CALL proc.Y(...)</c> inside that body runs at
+    /// depth 2; and so on. The procedure executor rejects new calls once
+    /// the depth would exceed <see cref="BatchExecutor.MaxProcedureCallDepth"/>
+    /// so a self- or mutually recursive procedure fails fast with a clear
+    /// message instead of running until the call stack overflows. Defaults
+    /// to <c>0</c> for top-level queries and any context not opened by a
+    /// procedural call.
     /// </summary>
-    public BatchContext? BatchContext { get; }
+    public int ProcedureCallDepth { get; init; }
+
+    /// <summary>
+    /// Sink for <c>PRINT</c> diagnostic output. Always non-null —
+    /// omitting (or passing <see langword="null"/> for) the
+    /// <c>printSink</c> constructor parameter installs a no-op handler
+    /// that silently drops every PRINT. Callers invoke directly
+    /// (<c>context.PrintSink(text)</c>) with no null check. Fixed at
+    /// construction; wire the handler at the call site that builds the
+    /// context rather than mutating it afterwards.
+    /// </summary>
+    public PrintHandler PrintSink { get; }
 
     /// <summary>
     /// Sidecar registry borrowed from the active <see cref="Catalog"/>. Each
@@ -544,9 +641,13 @@ public sealed class ExecutionContext : IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposeCount, 1) != 0) return;
+        // Accountant first: it samples VariableStore.BytesWritten on a
+        // timer, so stopping it before releasing the arena's baseline
+        // avoids a probe racing a refcount drop.
         if (_ownsAccountant) Accountant.Dispose();
         if (_ownsStore) Store.ReleaseReference();
         if (_ownsVideoRegistry) VideoRegistry.Dispose();
+        if (_ownsVariableStore) VariableStore.Dispose();
 
         Disposed = true;
     }

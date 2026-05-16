@@ -13,7 +13,6 @@ public sealed partial class ExpressionEvaluator
         // scope before the row schema. Qualified `t.col` references skip
         // this — variables are never schema-qualified.
         if (column.TableName is null
-            && _variableScope is not null
             && _variableScope.TryGet(column.ColumnName, out ValueRef variableValue))
         {
             // The scope holds a ValueRef; the DataValue path needs the value
@@ -78,8 +77,7 @@ public sealed partial class ExpressionEvaluator
                 maybeStruct = rowValue;
                 foundStruct = true;
             }
-            else if (_variableScope is not null
-                && _variableScope.TryGet(column.TableName, out ValueRef varValue)
+            else if (_variableScope.TryGet(column.TableName, out ValueRef varValue)
                 && varValue.Kind == DataKind.Struct
                 && !varValue.IsNull)
             {
@@ -111,12 +109,13 @@ public sealed partial class ExpressionEvaluator
                 $"Column '{column.TableName}.{column.ColumnName}' not found in row.");
         }
 
-        // Unqualified miss: when running inside a procedural batch, mention
-        // both possibilities (a typo'd column or an undeclared variable).
+        // Unqualified miss: the name is neither a declared variable in
+        // scope nor a column in the current row. Variables and columns
+        // share the same lookup surface (PG `use_variable` semantics) so
+        // surfacing both possibilities steers the user past typos in
+        // either direction.
         throw new InvalidOperationException(
-            _variableScope is not null
-                ? $"Name '{column.ColumnName}' is not a declared variable in scope and is not a column in the current row."
-                : $"Column '{column.ColumnName}' not found in row.");
+            $"Name '{column.ColumnName}' is not a declared variable in scope and is not a column in the current row.");
     }
 
     /// <summary>

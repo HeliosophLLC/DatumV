@@ -1,5 +1,5 @@
 using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
+using DatumIngest.Execution;
 using DatumIngest.Indexing;
 using DatumIngest.Ingestion;
 using DatumIngest.Manifest;
@@ -112,7 +112,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         Pool pool = CreatePool();
         using TableCatalog catalog = CreateCatalog(pool);
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+        ExecutionException ex = Assert.Throws<ExecutionException>(
             () => catalog.Plan("REINDEX missing"));
         Assert.Contains("not registered", ex.Message);
     }
@@ -126,7 +126,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+        ExecutionException ex = Assert.Throws<ExecutionException>(
             () => catalog.Plan("REINDEX t"));
         Assert.Contains("does not support REINDEX", ex.Message);
     }
@@ -163,7 +163,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+        ExecutionException ex = Assert.Throws<ExecutionException>(
             () => catalog.Plan("ANALYZE t"));
         Assert.Contains("does not support ANALYZE", ex.Message);
     }

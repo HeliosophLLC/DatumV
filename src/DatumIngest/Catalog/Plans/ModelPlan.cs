@@ -100,7 +100,7 @@ internal sealed class ModelPlan : StatementPlan
 #pragma warning disable CS1998 // Async method lacks 'await' on non-CreateModel branches — leaf yields no rows.
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         if (Interlocked.Exchange(ref _executed, 1) != 0)
         {
@@ -114,7 +114,7 @@ internal sealed class ModelPlan : StatementPlan
         switch (_statement)
         {
             case CreateModelStatement create:
-                await _routineRegistrar.ApplyCreateModelAsync(create, _sourceText).ConfigureAwait(false);
+                await _routineRegistrar.ApplyCreateModelAsync(create, context, _sourceText).ConfigureAwait(false);
                 break;
             case DropModelStatement drop:
                 _routineRegistrar.ApplyDropModel(drop, _sourceText);

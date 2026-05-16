@@ -43,8 +43,7 @@ namespace DatumIngest.Catalog.Plans;
 /// </remarks>
 internal sealed class DmlPlan : StatementPlan
 {
-    private readonly StatementPlan? _sourcePlan;
-    private readonly Func<BatchContext, Task> _apply;
+    private readonly Func<Execution.ExecutionContext, Task> _apply;
     private int _executed;
 
     private DmlPlan(
@@ -52,10 +51,9 @@ internal sealed class DmlPlan : StatementPlan
         string operatorName,
         string details,
         StatementPlan? sourcePlan,
-        Func<BatchContext, Task> apply)
+        Func<Execution.ExecutionContext, Task> apply)
         : base(catalog)
     {
-        _sourcePlan = sourcePlan;
         _apply = apply;
 
         ExplainPlanNode tree = new()
@@ -149,7 +147,7 @@ internal sealed class DmlPlan : StatementPlan
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         if (Interlocked.Exchange(ref _executed, 1) != 0)
         {
@@ -164,7 +162,7 @@ internal sealed class DmlPlan : StatementPlan
         // DmlReturningPlan composer projects the captured rows. This plan
         // yields nothing on its own — RETURNING projection is no longer
         // chained through an inner-plan forwarding loop here.
-        await _apply(batchContext).ConfigureAwait(false);
+        await _apply(context).ConfigureAwait(false);
         yield break;
     }
 

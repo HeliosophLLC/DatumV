@@ -86,7 +86,7 @@ internal sealed class DistinctOperator : QueryOperator, IDisposable
         // that only pay off when the consumer needs few rows.
         if (context.RowLimit is not null)
         {
-            context = new ExecutionContext(context) { RowLimit = null };
+            context = context.WithRowLimit(null);
         }
 
         // perRowBytes: DataValue cells + HashSet slot overhead. Arena payloads

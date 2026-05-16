@@ -492,6 +492,12 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         int skipped = 0;
         List<string> warnings = new();
 
+        // Single context for the whole rehydration pass — every CREATE MODEL
+        // reapplied below shares the same ambient state (accountant, types,
+        // variable scope). Catalog rehydration has no caller context to
+        // inherit from, so this context is the root.
+        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(cancellationToken: ct);
+
         // Partition by row shape. Catalog-installed rows (CatalogId set)
         // resolve their source from the live manifest's installSql — edits
         // to the on-disk SQL file flow through on the next process start.
@@ -540,6 +546,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                 group.ToList(),
                 manifest,
                 warnings,
+                context,
                 ct,
                 onLoaded: () => loaded++,
                 onSkipped: () => skipped++).ConfigureAwait(false);
@@ -574,7 +581,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
 
             try
             {
-                await Routines.ApplyCreateModelAsync(create, entry.SourceText!, suppressSave: true)
+                await Routines.ApplyCreateModelAsync(create, context, entry.SourceText!, suppressSave: true)
                     .ConfigureAwait(false);
                 loaded++;
             }
@@ -607,6 +614,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         IReadOnlyList<PendingModelEntry> rows,
         IManifestStore? manifest,
         List<string> warnings,
+        DatumIngest.Execution.ExecutionContext context,
         CancellationToken ct,
         Action onLoaded,
         Action onSkipped)
@@ -711,7 +719,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                 }
                 try
                 {
-                    await Routines.ApplyCreateModelAsync(create, sourceText, suppressSave: true)
+                    await Routines.ApplyCreateModelAsync(create, context, sourceText, suppressSave: true)
                         .ConfigureAwait(false);
                     registered.Add(create.Name);
                 }
@@ -750,7 +758,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// from the catalog; pass overrides for memory budget, value store, type
     /// registry, accountant, video registry, or cancellation token as named
     /// arguments when entering a scope that already owns them (e.g. a
-    /// <see cref="BatchContext"/> borrowing its accountant across child
+    /// <see cref="DatumIngest.Execution.ExecutionContext"/> borrowing its accountant across child
     /// queries).
     /// </summary>
     public DatumIngest.Execution.ExecutionContext CreateExecutionContext(
@@ -761,9 +769,19 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         VideoRegistry? videoRegistry = null,
         VariableScope? variableScope = null,
         Arena? variableStore = null,
-        BatchContext? batchContext = null,
+        PrintHandler? printHandler = null,
         CancellationToken cancellationToken = default)
-        => new(this, memoryBudgetBytes, store, types, accountant, videoRegistry, variableScope, variableStore, batchContext, cancellationToken)
+        => new(
+            this,
+            memoryBudgetBytes,
+            store,
+            types,
+            accountant,
+            videoRegistry,
+            variableScope,
+            variableStore,
+            printHandler,
+            cancellationToken)
         {
             // Snapshot the catalog's tracer into the per-query context.
             // Setting / clearing TableCatalog.ModelTracer at runtime affects
@@ -1167,21 +1185,19 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
 
     /// <summary>
     /// Convenience "batch of one" executor: constructs a fresh
-    /// <see cref="BatchContext"/> against this catalog, starts profiling on
+    /// <see cref="ExecutionContext"/> against this catalog, starts profiling on
     /// its <see cref="MemoryAccountant"/>, and streams the plan's output.
     /// The context is disposed when the iterator finishes (success, break,
-    /// or throw). For procedural batches that share a context across many
-    /// plans, call <c>plan.ExecuteAsync(ct, batchContext)</c> directly with
-    /// the shared <see cref="BatchContext"/>.
+    /// or throw).
     /// </summary>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(
         StatementPlan plan,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        using BatchContext batchContext = new(this);
-        batchContext.Accountant.StartProfiling();
-        await foreach (RowBatch batch in plan.ExecuteAsync(cancellationToken, batchContext).ConfigureAwait(false))
+        using Execution.ExecutionContext context = CreateExecutionContext(cancellationToken: cancellationToken);
+        context.Accountant.StartProfiling();
+        await foreach (RowBatch batch in plan.ExecuteAsync(cancellationToken, context).ConfigureAwait(false))
         {
             yield return batch;
         }
@@ -1198,9 +1214,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        using BatchContext batchContext = new(this);
-        batchContext.Accountant.StartProfiling();
-        return await plan.AnalyzeAsync(cancellationToken, batchContext).ConfigureAwait(false);
+        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(cancellationToken: cancellationToken);
+        context.Accountant.StartProfiling();
+        return await plan.AnalyzeAsync(cancellationToken, context).ConfigureAwait(false);
     }
 
     private StatementPlan PlanCall(CallStatement call)
@@ -1301,10 +1317,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
 
     /// <summary>
     /// Picks the first DDL-capable schema on the current search_path,
-    /// or <see langword="null"/> when none qualifies. Used for the
-    /// existence pre-check inside <see cref="TableExecutor.CreateTableAsync"/> —
-    /// it has to know the prospective target schema before
-    /// <c>ResolveForCreate</c> is invoked.
+    /// or <see langword="null"/> when none qualifies.
     /// </summary>
     public string? FirstWritableSchema()
     {

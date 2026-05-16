@@ -31,8 +31,8 @@ internal static class InsertExecutor
         TableCatalog catalog,
         InsertStatement insert,
         StatementPlan? preplannedSource,
-        Plans.CapturedRowsSource? captureSink,
-        BatchContext batchContext)
+        CapturedRowsSource? captureSink,
+        Execution.ExecutionContext context)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(insert);
@@ -80,7 +80,7 @@ internal static class InsertExecutor
         {
             case InsertValuesSource values:
                 RowBatch? singleBatch = await ApplyValuesAsync(
-                    catalog, provider, targetSchema, insert.ColumnNames, values, captureRows, batchContext)
+                    catalog, provider, targetSchema, insert.ColumnNames, values, captureRows, context)
                     .ConfigureAwait(false);
                 captured = singleBatch is null ? null : [singleBatch];
                 break;
@@ -101,13 +101,13 @@ internal static class InsertExecutor
                 RowBatch? defaultBatch = await ApplyValuesAsync(
                     catalog, provider, targetSchema,
                     columnList: Array.Empty<string>(),
-                    synthesisedValues, captureRows, batchContext).ConfigureAwait(false);
+                    synthesisedValues, captureRows, context).ConfigureAwait(false);
                 captured = defaultBatch is null ? null : [defaultBatch];
                 break;
 
             case InsertQuerySource queryRow:
                 captured = await ApplySelectAsync(
-                    catalog, provider, targetSchema, insert.ColumnNames, queryRow, preplannedSource, captureRows, batchContext)
+                    catalog, provider, targetSchema, insert.ColumnNames, queryRow, preplannedSource, captureRows, context)
                     .ConfigureAwait(false);
                 break;
 
@@ -134,10 +134,8 @@ internal static class InsertExecutor
         IReadOnlyList<string>? columnList,
         InsertValuesSource values,
         bool captureRows,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
-        // See UpdateExecutor for the non-null fallback rationale.
-        MemoryAccountant accountant = batchContext.Accountant;
         if (values.Rows.Count == 0)
         {
             // Nothing to insert. Don't open a session — keeps the
@@ -184,7 +182,7 @@ internal static class InsertExecutor
         // per-row header. Arena payload bytes are file-backed mmap and don't
         // count. Released after session.WriteAsync flushes the batch.
         long valuesBatchBytes = (long)values.Rows.Count * (targetSchema.Columns.Count * DataValue.SizeBytes + 24L);
-        if (valuesBatchBytes > 0) accountant.NotifyMaterialized(valuesBatchBytes);
+        if (valuesBatchBytes > 0) context.Accountant.NotifyMaterialized(valuesBatchBytes);
         try
         {
 
@@ -193,8 +191,6 @@ internal static class InsertExecutor
             // columns (no source row). Same arena for source and target so array
             // payloads materialised by array(...) land directly in the batch's
             // arena and ConvertSourceValue can pass them through without copy.
-            using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(store: arena,
-                accountant: accountant);
             ExpressionEvaluator evaluator = context.CreateEvaluator();
             ColumnLookup emptyLookup = new(Array.Empty<string>());
             Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
@@ -273,7 +269,7 @@ internal static class InsertExecutor
                             sourceExpr = await PrefoldSubqueriesAsync(
                                 sourceExpr,
                                 catalog,
-                                batchContext,
+                                context,
                                 CancellationToken.None).ConfigureAwait(false);
 
                             ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
@@ -298,7 +294,7 @@ internal static class InsertExecutor
                 // catalog validation forbids computed-to-computed dependencies
                 // so a single pass is sufficient.
                 await EvaluateComputedColumnsAsync(
-                    catalog, targetSchema, lookup, plan, targetRow, arena).ConfigureAwait(false);
+                    catalog, targetSchema, lookup, plan, targetRow, arena, context).ConfigureAwait(false);
 
                 pkChecker?.EnsureUnique(targetRow, targetSchema.Columns, arena);
                 batch.Add(targetRow);
@@ -313,7 +309,7 @@ internal static class InsertExecutor
             // SELECT plan layer for SELECT-source INSERTs; for VALUES the capture
             // is the same batch we just notified about, so a single release is
             // correct).
-            if (valuesBatchBytes > 0) accountant.NotifyReleased(valuesBatchBytes);
+            if (valuesBatchBytes > 0) context.Accountant.NotifyReleased(valuesBatchBytes);
 
             // Capture the resolved batch for RETURNING. The arena holds the
             // string / blob payloads for non-inline DataValues, so the plan
@@ -358,18 +354,12 @@ internal static class InsertExecutor
         InsertQuerySource source,
         StatementPlan? preplannedSource,
         bool captureRows,
-        BatchContext batchContext)
+        DatumIngest.Execution.ExecutionContext context)
     {
-        // INSERT … SELECT streams batch-by-batch through the source plan and
-        // flushes each via session.WriteAsync — no held state of consequence to
-        // account. The source-side plan still routes through its own
-        // ExecutionContext and accounts there. The accountant here is only
-        // needed for the per-row DEFAULT-evaluation frames built below.
-        MemoryAccountant accountant = batchContext.Accountant;
         // Use the pre-planned source if DmlPlan.ForInsert supplied one
         // (the composed-EXPLAIN path); otherwise fall back to planning
         // here so the legacy InsertExecutor.ExecuteAsync(catalog, insert,
-        // batchContext) entry point still works.
+        // context) entry point still works.
         StatementPlan sourcePlan = preplannedSource ?? catalog.PlanQuery(source.Query);
         ColumnLookup targetLookup = BuildTargetLookup(targetSchema);
 
@@ -391,7 +381,7 @@ internal static class InsertExecutor
         try
         {
             await foreach (RowBatch sourceBatch in
-                sourcePlan.ExecuteAsync(CancellationToken.None, batchContext).ConfigureAwait(false))
+                sourcePlan.ExecuteAsync(CancellationToken.None, context).ConfigureAwait(false))
             {
                 if (sourceBatch.Count == 0) continue;
 
@@ -413,14 +403,11 @@ internal static class InsertExecutor
                 try
                 {
                 // Tableless evaluator + empty frame for the per-row DEFAULT
-                // evaluation path. Built per batch because targetArena is
-                // batch-scoped; reused across every row in the batch.
-                using DatumIngest.Execution.ExecutionContext defaultContext = catalog.CreateExecutionContext(store: targetArena,
-                    accountant: accountant);
-                ExpressionEvaluator defaultEvaluator = defaultContext.CreateEvaluator();
+                // evaluation path. Reused across every row in the batch.
+                ExpressionEvaluator defaultEvaluator = context.CreateEvaluator();
                 ColumnLookup emptyLookup = new(Array.Empty<string>());
                 Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
-                EvaluationFrame defaultFrame = new(emptyRow, targetArena, defaultContext);
+                EvaluationFrame defaultFrame = new(emptyRow, targetArena, context);
 
                 for (int r = 0; r < sourceBatch.Count; r++)
                 {
@@ -464,7 +451,7 @@ internal static class InsertExecutor
                     // Computed columns evaluate post-fill against the row
                     // (see EvaluateComputedColumnsAsync for the contract).
                     await EvaluateComputedColumnsAsync(
-                        catalog, targetSchema, targetLookup, plan, targetRow, targetArena).ConfigureAwait(false);
+                        catalog, targetSchema, targetLookup, plan, targetRow, targetArena, context).ConfigureAwait(false);
 
                     pkChecker?.EnsureUnique(targetRow, targetSchema.Columns, targetArena);
                     targetBatch.Add(targetRow);
@@ -1118,7 +1105,8 @@ internal static class InsertExecutor
         ColumnLookup targetLookup,
         ColumnPlan plan,
         DataValue[] targetRow,
-        Arena arena)
+        Arena arena,
+        Execution.ExecutionContext context)
     {
         bool any = false;
         for (int i = 0; i < plan.OmittedFills.Length; i++)
@@ -1135,7 +1123,6 @@ internal static class InsertExecutor
         // expression can read column references via ColumnReference.
         // Source and Target arenas are both the INSERT batch's arena —
         // computed values land directly in the batch.
-        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(store: arena);
         ExpressionEvaluator evaluator = context.CreateEvaluator();
         Row partialRow = new(targetLookup, targetRow);
         EvaluationFrame frame = new(partialRow, arena, context);
@@ -1431,18 +1418,18 @@ internal static class InsertExecutor
     private static async Task<Expression> PrefoldSubqueriesAsync(
         Expression expression,
         TableCatalog catalog, 
-        BatchContext batchContext,
+        DatumIngest.Execution.ExecutionContext context,
         CancellationToken ct)
     {
         switch (expression)
         {
             case SubqueryExpression subquery:
-                return await FoldOneSubqueryAsync(subquery, catalog, batchContext, ct).ConfigureAwait(false);
+                return await FoldOneSubqueryAsync(subquery, catalog, context, ct).ConfigureAwait(false);
 
             case BinaryExpression binary:
             {
-                Expression left = await PrefoldSubqueriesAsync(binary.Left, catalog, batchContext, ct).ConfigureAwait(false);
-                Expression right = await PrefoldSubqueriesAsync(binary.Right, catalog, batchContext, ct).ConfigureAwait(false);
+                Expression left = await PrefoldSubqueriesAsync(binary.Left, catalog, context, ct).ConfigureAwait(false);
+                Expression right = await PrefoldSubqueriesAsync(binary.Right, catalog, context, ct).ConfigureAwait(false);
                 return ReferenceEquals(left, binary.Left) && ReferenceEquals(right, binary.Right)
                     ? binary
                     : new BinaryExpression(left, binary.Operator, right);
@@ -1450,7 +1437,7 @@ internal static class InsertExecutor
 
             case UnaryExpression unary:
             {
-                Expression operand = await PrefoldSubqueriesAsync(unary.Operand, catalog, batchContext, ct).ConfigureAwait(false);
+                Expression operand = await PrefoldSubqueriesAsync(unary.Operand, catalog, context, ct).ConfigureAwait(false);
                 return ReferenceEquals(operand, unary.Operand)
                     ? unary
                     : new UnaryExpression(unary.Operator, operand);
@@ -1458,7 +1445,7 @@ internal static class InsertExecutor
 
             case CastExpression cast:
             {
-                Expression inner = await PrefoldSubqueriesAsync(cast.Expression, catalog, batchContext, ct).ConfigureAwait(false);
+                Expression inner = await PrefoldSubqueriesAsync(cast.Expression, catalog, context, ct).ConfigureAwait(false);
                 return ReferenceEquals(inner, cast.Expression)
                     ? cast
                     : new CastExpression(inner, cast.TargetType, cast.Span);
@@ -1469,7 +1456,7 @@ internal static class InsertExecutor
                 Expression[]? rewrittenArgs = null;
                 for (int i = 0; i < fn.Arguments.Count; i++)
                 {
-                    Expression rewritten = await PrefoldSubqueriesAsync(fn.Arguments[i], catalog, batchContext, ct).ConfigureAwait(false);
+                    Expression rewritten = await PrefoldSubqueriesAsync(fn.Arguments[i], catalog, context, ct).ConfigureAwait(false);
                     if (!ReferenceEquals(rewritten, fn.Arguments[i]))
                     {
                         rewrittenArgs ??= fn.Arguments.ToArray();
@@ -1494,7 +1481,7 @@ internal static class InsertExecutor
     private static async Task<Expression> FoldOneSubqueryAsync(
         SubqueryExpression subquery,
         TableCatalog catalog,
-        BatchContext batchContext,
+        DatumIngest.Execution.ExecutionContext context,
         CancellationToken ct)
     {
         StatementPlan innerPlan = catalog.PlanQuery(new SelectQueryExpression(subquery.Query));
@@ -1505,7 +1492,7 @@ internal static class InsertExecutor
         Arena foldArena = new();
         try
         {
-            await foreach (RowBatch batch in innerPlan.ExecuteAsync(ct, batchContext).ConfigureAwait(false))
+            await foreach (RowBatch batch in innerPlan.ExecuteAsync(ct, context).ConfigureAwait(false))
             {
                 for (int i = 0; i < batch.Count; i++)
                 {

@@ -15,15 +15,12 @@ namespace DatumIngest.Catalog.Plans;
 /// </summary>
 internal sealed class SelectPlan : StatementPlan
 {
-    private readonly FunctionRegistry _functions;
     private readonly QueryOperator _operator;
     private readonly Arena _hoistStore;
 
     public SelectPlan(QueryOperator op, TableCatalog catalog, FunctionRegistry functions)
         : base(catalog)
     {
-        _functions = functions;
-
         // Hoist once into a plan-scoped store so the resulting LiteralValueExpression
         // payloads outlive any individual ExecuteAsync / AnalyzeAsync call. Otherwise
         // the second run would dereference a recycled arena.
@@ -44,30 +41,19 @@ internal sealed class SelectPlan : StatementPlan
 
     public override async Task<ExplainPlanNode> AnalyzeAsync(
         CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
-        ArgumentNullException.ThrowIfNull(batchContext);
+        ArgumentNullException.ThrowIfNull(context);
         InstrumentedOperator instrumented = InstrumentedOperator.InstrumentTree(_operator);
 
-        // Plumb the hoist store as context.Store so any operator that needs to
-        // resolve a hoisted-literal DataValue's payload (offsets reference
-        // _hoistStore) can do so via the well-known ExecutionContext.Store handle.
-        // Without this, hoisted string literals >16 bytes are stranded in
-        // _hoistStore and unreachable to operators downstream of the planner.
-        // The factory snapshots the catalog's ModelTracer into the context.
-        // Borrow the batch's accountant + scope / store / type registry so
-        // residency accounting rolls up uniformly regardless of whether the
-        // analyze is standalone or nested inside a procedural batch.
-        using DatumIngest.Execution.ExecutionContext context = Catalog.CreateExecutionContext(
-            store: _hoistStore,
-            types: batchContext.Types,
-            accountant: batchContext.Accountant,
-            variableScope: batchContext.VariableScope,
-            variableStore: batchContext.VariableStore,
-            batchContext: batchContext,
-            cancellationToken: cancellationToken);
+        // Override Store with the hoist store so operators can resolve
+        // hoisted-literal DataValue payloads (offsets reference _hoistStore)
+        // via the well-known ExecutionContext.Store handle. Everything else
+        // (types, accountant, variable substrate, video registry, model
+        // tracer) is borrowed from the caller's context.
+        using DatumIngest.Execution.ExecutionContext planContext = context.Derive(store: _hoistStore);
 
-        await foreach (RowBatch batch in instrumented.ExecuteAsync(context).WithCancellation(cancellationToken))
+        await foreach (RowBatch batch in instrumented.ExecuteAsync(planContext).WithCancellation(cancellationToken))
         {
             Catalog.Pool.ReturnRowBatch(batch);
         }
@@ -79,26 +65,16 @@ internal sealed class SelectPlan : StatementPlan
 
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        DatumIngest.Execution.ExecutionContext context)
     {
-        // Plumb the hoist store as context.Store so any operator that needs to
-        // resolve a hoisted-literal DataValue's payload (offsets reference
-        // _hoistStore) can do so via the well-known ExecutionContext.Store handle.
-        // Without this, hoisted string literals >16 bytes are stranded in
-        // _hoistStore and unreachable to operators downstream of the planner.
-        // Factory snapshots the catalog's ModelTracer. Procedural variable
-        // substrate (VariableScope / VariableStore) and the shared accountant
-        // are borrowed from the batch context — the batch owns both
-        // lifecycles and is responsible for starting profiling on the
+        // Override Store with the hoist store so operators can resolve
+        // hoisted-literal DataValue payloads (offsets reference _hoistStore)
+        // via the well-known ExecutionContext.Store handle. Everything else
+        // (types, accountant, variable substrate, video registry, model
+        // tracer) is borrowed from the caller's context — the caller owns
+        // both lifecycles and is responsible for starting profiling on the
         // accountant before any plan runs.
-        using DatumIngest.Execution.ExecutionContext context = Catalog.CreateExecutionContext(
-            store: _hoistStore,
-            types: batchContext.Types,
-            accountant: batchContext.Accountant,
-            variableScope: batchContext.VariableScope,
-            variableStore: batchContext.VariableStore,
-            batchContext: batchContext,
-            cancellationToken: cancellationToken);
+        using DatumIngest.Execution.ExecutionContext planContext = context.Derive(store: _hoistStore);
 
         // Auto-return the previous batch when the consumer asks for the next one.
         // Consumers must finish using the current batch before iterating; in practice
@@ -107,7 +83,7 @@ internal sealed class SelectPlan : StatementPlan
         RowBatch? previous = null;
         try
         {
-            await foreach (RowBatch batch in _operator.ExecuteAsync(context).WithCancellation(cancellationToken))
+            await foreach (RowBatch batch in _operator.ExecuteAsync(planContext).WithCancellation(cancellationToken))
             {
                 if (previous is not null)
                 {

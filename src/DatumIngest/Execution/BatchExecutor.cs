@@ -100,7 +100,7 @@ public sealed record CellMemorySampleBatchEvent(
 /// <summary>
 /// Executes a parsed procedural batch — a list of <see cref="Statement"/>s
 /// — against a <see cref="TableCatalog"/>, threading a single
-/// <see cref="BatchContext"/> through every child statement so procedural
+/// <see cref="ExecutionContext"/> through every child statement so procedural
 /// variables and the variable-payload arena live for the duration of the
 /// batch.
 /// </summary>
@@ -139,7 +139,7 @@ public sealed class BatchExecutor
     /// <summary>
     /// Creates an executor bound to <paramref name="catalog"/>. Each
     /// <c>ExecuteAsync</c> call constructs a fresh
-    /// <see cref="BatchContext"/>; the executor itself is stateless and
+    /// <see cref="ExecutionContext"/>; the executor itself is stateless and
     /// safe to reuse across calls.
     /// </summary>
     public BatchExecutor(TableCatalog catalog)
@@ -180,13 +180,13 @@ public sealed class BatchExecutor
     /// build) show up in the chart even before they yield rows.
     /// </summary>
     private static ValueTask EmitMemorySampleAsync(
-        BatchContext batchContext,
+        ExecutionContext context,
         Pool pool,
         string cellId,
         Stopwatch stopwatch,
         Func<BatchEvent, ValueTask> onEvent)
     {
-        MemoryAccountant accountant = batchContext.Accountant;
+        MemoryAccountant accountant = context.Accountant;
         long? vramUsed = null;
         long? vramTotal = null;
         if (VramProbe.TryGetUsage(out long usedBytes, out long totalBytes))
@@ -207,7 +207,7 @@ public sealed class BatchExecutor
 
     /// <summary>
     /// Runs <paramref name="statements"/> in order, threading a single
-    /// <see cref="BatchContext"/> through every child query so
+    /// <see cref="ExecutionContext"/> through every child query so
     /// <c>@var</c> references in any statement resolve to bindings made
     /// by earlier statements. Returns a <see cref="BatchResult"/>
     /// snapshotting the final variable bindings (so tests and host code
@@ -230,18 +230,18 @@ public sealed class BatchExecutor
         IReadOnlyList<(Statement Statement, string? SourceText)> statements,
         CancellationToken cancellationToken)
     {
-        using BatchContext batchContext = new(_catalog);
+        using ExecutionContext context = new(_catalog);
         // 1Hz residency sampling for the whole batch. Each child query
         // borrows this accountant so the timer ticks during every query
         // inside the batch.
-        batchContext.Accountant.StartProfiling();
-        await RunInternalAsync(statements, batchContext, NoOpEventHandler, cancellationToken)
+        context.Accountant.StartProfiling();
+        await RunInternalAsync(statements, context, NoOpEventHandler, cancellationToken)
             .ConfigureAwait(false);
 
         // Snapshot bindings before the batch context disposes — values
         // are read against VariableStore and materialised into managed
         // form, so the result remains valid after the arena is released.
-        Dictionary<string, object?> snapshot = SnapshotRootBindings(batchContext);
+        Dictionary<string, object?> snapshot = SnapshotRootBindings(context);
         return new BatchResult(snapshot);
     }
 
@@ -271,7 +271,7 @@ public sealed class BatchExecutor
     /// <strong>Row batch lifetime.</strong> A <see cref="CellRowBatchEvent"/>
     /// carries a <see cref="RowBatch"/> that is live for the duration of
     /// the <paramref name="onEvent"/> invocation. The auto-return
-    /// contract from <see cref="StatementPlan.ExecuteAsync(CancellationToken, BatchContext)"/>
+    /// contract from <see cref="StatementPlan.ExecuteAsync(CancellationToken, ExecutionContext)"/>
     /// applies — the batch is recycled when the next event fires.
     /// </para>
     /// </remarks>
@@ -298,9 +298,9 @@ public sealed class BatchExecutor
         // streaming UI's pressure indicator always has a denominator and
         // a single runaway statement can't OOM the host. Callers that
         // truly need unbounded behaviour pass long.MaxValue explicitly.
-        using BatchContext batchContext = new(_catalog, memoryBudgetBytes ?? DefaultMemoryBudgetBytes);
+        using ExecutionContext context = new(_catalog, memoryBudgetBytes ?? DefaultMemoryBudgetBytes);
         // 1Hz residency sampling for the whole batch. See ExecuteAsync for the rationale.
-        batchContext.Accountant.StartProfiling();
+        context.Accountant.StartProfiling();
 
         // Sidecar 1Hz memory-sample emitter. The row-streaming path emits
         // throttled samples between batch yields, but a long-running operator
@@ -364,7 +364,7 @@ public sealed class BatchExecutor
                     {
                         if (currentCellId is string cellId && currentCellStopwatch is Stopwatch sw)
                         {
-                            MemoryAccountant accountant = batchContext.Accountant;
+                            MemoryAccountant accountant = context.Accountant;
                             // Total arena bytes = sum across every Arena
                             // currently rented from the pool. This captures
                             // operator-internal arenas (OrderBy bufferArena,
@@ -407,7 +407,7 @@ public sealed class BatchExecutor
 
         try
         {
-            await RunInternalAsync(statements, batchContext, SerializedOnEvent, cancellationToken)
+            await RunInternalAsync(statements, context, SerializedOnEvent, cancellationToken)
                 .ConfigureAwait(false);
         }
         finally
@@ -424,7 +424,7 @@ public sealed class BatchExecutor
 
     private async Task RunInternalAsync(
         IReadOnlyList<(Statement Statement, string? SourceText)> statements,
-        BatchContext batchContext,
+        ExecutionContext context,
         Func<BatchEvent, ValueTask> onEvent,
         CancellationToken ct)
     {
@@ -448,7 +448,7 @@ public sealed class BatchExecutor
             foreach ((Statement stmt, string? sourceText) in statements)
             {
                 ct.ThrowIfCancellationRequested();
-                await ExecuteOneEventfulAsync(stmt, sourceText, batchContext, onEvent, NextCellId, currentCellId: null, ct)
+                await ExecuteOneEventfulAsync(stmt, sourceText, context, onEvent, NextCellId, currentCellId: null, ct)
                     .ConfigureAwait(false);
             }
         }
@@ -495,17 +495,17 @@ public sealed class BatchExecutor
     /// </remarks>
     private Task ExecuteOneEventfulAsync(
         Statement stmt,
-        BatchContext batchContext,
+        ExecutionContext context,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
         string? currentCellId,
         CancellationToken ct)
-        => ExecuteOneEventfulAsync(stmt, sourceText: null, batchContext, onEvent, nextCellId, currentCellId, ct);
+        => ExecuteOneEventfulAsync(stmt, sourceText: null, context, onEvent, nextCellId, currentCellId, ct);
 
     private async Task ExecuteOneEventfulAsync(
         Statement stmt,
         string? sourceText,
-        BatchContext batchContext,
+        ExecutionContext context,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
         string? currentCellId,
@@ -522,7 +522,7 @@ public sealed class BatchExecutor
             // Cell-entry memory sample (immediate, bypasses the sidecar's 1s
             // wait) — gives the UI a baseline so the sparkline doesn't start
             // blank during the first second of a cell.
-            await EmitMemorySampleAsync(batchContext, _catalog.Pool, cellId, sw, onEvent).ConfigureAwait(false);
+            await EmitMemorySampleAsync(context, _catalog.Pool, cellId, sw, onEvent).ConfigureAwait(false);
         }
         else
         {
@@ -538,7 +538,7 @@ public sealed class BatchExecutor
                 {
                     if (TryGetAssignmentForm(q, out IReadOnlyList<string?>? assignTargets))
                     {
-                        await ExecuteAssignmentSelectAsync(q, assignTargets!, batchContext, ct)
+                        await ExecuteAssignmentSelectAsync(q, assignTargets!, context, ct)
                             .ConfigureAwait(false);
                         break;
                     }
@@ -554,7 +554,7 @@ public sealed class BatchExecutor
                     if (TryGetProcedureCall(call, out ProcedureDescriptor? procDescriptor, out IReadOnlyList<Expression>? args))
                     {
                         await ExecuteProcedureCallAsync(
-                            procDescriptor, args, batchContext, onEvent, nextCellId, cellId, ct)
+                            procDescriptor, args, context, onEvent, nextCellId, cellId, ct)
                             .ConfigureAwait(false);
                         break;
                     }
@@ -562,34 +562,34 @@ public sealed class BatchExecutor
                 }
                 case BlockStatement block:
                 {
-                    batchContext.VariableScope.PushFrame();
+                    context.VariableScope.PushFrame();
                     try
                     {
                         foreach (Statement child in block.Statements)
                         {
                             ct.ThrowIfCancellationRequested();
-                            await ExecuteOneEventfulAsync(child, batchContext, onEvent, nextCellId, cellId, ct)
+                            await ExecuteOneEventfulAsync(child, context, onEvent, nextCellId, cellId, ct)
                                 .ConfigureAwait(false);
                         }
                     }
                     finally
                     {
-                        batchContext.VariableScope.PopFrame();
+                        context.VariableScope.PopFrame();
                     }
                     break;
                 }
                 case IfStatement ifs:
                 {
-                    bool predicate = await EvaluatePredicateAsync(ifs.Predicate, batchContext, ct)
+                    bool predicate = await EvaluatePredicateAsync(ifs.Predicate, context, ct)
                         .ConfigureAwait(false);
                     if (predicate)
                     {
-                        await ExecuteOneEventfulAsync(ifs.Then, batchContext, onEvent, nextCellId, cellId, ct)
+                        await ExecuteOneEventfulAsync(ifs.Then, context, onEvent, nextCellId, cellId, ct)
                             .ConfigureAwait(false);
                     }
                     else if (ifs.Else is not null)
                     {
-                        await ExecuteOneEventfulAsync(ifs.Else, batchContext, onEvent, nextCellId, cellId, ct)
+                        await ExecuteOneEventfulAsync(ifs.Else, context, onEvent, nextCellId, cellId, ct)
                             .ConfigureAwait(false);
                     }
                     break;
@@ -607,12 +607,12 @@ public sealed class BatchExecutor
                             throw new InvalidOperationException(
                                 $"WHILE loop exceeded {IterationCap} iterations — likely a missing termination condition.");
                         }
-                        bool keepGoing = await EvaluatePredicateAsync(loop.Predicate, batchContext, ct)
+                        bool keepGoing = await EvaluatePredicateAsync(loop.Predicate, context, ct)
                             .ConfigureAwait(false);
                         if (!keepGoing) break;
                         try
                         {
-                            await ExecuteOneEventfulAsync(loop.Body, batchContext, onEvent, nextCellId, cellId, ct)
+                            await ExecuteOneEventfulAsync(loop.Body, context, onEvent, nextCellId, cellId, ct)
                                 .ConfigureAwait(false);
                         }
                         catch (LoopContinueSignal)
@@ -628,18 +628,18 @@ public sealed class BatchExecutor
                     break;
                 }
                 case ForCounterStatement forC:
-                    await ExecuteForCounterAsync(forC, batchContext, onEvent, nextCellId, cellId, ct)
+                    await ExecuteForCounterAsync(forC, context, onEvent, nextCellId, cellId, ct)
                         .ConfigureAwait(false);
                     break;
                 case ForInStatement forIn:
-                    await ExecuteForInAsync(forIn, batchContext, onEvent, nextCellId, cellId, ct)
+                    await ExecuteForInAsync(forIn, context, onEvent, nextCellId, cellId, ct)
                         .ConfigureAwait(false);
                     break;
                 case DeclareStatement decl:
-                    await ExecuteDeclareAsync(decl, batchContext, ct).ConfigureAwait(false);
+                    await ExecuteDeclareAsync(decl, context, ct).ConfigureAwait(false);
                     break;
                 case SetStatement set:
-                    await ExecuteSetAsync(set, batchContext, ct).ConfigureAwait(false);
+                    await ExecuteSetAsync(set, context, ct).ConfigureAwait(false);
                     break;
                 case BreakStatement:
                     throw LoopBreakSignal.Instance;
@@ -647,30 +647,30 @@ public sealed class BatchExecutor
                     throw LoopContinueSignal.Instance;
                 case PrintStatement print:
                 {
-                    DataValue value = await EvaluateScalarAsync(print.Value, batchContext, ct)
+                    DataValue value = await EvaluateScalarAsync(print.Value, context, ct)
                         .ConfigureAwait(false);
-                    string? text = RenderForPrint(value, batchContext.VariableStore);
+                    string? text = RenderForPrint(value, context.VariableStore);
                     await onEvent(new CellPrintBatchEvent(cellId, text)).ConfigureAwait(false);
                     break;
                 }
                 case TryStatement tryStmt:
                 {
-                    await ExecuteTryAsync(tryStmt, batchContext, onEvent, nextCellId, cellId, ct)
+                    await ExecuteTryAsync(tryStmt, context, onEvent, nextCellId, cellId, ct)
                         .ConfigureAwait(false);
                     break;
                 }
                 case AssertStatement assert:
                 {
-                    bool holds = await EvaluatePredicateAsync(assert.Predicate, batchContext, ct)
+                    bool holds = await EvaluatePredicateAsync(assert.Predicate, context, ct)
                         .ConfigureAwait(false);
                     if (!holds)
                     {
                         string message;
                         if (assert.Message is not null)
                         {
-                            DataValue m = await EvaluateScalarAsync(assert.Message, batchContext, ct)
+                            DataValue m = await EvaluateScalarAsync(assert.Message, context, ct)
                                 .ConfigureAwait(false);
-                            message = RenderForPrint(m, batchContext.VariableStore)
+                            message = RenderForPrint(m, context.VariableStore)
                                 ?? "Assertion failed.";
                         }
                         else
@@ -683,9 +683,9 @@ public sealed class BatchExecutor
                 }
                 case RaiseStatement raise:
                 {
-                    DataValue messageValue = await EvaluateScalarAsync(raise.Message, batchContext, ct)
+                    DataValue messageValue = await EvaluateScalarAsync(raise.Message, context, ct)
                         .ConfigureAwait(false);
-                    string message = RenderForPrint(messageValue, batchContext.VariableStore)
+                    string message = RenderForPrint(messageValue, context.VariableStore)
                         ?? "RAISE: <null>";
                     throw new InvalidOperationException(message);
                 }
@@ -710,7 +710,7 @@ public sealed class BatchExecutor
                     {
                         StatementPlan plan = await _catalog.PlanAsync(stmt, sourceText).ConfigureAwait(false);
                         await foreach (RowBatch batch in plan
-                            .ExecuteAsync(ct, batchContext)
+                            .ExecuteAsync(ct, context)
                             .ConfigureAwait(false))
                         {
                             await onEvent(new CellRowBatchEvent(cellId, batch)).ConfigureAwait(false);
@@ -727,7 +727,7 @@ public sealed class BatchExecutor
                 // Cell-end memory sample (always emitted, bypasses throttle) — gives
                 // the UI a frozen final value so post-mortem inspection shows the
                 // last-known state.
-                await EmitMemorySampleAsync(batchContext, _catalog.Pool, cellId, sw, onEvent).ConfigureAwait(false);
+                await EmitMemorySampleAsync(context, _catalog.Pool, cellId, sw, onEvent).ConfigureAwait(false);
                 await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
                     .ConfigureAwait(false);
             }
@@ -857,7 +857,7 @@ public sealed class BatchExecutor
         => ProceduralEvaluator.RenderForPrint(value, store);
 
     private async Task ExecuteDeclareAsync(
-        DeclareStatement decl, BatchContext batchContext, CancellationToken ct)
+        DeclareStatement decl, ExecutionContext context, CancellationToken ct)
     {
         ValueRef bound;
         if (decl.Initializer is not null)
@@ -874,8 +874,8 @@ public sealed class BatchExecutor
             Expression effective = decl.TypeName is not null
                 ? new CastExpression(decl.Initializer, decl.TypeName, decl.Span)
                 : decl.Initializer;
-            DataValue stable = await EvaluateScalarAsync(effective, batchContext, ct).ConfigureAwait(false);
-            bound = LiftBoundaryValue(stable, batchContext);
+            DataValue stable = await EvaluateScalarAsync(effective, context, ct).ConfigureAwait(false);
+            bound = LiftBoundaryValue(stable, context);
         }
         else
         {
@@ -894,25 +894,25 @@ public sealed class BatchExecutor
             bound = isArray ? ValueRef.NullArray(kind) : ValueRef.Null(kind);
         }
 
-        batchContext.VariableScope.Declare(decl.VariableName, bound);
+        context.VariableScope.Declare(decl.VariableName, bound);
     }
 
     private async Task ExecuteSetAsync(
-        SetStatement set, BatchContext batchContext, CancellationToken ct)
+        SetStatement set, ExecutionContext context, CancellationToken ct)
     {
-        DataValue stable = await EvaluateScalarAsync(set.Value, batchContext, ct).ConfigureAwait(false);
-        batchContext.VariableScope.Set(set.VariableName, LiftBoundaryValue(stable, batchContext));
+        DataValue stable = await EvaluateScalarAsync(set.Value, context, ct).ConfigureAwait(false);
+        context.VariableScope.Set(set.VariableName, LiftBoundaryValue(stable, context));
     }
 
     /// <summary>
     /// Lifts a <see cref="DataValue"/> produced by <see cref="EvaluateScalarAsync"/>
-    /// (anchored in <see cref="BatchContext.VariableStore"/>) into a
+    /// (anchored in <see cref="ExecutionContext.VariableStore"/>) into a
     /// <see cref="ValueRef"/> for storage in <see cref="VariableScope"/>.
     /// Byte payloads materialise into managed memory so the binding survives
     /// any future arena recycle; inline scalars pass through unchanged.
     /// </summary>
-    private static ValueRef LiftBoundaryValue(DataValue value, BatchContext batchContext)
-        => ProceduralEvaluator.LiftBoundaryValue(value, batchContext);
+    private static ValueRef LiftBoundaryValue(DataValue value, ExecutionContext context)
+        => ProceduralEvaluator.LiftBoundaryValue(value, context);
 
     /// <summary>
     /// Returns the minimum required argument count for a procedure call:
@@ -960,7 +960,7 @@ public sealed class BatchExecutor
 
     /// <summary>
     /// Invokes a registered procedure: evaluates each argument in the
-    /// caller's scope, opens a fresh <see cref="BatchContext"/> for the
+    /// caller's scope, opens a fresh <see cref="ExecutionContext"/> for the
     /// procedure body, declares each parameter from the corresponding
     /// argument value (with <c>IS NOT NULL</c> enforcement when declared),
     /// then runs the body's statements through the same eventful path
@@ -970,7 +970,7 @@ public sealed class BatchExecutor
     /// body had been inlined.
     /// </summary>
     /// <remarks>
-    /// Each invocation gets its own <see cref="BatchContext"/> with a
+    /// Each invocation gets its own <see cref="ExecutionContext"/> with a
     /// fresh <see cref="VariableScope"/> and procedure-lifetime arena —
     /// procedures don't share variable state with the caller. Arguments
     /// are evaluated in the CALLER's scope (so they can reference the
@@ -980,7 +980,7 @@ public sealed class BatchExecutor
     private async Task ExecuteProcedureCallAsync(
         ProcedureDescriptor? descriptor,
         IReadOnlyList<Expression>? arguments,
-        BatchContext callerContext,
+        ExecutionContext callerContext,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
         string? currentCellId,
@@ -1044,12 +1044,12 @@ public sealed class BatchExecutor
             argValues[i] = v;
         }
 
-        // New BatchContext for the procedure's lifetime. Disposed at end —
+        // New ExecutionContext for the procedure's lifetime. Disposed at end —
         // the procedure-lifetime arena releases and any variable bindings
         // become unreachable, matching how a top-level procedural batch
         // tears down. Carries the bumped call depth so any further
         // CALLs the body issues see the running total.
-        using BatchContext procContext = new(_catalog) { ProcedureCallDepth = newDepth };
+        using ExecutionContext procContext = new(_catalog) { ProcedureCallDepth = newDepth };
         for (int i = 0; i < descriptor.Parameters.Count; i++)
         {
             // Stabilise from the caller's variable store into the
@@ -1154,7 +1154,7 @@ public sealed class BatchExecutor
     /// column is <c>@var = expression</c>. The plan runs as a normal
     /// projection (the assignment expressions are the projected columns);
     /// each row's values are stabilised into
-    /// <see cref="BatchContext.VariableStore"/> and pushed through
+    /// <see cref="ExecutionContext.VariableStore"/> and pushed through
     /// <see cref="VariableScope.Set"/>. Multiple matching rows update the
     /// variables in iteration order — the last row's values are what
     /// remain, matching T-SQL semantics. Zero rows leave the variables
@@ -1165,20 +1165,13 @@ public sealed class BatchExecutor
     private async Task ExecuteAssignmentSelectAsync(
         QueryStatement statement,
         IReadOnlyList<string?> assignTargets,
-        BatchContext batchContext,
+        ExecutionContext context,
         CancellationToken ct)
     {
         StatementPlan plan = await _catalog.PlanAsync(statement, sourceText: null).ConfigureAwait(false);
 
-        // Reuse one ExecutionContext across every row of every batch — the
-        // ambient state (registries, accountant, types) is stable for the
-        // duration of this assignment SELECT.
-        using ExecutionContext context = _catalog.CreateExecutionContext(store: batchContext.VariableStore,
-            types: batchContext.Types,
-            accountant: batchContext.Accountant, cancellationToken: ct);
-
         await foreach (RowBatch batch in plan
-            .ExecuteAsync(ct, batchContext)
+            .ExecuteAsync(ct, context)
             .ConfigureAwait(false))
         {
             for (int rowIdx = 0; rowIdx < batch.Count; rowIdx++)
@@ -1192,9 +1185,9 @@ public sealed class BatchExecutor
                     // Lift directly from the producing batch's arena into a
                     // managed-payload ValueRef so the binding survives the
                     // batch's recycle without going through VariableStore.
-                    EvaluationFrame batchFrame = new(row, batch.Arena, batchContext.VariableStore, context);
+                    EvaluationFrame batchFrame = new(row, batch.Arena, context.VariableStore, context);
                     ValueRef bound = ExpressionEvaluator.ToValueRef(row[colIdx], batchFrame);
-                    batchContext.VariableScope.Set(variableName, bound);
+                    context.VariableScope.Set(variableName, bound);
                 }
             }
         }
@@ -1232,13 +1225,13 @@ public sealed class BatchExecutor
     /// <strong>Error scope.</strong> A fresh frame is pushed before
     /// <c>@&lt;ErrorVariableName&gt;</c> is declared, so the binding is visible
     /// only inside the catch body and disappears when the frame pops. The
-    /// message string is stabilised into <see cref="BatchContext.VariableStore"/>
+    /// message string is stabilised into <see cref="ExecutionContext.VariableStore"/>
     /// so it remains valid across any inner query / arena recycle.
     /// </para>
     /// </remarks>
     private async Task ExecuteTryAsync(
         TryStatement tryStmt,
-        BatchContext batchContext,
+        ExecutionContext context,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
         string? currentCellId,
@@ -1250,7 +1243,7 @@ public sealed class BatchExecutor
         {
             try
             {
-                await ExecuteOneEventfulAsync(tryStmt.TryBody, batchContext, onEvent, nextCellId, currentCellId, ct)
+                await ExecuteOneEventfulAsync(tryStmt.TryBody, context, onEvent, nextCellId, currentCellId, ct)
                     .ConfigureAwait(false);
             }
             catch (LoopBreakSignal) { throw; }
@@ -1261,16 +1254,16 @@ public sealed class BatchExecutor
                 // Bind the exception message into a fresh frame so the catch
                 // body can reference @<ErrorVariableName>; pop on exit so the
                 // binding doesn't leak to the surrounding scope or to FINALLY.
-                batchContext.VariableScope.PushFrame();
+                context.VariableScope.PushFrame();
                 try
                 {
                     // Managed-string payload — survives any future arena
                     // recycle without anchoring in VariableStore.
                     ValueRef messageValue = ValueRef.FromString(ex.Message ?? string.Empty);
-                    batchContext.VariableScope.Declare(tryStmt.ErrorVariableName, messageValue);
+                    context.VariableScope.Declare(tryStmt.ErrorVariableName, messageValue);
                     try
                     {
-                        await ExecuteOneEventfulAsync(tryStmt.CatchBody, batchContext, onEvent, nextCellId, currentCellId, ct)
+                        await ExecuteOneEventfulAsync(tryStmt.CatchBody, context, onEvent, nextCellId, currentCellId, ct)
                             .ConfigureAwait(false);
                     }
                     catch (LoopBreakSignal) { throw; }
@@ -1286,7 +1279,7 @@ public sealed class BatchExecutor
                 }
                 finally
                 {
-                    batchContext.VariableScope.PopFrame();
+                    context.VariableScope.PopFrame();
                 }
             }
         }
@@ -1298,7 +1291,7 @@ public sealed class BatchExecutor
             // out of this method is whichever throw won.
             if (tryStmt.FinallyBody is not null)
             {
-                await ExecuteOneEventfulAsync(tryStmt.FinallyBody, batchContext, onEvent, nextCellId, currentCellId, ct)
+                await ExecuteOneEventfulAsync(tryStmt.FinallyBody, context, onEvent, nextCellId, currentCellId, ct)
                     .ConfigureAwait(false);
             }
         }
@@ -1311,18 +1304,18 @@ public sealed class BatchExecutor
 
     private async Task ExecuteForCounterAsync(
         ForCounterStatement forC,
-        BatchContext batchContext,
+        ExecutionContext context,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
         string? currentCellId,
         CancellationToken ct)
     {
-        DataValue startVal = await EvaluateScalarAsync(forC.Start, batchContext, ct).ConfigureAwait(false);
-        DataValue endVal = await EvaluateScalarAsync(forC.End, batchContext, ct).ConfigureAwait(false);
+        DataValue startVal = await EvaluateScalarAsync(forC.Start, context, ct).ConfigureAwait(false);
+        DataValue endVal = await EvaluateScalarAsync(forC.End, context, ct).ConfigureAwait(false);
         long start = ToInt64(startVal, $"FOR @{forC.VariableName} start");
         long end = ToInt64(endVal, $"FOR @{forC.VariableName} end");
 
-        batchContext.VariableScope.PushFrame();
+        context.VariableScope.PushFrame();
         try
         {
             if (start > end) return;
@@ -1332,15 +1325,15 @@ public sealed class BatchExecutor
                 ValueRef iValue = ValueRef.FromInt64(i);
                 if (i == start)
                 {
-                    batchContext.VariableScope.Declare(forC.VariableName, iValue);
+                    context.VariableScope.Declare(forC.VariableName, iValue);
                 }
                 else
                 {
-                    batchContext.VariableScope.Set(forC.VariableName, iValue);
+                    context.VariableScope.Set(forC.VariableName, iValue);
                 }
                 try
                 {
-                    await ExecuteOneEventfulAsync(forC.Body, batchContext, onEvent, nextCellId, currentCellId, ct)
+                    await ExecuteOneEventfulAsync(forC.Body, context, onEvent, nextCellId, currentCellId, ct)
                         .ConfigureAwait(false);
                 }
                 catch (LoopContinueSignal)
@@ -1355,7 +1348,7 @@ public sealed class BatchExecutor
         }
         finally
         {
-            batchContext.VariableScope.PopFrame();
+            context.VariableScope.PopFrame();
         }
     }
 
@@ -1371,7 +1364,7 @@ public sealed class BatchExecutor
     /// <para>
     /// <strong>Lifetime.</strong> Each row's struct fields are stabilised
     /// from the producing batch's arena into
-    /// <see cref="BatchContext.VariableStore"/> before the binding
+    /// <see cref="ExecutionContext.VariableStore"/> before the binding
     /// happens, so the binding remains valid even after the source batch
     /// recycles. A fresh frame is pushed and popped per iteration so the
     /// loop variable is re-declared cleanly each pass — this also keeps
@@ -1388,7 +1381,7 @@ public sealed class BatchExecutor
     /// </remarks>
     private async Task ExecuteForInAsync(
         ForInStatement forIn,
-        BatchContext batchContext,
+        ExecutionContext context,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
         string? currentCellId,
@@ -1401,14 +1394,8 @@ public sealed class BatchExecutor
         ushort rowTypeId = 0;
         bool broke = false;
 
-        // Reuse one ExecutionContext across the loop — ambient state is
-        // stable for the duration of the FOR-IN.
-        using ExecutionContext context = _catalog.CreateExecutionContext(store: batchContext.VariableStore,
-            types: batchContext.Types,
-            accountant: batchContext.Accountant, cancellationToken: ct);
-
         await foreach (RowBatch batch in plan
-            .ExecuteAsync(ct, batchContext)
+            .ExecuteAsync(ct, context)
             .ConfigureAwait(false))
         {
             if (broke) break;
@@ -1427,7 +1414,7 @@ public sealed class BatchExecutor
                 // ValueRef.FromStruct — the resulting binding has no arena
                 // dependency and survives the batch recycle without
                 // touching VariableStore.
-                EvaluationFrame batchFrame = new(row, batch.Arena, batchContext.VariableStore, context);
+                EvaluationFrame batchFrame = new(row, batch.Arena, context.VariableStore, context);
                 ValueRef[] fieldRefs = new ValueRef[colCount];
                 for (int j = 0; j < colCount; j++)
                 {
@@ -1442,21 +1429,21 @@ public sealed class BatchExecutor
                     StructFieldDescriptor[] fieldDescriptors = new StructFieldDescriptor[colCount];
                     for (int j = 0; j < colCount; j++)
                     {
-                        int fieldTypeId = batchContext.Types.InternScalarType(fieldRefs[j].Kind);
+                        int fieldTypeId = context.Types.InternScalarType(fieldRefs[j].Kind);
                         fieldDescriptors[j] = new StructFieldDescriptor(fieldNames[j], fieldTypeId);
                     }
-                    rowTypeId = (ushort)batchContext.Types.InternStructType(fieldDescriptors);
+                    rowTypeId = (ushort)context.Types.InternStructType(fieldDescriptors);
                 }
                 ValueRef rowStruct = ValueRef.FromStruct(fieldRefs, rowTypeId);
 
-                batchContext.VariableScope.PushFrame();
+                context.VariableScope.PushFrame();
                 try
                 {
-                    batchContext.VariableScope.Declare(
+                    context.VariableScope.Declare(
                         forIn.VariableName, rowStruct, fieldNames);
                     try
                     {
-                        await ExecuteOneEventfulAsync(forIn.Body, batchContext, onEvent, nextCellId, currentCellId, ct)
+                        await ExecuteOneEventfulAsync(forIn.Body, context, onEvent, nextCellId, currentCellId, ct)
                             .ConfigureAwait(false);
                     }
                     catch (LoopContinueSignal)
@@ -1470,7 +1457,7 @@ public sealed class BatchExecutor
                 }
                 finally
                 {
-                    batchContext.VariableScope.PopFrame();
+                    context.VariableScope.PopFrame();
                 }
 
                 if (broke) break;
@@ -1513,7 +1500,7 @@ public sealed class BatchExecutor
     /// Evaluates <paramref name="expression"/> by synthesising
     /// <c>SELECT &lt;expression&gt;</c>, planning it through the catalog,
     /// and reading the single resulting cell. The value is stabilised
-    /// into <see cref="BatchContext.VariableStore"/> so it remains valid
+    /// into <see cref="ExecutionContext.VariableStore"/> so it remains valid
     /// after the synthetic query's per-batch arena recycles. Throws if
     /// the expression doesn't yield exactly one row.
     /// </summary>
@@ -1528,21 +1515,21 @@ public sealed class BatchExecutor
     /// inner SELECT through the same engine the user query path uses.
     /// </remarks>
     private Task<DataValue> EvaluateScalarAsync(
-        Expression expression, BatchContext batchContext, CancellationToken ct)
-        => ProceduralEvaluator.EvaluateScalarAsync(expression, batchContext, ct);
+        Expression expression, ExecutionContext context, CancellationToken ct)
+        => ProceduralEvaluator.EvaluateScalarAsync(expression, context, ct);
 
     private Task<bool> EvaluatePredicateAsync(
-        Expression expression, BatchContext batchContext, CancellationToken ct)
-        => ProceduralEvaluator.EvaluatePredicateAsync(expression, batchContext, ct);
+        Expression expression, ExecutionContext context, CancellationToken ct)
+        => ProceduralEvaluator.EvaluatePredicateAsync(expression, context, ct);
 
-    private static Dictionary<string, object?> SnapshotRootBindings(BatchContext batchContext)
+    private static Dictionary<string, object?> SnapshotRootBindings(ExecutionContext context)
     {
         // Walk every visible binding in the scope chain and materialise
         // into managed form. The scope now holds ValueRefs (managed payloads
         // for non-inline values), so the snapshot is independent of
         // VariableStore — the conversion is purely a kind-switch.
         Dictionary<string, object?> snapshot = new(StringComparer.OrdinalIgnoreCase);
-        foreach (KeyValuePair<string, ValueRef> entry in batchContext.VariableScope.EnumerateVisible())
+        foreach (KeyValuePair<string, ValueRef> entry in context.VariableScope.EnumerateVisible())
         {
             snapshot[entry.Key] = Materialize(entry.Value);
         }
@@ -1597,7 +1584,7 @@ public sealed class BatchResult
     /// <summary>
     /// Snapshot of root-frame variable bindings at the moment the batch
     /// completed, with values materialised to managed types so they remain
-    /// valid after <c>BatchContext.VariableStore</c> disposes. Useful for
+    /// valid after <c>ExecutionContext.VariableStore</c> disposes. Useful for
     /// tests that assert "@x ended up as 5" without inspecting raw
     /// DataValue offsets.
     /// </summary>

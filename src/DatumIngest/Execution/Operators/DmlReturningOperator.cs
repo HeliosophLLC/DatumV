@@ -24,7 +24,7 @@ namespace DatumIngest.Execution.Operators;
 internal sealed class DmlReturningOperator : QueryOperator
 {
     private readonly TableCatalog _catalog;
-    private readonly Func<TableCatalog, BatchContext, CapturedRowsSource, Task> _applyAsync;
+    private readonly Func<TableCatalog, ExecutionContext, CapturedRowsSource, Task> _applyAsync;
     private readonly DmlReturningKind _kind;
     private readonly string _tableName;
     private readonly Schema _targetSchema;
@@ -34,7 +34,7 @@ internal sealed class DmlReturningOperator : QueryOperator
 
     private DmlReturningOperator(
         TableCatalog catalog,
-        Func<TableCatalog, BatchContext, CapturedRowsSource, Task> applyAsync,
+        Func<TableCatalog, ExecutionContext, CapturedRowsSource, Task> applyAsync,
         DmlReturningKind kind,
         string tableName,
         Schema targetSchema,
@@ -82,7 +82,7 @@ internal sealed class DmlReturningOperator : QueryOperator
         string? schemaName,
         IReadOnlyList<SelectColumn>? returning,
         DmlReturningKind kind,
-        Func<TableCatalog, BatchContext, CapturedRowsSource, Task> applyAsync,
+        Func<TableCatalog, ExecutionContext, CapturedRowsSource, Task> applyAsync,
         string operatorName,
         string explainDetails)
     {
@@ -112,13 +112,11 @@ internal sealed class DmlReturningOperator : QueryOperator
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
-        BatchContext batchContext = context.BatchContext!;
-
         // Build a capture sink, apply the DML side effect into it, then
         // construct a post-captured DmlReturningPlan and stream its
         // projected rows.
         CapturedRowsSource sink = new(_catalog);
-        await _applyAsync(_catalog, batchContext, sink).ConfigureAwait(false);
+        await _applyAsync(_catalog, context, sink).ConfigureAwait(false);
 
         DmlReturningPlan projection = new(
             _catalog, _kind, _tableName, _targetSchema,
@@ -126,7 +124,7 @@ internal sealed class DmlReturningOperator : QueryOperator
             returningColumns: _returningColumns);
 
         await foreach (RowBatch batch in projection
-            .ExecuteAsync(context.CancellationToken, batchContext)
+            .ExecuteAsync(context.CancellationToken, context)
             .ConfigureAwait(false))
         {
             yield return batch;

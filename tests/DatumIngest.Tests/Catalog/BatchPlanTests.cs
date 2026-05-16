@@ -80,7 +80,7 @@ public sealed class BatchPlanTests : ServiceTestBase, IDisposable
         StatementBatch batch = Assert.IsType<StatementBatch>(prepared);
 
         using InProcessDatumDbConnection connection = new(catalog);
-        using BatchContext ctx = new(catalog);
+        using DatumIngest.Execution.ExecutionContext ctx = catalog.CreateExecutionContext();
         ctx.Accountant.StartProfiling();
         await using InProcessDatumDbReader reader = await InProcessDatumDbReader_OpenForTest(
             batch, ctx);
@@ -119,7 +119,7 @@ public sealed class BatchPlanTests : ServiceTestBase, IDisposable
             "SELECT name FROM public.b ORDER BY name");
         StatementBatch batch = Assert.IsType<StatementBatch>(prepared);
 
-        using BatchContext ctx = new(catalog);
+        using DatumIngest.Execution.ExecutionContext ctx = catalog.CreateExecutionContext();
         ctx.Accountant.StartProfiling();
         await using InProcessDatumDbReader reader = await InProcessDatumDbReader_OpenForTest(
             batch, ctx);
@@ -178,8 +178,8 @@ public sealed class BatchPlanTests : ServiceTestBase, IDisposable
     }
 
     private static Task<InProcessDatumDbReader> InProcessDatumDbReader_OpenForTest(
-        PreparedSql prepared, BatchContext ctx)
-        => InProcessDatumDbReader.OpenAsync(prepared, ctx, ownsBatchContext: false, CancellationToken.None);
+        PreparedSql prepared, DatumIngest.Execution.ExecutionContext ctx)
+        => InProcessDatumDbReader.OpenAsync(prepared, ctx, ownsContext: false, CancellationToken.None);
 
     private static async Task Seed(TableCatalog catalog, params string[] sqls)
     {

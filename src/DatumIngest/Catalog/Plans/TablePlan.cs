@@ -83,7 +83,7 @@ internal sealed class TablePlan : StatementPlan
 #pragma warning disable CS1998 // Async method lacks 'await' on DROP — leaf yields no rows.
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         if (Interlocked.Exchange(ref _executed, 1) != 0)
         {
@@ -97,7 +97,7 @@ internal sealed class TablePlan : StatementPlan
         switch (_statement)
         {
             case CreateTableStatement create:
-                await TableExecutor.CreateTableAsync(Catalog, create, _sourceText).ConfigureAwait(false);
+                await TableExecutor.CreateTableAsync(Catalog, create, context, _sourceText).ConfigureAwait(false);
                 break;
             case DropTableStatement drop:
                 TableExecutor.DropTable(Catalog, drop, _sourceText);

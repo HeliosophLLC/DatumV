@@ -1,5 +1,6 @@
 using DatumIngest.Execution;
 using DatumIngest.Model;
+using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Catalog;
 
@@ -28,11 +29,12 @@ namespace DatumIngest.Catalog;
 /// </para>
 /// <para>
 /// Every execute / analyze path requires a non-null
-/// <see cref="BatchContext"/>. Top-level "batch of one" callers either
-/// construct a fresh <c>new BatchContext(catalog)</c> in a <c>using</c>
-/// scope, or call the <c>TableCatalog.ExecuteAsync(plan, ct)</c>
-/// convenience that owns the lifetime; procedural batches share the one
-/// their <see cref="BatchExecutor"/> owns.
+/// <see cref="ExecutionContext"/>. Top-level "batch of one" callers either
+/// construct a fresh <c>catalog.CreateExecutionContext()</c> in a
+/// <c>using</c> scope, or call the
+/// <c>TableCatalog.ExecuteAsync(plan, ct)</c> convenience that owns the
+/// lifetime; procedural batches share the one their
+/// <see cref="BatchExecutor"/> owns.
 /// </para>
 /// </remarks>
 public abstract class StatementPlan : PreparedSql
@@ -65,9 +67,9 @@ public abstract class StatementPlan : PreparedSql
     /// </summary>
     public virtual Task<ExplainPlanNode> AnalyzeAsync(
         CancellationToken cancellationToken,
-        BatchContext batchContext)
+        ExecutionContext context)
     {
-        ArgumentNullException.ThrowIfNull(batchContext);
+        ArgumentNullException.ThrowIfNull(context);
         return Task.FromResult(ExplainTree);
     }
 
@@ -79,19 +81,19 @@ public abstract class StatementPlan : PreparedSql
     /// </summary>
     public IAsyncEnumerable<RowBatch> ExecuteAsync(
         CancellationToken cancellationToken,
-        BatchContext batchContext)
+        ExecutionContext context)
     {
-        ArgumentNullException.ThrowIfNull(batchContext);
-        return ExecuteImplAsync(cancellationToken, batchContext);
+        ArgumentNullException.ThrowIfNull(context);
+        return ExecuteImplAsync(cancellationToken, context);
     }
 
     /// <summary>
     /// Subclass-supplied execution. Same contract as
-    /// <see cref="StatementPlan.ExecuteAsync(CancellationToken, BatchContext)"/>:
+    /// <see cref="StatementPlan.ExecuteAsync(CancellationToken, ExecutionContext)"/>:
     /// streams output as <see cref="RowBatch"/> values; each yielded batch
     /// is owned by the consumer until the next iteration step.
     /// </summary>
     protected abstract IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         CancellationToken cancellationToken,
-        BatchContext batchContext);
+        ExecutionContext context);
 }

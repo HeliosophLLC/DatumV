@@ -34,12 +34,12 @@ internal static class UpdateExecutor
     public static async Task ApplyAsync(
         TableCatalog catalog,
         UpdateStatement update,
-        Plans.CapturedRowsSource? captureSink,
-        BatchContext batchContext)
+        CapturedRowsSource? captureSink,
+        Execution.ExecutionContext context)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(update);
-        ArgumentNullException.ThrowIfNull(batchContext);
+        ArgumentNullException.ThrowIfNull(context);
 
         ITableProvider provider = Validate(catalog, update);
 
@@ -53,8 +53,8 @@ internal static class UpdateExecutor
         }
 
         IReadOnlyList<RowBatch>? captured = update.From is not null
-            ? await ExecuteWithFromAsync(catalog, provider, update, batchContext).ConfigureAwait(false)
-            : await ExecuteSimpleAsync(catalog, provider, update, batchContext).ConfigureAwait(false);
+            ? await ExecuteWithFromAsync(catalog, provider, update, context).ConfigureAwait(false)
+            : await ExecuteSimpleAsync(catalog, provider, update, context).ConfigureAwait(false);
 
         if (captured is not null && captureSink is not null)
         {
@@ -66,12 +66,8 @@ internal static class UpdateExecutor
         TableCatalog catalog,
         ITableProvider provider,
         UpdateStatement update,
-        BatchContext? batchContext)
+        Execution.ExecutionContext context)
     {
-        // Non-null accountant: either the surrounding batch's, or a private
-        // throwaway when running as a top-level DML statement. The throwaway
-        // never starts profiling so it owns no Timer / resources to clean.
-        MemoryAccountant accountant = batchContext is not null ? batchContext.Accountant : new MemoryAccountant();
         Schema schema = provider.GetSchema();
         bool captureRows = update.Returning is not null;
 
@@ -100,11 +96,6 @@ internal static class UpdateExecutor
         // resolves non-inline SET results against it after the scan
         // loop completes. Disposed at end of method.
         using Arena workArena = new();
-        // Transient context for the frame ambient state. Borrows the
-        // BatchContext-supplied accountant; owns only its (unused) Store
-        // baseline + empty VideoRegistry.
-        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(accountant: accountant,
-            types: batchContext?.Types);
         ExpressionEvaluator evaluator = context.CreateEvaluator();
 
         List<RowUpdateRequest> requests = new();
@@ -205,7 +196,7 @@ internal static class UpdateExecutor
                             // (~48 bytes) times the SET-touched column count. The
                             // arena-backed payload (workArena) is mmap-paged and
                             // doesn't count.
-                            accountant?.NotifyMaterialized(16L + rowValues.Count * 48L);
+                            context.Accountant.NotifyMaterialized(16L + rowValues.Count * 48L);
                         }
 
                         // RETURNING capture: build the post-image of this
@@ -252,15 +243,12 @@ internal static class UpdateExecutor
 
             // Release the requests list and its dictionary entries from the
             // accountant — they go out of scope as this method returns.
-            if (accountant is not null)
+            long releaseBytes = 0;
+            for (int i = 0; i < requests.Count; i++)
             {
-                long releaseBytes = 0;
-                for (int i = 0; i < requests.Count; i++)
-                {
-                    releaseBytes += 16L + requests[i].NewValues.Count * 48L;
-                }
-                if (releaseBytes > 0) accountant.NotifyReleased(releaseBytes);
+                releaseBytes += 16L + requests[i].NewValues.Count * 48L;
             }
+            if (releaseBytes > 0) context.Accountant.NotifyReleased(releaseBytes);
 
             return capturedBatches;
         }
@@ -291,10 +279,8 @@ internal static class UpdateExecutor
         TableCatalog catalog,
         ITableProvider provider,
         UpdateStatement update,
-        BatchContext? batchContext)
+        DatumIngest.Execution.ExecutionContext context)
     {
-        // See ExecuteSimpleAsync for the non-null fallback rationale.
-        MemoryAccountant accountant = batchContext is not null ? batchContext.Accountant : new MemoryAccountant();
         bool captureRows = update.Returning is not null;
         // Source table resolution. PR11d MVP only handles a single
         // TableReference in FROM; subqueries / nested joins are rejected.
@@ -405,7 +391,7 @@ internal static class UpdateExecutor
                         copy[c] = DataValueRetention.Stabilize(sourceRow[c], srcArena, workArena);
                     }
                     sourceRows.Add(copy);
-                    accountant?.NotifyMaterialized(sourceRowBytes);
+                    context.Accountant.NotifyMaterialized(sourceRowBytes);
                 }
             }
             finally
@@ -420,10 +406,6 @@ internal static class UpdateExecutor
             return null;
         }
 
-        // Transient context shared by every frame in the merge loop below.
-        // See ExecuteSimpleAsync's analogue for the borrowed-accountant rationale.
-        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(accountant: accountant,
-            types: batchContext?.Types);
         ExpressionEvaluator evaluator = context.CreateEvaluator();
 
         // Last-match-wins accumulator: liveRowIndex → (column → new value).
@@ -498,7 +480,7 @@ internal static class UpdateExecutor
                             // Outer-dict entry: ~48 bytes (hash, key, value, next).
                             // The inner Dictionary's own slot bytes are notified
                             // below as each SET coerced value lands.
-                            accountant.NotifyMaterialized(48L);
+                            context.Accountant.NotifyMaterialized(48L);
                         }
 
                         foreach ((int columnIndex, Expression valueExpression) in setBindings)
@@ -594,9 +576,9 @@ internal static class UpdateExecutor
         if (matched.Count == 0)
         {
             // Source rows still allocated; release before returning.
-            if (sourceRows.Count > 0 && accountant is not null)
+            if (sourceRows.Count > 0)
             {
-                accountant.NotifyReleased(sourceRows.Count * sourceRowBytes);
+                context.Accountant.NotifyReleased(sourceRows.Count * sourceRowBytes);
             }
             return capturedBatches;
         }
@@ -615,22 +597,16 @@ internal static class UpdateExecutor
 
         if (requests.Count == 0)
         {
-            if (accountant is not null)
-            {
-                accountant.NotifyReleased(matched.Count * 48L);
-                if (sourceRows.Count > 0) accountant.NotifyReleased(sourceRows.Count * sourceRowBytes);
-            }
+            context.Accountant.NotifyReleased(matched.Count * 48L);
+            if (sourceRows.Count > 0) context.Accountant.NotifyReleased(sourceRows.Count * sourceRowBytes);
             return capturedBatches;
         }
 
         await provider.UpdateRowsAsync(requests, workArena).ConfigureAwait(false);
         // Release the matched-dict bytes and the source-row buffer; both
         // become unreachable when this method returns.
-        if (accountant is not null)
-        {
-            accountant.NotifyReleased(matched.Count * 48L);
-            if (sourceRows.Count > 0) accountant.NotifyReleased(sourceRows.Count * sourceRowBytes);
-        }
+        context.Accountant.NotifyReleased(matched.Count * 48L);
+        if (sourceRows.Count > 0) context.Accountant.NotifyReleased(sourceRows.Count * sourceRowBytes);
         return capturedBatches;
     }
 

@@ -30,7 +30,8 @@ internal static class ColumnDefinitionResolver
     public static async Task<Schema> BuildSchemaAsync(
         TableCatalog catalog,
         IReadOnlyList<ColumnDefinition> definitions,
-        IReadOnlyList<string>? primaryKeyColumnNames)
+        IReadOnlyList<string>? primaryKeyColumnNames,
+        DatumIngest.Execution.ExecutionContext context)
     {
         ColumnInfo[] columns = new ColumnInfo[definitions.Count];
         int identityColumnIndex = -1;
@@ -80,7 +81,7 @@ internal static class ColumnDefinitionResolver
             if (d.DefaultValue is not null)
             {
                 ValidateDefaultExpression(d.DefaultValue, d.Name);
-                await ValidateDefaultExpressionFitsColumnAsync(catalog, d.DefaultValue, d.Name, kind, isArray)
+                await ValidateDefaultExpressionFitsColumnAsync(context, d.DefaultValue, d.Name, kind, isArray)
                     .ConfigureAwait(false);
                 defaultExpression = d.DefaultValue;
             }
@@ -215,14 +216,18 @@ internal static class ColumnDefinitionResolver
     /// so the throwaway value never escapes).
     /// </summary>
     public static async Task ValidateDefaultExpressionFitsColumnAsync(
-        TableCatalog catalog, Expression expression, string columnName, DataKind kind, bool isArray)
+        Execution.ExecutionContext context,
+        Expression expression,
+        string columnName,
+        DataKind kind,
+        bool isArray)
     {
         using Arena probeArena = new();
-        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(store: probeArena);
-        ExpressionEvaluator evaluator = context.CreateEvaluator();
+        using Execution.ExecutionContext probeContext = context.Derive(store: probeArena);
+        ExpressionEvaluator evaluator = probeContext.CreateEvaluator();
         ColumnLookup emptyLookup = new(Array.Empty<string>());
         Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
-        EvaluationFrame frame = context.CreateFrame(emptyRow, probeArena);
+        EvaluationFrame frame = probeContext.CreateFrame(emptyRow, probeArena);
 
         // Build a column-info shim with the target kind/nullable/array
         // shape so ConvertValueRefToTarget validates against the real

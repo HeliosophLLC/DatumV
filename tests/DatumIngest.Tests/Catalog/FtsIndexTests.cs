@@ -182,7 +182,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (id Int32, n Int32)");
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        ExecutionException ex = Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE INDEX bad ON t (n) USING FTS"));
 
         Assert.Contains("String", ex.Message);
@@ -194,7 +194,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a String, b String)");
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        ExecutionException ex = Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE INDEX bad ON t (a, b) USING FTS"));
 
         Assert.Contains("exactly one column", ex.Message);
@@ -221,7 +221,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (a String)");
         catalog.Plan("CREATE INDEX idx_one ON t (a) USING FTS");
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        ExecutionException ex = Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE INDEX idx_two ON t (a) USING FTS"));
 
         Assert.Contains("already has a full-text index", ex.Message);
@@ -233,7 +233,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a String)");
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        ExecutionException ex = Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE INDEX bad ON t (a) USING FTS WITH (analyzer = 'porter_en')"));
 
         Assert.Contains("porter_en", ex.Message);
@@ -245,7 +245,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a String)");
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        ExecutionException ex = Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE INDEX bad ON t (a) USING FTS WITH (bogus = 'x')"));
 
         Assert.Contains("bogus", ex.Message);
@@ -259,7 +259,7 @@ public sealed class FtsIndexTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32)");
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        ExecutionException ex = Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE INDEX bad ON t (a) WITH (analyzer = 'simple_en')"));
 
         Assert.Contains("WITH options", ex.Message);

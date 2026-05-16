@@ -239,9 +239,11 @@ public sealed class ProceduralModelAdapter : IModel, IDisposable
         // a MemoryAccountant. The body's residency is accounted in this
         // isolated island until the IModel API grows that parameter.
         using MemoryAccountant accountant = new();
-        using DatumIngest.Execution.ExecutionContext context = _catalog.CreateExecutionContext(store: arena,
+        using Execution.ExecutionContext context = _catalog.CreateExecutionContext(
+            store: arena,
             types: typeRegistry,
             accountant: accountant, cancellationToken: cancellationToken);
+
         try
         {
             EvaluationFrame frame = context.CreateFrame(Row.Empty, arena);

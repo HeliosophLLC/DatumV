@@ -35,7 +35,7 @@ namespace DatumIngest.Data;
 /// </para>
 /// <para>
 /// Each execute call constructs a fresh per-call
-/// <see cref="BatchContext"/> the reader owns and disposes when the
+/// <see cref="ExecutionContext"/> the reader owns and disposes when the
 /// reader is disposed.
 /// </para>
 /// </remarks>
@@ -88,10 +88,10 @@ public sealed class InProcessDatumDbCommand : IDisposable
     public async Task<InProcessDatumDbReader> ExecuteReaderAsync(CancellationToken cancellationToken = default)
     {
         PreparedSql prepared = await PrepareAsync(cancellationToken).ConfigureAwait(false);
-        BatchContext batchContext = new(_connection.Catalog);
-        batchContext.Accountant.StartProfiling();
+        Execution.ExecutionContext context = _connection.Catalog.CreateExecutionContext(cancellationToken: cancellationToken);
+        context.Accountant.StartProfiling();
         return await InProcessDatumDbReader
-            .OpenAsync(prepared, batchContext, ownsBatchContext: true, cancellationToken)
+            .OpenAsync(prepared, context, ownsContext: true, cancellationToken)
             .ConfigureAwait(false);
     }
 

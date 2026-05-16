@@ -57,19 +57,18 @@ public sealed partial class ExpressionEvaluator : ILambdaInvoker
     // Not readonly: lazily initialised by InvokeLambdaAsync when the
     // evaluator was constructed without an explicit scope. Lambda parameter
     // bindings need somewhere to land, and the operator pipeline doesn't
-    // pass a scope today (procedural UDFs / DECLARE do). The lazy backing
-    // here means lambda invocation works in any evaluator-bearing context;
-    // procedural callers that pass a scope keep using their own.
-    private VariableScope? _variableScope;
+    // Captured from ExecutionContext at construction. Always non-null —
+    // every context carries a procedure-lifetime substrate even for
+    // single-statement queries that never declare into it.
+    private readonly VariableScope _variableScope;
 
     /// <summary>
     /// Borrowed reference to the procedure-lifetime arena holding bound
     /// variable payloads. Source store for the stabilise that copies
     /// variable values out into the active <see cref="EvaluationFrame.Target"/>
-    /// arena on read. Paired with <see cref="_variableScope"/> — both are
-    /// non-null inside a procedural batch, both null outside it.
+    /// arena on read.
     /// </summary>
-    private readonly IValueStore? _variableStore;
+    private readonly IValueStore _variableStore;
 
     /// <summary>
     /// Maps LET binding names to their source expressions. Used by

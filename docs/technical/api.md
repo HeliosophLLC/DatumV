@@ -1,6 +1,6 @@
 # Programmatic API
 
-DatumIngest exposes a C# API for embedding ingestion, query execution, schema resolution, manifest generation, and checkpointing into .NET applications.
+DatumIngest exposes a C# API for embedding ingestion, query execution, schema resolution, and manifest generation into .NET applications.
 
 ## Manifest
 
@@ -20,141 +20,69 @@ string json = ManifestSerializer.Serialize("data", manifest);
 await ManifestSerializer.WriteToFileAsync("data", manifest, "manifest.json");
 ```
 
-### Loading & Registration
+### Serialization
 
-Manifests are deserialized via `ManifestSerializer`, which returns a `SourceManifest` — a container keyed by table name that supports multi-table sources. Individual manifests are registered in the `TableCatalog` for use by the query planner and cost model:
+`ManifestSerializer` reads and writes the JSON form. The container shape is `SourceManifest` — a dictionary keyed by table name that supports multi-table sources — and there are overloads for the common single-table case that accept `(tableName, QueryResultsManifest)` directly.
 
 ```csharp
-string json = await File.ReadAllTextAsync("data.csv.datum-manifest");
-SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+// Single-table form
+string json = ManifestSerializer.Serialize("data", manifest);
+await ManifestSerializer.WriteToFileAsync("data", manifest, "data.datum-manifest");
 
-if (sourceManifest is not null
-    && sourceManifest.Tables.TryGetValue("data", out QueryResultsManifest? manifest))
+// Multi-table form
+await ManifestSerializer.WriteToFileAsync(sourceManifest, "multi.datum-manifest");
+
+// Deserialize
+SourceManifest? loaded = ManifestSerializer.Deserialize(json);
+if (loaded is not null
+    && loaded.Tables.TryGetValue("data", out QueryResultsManifest? perTable))
 {
-    catalog.RegisterManifest("data", manifest);
+    // ...
 }
 ```
 
-For the common single-table case, `ManifestSerializer.Serialize(tableName, manifest)` and `ManifestSerializer.WriteToFileAsync(tableName, manifest, path)` accept a table name and manifest directly.
-
-When a manifest is registered, the query planner uses it to:
-- Override the scan operator's estimated row count with the manifest's authoritative `RowCount` (useful for CSV, JSON, JSONL, and ZIP sources that cannot report row counts from metadata alone).
-- Attach per-column `FeatureManifest` statistics to the `ScanOperator` for downstream cardinality estimation.
-
-### Sidecar Auto-Discovery
-
-After tables have been registered and expanded, call `catalog.DiscoverSidecars()` to auto-discover all three sidecar types alongside registered source files:
-
-| Sidecar | Naming Convention | Contents |
-|---------|-------------------|----------|
-| `.datum-index` | `{source-file}.datum-index` | Binary source index (chunk statistics, bloom filters, B+Tree indexes, bitmap indexes) |
-| `.datum-manifest` | `{source-file}.datum-manifest` | JSON feature manifest (per-column statistics, interactions) |
-| `.datum-schema` | `{source-file}.datum-schema` | JSON schema cache (column names, data kinds, nullability) |
-| `.datum-pkindex` | `{source-file}.datum-pkindex` | Mutable B+Tree backing a `PRIMARY KEY` constraint. Auto-managed by `DatumFileTableProviderV2` (created at `CREATE TABLE`, maintained on every `INSERT`); not consumed by `DiscoverSidecars`. |
-
-```csharp
-TableCatalog catalog = new();
-catalog.Register("data", "./data.csv");
-catalog.DiscoverSidecars();
-
-// Sidecars are now registered — e.g.:
-catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
-catalog.TryGetIndex("data", out SourceIndex? index);
-catalog.TryGetSchema("data", out Schema? schema);
-```
-
-`DiscoverSidecars()` reads each sidecar file at most once per unique source file path and skips tables that already have a registered artifact. Tables sharing the same source file (e.g., multi-table JSON) all receive matching entries from a single sidecar read.
-
-The CLI, gRPC compute backend, and `.source` interactive command all call `catalog.DiscoverSidecars()` after source registration.
-
-## Source Analysis
-
-`SourceAnalyzer` generates all three sidecar artifacts (schema, index, manifest) in a single pass over the source data. The result is a `SourceAnalysisResult` containing a `SourceSchema`, `SourceIndexSet`, and `SourceManifest`.
-
-### Catalog-driven analysis
-
-The simplest entry point analyzes all tables registered in a catalog:
-
-```csharp
-SourceAnalyzer analyzer = new(
-    chunkSize: 10_000,
-    bloomColumns: new HashSet<string> { "id" },
-    indexColumns: new HashSet<string> { "id" },
-    withInteractions: true);
-
-SourceAnalysisResult result = await analyzer.AnalyzeAsync(catalog, CancellationToken.None);
-
-// Write all three sidecars
-string sourcePath = catalog.Resolve("data").FilePath;
-await SchemaSerializer.WriteToFileAsync(result.Schema, sourcePath + ".datum-schema");
-await ManifestSerializer.WriteToFileAsync(result.Manifest, sourcePath + ".datum-manifest");
-
-using FileStream indexStream = File.Create(sourcePath + ".datum-index");
-IndexWriter writer = new();
-writer.Write(result.IndexSet, indexStream);
-```
-
-### Per-table analysis
-
-For fine-grained control, pass explicit table/provider pairs:
-
-```csharp
-TableDescriptor descriptor = catalog.Resolve("data");
-ITableProvider provider = catalog.CreateProvider(descriptor);
-
-SourceAnalysisResult result = await analyzer.AnalyzeAsync(
-    [(descriptor, provider)],
-    sourceStream: null,
-    CancellationToken.None);
-```
-
-### Result structure
-
-```csharp
-// SourceAnalysisResult is a sealed record with three fields:
-SourceSchema schema = result.Schema;           // Per-table schemas
-SourceIndexSet indexSet = result.IndexSet;      // Per-table indexes + source fingerprint
-SourceManifest manifest = result.Manifest;      // Per-table column statistics
-
-// Each container is keyed by table name:
-Schema tableSchema = schema.Tables["data"];
-SourceIndex tableIndex = indexSet.Tables["data"];
-QueryResultsManifest tableManifest = manifest.Tables["data"];
-```
+When the query planner has a manifest available for a source, it uses it to:
+- Override the scan operator's estimated row count with the manifest's authoritative `RowCount`.
+- Attach per-column `FeatureManifest` statistics for downstream cardinality estimation.
 
 ## Ingestion
 
-`DatumIngester` converts source files into `.datum` columnar format with statistics and a sample preview in a single streaming pass. Unlike `SourceAnalyzer` (which produces all three sidecar artifacts including indexes), `DatumIngester.IngestAsync` focuses on format conversion, statistics, and sample collection — indexing is a separate step via `BuildIndexAsync`.
+`Ingester` converts a source file into a single `.datum` v2 columnar file (plus an optional `.datum-blob` sidecar for non-inline payloads), collecting schema, statistics, and a sample preview along the way. Each call processes one source file → one `.datum` file.
 
 ### Basic usage
 
 ```csharp
-await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync("data.csv");
+Ingester ingester = new(formatRegistry, pool);
 
-// Per-table results
-DatumIngestionTableResult table = ingestion.Tables["data_csv"];
-Stream datumStream = table.DatumStream;          // .datum binary, positioned at 0
-Schema schema = table.Schema;                     // Discovered schema
-SourceManifest manifest = table.Manifest;         // Column statistics
-long rows = table.RowCount;                       // Total rows ingested
+FileFormatDescriptor source = new("data.csv");
+OutputDescriptor destination = new("data.datum");
+
+IngestionResult result = await ingester.IngestAsync(source, destination);
+
+string outputPath = result.OutputPath;
+long rows = result.RowCount;
+long bytes = result.BytesWritten;
+Schema schema = result.Schema;
+QueryResultsManifest manifest = result.Manifest;
+SamplePreview? preview = result.Sample;
 ```
 
-### Ingesting from an in-memory stream
+`FileFormatDescriptor` and `OutputDescriptor` both accept an optional `IReadOnlyDictionary<string, string>` of format-specific options (CSV delimiter, header policy, etc.). Subclass `OutputDescriptor` and override `OpenAsync` to redirect the write to a custom stream (in-memory testing, compression wrappers, cloud storage).
+
+For memory-constrained / multi-tenant hosts, pass `IngestionOptions.MultiTenantServer`:
 
 ```csharp
-using MemoryStream source = new(csvBytes);
-await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync("upload.csv", source);
+IngestionResult result = await ingester.IngestAsync(
+    source, destination, IngestionOptions.MultiTenantServer);
 ```
 
 ### Sample preview
 
-During ingestion, 25 representative rows are collected via reservoir sampling (Algorithm R), producing a uniform random sample regardless of dataset size. The preview is available immediately after ingestion — no need to wait for indexing.
+During ingestion, 25 representative rows are collected via reservoir sampling (Algorithm R), producing a uniform random sample regardless of dataset size. The preview is on `IngestionResult.Sample`:
 
 ```csharp
-await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync("data.csv");
-
-// Access the per-table sample preview
-SamplePreview preview = ingestion.Samples["data_csv"];
+SamplePreview? preview = result.Sample;
+if (preview is null) return;
 
 // Features describe the column structure
 foreach (SampleFeature feature in preview.Features)
@@ -215,7 +143,7 @@ SourceSchema? loaded = SchemaSerializer.Deserialize(json);
 Schema? tableSchema = loaded?.Tables["data"];
 ```
 
-When a `.datum-schema` sidecar is present, `GetSchemaAsync` returns the cached schema without invoking the provider — eliminating schema inference I/O (e.g., sampling the first 100 rows of a CSV).
+A `.datum-schema` sidecar lets a provider skip its own schema inference (e.g. sampling the first N rows of a CSV) and hand the cached schema straight back from `ITableProvider.GetSchema()`.
 
 ## Executing SQL
 
@@ -273,7 +201,7 @@ Children are planned lazily — the `INSERT` plans against the `CREATE TABLE` th
 
 ### Without ADO surface
 
-For procedural batches that share a `BatchContext` across many plans, or for callers that already hold a parsed `Statement`, the catalog exposes the lower-level surface directly:
+For procedural batches that share an `ExecutionContext` across many plans, or for callers that already hold a parsed `Statement`, the catalog exposes the lower-level surface directly:
 
 ```csharp
 // Single statement (throws on multi-statement SQL)
@@ -284,7 +212,7 @@ await catalog.ExecuteAsync(plan).DrainAsync(); // applies side effect
 PreparedSql prepared = await catalog.PrepareAsync(sql);
 ```
 
-`PlanAsync` is the building block. The returned `StatementPlan` is lazy — reading `plan.ExplainTree` does not apply the side effect; iterating `plan.ExecuteAsync(ct, batchContext)` does.
+`PlanAsync` is the building block. The returned `StatementPlan` is lazy — reading `plan.ExplainTree` does not apply the side effect; iterating `plan.ExecuteAsync(ct, context)` does.
 
 ## Parameter Binding
 
@@ -354,32 +282,21 @@ The cost model selectivity table:
 | `AND` | product of child selectivities | product of child selectivities |
 | `OR` | s₁ + s₂ − s₁×s₂ | s₁ + s₂ − s₁×s₂ |
 
-NDV is the estimated distinct count from the manifest's HyperLogLog sketch (±2% accuracy).
-
-Estimated rows are available on any `ExplainPlanNode` via `node.EstimatedRows`. Providers that report row counts (Parquet, HDF5, IDX) produce base estimates directly; CSV, JSON, JSONL, and ZIP return `null` by default. When a `.datum-manifest` sidecar file is available, its `RowCount` overrides the provider's estimate — giving accurate base counts for all formats.
-
-The estimates propagate through filter, join, sort, limit, and projection operators. When manifest column statistics are available, the cost model uses them for data-driven selectivity:
-
-| Predicate | With Manifest | Default Heuristic |
-|-----------|---------------|-------------------|
-| `column = value` | 1 / NDV | 10% |
-| `column != value` | 1 − 1/NDV | 90% |
-| `column IS NULL` | actual null ratio | 10% |
-| `column IS NOT NULL` | 1 − null ratio | 90% |
-| `column IN (a, b, c)` | count × 1/NDV | count × 10% |
-| equi-join `a.x = b.x` | left × right / max(NDV_left, NDV_right) | left × right × 10% |
-| `<`, `>`, `BETWEEN`, `LIKE` | 33% (default) | 33% |
-| `AND` | product of child selectivities | product of child selectivities |
-| `OR` | s₁ + s₂ − s₁×s₂ | s₁ + s₂ − s₁×s₂ |
-
-NDV is the estimated distinct count from the manifest's HyperLogLog sketch (±2% accuracy).
+NDV is the estimated distinct count from the manifest's HyperLogLog sketch (±2% accuracy). Per-node estimates are exposed on `node.EstimatedRows`.
 
 ## Schema Introspection
 
+`QuerySchemaResolver` walks the FROM / JOIN / subquery / TVF sources of a parsed `SelectStatement` and returns the combined `ResolvedQuerySchema` — the substrate for editor autocomplete and pre-execution validation.
+
 ```csharp
-// 1. Parse the query.
-SelectStatement statement = SqlParser.Parse(
+// 1. Parse to a Statement, then pull the SelectStatement out.
+Statement parsed = SqlParser.ParseStatement(
     "SELECT * FROM images AS img JOIN captions AS cap ON img.id = cap.image_id");
+SelectStatement statement = parsed switch
+{
+    QueryStatement { Query: SelectQueryExpression sq } => sq.Statement,
+    _ => throw new InvalidOperationException("Expected a SELECT statement."),
+};
 
 // 2. Resolve the combined schema of all FROM/JOIN sources.
 QuerySchemaResolver resolver = new(catalog, FunctionRegistry.CreateDefault());
@@ -392,6 +309,7 @@ foreach (ResolvedColumn column in schema.Columns)
     // column.Kind               → DataKind.String
     // column.Nullable           → false
     // column.SourceTableOrAlias → "img"
+    // column.IsArray, column.IsMultiDim
 }
 
 // Qualified lookup (alias.column):
@@ -407,131 +325,34 @@ IReadOnlyList<ResolvedColumn> imgColumns = schema.FindColumns("img");
 IEnumerable<string> tables = schema.TableNames;  // ["img", "cap"]
 ```
 
-### Single-table convenience
-
-For simple scenarios where you just need one table's schema:
+For just one table's schema, ask the catalog for its provider and call `GetSchema()`:
 
 ```csharp
-Schema schema = await catalog.GetSchemaAsync("tableName", cancellationToken);
-
-foreach (ColumnInfo column in schema.Columns)
+if (catalog.TryGetTable("tableName", out ITableProvider? provider))
 {
-    // column.Name     → "score"
-    // column.Kind     → DataKind.Float32
-    // column.Nullable → true
-}
-```
-
-### Schema-aware table-valued functions
-
-Custom table-valued functions can implement `ISchemaAwareTableFunction` to expose their output schema for introspection without execution:
-
-```csharp
-public class MyTableFunction : ISchemaAwareTableFunction
-{
-    public string Name => "my_func";
-
-    public Schema GetOutputSchema(ReadOnlySpan<DataKind> argumentKinds)
+    Schema schema = provider.GetSchema();
+    foreach (ColumnInfo column in schema.Columns)
     {
-        return new Schema([new ColumnInfo("result", DataKind.Float32, nullable: false)]);
+        // column.Name, column.Kind, column.Nullable
     }
-
-    public async IAsyncEnumerable<Row> ExecuteAsync(
-        DataValue[] arguments, CancellationToken cancellationToken) { /* ... */ }
 }
 ```
 
-## Auto-detecting table registration
+## Registering tables
 
-`TableCatalog` pre-registers all built-in provider factories (csv, json, jsonl, parquet, hdf5, zip, idx) in its constructor — no manual `RegisterProvider` calls are needed for supported formats. The `Register` overloads detect the file format automatically from extension, filename pattern, or magic bytes:
-
-```csharp
-TableCatalog catalog = new();
-
-// Simplest form — table name derived from filename (e.g. "iris.csv")
-catalog.Register("./iris.csv");
-
-// Explicit table name when you want a custom identifier
-catalog.Register("data", "./iris.csv");
-
-// Auto-detect with provider-specific options
-catalog.Register("data", "./data.tsv", new Dictionary<string, string> { ["delimiter"] = "\t" });
-
-// Explicit TableDescriptor still works as an override
-catalog.Register(new TableDescriptor("csv", "data", "./data.csv", new()));
-```
-
-### Async registration with auto-expansion
-
-`RegisterAsync` combines registration with multi-table expansion in one call. For sources that resolve to multiple sub-tables (e.g., root-object JSON), the original registration is replaced by one entry per discovered sub-table:
+`TableCatalog` is constructed with a `Pool`; once you have one, `AddFile` registers a `.datum` file as a queryable table. The table name defaults to the filename stem when omitted.
 
 ```csharp
-TableCatalog catalog = new();
+using TableCatalog catalog = new(pool);
 
-// Table name derived from filename
-await catalog.RegisterAsync("./multi-table.json", CancellationToken.None);
+// Filename-derived name (e.g. "./iris.datum" → "iris")
+catalog.AddFile("./iris.datum");
 
-// Or with an explicit name
-await catalog.RegisterAsync("data", "./multi-table.json", CancellationToken.None);
+// Explicit table name
+catalog.AddFile("./iris.datum", "data");
 
-// If the JSON has root keys "orders" and "customers",
-// the catalog now contains "multi-table.json.orders" / "data.orders"
-// and "multi-table.json.customers" / "data.customers".
+// Or register a fully-formed descriptor for finer control
+catalog.Add(new TableDescriptor("data", "./iris.datum"));
 ```
 
-For custom providers, use `RegisterProvider` before registering tables:
-
-```csharp
-catalog.RegisterProvider("custom", () => new MyCustomProvider());
-catalog.Register("data", "./data.custom");
-```
-
-When the format cannot be determined, `Register` throws `ArgumentException` with a message listing supported formats. See [Providers — Format auto-detection](providers.md#format-auto-detection) for the full detection rules.
-
-## Stream-based output
-
-All three output writers accept a `Stream` instead of a file path, enabling purely in-memory pipelines:
-
-```csharp
-using MemoryStream stream = new();
-await using CsvOutputWriter writer = new(stream);
-await writer.InitializeAsync(plan.Schema);
-
-await foreach (Row row in plan.ExecuteAsync(context))
-{
-    await writer.WriteRowAsync(row);
-}
-
-OutputSummary summary = await writer.FinalizeAsync();
-
-// Stream now contains the CSV data.
-stream.Position = 0;
-```
-
-Works with all formats — `CsvOutputWriter(stream)`, `ParquetOutputWriter(stream)`, `Hdf5OutputWriter(stream)`. The caller owns the stream; the writer leaves it open on dispose. In stream mode, `ParquetOutputWriter` embeds binary columns as `byte[]` directly instead of externalizing to an `images/` folder.
-
-## Checkpointing
-
-```csharp
-CheckpointManager checkpointManager = new(outputPath);
-IReadOnlyList<SourceFingerprint> fingerprints = SourceFingerprintCollector.Collect(catalog);
-
-// Scan for existing checkpoints and compute resume state
-IReadOnlyList<CheckpointMarker> checkpoints = await checkpointManager.ScanExistingCheckpointsAsync();
-ResumeState resume = CheckpointManager.ComputeResumeState(checkpoints);
-
-// Delete orphaned partial shard from a previous crash
-checkpointManager.DeleteOrphanedShard(resume.NextShardIndex);
-
-// Create a checkpoint-aware sharding writer
-await using ShardingOutputWriter writer = new(
-    path => new CsvOutputWriter(path),
-    strategy,
-    outputPath,
-    checkpointManager,
-    fingerprints,
-    startShardIndex: resume.NextShardIndex);
-
-// Wrap the plan with SkipOperator to fast-forward past completed rows
-IQueryOperator resumedPlan = new SkipOperator(plan, resume.RowsToSkip);
-```
+For sources that aren't yet in `.datum` form, run them through the `Ingester` first (see [Ingestion](#ingestion)) and then register the produced `.datum` file. Auto-detection of arbitrary source formats and multi-table expansion now live on the ingestion side, not the catalog.

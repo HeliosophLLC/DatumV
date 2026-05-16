@@ -1,4 +1,5 @@
 using DatumIngest.Catalog.Plans;
+using DatumIngest.Execution;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Catalog.Executors;
@@ -17,20 +18,21 @@ internal static class SchemaExecutor
     /// schemas (public / system / information_schema / datum_catalog)
     /// cannot be re-created.
     /// </summary>
-    public static StatementPlan CreateSchema(TableCatalog catalog, CreateSchemaStatement create, string? sourceText = null)
+    public static void CreateSchema(TableCatalog catalog, CreateSchemaStatement create, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(create);
 
         if (catalog.Backends.ContainsKey(create.SchemaName))
         {
-            if (create.IfNotExists) return DdlPlan.NoOp(catalog, "Schema");
-            throw new InvalidOperationException(
+            if (create.IfNotExists) return;
+
+            throw new ExecutionException(
                 $"Schema '{create.SchemaName}' already exists.");
         }
+
         catalog.Backends[create.SchemaName] = catalog.FlatFileCatalog;
         catalog.Events.Raise(new SchemaCreatedEvent(create.SchemaName, sourceText));
-        return DdlPlan.NoOp(catalog, "Schema");
     }
 
     /// <summary>
@@ -39,15 +41,16 @@ internal static class SchemaExecutor
     /// CASCADE drops every table in the schema first. Built-in schemas
     /// are protected.
     /// </summary>
-    public static StatementPlan DropSchema(TableCatalog catalog, DropSchemaStatement drop, string? sourceText = null)
+    public static void DropSchema(TableCatalog catalog, DropSchemaStatement drop, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(drop);
 
         if (!catalog.Backends.TryGetValue(drop.SchemaName, out ITableCatalog? backend))
         {
-            if (drop.IfExists) return DdlPlan.NoOp(catalog, "Schema");
-            throw new InvalidOperationException(
+            if (drop.IfExists) return;
+
+            throw new ExecutionException(
                 $"Schema '{drop.SchemaName}' does not exist.");
         }
 
@@ -87,7 +90,6 @@ internal static class SchemaExecutor
         // TableDropped events — subscribers treat SchemaDropped as "blow
         // away the entire subtree" (see CatalogEvents class remarks).
         catalog.Events.Raise(new SchemaDroppedEvent(drop.SchemaName, sourceText));
-        return DdlPlan.NoOp(catalog, "Schema");
     }
 
     /// <summary>
@@ -96,12 +98,11 @@ internal static class SchemaExecutor
     /// named schema is mounted. In-flight queries that captured the prior
     /// path are unaffected — they keep their snapshot.
     /// </summary>
-    public static StatementPlan SetSearchPath(TableCatalog catalog, SetSearchPathStatement setSearchPath)
+    public static void SetSearchPath(TableCatalog catalog, SetSearchPathStatement setSearchPath)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(setSearchPath);
 
         catalog.SetSearchPath(setSearchPath.Schemas);
-        return DdlPlan.NoOp(catalog, "Schema");
     }
 }

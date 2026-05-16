@@ -60,8 +60,13 @@ internal sealed partial class RoutineRegistrar
     private const string ModelsSchema = "models";
 
     public async Task ApplyCreateModelAsync(
-        CreateModelStatement create, string? sourceText = null, bool suppressSave = false)
+        CreateModelStatement create,
+        DatumIngest.Execution.ExecutionContext context,
+        string? sourceText = null,
+        bool suppressSave = false)
     {
+        ArgumentNullException.ThrowIfNull(context);
+
         ValidateDefaultsContiguous(create.Parameters, $"CREATE MODEL {create.Name}");
 
         // Schema lockdown. CREATE MODEL always lands in `models`; explicit
@@ -122,6 +127,7 @@ internal sealed partial class RoutineRegistrar
         await ValidateDefaultsAgainstChecksAsync(
             create.Parameters,
             $"CREATE MODEL {create.Name}",
+            context,
             CancellationToken.None).ConfigureAwait(false);
 
         QualifiedName qn = new(ModelsSchema, create.Name);

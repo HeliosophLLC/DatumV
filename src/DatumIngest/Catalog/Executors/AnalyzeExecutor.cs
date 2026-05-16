@@ -1,4 +1,4 @@
-using DatumIngest.Catalog.Plans;
+using DatumIngest.Execution;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Catalog.Executors;
@@ -19,12 +19,13 @@ internal static class AnalyzeExecutor
     /// At least one of the two must be supported, otherwise the table can't
     /// meaningfully be analysed.
     /// </summary>
-    public static async Task<StatementPlan> ExecuteAsync(TableCatalog catalog, AnalyzeTableStatement analyze)
+    public static async Task ExecuteAsync(TableCatalog catalog, AnalyzeTableStatement analyze)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(analyze);
 
         QualifiedName analyzeQn = catalog.ResolveDdlName(analyze.SchemaName, analyze.TableName);
+        
         if (!catalog.TryResolveBackend(analyzeQn.Schema, out ITableCatalog? analyzeBackend)
             || !analyzeBackend.TryGetTable(analyzeQn, out ITableProvider? provider))
         {
@@ -34,7 +35,7 @@ internal static class AnalyzeExecutor
 
         if (!provider.CanRebuildIndex && !provider.CanRebuildManifest)
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"Table '{analyze.TableName}' does not support ANALYZE " +
                 $"(provider type '{provider.GetType().Name}' has no acceleration sidecar or " +
                 "manifest to refresh).");
@@ -44,10 +45,10 @@ internal static class AnalyzeExecutor
         {
             await provider.RebuildManifestAsync().ConfigureAwait(false);
         }
+
         if (provider.CanRebuildIndex)
         {
             await provider.RebuildIndexAsync().ConfigureAwait(false);
         }
-        return DdlPlan.NoOp(catalog, "Analyze");
     }
 }

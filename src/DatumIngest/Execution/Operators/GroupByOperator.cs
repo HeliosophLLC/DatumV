@@ -141,7 +141,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
         // the consumer needs few rows.
         if (context.RowLimit is not null)
         {
-            context = new ExecutionContext(context) { RowLimit = null };
+            context = context.WithRowLimit(null);
         }
 
         if (_streamingSorted)

@@ -1,6 +1,6 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
-using DatumIngest.DatumFile.V2;
+using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 
@@ -74,7 +74,7 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (a Int32)");
 
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE TEMP TABLE t (a Int32)"));
     }
 
@@ -359,7 +359,7 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
     {
         using TableCatalog catalog = CreateCatalog(CatalogPath);
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        ExecutionException ex = Assert.Throws<ExecutionException>(() =>
             catalog.Plan($"CREATE TABLE t (a Int32) AT '{Path.Combine(_tempDir, "elsewhere.datum")}'"));
         Assert.Contains("AT 'path' is no longer supported", ex.Message);
     }
@@ -399,7 +399,7 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
     public void DropTable_WhenMissing_Throws()
     {
         using TableCatalog catalog = CreateCatalog();
-        Assert.Throws<InvalidOperationException>(() => catalog.Plan("DROP TABLE nope"));
+        Assert.Throws<ExecutionException>(() => catalog.Plan("DROP TABLE nope"));
     }
 
     [Fact]
@@ -472,7 +472,7 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE foo (id Int32)");
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        ExecutionException ex = Assert.Throws<ExecutionException>(() =>
             catalog.Plan("CREATE TEMP TABLE FOO (id Int32)"));
         Assert.Contains("already exists", ex.Message);
     }

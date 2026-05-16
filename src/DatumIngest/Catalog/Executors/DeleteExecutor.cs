@@ -34,11 +34,11 @@ internal static class DeleteExecutor
         TableCatalog catalog,
         DeleteStatement delete,
         Plans.CapturedRowsSource? captureSink,
-        BatchContext batchContext)
+        DatumIngest.Execution.ExecutionContext context)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(delete);
-        ArgumentNullException.ThrowIfNull(batchContext);
+        ArgumentNullException.ThrowIfNull(context);
 
         // Block DELETE against a view before the table resolver fires its
         // misleading "table not found" diagnostic.
@@ -63,7 +63,7 @@ internal static class DeleteExecutor
                 "is read-only (CanDeleteRows = false).");
         }
 
-        IReadOnlyList<RowBatch>? captured = await ScanAndDeleteAsync(catalog, provider, delete, batchContext).ConfigureAwait(false);
+        IReadOnlyList<RowBatch>? captured = await ScanAndDeleteAsync(catalog, provider, delete, context).ConfigureAwait(false);
 
         if (captured is not null && captureSink is not null)
         {
@@ -72,21 +72,15 @@ internal static class DeleteExecutor
     }
 
     private static async Task<IReadOnlyList<RowBatch>?> ScanAndDeleteAsync(
-        TableCatalog catalog, ITableProvider provider, DeleteStatement delete, BatchContext? batchContext)
+        TableCatalog catalog,
+        ITableProvider provider,
+        DeleteStatement delete,
+        Execution.ExecutionContext context)
     {
-        // See UpdateExecutor for the non-null fallback rationale.
-        MemoryAccountant accountant = batchContext is not null ? batchContext.Accountant : new MemoryAccountant();
         Expression? predicate = delete.Where;
         bool captureRows = delete.Returning is not null;
         Schema schema = provider.GetSchema();
         ColumnLookup? schemaLookup = captureRows ? BuildSchemaLookup(schema) : null;
-
-        // Transient ExecutionContext for the DML's frame ambient state.
-        // Borrows the (BatchContext-supplied or fresh) accountant so the
-        // dispose at end of this method only releases the unused Store
-        // baseline + VideoRegistry it allocated.
-        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(accountant: accountant,
-            types: batchContext?.Types);
 
         // Walk the live row sequence with a running counter. The
         // provider's tombstone index space matches a fresh scan's
@@ -149,7 +143,7 @@ internal static class DeleteExecutor
                         // 8 bytes per index in the matched list. Accountant
                         // notification keeps DELETE residency visible alongside
                         // UPDATE/INSERT for batch-wide budgeting and profiling.
-                        accountant?.NotifyMaterialized(sizeof(long));
+                        context.Accountant.NotifyMaterialized(sizeof(long));
 
                         // RETURNING capture: pre-delete image. Stabilize each
                         // cell from the scan batch's arena into the capture
@@ -198,7 +192,7 @@ internal static class DeleteExecutor
 
         // Release the matched-index buffer's bytes from the accountant; the
         // list goes out of scope when this method returns and is GC-eligible.
-        accountant?.NotifyReleased(matched.Count * sizeof(long));
+        context.Accountant.NotifyReleased(matched.Count * sizeof(long));
 
         return capturedBatches;
     }

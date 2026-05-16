@@ -10,7 +10,7 @@ namespace DatumIngest.Tests.Execution;
 /// Slice 4 end-to-end tests for the procedural batch executor: DECLARE,
 /// SET, BEGIN/END, IF/ELSE, WHILE, plus query / CALL statements that
 /// reference declared variables. The substrate (<see cref="VariableScope"/>
-/// / <see cref="BatchContext"/>) is verified separately; these tests
+/// / <see cref="ExecutionContext"/>) is verified separately; these tests
 /// pin the integrated semantics.
 /// </summary>
 public sealed class BatchExecutorTests : ServiceTestBase
@@ -1675,7 +1675,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // SELECT-assignment inside a FOR-IN body: each iteration runs the
         // assignment SELECT against the body's enclosing scope. Confirms
-        // the assignment routes through the same BatchContext as DECLARE
+        // the assignment routes through the same ExecutionContext as DECLARE
         // / SET.
         TableCatalog catalog = CreateCatalog("nums",
             columns: ["v"],

@@ -154,13 +154,7 @@ public sealed class LimitOperator : QueryOperator
 
         if (context.RowLimit is null || Limit + Offset < context.RowLimit)
         {
-            limitedContext = new ExecutionContext(context)
-            {
-                OuterRow = context.OuterRow,
-                MaxRecursionDepth = context.MaxRecursionDepth,
-                RowLimit = Limit + Offset,
-                DegreeOfParallelism = context.DegreeOfParallelism,
-            };
+            limitedContext = context.WithRowLimit(Limit + Offset);
         }
 
         int skipped = 0;

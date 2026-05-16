@@ -104,7 +104,7 @@ internal sealed class IndexPlan : StatementPlan
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        DatumIngest.Execution.ExecutionContext context)
     {
         if (Interlocked.Exchange(ref _executed, 1) != 0)
         {

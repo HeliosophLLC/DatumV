@@ -323,7 +323,6 @@ public sealed partial class ExpressionEvaluator
         // is bound in scope, before consulting the row schema.
         if (indexAccess.Source is ColumnReference unqualifiedSource
             && unqualifiedSource.TableName is null
-            && _variableScope is not null
             && _variableScope.TryGetFieldNames(unqualifiedSource.ColumnName, out IReadOnlyList<string>? variableFieldNames)
             && variableFieldNames is not null)
         {

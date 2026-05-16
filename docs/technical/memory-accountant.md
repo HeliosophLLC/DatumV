@@ -37,7 +37,7 @@ Every batch executed via `BatchExecutor.RunWithEventsAsync` runs against a budge
 public const long DefaultMemoryBudgetBytes = 2L * 1024 * 1024 * 1024;
 ```
 
-The default applies when no explicit budget is passed; callers that need different behavior pass their own value, or `long.MaxValue` for effectively unbounded execution. Standalone queries that bypass `BatchExecutor` (constructed directly via `new ExecutionContext(...)`) can set `memoryBudgetBytes` on the context constructor or leave it null for unbounded behavior.
+The default applies when no explicit budget is passed; callers that need different behavior pass their own value, or `long.MaxValue` for effectively unbounded execution. Standalone queries that bypass `BatchExecutor` (constructed directly via `catalog.CreateExecutionContext(...)`) can set `memoryBudgetBytes` on the factory call or leave it null for unbounded behavior.
 
 ### How operators consult the budget
 
@@ -152,7 +152,7 @@ The release happens when `PopFrame()` runs at the end of a `BEGIN … END` block
 
 ## DML
 
-INSERT, UPDATE, and DELETE executors track their buffered held state too. They take an optional `BatchContext?` parameter — when supplied, the executor reports its buffer growth into the batch's accountant. When called as a top-level statement outside a batch (the shell, ad-hoc Web request), each constructs a per-call accountant to satisfy the non-null requirement.
+INSERT, UPDATE, and DELETE executors track their buffered held state too. They take an optional `ExecutionContext?` parameter — when supplied, the executor reports its buffer growth into the batch's accountant. When called as a top-level statement outside a batch (the shell, ad-hoc Web request), each constructs a per-call accountant to satisfy the non-null requirement.
 
 | DML | What's accounted |
 |---|---|
@@ -178,16 +178,15 @@ If a future operator needs to budget bytes that fall outside this model, it shou
 
 ## Configuration
 
-The budget is set at one of two layers:
+The budget is set at one layer:
 
-- **`BatchContext` constructor.** `new BatchContext(memoryBudgetBytes: 4L * 1024 * 1024 * 1024)` for a 4 GiB batch budget. The Web app's streaming layer defaults to 2 GiB; the CLI / test harness defaults to unbounded unless told otherwise.
-- **`ExecutionContext` constructor.** `new ExecutionContext(..., memoryBudgetBytes: ...)` when constructing a context outside a batch. Ignored if an existing accountant is passed via the `accountant` parameter — the accountant carries its own budget.
+- **`TableCatalog.CreateExecutionContext` factory.** `catalog.CreateExecutionContext(memoryBudgetBytes: ...)` when constructing a context outside a batch. Ignored if an existing accountant is passed via the `accountant` parameter — the accountant carries its own budget.
 
 `MemoryAccountant.MemoryBudgetBytes` is null when no budget is configured. In that case `WouldExceedBudget` always returns false (no spill triggering from this path), but `NotifyMaterialized` / `NotifyReleased` still update the counter so the live profile remains accurate.
 
 ## Disposing the accountant
 
-`MemoryAccountant` implements `IDisposable` and stops its 1Hz sampling timer on disposal. The owning scope (`BatchContext` for batches, `ExecutionContext` for standalone queries) disposes the accountant when it itself is disposed. Borrowed contexts (copy ctor, `WithOuterRow`, RowLimit-strip children) skip the dispose — only the owner cleans up.
+`MemoryAccountant` implements `IDisposable` and stops its 1Hz sampling timer on disposal. The owning scope disposes the accountant when it itself is disposed. Derived contexts (`context.Derive(...)`, `context.WithRowLimit(...)`) borrow the parent's accountant and skip the dispose — only the owner cleans up.
 
 In tests that construct `MemoryAccountant` directly, the `using` pattern ensures the timer (if started via `StartProfiling`) stops cleanly. Accountants that never start profiling have no Timer to clean and can be left to the GC.
 

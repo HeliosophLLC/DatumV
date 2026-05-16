@@ -167,7 +167,7 @@ internal sealed class DmlReturningPlan : StatementPlan
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -178,7 +178,7 @@ internal sealed class DmlReturningPlan : StatementPlan
         if (_dmlPlan is not null)
         {
             await foreach (RowBatch _ in _dmlPlan
-                .ExecuteAsync(cancellationToken, batchContext)
+                .ExecuteAsync(cancellationToken, context)
                 .ConfigureAwait(false))
             {
                 // DmlPlan yields nothing; this body is unreachable in practice.
@@ -195,10 +195,6 @@ internal sealed class DmlReturningPlan : StatementPlan
         // batch's arena (Source) and writes new ones into the corresponding
         // output batch's arena (Target). RETURNING expressions can reference
         // any captured column; outer rows / variables are not in scope.
-        using DatumIngest.Execution.ExecutionContext context = Catalog.CreateExecutionContext(
-            accountant: batchContext.Accountant,
-            types: batchContext.Types,
-            cancellationToken: cancellationToken);
         ExpressionEvaluator evaluator = context.CreateEvaluator();
 
         // Yield one output batch per captured input batch — preserves the

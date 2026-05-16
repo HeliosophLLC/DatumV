@@ -38,7 +38,6 @@ public sealed partial class ExpressionEvaluator
         // is built when the call lands here.
         if (expression is ColumnReference columnRef
             && columnRef.TableName is null
-            && _variableScope is not null
             && _variableScope.TryGet(columnRef.ColumnName, out ValueRef variableValue))
         {
             return new ValueTask<ValueRef>(variableValue);
@@ -125,15 +124,6 @@ public sealed partial class ExpressionEvaluator
                 + $"({string.Join(", ", value.Parameters)}); got {args.Length}.",
                 nameof(arguments));
         }
-        // Lazily initialise the variable scope. Procedural callers
-        // (DECLARE / FOR / SET) pass an explicit scope at construction, so
-        // they hit the same instance every time. Operator-pipeline callers
-        // (ProjectOperator, FilterOperator, …) don't pass a scope; the
-        // first lambda invocation in that evaluator creates one bound to
-        // the evaluator's accountant. The scope persists for the
-        // evaluator's lifetime — typically per-query.
-        _variableScope ??= new VariableScope(_accountant);
-
         _variableScope.PushFrame();
         try
         {

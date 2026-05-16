@@ -71,7 +71,7 @@ internal sealed class CapturedRowsSource : StatementPlan
 #pragma warning disable CS1998 // Async method lacks 'await' operators — yielding from a buffered list.
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         if (Interlocked.Exchange(ref _executed, 1) != 0)
         {

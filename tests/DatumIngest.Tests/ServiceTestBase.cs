@@ -262,11 +262,13 @@ public abstract class ServiceTestBase : IDisposable
         int? maxRecursionDepth = null,
         int? batchSize = null,
         int? maxStratifyClasses = null,
+        int procedureCallDepth = 0,
         Arena? store = null,
         Pool? pool = null,
         MemoryAccountant? accountant = null,
         TypeRegistry? typeRegistry = null,
         VideoRegistry? videoRegistry = null,
+        PrintHandler? printSink = null,
         CancellationToken cancellationToken = default)
     {
         pool ??= CreatePool();
@@ -282,12 +284,14 @@ public abstract class ServiceTestBase : IDisposable
             store: store,
             types: typeRegistry ?? new TypeRegistry(),
             videoRegistry: videoRegistry ?? new VideoRegistry(),
+            printSink: printSink,
             cancellationToken: cancellationToken)
         {
             AssertionDiagnostics = diagnostics,
             MaxRecursionDepth = maxRecursionDepth ?? 1000,
             BatchSize = batchSize ?? 1024,
-            MaxStratifyClasses = maxStratifyClasses ?? 10000
+            MaxStratifyClasses = maxStratifyClasses ?? 10000,
+            ProcedureCallDepth = procedureCallDepth
         };
     }
 
@@ -373,7 +377,7 @@ public abstract class ServiceTestBase : IDisposable
         TableCatalog catalog = (plan as StatementPlan)?.Catalog
             ?? throw new InvalidOperationException(
                 $"AnalyzePlanAsync(plan): plan of type {plan.GetType().Name} has no catalog " +
-                "back-reference. Build a BatchContext and call plan.AnalyzeAsync(ct, batchContext) directly.");
+                "back-reference. Build an ExecutionContext and call plan.AnalyzeAsync(ct, context) directly.");
         return catalog.AnalyzeAsync(plan, cancellationToken);
     }
 

@@ -13,7 +13,7 @@ namespace DatumIngest.Data;
 /// <para>
 /// Lifecycle is intentionally trivial — the heavy state lives on the
 /// catalog (which the caller owns) or on the command/reader pair (which
-/// own a per-execute <see cref="DatumIngest.Execution.BatchContext"/>).
+/// own a per-execute <see cref="Execution.ExecutionContext"/>).
 /// A future remote variant would distinguish itself with non-trivial
 /// transport state at this layer; the in-process implementation does not.
 /// </para>

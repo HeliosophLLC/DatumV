@@ -19,7 +19,7 @@ internal static class ProceduralEvaluator
     /// Evaluates <paramref name="expression"/> by synthesising
     /// <c>SELECT &lt;expression&gt;</c>, planning it through the catalog,
     /// and reading the single resulting cell. The value is stabilised
-    /// into <see cref="BatchContext.VariableStore"/> so it remains valid
+    /// into <see cref="ExecutionContext.VariableStore"/> so it remains valid
     /// after the synthetic query's per-batch arena recycles. Throws if
     /// the expression doesn't yield exactly one row.
     /// </summary>
@@ -32,22 +32,22 @@ internal static class ProceduralEvaluator
     /// procedural shapes like <c>DECLARE @c INT64 = (SELECT count(*) FROM t)</c>.
     /// </remarks>
     public static async Task<DataValue> EvaluateScalarAsync(
-        Expression expression, BatchContext batchContext, CancellationToken ct)
+        Expression expression, ExecutionContext context, CancellationToken ct)
     {
-        Expression rewritten = await PrefoldSubqueriesAsync(expression, batchContext, ct)
+        Expression rewritten = await PrefoldSubqueriesAsync(expression, context, ct)
             .ConfigureAwait(false);
 
         QueryStatement synthetic = new(
             new SelectQueryExpression(
                 new SelectStatement(Columns: [new SelectColumn(rewritten)])));
-        StatementPlan plan = await batchContext.Catalog
+        StatementPlan plan = await context.Catalog
             .PlanAsync(synthetic, sourceText: null)
             .ConfigureAwait(false);
 
         DataValue stable = default;
         bool captured = false;
         await foreach (RowBatch batch in plan
-            .ExecuteAsync(ct, batchContext)
+            .ExecuteAsync(ct, context)
             .ConfigureAwait(false))
         {
             if (captured) continue; // drain remainder; auto-pool happens on iteration
@@ -56,7 +56,7 @@ internal static class ProceduralEvaluator
                 // Stabilise into the variable store while the producing
                 // arena is still alive (current batch's lifetime).
                 stable = DataValueRetention.Stabilize(
-                    batch[0][0], batch.Arena, batchContext.VariableStore);
+                    batch[0][0], batch.Arena, context.VariableStore);
                 captured = true;
             }
         }
@@ -75,9 +75,9 @@ internal static class ProceduralEvaluator
     /// flow). Non-boolean types throw.
     /// </summary>
     public static async Task<bool> EvaluatePredicateAsync(
-        Expression expression, BatchContext batchContext, CancellationToken ct)
+        Expression expression, ExecutionContext context, CancellationToken ct)
     {
-        DataValue value = await EvaluateScalarAsync(expression, batchContext, ct).ConfigureAwait(false);
+        DataValue value = await EvaluateScalarAsync(expression, context, ct).ConfigureAwait(false);
         if (value.IsNull) return false;
         if (value.Kind == DataKind.Boolean) return value.AsBoolean();
         throw new InvalidOperationException(
@@ -88,19 +88,15 @@ internal static class ProceduralEvaluator
     /// <summary>
     /// Lifts a <see cref="DataValue"/> produced by
     /// <see cref="EvaluateScalarAsync"/> (anchored in
-    /// <see cref="BatchContext.VariableStore"/>) into a
+    /// <see cref="ExecutionContext.VariableStore"/>) into a
     /// <see cref="ValueRef"/> for storage in <see cref="VariableScope"/>.
     /// Byte payloads materialise into managed memory so the binding
     /// survives any future arena recycle; inline scalars pass through
     /// unchanged.
     /// </summary>
-    public static ValueRef LiftBoundaryValue(DataValue value, BatchContext batchContext)
+    public static ValueRef LiftBoundaryValue(DataValue value, ExecutionContext context)
     {
-        using ExecutionContext context = batchContext.Catalog.CreateExecutionContext(
-            store: batchContext.VariableStore,
-            types: batchContext.Types,
-            accountant: batchContext.Accountant);
-        EvaluationFrame boundary = new(Row.Empty, batchContext.VariableStore, context);
+        EvaluationFrame boundary = new(Row.Empty, context.VariableStore, context);
         return ExpressionEvaluator.ToValueRef(value, boundary);
     }
 
@@ -184,16 +180,16 @@ internal static class ProceduralEvaluator
     /// procedural patterns demand it.
     /// </remarks>
     public static async Task<Expression> PrefoldSubqueriesAsync(
-        Expression expression, BatchContext batchContext, CancellationToken ct)
+        Expression expression, ExecutionContext context, CancellationToken ct)
     {
         switch (expression)
         {
             case SubqueryExpression subquery:
-                return await FoldOneSubqueryAsync(subquery, batchContext, ct).ConfigureAwait(false);
+                return await FoldOneSubqueryAsync(subquery, context, ct).ConfigureAwait(false);
 
             case CastExpression cast:
             {
-                Expression inner = await PrefoldSubqueriesAsync(cast.Expression, batchContext, ct)
+                Expression inner = await PrefoldSubqueriesAsync(cast.Expression, context, ct)
                     .ConfigureAwait(false);
                 return ReferenceEquals(inner, cast.Expression)
                     ? cast
@@ -202,9 +198,9 @@ internal static class ProceduralEvaluator
 
             case BinaryExpression binary:
             {
-                Expression left = await PrefoldSubqueriesAsync(binary.Left, batchContext, ct)
+                Expression left = await PrefoldSubqueriesAsync(binary.Left, context, ct)
                     .ConfigureAwait(false);
-                Expression right = await PrefoldSubqueriesAsync(binary.Right, batchContext, ct)
+                Expression right = await PrefoldSubqueriesAsync(binary.Right, context, ct)
                     .ConfigureAwait(false);
                 return ReferenceEquals(left, binary.Left) && ReferenceEquals(right, binary.Right)
                     ? binary
@@ -213,7 +209,7 @@ internal static class ProceduralEvaluator
 
             case UnaryExpression unary:
             {
-                Expression operand = await PrefoldSubqueriesAsync(unary.Operand, batchContext, ct)
+                Expression operand = await PrefoldSubqueriesAsync(unary.Operand, context, ct)
                     .ConfigureAwait(false);
                 return ReferenceEquals(operand, unary.Operand)
                     ? unary
@@ -222,7 +218,7 @@ internal static class ProceduralEvaluator
 
             case IsNullExpression isNull:
             {
-                Expression inner = await PrefoldSubqueriesAsync(isNull.Expression, batchContext, ct)
+                Expression inner = await PrefoldSubqueriesAsync(isNull.Expression, context, ct)
                     .ConfigureAwait(false);
                 return ReferenceEquals(inner, isNull.Expression)
                     ? isNull
@@ -234,7 +230,7 @@ internal static class ProceduralEvaluator
                 Expression[]? rewrittenArgs = null;
                 for (int i = 0; i < fn.Arguments.Count; i++)
                 {
-                    Expression rewritten = await PrefoldSubqueriesAsync(fn.Arguments[i], batchContext, ct)
+                    Expression rewritten = await PrefoldSubqueriesAsync(fn.Arguments[i], context, ct)
                         .ConfigureAwait(false);
                     if (!ReferenceEquals(rewritten, fn.Arguments[i]))
                     {
@@ -249,12 +245,12 @@ internal static class ProceduralEvaluator
 
             case InExpression inExpr:
             {
-                Expression target = await PrefoldSubqueriesAsync(inExpr.Expression, batchContext, ct)
+                Expression target = await PrefoldSubqueriesAsync(inExpr.Expression, context, ct)
                     .ConfigureAwait(false);
                 Expression[]? rewrittenValues = null;
                 for (int i = 0; i < inExpr.Values.Count; i++)
                 {
-                    Expression rewritten = await PrefoldSubqueriesAsync(inExpr.Values[i], batchContext, ct)
+                    Expression rewritten = await PrefoldSubqueriesAsync(inExpr.Values[i], context, ct)
                         .ConfigureAwait(false);
                     if (!ReferenceEquals(rewritten, inExpr.Values[i]))
                     {
@@ -269,11 +265,11 @@ internal static class ProceduralEvaluator
 
             case BetweenExpression between:
             {
-                Expression target = await PrefoldSubqueriesAsync(between.Expression, batchContext, ct)
+                Expression target = await PrefoldSubqueriesAsync(between.Expression, context, ct)
                     .ConfigureAwait(false);
-                Expression low = await PrefoldSubqueriesAsync(between.Low, batchContext, ct)
+                Expression low = await PrefoldSubqueriesAsync(between.Low, context, ct)
                     .ConfigureAwait(false);
-                Expression high = await PrefoldSubqueriesAsync(between.High, batchContext, ct)
+                Expression high = await PrefoldSubqueriesAsync(between.High, context, ct)
                     .ConfigureAwait(false);
                 return ReferenceEquals(target, between.Expression)
                     && ReferenceEquals(low, between.Low)
@@ -287,16 +283,16 @@ internal static class ProceduralEvaluator
                 Expression? operand = caseExpr.Operand;
                 if (operand is not null)
                 {
-                    operand = await PrefoldSubqueriesAsync(operand, batchContext, ct)
+                    operand = await PrefoldSubqueriesAsync(operand, context, ct)
                         .ConfigureAwait(false);
                 }
                 WhenClause[]? rewrittenClauses = null;
                 for (int i = 0; i < caseExpr.WhenClauses.Count; i++)
                 {
                     WhenClause clause = caseExpr.WhenClauses[i];
-                    Expression cond = await PrefoldSubqueriesAsync(clause.Condition, batchContext, ct)
+                    Expression cond = await PrefoldSubqueriesAsync(clause.Condition, context, ct)
                         .ConfigureAwait(false);
-                    Expression result = await PrefoldSubqueriesAsync(clause.Result, batchContext, ct)
+                    Expression result = await PrefoldSubqueriesAsync(clause.Result, context, ct)
                         .ConfigureAwait(false);
                     if (!ReferenceEquals(cond, clause.Condition) || !ReferenceEquals(result, clause.Result))
                     {
@@ -307,7 +303,7 @@ internal static class ProceduralEvaluator
                 Expression? elseResult = caseExpr.ElseResult;
                 if (elseResult is not null)
                 {
-                    elseResult = await PrefoldSubqueriesAsync(elseResult, batchContext, ct)
+                    elseResult = await PrefoldSubqueriesAsync(elseResult, context, ct)
                         .ConfigureAwait(false);
                 }
                 bool unchanged = ReferenceEquals(operand, caseExpr.Operand)
@@ -331,10 +327,10 @@ internal static class ProceduralEvaluator
     /// semantics: zero rows → NULL literal, more than one row → error.
     /// </summary>
     public static async Task<Expression> FoldOneSubqueryAsync(
-        SubqueryExpression subquery, BatchContext batchContext, CancellationToken ct)
+        SubqueryExpression subquery, ExecutionContext context, CancellationToken ct)
     {
         QueryStatement innerStatement = new(new SelectQueryExpression(subquery.Query));
-        StatementPlan innerPlan = await batchContext.Catalog
+        StatementPlan innerPlan = await context.Catalog
             .PlanAsync(innerStatement, sourceText: null)
             .ConfigureAwait(false);
 
@@ -342,7 +338,7 @@ internal static class ProceduralEvaluator
         bool haveValue = false;
         bool tooManyRows = false;
         await foreach (RowBatch batch in innerPlan
-            .ExecuteAsync(ct, batchContext)
+            .ExecuteAsync(ct, context)
             .ConfigureAwait(false))
         {
             for (int i = 0; i < batch.Count; i++)
@@ -362,7 +358,7 @@ internal static class ProceduralEvaluator
                 // Stabilise into the procedure-lifetime store before the
                 // producing arena recycles on the next iteration.
                 captured = DataValueRetention.Stabilize(
-                    row[0], batch.Arena, batchContext.VariableStore);
+                    row[0], batch.Arena, context.VariableStore);
                 haveValue = true;
             }
             if (tooManyRows) break;

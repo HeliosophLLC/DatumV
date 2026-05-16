@@ -1,5 +1,6 @@
 using DatumIngest.Catalog.Plans;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -19,11 +20,15 @@ internal static class TableExecutor
     /// file for persistent), registers it with the catalog, and persists
     /// the entry in the catalog json (persistent only).
     /// </summary>
-    public static async Task<StatementPlan> CreateTableAsync(
-        TableCatalog catalog, CreateTableStatement create, string? sourceText = null)
+    public static async Task CreateTableAsync(
+        TableCatalog catalog,
+        CreateTableStatement create,
+        Execution.ExecutionContext context,
+        string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(create);
+        ArgumentNullException.ThrowIfNull(context);
 
         // Existence check is against the explicit target location (after
         // ResolveForCreate picks the schema for unqualified names below)
@@ -40,13 +45,14 @@ internal static class TableExecutor
 
         if (catalog.HasTable(existenceCheckName))
         {
-            if (create.IfNotExists) return DdlPlan.NoOp(catalog, "Table");
-            throw new InvalidOperationException(
+            if (create.IfNotExists) return;
+
+            throw new ExecutionException(
                 $"Table '{create.TableName}' already exists.");
         }
 
         // Build ColumnInfo[] from the AST's ColumnDefinition list.
-        Schema schema = await ColumnDefinitionResolver.BuildSchemaAsync(catalog, create.Columns, create.PrimaryKeyColumns)
+        Schema schema = await ColumnDefinitionResolver.BuildSchemaAsync(catalog, create.Columns, create.PrimaryKeyColumns, context)
             .ConfigureAwait(false);
 
         if (create.IsTemp)
@@ -60,10 +66,12 @@ internal static class TableExecutor
                     $"CREATE TEMP TABLE cannot specify a schema (got '{create.SchemaName}'). " +
                     "TEMP tables are always session-scoped in the public schema.");
             }
+
             catalog.Add(new InMemoryTableProvider(catalog.Pool, create.TableName, schema));
             catalog.Events.Raise(new TableCreatedEvent(
                 new QualifiedName("public", create.TableName), schema, sourceText));
-            return DdlPlan.NoOp(catalog, "Table");
+
+            return;
         }
 
         // AT 'path' is no longer supported — table files always land at
@@ -73,7 +81,7 @@ internal static class TableExecutor
         // writing somewhere unexpected.
         if (create.StoragePath is not null)
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"CREATE TABLE '{create.TableName}': AT 'path' is no longer supported. " +
                 "Table files always land at <catalog>/data/<schema>/<name>.datum.");
         }
@@ -87,17 +95,17 @@ internal static class TableExecutor
 
         if (!catalog.TryResolveBackend(qn.Schema, out ITableCatalog? backend))
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"CREATE TABLE '{create.TableName}': no catalog backend is " +
                 $"mounted for schema '{qn.Schema}'.");
         }
+
         backend.CreatePersistentTable(
             qn,
             schema,
             create.PrimaryKeyConstraintName);
 
         catalog.Events.Raise(new TableCreatedEvent(qn, schema, sourceText));
-        return DdlPlan.NoOp(catalog, "Table");
     }
 
     /// <summary>
@@ -106,7 +114,7 @@ internal static class TableExecutor
     /// <c>.datum</c> file (and companion sidecars), and updates the
     /// catalog json. <c>IF EXISTS</c> suppresses the not-found error.
     /// </summary>
-    public static StatementPlan DropTable(TableCatalog catalog, DropTableStatement drop, string? sourceText = null)
+    public static void DropTable(TableCatalog catalog, DropTableStatement drop, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(drop);
@@ -127,12 +135,12 @@ internal static class TableExecutor
 
         if (!catalog.TryResolveBackend(qn.Schema, out ITableCatalog? backend) || !backend.DropTable(qn))
         {
-            if (drop.IfExists) return DdlPlan.NoOp(catalog, "Table");
-            throw new InvalidOperationException(
+            if (drop.IfExists) return;
+
+            throw new ExecutionException(
                 $"Table '{drop.TableName}' is not registered in the catalog.");
         }
 
         catalog.Events.Raise(new TableDroppedEvent(qn, beforeSchema, sourceText));
-        return DdlPlan.NoOp(catalog, "Table");
     }
 }

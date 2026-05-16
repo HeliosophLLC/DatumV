@@ -26,7 +26,7 @@ namespace DatumIngest.Model;
 /// per-query <see cref="TypeRegistry"/>: TypeIds are query-scoped intern indices, and
 /// reusing one across registries silently rebinds it to a different shape. In practice
 /// every Stabilize call site today shares a registry — <c>ExecutionContext.Types</c>
-/// is shared with child contexts, and <c>BatchContext.Types</c> is shared across every
+/// is shared with child contexts, and <c>ExecutionContext.Types</c> is shared across every
 /// query inside one procedural batch. If a future site stabilises a value into a store
 /// owned by a different registry, the TypeId carried across will name a
 /// different shape (or no shape) on lookup; the call site is responsible

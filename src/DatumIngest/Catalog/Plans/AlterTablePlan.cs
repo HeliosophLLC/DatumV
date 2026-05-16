@@ -132,7 +132,7 @@ internal sealed class AlterTablePlan : StatementPlan
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         if (Interlocked.Exchange(ref _executed, 1) != 0)
         {
@@ -154,7 +154,7 @@ internal sealed class AlterTablePlan : StatementPlan
         switch (_statement)
         {
             case AlterTableAddColumnStatement add:
-                await AlterTableExecutor.AddColumnAsync(Catalog, add, _sourceText).ConfigureAwait(false);
+                await AlterTableExecutor.AddColumnAsync(Catalog, add, context, _sourceText).ConfigureAwait(false);
                 break;
             case AlterTableDropColumnStatement dropCol:
                 AlterTableExecutor.DropColumn(Catalog, dropCol, _sourceText);

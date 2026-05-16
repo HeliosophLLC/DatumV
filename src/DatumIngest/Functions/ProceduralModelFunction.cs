@@ -352,9 +352,9 @@ public sealed class ProceduralModelFunction : IScalarFunction
         // above + the body's straight-line DECLARE/SET path threads columns through
         // EvaluateColumnAsync, not the frame), so the derived context only needs
         // Store overridden.
-        using DatumIngest.Execution.ExecutionContext bodyContext = outerFrame.Context!.Derive(
+        using Execution.ExecutionContext bodyContext = outerFrame.Context.Derive(
             store: variableStore);
-        EvaluationFrame bodyFrame = new EvaluationFrame(Row.Empty, variableStore, bodyContext, currentModel: _descriptor);
+        EvaluationFrame bodyFrame = new(Row.Empty, variableStore, bodyContext, currentModel: _descriptor);
 
         // Walk the body. The IsStraightLineBody contract guarantees the
         // sequence is DECLARE/SET-only up to a terminal RETURN — no IF /

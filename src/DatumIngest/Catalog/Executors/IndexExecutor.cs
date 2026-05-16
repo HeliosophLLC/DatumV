@@ -1,4 +1,5 @@
 using DatumIngest.Catalog.Plans;
+using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -20,7 +21,7 @@ internal static class IndexExecutor
     /// <c>.datum-cindex-{name}</c> sidecar (and backfill it from existing
     /// rows), records the index in the catalog descriptor, and persists.
     /// </summary>
-    public static async Task<StatementPlan> CreateIndexAsync(
+    public static async Task CreateIndexAsync(
         TableCatalog catalog, CreateIndexStatement create, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
@@ -30,10 +31,11 @@ internal static class IndexExecutor
         // Resolution honours the new SchemaName (S8): explicit schema →
         // exact lookup; unqualified → walks search_path.
         QualifiedName tableQn = catalog.ResolveDdlName(create.SchemaName, create.TableName);
+
         if (!catalog.TryResolveBackend(tableQn.Schema, out ITableCatalog? backend)
             || !backend.TryGetTable(tableQn, out ITableProvider? provider))
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"Table '{create.TableName}' is not registered in the catalog.");
         }
 
@@ -43,9 +45,10 @@ internal static class IndexExecutor
         {
             if (create.IfNotExists && existingOwner.Equals(tableQn))
             {
-                return DdlPlan.NoOp(catalog, "Index");
+                return;
             }
-            throw new InvalidOperationException(
+
+            throw new ExecutionException(
                 $"Index '{create.IndexName}' already exists" +
                 (existingOwner.Equals(tableQn)
                     ? $" on table '{existingOwner}'."
@@ -54,7 +57,7 @@ internal static class IndexExecutor
 
         if (provider is not Providers.DatumFileTableProviderV2 datumProvider)
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"Table '{create.TableName}' does not support CREATE INDEX. " +
                 "Only persistent .datum tables maintain composite indexes; " +
                 "TEMP / InMemory / external-source tables are excluded.");
@@ -62,7 +65,7 @@ internal static class IndexExecutor
 
         if (create.Columns.Count == 0)
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"CREATE INDEX '{create.IndexName}' requires at least one column.");
         }
 
@@ -72,7 +75,7 @@ internal static class IndexExecutor
         {
             IndexKind.Composite => BuildCompositeIndexDescriptor(create, datumProvider),
             IndexKind.FullText => BuildFullTextIndexDescriptor(create, datumProvider),
-            _ => throw new InvalidOperationException(
+            _ => throw new ExecutionException(
                 $"CREATE INDEX '{create.IndexName}': unsupported index kind {kind}."),
         };
 
@@ -93,7 +96,6 @@ internal static class IndexExecutor
         backend.RegisterIndex(tableQn, descriptor);
 
         catalog.Events.Raise(new IndexCreatedEvent(tableQn, descriptor, sourceText));
-        return DdlPlan.NoOp(catalog, "Index");
     }
 
     private static IndexKind ResolveCreateIndexKind(CreateIndexStatement create)
@@ -107,7 +109,7 @@ internal static class IndexExecutor
         {
             "btree" or "composite" => IndexKind.Composite,
             "fts" or "fulltext" => IndexKind.FullText,
-            _ => throw new InvalidOperationException(
+            _ => throw new ExecutionException(
                 $"CREATE INDEX '{create.IndexName}': USING method '{create.Method}' is not recognized. " +
                 "Supported methods: BTREE (default), FTS."),
         };
@@ -119,7 +121,7 @@ internal static class IndexExecutor
         // if someone supplies one so typos don't get silently dropped.
         if (create.Options is { Count: > 0 })
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"CREATE INDEX '{create.IndexName}': WITH options are not supported for composite (B+Tree) indexes. " +
                 "Known options apply to USING FTS only.");
         }
@@ -130,17 +132,17 @@ internal static class IndexExecutor
             ColumnInfo? column = schema.FindColumn(columnName);
             if (column is null)
             {
-                throw new InvalidOperationException(
+                throw new ExecutionException(
                     $"CREATE INDEX '{create.IndexName}': column '{columnName}' does not exist on table '{create.TableName}'.");
             }
             if (column.IsArray)
             {
-                throw new InvalidOperationException(
+                throw new ExecutionException(
                     $"CREATE INDEX '{create.IndexName}': column '{columnName}' is an array column and cannot be indexed.");
             }
             if (column.Kind is DataKind.Decimal or DataKind.Point2D or DataKind.Point3D)
             {
-                throw new InvalidOperationException(
+                throw new ExecutionException(
                     $"CREATE INDEX '{create.IndexName}': column '{columnName}' has kind '{column.Kind}' which has no canonical sort encoding.");
             }
         }
@@ -159,7 +161,7 @@ internal static class IndexExecutor
 
         if (create.Columns.Count != 1)
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"CREATE INDEX '{create.IndexName}': USING FTS requires exactly one column (got {create.Columns.Count}). " +
                 "For cross-column search, either create one FTS index per column or use a generated " +
                 "concatenation column.");
@@ -170,12 +172,12 @@ internal static class IndexExecutor
         ColumnInfo? column = schema.FindColumn(columnName);
         if (column is null)
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"CREATE INDEX '{create.IndexName}': column '{columnName}' does not exist on table '{create.TableName}'.");
         }
         if (column.IsArray || column.Kind != DataKind.String)
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"CREATE INDEX '{create.IndexName}': USING FTS requires a non-array String column. " +
                 $"Column '{columnName}' is {column.Kind}{(column.IsArray ? "[]" : string.Empty)}.");
         }
@@ -185,9 +187,9 @@ internal static class IndexExecutor
         // column with different analyzers); when that ships, drop this check.
         if (datumProvider.TryGetTextSearchIndex(columnName, out _))
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"CREATE INDEX '{create.IndexName}': column '{columnName}' already has a full-text index. " +
-                "Multiple FTS indexes per column are deferred to a future PR.");
+                "Multiple FTS indexes per column are not supported.");
         }
 
         string analyzerName = ResolveFtsAnalyzerOption(create);
@@ -196,7 +198,7 @@ internal static class IndexExecutor
         if (!Indexing.Fts.FtsAnalyzerRegistry.Default.TryGet(analyzerName, out _))
         {
             string known = string.Join(", ", Indexing.Fts.FtsAnalyzerRegistry.Default.RegisteredNames);
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"CREATE INDEX '{create.IndexName}': analyzer '{analyzerName}' is not registered. " +
                 $"Known analyzers: {known}.");
         }
@@ -220,7 +222,7 @@ internal static class IndexExecutor
         {
             if (!string.Equals(key, "analyzer", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException(
+                throw new ExecutionException(
                     $"CREATE INDEX '{create.IndexName}': unknown WITH option '{key}'. " +
                     "USING FTS recognizes only 'analyzer' in v1.");
             }
@@ -235,28 +237,28 @@ internal static class IndexExecutor
     /// run after this see acceleration restored. In-memory tables have
     /// no acceleration sidecar, so REINDEX rejects them.
     /// </summary>
-    public static async Task<StatementPlan> ReindexAsync(TableCatalog catalog, ReindexTableStatement reindex)
+    public static async Task ReindexAsync(TableCatalog catalog, ReindexTableStatement reindex)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(reindex);
 
         QualifiedName reindexQn = catalog.ResolveDdlName(reindex.SchemaName, reindex.TableName);
+
         if (!catalog.TryResolveBackend(reindexQn.Schema, out ITableCatalog? reindexBackend)
             || !reindexBackend.TryGetTable(reindexQn, out ITableProvider? provider))
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"Table '{reindex.TableName}' is not registered in the catalog.");
         }
 
         if (!provider.CanRebuildIndex)
         {
-            throw new InvalidOperationException(
+            throw new ExecutionException(
                 $"Table '{reindex.TableName}' does not support REINDEX " +
                 $"(provider type '{provider.GetType().Name}' has no .datum-index sidecar).");
         }
 
         await provider.RebuildIndexAsync().ConfigureAwait(false);
-        return DdlPlan.NoOp(catalog, "Index");
     }
 
     /// <summary>
@@ -265,7 +267,7 @@ internal static class IndexExecutor
     /// <c>.datum-cindex-{name}</c> sidecar, removes the catalog entry, and
     /// persists.
     /// </summary>
-    public static StatementPlan DropIndex(TableCatalog catalog, DropIndexStatement drop, string? sourceText = null)
+    public static void DropIndex(TableCatalog catalog, DropIndexStatement drop, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(drop);
@@ -276,8 +278,9 @@ internal static class IndexExecutor
         // index-name-to-owning-table.
         if (!flatFile.TryGetIndexOwner(drop.IndexName, out QualifiedName tableName))
         {
-            if (drop.IfExists) return DdlPlan.NoOp(catalog, "Index");
-            throw new InvalidOperationException(
+            if (drop.IfExists) return;
+
+            throw new ExecutionException(
                 $"Index '{drop.IndexName}' is not registered in the catalog.");
         }
 
@@ -287,8 +290,9 @@ internal static class IndexExecutor
             // cleaning up the index map. Defensively remove the stale entry
             // and persist.
             flatFile.UnregisterIndex(drop.IndexName, out _);
-            if (drop.IfExists) return DdlPlan.NoOp(catalog, "Index");
-            throw new InvalidOperationException(
+            if (drop.IfExists) return;
+
+            throw new ExecutionException(
                 $"Index '{drop.IndexName}' references missing table '{tableName}'.");
         }
 
@@ -313,6 +317,5 @@ internal static class IndexExecutor
         flatFile.UnregisterIndex(drop.IndexName, out _);
 
         catalog.Events.Raise(new IndexDroppedEvent(tableName, descriptor, sourceText));
-        return DdlPlan.NoOp(catalog, "Index");
     }
 }

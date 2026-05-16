@@ -78,20 +78,20 @@ internal sealed class ProceduralLeafPlan : StatementPlan
 #pragma warning disable CS1998 // Async method lacks 'await' operators on some paths — leaf yields no rows.
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         switch (_statement)
         {
             case DeclareStatement decl:
-                await ExecuteDeclareAsync(decl, batchContext, cancellationToken).ConfigureAwait(false);
+                await ExecuteDeclareAsync(decl, context, cancellationToken).ConfigureAwait(false);
                 break;
             case SetStatement set:
-                await ExecuteSetAsync(set, batchContext, cancellationToken).ConfigureAwait(false);
+                await ExecuteSetAsync(set, context, cancellationToken).ConfigureAwait(false);
                 break;
             case PrintStatement print:
-                await ExecutePrintAsync(print, batchContext, cancellationToken).ConfigureAwait(false);
+                await ExecutePrintAsync(print, context, cancellationToken).ConfigureAwait(false);
                 break;
             case BreakStatement:
                 throw LoopBreakSignal.Instance;
@@ -106,7 +106,7 @@ internal sealed class ProceduralLeafPlan : StatementPlan
 #pragma warning restore CS1998
 
     private static async Task ExecuteDeclareAsync(
-        DeclareStatement decl, BatchContext batchContext, CancellationToken ct)
+        DeclareStatement decl, Execution.ExecutionContext context, CancellationToken ct)
     {
         ValueRef bound;
         if (decl.Initializer is not null)
@@ -118,8 +118,8 @@ internal sealed class ProceduralLeafPlan : StatementPlan
             Expression effective = decl.TypeName is not null
                 ? new CastExpression(decl.Initializer, decl.TypeName, decl.Span)
                 : decl.Initializer;
-            DataValue stable = await ProceduralEvaluator.EvaluateScalarAsync(effective, batchContext, ct).ConfigureAwait(false);
-            bound = ProceduralEvaluator.LiftBoundaryValue(stable, batchContext);
+            DataValue stable = await ProceduralEvaluator.EvaluateScalarAsync(effective, context, ct).ConfigureAwait(false);
+            bound = ProceduralEvaluator.LiftBoundaryValue(stable, context);
         }
         else
         {
@@ -134,27 +134,27 @@ internal sealed class ProceduralLeafPlan : StatementPlan
             }
             bound = isArray ? ValueRef.NullArray(kind) : ValueRef.Null(kind);
         }
-        batchContext.VariableScope.Declare(decl.VariableName, bound);
+        context.VariableScope.Declare(decl.VariableName, bound);
     }
 
     private static async Task ExecuteSetAsync(
-        SetStatement set, BatchContext batchContext, CancellationToken ct)
+        SetStatement set, Execution.ExecutionContext context, CancellationToken ct)
     {
-        DataValue stable = await ProceduralEvaluator.EvaluateScalarAsync(set.Value, batchContext, ct).ConfigureAwait(false);
-        batchContext.VariableScope.Set(set.VariableName, ProceduralEvaluator.LiftBoundaryValue(stable, batchContext));
+        DataValue stable = await ProceduralEvaluator.EvaluateScalarAsync(set.Value, context, ct).ConfigureAwait(false);
+        context.VariableScope.Set(set.VariableName, ProceduralEvaluator.LiftBoundaryValue(stable, context));
     }
 
     private static async Task ExecutePrintAsync(
-        PrintStatement print, BatchContext batchContext, CancellationToken ct)
+        PrintStatement print, Execution.ExecutionContext context, CancellationToken ct)
     {
-        DataValue value = await ProceduralEvaluator.EvaluateScalarAsync(print.Value, batchContext, ct).ConfigureAwait(false);
-        string? text = ProceduralEvaluator.RenderForPrint(value, batchContext.VariableStore);
+        DataValue value = await ProceduralEvaluator.EvaluateScalarAsync(print.Value, context, ct).ConfigureAwait(false);
+        string? text = ProceduralEvaluator.RenderForPrint(value, context.VariableStore);
         // No event channel on the plan contract — emission goes through
-        // BatchContext.PrintSink. BatchExecutor's AST-walk emits
+        // ExecutionContext.PrintSink. BatchExecutor's AST-walk emits
         // CellPrintBatchEvent directly via onEvent; standalone plan
         // callers that want PRINT visibility set PrintSink before
         // iteration. Null sink silently drops.
-        batchContext.PrintSink?.Invoke(text);
+        context.PrintSink(text);
     }
 }
 
@@ -196,18 +196,18 @@ internal sealed class BlockPlan : StatementPlan
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         _ = _statement;
         cancellationToken.ThrowIfCancellationRequested();
-        batchContext.VariableScope.PushFrame();
+        context.VariableScope.PushFrame();
         try
         {
             foreach (StatementPlan child in _children)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 await foreach (RowBatch batch in child
-                    .ExecuteAsync(cancellationToken, batchContext)
+                    .ExecuteAsync(cancellationToken, context)
                     .ConfigureAwait(false))
                 {
                     yield return batch;
@@ -216,7 +216,7 @@ internal sealed class BlockPlan : StatementPlan
         }
         finally
         {
-            batchContext.VariableScope.PopFrame();
+            context.VariableScope.PopFrame();
         }
     }
 }
@@ -268,16 +268,16 @@ internal sealed class IfPlan : StatementPlan
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         cancellationToken.ThrowIfCancellationRequested();
         bool predicate = await ProceduralEvaluator
-            .EvaluatePredicateAsync(_statement.Predicate, batchContext, cancellationToken)
+            .EvaluatePredicateAsync(_statement.Predicate, context, cancellationToken)
             .ConfigureAwait(false);
         StatementPlan? branch = predicate ? _thenPlan : _elsePlan;
         if (branch is null) yield break;
         await foreach (RowBatch batch in branch
-            .ExecuteAsync(cancellationToken, batchContext)
+            .ExecuteAsync(cancellationToken, context)
             .ConfigureAwait(false))
         {
             yield return batch;
@@ -326,7 +326,7 @@ internal sealed class WhilePlan : StatementPlan
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         int iter = 0;
         while (true)
@@ -338,12 +338,12 @@ internal sealed class WhilePlan : StatementPlan
                     $"WHILE loop exceeded {IterationCap} iterations — likely a missing termination condition.");
             }
             bool keepGoing = await ProceduralEvaluator
-                .EvaluatePredicateAsync(_statement.Predicate, batchContext, cancellationToken)
+                .EvaluatePredicateAsync(_statement.Predicate, context, cancellationToken)
                 .ConfigureAwait(false);
             if (!keepGoing) break;
 
             (LoopOutcome outcome, IAsyncEnumerator<RowBatch> bodyEnumerator) = (LoopOutcome.Completed, null!);
-            bodyEnumerator = _bodyPlan.ExecuteAsync(cancellationToken, batchContext).GetAsyncEnumerator(cancellationToken);
+            bodyEnumerator = _bodyPlan.ExecuteAsync(cancellationToken, context).GetAsyncEnumerator(cancellationToken);
             try
             {
                 while (true)
@@ -417,19 +417,19 @@ internal sealed class ForCounterPlan : StatementPlan
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         cancellationToken.ThrowIfCancellationRequested();
         DataValue startVal = await ProceduralEvaluator
-            .EvaluateScalarAsync(_statement.Start, batchContext, cancellationToken)
+            .EvaluateScalarAsync(_statement.Start, context, cancellationToken)
             .ConfigureAwait(false);
         DataValue endVal = await ProceduralEvaluator
-            .EvaluateScalarAsync(_statement.End, batchContext, cancellationToken)
+            .EvaluateScalarAsync(_statement.End, context, cancellationToken)
             .ConfigureAwait(false);
         long start = ProceduralEvaluator.ToInt64(startVal, $"FOR @{_statement.VariableName} start");
         long end = ProceduralEvaluator.ToInt64(endVal, $"FOR @{_statement.VariableName} end");
 
-        batchContext.VariableScope.PushFrame();
+        context.VariableScope.PushFrame();
         try
         {
             if (start > end) yield break;
@@ -439,16 +439,16 @@ internal sealed class ForCounterPlan : StatementPlan
                 ValueRef iValue = ValueRef.FromInt64(i);
                 if (i == start)
                 {
-                    batchContext.VariableScope.Declare(_statement.VariableName, iValue);
+                    context.VariableScope.Declare(_statement.VariableName, iValue);
                 }
                 else
                 {
-                    batchContext.VariableScope.Set(_statement.VariableName, iValue);
+                    context.VariableScope.Set(_statement.VariableName, iValue);
                 }
 
                 LoopOutcome outcome = LoopOutcome.Completed;
                 IAsyncEnumerator<RowBatch> bodyEnumerator = _bodyPlan
-                    .ExecuteAsync(cancellationToken, batchContext)
+                    .ExecuteAsync(cancellationToken, context)
                     .GetAsyncEnumerator(cancellationToken);
                 try
                 {
@@ -483,7 +483,7 @@ internal sealed class ForCounterPlan : StatementPlan
         }
         finally
         {
-            batchContext.VariableScope.PopFrame();
+            context.VariableScope.PopFrame();
         }
     }
 }
@@ -537,7 +537,7 @@ internal sealed class ForInPlan : StatementPlan
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -545,16 +545,8 @@ internal sealed class ForInPlan : StatementPlan
         ushort rowTypeId = 0;
         bool broke = false;
 
-        // Reuse one ExecutionContext across the loop — ambient state is
-        // stable for the duration of the FOR-IN.
-        using DatumIngest.Execution.ExecutionContext context = Catalog.CreateExecutionContext(
-            store: batchContext.VariableStore,
-            types: batchContext.Types,
-            accountant: batchContext.Accountant,
-            cancellationToken: cancellationToken);
-
         await foreach (RowBatch batch in _sourcePlan
-            .ExecuteAsync(cancellationToken, batchContext)
+            .ExecuteAsync(cancellationToken, context)
             .ConfigureAwait(false))
         {
             if (broke) break;
@@ -571,7 +563,7 @@ internal sealed class ForInPlan : StatementPlan
                 // ValueRef.FromStruct — the resulting binding has no arena
                 // dependency and survives the batch recycle without
                 // touching VariableStore.
-                EvaluationFrame batchFrame = new(row, batch.Arena, batchContext.VariableStore, context);
+                EvaluationFrame batchFrame = new(row, batch.Arena, context.VariableStore, context);
                 ValueRef[] fieldRefs = new ValueRef[colCount];
                 for (int j = 0; j < colCount; j++)
                 {
@@ -582,20 +574,20 @@ internal sealed class ForInPlan : StatementPlan
                     StructFieldDescriptor[] fieldDescriptors = new StructFieldDescriptor[colCount];
                     for (int j = 0; j < colCount; j++)
                     {
-                        int fieldTypeId = batchContext.Types.InternScalarType(fieldRefs[j].Kind);
+                        int fieldTypeId = context.Types.InternScalarType(fieldRefs[j].Kind);
                         fieldDescriptors[j] = new StructFieldDescriptor(fieldNames[j], fieldTypeId);
                     }
-                    rowTypeId = (ushort)batchContext.Types.InternStructType(fieldDescriptors);
+                    rowTypeId = (ushort)context.Types.InternStructType(fieldDescriptors);
                 }
                 ValueRef rowStruct = ValueRef.FromStruct(fieldRefs, rowTypeId);
 
-                batchContext.VariableScope.PushFrame();
+                context.VariableScope.PushFrame();
                 LoopOutcome outcome = LoopOutcome.Completed;
                 try
                 {
-                    batchContext.VariableScope.Declare(_statement.VariableName, rowStruct, fieldNames);
+                    context.VariableScope.Declare(_statement.VariableName, rowStruct, fieldNames);
                     IAsyncEnumerator<RowBatch> bodyEnumerator = _bodyPlan
-                        .ExecuteAsync(cancellationToken, batchContext)
+                        .ExecuteAsync(cancellationToken, context)
                         .GetAsyncEnumerator(cancellationToken);
                     try
                     {
@@ -627,7 +619,7 @@ internal sealed class ForInPlan : StatementPlan
                 }
                 finally
                 {
-                    batchContext.VariableScope.PopFrame();
+                    context.VariableScope.PopFrame();
                 }
 
                 if (outcome == LoopOutcome.Broke)

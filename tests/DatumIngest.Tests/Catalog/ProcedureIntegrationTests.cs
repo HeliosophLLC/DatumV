@@ -168,7 +168,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "  DECLARE x INT32 = 7 " +
             "END");
 
-        // The procedure's x lives in its own BatchContext and is gone after
+        // The procedure's x lives in its own ExecutionContext and is gone after
         // the procedure ends — so we can't observe it via FinalBindings.
         // We assert that the call doesn't throw and the procedure is
         // registered & callable.
@@ -273,7 +273,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
     public async Task ExecProc_ArgsEvaluateInCallerScope()
     {
         // The argument expression is evaluated against the caller's
-        // BatchContext, so it can reference the caller's vars.
+        // ExecutionContext, so it can reference the caller's vars.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
             "CREATE PROCEDURE noop(v INT64) AS BEGIN " +
@@ -293,7 +293,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
     [Fact]
     public async Task ExecProc_DirectRecursion_ThrowsAfterCap()
     {
-        // Self-recursive procedure: each call opens a new BatchContext at
+        // Self-recursive procedure: each call opens a new ExecutionContext at
         // depth+1; the cap fires before the .NET call stack overflows.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(

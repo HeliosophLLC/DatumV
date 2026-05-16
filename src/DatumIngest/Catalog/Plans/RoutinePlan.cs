@@ -102,7 +102,7 @@ internal sealed class RoutinePlan : StatementPlan
 #pragma warning disable CS1998 // Async method lacks 'await' — leaf yields no rows.
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        BatchContext batchContext)
+        Execution.ExecutionContext context)
     {
         if (Interlocked.Exchange(ref _executed, 1) != 0)
         {
@@ -111,7 +111,6 @@ internal sealed class RoutinePlan : StatementPlan
                 "Statement plans represent a single pending execution; re-plan the statement to apply it again.");
         }
 
-        _ = batchContext;
         cancellationToken.ThrowIfCancellationRequested();
 
         switch (_statement)

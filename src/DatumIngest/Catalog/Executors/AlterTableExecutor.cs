@@ -1,7 +1,5 @@
-using DatumIngest.Catalog.Plans;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
-using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -21,11 +19,15 @@ internal static class AlterTableExecutor
     /// later-PR concern), and computed columns (<c>AS expr</c>) are
     /// reserved for a future PR.
     /// </summary>
-    public static async Task<StatementPlan> AddColumnAsync(
-        TableCatalog catalog, AlterTableAddColumnStatement alter, string? sourceText = null)
+    public static async Task AddColumnAsync(
+        TableCatalog catalog,
+        AlterTableAddColumnStatement alter,
+        Execution.ExecutionContext context,
+        string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(alter);
+        ArgumentNullException.ThrowIfNull(context);
 
         // Resolve the schema once. Subsequent lookups go through the
         // string indexer with this qualified form so the router picks the
@@ -65,7 +67,7 @@ internal static class AlterTableExecutor
         if (defaultExpr is not null)
         {
             ColumnDefinitionResolver.ValidateDefaultExpression(defaultExpr, alter.ColumnName);
-            await ColumnDefinitionResolver.ValidateDefaultExpressionFitsColumnAsync(catalog, defaultExpr, alter.ColumnName, kind, isArray)
+            await ColumnDefinitionResolver.ValidateDefaultExpressionFitsColumnAsync(context, defaultExpr, alter.ColumnName, kind, isArray)
                 .ConfigureAwait(false);
         }
 
@@ -201,7 +203,7 @@ internal static class AlterTableExecutor
         // the v1 INSERT-time behaviour.
         if (computedExpr is not null)
         {
-            await BackfillComputedColumnAsync(catalog, qualifiedTableName, column).ConfigureAwait(false);
+            await BackfillComputedColumnAsync(catalog, qualifiedTableName, column, context).ConfigureAwait(false);
         }
 
         // Promote the new column to PRIMARY KEY. AddColumn has already
@@ -256,7 +258,6 @@ internal static class AlterTableExecutor
         {
             catalog.Events.Raise(new TableAlteredEvent(qn, beforeSchema, afterProvider.GetSchema(), sourceText));
         }
-        return DdlPlan.NoOp(catalog, "AlterTable");
     }
 
     /// <summary>
@@ -264,18 +265,19 @@ internal static class AlterTableExecutor
     /// is soft-dropped (tombstoned) on the underlying provider; the
     /// data block stays on disk for compaction-time reclamation.
     /// </summary>
-    public static StatementPlan DropColumn(TableCatalog catalog, AlterTableDropColumnStatement alter, string? sourceText = null)
+    public static void DropColumn(TableCatalog catalog, AlterTableDropColumnStatement alter, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(alter);
 
         QualifiedName qn = catalog.ResolveDdlName(alter.SchemaName, alter.TableName);
-        string qualifiedTableName = qn.ToString();
-        if (!catalog.TryGetTable(qualifiedTableName, out ITableProvider? provider))
+
+        if (!catalog.TryGetTable(qn, out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"Table '{alter.TableName}' is not registered in the catalog.");
         }
+
         Schema beforeSchema = provider.GetSchema();
 
         // Honor IF EXISTS — schema lookup is the cheapest way to ask
@@ -292,13 +294,15 @@ internal static class AlterTableExecutor
                 break;
             }
         }
+
         if (!columnPresent)
         {
-            if (alter.IfExists) return DdlPlan.NoOp(catalog, "AlterTable");
+            if (alter.IfExists) return;
+
             throw new InvalidOperationException(
                 $"Column '{alter.ColumnName}' does not exist on table '{alter.TableName}'.");
         }
-        if (columnIsPrimaryKey)
+        else if (columnIsPrimaryKey)
         {
             // PK columns are load-bearing on the prologue's PK index
             // list and on the runtime uniqueness check. Dropping one
@@ -309,7 +313,7 @@ internal static class AlterTableExecutor
                 "dropped. Drop the PRIMARY KEY constraint first (e.g., " +
                 $"`ALTER TABLE {alter.TableName} DROP CONSTRAINT {alter.TableName}_pkey`).");
         }
-        if (schema.Columns.Count == 1)
+        else if (schema.Columns.Count == 1)
         {
             // The on-disk .datum format requires at least one column;
             // dropping the only column would leave the next append /
@@ -401,13 +405,12 @@ internal static class AlterTableExecutor
             }
         }
 
-        catalog[qualifiedTableName].DropColumn(alter.ColumnName);
+        provider.DropColumn(alter.ColumnName);
 
-        if (catalog.TryGetTable(qualifiedTableName, out ITableProvider? afterProvider))
+        if (catalog.TryGetTable(qn, out ITableProvider? afterProvider))
         {
             catalog.Events.Raise(new TableAlteredEvent(qn, beforeSchema, afterProvider.GetSchema(), sourceText));
         }
-        return DdlPlan.NoOp(catalog, "AlterTable");
     }
 
     /// <summary>
@@ -417,7 +420,7 @@ internal static class AlterTableExecutor
     /// names produce a PG-flavored "does not exist" error (suppressed by
     /// <c>IF EXISTS</c>).
     /// </summary>
-    public static async Task<StatementPlan> DropConstraintAsync(
+    public static async Task DropConstraintAsync(
         TableCatalog catalog, AlterTableDropConstraintStatement alter, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
@@ -444,7 +447,8 @@ internal static class AlterTableExecutor
             Schema schema = provider.GetSchema();
             if (schema.PrimaryKeyColumnIndices.Count == 0)
             {
-                if (alter.IfExists) return DdlPlan.NoOp(catalog, "AlterTable");
+                if (alter.IfExists) return;
+
                 throw new InvalidOperationException(
                     $"constraint \"{alter.ConstraintName}\" of relation \"{alter.TableName}\" does not exist");
             }
@@ -461,12 +465,14 @@ internal static class AlterTableExecutor
             {
                 catalog.Events.Raise(new TableAlteredEvent(qn, beforeSchema, afterProvider.GetSchema(), sourceText));
             }
-            return DdlPlan.NoOp(catalog, "AlterTable");
+
+            return;
         }
 
         // Name didn't match the PK convention. In v1 there are no other
         // droppable constraint names, so this is always "does not exist".
-        if (alter.IfExists) return DdlPlan.NoOp(catalog, "AlterTable");
+        if (alter.IfExists) return;
+
         throw new InvalidOperationException(
             $"constraint \"{alter.ConstraintName}\" of relation \"{alter.TableName}\" does not exist");
     }
@@ -476,15 +482,15 @@ internal static class AlterTableExecutor
     /// Validates that the column exists and (for DROP IDENTITY without
     /// IF EXISTS) that the attribute being dropped is actually present.
     /// </summary>
-    public static async Task<StatementPlan> AlterColumnDropAsync(
+    public static async Task AlterColumnDropAsync(
         TableCatalog catalog, AlterTableAlterColumnDropStatement alter, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(alter);
 
         QualifiedName qn = catalog.ResolveDdlName(alter.SchemaName, alter.TableName);
-        string qualifiedTableName = qn.ToString();
-        if (!catalog.TryGetTable(qualifiedTableName, out ITableProvider? provider))
+
+        if (!catalog.TryGetTable(qn, out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"Table '{alter.TableName}' is not registered in the catalog.");
@@ -500,6 +506,7 @@ internal static class AlterTableExecutor
                 break;
             }
         }
+
         if (columnIndex < 0)
         {
             throw new InvalidOperationException(
@@ -513,10 +520,12 @@ internal static class AlterTableExecutor
             case AlterColumnDropTarget.Identity:
                 if (column.Identity is null)
                 {
-                    if (alter.IfExists) return DdlPlan.NoOp(catalog, "AlterTable");
+                    if (alter.IfExists) return;
+
                     throw new InvalidOperationException(
                         $"column \"{alter.ColumnName}\" of relation \"{alter.TableName}\" is not an IDENTITY column");
                 }
+                
                 await provider.DropColumnIdentityAsync(columnIndex).ConfigureAwait(false);
                 break;
 
@@ -533,10 +542,12 @@ internal static class AlterTableExecutor
                 // constraint"). Silent no-op with IF EXISTS.
                 if (column.Nullable)
                 {
-                    if (alter.IfExists) return DdlPlan.NoOp(catalog, "AlterTable");
+                    if (alter.IfExists) return;
+
                     throw new InvalidOperationException(
                         $"column \"{alter.ColumnName}\" of relation \"{alter.TableName}\" does not have a NOT NULL constraint");
                 }
+
                 await provider.DropColumnNotNullAsync(columnIndex).ConfigureAwait(false);
                 break;
 
@@ -545,11 +556,12 @@ internal static class AlterTableExecutor
                     $"ALTER COLUMN DROP target {alter.Target} is not implemented.");
         }
 
-        if (catalog.TryGetTable(qualifiedTableName, out ITableProvider? afterProvider))
+        if (catalog.TryGetTable(qn, out ITableProvider? afterProvider))
         {
             catalog.Events.Raise(new TableAlteredEvent(qn, schema, afterProvider.GetSchema(), sourceText));
         }
-        return DdlPlan.NoOp(catalog, "AlterTable");
+
+        return;
     }
 
     /// <summary>
@@ -558,15 +570,15 @@ internal static class AlterTableExecutor
     /// <c>SetColumnNotNullAsync</c> handles the scan-for-NULLs validation
     /// and the descriptor flip; this method just resolves the column index.
     /// </summary>
-    public static async Task<StatementPlan> AlterColumnSetAsync(
+    public static async Task AlterColumnSetAsync(
         TableCatalog catalog, AlterTableAlterColumnSetStatement alter, string? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(alter);
 
         QualifiedName qn = catalog.ResolveDdlName(alter.SchemaName, alter.TableName);
-        string qualifiedTableName = qn.ToString();
-        if (!catalog.TryGetTable(qualifiedTableName, out ITableProvider? provider))
+
+        if (!catalog.TryGetTable(qn, out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"Table '{alter.TableName}' is not registered in the catalog.");
@@ -602,11 +614,12 @@ internal static class AlterTableExecutor
                     $"ALTER COLUMN SET target {alter.Target} is not implemented.");
         }
 
-        if (catalog.TryGetTable(qualifiedTableName, out ITableProvider? afterProvider))
+        if (catalog.TryGetTable(qn, out ITableProvider? afterProvider))
         {
             catalog.Events.Raise(new TableAlteredEvent(qn, schema, afterProvider.GetSchema(), sourceText));
         }
-        return DdlPlan.NoOp(catalog, "AlterTable");
+
+        return;
     }
 
     /// <summary>
@@ -616,7 +629,11 @@ internal static class AlterTableExecutor
     /// values in place of the NULL pump that <c>provider.AddColumn</c>
     /// just emitted.
     /// </summary>
-    private static async Task BackfillComputedColumnAsync(TableCatalog catalog, string tableName, ColumnInfo column)
+    private static async Task BackfillComputedColumnAsync(
+        TableCatalog catalog,
+        string tableName,
+        ColumnInfo column,
+        Execution.ExecutionContext context)
     {
         if (!catalog.TryGetTable(tableName, out ITableProvider? provider)) return;
         if (!provider.CanUpdateRows)
@@ -641,7 +658,7 @@ internal static class AlterTableExecutor
         // the same failure would look like at INSERT time.
         try
         {
-            await BackfillComputedColumnAsync(catalog, provider, column).ConfigureAwait(false);
+            await BackfillComputedColumnAsync(provider, column, context).ConfigureAwait(false);
         }
         catch
         {
@@ -655,7 +672,10 @@ internal static class AlterTableExecutor
         }
     }
 
-    private static async Task BackfillComputedColumnAsync(TableCatalog catalog, ITableProvider provider, ColumnInfo column)
+    private static async Task BackfillComputedColumnAsync(
+        ITableProvider provider,
+        ColumnInfo column,
+        Execution.ExecutionContext context)
     {
         Schema schema = provider.GetSchema();
         int newColIdx = -1;
@@ -670,9 +690,9 @@ internal static class AlterTableExecutor
         if (newColIdx < 0) return;
 
         using Arena workArena = new();
-        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext(store: workArena);
-        ExpressionEvaluator evaluator = context.CreateEvaluator();
-        List<RowUpdateRequest> requests = new();
+        using Execution.ExecutionContext backfillContext = context.Derive(store: workArena);
+        ExpressionEvaluator evaluator = backfillContext.CreateEvaluator();
+        List<RowUpdateRequest> requests = [];
         long liveRowIndex = 0;
 
         await foreach (RowBatch batch in provider.ScanAsync(
@@ -684,10 +704,11 @@ internal static class AlterTableExecutor
             try
             {
                 Arena scanArena = batch.Arena;
+
                 for (int r = 0; r < batch.Count; r++, liveRowIndex++)
                 {
                     Row row = batch[r];
-                    EvaluationFrame frame = new(row, scanArena, workArena, context);
+                    EvaluationFrame frame = new(row, scanArena, workArena, backfillContext);
                     ValueRef result = await evaluator.EvaluateAsValueRefAsync(
                         column.ComputedExpression!, frame, CancellationToken.None).ConfigureAwait(false);
                     DataValue computed = ComputedColumnEvaluator.ConvertValueRefToTarget(
