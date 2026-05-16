@@ -8,8 +8,13 @@ using DatumIngest.Statistics.Accumulators;
 
 public sealed class ImageStatsAccumulatorTests : ServiceTestBase
 {
-    private readonly Arena _arena = new();
+    private readonly Arena _arena;
 
+    public ImageStatsAccumulatorTests()
+    {
+        _arena = CreateArena();
+    }
+    
     public override void Dispose()
     {
         _arena.Dispose();

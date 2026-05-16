@@ -179,7 +179,7 @@ public sealed class DatumFileV2DropColumnTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["id", "name", "drop_me"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
         for (int i = 0; i < 3; i++)
         {
@@ -216,7 +216,7 @@ public sealed class DatumFileV2DropColumnTests : ServiceTestBase, IAsyncLifetime
         registry.Register(sidecarSource);
 
         // Read the surviving String column at footer index 1.
-        Arena readArena = new();
+        Arena readArena = CreateArena();
         IPageDecoderV2 nameDec = reader.OpenPageDecoder(
             columnIndex: 1, pageIndex: 0,
             sidecarStoreId: 0, sidecarSource: sidecarSource, eagerStore: readArena);
@@ -282,7 +282,7 @@ public sealed class DatumFileV2DropColumnTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["a", "b", "c"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
         for (int i = 0; i < 3; i++)
         {

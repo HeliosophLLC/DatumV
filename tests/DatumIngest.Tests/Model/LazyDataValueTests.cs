@@ -88,7 +88,7 @@ public class LazyDataValueTests : ServiceTestBase
     {
         int innerForceCount = 0;
         int outerForceCount = 0;
-        Arena arena = new();
+        Arena arena = CreateArena();
 
         // Simulates load_image(file_bytes) in inner SELECT
         LazyDataValue innerLazy = new(() =>

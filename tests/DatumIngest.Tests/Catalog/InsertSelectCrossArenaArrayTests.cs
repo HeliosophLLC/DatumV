@@ -90,7 +90,7 @@ public sealed class InsertSelectCrossArenaArrayTests : ServiceTestBase, IAsyncLi
         // Cross-arena copy — shape prefix must survive intact.
         catalog.Plan("INSERT INTO sink SELECT m FROM source");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_shape(m) AS shape," +

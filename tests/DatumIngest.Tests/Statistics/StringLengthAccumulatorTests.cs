@@ -2,12 +2,17 @@ namespace DatumIngest.Tests.Statistics;
 
 using System.Linq;
 using DatumIngest.Model;
-using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
 public sealed class StringLengthAccumulatorTests : ServiceTestBase
 {
-    private readonly Arena _arena = new();
+    private readonly Arena _arena;
+
+    public StringLengthAccumulatorTests()
+    {
+        _arena = CreateArena();
+    }
+
 
     public override void Dispose()
     {

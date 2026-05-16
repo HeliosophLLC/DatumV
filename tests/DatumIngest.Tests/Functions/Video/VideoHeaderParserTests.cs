@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Functions.Video;
 /// stamping path. Runs against <c>Fixtures/spike.mp4</c> — a 72-frame 1920×1080
 /// H.264 clip already in the repo for video-frame tests.
 /// </summary>
-public sealed class VideoHeaderParserTests
+public sealed class VideoHeaderParserTests : ServiceTestBase
 {
     private static string SpikeVideoPath() => Path.Combine(
         AppContext.BaseDirectory, "Fixtures", "spike.mp4");
@@ -50,7 +50,7 @@ public sealed class VideoHeaderParserTests
     public void VideoDataValueFactory_FromEncodedBytes_StampsMetadataOntoDataValue()
     {
         byte[] bytes = File.ReadAllBytes(SpikeVideoPath());
-        using Arena store = new();
+        using Arena store = CreateArena();
 
         DataValue dv = VideoDataValueFactory.FromEncodedBytes(bytes, store);
 
@@ -69,7 +69,7 @@ public sealed class VideoHeaderParserTests
         // functions return NULL.
         byte[] mystery = new byte[1024];
         for (int i = 0; i < mystery.Length; i++) mystery[i] = (byte)(i & 0xFF);
-        using Arena store = new();
+        using Arena store = CreateArena();
 
         DataValue dv = VideoDataValueFactory.FromEncodedBytes(mystery, store);
 

@@ -791,6 +791,42 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         };
 
     /// <summary>
+    /// Parses <paramref name="sql"/> and returns the right
+    /// <see cref="PreparedSql"/> shape: a <see cref="StatementPlan"/> for
+    /// a single statement, a <see cref="Plans.StatementBatch"/> for a
+    /// semicolon-separated multi-statement script. Pure — no side
+    /// effects until the returned unit is iterated (or its children are,
+    /// for batches). Empty input is a caller error.
+    /// </summary>
+    /// <remarks>
+    /// Use this entry when the caller doesn't know up-front whether the
+    /// SQL contains one or many statements (the in-process data API
+    /// dispatches through here). Callers that know they have a single
+    /// statement can call <see cref="PlanAsync(string)"/> directly for
+    /// a tighter return type.
+    /// </remarks>
+    public async Task<PreparedSql> PrepareAsync(string sql)
+    {
+        IReadOnlyList<(Statement Statement, string SourceText)> entries =
+            SqlParser.ParseBatchWithText(sql);
+        if (entries.Count == 0)
+        {
+            throw new ArgumentException(
+                "PrepareAsync: input contained no statements.", nameof(sql));
+        }
+        if (entries.Count == 1)
+        {
+            return await PlanAsync(entries[0].Statement, entries[0].SourceText).ConfigureAwait(false);
+        }
+        List<(Statement, string?)> batchEntries = new(entries.Count);
+        foreach ((Statement statement, string sourceText) in entries)
+        {
+            batchEntries.Add((statement, sourceText));
+        }
+        return new Plans.StatementBatch(this, batchEntries);
+    }
+
+    /// <summary>
     /// Parses and plans <paramref name="sql"/> against this catalog, returning an
     /// <see cref="StatementPlan"/> that may be inspected (<see cref="StatementPlan.ExplainTree"/>),
     /// analyzed (<see cref="StatementPlan.AnalyzeAsync"/>), or executed. Literal payloads
@@ -829,42 +865,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// </summary>
     public Task<StatementPlan> PlanAsync(Statement statement)
         => PlanAsync(statement, sourceText: null);
-
-    /// <summary>
-    /// Parses <paramref name="sql"/> and returns the right
-    /// <see cref="PreparedSql"/> shape: a <see cref="StatementPlan"/> for
-    /// a single statement, a <see cref="Plans.StatementBatch"/> for a
-    /// semicolon-separated multi-statement script. Pure — no side
-    /// effects until the returned unit is iterated (or its children are,
-    /// for batches). Empty input is a caller error.
-    /// </summary>
-    /// <remarks>
-    /// Use this entry when the caller doesn't know up-front whether the
-    /// SQL contains one or many statements (the in-process data API
-    /// dispatches through here). Callers that know they have a single
-    /// statement can call <see cref="PlanAsync(string)"/> directly for
-    /// a tighter return type.
-    /// </remarks>
-    public async Task<PreparedSql> PrepareAsync(string sql)
-    {
-        IReadOnlyList<(Statement Statement, string SourceText)> entries =
-            SqlParser.ParseBatchWithText(sql);
-        if (entries.Count == 0)
-        {
-            throw new ArgumentException(
-                "PrepareAsync: input contained no statements.", nameof(sql));
-        }
-        if (entries.Count == 1)
-        {
-            return await PlanAsync(entries[0].Statement, entries[0].SourceText).ConfigureAwait(false);
-        }
-        List<(Statement, string?)> batchEntries = new(entries.Count);
-        foreach ((Statement statement, string sourceText) in entries)
-        {
-            batchEntries.Add((statement, sourceText));
-        }
-        return new Plans.StatementBatch(this, batchEntries);
-    }
 
     /// <summary>
     /// Canonical planning entry point. Returns an <see cref="StatementPlan"/>
@@ -1151,36 +1151,44 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             "Add a structured plan class under DatumIngest.Catalog.Plans and an explicit route in PlanAsync.");
     }
 
-    /// <summary>
-    /// Best-effort target-schema resolution for DML composition. Returns
-    /// the live <see cref="Schema"/> when the (schema, table) qualifier
-    /// resolves through the search path and the provider is registered;
-    /// returns <see langword="false"/> when any step fails so the caller
-    /// can fall back to a bare <see cref="Plans.DmlPlan"/> and let the
-    /// executor surface the precise diagnostic at apply time.
-    /// </summary>
-    private bool TryResolveDmlTargetSchema(
-        string? schemaName,
-        string tableName,
-        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Schema? schema)
+    private StatementPlan PlanCall(CallStatement call)
     {
-        try
+        // Lower CALL udf.fn(args) to SELECT udf.fn(args) — a tableless query
+        // against the implicit single-row source. UDF inlining and model hoisting
+        // apply exactly as they would for an explicit SELECT, so UDFs, model
+        // invocations, and template strings in the body all work unchanged.
+        SelectStatement syntheticSelect = new(
+            Columns: [new SelectColumn(call.Call)]);
+        QueryExpression syntheticQuery = new SelectQueryExpression(syntheticSelect);
+        return PlanQuery(syntheticQuery);
+    }
+
+    internal SelectPlan PlanQuery(QueryExpression query)
+    {
+        // PG-style named arguments — rewrite fn(a := 1, b => 2) into the
+        // canonical positional shape before UdfInliner / planner passes,
+        // which all assume positional argument lists.
+        QueryExpression permuted = NamedArgPermuter.Permute(query, Functions, Udfs, SearchPath);
+
+        // Parse-time pre-flight: walk the top-level statement for
+        // catalog-model references that need a download or a typo fix
+        // before we build any operator tree. Runs pre-UdfInliner so UDF
+        // bodies stay opaque (their models.* references aren't surfaced
+        // until the user names the model directly). Empty result == no
+        // blocker.
+        PreFlightRequirements preflight = PreFlightWalker.Walk(
+            permuted, Models, CatalogVocabulary, Functions, DatasetPreFlightSource);
+        if (preflight.Models.Count > 0
+            || preflight.Datasets.Count > 0
+            || preflight.Suggestions.Count > 0)
         {
-            SchemaResolver resolver = new(this, SearchPath);
-            QualifiedName qn = resolver.Resolve(schemaName, tableName);
-            if (TryGetTable(qn.ToString(), out ITableProvider? provider))
-            {
-                schema = provider.GetSchema();
-                return true;
-            }
+            throw new PreFlightRequiredException(preflight);
         }
-        catch
-        {
-            // Resolution exceptions (missing schema, ambiguous, etc.) fall
-            // through to the executor for the canonical diagnostic.
-        }
-        schema = null;
-        return false;
+
+        QueryExpression inlined = UdfInliner.Inline(permuted, Udfs, SearchPath, Procedures);
+        QueryPlanner planner = new(this, Functions);
+        QueryOperator op = planner.Plan(inlined);
+        return new SelectPlan(op, this, Functions);
     }
 
     /// <summary>
@@ -1219,44 +1227,36 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         return await plan.AnalyzeAsync(cancellationToken, context).ConfigureAwait(false);
     }
 
-    private StatementPlan PlanCall(CallStatement call)
+    /// <summary>
+    /// Best-effort target-schema resolution for DML composition. Returns
+    /// the live <see cref="Schema"/> when the (schema, table) qualifier
+    /// resolves through the search path and the provider is registered;
+    /// returns <see langword="false"/> when any step fails so the caller
+    /// can fall back to a bare <see cref="Plans.DmlPlan"/> and let the
+    /// executor surface the precise diagnostic at apply time.
+    /// </summary>
+    private bool TryResolveDmlTargetSchema(
+        string? schemaName,
+        string tableName,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Schema? schema)
     {
-        // Lower CALL udf.fn(args) to SELECT udf.fn(args) — a tableless query
-        // against the implicit single-row source. UDF inlining and model hoisting
-        // apply exactly as they would for an explicit SELECT, so UDFs, model
-        // invocations, and template strings in the body all work unchanged.
-        SelectStatement syntheticSelect = new(
-            Columns: [new SelectColumn(call.Call)]);
-        QueryExpression syntheticQuery = new SelectQueryExpression(syntheticSelect);
-        return PlanQuery(syntheticQuery);
-    }
-
-    internal StatementPlan PlanQuery(QueryExpression query)
-    {
-        // PG-style named arguments — rewrite fn(a := 1, b => 2) into the
-        // canonical positional shape before UdfInliner / planner passes,
-        // which all assume positional argument lists.
-        QueryExpression permuted = NamedArgPermuter.Permute(query, Functions, Udfs, SearchPath);
-
-        // Parse-time pre-flight: walk the top-level statement for
-        // catalog-model references that need a download or a typo fix
-        // before we build any operator tree. Runs pre-UdfInliner so UDF
-        // bodies stay opaque (their models.* references aren't surfaced
-        // until the user names the model directly). Empty result == no
-        // blocker.
-        PreFlightRequirements preflight = PreFlightWalker.Walk(
-            permuted, Models, CatalogVocabulary, Functions, DatasetPreFlightSource);
-        if (preflight.Models.Count > 0
-            || preflight.Datasets.Count > 0
-            || preflight.Suggestions.Count > 0)
+        try
         {
-            throw new PreFlightRequiredException(preflight);
+            SchemaResolver resolver = new(this, SearchPath);
+            QualifiedName qn = resolver.Resolve(schemaName, tableName);
+            if (TryGetTable(qn.ToString(), out ITableProvider? provider))
+            {
+                schema = provider.GetSchema();
+                return true;
+            }
         }
-
-        QueryExpression inlined = UdfInliner.Inline(permuted, Udfs, SearchPath, Procedures);
-        QueryPlanner planner = new(this, Functions);
-        QueryOperator op = planner.Plan(inlined);
-        return new SelectPlan(op, this, Functions);
+        catch
+        {
+            // Resolution exceptions (missing schema, ambiguous, etc.) fall
+            // through to the executor for the canonical diagnostic.
+        }
+        schema = null;
+        return false;
     }
 
     /// <summary>

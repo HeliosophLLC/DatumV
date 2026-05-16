@@ -633,7 +633,7 @@ public sealed class MissingnessCorrelationAccumulatorTests : ServiceTestBase
     [Fact]
     public void GetValue_MixedDataKinds_WorksCorrectly()
     {
-        using Arena arena = new();
+        using Arena arena = CreateArena();
 
         MissingnessCorrelationAccumulator accumulator = new();
 

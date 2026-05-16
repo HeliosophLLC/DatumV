@@ -15,8 +15,13 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
     /// reference-type payloads (strings, vectors, images, arrays, structs). Disposed
     /// by xUnit when the test class instance is GC'd.
     /// </summary>
-    private readonly Arena _arena = new();
+    private readonly Arena _arena;
 
+    public SamplePreviewCollectorTests()
+    {
+        _arena = CreateArena();
+    }
+    
 
     // ──────────────────── Reservoir sizing ────────────────────
 

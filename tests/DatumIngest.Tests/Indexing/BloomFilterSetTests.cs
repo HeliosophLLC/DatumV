@@ -1,4 +1,3 @@
-using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Indexing.Bloom;
 
@@ -10,13 +9,18 @@ namespace DatumIngest.Tests.Indexing;
 /// </summary>
 public sealed class BloomFilterSetTests : ServiceTestBase
 {
-    private static readonly Arena Store = new();
+    private readonly Arena _store;
+
+    public BloomFilterSetTests()
+    {
+        _store = CreateArena();
+    }
 
     [Fact]
     public void TryGetFilter_ExistingColumnAndChunk_ReturnsTrue()
     {
         BloomFilter filter = new(expectedElements: 100);
-        filter.Add(DataValue.FromString("test", Store), Store);
+        filter.Add(DataValue.FromString("test", _store), _store);
 
         Dictionary<string, BloomFilter[]> filters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -27,7 +31,7 @@ public sealed class BloomFilterSetTests : ServiceTestBase
 
         Assert.True(set.TryGetFilter("name", 0, out BloomFilter? result));
         Assert.NotNull(result);
-        Assert.True(result.MayContain(DataValue.FromString("test", Store), Store));
+        Assert.True(result.MayContain(DataValue.FromString("test", _store), _store));
     }
 
     [Fact]
@@ -133,10 +137,10 @@ public sealed class BloomFilterSetTests : ServiceTestBase
     public void MultipleChunks_EachChunkHasIndependentFilter()
     {
         BloomFilter filter0 = new(expectedElements: 100);
-        filter0.Add(DataValue.FromString("alpha", Store), Store);
+        filter0.Add(DataValue.FromString("alpha", _store), _store);
 
         BloomFilter filter1 = new(expectedElements: 100);
-        filter1.Add(DataValue.FromString("beta", Store), Store);
+        filter1.Add(DataValue.FromString("beta", _store), _store);
 
         Dictionary<string, BloomFilter[]> filters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -146,11 +150,11 @@ public sealed class BloomFilterSetTests : ServiceTestBase
         BloomFilterSet set = new(filters, chunkCount: 2);
 
         Assert.True(set.TryGetFilter("name", 0, out BloomFilter? chunk0Filter));
-        Assert.True(chunk0Filter!.MayContain(DataValue.FromString("alpha", Store), Store));
-        Assert.False(chunk0Filter.MayContain(DataValue.FromString("beta", Store), Store));
+        Assert.True(chunk0Filter!.MayContain(DataValue.FromString("alpha", _store), _store));
+        Assert.False(chunk0Filter.MayContain(DataValue.FromString("beta", _store), _store));
 
         Assert.True(set.TryGetFilter("name", 1, out BloomFilter? chunk1Filter));
-        Assert.True(chunk1Filter!.MayContain(DataValue.FromString("beta", Store), Store));
-        Assert.False(chunk1Filter.MayContain(DataValue.FromString("alpha", Store), Store));
+        Assert.True(chunk1Filter!.MayContain(DataValue.FromString("beta", _store), _store));
+        Assert.False(chunk1Filter.MayContain(DataValue.FromString("alpha", _store), _store));
     }
 }

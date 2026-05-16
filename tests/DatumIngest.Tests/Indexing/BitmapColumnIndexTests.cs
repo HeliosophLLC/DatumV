@@ -211,7 +211,7 @@ public sealed class BitmapColumnIndexTests : ServiceTestBase
         // Build the index, then look up values using a fresh Arena.
         BitmapColumnIndex index = BuildTwoValueIndex();
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         DataValue red = DataValue.FromString("red", arena);
 
         ChunkBitmap bitmap = index.GetChunkBitmap(red, chunkIndex: 0);
@@ -226,7 +226,7 @@ public sealed class BitmapColumnIndexTests : ServiceTestBase
     public void ChunkContainsValue_StringKey_SurvivesScopeChange()
     {
         BitmapColumnIndex index = BuildTwoValueIndex();
-        using Arena arena = new();
+        using Arena arena = CreateArena();
 
         Assert.True(index.ChunkContainsValue(DataValue.FromString("red", arena), chunkIndex: 0));
         Assert.False(index.ChunkContainsValue(DataValue.FromString("green", arena), chunkIndex: 0));
@@ -238,7 +238,7 @@ public sealed class BitmapColumnIndexTests : ServiceTestBase
     public void FindChunksContaining_StringKey_SurvivesScopeChange()
     {
         BitmapColumnIndex index = BuildTwoValueIndex();
-        using Arena arena = new();
+        using Arena arena = CreateArena();
 
         IReadOnlySet<int> redChunks = index.FindChunksContaining(DataValue.FromString("red", arena));
         Assert.Equal(2, redChunks.Count);

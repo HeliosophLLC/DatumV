@@ -16,7 +16,7 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     {
         float[] data = [1f, 2f, 3f, 4f, 5f, 6f];
         int[] shape = [2, 3];
-        Arena arena = new();
+        Arena arena = CreateArena();
 
         DataValue value = DataValue.FromArenaMultiDimArray<float>(data, shape, DataKind.Float32, arena);
 
@@ -40,7 +40,7 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     {
         int[] data = [0, 1, 2, 3, 4, 5, 6, 7];
         int[] shape = [2, 2, 2];
-        Arena arena = new();
+        Arena arena = CreateArena();
 
         DataValue value = DataValue.FromArenaMultiDimArray<int>(data, shape, DataKind.Int32, arena);
 
@@ -57,7 +57,7 @@ public sealed class MultiDimArrayTests : ServiceTestBase
         double[] data = new double[1024];
         for (int i = 0; i < data.Length; i++) data[i] = i * 0.25;
         int[] shape = [32, 32];
-        Arena arena = new();
+        Arena arena = CreateArena();
 
         DataValue value = DataValue.FromArenaMultiDimArray<double>(data, shape, DataKind.Float64, arena);
 
@@ -136,7 +136,7 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     public void NonMultiDim_Value_HasZeroNdim_AndEmptyShape()
     {
         // Regular 1-D arena array — no flag, no prefix.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue value = DataValue.FromArenaArray<float>([1f, 2f, 3f], DataKind.Float32, arena);
 
         Assert.False(value.IsMultiDim);
@@ -161,7 +161,7 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     [Fact]
     public void Validate_RejectsNdimLessThanTwo()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         Assert.Throws<ArgumentException>(() =>
             DataValue.FromArenaMultiDimArray<float>([1f, 2f, 3f], [3], DataKind.Float32, arena));
     }
@@ -169,7 +169,7 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     [Fact]
     public void Validate_RejectsNonPositiveDim()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         Assert.Throws<ArgumentException>(() =>
             DataValue.FromArenaMultiDimArray<float>([], [2, 0], DataKind.Float32, arena));
     }
@@ -177,7 +177,7 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     [Fact]
     public void Validate_RejectsShapeProductMismatch()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         // shape [2,3] = 6 elements expected, but only 5 supplied.
         Assert.Throws<ArgumentException>(() =>
             DataValue.FromArenaMultiDimArray<float>([1f, 2f, 3f, 4f, 5f], [2, 3], DataKind.Float32, arena));
@@ -186,7 +186,7 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     [Fact]
     public void Validate_RejectsByteArrayKind()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         Assert.Throws<ArgumentException>(() =>
             DataValue.FromArenaMultiDimArray<byte>(new byte[4], [2, 2], DataKind.UInt8, arena));
     }
@@ -194,7 +194,7 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     [Fact]
     public void Validate_RejectsReferenceElementKinds()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         Assert.Throws<ArgumentException>(() =>
             DataValue.FromArenaMultiDimArray<byte>(new byte[4], [2, 2], DataKind.String, arena));
         Assert.Throws<ArgumentException>(() =>

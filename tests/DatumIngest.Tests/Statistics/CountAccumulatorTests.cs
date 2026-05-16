@@ -2,13 +2,17 @@ namespace DatumIngest.Tests.Statistics;
 
 using System.Linq;
 using DatumIngest.Model;
-using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
 public sealed class CountAccumulatorTests : ServiceTestBase
 {
-    private readonly Arena _arena = new();
+    private readonly Arena _arena;
 
+    public CountAccumulatorTests()
+    {
+        _arena = CreateArena();
+    }
+    
     public override void Dispose()
     {
         _arena.Dispose();

@@ -23,7 +23,7 @@ public sealed class BatchStatisticsCollectorTests : ServiceTestBase
     {
         PoolBacking backing = new();
         Pool pool = new(backing);
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         string[] names = ["value"];
 
         RowBatch b1 = MakeBatch(pool, names,
@@ -54,7 +54,7 @@ public sealed class BatchStatisticsCollectorTests : ServiceTestBase
     [Fact]
     public async Task EmptyStream_ProducesEmptyStatistics()
     {
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         StatisticsCollector collector = new();
         BatchStatisticsCollector batchCollector = new(collector);
 

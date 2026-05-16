@@ -119,7 +119,7 @@ public sealed class DatumFileV2RewritePagesTests : ServiceTestBase, IAsyncLifeti
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["id", "score"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
         AddRow(pool, batch, DataValue.FromInt32(1), DataValue.FromFloat64(0.1));
         AddRow(pool, batch, DataValue.FromInt32(2), DataValue.FromFloat64(0.2));
@@ -167,7 +167,7 @@ public sealed class DatumFileV2RewritePagesTests : ServiceTestBase, IAsyncLifeti
         // Force two pages by setting page size to 4 and writing 7 rows.
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 7, arena: arena);
         for (int i = 0; i < 7; i++) AddRow(pool, batch, DataValue.FromInt32(i + 1));
 
@@ -481,7 +481,7 @@ public sealed class DatumFileV2RewritePagesTests : ServiceTestBase, IAsyncLifeti
     {
         Pool pool = CreatePool();
         ColumnLookup lookup = new(columns.Select(c => c.Name).ToArray());
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rows.Count, arena: arena);
         for (int i = 0; i < rows.Count; i++)
         {

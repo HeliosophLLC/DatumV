@@ -109,7 +109,7 @@ public class DataValueTests : ServiceTestBase
     public void ByteArrayValueStoresByteArray()
     {
         byte[] data = [1, 2, 3, 4];
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue value = DataValue.FromByteArray(data, arena);
 
         Assert.Equal(DataKind.UInt8, value.Kind);

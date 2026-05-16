@@ -263,7 +263,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
         ITableProvider srcProvider = catalog["src"];
         await using (IAppendSession s = srcProvider.BeginAppend())
         {
-            Arena srcArena = new();
+            Arena srcArena = CreateArena();
             RowBatch srcBatch = pool.RentRowBatch(new ColumnLookup(["id", "img"]), capacity: 1, arena: srcArena);
             DataValue[] row = pool.RentDataValues(2);
             row[0] = DataValue.FromInt32(1);
@@ -332,7 +332,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
         ITableProvider srcProvider = catalog["src"];
         await using (IAppendSession s = srcProvider.BeginAppend())
         {
-            Arena srcArena = new();
+            Arena srcArena = CreateArena();
             RowBatch srcBatch = pool.RentRowBatch(new ColumnLookup(["id", "img"]), capacity: 1, arena: srcArena);
             DataValue[] row = pool.RentDataValues(2);
             row[0] = DataValue.FromInt32(1);

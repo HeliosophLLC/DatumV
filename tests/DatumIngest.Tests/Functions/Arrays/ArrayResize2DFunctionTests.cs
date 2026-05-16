@@ -37,7 +37,7 @@ public sealed class ArrayResize2DFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (m Array<Float32>(2,2))");
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_resize_2d(m, 2, 2) AS r FROM t", catalog, store: arena);
@@ -60,7 +60,7 @@ public sealed class ArrayResize2DFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (m Array<Float32>(2,2))");
         catalog.Plan("INSERT INTO t VALUES ([7.5, 7.5, 7.5, 7.5])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_resize_2d(m, 8, 8) AS r FROM t", catalog, store: arena);
@@ -84,7 +84,7 @@ public sealed class ArrayResize2DFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (m Array<Float32>(1,2,2))");
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_resize_2d(m, 4, 4) AS r FROM t", catalog, store: arena);
@@ -104,7 +104,7 @@ public sealed class ArrayResize2DFunctionTests : ServiceTestBase, IAsyncLifetime
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            using Arena arena = new();
+            using Arena arena = CreateArena();
             arena.AddReference();
             _ = await ExecuteQueryAsync(
                 "SELECT array_resize_2d(m, 4, 4) AS r FROM t", catalog, store: arena);

@@ -10,7 +10,12 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public class StatisticsPredicateEvaluatorTests : ServiceTestBase
 {
-    private static readonly Arena TestStore = new();
+    private readonly Arena _testStore;
+
+    public StatisticsPredicateEvaluatorTests()
+    {
+        _testStore = CreateArena();
+    }
 
     /// <summary>
     /// Builds a statistics dictionary for a single column with scalar min/max bounds.
@@ -74,7 +79,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.Equal, new LiteralExpression(50.0));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -85,7 +90,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.Equal, new LiteralExpression(5.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -95,7 +100,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.Equal, new LiteralExpression(1.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -105,7 +110,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.Equal, new LiteralExpression(10.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -115,7 +120,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.Equal, new LiteralExpression(2.0));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -126,7 +131,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.NotEqual, new LiteralExpression(5.0));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -137,7 +142,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.NotEqual, new LiteralExpression(5.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -148,7 +153,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.LessThan, new LiteralExpression(5.0));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -159,7 +164,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.LessThan, new LiteralExpression(5.0));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -170,7 +175,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.LessThan, new LiteralExpression(5.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -181,7 +186,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.LessThanOrEqual, new LiteralExpression(5.0));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -192,7 +197,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.LessThanOrEqual, new LiteralExpression(5.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -203,7 +208,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.GreaterThan, new LiteralExpression(100.0));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -214,7 +219,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.GreaterThan, new LiteralExpression(50.0));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -225,7 +230,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.GreaterThanOrEqual, new LiteralExpression(100.0));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -236,7 +241,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.GreaterThanOrEqual, new LiteralExpression(50.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     // ──────────────── Reversed: literal op col ────────────────
@@ -249,7 +254,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new LiteralExpression(100.0), BinaryOperator.GreaterThan, new ColumnReference("x"));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -260,7 +265,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new LiteralExpression(100.0), BinaryOperator.LessThan, new ColumnReference("x"));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     // ──────────────── AND / OR composition ────────────────
@@ -275,7 +280,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
             BinaryOperator.And,
             new BinaryExpression(new ColumnReference("y"), BinaryOperator.GreaterThan, new LiteralExpression(0.0)));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -287,7 +292,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
             BinaryOperator.And,
             new BinaryExpression(new ColumnReference("x"), BinaryOperator.LessThan, new LiteralExpression(40.0)));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -300,7 +305,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
             BinaryOperator.Or,
             new BinaryExpression(new ColumnReference("x"), BinaryOperator.LessThan, new LiteralExpression(0.0)));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -313,7 +318,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
             BinaryOperator.Or,
             new BinaryExpression(new ColumnReference("x"), BinaryOperator.GreaterThan, new LiteralExpression(10.0)));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     // ──────────────── BETWEEN ────────────────
@@ -326,7 +331,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BetweenExpression predicate = new(
             new ColumnReference("x"), new LiteralExpression(100.0), new LiteralExpression(200.0));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -337,7 +342,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BetweenExpression predicate = new(
             new ColumnReference("x"), new LiteralExpression(100.0), new LiteralExpression(200.0));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -348,7 +353,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BetweenExpression predicate = new(
             new ColumnReference("x"), new LiteralExpression(10.0), new LiteralExpression(60.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -359,7 +364,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BetweenExpression predicate = new(
             new ColumnReference("x"), new LiteralExpression(0.0), new LiteralExpression(100.0), Negated: true);
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -370,7 +375,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BetweenExpression predicate = new(
             new ColumnReference("x"), new LiteralExpression(20.0), new LiteralExpression(30.0), Negated: true);
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     // ──────────────── IN ────────────────
@@ -384,7 +389,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
             new ColumnReference("x"),
             [new LiteralExpression(100.0), new LiteralExpression(200.0)]);
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -396,7 +401,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
             new ColumnReference("x"),
             [new LiteralExpression(5.0), new LiteralExpression(200.0)]);
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -409,7 +414,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
             [new LiteralExpression(5.0)],
             Negated: true);
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -422,7 +427,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
             [new LiteralExpression(5.0)],
             Negated: true);
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     // ──────────────── IS NULL / IS NOT NULL ────────────────
@@ -433,7 +438,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         ColumnStatisticsRangeLookup statistics = ScalarStats("x", 1f, 10f, nullCount: 0);
         IsNullExpression predicate = new(new ColumnReference("x"));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -442,7 +447,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         ColumnStatisticsRangeLookup statistics = ScalarStats("x", 1f, 10f, nullCount: 5);
         IsNullExpression predicate = new(new ColumnReference("x"));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -451,7 +456,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         ColumnStatisticsRangeLookup statistics = ScalarStats("x", 1f, 10f, rowCount: 100, nullCount: 100);
         IsNullExpression predicate = new(new ColumnReference("x"), Negated: true);
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -460,7 +465,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         ColumnStatisticsRangeLookup statistics = ScalarStats("x", 1f, 10f, rowCount: 100, nullCount: 50);
         IsNullExpression predicate = new(new ColumnReference("x"), Negated: true);
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -469,7 +474,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         ColumnStatisticsRangeLookup statistics = ScalarStats("x", 1f, 10f, nullCount: null);
         IsNullExpression predicate = new(new ColumnReference("x"));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     // ──────────────── Edge cases ────────────────
@@ -481,7 +486,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("z"), BinaryOperator.Equal, new LiteralExpression(5.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -491,7 +496,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.Equal, new LiteralExpression(5.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -504,7 +509,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.Equal, new LiteralExpression(5.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -513,7 +518,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         ColumnStatisticsRangeLookup statistics = ScalarStats("x", 1f, 10f);
         FunctionCallExpression predicate = new("abs", [new ColumnReference("x")]);
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -523,7 +528,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("name"), BinaryOperator.Like, new LiteralExpression("%test%"));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -533,7 +538,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.Equal, new ColumnReference("y"));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -544,7 +549,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("name"), BinaryOperator.Equal, new LiteralExpression("zzz"));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -555,7 +560,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("name"), BinaryOperator.Equal, new LiteralExpression("B"));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     [Fact]
@@ -566,7 +571,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.Add, new LiteralExpression(5.0));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics, _testStore));
     }
 
     // ──────────────── Boolean columns ────────────────
@@ -588,7 +593,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("reordered"), BinaryOperator.Equal, new LiteralExpression(true));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, new ColumnStatisticsRangeLookup(statistics), TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, new ColumnStatisticsRangeLookup(statistics), _testStore));
     }
 
     [Fact]
@@ -599,7 +604,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("reordered"), BinaryOperator.Equal, new LiteralExpression(false));
 
-        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, new ColumnStatisticsRangeLookup(statistics), TestStore));
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, new ColumnStatisticsRangeLookup(statistics), _testStore));
     }
 
     [Fact]
@@ -610,7 +615,7 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("reordered"), BinaryOperator.Equal, new LiteralExpression(true));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, new ColumnStatisticsRangeLookup(statistics), TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, new ColumnStatisticsRangeLookup(statistics), _testStore));
     }
 
     [Fact]
@@ -621,6 +626,6 @@ public class StatisticsPredicateEvaluatorTests : ServiceTestBase
         BinaryExpression predicate = new(
             new ColumnReference("reordered"), BinaryOperator.Equal, new LiteralExpression(true));
 
-        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, new ColumnStatisticsRangeLookup(statistics), TestStore));
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, new ColumnStatisticsRangeLookup(statistics), _testStore));
     }
 }

@@ -12,7 +12,12 @@ using DatumIngest.Statistics;
 /// </summary>
 public sealed class ManifestBuilderInsightsIntegrationTests : ServiceTestBase
 {
-    private readonly Arena _arena = new();
+    private readonly Arena _arena;
+
+    public ManifestBuilderInsightsIntegrationTests()
+    {
+        _arena = CreateArena();
+    }
 
     public override void Dispose()
     {

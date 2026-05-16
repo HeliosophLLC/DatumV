@@ -122,7 +122,7 @@ public sealed class MultiDimProjectionPropagationTests : ServiceTestBase, IAsync
         catalog.Plan("CREATE TABLE t (m Array<Float32>(2,3))");
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_shape(m) AS s FROM (SELECT m FROM t) sub", catalog, store: arena);

@@ -9,7 +9,7 @@ public sealed class DataValueTypeIdTests
     [Fact]
     public void FromUntypedStruct_TypeId_IsZero()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue v = DataValue.FromUntypedStruct([], arena);
         Assert.Equal((ushort)0, v.TypeId);
     }
@@ -17,7 +17,7 @@ public sealed class DataValueTypeIdTests
     [Fact]
     public void FromStruct_WithTypeId_RoundTrips()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue v = DataValue.FromStruct([], arena, typeId: 42);
         Assert.Equal((ushort)42, v.TypeId);
     }
@@ -25,7 +25,7 @@ public sealed class DataValueTypeIdTests
     [Fact]
     public void FromStruct_MaxTypeId_RoundTrips()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue v = DataValue.FromStruct([], arena, typeId: ushort.MaxValue);
         Assert.Equal(ushort.MaxValue, v.TypeId);
     }
@@ -33,7 +33,7 @@ public sealed class DataValueTypeIdTests
     [Fact]
     public void FromStruct_WithTypeId_PreservesFields()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] fields = [DataValue.FromInt32(7), DataValue.FromBoolean(true)];
         DataValue v = DataValue.FromStruct(fields, arena, typeId: 5);
 
@@ -77,7 +77,7 @@ public sealed class DataValueTypeIdTests
     [Fact]
     public void UntypedStructArray_TypeId_IsZero()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue v = DataValue.FromUntypedStructArray([[DataValue.FromInt32(1)]], arena);
         Assert.Equal((ushort)0, v.TypeId);
     }
@@ -87,7 +87,7 @@ public sealed class DataValueTypeIdTests
     [Fact]
     public void NullStruct_CarriesTypeId_FromSource()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue source = DataValue.FromStruct([DataValue.FromInt32(1)], arena, typeId: 13);
         DataValue nulled = DataValue.NullStruct(source.TypeId);
         Assert.Equal((ushort)13, nulled.TypeId);
@@ -99,7 +99,7 @@ public sealed class DataValueTypeIdTests
     [Fact]
     public void TypeId_RoundTripsThroughAsStruct_AndFromStruct()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue original = DataValue.FromStruct(
             [DataValue.FromInt32(99)], arena, typeId: 8);
 
@@ -119,7 +119,7 @@ public sealed class DataValueTypeIdTests
         // layout used to lose TypeId because `_charCount` carried the element
         // count. After the slot-resident TypeId change, each element's TypeId
         // rides in its own slot's reserved bytes — so even N=1 round-trips.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] fields = [DataValue.FromInt32(7), DataValue.FromBoolean(true)];
         DataValue v = DataValue.FromStructArray([fields], arena, typeId: 99);
 
@@ -140,7 +140,7 @@ public sealed class DataValueTypeIdTests
     {
         // The N≥2 path went through the slot block. After the change every
         // slot carries its own TypeId; per-element reads recover it.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] r0 = [DataValue.FromInt32(1)];
         DataValue[] r1 = [DataValue.FromInt32(2)];
         DataValue[] r2 = [DataValue.FromInt32(3)];
@@ -161,7 +161,7 @@ public sealed class DataValueTypeIdTests
         // TypeId stamped on every slot. Heterogeneous Array<Struct> (different
         // element shapes per row) would need a per-element-TypeId overload —
         // not exposed today, but the slot layout supports it.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] r0 = [DataValue.FromInt32(1)];
         DataValue[] r1 = [DataValue.FromInt32(2)];
         DataValue v = DataValue.FromStructArray([r0, r1], arena, typeId: 5);
@@ -179,7 +179,7 @@ public sealed class DataValueTypeIdTests
         // each element self-describes via its slot. This test pins the
         // contract so a regression toward the old container-TypeId model is
         // visible.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] r0 = [DataValue.FromInt32(1)];
         DataValue[] r1 = [DataValue.FromInt32(2)];
         DataValue v = DataValue.FromStructArray([r0, r1], arena, typeId: 7);

@@ -66,7 +66,7 @@ public sealed class MultiDimEqualityTests : ServiceTestBase
         // different declared shapes. Different ndim packs into different
         // _charCount high-bytes, so equality must reject the match even
         // though _p0 (offset) and _p1 (length) might be the same.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue twoByThree = DataValue.FromArenaMultiDimArray<float>(
             [1f, 2f, 3f, 4f, 5f, 6f], [2, 3], DataKind.Float32, arena);
         DataValue threeByTwo = DataValue.FromArenaMultiDimArray<float>(
@@ -80,7 +80,7 @@ public sealed class MultiDimEqualityTests : ServiceTestBase
     {
         // Same arena, same offset, same shape — the canonical "identity"
         // case. Hash + equality must agree.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue a = DataValue.FromArenaMultiDimArray<float>(
             [1f, 2f, 3f, 4f, 5f, 6f], [2, 3], DataKind.Float32, arena);
         // Manually construct a second view with the same offset/length/shape.
@@ -95,7 +95,7 @@ public sealed class MultiDimEqualityTests : ServiceTestBase
     {
         // The IsMultiDim flag is part of _flags. Same elements, one flagged
         // multi-dim, one flat → unequal.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue multi = DataValue.FromArenaMultiDimArray<float>(
             [1f, 2f, 3f, 4f, 5f, 6f], [2, 3], DataKind.Float32, arena);
         DataValue flat = DataValue.FromArenaArray<float>(

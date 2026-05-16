@@ -17,7 +17,7 @@ namespace DatumIngest.Tests.Indexing;
 /// </summary>
 public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
 {
-    private static readonly Arena Store = new();
+    private readonly Arena _store;
     private readonly string _tempDirectory;
 
     /// <summary>Creates a temporary directory for test files.</summary>
@@ -26,6 +26,7 @@ public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
         _tempDirectory = Path.Combine(
             Path.GetTempPath(), "UnifiedIndexTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDirectory);
+        _store = CreateArena();
     }
 
     /// <summary>Cleans up test files.</summary>
@@ -268,12 +269,12 @@ public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
         ];
 
         BloomFilter filter0 = new(expectedElements: 100);
-        filter0.Add(DataValue.FromFloat32(1.0f), Store);
-        filter0.Add(DataValue.FromFloat32(50.0f), Store);
+        filter0.Add(DataValue.FromFloat32(1.0f), _store);
+        filter0.Add(DataValue.FromFloat32(50.0f), _store);
 
         BloomFilter filter1 = new(expectedElements: 100);
-        filter1.Add(DataValue.FromFloat32(51.0f), Store);
-        filter1.Add(DataValue.FromFloat32(100.0f), Store);
+        filter1.Add(DataValue.FromFloat32(51.0f), _store);
+        filter1.Add(DataValue.FromFloat32(100.0f), _store);
 
         Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -291,12 +292,12 @@ public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
         Assert.Equal(2, restored.BloomFilters.ChunkCount);
 
         Assert.True(restored.BloomFilters.TryGetFilter("id", 0, out BloomFilter? restoredFilter0));
-        Assert.True(restoredFilter0!.MayContain(DataValue.FromFloat32(1.0f), Store));
-        Assert.True(restoredFilter0.MayContain(DataValue.FromFloat32(50.0f), Store));
-        Assert.False(restoredFilter0.MayContain(DataValue.FromFloat32(999.0f), Store));
+        Assert.True(restoredFilter0!.MayContain(DataValue.FromFloat32(1.0f), _store));
+        Assert.True(restoredFilter0.MayContain(DataValue.FromFloat32(50.0f), _store));
+        Assert.False(restoredFilter0.MayContain(DataValue.FromFloat32(999.0f), _store));
 
         Assert.True(restored.BloomFilters.TryGetFilter("id", 1, out BloomFilter? restoredFilter1));
-        Assert.True(restoredFilter1!.MayContain(DataValue.FromFloat32(51.0f), Store));
+        Assert.True(restoredFilter1!.MayContain(DataValue.FromFloat32(51.0f), _store));
     }
 
     // ────────────────────── Sorted indexes ──────────────────────
@@ -438,7 +439,7 @@ public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
 
         // Bloom filters.
         BloomFilter idBloom0 = new(expectedElements: 100);
-        idBloom0.Add(DataValue.FromInt32(42), Store);
+        idBloom0.Add(DataValue.FromInt32(42), _store);
         BloomFilter idBloom1 = new(expectedElements: 100);
 
         Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
@@ -461,7 +462,7 @@ public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
         Assert.Equal(1, restored.Chunks[0].ColumnStatistics["id"].Minimum.GetValueOrDefault().AsInt32());
         Assert.NotNull(restored.BloomFilters);
         Assert.True(restored.BloomFilters.TryGetFilter("id", 0, out BloomFilter? restoredBloom));
-        Assert.True(restoredBloom!.MayContain(DataValue.FromInt32(42), Store));
+        Assert.True(restoredBloom!.MayContain(DataValue.FromInt32(42), _store));
     }
 
     // ────────────────────── Error handling ──────────────────────

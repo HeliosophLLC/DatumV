@@ -41,7 +41,10 @@ namespace DatumIngest.Model;
 /// </remarks>
 public sealed class Arena : IValueStore, IDisposable
 {
-    private const int DefaultCapacity = 1024 * 1024; // 1 MB — initial commit; grows on demand within the reservation.
+    /// <summary>
+    /// Gets the default initial capacity for arenas.
+    /// </summary>
+    public const int DefaultCapacity = 1024 * 1024; // 1 MB — initial commit; grows on demand within the reservation.
 
     // Default virtual-address reservation per anonymous arena. The reservation is cheap
     // (VA only — no RAM, no commit charge) and lets the base pointer stay stable across

@@ -17,7 +17,7 @@ public sealed class ReferenceArrayBlobKindsTests : ServiceTestBase
     [Fact]
     public void Audio_Empty_RoundTrips()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue value = DataValue.FromAudioArray([], arena);
 
         Assert.Equal(DataKind.Audio, value.Kind);
@@ -29,7 +29,7 @@ public sealed class ReferenceArrayBlobKindsTests : ServiceTestBase
     [Fact]
     public void Audio_SingleElement_FitsInline()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] clip = new byte[] { 0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00 };
         DataValue value = DataValue.FromAudioArray([clip], arena);
 
@@ -45,7 +45,7 @@ public sealed class ReferenceArrayBlobKindsTests : ServiceTestBase
     [Fact]
     public void Audio_MultipleElements_UsesArenaSlotBlock()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] clip0 = new byte[] { 0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00 };
         byte[] clip1 = new byte[] { 0x49, 0x44, 0x33, 0x04 };
         byte[] clip2 = new byte[] { 0x4F, 0x67, 0x67, 0x53 };
@@ -68,7 +68,7 @@ public sealed class ReferenceArrayBlobKindsTests : ServiceTestBase
     [Fact]
     public void Video_MultipleElements_RoundTrips()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] frame0 = new byte[] { 0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70 }; // mp4 header start
         byte[] frame1 = new byte[] { 0x1A, 0x45, 0xDF, 0xA3 };                          // matroska header start
 
@@ -86,7 +86,7 @@ public sealed class ReferenceArrayBlobKindsTests : ServiceTestBase
     [Fact]
     public void Json_MultipleElements_RoundTrips()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] doc0 = System.Text.Encoding.UTF8.GetBytes("""{"id":1}""");
         byte[] doc1 = System.Text.Encoding.UTF8.GetBytes("""{"id":2,"name":"alice"}""");
         byte[] doc2 = System.Text.Encoding.UTF8.GetBytes("""{"id":3}""");
@@ -106,7 +106,7 @@ public sealed class ReferenceArrayBlobKindsTests : ServiceTestBase
     [Fact]
     public void PointCloud_MultipleElements_RoundTrips()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         // Fake PointCloud header bytes (40-byte header per the format spec) +
         // an arbitrary tail. The array storage tier doesn't parse the header,
         // so any bytes round-trip cleanly.
@@ -132,14 +132,14 @@ public sealed class ReferenceArrayBlobKindsTests : ServiceTestBase
         // The InsertExecutor cross-arena copy uses this exact pattern: read
         // bytes out of the source arena via As*Array (which returns managed
         // byte[][]), then write into the target arena via From*Array.
-        Arena source = new();
+        Arena source = CreateArena();
         byte[] clip0 = new byte[] { 0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00 };
         byte[] clip1 = new byte[] { 0x49, 0x44, 0x33, 0x04 };
         DataValue inSource = DataValue.FromAudioArray([clip0, clip1], source);
 
         byte[][] managed = inSource.AsAudioArray(source);
 
-        Arena target = new();
+        Arena target = CreateArena();
         DataValue inTarget = DataValue.FromAudioArray(managed, target);
 
         // Reading the target value through the target arena must succeed and
@@ -155,7 +155,7 @@ public sealed class ReferenceArrayBlobKindsTests : ServiceTestBase
     [Fact]
     public void AsAudioArray_OnImageValue_Throws()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue imageArray = DataValue.FromImageArray(
             [new byte[] { 1, 2, 3 }], arena);
 

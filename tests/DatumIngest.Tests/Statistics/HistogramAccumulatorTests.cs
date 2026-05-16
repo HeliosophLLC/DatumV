@@ -2,13 +2,17 @@ namespace DatumIngest.Tests.Statistics;
 
 using System.Linq;
 using DatumIngest.Model;
-using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
 public sealed class HistogramAccumulatorTests : ServiceTestBase
 {
-    private readonly Arena _arena = new();
+    private readonly Arena _arena;
 
+    public HistogramAccumulatorTests()
+    {
+        _arena = CreateArena();
+    }
+    
     public override void Dispose()
     {
         _arena.Dispose();

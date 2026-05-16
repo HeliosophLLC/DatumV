@@ -39,7 +39,7 @@ public sealed class ArraySliceFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (v Array<Float32>)");
         catalog.Plan("INSERT INTO t VALUES ([10.0, 20.0, 30.0, 40.0, 50.0])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_slice(v, 2, 3) AS s FROM t", catalog, store: arena);
@@ -58,7 +58,7 @@ public sealed class ArraySliceFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (v Array<Int64>)");
         catalog.Plan("INSERT INTO t VALUES ([1, 2, 3, 4, 5])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_slice(v, 1, 2) AS s FROM t", catalog, store: arena);
@@ -74,7 +74,7 @@ public sealed class ArraySliceFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (v Array<Int32>)");
         catalog.Plan("INSERT INTO t VALUES ([1, 2, 3])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_slice(v, 2, 100) AS s FROM t", catalog, store: arena);
@@ -92,7 +92,7 @@ public sealed class ArraySliceFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (v Array<Float32>)");
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_slice(v, 10, 5) AS s FROM t", catalog, store: arena);
@@ -108,7 +108,7 @@ public sealed class ArraySliceFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (v Array<Float32>)");
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_slice(v, 1, 0) AS s FROM t", catalog, store: arena);
@@ -160,7 +160,7 @@ public sealed class ArraySliceFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (v Array<Float32>)");
         catalog.Plan("INSERT INTO t VALUES (NULL)");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_slice(v, 1, 2) AS s FROM t", catalog, store: arena);
@@ -175,7 +175,7 @@ public sealed class ArraySliceFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (v Array<Boolean>)");
         catalog.Plan("INSERT INTO t VALUES ([true, false, true, true, false])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT array_slice(v, 2, 3) AS s FROM t", catalog, store: arena);

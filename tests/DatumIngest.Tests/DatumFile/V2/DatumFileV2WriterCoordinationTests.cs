@@ -60,7 +60,7 @@ public sealed class DatumFileV2WriterCoordinationTests : ServiceTestBase, IAsync
         const ulong customId = 0xABCDEF0123456789UL;
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
         for (int i = 0; i < 3; i++)
         {
@@ -92,7 +92,7 @@ public sealed class DatumFileV2WriterCoordinationTests : ServiceTestBase, IAsync
         // Initial write with one writer id.
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
         for (int i = 0; i < 3; i++)
         {
@@ -113,7 +113,7 @@ public sealed class DatumFileV2WriterCoordinationTests : ServiceTestBase, IAsync
         {
             appender.WriterId = appendId;
             Pool pool2 = CreatePool();
-            Arena arena2 = new();
+            Arena arena2 = CreateArena();
             RowBatch appBatch = pool2.RentRowBatch(lookup, capacity: 2, arena: arena2);
             for (int i = 3; i < 5; i++)
             {
@@ -167,7 +167,7 @@ public sealed class DatumFileV2WriterCoordinationTests : ServiceTestBase, IAsync
         using DatumFileWriterV2 writer = DatumFileWriterV2.OpenForAppend(path, sidecarPath: null);
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 1, arena: arena);
         DataValue[] row = pool.RentDataValues(1);
         row[0] = DataValue.FromInt32(99);
@@ -201,7 +201,7 @@ public sealed class DatumFileV2WriterCoordinationTests : ServiceTestBase, IAsync
         {
             Pool pool = CreatePool();
             ColumnLookup lookup = new(["v"]);
-            Arena arena = new();
+            Arena arena = CreateArena();
             RowBatch batch = pool.RentRowBatch(lookup, capacity: 5, arena: arena);
             for (int i = 0; i < 5; i++)
             {
@@ -234,7 +234,7 @@ public sealed class DatumFileV2WriterCoordinationTests : ServiceTestBase, IAsync
         using DatumFileWriterV2 appender = DatumFileWriterV2.OpenForAppend(path, sidecarPath: null);
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 5, arena: arena);
         for (int i = 0; i < 5; i++)
         {
@@ -296,11 +296,11 @@ public sealed class DatumFileV2WriterCoordinationTests : ServiceTestBase, IAsync
         return path;
     }
 
-    private static void WriteSimpleFileTo(string path, ColumnDescriptorV2[] columns)
+    private void WriteSimpleFileTo(string path, ColumnDescriptorV2[] columns)
     {
         Pool pool = new(new PoolBacking());
         ColumnLookup lookup = new([columns[0].Name]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
         for (int i = 0; i < 3; i++)
         {

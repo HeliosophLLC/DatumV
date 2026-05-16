@@ -11,7 +11,7 @@ public class StringArenaTests : ServiceTestBase
     [Fact]
     public void AppendAndRetrieveUtf8Bytes()
     {
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         byte[] utf8 = Encoding.UTF8.GetBytes("hello");
         (long offset, int length) = arena.AppendUtf8(utf8);
 
@@ -23,7 +23,7 @@ public class StringArenaTests : ServiceTestBase
     [Fact]
     public void AppendStringAndMaterialise()
     {
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         (long offset, int length) = arena.AppendString("world");
 
         string result = arena.GetString(offset, length);
@@ -34,7 +34,7 @@ public class StringArenaTests : ServiceTestBase
     [Fact]
     public void MultipleAppendsAreContiguous()
     {
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         (long offset1, int length1) = arena.AppendString("first");
         (long offset2, int length2) = arena.AppendString("second");
 
@@ -47,7 +47,7 @@ public class StringArenaTests : ServiceTestBase
     [Fact]
     public void BytesWrittenTracksTotal()
     {
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         Assert.Equal(0, arena.BytesWritten);
 
         arena.AppendString("abc");
@@ -60,7 +60,7 @@ public class StringArenaTests : ServiceTestBase
     [Fact]
     public void GrowsBeyondInitialCapacity()
     {
-        using Arena arena = new(initialCapacity: 8);
+        using Arena arena = CreateArena(initialCapacity: 8);
         string longString = new('x', 1000);
         (long offset, int length) = arena.AppendString(longString);
 
@@ -70,10 +70,10 @@ public class StringArenaTests : ServiceTestBase
     [Fact]
     public void CopyFromTransfersAllBytes()
     {
-        using Arena source = new();
+        using Arena source = CreateArena();
         (long sourceOffset, int sourceLength) = source.AppendString("transferred");
 
-        using Arena target = new();
+        using Arena target = CreateArena();
         target.AppendString("prefix");
         long baseOffset = target.CopyFrom(source);
 
@@ -84,7 +84,7 @@ public class StringArenaTests : ServiceTestBase
     [Fact]
     public void DisposeIsIdempotent()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         arena.AppendString("test");
         arena.Dispose();
         arena.Dispose();
@@ -93,7 +93,7 @@ public class StringArenaTests : ServiceTestBase
     [Fact]
     public void HandlesMultibyteUtf8()
     {
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         string emoji = "Hello \U0001F600 World";
         (long offset, int length) = arena.AppendString(emoji);
 

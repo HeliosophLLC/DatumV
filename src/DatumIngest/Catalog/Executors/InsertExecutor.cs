@@ -354,7 +354,7 @@ internal static class InsertExecutor
         InsertQuerySource source,
         StatementPlan? preplannedSource,
         bool captureRows,
-        DatumIngest.Execution.ExecutionContext context)
+        Execution.ExecutionContext context)
     {
         // Use the pre-planned source if DmlPlan.ForInsert supplied one
         // (the composed-EXPLAIN path); otherwise fall back to planning

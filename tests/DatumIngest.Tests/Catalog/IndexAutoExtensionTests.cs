@@ -375,7 +375,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         // All 4 original rows live in chunk 0; UPDATE didn't add
         // chunks. Bloom for chunk 0 must test-positive for 'morphed'.
         Assert.True(after.BloomFilters.TryGetFilter("name", 0, out BloomFilter? bloomChunk0));
-        Arena bloomArena = new();
+        Arena bloomArena = CreateArena();
         Assert.True(bloomChunk0.MayContain(DataValue.FromString("morphed"), bloomArena));
     }
 
@@ -411,7 +411,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         // value present in that chunk. Existing 4 rows all live in
         // chunk 0 (chunkSize >> 4).
         Assert.True(after.BloomFilters.TryGetFilter("name", 0, out BloomFilter? bloomChunk0));
-        Arena bloomArena = new();
+        Arena bloomArena = CreateArena();
         Assert.True(bloomChunk0.MayContain(DataValue.FromString("alice"), bloomArena));
 
         // Bloom array grew with the delta chunks.
@@ -454,12 +454,12 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         return datumPath;
     }
 
-    private static async IAsyncEnumerable<RowBatch> MakeBatchesMatchingSchema(
+    private async IAsyncEnumerable<RowBatch> MakeBatchesMatchingSchema(
         Pool pool, Schema schema, object[][] rows)
     {
         string[] columnNames = schema.Columns.Select(c => c.Name).ToArray();
         ColumnLookup lookup = new(columnNames);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rows.Length, arena: arena);
         foreach (object[] row in rows)
         {

@@ -167,7 +167,7 @@ public sealed class RequiredColumnsContractTests : ServiceTestBase, IAsyncLifeti
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["id", "name"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 4, arena: arena);
         string[] names = ["alpha", "beta", "gamma", "delta"];
         for (int i = 0; i < 4; i++)

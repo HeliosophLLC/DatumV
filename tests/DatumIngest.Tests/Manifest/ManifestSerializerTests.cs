@@ -1,15 +1,17 @@
 namespace DatumIngest.Tests.Manifest;
 
-using System.Text.Json;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
-using DatumIngest.Statistics.Accumulators;
 
 public sealed class ManifestSerializerTests : ServiceTestBase
 {
-    private readonly Arena _arena = new();
+    private readonly Arena _arena;
 
+    public ManifestSerializerTests()
+    {
+        _arena = CreateArena();
+    }
     public override void Dispose()
     {
         _arena.Dispose();

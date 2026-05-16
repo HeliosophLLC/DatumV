@@ -42,7 +42,7 @@ internal sealed class CtasPlan : StatementPlan
     private readonly Schema _targetSchema;
     private readonly QualifiedName _targetName;
     private readonly ITableCatalog _targetBackend;
-    private readonly StatementPlan _sourcePlan;
+    private readonly SelectPlan _sourcePlan;
     private int _executed;
 
     private CtasPlan(
@@ -52,7 +52,7 @@ internal sealed class CtasPlan : StatementPlan
         Schema targetSchema,
         QualifiedName targetName,
         ITableCatalog targetBackend,
-        StatementPlan sourcePlan)
+        SelectPlan sourcePlan)
         : base(catalog)
     {
         _ctas = ctas;
@@ -174,7 +174,7 @@ internal sealed class CtasPlan : StatementPlan
         // Plan the source query at plan time. The resulting SelectPlan
         // becomes a real child of this CtasPlan so the EXPLAIN tree shows
         // the full SELECT subtree under the CTAS node.
-        StatementPlan sourcePlan = catalog.PlanQuery(ctas.Query);
+        SelectPlan sourcePlan = catalog.PlanQuery(ctas.Query);
 
         return new CtasPlan(catalog, ctas, sourceText, targetSchema, targetName, targetBackend, sourcePlan);
     }

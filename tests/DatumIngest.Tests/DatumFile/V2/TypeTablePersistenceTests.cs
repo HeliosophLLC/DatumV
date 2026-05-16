@@ -71,7 +71,7 @@ public sealed class TypeTablePersistenceTests : ServiceTestBase, IAsyncLifetime
         IPageDecoderV2 decoder = reader.OpenPageDecoder(
             columnIndex: 0, pageIndex: 0,
             sidecarStoreId: 0, sidecarSource: sidecar,
-            eagerStore: new Arena(),
+            eagerStore: CreateArena(),
             columnRuntimeStructTypeId: runtimeStructId);
 
         DataValue first = decoder.ReadValue(0);
@@ -106,9 +106,9 @@ public sealed class TypeTablePersistenceTests : ServiceTestBase, IAsyncLifetime
         IPageDecoderV2 decoder = reader.OpenPageDecoder(
             columnIndex: 0, pageIndex: 0,
             sidecarStoreId: 0, sidecarSource: sidecar,
-            eagerStore: new Arena());
+            eagerStore: CreateArena());
 
-        Arena readArena = new();
+        Arena readArena = CreateArena();
         DataValue arrayValue = decoder.ReadValue(0);
         Assert.True(arrayValue.IsArray);
         Assert.Equal(DataKind.Struct, arrayValue.Kind);
@@ -155,9 +155,9 @@ public sealed class TypeTablePersistenceTests : ServiceTestBase, IAsyncLifetime
         IPageDecoderV2 decoder = reader.OpenPageDecoder(
             columnIndex: 0, pageIndex: 0,
             sidecarStoreId: 0, sidecarSource: sidecar,
-            eagerStore: new Arena());
+            eagerStore: CreateArena());
 
-        Arena readArena = new();
+        Arena readArena = CreateArena();
         DataValue arrayValue = decoder.ReadValue(0);
         DataValue[] elements = arrayValue.AsStructArray(readArena, sidecarRegistry, translations);
 
@@ -237,7 +237,7 @@ public sealed class TypeTablePersistenceTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new([column.Name]);
-        Arena arena = new();
+        Arena arena = CreateArena();
 
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 2, arena: arena);
         DataValue[] r0 = pool.RentDataValues(1);
@@ -282,7 +282,7 @@ public sealed class TypeTablePersistenceTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new([column.Name]);
-        Arena arena = new();
+        Arena arena = CreateArena();
 
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 1, arena: arena);
         DataValue[] e0 = [DataValue.FromString("cat", arena), DataValue.FromFloat32(0.94f)];

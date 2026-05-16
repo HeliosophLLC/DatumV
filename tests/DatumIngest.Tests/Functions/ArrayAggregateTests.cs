@@ -9,7 +9,12 @@ namespace DatumIngest.Tests.Functions;
 /// </summary>
 public class ArrayAggregateTests : ServiceTestBase
 {
-    private static readonly DatumIngest.Functions.InvocationFrame _testFrame = DatumIngest.Functions.InvocationFrame.Symmetric(new DatumIngest.Model.Arena());
+    private readonly InvocationFrame _testFrame;
+
+    public ArrayAggregateTests()
+    {
+        _testFrame = InvocationFrame.Symmetric(CreateArena());
+    }
 
     // ─────────────── VALIDATION ───────────────
 

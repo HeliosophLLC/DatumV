@@ -47,7 +47,7 @@ public sealed class AudioDecodeFunctionTests : ServiceTestBase
         // Metadata is stamped at the materialization boundary (ToDataValue), not
         // inside ExecuteAsync — verify by walking through ToDataValue and reading
         // the inline accessors on the resulting DataValue.
-        using DatumIngest.Model.Arena store = new();
+        using DatumIngest.Model.Arena store = CreateArena();
         DataValue audio = result.ToDataValue(store);
         Assert.Equal(DataKind.Audio, audio.Kind);
         Assert.Equal(22050u, audio.AudioSampleRate);
@@ -66,7 +66,7 @@ public sealed class AudioDecodeFunctionTests : ServiceTestBase
             new[] { ValueRef.FromBytes(DataKind.UInt8, flac, isArray: true) },
             CreateEvaluationFrame(), default);
 
-        using DatumIngest.Model.Arena store = new();
+        using DatumIngest.Model.Arena store = CreateArena();
         DataValue audio = result.ToDataValue(store);
         Assert.Equal(DataKind.Audio, audio.Kind);
         Assert.Equal(16000u, audio.AudioSampleRate);
@@ -88,7 +88,7 @@ public sealed class AudioDecodeFunctionTests : ServiceTestBase
             new[] { ValueRef.FromBytes(DataKind.UInt8, mystery, isArray: true) },
             CreateEvaluationFrame(), default);
 
-        using DatumIngest.Model.Arena store = new();
+        using DatumIngest.Model.Arena store = CreateArena();
         DataValue audio = result.ToDataValue(store);
         Assert.Equal(DataKind.Audio, audio.Kind);
         Assert.Equal(0u, audio.AudioSampleRate);

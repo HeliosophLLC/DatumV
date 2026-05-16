@@ -171,7 +171,7 @@ public sealed class DatumFileTableProviderV2SeekTests : ServiceTestBase, IAsyncL
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["id"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);
         for (int i = 0; i < rowCount; i++)
         {

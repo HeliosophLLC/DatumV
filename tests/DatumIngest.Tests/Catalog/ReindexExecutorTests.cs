@@ -354,12 +354,12 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         return datumPath;
     }
 
-    private static async IAsyncEnumerable<RowBatch> MakeBatchesMatchingSchema(
+    private async IAsyncEnumerable<RowBatch> MakeBatchesMatchingSchema(
         Pool pool, Schema schema, object[][] rows)
     {
         string[] columnNames = schema.Columns.Select(c => c.Name).ToArray();
         ColumnLookup lookup = new(columnNames);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rows.Length, arena: arena);
         foreach (object[] row in rows)
         {

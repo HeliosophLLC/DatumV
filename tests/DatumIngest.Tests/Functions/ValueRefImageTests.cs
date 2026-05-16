@@ -86,7 +86,7 @@ public sealed class ValueRefImageTests
     {
         using SKBitmap bmp = MakeTestBitmap();
         ValueRef v = ValueRef.FromImage(bmp);
-        var arena = new Arena();
+        var arena = CreateArena Arena();
 
         DataValue dv = v.ToDataValue(arena);
 
@@ -99,7 +99,7 @@ public sealed class ValueRefImageTests
     {
         using SKBitmap bmp = MakeTestBitmap(8, 8);
         ValueRef v = ValueRef.FromImage(bmp);
-        var arena = new Arena();
+        var arena = CreateArena Arena();
 
         DataValue dv = v.ToDataValue(arena);
 

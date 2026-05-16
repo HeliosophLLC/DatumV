@@ -6,7 +6,6 @@ using DatumIngest.Manifest;
 using DatumIngest.Manifest.Insights;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
-using DatumIngest.Statistics.Accumulators;
 
 /// <summary>
 /// Tests for <see cref="ColumnIndexHint"/> generation in <see cref="ManifestBuilder"/>
@@ -14,7 +13,12 @@ using DatumIngest.Statistics.Accumulators;
 /// </summary>
 public sealed class IndexHintTests : ServiceTestBase
 {
-    private readonly Arena _arena = new();
+    private readonly Arena _arena;
+
+    public IndexHintTests()
+    {
+        _arena = CreateArena();
+    }
 
     public override void Dispose()
     {

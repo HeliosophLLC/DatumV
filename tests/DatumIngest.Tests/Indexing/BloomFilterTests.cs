@@ -1,4 +1,3 @@
-using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Indexing.Bloom;
 
@@ -10,26 +9,31 @@ namespace DatumIngest.Tests.Indexing;
 /// </summary>
 public sealed class BloomFilterTests : ServiceTestBase
 {
-    private static readonly Arena Store = new();
+    private readonly Arena _store;
+
+    public BloomFilterTests()
+    {
+        _store = CreateArena();
+    }
 
     [Fact]
     public void Add_And_MayContain_KnownValues_ReturnsTrue()
     {
         BloomFilter filter = new(expectedElements: 100);
-        DataValue value = DataValue.FromString("hello", Store);
-        filter.Add(value, Store);
+        DataValue value = DataValue.FromString("hello", _store);
+        filter.Add(value, _store);
 
-        Assert.True(filter.MayContain(value, Store));
+        Assert.True(filter.MayContain(value, _store));
     }
 
     [Fact]
     public void MayContain_ValueNotAdded_ReturnsFalse()
     {
         BloomFilter filter = new(expectedElements: 100);
-        filter.Add(DataValue.FromString("hello", Store), Store);
+        filter.Add(DataValue.FromString("hello", _store), _store);
 
         // A value that was never inserted should almost certainly report false.
-        Assert.False(filter.MayContain(DataValue.FromString("goodbye", Store), Store));
+        Assert.False(filter.MayContain(DataValue.FromString("goodbye", _store), _store));
     }
 
     [Fact]
@@ -41,14 +45,14 @@ public sealed class BloomFilterTests : ServiceTestBase
         for (int index = 0; index < 500; index++)
         {
             DataValue value = DataValue.FromFloat32((float)index);
-            filter.Add(value, Store);
+            filter.Add(value, _store);
             inserted.Add(value);
         }
 
         // Every inserted value must be found — no false negatives allowed.
         foreach (DataValue value in inserted)
         {
-            Assert.True(filter.MayContain(value, Store), $"False negative for {value.AsFloat32()}");
+            Assert.True(filter.MayContain(value, _store), $"False negative for {value.AsFloat32()}");
         }
     }
 
@@ -61,7 +65,7 @@ public sealed class BloomFilterTests : ServiceTestBase
 
         for (int index = 0; index < elementCount; index++)
         {
-            filter.Add(DataValue.FromFloat32((float)index), Store);
+            filter.Add(DataValue.FromFloat32((float)index), _store);
         }
 
         // Test against values that were NOT inserted.
@@ -70,7 +74,7 @@ public sealed class BloomFilterTests : ServiceTestBase
 
         for (int index = elementCount; index < elementCount + testCount; index++)
         {
-            if (filter.MayContain(DataValue.FromFloat32((float)index), Store))
+            if (filter.MayContain(DataValue.FromFloat32((float)index), _store))
             {
                 falsePositives++;
             }
@@ -121,50 +125,50 @@ public sealed class BloomFilterTests : ServiceTestBase
         {
             DataKind.Float32 => DataValue.FromFloat32(42.0f),
             DataKind.UInt8 => DataValue.FromUInt8(42),
-            DataKind.String => DataValue.FromString("test", Store),
+            DataKind.String => DataValue.FromString("test", _store),
             DataKind.Date => DataValue.FromDate(new DateOnly(2024, 6, 15)),
             DataKind.TimestampTz => DataValue.FromTimestampTz(new DateTimeOffset(2024, 6, 15, 12, 0, 0, TimeSpan.Zero)),
             DataKind.Timestamp => DataValue.FromTimestamp(new DateTime(2024, 6, 15, 12, 0, 0, DateTimeKind.Unspecified)),
             _ => throw new ArgumentException($"Unsupported kind: {kind}")
         };
 
-        filter.Add(value, Store);
-        Assert.True(filter.MayContain(value, Store));
+        filter.Add(value, _store);
+        Assert.True(filter.MayContain(value, _store));
     }
 
     [Fact]
     public void Add_And_MayContain_VectorKind()
     {
         BloomFilter filter = new(expectedElements: 100);
-        DataValue value = DataValue.FromArenaArray<float>([1.0f, 2.0f, 3.0f], DataKind.Float32, Store);
-        filter.Add(value, Store);
+        DataValue value = DataValue.FromArenaArray<float>([1.0f, 2.0f, 3.0f], DataKind.Float32, _store);
+        filter.Add(value, _store);
 
-        Assert.True(filter.MayContain(value, Store));
+        Assert.True(filter.MayContain(value, _store));
     }
 
     [Fact]
     public void Add_And_MayContain_UInt8ArrayKind()
     {
         BloomFilter filter = new(expectedElements: 100);
-        DataValue value = DataValue.FromByteArray([10, 20, 30], Store);
-        filter.Add(value, Store);
+        DataValue value = DataValue.FromByteArray([10, 20, 30], _store);
+        filter.Add(value, _store);
 
-        Assert.True(filter.MayContain(value, Store));
+        Assert.True(filter.MayContain(value, _store));
     }
 
     [Fact]
     public void InternalConstructor_FromBits_PreservesState()
     {
         BloomFilter original = new(expectedElements: 100, falsePositiveRate: 0.01);
-        original.Add(DataValue.FromString("alpha", Store), Store);
-        original.Add(DataValue.FromString("beta", Store), Store);
+        original.Add(DataValue.FromString("alpha", _store), _store);
+        original.Add(DataValue.FromString("beta", _store), _store);
 
         // Reconstruct from raw bits (simulates deserialization).
         BloomFilter restored = new(original.Bits, original.BitCount, original.HashCount);
 
-        Assert.True(restored.MayContain(DataValue.FromString("alpha", Store), Store));
-        Assert.True(restored.MayContain(DataValue.FromString("beta", Store), Store));
-        Assert.False(restored.MayContain(DataValue.FromString("gamma", Store), Store));
+        Assert.True(restored.MayContain(DataValue.FromString("alpha", _store), _store));
+        Assert.True(restored.MayContain(DataValue.FromString("beta", _store), _store));
+        Assert.False(restored.MayContain(DataValue.FromString("gamma", _store), _store));
     }
 
     [Fact]

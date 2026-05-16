@@ -396,7 +396,7 @@ public sealed class DatumFormatV4FieldTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["a", "b"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
 
         for (int i = 0; i < 3; i++)

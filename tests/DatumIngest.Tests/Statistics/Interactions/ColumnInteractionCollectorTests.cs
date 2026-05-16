@@ -152,7 +152,7 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
     [Fact]
     public void GetInteractions_IneligiblePairOnly_ProducesMissingnessOnly()
     {
-        using Arena arena = new();
+        using Arena arena = CreateArena();
 
         ColumnLookup columnLookup = new(["image", "vector"]);
         ColumnInteractionCollector collector = new();
@@ -190,7 +190,7 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
     [Fact]
     public void GetInteractions_MixedEligibility_ExpandedPairCount()
     {
-        using Arena arena = new();
+        using Arena arena = CreateArena();
 
         ColumnLookup columnLookup = new(["score", "label", "image"]);
         ColumnInteractionCollector collector = new();

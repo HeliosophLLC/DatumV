@@ -12,7 +12,7 @@ public sealed class ArenaVirtualMemoryTests : ServiceTestBase
     [Fact]
     public unsafe void Anonymous_Grow_PreservesBasePointer()
     {
-        using Arena arena = new(initialCapacity: 1024 * 1024); // 1 MB
+        using Arena arena = CreateArena(initialCapacity: 1024 * 1024); // 1 MB
 
         arena.AppendBytes(new byte[100]);
 
@@ -36,7 +36,7 @@ public sealed class ArenaVirtualMemoryTests : ServiceTestBase
     [Fact]
     public void Anonymous_Grow_PreservesContentsAtOriginalAddress()
     {
-        using Arena arena = new(initialCapacity: 4096);
+        using Arena arena = CreateArena(initialCapacity: 4096);
 
         // Sentinel near the start.
         byte[] sentinel = [0xDE, 0xAD, 0xBE, 0xEF];
@@ -60,7 +60,7 @@ public sealed class ArenaVirtualMemoryTests : ServiceTestBase
         // a span over the arena while another worker's write triggers a grow. Under
         // the old mmap-and-remap design this AVE'd. With VA-reserve the pointer is
         // stable, so this loop must complete cleanly.
-        using Arena arena = new(initialCapacity: 4096);
+        using Arena arena = CreateArena(initialCapacity: 4096);
 
         // Pre-seed with a bunch of small payloads that workers will read.
         List<(long offset, int len)> seeded = [];
@@ -114,7 +114,7 @@ public sealed class ArenaVirtualMemoryTests : ServiceTestBase
         {
             for (int i = 0; i < arenas.Length; i++)
             {
-                arenas[i] = new Arena();
+                arenas[i] = CreateArena();
                 // Trigger first commit so the reservation actually happens.
                 arenas[i].AppendBytes([0x00]);
             }
@@ -132,7 +132,7 @@ public sealed class ArenaVirtualMemoryTests : ServiceTestBase
     public void Anonymous_DisposeWithoutWrite_DoesNotThrow()
     {
         // Arena that never wrote anything — no reservation ever happened.
-        Arena arena = new();
+        Arena arena = CreateArena();
         arena.Dispose();
     }
 
@@ -145,7 +145,7 @@ public sealed class ArenaVirtualMemoryTests : ServiceTestBase
         // if Dispose actually frees the VA.
         for (int i = 0; i < 2000; i++)
         {
-            using Arena arena = new();
+            using Arena arena = CreateArena();
             arena.AppendBytes([(byte)i]);
         }
     }
@@ -156,7 +156,7 @@ public sealed class ArenaVirtualMemoryTests : ServiceTestBase
         // Reset is the pool-reuse path: position rewinds, mapping retained. The
         // base pointer must stay valid since the same arena instance may be
         // immediately rented out again.
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AppendBytes(new byte[1024]);
 
         nint before;

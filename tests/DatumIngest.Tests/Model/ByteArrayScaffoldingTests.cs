@@ -12,7 +12,7 @@ public sealed class ByteArrayScaffoldingTests : ServiceTestBase
     [Fact]
     public void FromByteArray_ProducesUInt8KindWithIsArrayFlag()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] payload = [10, 20, 30, 40, 50];
 
         DataValue value = DataValue.FromByteArray(payload, arena);
@@ -28,7 +28,7 @@ public sealed class ByteArrayScaffoldingTests : ServiceTestBase
     [Fact]
     public void FromByteArray_RoundTripsThroughAsByteSpan()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] payload = [0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xFF];
 
         DataValue value = DataValue.FromByteArray(payload, arena);
@@ -40,7 +40,7 @@ public sealed class ByteArrayScaffoldingTests : ServiceTestBase
     [Fact]
     public void FromByteArray_RoundTripsThroughAsUInt8Array()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] payload = [1, 2, 3, 4];
 
         DataValue value = DataValue.FromByteArray(payload, arena);
@@ -52,7 +52,7 @@ public sealed class ByteArrayScaffoldingTests : ServiceTestBase
     [Fact]
     public void FromByteArrayAtOffset_RoundTripsBytesFromArena()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] payload = [101, 102, 103, 104];
         var (offset, length) = arena.StoreBytes(payload);
 
@@ -86,7 +86,7 @@ public sealed class ByteArrayScaffoldingTests : ServiceTestBase
     [Fact]
     public void AsByteSpan_AcceptsByteArrayValue()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] payload = [42];
 
         DataValue value = DataValue.FromByteArray(payload, arena);
@@ -105,7 +105,7 @@ public sealed class ByteArrayScaffoldingTests : ServiceTestBase
 
         Assert.False(scalar.IsArray);
         Assert.False(scalar.IsByteArrayKind);
-        Assert.Throws<InvalidOperationException>(() => scalar.AsByteSpan(new Arena()));
+        Assert.Throws<InvalidOperationException>(() => scalar.AsByteSpan(CreateArena()));
     }
 
     [Fact]

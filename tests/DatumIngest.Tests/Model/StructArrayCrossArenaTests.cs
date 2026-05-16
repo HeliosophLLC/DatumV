@@ -29,14 +29,14 @@ public sealed class StructArrayCrossArenaTests : ServiceTestBase
         // This works even without per-field rebind because no arena references
         // exist in the fields. Locks the baseline so the harder tests below
         // can isolate the rebind-specific failures.
-        Arena source = new();
+        Arena source = CreateArena();
         DataValue[] row0 = [DataValue.FromInt32(1), DataValue.FromFloat32(1.5f)];
         DataValue[] row1 = [DataValue.FromInt32(2), DataValue.FromFloat32(2.5f)];
         DataValue arr = DataValue.FromStructArray(new[] { row0, row1 }, source, typeId: 0);
 
         DataValue[] readBack = arr.AsStructArray(source);
 
-        Arena target = new();
+        Arena target = CreateArena();
         DataValue[][] perRowFields = new DataValue[readBack.Length][];
         for (int i = 0; i < readBack.Length; i++)
         {
@@ -65,8 +65,8 @@ public sealed class StructArrayCrossArenaTests : ServiceTestBase
         // dangling into the source arena. The CopyStructArrayToTargetArena
         // helper must recursively rebind the String field to the target arena
         // before writing the slot block.
-        Arena source = new();
-        Arena target = new();
+        Arena source = CreateArena();
+        Arena target = CreateArena();
 
         DataValue[] row0 = [
             DataValue.FromString("alice", source),  // arena-backed in source
@@ -103,8 +103,8 @@ public sealed class StructArrayCrossArenaTests : ServiceTestBase
         // RebindStructToTargetArena recursive descent — without it, the
         // nested struct's String field would still reference the source
         // arena after the outer rebind.
-        Arena source = new();
-        Arena target = new();
+        Arena source = CreateArena();
+        Arena target = CreateArena();
 
         // Inner struct: { city: String }
         DataValue[] inner0 = [DataValue.FromString("Boston", source)];

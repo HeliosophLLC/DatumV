@@ -3,11 +3,15 @@ namespace DatumIngest.Tests.Manifest;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
-using DatumIngest.Statistics.Accumulators;
 
 public sealed class ManifestBuilderTests : ServiceTestBase
 {
-    private readonly Arena _arena = new();
+    private readonly Arena _arena;
+
+    public ManifestBuilderTests()
+    {
+        _arena = CreateArena();
+    }
 
     public override void Dispose()
     {

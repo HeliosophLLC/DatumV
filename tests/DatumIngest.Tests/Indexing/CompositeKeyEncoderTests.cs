@@ -11,7 +11,7 @@ namespace DatumIngest.Tests.Indexing;
 /// (sign extremes, empty / embedded-null strings, float corner cases), and
 /// rejection of NULL components / unsupported kinds.
 /// </summary>
-public sealed class CompositeKeyEncoderTests
+public sealed class CompositeKeyEncoderTests : ServiceTestBase
 {
     // ───────────────────────── Per-kind ordering ─────────────────────────
 
@@ -244,7 +244,7 @@ public sealed class CompositeKeyEncoderTests
     [Fact]
     public void String_OrderingPreserved_Ascii()
     {
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         AssertSortedOrder(arena,
             DataValue.FromString("", arena),
             DataValue.FromString("a", arena),
@@ -260,7 +260,7 @@ public sealed class CompositeKeyEncoderTests
     {
         // Bytes-lex order on UTF-8 matches code-point order for BMP runs.
         // (Cross-codepoint ordering: bytes < non-bytes per UTF-8 spec.)
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         AssertSortedOrder(arena,
             DataValue.FromString("apple", arena),
             DataValue.FromString("apples", arena),
@@ -273,7 +273,7 @@ public sealed class CompositeKeyEncoderTests
     {
         // "test2017/000000290551.jpg" — the COCO filename example. 25 bytes.
         // Must order after its prefix and before its successor.
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         AssertSortedOrder(arena,
             DataValue.FromString("test2017/000000290550", arena),
             DataValue.FromString("test2017/000000290551.jpg", arena),
@@ -283,7 +283,7 @@ public sealed class CompositeKeyEncoderTests
     [Fact]
     public void ByteArray_OrderingPreserved()
     {
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         AssertSortedOrder(arena,
             DataValue.FromByteArray(Array.Empty<byte>(), arena),
             DataValue.FromByteArray(new byte[] { 0x01 }, arena),
@@ -298,7 +298,7 @@ public sealed class CompositeKeyEncoderTests
     {
         // The escape pattern \x00 → \x00\xFF must preserve order:
         // [\x00, \x01] sorts after [\x00] and before [\x01].
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         AssertSortedOrder(arena,
             DataValue.FromByteArray(Array.Empty<byte>(), arena),
             DataValue.FromByteArray(new byte[] { 0x00 }, arena),
@@ -315,7 +315,7 @@ public sealed class CompositeKeyEncoderTests
     public void Tuple_TwoColumns_PreservesLexOrder()
     {
         // (Int32, String) tuple — lex order is component-by-component.
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         IReadOnlyList<DataValue>[] sortedTuples =
         [
             [DataValue.FromInt32(1), DataValue.FromString("alpha", arena)],
@@ -336,7 +336,7 @@ public sealed class CompositeKeyEncoderTests
     public void Tuple_ThreeColumns_MixedKinds()
     {
         // (Int64, Date, Uuid) — the user's three-column composite example.
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         Guid g1 = new Guid("00000000-0000-0000-0000-000000000001");
         Guid g2 = new Guid("00000000-0000-0000-0000-000000000002");
 
@@ -391,7 +391,7 @@ public sealed class CompositeKeyEncoderTests
     public void String_Empty_RoundTrips()
     {
         // Empty string encodes to just the terminator (\x00\x00).
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         byte[] encoded = CompositeKeyEncoder.EncodeSingle(DataValue.FromString("", arena), arena);
         Assert.Equal(new byte[] { 0x00, 0x00 }, encoded);
     }

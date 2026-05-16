@@ -14,11 +14,16 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public class StatisticalAggregateTests : ServiceTestBase
 {
-    private static readonly DatumIngest.Functions.InvocationFrame _testFrame = DatumIngest.Functions.InvocationFrame.Symmetric(new DatumIngest.Model.Arena());
-
     private static readonly string[] XColumns = ["x"];
     private static readonly string[] CatXColumns = ["cat", "x"];
     private static readonly string[] XpColumns = ["x", "p"];
+
+    private readonly InvocationFrame _testFrame;
+
+    public StatisticalAggregateTests()
+    {
+        _testFrame = InvocationFrame.Symmetric(CreateArena());
+    }
 
     private async Task<List<Row>> CollectAsync(QueryOperator op, ExecutionContext? context = null)
     {

@@ -20,7 +20,7 @@ public sealed class FixedShapeMultiDimAttachTests : ServiceTestBase
     [Fact]
     public void MultiDimColumn_AttachesShapeAndFlagToFlatSource()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         // Source: flat 4-element Float32 array.
         DataValue source = DataValue.FromArenaArray<float>([1f, 2f, 3f, 4f], DataKind.Float32, arena);
         Assert.False(source.IsMultiDim);
@@ -37,7 +37,7 @@ public sealed class FixedShapeMultiDimAttachTests : ServiceTestBase
     [Fact]
     public void OneDimColumn_LeavesValueFlat()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue source = DataValue.FromArenaArray<float>([1f, 2f, 3f, 4f], DataKind.Float32, arena);
 
         ColumnInfo target = Column("vec", DataKind.Float32, fixedShape: [4]);
@@ -50,7 +50,7 @@ public sealed class FixedShapeMultiDimAttachTests : ServiceTestBase
     [Fact]
     public void VariableLengthColumn_LeavesValueFlat()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue source = DataValue.FromArenaArray<float>([1f, 2f, 3f], DataKind.Float32, arena);
 
         ColumnInfo target = Column("vec", DataKind.Float32, fixedShape: null);
@@ -62,7 +62,7 @@ public sealed class FixedShapeMultiDimAttachTests : ServiceTestBase
     [Fact]
     public void NullSource_PassesThrough()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue source = DataValue.Null(DataKind.Float32);
 
         ColumnInfo target = Column("matrix", DataKind.Float32, fixedShape: [2, 2]);
@@ -75,7 +75,7 @@ public sealed class FixedShapeMultiDimAttachTests : ServiceTestBase
     [Fact]
     public void MultiDimSource_AlreadyAttached_PassesThrough()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue source = DataValue.FromArenaMultiDimArray<float>(
             [1f, 2f, 3f, 4f], [2, 2], DataKind.Float32, arena);
 
@@ -91,7 +91,7 @@ public sealed class FixedShapeMultiDimAttachTests : ServiceTestBase
     {
         // UPDATE fast-path passes arena=null to preserve sidecar identity;
         // validation still runs, but multi-dim attachment is skipped.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue source = DataValue.FromArenaArray<float>([1f, 2f, 3f, 4f], DataKind.Float32, arena);
 
         ColumnInfo target = Column("matrix", DataKind.Float32, fixedShape: [2, 2]);
@@ -104,7 +104,7 @@ public sealed class FixedShapeMultiDimAttachTests : ServiceTestBase
     [Fact]
     public void ElementCount_Mismatch_StillThrows()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue source = DataValue.FromArenaArray<float>([1f, 2f, 3f], DataKind.Float32, arena);
 
         ColumnInfo target = Column("matrix", DataKind.Float32, fixedShape: [2, 2]);

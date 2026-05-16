@@ -39,7 +39,7 @@ public sealed class ArrayShapeGetFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (m Array<Float32>(2,3))");
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();   // baseline keeps the arena alive across mid-query batch returns
         List<Row> rows = await ExecuteQueryAsync("SELECT array_shape(m) AS s FROM t", catalog, store: arena);
 
@@ -56,7 +56,7 @@ public sealed class ArrayShapeGetFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (cube Array<Int32>(2,2,2))");
         catalog.Plan("INSERT INTO t VALUES ([0, 1, 2, 3, 4, 5, 6, 7])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();   // baseline keeps the arena alive across mid-query batch returns
         List<Row> rows = await ExecuteQueryAsync("SELECT array_shape(cube) AS s FROM t", catalog, store: arena);
 
@@ -71,7 +71,7 @@ public sealed class ArrayShapeGetFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (v Array<Float32>(4))");
         catalog.Plan("INSERT INTO t VALUES ([10.0, 20.0, 30.0, 40.0])");
 
-        using Arena arena = new();
+        using Arena arena = CreateArena();
         arena.AddReference();   // baseline keeps the arena alive across mid-query batch returns
         List<Row> rows = await ExecuteQueryAsync("SELECT array_shape(v) AS s FROM t", catalog, store: arena);
 

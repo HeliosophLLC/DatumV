@@ -115,7 +115,7 @@ public sealed class DatumFileV2AddColumnTests : ServiceTestBase, IAsyncLifetime
             // values for both.
             Pool pool = CreatePool();
             ColumnLookup lookup = new(["v", "score"]);
-            Arena arena = new();
+            Arena arena = CreateArena();
             RowBatch batch = pool.RentRowBatch(lookup, capacity: 20, arena: arena);
             for (int i = 50; i < 70; i++)
             {
@@ -240,7 +240,7 @@ public sealed class DatumFileV2AddColumnTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         const int rowCount = 100;  // 3 full pages of 32 + 1 partial of 4
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);
         for (int i = 0; i < rowCount; i++)
@@ -309,7 +309,7 @@ public sealed class DatumFileV2AddColumnTests : ServiceTestBase, IAsyncLifetime
             // Append one row first (1 column).
             Pool pool = CreatePool();
             ColumnLookup lookup = new(["v"]);
-            Arena arena = new();
+            Arena arena = CreateArena();
             RowBatch batch = pool.RentRowBatch(lookup, capacity: 1, arena: arena);
             DataValue[] row = pool.RentDataValues(1);
             row[0] = DataValue.FromInt32(99);
@@ -363,7 +363,7 @@ public sealed class DatumFileV2AddColumnTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);
         for (int i = 0; i < rowCount; i++)
         {

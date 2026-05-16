@@ -8,7 +8,12 @@ using DatumIngest.Model;
 /// </summary>
 public sealed class ColumnRoleClassifierTests : ServiceTestBase
 {
-    private readonly Arena _arena = new();
+    private readonly Arena _arena;
+
+    public ColumnRoleClassifierTests()
+    {
+        _arena = CreateArena();
+    }
 
     public override void Dispose()
     {

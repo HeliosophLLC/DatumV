@@ -121,7 +121,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
 
         // Build a batch matching the schema and feed it through the catalog.
         ColumnLookup lookup = new(["a", "b"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 2, arena: arena);
         DataValue[] row1 = pool.RentDataValues(2);
         row1[0] = DataValue.FromInt32(2); row1[1] = DataValue.FromString("two", arena);
@@ -249,7 +249,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
         long beforeCount = catalog["t"].GetRowCount();
 
         ColumnLookup lookup = new(["a", "b"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 2, arena: arena);
         DataValue[] row = pool.RentDataValues(2);
         row[0] = DataValue.FromInt32(99); row[1] = DataValue.FromInt32(990);
@@ -392,7 +392,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["a", "b"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
         for (int i = 0; i < 3; i++)
         {

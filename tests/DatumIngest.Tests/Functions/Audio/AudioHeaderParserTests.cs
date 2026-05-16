@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Functions.Audio;
 /// <summary>
 /// Round-trip tests for the WAV header parser + the audio inline-metadata stamping path.
 /// </summary>
-public sealed class AudioHeaderParserTests
+public sealed class AudioHeaderParserTests : ServiceTestBase
 {
     [Fact]
     public void TryParseHeader_MinimalWave_ExtractsSampleRateChannelsBitDepthFrameCount()
@@ -47,7 +47,7 @@ public sealed class AudioHeaderParserTests
     public void AudioDataValueFactory_FromEncodedBytes_StampsMetadataOntoDataValue()
     {
         byte[] wav = BuildWave(sampleRate: 48000, channels: 1, bitsPerSample: 24, dataBytes: 144000);
-        using Arena store = new();
+        using Arena store = CreateArena();
 
         DataValue dv = AudioDataValueFactory.FromEncodedBytes(wav, store);
 
@@ -65,7 +65,7 @@ public sealed class AudioHeaderParserTests
         // with zero-sentinel metadata so accessors return 0 and SQL functions return NULL.
         byte[] mystery = new byte[256];
         mystery[0] = 0xFF; // arbitrary
-        using Arena store = new();
+        using Arena store = CreateArena();
 
         DataValue dv = AudioDataValueFactory.FromEncodedBytes(mystery, store);
 
@@ -188,7 +188,7 @@ public sealed class AudioHeaderParserTests
         // inline metadata stamping path that powers audio_sample_rate() and friends
         // for LibriSpeech-style FLAC archives at ingest time.
         byte[] flac = BuildFlac(sampleRate: 16000, channels: 1, bitsPerSample: 16, totalSamples: 32000);
-        using Arena store = new();
+        using Arena store = CreateArena();
 
         DataValue dv = AudioDataValueFactory.FromEncodedBytes(flac, store);
 
@@ -279,7 +279,7 @@ public sealed class AudioHeaderParserTests
         // the WAV / FLAC equivalents, exercises the audio_sample_rate() fast path
         // for MP3 ingest (Common Voice, AudioSet TSVs, podcast archives).
         byte[] mp3 = BuildMp3Frame(version: Mp3Version.Mpeg1, sampleRateIdx: 0, channelMode: Mp3ChannelMode.Stereo);
-        using Arena store = new();
+        using Arena store = CreateArena();
 
         DataValue dv = AudioDataValueFactory.FromEncodedBytes(mp3, store);
 
@@ -352,7 +352,7 @@ public sealed class AudioHeaderParserTests
     public void AudioDataValueFactory_FromEncodedBytes_StampsOggVorbisMetadataOntoDataValue()
     {
         byte[] ogg = BuildOggVorbis(sampleRate: 44100, channels: 2);
-        using Arena store = new();
+        using Arena store = CreateArena();
 
         DataValue dv = AudioDataValueFactory.FromEncodedBytes(ogg, store);
 

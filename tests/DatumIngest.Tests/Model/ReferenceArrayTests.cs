@@ -14,7 +14,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void StringArray_Empty_RoundTrips()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue value = DataValue.FromStringArray([], arena);
 
         Assert.Equal(DataKind.String, value.Kind);
@@ -26,7 +26,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void StringArray_Single_FitsInline()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue value = DataValue.FromStringArray(["hello"], arena);
 
         Assert.Equal(DataKind.String, value.Kind);
@@ -42,7 +42,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void StringArray_Multiple_UsesArenaSlotBlock()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue value = DataValue.FromStringArray(["alpha", "beta", "gamma"], arena);
 
         Assert.Equal(DataKind.String, value.Kind);
@@ -57,7 +57,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void StringArray_LongStringElements_RoundTrip()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         // Each element exceeds the 16-byte inline cap; ensures slot offsets
         // resolve correctly into the arena's variable-length region.
         string[] elements = [
@@ -74,7 +74,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void StringArray_LargeArray_RoundTrip()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         string[] elements = new string[256];
         for (int i = 0; i < elements.Length; i++)
         {
@@ -89,7 +89,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void StringArray_KindIsArray_DistinguishedFromScalar()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue scalar = DataValue.FromString("hello", arena);
         DataValue oneElementArray = DataValue.FromStringArray(["hello"], arena);
 
@@ -102,7 +102,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void AsStringArray_OnNonArray_Throws()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue scalar = DataValue.FromString("hello", arena);
 
         Assert.Throws<InvalidOperationException>(() => scalar.AsStringArray(arena));
@@ -111,7 +111,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void AsStringArray_OnNullArray_Throws()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue typedNull = DataValue.Null(DataKind.String);
 
         Assert.Throws<InvalidOperationException>(() => typedNull.AsStringArray(arena));
@@ -121,7 +121,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     public void AsStringArray_OnWrongKindArray_Throws()
     {
         // A byte array (UInt8 + IsArray) is not a String array.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue byteArray = DataValue.FromByteArray([1, 2, 3], arena);
 
         Assert.Throws<InvalidOperationException>(() => byteArray.AsStringArray(arena));
@@ -132,7 +132,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void ImageArray_Empty_RoundTrips()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue value = DataValue.FromImageArray(ReadOnlySpan<byte[]>.Empty, arena);
 
         Assert.Equal(DataKind.Image, value.Kind);
@@ -144,7 +144,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void ImageArray_Single_FitsInline()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         DataValue value = DataValue.FromImageArray([png], arena);
 
@@ -160,7 +160,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void ImageArray_Multiple_UsesArenaSlotBlock()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] png = [0x89, 0x50, 0x4E, 0x47];
         byte[] jpg = [0xFF, 0xD8, 0xFF, 0xE0];
         byte[] gif = [0x47, 0x49, 0x46, 0x38];
@@ -179,7 +179,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void ImageArray_KindIsArray_DistinguishedFromScalarImage()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         byte[] bytes = [0x89, 0x50, 0x4E, 0x47];
         DataValue scalar = DataValue.FromImage(bytes, arena);
         DataValue oneElementArray = DataValue.FromImageArray([bytes], arena);
@@ -193,7 +193,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void AsImageArray_OnNonArray_Throws()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue scalar = DataValue.FromImage([0xFF, 0xD8], arena);
 
         Assert.Throws<InvalidOperationException>(() => scalar.AsImageArray(arena));
@@ -204,7 +204,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void StructArray_Empty_RoundTrips()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue value = DataValue.FromUntypedStructArray(ReadOnlySpan<DataValue[]>.Empty, arena);
 
         Assert.Equal(DataKind.Struct, value.Kind);
@@ -216,7 +216,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void StructArray_Single_FitsInline()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] fields = [DataValue.FromString("alice", arena), DataValue.FromInt32(42)];
         DataValue value = DataValue.FromUntypedStructArray([fields], arena);
 
@@ -235,7 +235,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void StructArray_Multiple_UsesArenaSlotBlock()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] alice = [DataValue.FromString("alice", arena), DataValue.FromInt32(30)];
         DataValue[] bob = [DataValue.FromString("bob", arena), DataValue.FromInt32(25)];
         DataValue[] carol = [DataValue.FromString("carol", arena), DataValue.FromInt32(40)];
@@ -260,7 +260,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void StructArray_KindIsArray_DistinguishedFromScalarStruct()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] fields = [DataValue.FromString("alice", arena), DataValue.FromInt32(30)];
         DataValue scalar = DataValue.FromUntypedStruct(fields, arena);
         DataValue oneElementArray = DataValue.FromUntypedStructArray([fields], arena);
@@ -274,7 +274,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void AsStructArray_OnNonArray_Throws()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] fields = [DataValue.FromInt32(1)];
         DataValue scalar = DataValue.FromUntypedStruct(fields, arena);
 
@@ -286,8 +286,8 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void Stabilize_StringArray_DeepCopiesAcrossStores()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         string[] elements = [
             "this is a long string that does not fit inline",
@@ -307,8 +307,8 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void Stabilize_StringArray_InlineN1_DeepCopies()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         // Even an inline N=1 array points its slot at sourceStore — needs deep copy.
         DataValue original = DataValue.FromStringArray(["a single value, longer than 16 bytes"], source);
@@ -325,8 +325,8 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void Stabilize_ImageArray_DeepCopiesAcrossStores()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         byte[][] elements = [
             [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
@@ -346,8 +346,8 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void Stabilize_StructArray_DeepCopiesIncludingFieldStrings()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         // Each struct contains a long-string field — proves the field-level
         // recursion in StabilizeStructArray actually copies field payloads,
@@ -379,7 +379,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     public void Stabilize_ReferenceArray_SameStore_PassesThrough()
     {
         // Same-store fast path — no copy, slot offsets stay valid.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue original = DataValue.FromStringArray(["alpha", "beta"], arena);
 
         DataValue stable = DataValueRetention.Stabilize(original, arena, arena);
@@ -393,8 +393,8 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     [Fact]
     public void Stabilize_EmptyReferenceArray_PassesThrough()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         DataValue empty = DataValue.FromStringArray([], source);
         DataValue stable = DataValueRetention.Stabilize(empty, source, retention);

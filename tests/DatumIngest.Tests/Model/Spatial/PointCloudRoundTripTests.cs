@@ -128,7 +128,7 @@ public sealed class PointCloudRoundTripTests : ServiceTestBase
     [Fact]
     public void DataValue_FromPointCloud_AsPointCloud_RoundTripsBlob()
     {
-        Arena store = new();
+        Arena store = CreateArena();
         byte[] blob = BuildSamplePointCloudBlob();
 
         DataValue value = DataValue.FromPointCloud(blob, store);
@@ -144,7 +144,7 @@ public sealed class PointCloudRoundTripTests : ServiceTestBase
     [Fact]
     public void DataValue_PointCloud_OffsetEqualityAndHash()
     {
-        Arena store = new();
+        Arena store = CreateArena();
         byte[] blob = BuildSamplePointCloudBlob();
 
         DataValue a = DataValue.FromPointCloud(blob, store);
@@ -163,7 +163,7 @@ public sealed class PointCloudRoundTripTests : ServiceTestBase
     [Fact]
     public void DataValue_AsByteSpan_ReadsPointCloudBlob()
     {
-        Arena store = new();
+        Arena store = CreateArena();
         byte[] blob = BuildSamplePointCloudBlob();
 
         DataValue value = DataValue.FromPointCloud(blob, store);
@@ -176,7 +176,7 @@ public sealed class PointCloudRoundTripTests : ServiceTestBase
     [Fact]
     public void DataValue_WireFormat_RoundTripsThroughDataValueWriterReader()
     {
-        Arena writeStore = new();
+        Arena writeStore = CreateArena();
         byte[] blob = BuildSamplePointCloudBlob();
         DataValue original = DataValue.FromPointCloud(blob, writeStore);
 
@@ -187,7 +187,7 @@ public sealed class PointCloudRoundTripTests : ServiceTestBase
         }
 
         stream.Position = 0;
-        Arena readStore = new();
+        Arena readStore = CreateArena();
         using BinaryReader reader = new(stream);
         DataValue restored = DataValueReader.ReadDataValue(reader, readStore);
 

@@ -275,12 +275,12 @@ public sealed class DatumFileV2MultiFileReadTests : ServiceTestBase, IAsyncLifet
         return path;
     }
 
-    private static void WriteSequentialRowsFileTo(string path, int rowCount, int pageSize)
+    private void WriteSequentialRowsFileTo(string path, int rowCount, int pageSize)
     {
         ColumnDescriptorV2 col = new("v", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
         Pool pool = new(new PoolBacking());
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);
         for (int i = 0; i < rowCount; i++)
         {

@@ -1,5 +1,3 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Model;
@@ -13,8 +11,12 @@ namespace DatumIngest.Tests.Indexing;
 /// </summary>
 public sealed class BitmapBuildPipelineTests : ServiceTestBase
 {
-    private static readonly Arena Store = new();
+    private readonly Arena _store;
 
+    public BitmapBuildPipelineTests()
+    {
+        _store = CreateArena();
+    }
 
     // ───────────────────────── IncrementalIndexBuilder ─────────────────────────
 
@@ -30,7 +32,7 @@ public sealed class BitmapBuildPipelineTests : ServiceTestBase
         for (int i = 0; i < 10; i++)
         {
             DataValue[] values = [DataValue.FromBoolean(i % 2 == 0)];
-            incremental.AddRow(MakeRow(lookup, values), Store);
+            incremental.AddRow(MakeRow(lookup, values), _store);
         }
 
         SourceIndex index = incremental.Finalize();
@@ -55,7 +57,7 @@ public sealed class BitmapBuildPipelineTests : ServiceTestBase
         for (int i = 0; i < 6; i++)
         {
             DataValue[] values = [DataValue.FromString(categories[i % 2])];
-            incremental.AddRow(MakeRow(lookup, values), Store);
+            incremental.AddRow(MakeRow(lookup, values), _store);
         }
 
         SourceIndex index = incremental.Finalize();
@@ -85,7 +87,7 @@ public sealed class BitmapBuildPipelineTests : ServiceTestBase
         for (int i = 0; i < count; i++)
         {
             DataValue[] values = [DataValue.FromFloat32((float)i)];
-            incremental.AddRow(MakeRow(lookup, values), Store);
+            incremental.AddRow(MakeRow(lookup, values), _store);
         }
 
         SourceIndex index = incremental.Finalize();
@@ -108,7 +110,7 @@ public sealed class BitmapBuildPipelineTests : ServiceTestBase
         for (int i = 0; i < 5; i++)
         {
             DataValue[] values = [DataValue.FromString(i < 3 ? "red" : "blue")];
-            incremental.AddRow(MakeRow(lookup, values), Store);
+            incremental.AddRow(MakeRow(lookup, values), _store);
         }
 
         SourceIndex index = incremental.Finalize();

@@ -9,12 +9,12 @@ namespace DatumIngest.Tests.Model;
 /// require a TypeId argument, so a missing-plumbing site fails to compile rather
 /// than silently producing <c>f0..fN</c> output.
 /// </summary>
-public sealed class StructApiContractTests
+public sealed class StructApiContractTests : ServiceTestBase
 {
     [Fact]
     public void FromStruct_Typed_StampsTypeIdOnDataValue()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue v = DataValue.FromStruct([DataValue.FromInt32(1)], arena, typeId: 42);
         Assert.Equal((ushort)42, v.TypeId);
         Assert.Equal(DataKind.Struct, v.Kind);
@@ -24,7 +24,7 @@ public sealed class StructApiContractTests
     [Fact]
     public void FromUntypedStruct_HasZeroTypeId()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue v = DataValue.FromUntypedStruct([DataValue.FromInt32(1)], arena);
         Assert.Equal((ushort)0, v.TypeId);
         Assert.Equal(DataKind.Struct, v.Kind);
@@ -37,7 +37,7 @@ public sealed class StructApiContractTests
         // Per-element TypeId layout: the typeId argument is now stamped into
         // each slot's reserved bytes, not on the array container. Read elements
         // back and verify each carries the TypeId.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] r0 = [DataValue.FromInt32(1)];
         DataValue[] r1 = [DataValue.FromInt32(2)];
         DataValue v = DataValue.FromStructArray([r0, r1], arena, typeId: 7);
@@ -53,7 +53,7 @@ public sealed class StructApiContractTests
     [Fact]
     public void FromUntypedStructArray_ElementsHaveZeroTypeId()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] r0 = [DataValue.FromInt32(1)];
         DataValue[] r1 = [DataValue.FromInt32(2)];
         DataValue v = DataValue.FromUntypedStructArray([r0, r1], arena);
@@ -86,7 +86,7 @@ public sealed class StructApiContractTests
         // Behavioural sameness: the only difference between typed and untyped
         // factories is the TypeId stamp. Field payload round-trip is identical,
         // which is why FromUntypedStruct is a safe escape hatch for tests.
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue[] fields = [DataValue.FromInt32(7), DataValue.FromBoolean(true)];
         DataValue v = DataValue.FromUntypedStruct(fields, arena);
 

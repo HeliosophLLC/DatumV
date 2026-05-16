@@ -8,15 +8,20 @@ namespace DatumIngest.Tests.Model;
 /// <see cref="DataValue.ImageWidth"/>, <see cref="DataValue.ImageHeight"/>,
 /// <see cref="DataValue.ImageChannels"/> read these without touching the arena.
 /// </summary>
-public sealed class DataValueImageMetadataTests
+public sealed class DataValueImageMetadataTests : ServiceTestBase
 {
-    private static readonly Arena Store = new();
+    private readonly Arena _store;
+
+    public DataValueImageMetadataTests()
+    {
+        _store = CreateArena();
+    }
 
     [Fact]
     public void FromImage_WithDimensions_RoundTripsThroughInlineAccessors()
     {
         byte[] payload = [0xFF, 0xD8, 0xFF, 0xE0]; // JPEG signature bytes, content not material
-        DataValue dv = DataValue.FromImage(payload, Store, width: 1920, height: 1080, channels: 3);
+        DataValue dv = DataValue.FromImage(payload, _store, width: 1920, height: 1080, channels: 3);
 
         Assert.Equal(DataKind.Image, dv.Kind);
         Assert.True(dv.IsArenaBacked);
@@ -30,7 +35,7 @@ public sealed class DataValueImageMetadataTests
     {
         // The no-metadata overload — legacy path, what existing callers still use.
         byte[] payload = [0xFF, 0xD8, 0xFF, 0xE0];
-        DataValue dv = DataValue.FromImage(payload, Store);
+        DataValue dv = DataValue.FromImage(payload, _store);
 
         Assert.Equal((ushort)0, dv.ImageWidth);
         Assert.Equal((ushort)0, dv.ImageHeight);
@@ -42,7 +47,7 @@ public sealed class DataValueImageMetadataTests
     {
         // uint16 cap chosen because AV1/VP9/JPEG codec specs themselves cap at 65535.
         byte[] payload = [0xFF, 0xD8];
-        DataValue dv = DataValue.FromImage(payload, Store, width: 65535, height: 65535, channels: 4);
+        DataValue dv = DataValue.FromImage(payload, _store, width: 65535, height: 65535, channels: 4);
 
         Assert.Equal((ushort)65535, dv.ImageWidth);
         Assert.Equal((ushort)65535, dv.ImageHeight);
@@ -53,7 +58,7 @@ public sealed class DataValueImageMetadataTests
     public void FromImageAtOffset_WithDimensions_ProducesArenaBackedValueWithMetadata()
     {
         byte[] payload = [0x89, 0x50, 0x4E, 0x47]; // PNG signature, content irrelevant
-        var (offset, length) = Store.StoreBytes(payload);
+        var (offset, length) = _store.StoreBytes(payload);
 
         DataValue dv = DataValue.FromImageAtOffset(offset.Value, length.Value, width: 800, height: 600, channels: 4);
 
@@ -62,7 +67,7 @@ public sealed class DataValueImageMetadataTests
         Assert.Equal((ushort)800, dv.ImageWidth);
         Assert.Equal((ushort)600, dv.ImageHeight);
         Assert.Equal((byte)4, dv.ImageChannels);
-        Assert.Equal(payload, dv.AsImage(Store));
+        Assert.Equal(payload, dv.AsImage(_store));
     }
 
     [Fact]
@@ -76,7 +81,7 @@ public sealed class DataValueImageMetadataTests
         Assert.Equal((ushort)0, notImage.ImageHeight);
         Assert.Equal((byte)0, notImage.ImageChannels);
 
-        DataValue longInline = DataValue.FromString("2026-05-22T13:45:00.123", Store); // 23 bytes, inline
+        DataValue longInline = DataValue.FromString("2026-05-22T13:45:00.123", _store); // 23 bytes, inline
         Assert.True(longInline.IsInline);
         Assert.Equal((ushort)0, longInline.ImageWidth);
     }
@@ -88,10 +93,10 @@ public sealed class DataValueImageMetadataTests
         // cross-arena copy — otherwise downstream image_width() falls back to a
         // full SkiaSharp decode unnecessarily.
         byte[] payload = [0xFF, 0xD8, 0xFF, 0xE0];
-        DataValue source = DataValue.FromImage(payload, Store, width: 4096, height: 2160, channels: 3);
+        DataValue source = DataValue.FromImage(payload, _store, width: 4096, height: 2160, channels: 3);
 
-        using Arena retention = new();
-        DataValue stabilized = DataValueRetention.Stabilize(source, Store, retention);
+        using Arena retention = CreateArena();
+        DataValue stabilized = DataValueRetention.Stabilize(source, _store, retention);
 
         Assert.Equal((ushort)4096, stabilized.ImageWidth);
         Assert.Equal((ushort)2160, stabilized.ImageHeight);
@@ -104,7 +109,7 @@ public sealed class DataValueImageMetadataTests
         // The post-cleanup WithArenaOffset shifts only the offset words; kind-specific
         // metadata in _p4/_p5/_p6 must round-trip unchanged.
         byte[] payload = [0xFF, 0xD8];
-        var (offset, length) = Store.StoreBytes(payload);
+        var (offset, length) = _store.StoreBytes(payload);
         DataValue source = DataValue.FromImageAtOffset(offset.Value, length.Value, width: 1024, height: 768, channels: 4);
 
         DataValue shifted = source.WithArenaOffsetForTest(delta: 256);

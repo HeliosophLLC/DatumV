@@ -19,11 +19,11 @@ public sealed class AccumulatorRetentionTests : ServiceTestBase
         ChunkAccumulator accumulator = new();
 
         // Short (inline) strings are self-contained; retention works without arena plumbing.
-        Arena batch1 = new();
+        Arena batch1 = CreateArena();
         accumulator.Add(DataValue.FromString("abc", batch1));
         batch1.Dispose();
 
-        Arena batch2 = new();
+        Arena batch2 = CreateArena();
         accumulator.Add(DataValue.FromString("xyz", batch2));
         batch2.Dispose();
 
@@ -39,7 +39,7 @@ public sealed class AccumulatorRetentionTests : ServiceTestBase
     {
         ChunkAccumulator accumulator = new();
 
-        Arena source = new();
+        Arena source = CreateArena();
         // A non-inline (>16 UTF-8 byte) string on any row invalidates min/max for the column.
         accumulator.Add(DataValue.FromString("abc", source));
         accumulator.Add(DataValue.FromString("this string is longer than sixteen bytes", source));
@@ -55,12 +55,12 @@ public sealed class AccumulatorRetentionTests : ServiceTestBase
     {
         ChunkAccumulator accumulator = new();
 
-        Arena batch1 = new();
+        Arena batch1 = CreateArena();
         accumulator.Add(DataValue.FromInt32(42));
         accumulator.Add(DataValue.FromInt32(7));
         batch1.Dispose();
 
-        Arena batch2 = new();
+        Arena batch2 = CreateArena();
         accumulator.Add(DataValue.FromInt32(100));
         batch2.Dispose();
 
@@ -76,7 +76,7 @@ public sealed class AccumulatorRetentionTests : ServiceTestBase
         // so even non-inline strings still contribute to the estimate.
         ChunkAccumulator accumulator = new();
 
-        Arena source = new();
+        Arena source = CreateArena();
         accumulator.Add(DataValue.FromString("longstringlongstringlongstring A", source));
         accumulator.Add(DataValue.FromString("longstringlongstringlongstring B", source));
         accumulator.Add(DataValue.FromString("longstringlongstringlongstring A", source));
@@ -95,13 +95,13 @@ public sealed class AccumulatorRetentionTests : ServiceTestBase
     {
         BitmapChunkAccumulator accumulator = new();
 
-        Arena batch1 = new();
+        Arena batch1 = CreateArena();
         accumulator.BeginChunk(chunkRowCapacity: 1);
         accumulator.Add(DataValue.FromString("red", batch1), rowOffsetInChunk: 0);
         accumulator.FinalizeChunk(actualRowCount: 1);
         batch1.Dispose();
 
-        Arena batch2 = new();
+        Arena batch2 = CreateArena();
         accumulator.BeginChunk(chunkRowCapacity: 1);
         accumulator.Add(DataValue.FromString("red", batch2), rowOffsetInChunk: 0);
         accumulator.FinalizeChunk(actualRowCount: 1);
@@ -117,7 +117,7 @@ public sealed class AccumulatorRetentionTests : ServiceTestBase
     {
         BitmapChunkAccumulator accumulator = new();
 
-        Arena source = new();
+        Arena source = CreateArena();
         accumulator.BeginChunk(chunkRowCapacity: 2);
         accumulator.Add(DataValue.FromString("short", source), rowOffsetInChunk: 0);
         // First non-inline string triggers abandonment of the whole column.
@@ -134,7 +134,7 @@ public sealed class AccumulatorRetentionTests : ServiceTestBase
     {
         BitmapChunkAccumulator accumulator = new(cardinalityThreshold: 256);
 
-        Arena source = new();
+        Arena source = CreateArena();
         accumulator.BeginChunk(chunkRowCapacity: 6);
         accumulator.Add(DataValue.FromString("red", source), rowOffsetInChunk: 0);
         accumulator.Add(DataValue.FromString("blue", source), rowOffsetInChunk: 1);

@@ -9,12 +9,12 @@ namespace DatumIngest.Tests.Functions.Aggregates;
 /// Tests for <see cref="ImageStackAggregateFunction"/> — aggregate-shape image
 /// concatenation along a horizontal or vertical axis.
 /// </summary>
-public sealed class ImageStackAggregateFunctionTests
+public sealed class ImageStackAggregateFunctionTests : ServiceTestBase
 {
     [Fact]
     public async Task Horizontal_SumsWidthsTakesMaxHeight()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new ImageStackAggregateFunction().CreateAccumulator();
 
@@ -31,7 +31,7 @@ public sealed class ImageStackAggregateFunctionTests
     [Fact]
     public async Task Vertical_TakesMaxWidthSumsHeights()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new ImageStackAggregateFunction().CreateAccumulator();
 
@@ -47,7 +47,7 @@ public sealed class ImageStackAggregateFunctionTests
     [Fact]
     public async Task Horizontal_BlitsFirstImageAtOrigin()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new ImageStackAggregateFunction().CreateAccumulator();
 
@@ -63,7 +63,7 @@ public sealed class ImageStackAggregateFunctionTests
     [Fact]
     public void Axis_Invalid_Throws()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new ImageStackAggregateFunction().CreateAccumulator();
 
@@ -77,7 +77,7 @@ public sealed class ImageStackAggregateFunctionTests
     [Fact]
     public async Task Empty_ReturnsNullImage()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new ImageStackAggregateFunction().CreateAccumulator();
 
@@ -89,7 +89,7 @@ public sealed class ImageStackAggregateFunctionTests
     [Fact]
     public async Task NullImages_AreSkipped()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new ImageStackAggregateFunction().CreateAccumulator();
 
@@ -106,7 +106,7 @@ public sealed class ImageStackAggregateFunctionTests
     [Fact]
     public async Task Merge_ConcatenatesBothSides()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         ImageStackAggregateFunction fn = new();
 
@@ -126,7 +126,7 @@ public sealed class ImageStackAggregateFunctionTests
     [Fact]
     public async Task Reset_AllowsReuseAcrossGroups()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new ImageStackAggregateFunction().CreateAccumulator();
 

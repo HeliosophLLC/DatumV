@@ -252,7 +252,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["id", "name", "active"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
 
         DataValue[] r0 = pool.RentDataValues(3);
@@ -307,7 +307,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);
         for (int i = 0; i < rowCount; i++)
         {
@@ -357,7 +357,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
         // 10 rows: values 1..10. Zone map should report min=1, max=10.
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 10, arena: arena);
         for (int i = 1; i <= 10; i++)
         {
@@ -397,7 +397,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["s"]);
-        Arena writeArena = new();
+        Arena writeArena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: writeArena);
 
         // Row 0: struct with three fields (Int32, String, Boolean).
@@ -448,7 +448,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
 
         using DatumFileReaderV2 reader = DatumFileReaderV2.Open(datumPath);
         using DatumIngest.DatumFile.Sidecar.SidecarReadStore sidecarSource = new(sidecarPath, fingerprint);
-        Arena readArena = new();
+        Arena readArena = CreateArena();
 
         var decoder = reader.OpenPageDecoder(
             columnIndex: 0,
@@ -490,7 +490,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["tags"]);
-        Arena writeArena = new();
+        Arena writeArena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 4, arena: writeArena);
 
         // Row 0: empty array
@@ -550,7 +550,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["thumbs"]);
-        Arena writeArena = new();
+        Arena writeArena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 2, arena: writeArena);
 
         DataValue[] r0 = pool.RentDataValues(1);
@@ -595,7 +595,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["boxes"]);
-        Arena writeArena = new();
+        Arena writeArena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 2, arena: writeArena);
 
         // Row 0: array of two struct elements, each with (label: String, score: Float32) fields.
@@ -661,7 +661,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
         // Register returns the assigned storeId; first registration gets 0,
         // matching the sidecarStoreId we pass to OpenPageDecoder below.
         registry.Register(sidecarSource);
-        Arena readArena = new();
+        Arena readArena = CreateArena();
         IPageDecoderV2 decoder = reader.OpenPageDecoder(
             columnIndex: 0,
             pageIndex: 0,
@@ -683,7 +683,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
     {
         Pool pool = CreatePool();
         ColumnLookup lookup = new([columns[0].Name]);
-        Arena arena = new();
+        Arena arena = CreateArena();
 
         RowBatch batch = pool.RentRowBatch(lookup, capacity: values.Length, arena: arena);
         for (int i = 0; i < values.Length; i++)

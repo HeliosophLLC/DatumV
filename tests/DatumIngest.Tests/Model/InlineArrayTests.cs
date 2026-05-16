@@ -136,8 +136,8 @@ public sealed class InlineArrayTests : ServiceTestBase
         // (no copy across arenas required), per the Phase A3 update.
         DataValue value = DataValue.FromInlineArray<float>([1f, 2f, 3f, 4f], DataKind.Float32);
 
-        Arena source = new();
-        Arena destination = new();
+        Arena source = CreateArena();
+        Arena destination = CreateArena();
         DataValue stabilized = DataValueRetention.Stabilize(value, source, destination);
 
         Assert.True(stabilized.IsInlineArray);
@@ -248,7 +248,7 @@ public sealed class InlineArrayTests : ServiceTestBase
     {
         // 4 × Int128 = 64 bytes — far past the 16-byte inline cap, must arena-back.
         Int128[] source = [1, -2, Int128.MaxValue, Int128.MinValue];
-        Arena arena = new();
+        Arena arena = CreateArena();
 
         DataValue value = DataValue.FromArenaArray<Int128>(source, DataKind.Int128, arena);
 
@@ -267,7 +267,7 @@ public sealed class InlineArrayTests : ServiceTestBase
         Half[] source = new Half[100];
         for (int i = 0; i < source.Length; i++) source[i] = (Half)(i * 0.5f);
 
-        Arena arena = new();
+        Arena arena = CreateArena();
         DataValue value = DataValue.FromArenaArray<Half>(source, DataKind.Float16, arena);
 
         Assert.False(value.IsInlineArray);

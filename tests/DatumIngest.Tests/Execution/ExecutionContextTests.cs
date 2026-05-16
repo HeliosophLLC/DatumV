@@ -191,7 +191,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     [Fact]
     public void BorrowedVariableStore_DisposeDoesNotReleaseIt()
     {
-        Arena caller = new();
+        Arena caller = CreateArena();
 
         ExecutionContext ctx = new DatumIngest.Execution.ExecutionContext(
             CreateCatalog(),
@@ -217,7 +217,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     {
         const string longText = "This string is more than 16 UTF-8 bytes, so the payload lives in an arena rather than inline.";
 
-        Arena producingArena = new();
+        Arena producingArena = CreateArena();
         producingArena.AddReference();
         DataValue produced = DataValue.FromString(longText, producingArena);
 
@@ -244,7 +244,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
         const string firstText = "First long enough payload to require an arena copy on bind.";
         const string secondText = "Second long enough payload that overwrites the first via SET.";
 
-        Arena producingArena = new();
+        Arena producingArena = CreateArena();
         producingArena.AddReference();
 
         using ExecutionContext ctx = CreateExecutionContext();
@@ -265,7 +265,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     [Fact]
     public void Declare_InlineValueBinding_RoundTripsThroughVariableScope()
     {
-        Arena producing = new();
+        Arena producing = CreateArena();
         producing.AddReference();
 
         using ExecutionContext ctx = CreateExecutionContext();

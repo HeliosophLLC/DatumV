@@ -566,7 +566,7 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_Memoization_UuidStableAcrossReferences()
     {
-        using Arena store = new();
+        using Arena store = CreateArena();
         store.AddReference();
 
         TableCatalog catalog = CreateCatalog("t",

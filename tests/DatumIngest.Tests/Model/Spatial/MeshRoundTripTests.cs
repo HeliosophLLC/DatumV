@@ -17,7 +17,7 @@ public sealed class MeshRoundTripTests : ServiceTestBase
     [Fact]
     public void DataValue_FromMesh_AsMesh_RoundTripsBlob()
     {
-        Arena store = new();
+        Arena store = CreateArena();
         byte[] blob = BuildSampleMeshBlob();
 
         DataValue value = DataValue.FromMesh(blob, store);
@@ -33,7 +33,7 @@ public sealed class MeshRoundTripTests : ServiceTestBase
     [Fact]
     public void DataValue_Mesh_OffsetEqualityAndHash()
     {
-        Arena store = new();
+        Arena store = CreateArena();
         byte[] blob = BuildSampleMeshBlob();
 
         DataValue a = DataValue.FromMesh(blob, store);
@@ -53,7 +53,7 @@ public sealed class MeshRoundTripTests : ServiceTestBase
     [Fact]
     public void DataValue_AsByteSpan_ReadsMeshBlob()
     {
-        Arena store = new();
+        Arena store = CreateArena();
         byte[] blob = BuildSampleMeshBlob();
 
         DataValue value = DataValue.FromMesh(blob, store);
@@ -66,7 +66,7 @@ public sealed class MeshRoundTripTests : ServiceTestBase
     [Fact]
     public void DataValue_WireFormat_RoundTripsThroughDataValueWriterReader()
     {
-        Arena writeStore = new();
+        Arena writeStore = CreateArena();
         byte[] blob = BuildSampleMeshBlob();
         DataValue original = DataValue.FromMesh(blob, writeStore);
 
@@ -77,7 +77,7 @@ public sealed class MeshRoundTripTests : ServiceTestBase
         }
 
         stream.Position = 0;
-        Arena readStore = new();
+        Arena readStore = CreateArena();
         using BinaryReader reader = new(stream);
         DataValue restored = DataValueReader.ReadDataValue(reader, readStore);
 

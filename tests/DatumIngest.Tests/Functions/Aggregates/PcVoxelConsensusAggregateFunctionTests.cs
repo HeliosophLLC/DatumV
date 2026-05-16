@@ -8,7 +8,7 @@ using DatumIngest.Model.Spatial;
 
 namespace DatumIngest.Tests.Functions.Aggregates;
 
-public sealed class PcVoxelConsensusAggregateFunctionTests
+public sealed class PcVoxelConsensusAggregateFunctionTests : ServiceTestBase
 {
     [Fact]
     public void ValidateArguments_RejectsWrongCount()
@@ -29,7 +29,7 @@ public sealed class PcVoxelConsensusAggregateFunctionTests
     [Fact]
     public async Task EmptyAggregation_EmitsZeroPointCloud()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcVoxelConsensusAggregateFunction().CreateAccumulator();
 
@@ -44,7 +44,7 @@ public sealed class PcVoxelConsensusAggregateFunctionTests
     {
         // Three clouds, each containing one point in the same voxel cell.
         // With cell=1.0 and min_votes=3, expected output: 1 point.
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcVoxelConsensusAggregateFunction().CreateAccumulator();
 
@@ -70,7 +70,7 @@ public sealed class PcVoxelConsensusAggregateFunctionTests
     public async Task SingleFrameCell_DroppedWhenMinVotesTwoOrMore()
     {
         // One cloud with one point, min_votes=2 → output is empty.
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcVoxelConsensusAggregateFunction().CreateAccumulator();
 
@@ -88,7 +88,7 @@ public sealed class PcVoxelConsensusAggregateFunctionTests
     [Fact]
     public async Task ConstantsMustBeStable()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcVoxelConsensusAggregateFunction().CreateAccumulator();
 
@@ -106,7 +106,7 @@ public sealed class PcVoxelConsensusAggregateFunctionTests
     [Fact]
     public async Task NullPointCloudInput_IsSkipped()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcVoxelConsensusAggregateFunction().CreateAccumulator();
 
@@ -132,7 +132,7 @@ public sealed class PcVoxelConsensusAggregateFunctionTests
         // pipeline pc_voxel_consensus(pc_fuse_agg(_), cell, min_votes).
         // Same inputs → same point count. (Floating-point order may shift
         // centroid positions by epsilon; we check counts and bbox bounds.)
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
 
         DataValue[] clouds =

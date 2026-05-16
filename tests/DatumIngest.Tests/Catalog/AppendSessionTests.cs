@@ -281,10 +281,10 @@ public sealed class AppendSessionTests : ServiceTestBase, IAsyncLifetime
 
     // ──────────────────── Helpers ────────────────────
 
-    private static RowBatch MakeBatch(Pool pool, string[] columns, int[][] rows)
+    private RowBatch MakeBatch(Pool pool, string[] columns, int[][] rows)
     {
         ColumnLookup lookup = new(columns);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rows.Length, arena: arena);
         foreach (int[] row in rows)
         {
@@ -311,7 +311,7 @@ public sealed class AppendSessionTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["a", "b"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
         for (int i = 0; i < 3; i++)
         {

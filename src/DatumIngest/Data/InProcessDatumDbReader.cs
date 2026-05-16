@@ -208,6 +208,7 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
         {
             return false;
         }
+        
         while (await _batchEnumerator.MoveNextAsync().ConfigureAwait(false))
         {
             if (_batchEnumerator.Current.Count == 0) continue;

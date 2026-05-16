@@ -307,7 +307,7 @@ public sealed class VariableScopeTests : ServiceTestBase
         VariableScope scope = new(accountant);
         scope.Declare("tensor", ValueRef.FromPrimitiveArray(tensor, DataKind.Float32));
 
-        Arena store = new();
+        Arena store = CreateArena();
         store.AddReference();
         long bytesBeforeRead = store.BytesWritten;
 

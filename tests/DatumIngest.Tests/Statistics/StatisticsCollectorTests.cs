@@ -6,7 +6,12 @@ using DatumIngest.Statistics.Accumulators;
 
 public sealed class StatisticsCollectorTests : ServiceTestBase
 {
-    private readonly Arena _arena = new();
+    private readonly Arena _arena;
+
+    public StatisticsCollectorTests()
+    {
+        _arena = CreateArena();
+    }
 
     public override void Dispose()
     {

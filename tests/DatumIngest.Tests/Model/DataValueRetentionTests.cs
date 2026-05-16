@@ -14,8 +14,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [Fact]
     public void Stabilize_Null_PassesThrough()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         DataValue value = DataValue.Null(DataKind.Int32);
         DataValue stable = DataValueRetention.Stabilize(value, source, retention);
@@ -27,8 +27,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [Fact]
     public void Stabilize_InlineString_PassesThrough()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         DataValue value = DataValue.FromString("short", source);
         Assert.True(value.IsInline);
@@ -51,8 +51,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [InlineData(DataKind.Uuid)]
     public void Stabilize_FixedSizeScalar_PassesThrough(DataKind kind)
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         DataValue value = kind switch
         {
@@ -81,8 +81,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [Fact]
     public void Stabilize_NonInlineString_CopiesToRetentionStore()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         // 30-byte string → forces reference-store (>16 byte inline threshold).
         string value = "this string is longer than sixteen bytes";
@@ -98,8 +98,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [Fact]
     public void Stabilize_NonInlineString_SurvivesSourceDisposal()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         string value = "this string is longer than sixteen bytes";
         DataValue original = DataValue.FromString(value, source);
@@ -114,8 +114,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [Fact]
     public void Stabilize_UInt8Array_CopiesToRetentionStore()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         byte[] bytes = Enumerable.Range(0, 64).Select(i => (byte)i).ToArray();
         DataValue original = DataValue.FromByteArray(bytes, source);
@@ -131,8 +131,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [Fact]
     public void Stabilize_Image_CopiesToRetentionStore()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         byte[] bytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };   // PNG magic
         DataValue original = DataValue.FromImage(bytes, source);
@@ -150,8 +150,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [Fact]
     public void Stabilize_StringContent_HashesEqualToOriginal()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         string value = "some content to hash that is longer than sixteen bytes";
         DataValue original = DataValue.FromString(value, source);
@@ -164,8 +164,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [Fact]
     public void Stabilize_StringContent_EqualsOriginal()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         string value = "a string that is definitely longer than sixteen bytes";
         DataValue original = DataValue.FromString(value, source);
@@ -181,8 +181,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [Fact]
     public void Stabilize_ArenaFloat32Array_CopiesToRetentionStore()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         // 100 floats = 400 bytes — exceeds the inline cap, so this lands arena-backed.
         float[] values = Enumerable.Range(0, 100).Select(i => i * 0.5f).ToArray();
@@ -205,8 +205,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [Fact]
     public void Stabilize_PointCloud_CopiesBytesToRetentionStore()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         byte[] blob = new byte[64];
         for (int i = 0; i < blob.Length; i++) blob[i] = (byte)(i + 1);
@@ -224,8 +224,8 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     [Fact]
     public void Stabilize_Mesh_CopiesBytesToRetentionStore()
     {
-        Arena source = new();
-        Arena retention = new();
+        Arena source = CreateArena();
+        Arena retention = CreateArena();
 
         byte[] blob = new byte[96];
         for (int i = 0; i < blob.Length; i++) blob[i] = (byte)(i * 3 + 7);

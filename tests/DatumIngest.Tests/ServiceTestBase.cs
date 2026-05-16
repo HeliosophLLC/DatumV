@@ -295,6 +295,9 @@ public abstract class ServiceTestBase : IDisposable
         };
     }
 
+    protected Arena CreateArena(long? initialCapacity = null)
+        => new(initialCapacity: initialCapacity ?? Arena.DefaultCapacity);
+
     /// <summary>
     /// Creates a <see cref="Execution.MockOperator"/> that yields the supplied rows.
     /// Backed by an <see cref="InMemoryTableProvider"/> so batches are pool-rented

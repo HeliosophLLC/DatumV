@@ -170,7 +170,7 @@ public sealed class DatumFileV2SoftDeleteTests : ServiceTestBase, IAsyncLifetime
         {
             Pool pool = CreatePool();
             ColumnLookup lookup = new(["v"]);
-            Arena arena = new();
+            Arena arena = CreateArena();
             RowBatch batch = pool.RentRowBatch(lookup, capacity: 50, arena: arena);
             for (int i = 50; i < 100; i++)
             {
@@ -207,7 +207,7 @@ public sealed class DatumFileV2SoftDeleteTests : ServiceTestBase, IAsyncLifetime
         {
             Pool pool = CreatePool();
             ColumnLookup lookup = new(["v"]);
-            Arena arena = new();
+            Arena arena = CreateArena();
             RowBatch batch = pool.RentRowBatch(lookup, capacity: 10, arena: arena);
             for (int i = 50; i < 60; i++)
             {
@@ -258,7 +258,7 @@ public sealed class DatumFileV2SoftDeleteTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         const int rowCount = 64;
         const int pageSize = 32;
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);
@@ -325,7 +325,7 @@ public sealed class DatumFileV2SoftDeleteTests : ServiceTestBase, IAsyncLifetime
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
-        Arena arena = new();
+        Arena arena = CreateArena();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);
         for (int i = 0; i < rowCount; i++)
         {

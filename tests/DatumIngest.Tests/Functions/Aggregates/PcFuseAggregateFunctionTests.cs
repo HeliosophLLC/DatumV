@@ -13,12 +13,12 @@ namespace DatumIngest.Tests.Functions.Aggregates;
 /// concatenation. Mirrors PcFuseFunctionTests' coverage, plus the aggregate
 /// lifecycle methods (Merge, Reset).
 /// </summary>
-public sealed class PcFuseAggregateFunctionTests
+public sealed class PcFuseAggregateFunctionTests : ServiceTestBase
 {
     [Fact]
     public async Task AccumulateThree_ProducesConcatenatedCloud()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcFuseAggregateFunction().CreateAccumulator();
 
@@ -44,7 +44,7 @@ public sealed class PcFuseAggregateFunctionTests
     [Fact]
     public async Task BboxUnionsAcrossContributions()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcFuseAggregateFunction().CreateAccumulator();
 
@@ -64,7 +64,7 @@ public sealed class PcFuseAggregateFunctionTests
     [Fact]
     public async Task EmptyAggregation_ReturnsZeroPointCloud()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcFuseAggregateFunction().CreateAccumulator();
 
@@ -77,7 +77,7 @@ public sealed class PcFuseAggregateFunctionTests
     [Fact]
     public async Task NullInputs_AreSkipped()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcFuseAggregateFunction().CreateAccumulator();
 
@@ -95,7 +95,7 @@ public sealed class PcFuseAggregateFunctionTests
     [Fact]
     public async Task MixedColor_StripsColorFromOutput()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcFuseAggregateFunction().CreateAccumulator();
 
@@ -113,7 +113,7 @@ public sealed class PcFuseAggregateFunctionTests
     [Fact]
     public async Task ConflictingFrames_ThrowsOnAccumulate()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcFuseAggregateFunction().CreateAccumulator();
 
@@ -130,7 +130,7 @@ public sealed class PcFuseAggregateFunctionTests
     [Fact]
     public async Task Merge_CombinesTwoAccumulators()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateFunction func = new PcFuseAggregateFunction();
         IAggregateAccumulator a = func.CreateAccumulator();
@@ -149,7 +149,7 @@ public sealed class PcFuseAggregateFunctionTests
     [Fact]
     public async Task Reset_ClearsState()
     {
-        Arena arena = new();
+        Arena arena = CreateArena();
         InvocationFrame frame = InvocationFrame.Symmetric(arena);
         IAggregateAccumulator acc = new PcFuseAggregateFunction().CreateAccumulator();
 
