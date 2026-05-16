@@ -1057,6 +1057,22 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         {
             return Plans.TablePlan.ForDropTable(this, dropTable, sourceText);
         }
+        else if (statement is CreateIndexStatement createIndex)
+        {
+            return Plans.IndexPlan.ForCreateIndex(this, createIndex, sourceText);
+        }
+        else if (statement is DropIndexStatement dropIndex)
+        {
+            return Plans.IndexPlan.ForDropIndex(this, dropIndex, sourceText);
+        }
+        else if (statement is ReindexTableStatement reindex)
+        {
+            return Plans.IndexPlan.ForReindex(this, reindex);
+        }
+        else if (statement is AnalyzeTableStatement analyze)
+        {
+            return Plans.IndexPlan.ForAnalyze(this, analyze);
+        }
 
         // Everything else (executor-backed DDL — CREATE / DROP / ALTER /
         // ANALYZE / REINDEX / SET search_path) routes through a generic
@@ -1318,16 +1334,20 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                     Plans.SchemaPlan.ForSetSearchPath(this, setSearchPath), batchContext).ConfigureAwait(false);
 
             case CreateIndexStatement createIndex:
-                return await IndexExecutor.CreateIndexAsync(this, createIndex, sourceText).ConfigureAwait(false);
+                return await DrainSideEffectPlanAsync(
+                    Plans.IndexPlan.ForCreateIndex(this, createIndex, sourceText), batchContext).ConfigureAwait(false);
 
             case DropIndexStatement dropIndex:
-                return IndexExecutor.DropIndex(this, dropIndex, sourceText);
+                return await DrainSideEffectPlanAsync(
+                    Plans.IndexPlan.ForDropIndex(this, dropIndex, sourceText), batchContext).ConfigureAwait(false);
 
             case ReindexTableStatement reindex:
-                return await IndexExecutor.ReindexAsync(this, reindex).ConfigureAwait(false);
+                return await DrainSideEffectPlanAsync(
+                    Plans.IndexPlan.ForReindex(this, reindex), batchContext).ConfigureAwait(false);
 
             case AnalyzeTableStatement analyze:
-                return await AnalyzeExecutor.ExecuteAsync(this, analyze).ConfigureAwait(false);
+                return await DrainSideEffectPlanAsync(
+                    Plans.IndexPlan.ForAnalyze(this, analyze), batchContext).ConfigureAwait(false);
 
             case AlterTableAddColumnStatement alterAdd:
                 if (alterAdd.TableIfExists && !TryGetTable(ResolveDdlName(alterAdd.SchemaName, alterAdd.TableName).ToString(), out _)) return DdlPlan.NoOp(this, "AlterTable", "ADD COLUMN — table not found, IF EXISTS skipped");
