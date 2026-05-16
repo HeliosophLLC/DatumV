@@ -518,8 +518,18 @@ public sealed class QueryPlanner
 
                 if (join.IsLateral)
                 {
-                    // Lateral joins re-execute the right side per outer row;
-                    // predicate pushdown across the lateral boundary is not safe.
+                    // Single-side predicates are still safe to push across the lateral
+                    // boundary — alias-subset check in PushPredicatesBelow keeps
+                    // correlated (mixed-alias) predicates above the join. Restricted to
+                    // INNER / CROSS lateral so we don't push a right-only predicate
+                    // below a LEFT lateral and turn null-padded rows into dropped rows.
+                    if (pendingPredicates is not null
+                        && (join.Type == JoinType.Inner || join.Type == JoinType.Cross))
+                    {
+                        currentRight = PredicatePushdown.PushPredicatesBelow(currentRight, rightAliases, pendingPredicates);
+                        source = PredicatePushdown.PushPredicatesBelow(source, leftAliases, pendingPredicates);
+                    }
+
                     source = new LateralJoinOperator(source, currentRight, join.Type, join.OnCondition);
                 }
                 else
