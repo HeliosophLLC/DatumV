@@ -2,7 +2,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Model;
 
-public sealed class DataValueTypeIdTests
+public sealed class DataValueTypeIdTests : ServiceTestBase
 {
     // ─────────────── FromStruct + TypeId ───────────────
 

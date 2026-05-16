@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Functions;
 /// Tests for the <see cref="ValueRef"/> Image surface: <c>FromImage(SKBitmap)</c>,
 /// <c>AsImage()</c>, and the <c>ToDataValue</c> encode path.
 /// </summary>
-public sealed class ValueRefImageTests
+public sealed class ValueRefImageTests : ServiceTestBase
 {
     private static SKBitmap MakeTestBitmap(int width = 4, int height = 4)
     {
@@ -86,7 +86,7 @@ public sealed class ValueRefImageTests
     {
         using SKBitmap bmp = MakeTestBitmap();
         ValueRef v = ValueRef.FromImage(bmp);
-        var arena = CreateArena Arena();
+        var arena = CreateArena();
 
         DataValue dv = v.ToDataValue(arena);
 
@@ -99,7 +99,7 @@ public sealed class ValueRefImageTests
     {
         using SKBitmap bmp = MakeTestBitmap(8, 8);
         ValueRef v = ValueRef.FromImage(bmp);
-        var arena = CreateArena Arena();
+        var arena = CreateArena();
 
         DataValue dv = v.ToDataValue(arena);
 
