@@ -98,7 +98,7 @@ internal sealed class DmlPlan : StatementPlan
             operatorName: "Insert",
             details: details,
             sourcePlan: sourcePlan,
-            apply: bctx => InsertExecutor.ExecuteAsync(catalog, insert, sourcePlan, captureSink, bctx));
+            apply: bctx => InsertExecutor.ApplyAsync(catalog, insert, sourcePlan, captureSink, bctx));
     }
 
     /// <summary>
@@ -119,7 +119,7 @@ internal sealed class DmlPlan : StatementPlan
             operatorName: "Update",
             details: details,
             sourcePlan: null,
-            apply: bctx => UpdateExecutor.ExecuteAsync(catalog, update, captureSink, bctx));
+            apply: bctx => UpdateExecutor.ApplyAsync(catalog, update, captureSink, bctx));
     }
 
     /// <summary>
@@ -140,7 +140,7 @@ internal sealed class DmlPlan : StatementPlan
             operatorName: "Delete",
             details: details,
             sourcePlan: null,
-            apply: bctx => DeleteExecutor.ExecuteAsync(catalog, delete, captureSink, bctx));
+            apply: bctx => DeleteExecutor.ApplyAsync(catalog, delete, captureSink, bctx));
     }
 
     /// <inheritdoc />

@@ -24,28 +24,21 @@ namespace DatumIngest.Catalog.Executors;
 /// </remarks>
 internal static class DeleteExecutor
 {
-    public static Task<StatementPlan> ExecuteAsync(
-        TableCatalog catalog, DeleteStatement delete, BatchContext? batchContext = null)
-        => ExecuteAsync(catalog, delete, captureSink: null, batchContext);
-
     /// <summary>
-    /// Primary overload. When <paramref name="captureSink"/> is non-null,
-    /// pre-delete captured rows are routed into it (for a wrapping
-    /// <see cref="Plans.DmlReturningPlan"/> composer to project over) and
-    /// the executor returns <see cref="DdlPlan.NoOp"/>. When the sink is
-    /// null, behavior matches the legacy contract: a
-    /// <see cref="Plans.DmlReturningPlan"/> is constructed post-hoc from
-    /// the internal captured list (when RETURNING is set) or
-    /// <see cref="DdlPlan.NoOp"/> is returned otherwise.
+    /// Applies the <c>DELETE</c> side effect. When
+    /// <paramref name="captureSink"/> is non-null, pre-delete rows are
+    /// routed into it for a wrapping <see cref="Plans.DmlReturningPlan"/>
+    /// composer to project; otherwise no rows are captured.
     /// </summary>
-    public static async Task<StatementPlan> ExecuteAsync(
+    public static async Task ApplyAsync(
         TableCatalog catalog,
         DeleteStatement delete,
         Plans.CapturedRowsSource? captureSink,
-        BatchContext? batchContext = null)
+        BatchContext batchContext)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(delete);
+        ArgumentNullException.ThrowIfNull(batchContext);
 
         // Block DELETE against a view before the table resolver fires its
         // misleading "table not found" diagnostic.
@@ -70,31 +63,15 @@ internal static class DeleteExecutor
                 "is read-only (CanDeleteRows = false).");
         }
 
-        IReadOnlyList<RowBatch>? captured = await ApplyAsync(catalog, provider, delete, batchContext).ConfigureAwait(false);
+        IReadOnlyList<RowBatch>? captured = await ScanAndDeleteAsync(catalog, provider, delete, batchContext).ConfigureAwait(false);
 
-        if (captured is null || delete.Returning is null)
-        {
-            return DdlPlan.NoOp(catalog, "Delete", "no matching rows");
-        }
-
-        // Composer path: route captured rows into the sink for a wrapping
-        // DmlReturningPlan to project.
-        if (captureSink is not null)
+        if (captured is not null && captureSink is not null)
         {
             foreach (RowBatch batch in captured) captureSink.Capture(batch);
-            return DdlPlan.NoOp(catalog, "Delete", "captured rows routed to composer sink");
         }
-
-        return new DmlReturningPlan(
-            catalog,
-            DmlReturningKind.Delete,
-            delete.TableName,
-            provider.GetSchema(),
-            captured,
-            delete.Returning);
     }
 
-    private static async Task<IReadOnlyList<RowBatch>?> ApplyAsync(
+    private static async Task<IReadOnlyList<RowBatch>?> ScanAndDeleteAsync(
         TableCatalog catalog, ITableProvider provider, DeleteStatement delete, BatchContext? batchContext)
     {
         // See UpdateExecutor for the non-null fallback rationale.

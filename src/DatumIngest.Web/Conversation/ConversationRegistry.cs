@@ -1,20 +1,19 @@
 using DatumIngest.Catalog;
-using DatumIngest.Execution;
+using DatumIngest.Data;
 using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Web.Conversation;
 
-// Reads / writes against the `conversations` table. INSERTs use RETURNING
-// so we get the IDENTITY-assigned id back without a follow-up SELECT.
+// Reads / writes against the `conversations` table via the
+// InProcessDatumDb* command/reader surface. INSERTs use RETURNING so we
+// get the IDENTITY-assigned id back without a follow-up SELECT.
 //
-// EnsureDefaultAsync is the only path the agent exercises by default: it
-// picks the newest conversation by id if any exist, otherwise creates a
-// fresh one. Id is monotonic via IDENTITY, so "highest id = newest" —
-// the v1 schema doesn't carry an updated_at column, which means "most
-// recently used" isn't surfaced today. A future migration can add the
-// column back and switch the ordering here.
+// EnsureDefaultAsync is the only path the agent exercises by default:
+// it picks the newest conversation by id if any exist, otherwise
+// creates a fresh one. Id is monotonic via IDENTITY, so "highest id =
+// newest" — the v1 schema doesn't carry an updated_at column, which
+// means "most recently used" isn't surfaced today. A future migration
+// can add the column back and switch the ordering here.
 internal sealed class ConversationRegistry : IConversationRegistry
 {
     private readonly TableCatalog _catalog;
@@ -26,111 +25,82 @@ internal sealed class ConversationRegistry : IConversationRegistry
 
     public async Task<long> EnsureDefaultAsync(CancellationToken ct)
     {
-        StatementPlan selectPlan = await _catalog
-            .PlanAsync("SELECT id FROM conversations ORDER BY id DESC LIMIT 1")
-            .ConfigureAwait(false);
+        using InProcessDatumDbConnection conn = new(_catalog);
+        using InProcessDatumDbCommand cmd = conn.CreateCommand(
+            "SELECT id FROM conversations ORDER BY id DESC LIMIT 1");
 
-        await foreach (RowBatch batch in _catalog.ExecuteAsync(selectPlan, ct).ConfigureAwait(false))
-        {
-            if (batch.Count == 0) continue;
-            DataValue cell = batch[0][0];
-            if (!cell.IsNull) return cell.AsInt64();
-        }
+        DataValue? scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        if (scalar is { IsNull: false } cell) return cell.AsInt64();
 
         return await CreateAsync(title: null, model: null, ct).ConfigureAwait(false);
     }
 
     public async Task<long> CreateAsync(string? title, string? model, CancellationToken ct)
     {
-        Dictionary<string, ParameterValue> parameters = new()
-        {
-            ["title"] = title is null
-                ? new InlineParameter(DataValue.Null(DataKind.String))
-                : new StringParameter(title),
-            ["model"] = model is null
-                ? new InlineParameter(DataValue.Null(DataKind.String))
-                : new StringParameter(model),
-        };
-
-        Statement statement = SqlParser.ParseStatement(
+        using InProcessDatumDbConnection conn = new(_catalog);
+        using InProcessDatumDbCommand cmd = conn.CreateCommand(
             "INSERT INTO conversations (title, model) VALUES ($title, $model) RETURNING id");
-        Statement bound = ParameterBinder.Bind(statement, parameters);
+        cmd.Parameters
+            .AddString("title", title)
+            .AddString("model", model);
 
-        StatementPlan plan = await _catalog
-            .ExecuteStatementAsync(bound)
-            .ConfigureAwait(false);
-
-        await foreach (RowBatch batch in _catalog.ExecuteAsync(plan, ct).ConfigureAwait(false))
+        DataValue? id = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        if (id is null)
         {
-            if (batch.Count == 0) continue;
-            return batch[0][0].AsInt64();
+            throw new InvalidOperationException(
+                "INSERT INTO conversations ... RETURNING id yielded no rows.");
         }
-
-        throw new InvalidOperationException(
-            "INSERT INTO conversations ... RETURNING id yielded no rows.");
+        return id.Value.AsInt64();
     }
 
     public async Task<IReadOnlyList<ConversationSummary>> ListAsync(CancellationToken ct)
     {
-        StatementPlan plan = await _catalog
-            .PlanAsync(
-                "SELECT id, title, model, created_at FROM conversations " +
-                "ORDER BY id DESC")
-            .ConfigureAwait(false);
+        using InProcessDatumDbConnection conn = new(_catalog);
+        using InProcessDatumDbCommand cmd = conn.CreateCommand(
+            "SELECT id, title, model, created_at FROM conversations ORDER BY id DESC");
 
         List<ConversationSummary> results = new();
-        await foreach (RowBatch batch in _catalog.ExecuteAsync(plan, ct).ConfigureAwait(false))
+        await using InProcessDatumDbReader reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            Arena arena = batch.Arena;
-            for (int i = 0; i < batch.Count; i++)
-            {
-                results.Add(ReadSummary(batch[i], arena));
-            }
+            results.Add(ReadSummary(reader));
         }
         return results;
     }
 
     public async Task<ConversationSummary?> GetAsync(long id, CancellationToken ct)
     {
-        Dictionary<string, ParameterValue> parameters = new()
-        {
-            ["id"] = new InlineParameter(DataValue.FromInt64(id)),
-        };
-        Statement statement = SqlParser.ParseStatement(
+        using InProcessDatumDbConnection conn = new(_catalog);
+        using InProcessDatumDbCommand cmd = conn.CreateCommand(
             "SELECT id, title, model, created_at FROM conversations WHERE id = $id");
-        Statement bound = ParameterBinder.Bind(statement, parameters);
+        cmd.Parameters.AddInt64("id", id);
 
-        StatementPlan plan = await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
-        await foreach (RowBatch batch in _catalog.ExecuteAsync(plan, ct).ConfigureAwait(false))
+        await using InProcessDatumDbReader reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (batch.Count == 0) continue;
-            return ReadSummary(batch[0], batch.Arena);
+            return ReadSummary(reader);
         }
         return null;
     }
 
     public async Task SetTitleAsync(long id, string? title, CancellationToken ct)
     {
-        Dictionary<string, ParameterValue> parameters = new()
-        {
-            ["id"] = new InlineParameter(DataValue.FromInt64(id)),
-            ["title"] = title is null
-                ? new InlineParameter(DataValue.Null(DataKind.String))
-                : new StringParameter(title),
-        };
-        Statement statement = SqlParser.ParseStatement(
+        using InProcessDatumDbConnection conn = new(_catalog);
+        using InProcessDatumDbCommand cmd = conn.CreateCommand(
             "UPDATE conversations SET title = $title WHERE id = $id");
-        Statement bound = ParameterBinder.Bind(statement, parameters);
-        await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
-        _ = ct;
+        cmd.Parameters
+            .AddInt64("id", id)
+            .AddString("title", title);
+
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
-    private static ConversationSummary ReadSummary(Row row, Arena arena)
+    private static ConversationSummary ReadSummary(InProcessDatumDbReader reader)
     {
-        long id = row[0].AsInt64();
-        string? title = row[1].IsNull ? null : row[1].AsString(arena);
-        string? model = row[2].IsNull ? null : row[2].AsString(arena);
-        DateTime createdAt = row[3].AsTimestamp();
+        long id = reader.GetInt64(0);
+        string? title = reader.IsDBNull(1) ? null : reader.GetString(1);
+        string? model = reader.IsDBNull(2) ? null : reader.GetString(2);
+        DateTime createdAt = reader.GetValue(3).AsTimestamp();
         return new ConversationSummary(id, title, model, createdAt);
     }
 }

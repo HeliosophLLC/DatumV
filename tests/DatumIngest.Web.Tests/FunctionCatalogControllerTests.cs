@@ -250,7 +250,7 @@ public sealed class FunctionCatalogControllerTests
 
     // ───────────────────── /api/functions/udfs ─────────────────────
 
-    private static TableCatalog CreateCatalogWithUdfs(params string[] createStatements)
+    private static async Task<TableCatalog> CreateCatalogWithUdfs(params string[] createStatements)
     {
         ServiceCollection services = new();
         services.AddDatumIngest();
@@ -259,7 +259,8 @@ public sealed class FunctionCatalogControllerTests
         TableCatalog catalog = new(pool);
         foreach (string sql in createStatements)
         {
-            catalog.ExecuteStatementAsync(sql).GetAwaiter().GetResult();
+            StatementPlan plan = await catalog.PlanAsync(sql);
+            await catalog.ExecuteAsync(plan).DrainAsync();
         }
         return catalog;
     }
@@ -274,9 +275,9 @@ public sealed class FunctionCatalogControllerTests
     }
 
     [Fact]
-    public void ListUdfs_MacroUdf_SurfacesBodyKindAndParameters()
+    public async Task ListUdfs_MacroUdf_SurfacesBodyKindAndParameters()
     {
-        TableCatalog catalog = CreateCatalogWithUdfs(
+        TableCatalog catalog = await CreateCatalogWithUdfs(
             "CREATE FUNCTION shout(name STRING) AS upper(name)");
         FunctionCatalogController controller = new(catalog);
 
@@ -290,11 +291,11 @@ public sealed class FunctionCatalogControllerTests
     }
 
     [Fact]
-    public void ListUdfs_ProceduralUdf_WithCheckClause_ProjectsTypedDiscriminator()
+    public async Task ListUdfs_ProceduralUdf_WithCheckClause_ProjectsTypedDiscriminator()
     {
         // CHECK on a procedural UDF parameter should round-trip through the
         // walker into a BetweenCheckDto carried on the wire payload.
-        TableCatalog catalog = CreateCatalogWithUdfs(
+        TableCatalog catalog = await CreateCatalogWithUdfs(
             "CREATE FUNCTION clamp01(x FLOAT32 = CAST(0.5 AS FLOAT32) " +
             "CHECK (x BETWEEN 0 AND 1) STEP 0.05 COMMENT 'Sigmoid threshold.') " +
             "RETURNS FLOAT32 BEGIN RETURN x END");
@@ -317,12 +318,12 @@ public sealed class FunctionCatalogControllerTests
     }
 
     [Fact]
-    public void ListUdfs_DeclaredType_RoundTripsAsSingletonAcceptedKinds()
+    public async Task ListUdfs_DeclaredType_RoundTripsAsSingletonAcceptedKinds()
     {
         // A declared `INT32` parameter type should resolve into the
         // accepted-kinds list as a singleton so the UI can render a typed
         // input widget instead of a permissive any-kind text field.
-        TableCatalog catalog = CreateCatalogWithUdfs(
+        TableCatalog catalog = await CreateCatalogWithUdfs(
             "CREATE FUNCTION sq(x INT32) RETURNS INT32 BEGIN RETURN x * x END");
         FunctionCatalogController controller = new(catalog);
 

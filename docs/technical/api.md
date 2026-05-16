@@ -217,43 +217,101 @@ Schema? tableSchema = loaded?.Tables["data"];
 
 When a `.datum-schema` sidecar is present, `GetSchemaAsync` returns the cached schema without invoking the provider — eliminating schema inference I/O (e.g., sampling the first 100 rows of a CSV).
 
+## Executing SQL
+
+The primary surface for running SQL against a `TableCatalog` is the ADO.NET-style trio in `DatumIngest.Data` — `InProcessDatumDbConnection`, `InProcessDatumDbCommand`, `InProcessDatumDbReader`. The connection is a thin handle over a catalog; the command holds SQL text plus a parameter collection; the reader streams rows.
+
+```csharp
+using DatumIngest.Catalog;
+using DatumIngest.Data;
+
+using InProcessDatumDbConnection connection = new(catalog);
+using InProcessDatumDbCommand command = connection.CreateCommand(
+    "SELECT id, name FROM users WHERE id = $id");
+command.Parameters.AddInt64("id", 42);
+
+await using InProcessDatumDbReader reader = await command.ExecuteReaderAsync();
+while (await reader.ReadAsync())
+{
+    long id = reader.GetInt64(0);
+    string name = reader.GetString(1);
+}
+```
+
+Three execute verbs cover the common shapes:
+
+| Verb | Use for | Returns |
+|------|---------|---------|
+| `ExecuteReaderAsync()` | `SELECT`, `CALL`, `… RETURNING` DML | `InProcessDatumDbReader` |
+| `ExecuteNonQueryAsync()` | DDL, no-RETURNING DML | `Task<int>` (rows-affected count, `-1` when unknown) |
+| `ExecuteScalarAsync()` | first row, first column reads | `Task<DataValue?>` (`null` when result set is empty) |
+
+The reader handles `RowBatch` lifecycle internally — consumers see row-at-a-time accessors (`GetInt32(ordinal)`, `GetString(ordinal)`, `IsDBNull(ordinal)`, etc.) and never touch a batch directly. Pool returns happen as the reader advances; disposing the reader fires the iterator's `finally` so the last batch returns too.
+
+### Multi-statement scripts
+
+`CommandText` accepts semicolon-separated SQL. The connection routes through `TableCatalog.PrepareAsync` which auto-detects single vs multi-statement and returns either a `StatementPlan` (single) or a `StatementBatch` (multi). The reader surfaces each child as its own result set:
+
+```csharp
+using InProcessDatumDbCommand command = connection.CreateCommand(
+    "CREATE TABLE staging (id INT32 NOT NULL); " +
+    "INSERT INTO staging VALUES (1), (2), (3); " +
+    "SELECT id FROM staging ORDER BY id");
+
+await using InProcessDatumDbReader reader = await command.ExecuteReaderAsync();
+do
+{
+    while (await reader.ReadAsync())
+    {
+        // Rows from the current result set; trailing SELECT here yields 1/2/3.
+    }
+}
+while (await reader.NextResultAsync());
+```
+
+Children are planned lazily — the `INSERT` plans against the `CREATE TABLE` that already ran, so state dependencies across statement boundaries work.
+
+### Without ADO surface
+
+For procedural batches that share a `BatchContext` across many plans, or for callers that already hold a parsed `Statement`, the catalog exposes the lower-level surface directly:
+
+```csharp
+// Single statement (throws on multi-statement SQL)
+StatementPlan plan = await catalog.PlanAsync("CREATE TABLE t (id INT32 NOT NULL)");
+await catalog.ExecuteAsync(plan).DrainAsync(); // applies side effect
+
+// Auto-detect single vs multi-statement
+PreparedSql prepared = await catalog.PrepareAsync(sql);
+```
+
+`PlanAsync` is the building block. The returned `StatementPlan` is lazy — reading `plan.ExplainTree` does not apply the side effect; iterating `plan.ExecuteAsync(ct, batchContext)` does.
+
 ## Parameter Binding
 
-Parameterized queries use `$name` placeholders that are substituted before planning. The binding step is a pure AST rewrite — `ParameterExpression` nodes are replaced with `LiteralExpression` values, preserving all downstream optimizations.
+Parameterized queries use `$name` placeholders. Parameters are bound at plan time via an AST rewrite — `ParameterExpression` nodes are replaced with literal values before the planner runs, so all downstream optimizations apply.
+
+The primary way to bind is through the command's `Parameters` collection:
 
 ```csharp
-SelectStatement statement = SqlParser.Parse(
+using InProcessDatumDbCommand command = connection.CreateCommand(
     "SELECT * FROM data WHERE score > $threshold AND category = $cat");
+command.Parameters
+    .AddFloat64("threshold", 0.5)
+    .AddString("cat", "electronics");
 
-// Build the parameter dictionary
-Dictionary<string, DataValue> parameters = new()
-{
-    ["threshold"] = DataValue.FromFloat32(0.5f),
-    ["cat"] = DataValue.FromString("electronics"),
-};
-
-// Bind parameters (returns a new statement with literals substituted)
-SelectStatement bound = ParameterBinder.Bind(statement, parameters);
-
-// Plan and execute as usual
-IQueryOperator plan = await planner.PlanAsync(bound, CancellationToken.None);
+await using InProcessDatumDbReader reader = await command.ExecuteReaderAsync();
 ```
 
-`ParameterBinder.Bind` validates that all referenced parameters are supplied and all supplied parameters are referenced. If either check fails, it throws `InvalidOperationException` with a diagnostic message.
+Typed `AddInt32`/`AddInt64`/`AddString`/`AddBoolean`/`AddFloat64` helpers accept nullable values; passing `null` binds SQL NULL of the appropriate kind. For other kinds, `Add(name, DataValue)` accepts any pre-built `DataValue`.
 
-To inspect which parameters a query requires without binding:
-
-```csharp
-IReadOnlySet<string> names = ParameterBinder.CollectParameterNames(statement);
-// names = { "threshold", "cat" }
-```
+For lower-level callers driving `TableCatalog.PlanAsync` directly, `ParameterBinder.Bind(Statement, IReadOnlyDictionary<string, ParameterValue>)` is the underlying rewrite. It validates that every referenced placeholder is supplied and every supplied parameter is referenced; either gap throws `ArgumentException` with a diagnostic message.
 
 ### CLI string parsing
 
 `ParameterValueParser.Parse` converts a raw string value (as provided by `--param key=value`) into a `DataValue` with automatic type inference:
 
 ```csharp
-DataValue value = ParameterValueParser.Parse("42");      // Float32(42)
+DataValue value = ParameterValueParser.Parse("42");       // Float32(42)
 DataValue flag = ParameterValueParser.Parse("true");      // Boolean(true)
 DataValue text = ParameterValueParser.Parse("hello");     // String("hello")
 DataValue nil = ParameterValueParser.Parse("null");       // Null
@@ -261,21 +319,42 @@ DataValue nil = ParameterValueParser.Parse("null");       // Null
 
 ## EXPLAIN
 
-```csharp
-// Static explain (includes estimated row counts when provider reports them)
-IQueryOperator plan = planner.Plan(statement);
-ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);
-Console.WriteLine(explainPlan.Render());
-// Output includes ~N rows annotations per operator node, e.g.:
-//   Filter (predicate: x > 5)  ~3,300 rows
-//     └─ Scan (table: data, provider: parquet, columns: [x])  ~10,000 rows
+Every plan exposes a static `ExplainTree` populated at construction. Reading it does not iterate the plan or apply any side effect:
 
-// EXPLAIN ANALYZE (adds actual row counts and timing)
-InstrumentedOperator instrumented = InstrumentedOperator.InstrumentTree(plan);
-await foreach (Row row in instrumented.ExecuteAsync(context)) { }
-InstrumentedOperator.PopulateMetrics(explainPlan, instrumented);
-Console.WriteLine(explainPlan.Render());
+```csharp
+StatementPlan plan = await catalog.PlanAsync(
+    "SELECT id FROM data WHERE x > 5");
+Console.WriteLine(plan.ExplainTree.Render());
+// Filter (predicate: x > 5)  ~3,300 rows
+//   └─ Scan (table: data, provider: parquet, columns: [x])  ~10,000 rows
 ```
+
+Per-operator row estimates use provider-reported counts when available (Parquet, HDF5, IDX) and fall back to a `.datum-manifest`'s `RowCount` when present. Estimates propagate through filter, join, sort, limit, and projection operators using cost-model selectivity.
+
+For EXPLAIN ANALYZE — actual row counts and per-operator timing — call `AnalyzeAsync` instead. It runs the plan under instrumentation and returns the populated tree:
+
+```csharp
+ExplainPlanNode analyzed = await catalog.AnalyzeAsync(plan);
+Console.WriteLine(analyzed.Render());
+```
+
+Both shapes work on `StatementPlan`s of any family (`SelectPlan`, `DmlPlan`, `RoutinePlan`, `AlterTablePlan`, etc.) and on `StatementBatch` (which renders each child as a sub-tree). DDL plans are safe to EXPLAIN — they read the structured tree without firing the registry mutation.
+
+The cost model selectivity table:
+
+| Predicate | With Manifest | Default Heuristic |
+|-----------|---------------|-------------------|
+| `column = value` | 1 / NDV | 10% |
+| `column != value` | 1 − 1/NDV | 90% |
+| `column IS NULL` | actual null ratio | 10% |
+| `column IS NOT NULL` | 1 − null ratio | 90% |
+| `column IN (a, b, c)` | count × 1/NDV | count × 10% |
+| equi-join `a.x = b.x` | left × right / max(NDV_left, NDV_right) | left × right × 10% |
+| `<`, `>`, `BETWEEN`, `LIKE` | 33% (default) | 33% |
+| `AND` | product of child selectivities | product of child selectivities |
+| `OR` | s₁ + s₂ − s₁×s₂ | s₁ + s₂ − s₁×s₂ |
+
+NDV is the estimated distinct count from the manifest's HyperLogLog sketch (±2% accuracy).
 
 Estimated rows are available on any `ExplainPlanNode` via `node.EstimatedRows`. Providers that report row counts (Parquet, HDF5, IDX) produce base estimates directly; CSV, JSON, JSONL, and ZIP return `null` by default. When a `.datum-manifest` sidecar file is available, its `RowCount` overrides the provider's estimate — giving accurate base counts for all formats.
 

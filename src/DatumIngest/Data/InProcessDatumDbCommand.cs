@@ -76,30 +76,43 @@ public sealed class InProcessDatumDbCommand : IDisposable
     /// <summary>Named-parameter bindings.</summary>
     public InProcessDatumDbParameterCollection Parameters { get; }
 
-    /// <summary>Opens a reader that yields the plan's row stream.</summary>
+    /// <summary>
+    /// Opens a reader over the prepared SQL. Multi-statement
+    /// <see cref="CommandText"/> opens against a
+    /// <see cref="DatumIngest.Catalog.Plans.StatementBatch"/> (one result set per statement;
+    /// advance with <see cref="InProcessDatumDbReader.NextResultAsync"/>);
+    /// single-statement <see cref="CommandText"/> or a pre-parsed
+    /// <see cref="Statement"/> opens against a single
+    /// <see cref="StatementPlan"/>.
+    /// </summary>
     public async Task<InProcessDatumDbReader> ExecuteReaderAsync(CancellationToken cancellationToken = default)
     {
-        StatementPlan plan = await PrepareAsync(cancellationToken).ConfigureAwait(false);
+        PreparedSql prepared = await PrepareAsync(cancellationToken).ConfigureAwait(false);
         BatchContext batchContext = new(_connection.Catalog);
         batchContext.Accountant.StartProfiling();
         return await InProcessDatumDbReader
-            .OpenAsync(plan, batchContext, ownsBatchContext: true, cancellationToken)
+            .OpenAsync(prepared, batchContext, ownsBatchContext: true, cancellationToken)
             .ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Runs the plan to completion, discarding any yielded rows. Returns the
+    /// Runs the prepared SQL to completion, advancing through all
+    /// result sets and discarding any yielded rows. Returns the
     /// number of rows the plan reported as affected, or <c>-1</c> when the
     /// plan does not surface a count (DDL, SELECT, and current-version DML).
     /// </summary>
     public async Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken = default)
     {
         await using InProcessDatumDbReader reader = await ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        do
         {
-            // Drain — the plan's side effect applies during iteration; the rows
-            // (if any) are intentionally discarded.
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                // Drain — the plan's side effect applies during iteration;
+                // the rows (if any) are intentionally discarded.
+            }
         }
+        while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
         return reader.RecordsAffected;
     }
 
@@ -117,26 +130,51 @@ public sealed class InProcessDatumDbCommand : IDisposable
     }
 
     /// <summary>
-    /// Builds and returns the <see cref="StatementPlan"/> without iterating
-    /// it. Use for <c>EXPLAIN</c> — read the plan's
-    /// <see cref="StatementPlan.ExplainTree"/> structure without applying
-    /// side effects.
+    /// Builds and returns the <see cref="PreparedSql"/> without iterating
+    /// it — either a <see cref="StatementPlan"/> (single statement) or
+    /// a <see cref="DatumIngest.Catalog.Plans.StatementBatch"/> (multi-statement
+    /// <see cref="CommandText"/>). Use for <c>EXPLAIN</c> — reading the
+    /// plan's structure does not apply side effects.
     /// </summary>
-    public async Task<StatementPlan> PrepareAsync(CancellationToken cancellationToken = default)
+    public async Task<PreparedSql> PrepareAsync(CancellationToken cancellationToken = default)
     {
         _ = cancellationToken;
-        Statement statement = Statement ?? (CommandText is null
-            ? throw new InvalidOperationException(
-                "InProcessDatumDbCommand: either CommandText or Statement must be set before executing.")
-            : SqlParser.ParseStatement(CommandText));
 
-        if (Parameters.Count > 0)
+        // Pre-parsed Statement overrides CommandText for dispatch — used by
+        // callers that already have an AST (parameter binders, batch
+        // re-execution). Multi-statement support only flows through the
+        // CommandText path.
+        if (Statement is not null)
         {
-            statement = ParameterBinder.Bind(statement, Parameters.AsValueMap());
+            Statement statement = Statement;
+            if (Parameters.Count > 0)
+            {
+                statement = ParameterBinder.Bind(statement, Parameters.AsValueMap());
+            }
+            string? sourceTextOverride = SourceText ?? CommandText;
+            return await _connection.Catalog.PlanAsync(statement, sourceTextOverride).ConfigureAwait(false);
         }
 
-        string? sourceText = SourceText ?? (Statement is null ? CommandText : null);
-        return await _connection.Catalog.PlanAsync(statement, sourceText).ConfigureAwait(false);
+        if (CommandText is null)
+        {
+            throw new InvalidOperationException(
+                "InProcessDatumDbCommand: either CommandText or Statement must be set before executing.");
+        }
+
+        // String path: PrepareAsync auto-detects single vs multi-statement.
+        // Parameters are only bindable on single statements (the multi-stmt
+        // PrepareAsync returns a StatementBatch whose children we'd need to
+        // walk to bind — defer that to a future enhancement).
+        if (Parameters.Count == 0)
+        {
+            return await _connection.Catalog.PrepareAsync(CommandText).ConfigureAwait(false);
+        }
+
+        // With parameters: parse, bind, plan as single statement (multi-stmt
+        // + parameters is unsupported in v1; ParseStatement throws on multi).
+        Statement parsed = SqlParser.ParseStatement(CommandText);
+        Statement bound = ParameterBinder.Bind(parsed, Parameters.AsValueMap());
+        return await _connection.Catalog.PlanAsync(bound, CommandText).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

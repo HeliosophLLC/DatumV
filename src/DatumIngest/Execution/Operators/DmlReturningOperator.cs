@@ -1,5 +1,6 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Executors;
+using DatumIngest.Catalog.Plans;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -23,54 +24,109 @@ namespace DatumIngest.Execution.Operators;
 internal sealed class DmlReturningOperator : QueryOperator
 {
     private readonly TableCatalog _catalog;
-    private readonly Func<TableCatalog, Task<StatementPlan>> _executeAsync;
+    private readonly Func<TableCatalog, BatchContext, CapturedRowsSource, Task> _applyAsync;
+    private readonly DmlReturningKind _kind;
+    private readonly string _tableName;
+    private readonly Schema _targetSchema;
+    private readonly IReadOnlyList<SelectColumn> _returningColumns;
     private readonly string _operatorName;
     private readonly string _explainDetails;
 
     private DmlReturningOperator(
         TableCatalog catalog,
-        Func<TableCatalog, Task<StatementPlan>> executeAsync,
+        Func<TableCatalog, BatchContext, CapturedRowsSource, Task> applyAsync,
+        DmlReturningKind kind,
+        string tableName,
+        Schema targetSchema,
+        IReadOnlyList<SelectColumn> returningColumns,
         string operatorName,
         string explainDetails)
     {
         _catalog = catalog;
-        _executeAsync = executeAsync;
+        _applyAsync = applyAsync;
+        _kind = kind;
+        _tableName = tableName;
+        _targetSchema = targetSchema;
+        _returningColumns = returningColumns;
         _operatorName = operatorName;
         _explainDetails = explainDetails;
     }
 
     public static DmlReturningOperator ForInsert(TableCatalog catalog, InsertStatement insert) =>
-        new(
-            catalog,
-            cat => InsertExecutor.ExecuteAsync(cat, insert),
+        Build(
+            catalog, insert.TableName, insert.SchemaName, insert.Returning,
+            DmlReturningKind.Insert,
+            applyAsync: (cat, bctx, sink) => InsertExecutor.ApplyAsync(cat, insert, preplannedSource: null, sink, bctx),
             operatorName: "InsertReturning",
             explainDetails: $"INSERT INTO {insert.TableName} … RETURNING …");
 
     public static DmlReturningOperator ForUpdate(TableCatalog catalog, UpdateStatement update) =>
-        new(
-            catalog,
-            cat => UpdateExecutor.ExecuteAsync(cat, update),
+        Build(
+            catalog, update.TableName, update.SchemaName, update.Returning,
+            DmlReturningKind.Update,
+            applyAsync: (cat, bctx, sink) => UpdateExecutor.ApplyAsync(cat, update, sink, bctx),
             operatorName: "UpdateReturning",
             explainDetails: $"UPDATE {update.TableName} … RETURNING …");
 
     public static DmlReturningOperator ForDelete(TableCatalog catalog, DeleteStatement delete) =>
-        new(
-            catalog,
-            cat => DeleteExecutor.ExecuteAsync(cat, delete),
+        Build(
+            catalog, delete.TableName, delete.SchemaName, delete.Returning,
+            DmlReturningKind.Delete,
+            applyAsync: (cat, bctx, sink) => DeleteExecutor.ApplyAsync(cat, delete, sink, bctx),
             operatorName: "DeleteReturning",
             explainDetails: $"DELETE FROM {delete.TableName} … RETURNING …");
+
+    private static DmlReturningOperator Build(
+        TableCatalog catalog,
+        string tableName,
+        string? schemaName,
+        IReadOnlyList<SelectColumn>? returning,
+        DmlReturningKind kind,
+        Func<TableCatalog, BatchContext, CapturedRowsSource, Task> applyAsync,
+        string operatorName,
+        string explainDetails)
+    {
+        if (returning is null)
+        {
+            throw new InvalidOperationException(
+                $"{operatorName}: cannot build a DML-returning operator for a statement with no RETURNING clause.");
+        }
+
+        // Resolve target schema once at construction. Modifying-CTE
+        // execute fires once per surrounding query but the schema is
+        // stable across that lifetime.
+        SchemaResolver resolver = new(catalog, catalog.SearchPath);
+        QualifiedName qn = resolver.Resolve(schemaName, tableName);
+        if (!catalog.TryGetTable(qn.ToString(), out ITableProvider? provider))
+        {
+            throw new InvalidOperationException(
+                $"{operatorName}: target table '{qn}' is not registered in the catalog.");
+        }
+        Schema targetSchema = provider.GetSchema();
+
+        return new DmlReturningOperator(
+            catalog, applyAsync, kind, tableName, targetSchema, returning,
+            operatorName, explainDetails);
+    }
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
-        StatementPlan innerPlan = await _executeAsync(_catalog).ConfigureAwait(false);
-        // Forward the enclosing batch context so the inner plan's
-        // accountant + variable scope roll up under the outer query's
-        // lifetime. SelectPlan sets context.BatchContext on every execute
-        // path that reaches a DmlReturningOperator; the borrow-or-own
-        // overload falls back to a fresh BatchContext if it's somehow null.
+        BatchContext batchContext = context.BatchContext!;
+
+        // Build a capture sink, apply the DML side effect into it, then
+        // construct a post-captured DmlReturningPlan and stream its
+        // projected rows.
+        CapturedRowsSource sink = new(_catalog);
+        await _applyAsync(_catalog, batchContext, sink).ConfigureAwait(false);
+
+        DmlReturningPlan projection = new(
+            _catalog, _kind, _tableName, _targetSchema,
+            capturedBatches: sink.Batches,
+            returningColumns: _returningColumns);
+
         await foreach (RowBatch batch in _catalog
-            .ExecuteAsync(innerPlan, context.BatchContext, context.CancellationToken)
+            .ExecuteAsync(projection, batchContext, context.CancellationToken)
             .ConfigureAwait(false))
         {
             yield return batch;

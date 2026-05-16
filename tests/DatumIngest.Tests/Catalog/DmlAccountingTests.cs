@@ -29,7 +29,7 @@ public sealed class DmlAccountingTests : ServiceTestBase
         using BatchContext batch = new(catalog);
         long before = batch.Accountant.CurrentResidentBytes;
 
-        await UpdateExecutor.ExecuteAsync(catalog, update, batch);
+        await UpdateExecutor.ApplyAsync(catalog, update, null, batch);
 
         // All three rows match the empty WHERE, so PeakResidentBytes must
         // have risen above the baseline before NotifyReleased zeroed the
@@ -38,21 +38,6 @@ public sealed class DmlAccountingTests : ServiceTestBase
             batch.Accountant.PeakResidentBytes > before,
             $"PeakResidentBytes should have risen above {before}; got {batch.Accountant.PeakResidentBytes}");
         Assert.Equal(before, batch.Accountant.CurrentResidentBytes);
-    }
-
-    [Fact]
-    public async Task Update_WithoutBatchContext_IsBackwardCompatible()
-    {
-        // No BatchContext: executor must run unchanged, no accountant calls.
-        TableCatalog catalog = CreateCatalog("t",
-            columns: ["id", "name"],
-            [1, "alice"]);
-        UpdateStatement update = (UpdateStatement)SqlParser.ParseBatch("UPDATE t SET name = 'changed'")[0];
-
-        await UpdateExecutor.ExecuteAsync(catalog, update);
-
-        // No assertion beyond "didn't throw" — the path with batchContext=null
-        // must keep working for the shell / web / migrations callers.
     }
 
     [Fact]
@@ -67,7 +52,7 @@ public sealed class DmlAccountingTests : ServiceTestBase
         using BatchContext batch = new(catalog);
         long before = batch.Accountant.CurrentResidentBytes;
 
-        await InsertExecutor.ExecuteAsync(catalog, insert, batch);
+        await InsertExecutor.ApplyAsync(catalog, insert, null, null, batch);
 
         Assert.True(
             batch.Accountant.PeakResidentBytes > before,
@@ -88,7 +73,7 @@ public sealed class DmlAccountingTests : ServiceTestBase
         using BatchContext batch = new(catalog);
         long before = batch.Accountant.CurrentResidentBytes;
 
-        await DeleteExecutor.ExecuteAsync(catalog, delete, batch);
+        await DeleteExecutor.ApplyAsync(catalog, delete, null, batch);
 
         Assert.True(
             batch.Accountant.PeakResidentBytes > before,

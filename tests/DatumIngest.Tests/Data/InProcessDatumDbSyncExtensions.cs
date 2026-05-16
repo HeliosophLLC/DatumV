@@ -23,6 +23,10 @@ internal static class InProcessDatumDbSyncExtensions
     public static bool Read(this InProcessDatumDbReader reader)
         => reader.ReadAsync().AsTask().GetAwaiter().GetResult();
 
+    /// <summary>Sync wrapper over <see cref="InProcessDatumDbReader.NextResultAsync"/>.</summary>
+    public static bool NextResult(this InProcessDatumDbReader reader)
+        => reader.NextResultAsync().AsTask().GetAwaiter().GetResult();
+
     /// <summary>Sync wrapper over <see cref="InProcessDatumDbCommand.ExecuteReaderAsync"/>.</summary>
     public static InProcessDatumDbReader ExecuteReader(this InProcessDatumDbCommand command)
         => command.ExecuteReaderAsync().GetAwaiter().GetResult();

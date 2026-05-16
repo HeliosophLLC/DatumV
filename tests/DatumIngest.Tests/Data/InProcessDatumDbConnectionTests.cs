@@ -213,7 +213,7 @@ public sealed class InProcessDatumDbConnectionTests : ServiceTestBase, IDisposab
     }
 
     [Fact]
-    public async Task NextResult_AlwaysFalse_InV1()
+    public async Task NextResultAsync_SinglePlan_AlwaysFalse()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
         await Seed(catalog,
@@ -225,7 +225,7 @@ public sealed class InProcessDatumDbConnectionTests : ServiceTestBase, IDisposab
             "SELECT id FROM public.t");
 
         await using InProcessDatumDbReader reader = await command.ExecuteReaderAsync();
-        Assert.False(reader.NextResult());
+        Assert.False(await reader.NextResultAsync());
     }
 
     [Fact]
@@ -254,7 +254,8 @@ public sealed class InProcessDatumDbConnectionTests : ServiceTestBase, IDisposab
         using InProcessDatumDbCommand command = connection.CreateCommand(
             "CREATE TABLE public.t (id INT32 NOT NULL)");
 
-        StatementPlan plan = await command.PrepareAsync();
+        PreparedSql prepared = await command.PrepareAsync();
+        StatementPlan plan = Assert.IsAssignableFrom<StatementPlan>(prepared);
 
         Assert.False(catalog.HasTable("public.t"),
             "PrepareAsync must not execute the plan — only the Execute* verbs apply side effects.");

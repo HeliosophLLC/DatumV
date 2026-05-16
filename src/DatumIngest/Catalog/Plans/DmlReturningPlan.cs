@@ -135,11 +135,11 @@ internal sealed class DmlReturningPlan : StatementPlan
     }
 
     /// <summary>
-    /// Legacy post-applied constructor. The executor has already run and
+    /// Post-applied constructor. The executor has already run and
     /// supplied the captured batches as a list; this overload wraps them
     /// in a <see cref="CapturedRowsSource"/> internally. Used by the
-    /// eager <see cref="TableCatalog.ExecuteStatementAsync(string)"/>
-    /// path, where the side effect runs before the plan is built.
+    /// DML executor paths where the side effect runs before the plan is
+    /// built.
     /// </summary>
     public DmlReturningPlan(
         TableCatalog catalog,

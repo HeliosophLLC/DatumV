@@ -91,7 +91,7 @@ internal sealed class SqlIngestExecutor
 
         Statement bound = ParameterBinder.Bind(parsed, parameters);
         StatementPlan plan = await _catalog
-            .ExecuteStatementAsync(bound, sourceText: sql, batchContext: null)
+            .PlanAsync(bound, sourceText: sql)
             .ConfigureAwait(false);
 
         string sidecarPath = IngesterHelpers.SidecarPathFor(destPath);

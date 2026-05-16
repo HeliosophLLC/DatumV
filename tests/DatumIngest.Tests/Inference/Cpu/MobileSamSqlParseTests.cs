@@ -53,7 +53,8 @@ public sealed class MobileSamSqlParseTests : ServiceTestBase
         Assert.Equal(2, statements.Count);
         foreach ((Statement statement, string sourceText) in statements)
         {
-            await catalog.ExecuteStatementAsync(statement, sourceText);
+            StatementPlan plan = await catalog.PlanAsync(statement, sourceText);
+            await catalog.ExecuteAsync(plan).DrainAsync();
         }
     }
 

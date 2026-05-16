@@ -1,8 +1,8 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
 using DatumIngest.Catalog;
+using DatumIngest.Data;
 using DatumIngest.Model;
-using DatumIngest.Parsing;
 using Microsoft.Extensions.Logging;
 
 namespace DatumIngest.Web.Migrations;
@@ -66,13 +66,13 @@ internal sealed class MigrationRunner
 
     private async Task ApplyAsync(string sql, CancellationToken ct)
     {
-        foreach ((var statement, _) in SqlParser.ParseBatchWithText(sql))
-        {
-            ct.ThrowIfCancellationRequested();
-            // DDL applies as a side effect during ExecuteStatementAsync; DML
-            // executes inline. Either way we discard the returned no-op DdlPlan.
-            await _catalog.ExecuteStatementAsync(statement).ConfigureAwait(false);
-        }
+        // PrepareAsync auto-detects single vs multi-statement; the
+        // command's ExecuteNonQueryAsync drains every result set in
+        // source order so a CREATE; INSERT; SELECT migration script runs
+        // end-to-end with one call.
+        using InProcessDatumDbConnection conn = new(_catalog);
+        using InProcessDatumDbCommand cmd = conn.CreateCommand(sql);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     private async Task<int> GetCurrentVersionAsync(CancellationToken ct)
@@ -85,20 +85,14 @@ internal sealed class MigrationRunner
             return 0;
         }
 
-        StatementPlan plan = await _catalog
-            .PlanAsync("SELECT max(version) FROM __schema_migrations")
-            .ConfigureAwait(false);
-
-        await foreach (RowBatch batch in _catalog.ExecuteAsync(plan, ct).ConfigureAwait(false))
-        {
-            if (batch.Count == 0) continue;
-            DataValue cell = batch[0][0];
-            return cell.IsNull ? 0 : cell.AsInt32();
-        }
-        return 0;
+        using InProcessDatumDbConnection conn = new(_catalog);
+        using InProcessDatumDbCommand cmd = conn.CreateCommand(
+            "SELECT max(version) FROM __schema_migrations");
+        DataValue? scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return scalar is { IsNull: false } cell ? cell.AsInt32() : 0;
     }
 
-    private Task RecordAsync(int version, string name, CancellationToken ct)
+    private async Task RecordAsync(int version, string name, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         // Name comes from a controlled filename — SQL injection isn't a
@@ -107,7 +101,10 @@ internal sealed class MigrationRunner
         // to parameter binding.
         string escapedName = name.Replace("'", "''");
         string sql = $"INSERT INTO __schema_migrations (version, name) VALUES ({version}, '{escapedName}')";
-        return _catalog.ExecuteStatementAsync(sql);
+
+        using InProcessDatumDbConnection conn = new(_catalog);
+        using InProcessDatumDbCommand cmd = conn.CreateCommand(sql);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     private static List<Migration> DiscoverMigrations()

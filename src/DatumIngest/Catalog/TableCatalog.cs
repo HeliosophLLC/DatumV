@@ -813,6 +813,42 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         => PlanAsync(statement, sourceText: null);
 
     /// <summary>
+    /// Parses <paramref name="sql"/> and returns the right
+    /// <see cref="PreparedSql"/> shape: a <see cref="StatementPlan"/> for
+    /// a single statement, a <see cref="Plans.StatementBatch"/> for a
+    /// semicolon-separated multi-statement script. Pure — no side
+    /// effects until the returned unit is iterated (or its children are,
+    /// for batches). Empty input is a caller error.
+    /// </summary>
+    /// <remarks>
+    /// Use this entry when the caller doesn't know up-front whether the
+    /// SQL contains one or many statements (the in-process data API
+    /// dispatches through here). Callers that know they have a single
+    /// statement can call <see cref="PlanAsync(string)"/> directly for
+    /// a tighter return type.
+    /// </remarks>
+    public async Task<PreparedSql> PrepareAsync(string sql)
+    {
+        IReadOnlyList<(Statement Statement, string SourceText)> entries =
+            SqlParser.ParseBatchWithText(sql);
+        if (entries.Count == 0)
+        {
+            throw new ArgumentException(
+                "PrepareAsync: input contained no statements.", nameof(sql));
+        }
+        if (entries.Count == 1)
+        {
+            return await PlanAsync(entries[0].Statement, entries[0].SourceText).ConfigureAwait(false);
+        }
+        List<(Statement, string?)> batchEntries = new(entries.Count);
+        foreach ((Statement statement, string sourceText) in entries)
+        {
+            batchEntries.Add((statement, sourceText));
+        }
+        return new Plans.StatementBatch(this, batchEntries);
+    }
+
+    /// <summary>
     /// Canonical planning entry point. Returns an <see cref="StatementPlan"/>
     /// that has NOT yet executed any side effects. Iterating
     /// <c>StatementPlan.ExecuteAsync</c> applies them; reading
@@ -821,18 +857,18 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// <remarks>
     /// <para>
     /// For pure queries (<see cref="QueryStatement"/>, <see cref="CallStatement"/>)
-    /// the returned plan is a <see cref="Plans.SelectPlan"/> as before. For DDL and
-    /// DML statements the returned plan is a <see cref="Plans.DdlPlan"/>
-    /// that wraps <see cref="ExecuteStatementAsync(Statement, string?, BatchContext?)"/>
-    /// and only invokes it on iteration. This makes <c>EXPLAIN CREATE TABLE</c>
-    /// and <c>EXPLAIN DELETE</c> safe — they never iterate the plan.
+    /// the returned plan is a <see cref="Plans.SelectPlan"/>. For DDL and
+    /// DML statements the returned plan is the structured per-family plan
+    /// (<see cref="Plans.RoutinePlan"/>, <see cref="Plans.SchemaPlan"/>,
+    /// <see cref="Plans.AlterTablePlan"/>, etc.) whose
+    /// <c>ExecuteImplAsync</c> applies the side effect on iteration.
+    /// This makes <c>EXPLAIN CREATE TABLE</c> and <c>EXPLAIN DELETE</c>
+    /// safe — they read the tree without iterating.
     /// </para>
     /// <para>
-    /// Callers that want eager DDL/DML application (the historical
-    /// <c>PlanAsync</c> behaviour) should call
-    /// <see cref="ExecuteStatementAsync(Statement, string?, BatchContext?)"/>
-    /// directly. <c>BatchExecutor</c> and other row-iterating consumers
-    /// reach the same end-state through either entry point.
+    /// Callers that want eager DDL/DML application iterate the returned
+    /// plan via <see cref="ExecuteAsync(StatementPlan, CancellationToken)"/>
+    /// (or its <c>DrainAsync()</c> extension when no rows are wanted).
     /// </para>
     /// </remarks>
     public async Task<StatementPlan> PlanAsync(Statement statement, string? sourceText)
@@ -1088,27 +1124,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             return Plans.AlterTablePlan.ForAlterColumnSet(this, alterColumnSet, sourceText);
         }
 
-        // Everything else (executor-backed DDL — CREATE / DROP / ALTER /
-        // ANALYZE / REINDEX / SET search_path) routes through a generic
-        // DdlPlan whose apply delegate calls ExecuteStatementAsync at
-        // iterate time. EXPLAIN reads the tree without iterating, so the
-        // executor never fires for a pure EXPLAIN. Per-statement DdlPlan
-        // factories with richer Details ("AlterTable target=foo op=DROP
-        // COLUMN bar") are a follow-up — the current shape gets the
-        // structural guarantee in place.
-        string operatorName = statement.GetType().Name;
-        if (operatorName.EndsWith("Statement", StringComparison.Ordinal))
-        {
-            operatorName = operatorName[..^"Statement".Length];
-        }
-        return new Plans.DdlPlan(
-            this,
-            operatorName,
-            details: "deferred to ExecuteStatementAsync",
-            apply: async _ =>
-            {
-                await ExecuteStatementAsync(statement, sourceText, batchContext: null).ConfigureAwait(false);
-            });
+        // Every supported statement type has an explicit structural route
+        // above. Anything reaching here is a new AST node a contributor
+        // added without wiring a plan family — fail loudly at plan time
+        // rather than silently falling through to an opaque thunk.
+        throw new NotSupportedException(
+            $"Statement type '{statement.GetType().Name}' is not supported by PlanAsync. " +
+            "Add a structured plan class under DatumIngest.Catalog.Plans and an explicit route in PlanAsync.");
     }
 
     /// <summary>
@@ -1198,223 +1220,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         using BatchContext batchContext = new(this);
         batchContext.Accountant.StartProfiling();
         return await plan.AnalyzeAsync(cancellationToken, batchContext).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Parses and eagerly executes <paramref name="sql"/>. DDL and DML side
-    /// effects apply at call time. Returns an <see cref="StatementPlan"/> for
-    /// any remaining row stream (empty for no-RETURNING DML and DDL; a
-    /// row-yielding plan for SELECT, CALL, and <c>… RETURNING</c>).
-    /// </summary>
-    public Task<StatementPlan> ExecuteStatementAsync(string sql)
-    {
-        Statement statement = SqlParser.ParseStatement(sql);
-        return ExecuteStatementAsync(statement, sql);
-    }
-
-    /// <summary>
-    /// Eagerly executes an already-parsed <see cref="Statement"/>. See
-    /// <see cref="ExecuteStatementAsync(string)"/>.
-    /// </summary>
-    public Task<StatementPlan> ExecuteStatementAsync(Statement statement)
-        => ExecuteStatementAsync(statement, sourceText: null, batchContext: null);
-
-    /// <summary>
-    /// Eagerly executes a parsed <see cref="Statement"/> with original
-    /// source-text slice for DDL persistence. See
-    /// <see cref="ExecuteStatementAsync(string)"/>.
-    /// </summary>
-    public Task<StatementPlan> ExecuteStatementAsync(Statement statement, string? sourceText)
-        => ExecuteStatementAsync(statement, sourceText, batchContext: null);
-
-    /// <summary>
-    /// Canonical eager statement dispatch. DDL applies as a side effect
-    /// (returning <see cref="Plans.DdlPlan"/>); queries return a plan
-    /// whose batches stream on <c>StatementPlan.ExecuteAsync</c>; DML
-    /// executes inline and returns either <see cref="Plans.DdlPlan"/> or a
-    /// <c>RETURNING</c> plan.
-    /// </summary>
-    /// <remarks>
-    /// Threads <paramref name="sourceText"/> through for DDL statements that
-    /// need to round-trip the original SQL text through the catalog file
-    /// (procedural <c>CREATE FUNCTION</c> / <c>CREATE PROCEDURE</c> bodies
-    /// don't have a faithful AST formatter, so without the slice they fall
-    /// back to a synthesised header that won't reparse on catalog reload).
-    /// Callers that parsed via <c>SqlParser.ParseBatchWithText</c> already
-    /// have the per-statement slice; callers that built the AST
-    /// programmatically pass <see langword="null"/>.
-    /// </remarks>
-    public async Task<StatementPlan> ExecuteStatementAsync(Statement statement, string? sourceText, BatchContext? batchContext)
-    {
-        // Parse-time pre-flight covers DML shapes (INSERT / UPDATE /
-        // DELETE) that don't flow through PlanQuery. Pure queries skip
-        // the walk here — PlanQuery runs the same gate downstream and
-        // we'd double-walk otherwise. Other top-level shapes (DDL,
-        // CALL, CREATE bodies) return an empty result from WalkStatement
-        // so the no-op cost is one type test.
-        if (statement is InsertStatement or UpdateStatement or DeleteStatement)
-        {
-            PreFlightRequirements preflight = PreFlightWalker.WalkStatement(
-                statement, Models, CatalogVocabulary, Functions, DatasetPreFlightSource);
-            if (preflight.Models.Count > 0
-                || preflight.Datasets.Count > 0
-                || preflight.Suggestions.Count > 0)
-            {
-                throw new PreFlightRequiredException(preflight);
-            }
-        }
-
-        switch (statement)
-        {
-            case QueryStatement queryStatement:
-                return PlanQuery(queryStatement.Query);
-
-            case CreateFunctionStatement create:
-                return await DrainSideEffectPlanAsync(
-                    Plans.RoutinePlan.ForCreateFunction(this, create, sourceText), batchContext).ConfigureAwait(false);
-
-            case DropFunctionStatement drop:
-                return await DrainSideEffectPlanAsync(
-                    Plans.RoutinePlan.ForDropFunction(this, drop, sourceText), batchContext).ConfigureAwait(false);
-
-            case CreateProcedureStatement create:
-                return await DrainSideEffectPlanAsync(
-                    Plans.RoutinePlan.ForCreateProcedure(this, create, sourceText), batchContext).ConfigureAwait(false);
-
-            case DropProcedureStatement drop:
-                return await DrainSideEffectPlanAsync(
-                    Plans.RoutinePlan.ForDropProcedure(this, drop, sourceText), batchContext).ConfigureAwait(false);
-
-            case CreateViewStatement createView:
-                return await DrainSideEffectPlanAsync(
-                    Plans.ViewPlan.ForCreateView(this, createView, sourceText), batchContext).ConfigureAwait(false);
-
-            case DropViewStatement dropView:
-                return await DrainSideEffectPlanAsync(
-                    Plans.ViewPlan.ForDropView(this, dropView, sourceText), batchContext).ConfigureAwait(false);
-
-            case CreateModelStatement createModel:
-                return await DrainSideEffectPlanAsync(
-                    Plans.ModelPlan.ForCreateModel(this, createModel, sourceText), batchContext).ConfigureAwait(false);
-
-            case DropModelStatement dropModel:
-                return await DrainSideEffectPlanAsync(
-                    Plans.ModelPlan.ForDropModel(this, dropModel, sourceText), batchContext).ConfigureAwait(false);
-
-            case EvictModelStatement evictModel:
-                return await DrainSideEffectPlanAsync(
-                    Plans.ModelPlan.ForEvictModel(this, evictModel, sourceText), batchContext).ConfigureAwait(false);
-
-            case ResetCalibrationStatement resetCalibration:
-                return await DrainSideEffectPlanAsync(
-                    Plans.ModelPlan.ForResetCalibration(this, resetCalibration, sourceText), batchContext).ConfigureAwait(false);
-
-            case CallStatement call:
-                return PlanCall(call);
-
-            case CreateTableStatement createTable:
-                return await DrainSideEffectPlanAsync(
-                    Plans.TablePlan.ForCreateTable(this, createTable, sourceText), batchContext).ConfigureAwait(false);
-
-            case CreateTableAsSelectStatement ctas:
-            {
-                // Plan into a CtasPlan (or DdlPlan.NoOp for IF NOT EXISTS
-                // early-bail), then iterate to apply the side effect — this
-                // path is the eager-execute contract direct callers rely on.
-                StatementPlan plan = await Plans.CtasPlan.PlanAsync(this, ctas, sourceText).ConfigureAwait(false);
-                if (plan is Plans.CtasPlan)
-                {
-                    await foreach (RowBatch _ in ExecuteAsync(plan, batchContext, CancellationToken.None).ConfigureAwait(false))
-                    {
-                    }
-                }
-                return DdlPlan.NoOp(this, "CreateTableAsSelect");
-            }
-
-            case DropTableStatement dropTable:
-                return await DrainSideEffectPlanAsync(
-                    Plans.TablePlan.ForDropTable(this, dropTable, sourceText), batchContext).ConfigureAwait(false);
-
-            case CreateSchemaStatement createSchema:
-                return await DrainSideEffectPlanAsync(
-                    Plans.SchemaPlan.ForCreateSchema(this, createSchema, sourceText), batchContext).ConfigureAwait(false);
-
-            case DropSchemaStatement dropSchema:
-                return await DrainSideEffectPlanAsync(
-                    Plans.SchemaPlan.ForDropSchema(this, dropSchema, sourceText), batchContext).ConfigureAwait(false);
-
-            case SetSearchPathStatement setSearchPath:
-                return await DrainSideEffectPlanAsync(
-                    Plans.SchemaPlan.ForSetSearchPath(this, setSearchPath), batchContext).ConfigureAwait(false);
-
-            case CreateIndexStatement createIndex:
-                return await DrainSideEffectPlanAsync(
-                    Plans.IndexPlan.ForCreateIndex(this, createIndex, sourceText), batchContext).ConfigureAwait(false);
-
-            case DropIndexStatement dropIndex:
-                return await DrainSideEffectPlanAsync(
-                    Plans.IndexPlan.ForDropIndex(this, dropIndex, sourceText), batchContext).ConfigureAwait(false);
-
-            case ReindexTableStatement reindex:
-                return await DrainSideEffectPlanAsync(
-                    Plans.IndexPlan.ForReindex(this, reindex), batchContext).ConfigureAwait(false);
-
-            case AnalyzeTableStatement analyze:
-                return await DrainSideEffectPlanAsync(
-                    Plans.IndexPlan.ForAnalyze(this, analyze), batchContext).ConfigureAwait(false);
-
-            case AlterTableAddColumnStatement alterAdd:
-                return await DrainSideEffectPlanAsync(
-                    Plans.AlterTablePlan.ForAddColumn(this, alterAdd, sourceText), batchContext).ConfigureAwait(false);
-
-            case AlterTableDropColumnStatement alterDrop:
-                return await DrainSideEffectPlanAsync(
-                    Plans.AlterTablePlan.ForDropColumn(this, alterDrop, sourceText), batchContext).ConfigureAwait(false);
-
-            case AlterTableDropConstraintStatement alterDropConstraint:
-                return await DrainSideEffectPlanAsync(
-                    Plans.AlterTablePlan.ForDropConstraint(this, alterDropConstraint, sourceText), batchContext).ConfigureAwait(false);
-
-            case AlterTableAlterColumnDropStatement alterColumnDrop:
-                return await DrainSideEffectPlanAsync(
-                    Plans.AlterTablePlan.ForAlterColumnDrop(this, alterColumnDrop, sourceText), batchContext).ConfigureAwait(false);
-
-            case AlterTableAlterColumnSetStatement alterColumnSet:
-                return await DrainSideEffectPlanAsync(
-                    Plans.AlterTablePlan.ForAlterColumnSet(this, alterColumnSet, sourceText), batchContext).ConfigureAwait(false);
-
-            case InsertStatement insert:
-                return await InsertExecutor.ExecuteAsync(this, insert, batchContext).ConfigureAwait(false);
-
-            case UpdateStatement update:
-                return await UpdateExecutor.ExecuteAsync(this, update, batchContext).ConfigureAwait(false);
-
-            case DeleteStatement delete:
-                return await DeleteExecutor.ExecuteAsync(this, delete, batchContext).ConfigureAwait(false);
-
-            default:
-                throw new NotSupportedException(
-                    $"Statement type '{statement.GetType().Name}' is not yet supported by PlanAsync. " +
-                    $"Use the dedicated APIs (e.g. AddFile for file registration) or extend PlanAsync to dispatch this statement.");
-        }
-    }
-
-    /// <summary>
-    /// Iterates a side-effect-only plan to completion under the caller's
-    /// (optional) <see cref="BatchContext"/>, then returns a
-    /// <see cref="DdlPlan.NoOp"/> marker carrying the same operator
-    /// label. Used by the eager <see cref="ExecuteStatementAsync(Statement, string?, BatchContext?)"/>
-    /// dispatch for plan families whose side effect must only live inside
-    /// the plan's <c>ExecuteImplAsync</c> — the caller gets the same
-    /// observable behaviour as the legacy direct-mutation switch branch.
-    /// </summary>
-    private async Task<StatementPlan> DrainSideEffectPlanAsync(
-        StatementPlan plan, BatchContext? batchContext)
-    {
-        await foreach (RowBatch _ in ExecuteAsync(plan, batchContext, CancellationToken.None).ConfigureAwait(false))
-        {
-        }
-        return DdlPlan.NoOp(this, plan.ExplainTree.OperatorName);
     }
 
     private StatementPlan PlanCall(CallStatement call)

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 
 using DatumIngest.Catalog;
+using DatumIngest.Data;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Diagnostics;
 using DatumIngest.Functions;
@@ -206,11 +207,14 @@ foreach (string applyPath in opts.ApplySql)
     Console.WriteLine($"Applying: {applyPath}");
     try
     {
-        // ExecuteStatementAsync auto-routes CREATE MODEL to the registrar without
-        // persisting back to the catalog file when the body comes via the in-process
-        // path (caller controls persistence via the CatalogStore). The probe
-        // intentionally doesn't pin the change — it goes away when the process exits.
-        await catalog.ExecuteStatementAsync(applySql);
+        // CREATE MODEL routes through ModelPlan; ExecuteNonQueryAsync
+        // applies the registrar mutation. The probe intentionally doesn't
+        // pin the change — it goes away when the process exits. Multi-
+        // statement apply files Just Work via the command's PrepareAsync
+        // auto-detect.
+        using InProcessDatumDbConnection conn = new(catalog);
+        using InProcessDatumDbCommand cmd = conn.CreateCommand(applySql);
+        await cmd.ExecuteNonQueryAsync();
     }
     catch (Exception ex)
     {

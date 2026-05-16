@@ -1,20 +1,25 @@
 using DatumIngest.Catalog;
-using DatumIngest.Execution;
+using DatumIngest.Data;
 using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Web.Messages;
 
-// INSERT-only wrapper over TableCatalog. Uses ParameterBinder so user-supplied
-// content (which may contain quotes, newlines, anything) doesn't have to be
-// escaped — the binder substitutes $name parameters with proper literals at
-// the AST level before planning.
+// INSERT-only wrapper over TableCatalog via the InProcessDatumDb*
+// command/reader surface. Parameters round-trip through the command's
+// Parameters collection (which the command hands to ParameterBinder)
+// so user-supplied content (which may contain quotes, newlines,
+// anything) doesn't need to be escaped — substitution happens at the
+// AST level before planning.
 internal sealed class MessageGraph : IMessageGraph
 {
     private const string InsertSql =
         "INSERT INTO messages (conversation_id, kind, role, content, model, input_tokens, output_tokens) " +
         "VALUES ($conversation_id, $kind, $role, $content, $model, $input_tokens, $output_tokens)";
+
+    private const string SelectHistorySql =
+        "SELECT id, conversation_id, kind, role, content, model, " +
+        "       input_tokens, output_tokens, created_at " +
+        "FROM messages WHERE conversation_id = $conversation_id ORDER BY id ASC";
 
     private readonly TableCatalog _catalog;
 
@@ -27,67 +32,42 @@ internal sealed class MessageGraph : IMessageGraph
     {
         ct.ThrowIfCancellationRequested();
 
-        Dictionary<string, ParameterValue> parameters = new()
-        {
-            ["conversation_id"] = new InlineParameter(DataValue.FromInt64(conversationId)),
-            ["kind"] = new StringParameter(draft.Kind),
-            ["role"] = new StringParameter(draft.Role),
-            ["content"] = new StringParameter(draft.Content),
-            ["model"] = draft.Model is null
-                ? new InlineParameter(DataValue.Null(DataKind.String))
-                : new StringParameter(draft.Model),
-            ["input_tokens"] = draft.InputTokens is null
-                ? new InlineParameter(DataValue.Null(DataKind.Int32))
-                : new InlineParameter(DataValue.FromInt32(draft.InputTokens.Value)),
-            ["output_tokens"] = draft.OutputTokens is null
-                ? new InlineParameter(DataValue.Null(DataKind.Int32))
-                : new InlineParameter(DataValue.FromInt32(draft.OutputTokens.Value)),
-        };
+        using InProcessDatumDbConnection conn = new(_catalog);
+        using InProcessDatumDbCommand cmd = conn.CreateCommand(InsertSql);
+        cmd.Parameters
+            .AddInt64("conversation_id", conversationId)
+            .AddString("kind", draft.Kind)
+            .AddString("role", draft.Role)
+            .AddString("content", draft.Content)
+            .AddString("model", draft.Model)
+            .AddInt32("input_tokens", draft.InputTokens)
+            .AddInt32("output_tokens", draft.OutputTokens);
 
-        Statement statement = SqlParser.ParseStatement(InsertSql);
-        Statement bound = ParameterBinder.Bind(statement, parameters);
-        // ExecuteStatementAsync runs INSERT inline and returns a DdlPlan.NoOp
-        // — no need to iterate the result.
-        await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<MessageRecord>> ReadHistoryAsync(
         long conversationId,
         CancellationToken ct)
     {
-        Dictionary<string, ParameterValue> parameters = new()
-        {
-            ["conversation_id"] = new InlineParameter(DataValue.FromInt64(conversationId)),
-        };
-        Statement statement = SqlParser.ParseStatement(
-            "SELECT id, conversation_id, kind, role, content, model, " +
-            "       input_tokens, output_tokens, created_at " +
-            "FROM messages WHERE conversation_id = $conversation_id ORDER BY id ASC");
-        Statement bound = ParameterBinder.Bind(statement, parameters);
+        using InProcessDatumDbConnection conn = new(_catalog);
+        using InProcessDatumDbCommand cmd = conn.CreateCommand(SelectHistorySql);
+        cmd.Parameters.AddInt64("conversation_id", conversationId);
 
-        StatementPlan plan = await _catalog.ExecuteStatementAsync(bound).ConfigureAwait(false);
+        await using InProcessDatumDbReader reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         List<MessageRecord> results = new();
-        await foreach (RowBatch batch in _catalog.ExecuteAsync(plan, ct).ConfigureAwait(false))
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            // Strings only stay inline when they fit in the DataValue
-            // struct (~27 bytes UTF-8). Message content is variable-length
-            // and routinely overflows into the batch arena — pass it to
-            // the AsString overload so the long path resolves cleanly.
-            Arena arena = batch.Arena;
-            for (int i = 0; i < batch.Count; i++)
-            {
-                Row row = batch[i];
-                results.Add(new MessageRecord(
-                    Id: row[0].AsInt64(),
-                    ConversationId: row[1].AsInt64(),
-                    Kind: row[2].AsString(arena),
-                    Role: row[3].AsString(arena),
-                    Content: row[4].AsString(arena),
-                    Model: row[5].IsNull ? null : row[5].AsString(arena),
-                    InputTokens: row[6].IsNull ? null : row[6].AsInt32(),
-                    OutputTokens: row[7].IsNull ? null : row[7].AsInt32(),
-                    CreatedAt: row[8].AsTimestamp()));
-            }
+            results.Add(new MessageRecord(
+                Id: reader.GetInt64(0),
+                ConversationId: reader.GetInt64(1),
+                Kind: reader.GetString(2),
+                Role: reader.GetString(3),
+                Content: reader.GetString(4),
+                Model: reader.IsDBNull(5) ? null : reader.GetString(5),
+                InputTokens: reader.IsDBNull(6) ? null : reader.GetInt32(6),
+                OutputTokens: reader.IsDBNull(7) ? null : reader.GetInt32(7),
+                CreatedAt: reader.GetValue(8).AsTimestamp()));
         }
         return results;
     }

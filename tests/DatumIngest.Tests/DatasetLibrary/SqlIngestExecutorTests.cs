@@ -175,7 +175,7 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
         TableCatalog readback = CreateCatalog();
         readback.AddFile(destPath, name: "clips");
 
-        StatementPlan plan = await readback.ExecuteStatementAsync("SELECT utt_id, clip FROM clips");
+        StatementPlan plan = await readback.PlanAsync("SELECT utt_id, clip FROM clips");
         int seen = 0;
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
         {

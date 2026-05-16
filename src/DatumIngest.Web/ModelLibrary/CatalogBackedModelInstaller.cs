@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Data;
 using DatumIngest.ModelLibrary;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
@@ -101,16 +102,20 @@ internal sealed class CatalogBackedModelInstaller : IModelInstaller
         ModelInstallContext.CurrentInstallIsPinned = pinnedMode;
         try
         {
-            // Apply each statement in order. DDL applies as a side effect inside
-            // ExecuteStatementAsync (Routines.ApplyCreateModelAsync runs there),
-            // so we don't need to also iterate the returned plan for CREATE MODEL.
-            // Throw early on the first failure — partial install would leave the
+            // Apply each statement in order via a per-statement command on
+            // a shared connection. CREATE MODEL routes through ModelPlan,
+            // whose ExecuteImplAsync applies the registrar mutation. Throw
+            // early on the first failure — partial install would leave the
             // catalog in an inconsistent state.
             List<string> observed = [];
+            using InProcessDatumDbConnection conn = new(_catalog);
             foreach ((Statement statement, string sourceText) in statements)
             {
                 ct.ThrowIfCancellationRequested();
-                await _catalog.ExecuteStatementAsync(statement, sourceText).ConfigureAwait(false);
+                using InProcessDatumDbCommand cmd = conn.CreateCommand();
+                cmd.Statement = statement;
+                cmd.SourceText = sourceText;
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 if (statement is CreateModelStatement create)
                 {
                     observed.Add(create.Name);
@@ -136,9 +141,10 @@ internal sealed class CatalogBackedModelInstaller : IModelInstaller
                 // the user invokes manually runs here — persisted catalog
                 // state, lazy-disposal of any leases, and the ModelRegistry
                 // unregister all happen as a single side effect.
-                Statement stmt = SqlParser.ParseStatement($"DROP MODEL IF EXISTS {identifier}");
-                await _catalog.ExecuteStatementAsync(stmt, $"DROP MODEL IF EXISTS {identifier}")
-                    .ConfigureAwait(false);
+                using InProcessDatumDbConnection conn = new(_catalog);
+                using InProcessDatumDbCommand cmd = conn.CreateCommand(
+                    $"DROP MODEL IF EXISTS {identifier}");
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

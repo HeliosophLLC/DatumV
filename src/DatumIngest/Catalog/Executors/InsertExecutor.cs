@@ -2,8 +2,6 @@ using DatumIngest.Catalog.Plans;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
-using DatumIngest.Functions.Audio;
-using DatumIngest.Functions.Video;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -17,58 +15,24 @@ namespace DatumIngest.Catalog.Executors;
 /// resulting <see cref="RowBatch"/> through
 /// <see cref="ITableProvider.AppendRowsAsync"/>.
 /// </summary>
-/// <remarks>
-/// PR10c shipped <c>INSERT … VALUES (…)</c> with literal expressions
-/// only (matching <c>DEFAULT</c>'s literal-only restriction from PR10b).
-/// PR10c' adds <c>INSERT … SELECT</c>: the source query is planned via
-/// <see cref="TableCatalog.PlanQuery"/>, batches stream through the
-/// shared column plan + per-value coercion, and rows commit through an
-/// <see cref="IAppendSession"/>. PR10c'' lifts the literal-only restriction
-/// on VALUES — each VALUES expression is evaluated through
-/// <see cref="ExpressionEvaluator"/> against an empty row, so binary
-/// expressions, function calls, and array literals (<c>['a','b','c']</c>
-/// → <c>array(...)</c>) work uniformly. Column references in VALUES still
-/// fail because there's no source row to bind against.
-/// </remarks>
 internal static class InsertExecutor
 {
-    public static Task<StatementPlan> ExecuteAsync(
-        TableCatalog catalog, InsertStatement insert, BatchContext? batchContext = null)
-        => ExecuteAsync(catalog, insert, preplannedSource: null, captureSink: null, batchContext);
-
     /// <summary>
-    /// Source-plan-aware overload used by <see cref="Plans.DmlPlan.ForInsert"/>:
-    /// the source query is planned at <c>PlanAsync</c> time and threaded in
-    /// here so the planner-time / executor-time split is enforced and the
-    /// composed EXPLAIN tree shows the SELECT subtree under the INSERT
-    /// node. Pass <see langword="null"/> for <c>VALUES</c> /
-    /// <c>DEFAULT VALUES</c> insertion (no source query to compose); the
-    /// SELECT path will fall back to <see cref="TableCatalog.PlanQuery"/>
-    /// for back-compat with callers that haven't been migrated.
+    /// Applies the <c>INSERT</c> side effect. <paramref name="preplannedSource"/>
+    /// is the SELECT plan composed at <c>PlanAsync</c> time for
+    /// <c>INSERT … SELECT</c> (so EXPLAIN sees the SELECT subtree under
+    /// the INSERT node); pass <see langword="null"/> for <c>VALUES</c> /
+    /// <c>DEFAULT VALUES</c>. When <paramref name="captureSink"/> is
+    /// non-null, post-mutation rows are routed into it for a wrapping
+    /// <see cref="Plans.DmlReturningPlan"/> composer to project; otherwise
+    /// no rows are captured.
     /// </summary>
-    public static Task<StatementPlan> ExecuteAsync(
-        TableCatalog catalog,
-        InsertStatement insert,
-        StatementPlan? preplannedSource,
-        BatchContext? batchContext = null)
-        => ExecuteAsync(catalog, insert, preplannedSource, captureSink: null, batchContext);
-
-    /// <summary>
-    /// Primary overload. When <paramref name="captureSink"/> is non-null,
-    /// post-mutation captured rows are routed into it (for a wrapping
-    /// <see cref="Plans.DmlReturningPlan"/> composer to project over) and
-    /// the executor returns <see cref="DdlPlan.NoOp"/>. When the sink is
-    /// null, behavior matches the legacy contract: a
-    /// <see cref="Plans.DmlReturningPlan"/> is constructed post-hoc from
-    /// the internal captured list (when RETURNING is set) or
-    /// <see cref="DdlPlan.NoOp"/> is returned otherwise.
-    /// </summary>
-    public static async Task<StatementPlan> ExecuteAsync(
+    public static async Task ApplyAsync(
         TableCatalog catalog,
         InsertStatement insert,
         StatementPlan? preplannedSource,
         Plans.CapturedRowsSource? captureSink,
-        BatchContext? batchContext = null)
+        BatchContext batchContext)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(insert);
@@ -105,10 +69,11 @@ internal static class InsertExecutor
         }
 
         Schema targetSchema = provider.GetSchema();
-        // Capture is needed whenever the caller wants the post-mutation
-        // rows — either to project RETURNING (legacy path) or to feed a
-        // wrapping DmlReturningPlan composer through the sink.
-        bool captureRows = insert.Returning is not null || captureSink is not null;
+        // Capture is needed only when the caller supplied a sink — the
+        // sink is the only way captured rows escape the executor (a
+        // wrapping DmlReturningPlan composer drains it). Without one,
+        // skip the per-row capture overhead.
+        bool captureRows = captureSink is not null;
         IReadOnlyList<RowBatch>? captured;
 
         switch (insert.Source)
@@ -151,25 +116,15 @@ internal static class InsertExecutor
                     $"Unrecognised INSERT source: {insert.Source.GetType().Name}.");
         }
 
-        if (captured is null) return DdlPlan.NoOp(catalog, "Insert", "no rows captured");
-
-        // Composer path: pour captured batches into the supplied sink so
-        // the parent DmlReturningPlan can project them. No DmlReturningPlan
-        // is constructed here — the caller (DmlPlan apply) discards our
-        // return value.
-        if (captureSink is not null)
+        // When a capture sink was supplied, pour the captured batches
+        // into it so the wrapping DmlReturningPlan composer can project
+        // them. No sink → no rows are surfaced; the side effect alone is
+        // the contract (callers wanting RETURNING rows must compose a
+        // sink at plan time).
+        if (captured is not null && captureSink is not null)
         {
             foreach (RowBatch batch in captured) captureSink.Capture(batch);
-            return DdlPlan.NoOp(catalog, "Insert", "captured rows routed to composer sink");
         }
-
-        return new DmlReturningPlan(
-            catalog,
-            DmlReturningKind.Insert,
-            insert.TableName,
-            targetSchema,
-            captured,
-            insert.Returning!);
     }
 
     private static async Task<RowBatch?> ApplyValuesAsync(
@@ -400,14 +355,14 @@ internal static class InsertExecutor
         InsertQuerySource source,
         StatementPlan? preplannedSource,
         bool captureRows,
-        BatchContext? batchContext)
+        BatchContext batchContext)
     {
         // INSERT … SELECT streams batch-by-batch through the source plan and
         // flushes each via session.WriteAsync — no held state of consequence to
         // account. The source-side plan still routes through its own
         // ExecutionContext and accounts there. The accountant here is only
         // needed for the per-row DEFAULT-evaluation frames built below.
-        MemoryAccountant accountant = batchContext is not null ? batchContext.Accountant : new MemoryAccountant();
+        MemoryAccountant accountant = batchContext.Accountant;
         // Use the pre-planned source if DmlPlan.ForInsert supplied one
         // (the composed-EXPLAIN path); otherwise fall back to planning
         // here so the legacy InsertExecutor.ExecuteAsync(catalog, insert,

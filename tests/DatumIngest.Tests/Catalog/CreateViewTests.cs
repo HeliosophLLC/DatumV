@@ -404,7 +404,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE VIEW v AS SELECT a FROM t");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => catalog.ExecuteStatementAsync("INSERT INTO v VALUES (1)"));
+            () => RunAsync(catalog, "INSERT INTO v VALUES (1)"));
         Assert.Contains("is a view", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("INSERT", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -418,7 +418,7 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
 
         DatumIngest.Execution.QueryPlanException ex = await Assert
             .ThrowsAsync<DatumIngest.Execution.QueryPlanException>(
-                () => catalog.ExecuteStatementAsync("UPDATE v SET a = 1"));
+                () => RunAsync(catalog, "UPDATE v SET a = 1"));
         Assert.Contains("is a view", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("UPDATE", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -431,9 +431,15 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE VIEW v AS SELECT a FROM t");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => catalog.ExecuteStatementAsync("DELETE FROM v"));
+            () => RunAsync(catalog, "DELETE FROM v"));
         Assert.Contains("is a view", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DELETE", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task RunAsync(TableCatalog catalog, string sql)
+    {
+        StatementPlan plan = await catalog.PlanAsync(sql);
+        await catalog.ExecuteAsync(plan).DrainAsync();
     }
 
     [Fact]

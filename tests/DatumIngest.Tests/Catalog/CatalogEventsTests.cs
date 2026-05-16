@@ -45,7 +45,7 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
         FunctionCreatedEvent? captured = null;
         catalog.Events.FunctionCreated += e => captured = e;
 
-        await catalog.ExecuteStatementAsync("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
+        catalog.Plan("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
 
         Assert.NotNull(captured);
         Assert.Equal("public", captured!.Name.Schema);
@@ -57,12 +57,12 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
     public async Task CreateOrReplaceFunction_FiresFunctionAltered_WhenPreviousExists()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
-        await catalog.ExecuteStatementAsync("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
+        catalog.Plan("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
 
         FunctionAlteredEvent? captured = null;
         catalog.Events.FunctionAltered += e => captured = e;
 
-        await catalog.ExecuteStatementAsync("CREATE OR REPLACE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x + x");
+        catalog.Plan("CREATE OR REPLACE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x + x");
 
         Assert.NotNull(captured);
         Assert.NotNull(captured!.Before);
@@ -73,12 +73,12 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
     public async Task DropFunction_FiresFunctionDropped()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
-        await catalog.ExecuteStatementAsync("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
+        catalog.Plan("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
 
         FunctionDroppedEvent? captured = null;
         catalog.Events.FunctionDropped += e => captured = e;
 
-        await catalog.ExecuteStatementAsync("DROP FUNCTION public.dbl");
+        catalog.Plan("DROP FUNCTION public.dbl");
 
         Assert.NotNull(captured);
         Assert.NotNull(captured!.Before);
@@ -92,7 +92,7 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
         ProcedureCreatedEvent? captured = null;
         catalog.Events.ProcedureCreated += e => captured = e;
 
-        await catalog.ExecuteStatementAsync("CREATE PROCEDURE public.noop() AS BEGIN SELECT 1 END");
+        catalog.Plan("CREATE PROCEDURE public.noop() AS BEGIN SELECT 1 END");
 
         Assert.NotNull(captured);
         Assert.Equal("noop", captured!.Name.Name);
@@ -102,12 +102,12 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
     public async Task DropProcedure_FiresProcedureDropped()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
-        await catalog.ExecuteStatementAsync("CREATE PROCEDURE public.noop() AS BEGIN SELECT 1 END");
+        catalog.Plan("CREATE PROCEDURE public.noop() AS BEGIN SELECT 1 END");
 
         ProcedureDroppedEvent? captured = null;
         catalog.Events.ProcedureDropped += e => captured = e;
 
-        await catalog.ExecuteStatementAsync("DROP PROCEDURE public.noop");
+        catalog.Plan("DROP PROCEDURE public.noop");
 
         Assert.NotNull(captured);
         Assert.NotNull(captured!.Before);
@@ -120,7 +120,7 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
         SchemaCreatedEvent? captured = null;
         catalog.Events.SchemaCreated += e => captured = e;
 
-        await catalog.ExecuteStatementAsync("CREATE SCHEMA myapp");
+        catalog.Plan("CREATE SCHEMA myapp");
 
         Assert.NotNull(captured);
         Assert.Equal("myapp", captured!.SchemaName);
@@ -130,12 +130,12 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
     public async Task DropSchema_FiresSchemaDropped()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
-        await catalog.ExecuteStatementAsync("CREATE SCHEMA myapp");
+        catalog.Plan("CREATE SCHEMA myapp");
 
         SchemaDroppedEvent? captured = null;
         catalog.Events.SchemaDropped += e => captured = e;
 
-        await catalog.ExecuteStatementAsync("DROP SCHEMA myapp");
+        catalog.Plan("DROP SCHEMA myapp");
 
         Assert.NotNull(captured);
         Assert.Equal("myapp", captured!.SchemaName);
@@ -148,7 +148,7 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
         TableCreatedEvent? captured = null;
         catalog.Events.TableCreated += e => captured = e;
 
-        await catalog.ExecuteStatementAsync("CREATE TABLE public.things (id INT32 NOT NULL, name STRING)");
+        catalog.Plan("CREATE TABLE public.things (id INT32 NOT NULL, name STRING)");
 
         Assert.NotNull(captured);
         Assert.Equal("things", captured!.Name.Name);
@@ -160,12 +160,12 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
     public async Task DropTable_FiresTableDropped_WithBeforeSchema()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
-        await catalog.ExecuteStatementAsync("CREATE TABLE public.things (id INT32 NOT NULL, name STRING)");
+        catalog.Plan("CREATE TABLE public.things (id INT32 NOT NULL, name STRING)");
 
         TableDroppedEvent? captured = null;
         catalog.Events.TableDropped += e => captured = e;
 
-        await catalog.ExecuteStatementAsync("DROP TABLE public.things");
+        catalog.Plan("DROP TABLE public.things");
 
         Assert.NotNull(captured);
         Assert.NotNull(captured!.Before);
@@ -176,12 +176,12 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
     public async Task AlterTableAddColumn_FiresTableAltered()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
-        await catalog.ExecuteStatementAsync("CREATE TABLE public.things (id INT32 NOT NULL)");
+        catalog.Plan("CREATE TABLE public.things (id INT32 NOT NULL)");
 
         TableAlteredEvent? captured = null;
         catalog.Events.TableAltered += e => captured = e;
 
-        await catalog.ExecuteStatementAsync("ALTER TABLE public.things ADD COLUMN name STRING");
+        catalog.Plan("ALTER TABLE public.things ADD COLUMN name STRING");
 
         Assert.NotNull(captured);
         Assert.NotNull(captured!.Before);
@@ -193,13 +193,13 @@ public sealed class CatalogEventsTests : ServiceTestBase, IDisposable
     public async Task IfNotExistsCreateFunction_DoesNotFire_WhenAlreadyExists()
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
-        await catalog.ExecuteStatementAsync("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
+        catalog.Plan("CREATE FUNCTION public.dbl(x INT32) RETURNS INT32 AS x * 2");
 
         bool fired = false;
         catalog.Events.FunctionCreated += _ => fired = true;
         catalog.Events.FunctionAltered += _ => fired = true;
 
-        await catalog.ExecuteStatementAsync("CREATE FUNCTION IF NOT EXISTS public.dbl(x INT32) RETURNS INT32 AS x * 99");
+        catalog.Plan("CREATE FUNCTION IF NOT EXISTS public.dbl(x INT32) RETURNS INT32 AS x * 99");
 
         Assert.False(fired, "IF NOT EXISTS hit on an existing function should not raise any event.");
     }

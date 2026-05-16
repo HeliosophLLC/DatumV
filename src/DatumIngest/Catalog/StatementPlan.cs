@@ -35,7 +35,7 @@ namespace DatumIngest.Catalog;
 /// their <see cref="BatchExecutor"/> owns.
 /// </para>
 /// </remarks>
-public abstract class StatementPlan
+public abstract class StatementPlan : PreparedSql
 {
     /// <summary>
     /// Initializes a new <see cref="StatementPlan"/> instance.
@@ -52,10 +52,8 @@ public abstract class StatementPlan
     /// </summary>
     public abstract ExplainPlanNode ExplainTree { get; }
 
-    /// <summary>
-    /// Gets the <see cref="TableCatalog"/> this plan was built against.
-    /// </summary>
-    public TableCatalog Catalog { get; }
+    /// <inheritdoc />
+    public override TableCatalog Catalog { get; }
 
     /// <summary>
     /// Default: returns the static <see cref="ExplainTree"/>. Side-effect
