@@ -42,7 +42,7 @@
         "KeypointDetector"
       ],
       "cardFile": "cards/coco2017/index.md",
-      "heroImageFile": "cards/coco2017/hero.png",
+      "heroImageFile": "cards/coco2017/hero.jpg",
       "variants": [
         {
           "id": "coco_test2017",
