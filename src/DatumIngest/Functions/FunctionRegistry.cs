@@ -830,6 +830,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Uuid.UuidExtractVersionFunction>();
 
         // Image
+        registry.RegisterScalar<Scalar.Image.ImageDecodeFunction>();
         registry.RegisterScalar<Scalar.Image.CreateImageRgbFunction>();
         registry.RegisterScalar<Scalar.Image.VideoFrameToImageFunction>();
         registry.RegisterScalar<Scalar.Image.YoloxPreprocessFunction>();
@@ -1146,6 +1147,7 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate<Aggregates.StringAggregateFunction>();
         registry.RegisterAggregate<Aggregates.ArrayAggregateFunction>();
         registry.RegisterAggregate<Aggregates.ImageStackAggregateFunction>();
+        registry.RegisterAggregate<Aggregates.ImageTileAggregateFunction>();
         registry.RegisterAggregate<Aggregates.PcFuseAggregateFunction>();
         registry.RegisterAggregate<Aggregates.PcVoxelConsensusAggregateFunction>();
         registry.RegisterAggregate<Aggregates.ArgMaxFunction>();
