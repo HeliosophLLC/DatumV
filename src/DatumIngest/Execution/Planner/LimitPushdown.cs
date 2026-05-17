@@ -9,8 +9,11 @@ namespace DatumIngest.Execution.Planner;
 /// of a planned operator tree so expensive per-row work in the projection
 /// only evaluates for the rows that survive LIMIT/OFFSET. Walks through any
 /// adjacent chain of row-preserving wrappers (<see cref="ProjectOperator"/>
-/// without <c>ASSERT</c>, <see cref="RowEnricherOperator"/>) and slots the
-/// <see cref="LimitOperator"/> in just below the deepest one.
+/// without <c>ASSERT</c>, <see cref="RowEnricherOperator"/>,
+/// <see cref="ModelInvocationOperator"/>) and slots the
+/// <see cref="LimitOperator"/> in just below the deepest one. Pushing under
+/// model invocation matters a lot — the model is the expensive per-row work
+/// in image / vision queries.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,8 +24,7 @@ namespace DatumIngest.Execution.Planner;
 /// </para>
 /// <para>
 /// The walk stops at non-row-preserving operators (Filter, Distinct, OrderBy,
-/// GroupBy, Join, Limit, ModelInvocation, etc.) so cardinality semantics are
-/// preserved.
+/// GroupBy, Join, Limit, etc.) so cardinality semantics are preserved.
 /// </para>
 /// </remarks>
 internal static class LimitPushdown
@@ -74,6 +76,9 @@ internal static class LimitPushdown
             case RowEnricherOperator enricher:
                 inner = enricher.Source;
                 return true;
+            case ModelInvocationOperator model:
+                inner = model.Source;
+                return true;
             default:
                 inner = null;
                 return false;
@@ -84,6 +89,7 @@ internal static class LimitPushdown
     {
         ProjectOperator p => new ProjectOperator(newSource, p.Columns, p.LetBindings, p.Assertions),
         RowEnricherOperator e => new RowEnricherOperator(newSource, e.Enrichments),
+        ModelInvocationOperator m => new ModelInvocationOperator(newSource, m.Invocations),
         _ => throw new InvalidOperationException($"Unexpected wrapper type: {original.GetType().Name}"),
     };
 
