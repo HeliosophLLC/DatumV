@@ -256,7 +256,7 @@ public static class ParameterBinder
                     ? BindExpression(join.OnCondition, parameters)
                     : null;
                 TableSource source = BindTableSource(join.Source, parameters);
-                boundJoins[i] = new JoinClause(join.Type, source, onCondition);
+                boundJoins[i] = new JoinClause(join.Type, source, onCondition, join.IsLateral);
             }
 
             joins = boundJoins;
@@ -972,7 +972,7 @@ public static class ParameterBinder
                 Expression? on = j.OnCondition is not null
                     ? BindExpression(j.OnCondition, parameters)
                     : null;
-                boundJoins[i] = new JoinClause(j.Type, BindTableSource(j.Source, parameters), on);
+                boundJoins[i] = new JoinClause(j.Type, BindTableSource(j.Source, parameters), on, j.IsLateral);
             }
             joins = boundJoins;
         }

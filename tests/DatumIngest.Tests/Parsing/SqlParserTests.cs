@@ -1146,6 +1146,45 @@ public class SqlParserTests : ServiceTestBase
         Assert.False(result.Joins[0].IsLateral);
     }
 
+    [Fact]
+    public void CrossJoin_FunctionSource_IsImplicitlyLateral()
+    {
+        // PG semantics: function sources on the right of any JOIN are implicitly
+        // LATERAL, mirroring the comma-form rule. Without this, `a.bytes` would
+        // resolve against an empty right-side scope.
+        SelectStatement result = Parse(
+            "SELECT * FROM open_archive('x') AS a CROSS JOIN open_cifar10(a.bytes) AS c");
+
+        Assert.NotNull(result.Joins);
+        Assert.Single(result.Joins);
+        Assert.Equal(JoinType.Cross, result.Joins[0].Type);
+        Assert.True(result.Joins[0].IsLateral);
+        FunctionSource fn = Assert.IsType<FunctionSource>(result.Joins[0].Source);
+        Assert.Equal("open_cifar10", fn.FunctionName);
+    }
+
+    [Fact]
+    public void InnerJoin_FunctionSource_IsImplicitlyLateral()
+    {
+        SelectStatement result = Parse(
+            "SELECT * FROM t INNER JOIN unnest(t.tags) AS u ON true");
+
+        Assert.NotNull(result.Joins);
+        Assert.Equal(JoinType.Inner, result.Joins[0].Type);
+        Assert.True(result.Joins[0].IsLateral);
+    }
+
+    [Fact]
+    public void LeftJoin_FunctionSource_IsImplicitlyLateral()
+    {
+        SelectStatement result = Parse(
+            "SELECT * FROM t LEFT JOIN unnest(t.tags) AS u ON true");
+
+        Assert.NotNull(result.Joins);
+        Assert.Equal(JoinType.Left, result.Joins[0].Type);
+        Assert.True(result.Joins[0].IsLateral);
+    }
+
     // ————————————————————— Arithmetic expressions —————————————————————
 
     [Fact]

@@ -526,6 +526,13 @@ public static partial class SqlParser
             .Select(_ => (JoinType.Inner, false)));
 
     /// <summary>A single JOIN clause with source and optional ON condition.</summary>
+    /// <remarks>
+    /// A <see cref="FunctionSource"/> on the right of any JOIN is promoted to
+    /// LATERAL automatically, matching PG's "function calls in FROM are
+    /// implicitly LATERAL" rule and mirroring <see cref="CommaJoinSourcesParser"/>.
+    /// Without this, <c>... JOIN open_cifar10(a.bytes) AS c</c> would resolve
+    /// <c>a.bytes</c> against an empty right-side scope.
+    /// </remarks>
     private static readonly TokenListParser<SqlToken, JoinClause> JoinClauseParser =
         from joinInfo in JoinTypeParser
         from source in TableSourceParser
@@ -534,7 +541,8 @@ public static partial class SqlParser
             from condition in ExpressionParser
             select condition
         ).OptionalOrDefault()
-        select new JoinClause(joinInfo.Type, source, onCondition, joinInfo.IsLateral);
+        select new JoinClause(joinInfo.Type, source, onCondition,
+            joinInfo.IsLateral || source is FunctionSource);
 
     /// <summary>Zero or more JOIN clauses.</summary>
     private static readonly TokenListParser<SqlToken, JoinClause[]> JoinClausesParser =
