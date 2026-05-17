@@ -132,11 +132,15 @@ public sealed class CompletionProvider
 
             case CompletionZoneKind.AfterOrderBy:
                 AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
+                AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterGroupBy:
                 AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddScalarFunctions(items, effectiveScalarWhitelist);
+                AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 

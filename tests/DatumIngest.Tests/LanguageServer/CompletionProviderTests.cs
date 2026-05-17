@@ -502,6 +502,27 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.Contains(items, item => item.Label == "DESC" && item.Kind == CompletionItemKind.Keyword);
     }
 
+    [Fact]
+    public void GetCompletions_AfterOrderBy_OffersScalarFunctions()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM users ORDER BY ", 29);
+
+        Assert.Contains(items, item => item.Label == "abs" && item.Kind == CompletionItemKind.Function);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterGroupBy_OffersScalarFunctions()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT name FROM users GROUP BY ", 32);
+
+        Assert.Contains(items, item => item.Label == "name" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "abs" && item.Kind == CompletionItemKind.Function);
+    }
+
     // ───────────────────── Dot-qualified ─────────────────────
 
     [Fact]
