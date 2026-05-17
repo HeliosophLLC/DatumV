@@ -339,13 +339,44 @@ internal sealed class ManifestStore : IManifestStore
                         "`sourcePath` (direct ingest) or `sqlFile` (SQL ingest); " +
                         (hasDirect ? "both are set." : "neither is set."));
                 }
-                if (hasSql && string.IsNullOrWhiteSpace(job.Archive))
+                if (hasSql)
                 {
-                    throw new InvalidOperationException(
-                        $"Dataset variant '{variant.Id}' version '{v.Version}' ingest job " +
-                        $"'{job.TableName}' in {manifestPath} declares `sqlFile` but no " +
-                        "`archive` field. SQL ingests need an archive name so the install " +
-                        "pipeline can bind $archive + $archive_stem.");
+                    bool hasArchive = !string.IsNullOrWhiteSpace(job.Archive);
+                    bool hasArchives = job.Archives is { Count: > 0 };
+                    if (hasArchive == hasArchives)
+                    {
+                        throw new InvalidOperationException(
+                            $"Dataset variant '{variant.Id}' version '{v.Version}' ingest job " +
+                            $"'{job.TableName}' in {manifestPath} declares `sqlFile` but " +
+                            (hasArchive
+                                ? "also sets `archives`; pick exactly one. Use `archive` for a "
+                                    + "single-source recipe ($archive + $archive_stem), or `archives` "
+                                    + "for a multi-source recipe ($<name> per entry)."
+                                : "neither `archive` nor `archives`. Use `archive` for a "
+                                    + "single-source recipe ($archive + $archive_stem), or `archives` "
+                                    + "for a multi-source recipe ($<name> per entry)."));
+                    }
+                    if (hasArchives)
+                    {
+                        foreach ((string paramName, string archivePath) in job.Archives!)
+                        {
+                            if (!IsValidSqlIdentifier(paramName))
+                            {
+                                throw new InvalidOperationException(
+                                    $"Dataset variant '{variant.Id}' version '{v.Version}' ingest job " +
+                                    $"'{job.TableName}' in {manifestPath} declares archives entry " +
+                                    $"'{paramName}' which is not a valid SQL identifier. Each archives " +
+                                    "key is bound as a `$name` parameter so names must be snake_case.");
+                            }
+                            if (string.IsNullOrWhiteSpace(archivePath))
+                            {
+                                throw new InvalidOperationException(
+                                    $"Dataset variant '{variant.Id}' version '{v.Version}' ingest job " +
+                                    $"'{job.TableName}' in {manifestPath} archives entry " +
+                                    $"'{paramName}' has empty path.");
+                            }
+                        }
+                    }
                 }
                 if (!tableNames.Add(job.TableName))
                 {

@@ -6,6 +6,7 @@ using DatumIngest.DatasetLibrary;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
+using DatumIngest.Tests.Functions.TableValued;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -220,6 +221,133 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
             ct: default);
 
         Assert.Equal(1, result.RowCount);
+    }
+
+    [Fact]
+    public void Parse_CrossJoinOpenCifar_MarksJoinAsLateral()
+    {
+        DatumIngest.Parsing.Ast.Statement parsed = DatumIngest.Parsing.SqlParser.ParseStatement(
+            "SELECT c.idx FROM open_archive($archive) AS a " +
+            "CROSS JOIN open_cifar10(a.bytes) AS c");
+        DatumIngest.Parsing.Ast.QueryStatement query = Assert.IsType<DatumIngest.Parsing.Ast.QueryStatement>(parsed);
+        DatumIngest.Parsing.Ast.SelectQueryExpression sel =
+            Assert.IsType<DatumIngest.Parsing.Ast.SelectQueryExpression>(query.Query);
+        DatumIngest.Parsing.Ast.JoinClause join = Assert.Single(sel.Statement.Joins!);
+        Assert.True(join.IsLateral, "CROSS JOIN with a FunctionSource right side should be implicit-LATERAL");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JoinWithUncorrelatedFunctionSource_UsesHashJoinNotLateral()
+    {
+        // Repro for the MNIST-install hang. `open_idx_labels($labels)` has no
+        // column references after parameter binding, so the implicit-LATERAL
+        // promotion (right side re-executed per outer row, O(N*M)) is purely a
+        // performance penalty over a regular hash join (O(N+M)). The 60k×60k
+        // MNIST shape would never finish under the lateral plan.
+        // Verifies the regression by ingesting a synthetic-but-large IDX pair
+        // and checking it completes within a reasonable budget.
+        const int rowCount = 5000;
+        byte[] imagesIdx = OpenIdxImagesFunctionTests.BuildIdxImagesFile(
+            itemCount: rowCount, height: 4, width: 4, gradientStart: 0);
+        byte[] labelsIdx = OpenIdxImagesFunctionTests.BuildIdxLabelsFile(itemCount: rowCount);
+        string imagesPath = Path.Combine(_scratch, "images.idx");
+        string labelsPath = Path.Combine(_scratch, "labels.idx");
+        await File.WriteAllBytesAsync(imagesPath, imagesIdx);
+        await File.WriteAllBytesAsync(labelsPath, labelsIdx);
+
+        TableCatalog catalog = CreateCatalog();
+        SqlIngestExecutor executor = new(catalog, CreatePool(), NullLogger<SqlIngestExecutor>.Instance);
+        string destPath = Path.Combine(_scratch, "joined.datum");
+
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
+        SqlIngestResult result = await executor.ExecuteAsync(
+            sql:
+                "SELECT i.idx AS idx, i.image AS image, l.label AS label " +
+                "FROM open_idx_images($images) AS i " +
+                "JOIN open_idx_labels($labels) AS l ON i.idx = l.idx",
+            parameters: new Dictionary<string, ParameterValue>(StringComparer.Ordinal)
+            {
+                ["images"] = new StringParameter(imagesPath),
+                ["labels"] = new StringParameter(labelsPath),
+            },
+            destPath: destPath,
+            onRowProgress: null,
+            ct: cts.Token);
+
+        Assert.Equal(rowCount, result.RowCount);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CteJoinedToFromSource_ResolvesCteAsTable()
+    {
+        // Repro for the CIFAR-10 labels-CTE failure: a WITH clause defining
+        // a CTE, then the outer SELECT joining that CTE as a regular table
+        // source via JOIN ON. The CTE name should resolve from WITH-scope —
+        // SchemaResolver shouldn't reach into the catalog for it.
+        string archivePath = Path.Combine(_scratch, "labels.zip");
+        byte[] metaTxt = System.Text.Encoding.UTF8.GetBytes("airplane\nautomobile\nbird\n");
+        byte[] cifarBatch = OpenCifar10FunctionTests.BuildCifar10Batch(labels: [0, 1, 2]);
+        BuildZip(archivePath,
+        [
+            ("cifar-10-batches-bin/batches.meta.txt", metaTxt),
+            ("cifar-10-batches-bin/test_batch.bin", cifarBatch),
+        ]);
+
+        TableCatalog catalog = CreateCatalog();
+        SqlIngestExecutor executor = new(catalog, CreatePool(), NullLogger<SqlIngestExecutor>.Instance);
+        string destPath = Path.Combine(_scratch, "cte.datum");
+        SqlIngestResult result = await executor.ExecuteAsync(
+            sql:
+                "WITH labels AS ( " +
+                "  SELECT CAST(row_number() OVER () - 1 AS UInt8) AS label_id, " +
+                "         f.fields[1] AS label_name " +
+                "  FROM open_archive($archive, 'cifar-10-batches-bin/batches.meta.txt') tt " +
+                "  JOIN read_csv(tt.bytes) f " +
+                ") " +
+                "SELECT c.idx, c.image, c.label, labels.label_name " +
+                "FROM open_archive($archive, 'cifar-10-batches-bin/test_batch.bin') AS a " +
+                "CROSS JOIN open_cifar10(a.bytes) AS c " +
+                "JOIN labels ON labels.label_id = c.label",
+            parameters: new Dictionary<string, ParameterValue>(StringComparer.Ordinal)
+            {
+                ["archive"] = new StringParameter(archivePath),
+            },
+            destPath: destPath,
+            onRowProgress: null,
+            ct: default);
+
+        Assert.Equal(3, result.RowCount);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CrossJoinFunctionSource_WithParameter_ResolvesLateralColumn()
+    {
+        // Repro for the CIFAR-10 train recipe failure: CROSS JOIN a function
+        // source whose argument references a column from the preceding
+        // function source, with the outer source's first argument bound via
+        // a $parameter. The implicit-LATERAL promotion needs `a.bytes` to
+        // resolve against the outer row at right-side execution time.
+        byte[] cifarBatch = OpenCifar10FunctionTests.BuildCifar10Batch(labels: [0, 1, 2]);
+        string archivePath = Path.Combine(_scratch, "cifar.zip");
+        BuildZip(archivePath, [("cifar-10-batches-bin/data_batch_1.bin", cifarBatch)]);
+
+        TableCatalog catalog = CreateCatalog();
+        SqlIngestExecutor executor = new(catalog, CreatePool(), NullLogger<SqlIngestExecutor>.Instance);
+
+        string destPath = Path.Combine(_scratch, "cifar.datum");
+        SqlIngestResult result = await executor.ExecuteAsync(
+            sql: "SELECT c.idx AS idx, c.image AS image, c.label AS label "
+               + "FROM open_archive($archive, 'cifar-10-batches-bin/data_batch_%.bin') AS a "
+               + "CROSS JOIN open_cifar10(a.bytes) AS c",
+            parameters: new Dictionary<string, ParameterValue>(StringComparer.Ordinal)
+            {
+                ["archive"] = new StringParameter(archivePath),
+            },
+            destPath: destPath,
+            onRowProgress: null,
+            ct: default);
+
+        Assert.Equal(3, result.RowCount);
     }
 
     // ————————————————————————— Helpers —————————————————————————

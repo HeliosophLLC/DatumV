@@ -512,13 +512,15 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
         return await ingester.IngestAsync(source, destination, ct).ConfigureAwait(false);
     }
 
-    // SQL-shape ingest. Reads the script from `<manifestDir>/<job.SqlFile>`,
-    // binds `$archive` (absolute path of `<rawDir>/<job.Archive>`) and
-    // `$archive_stem` (basename stripped of compound archive extensions),
-    // and streams rows from the planner straight into a fresh .datum.
-    // The IngestionResult returned uses synthetic stats — Manifest and
-    // Schema fields stay empty; downstream consumers that need them are
-    // a follow-up.
+    // SQL-shape ingest. Reads the script from `<manifestDir>/<job.SqlFile>`
+    // and binds either:
+    //   - `$archive` + `$archive_stem` for single-archive jobs (legacy
+    //     shape, used by LJSpeech), or
+    //   - `$<name>` for each entry in `archives` for multi-archive jobs
+    //     (used by MNIST / Fashion-MNIST).
+    // Streams rows from the planner straight into a fresh .datum. The
+    // IngestionResult uses synthetic stats — Manifest and Schema stay
+    // empty; collection for SQL ingest is a follow-up.
     private async Task<IngestionResult> RunSqlIngestJobAsync(
         string variantId,
         string rawDir,
@@ -536,25 +538,47 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
         }
         string sql = await File.ReadAllTextAsync(sqlScriptPath, ct).ConfigureAwait(false);
 
-        string archivePath = Path.Combine(rawDir, job.Archive!);
-        if (!File.Exists(archivePath))
+        Dictionary<string, ParameterValue> parameters = new(StringComparer.Ordinal);
+
+        if (!string.IsNullOrWhiteSpace(job.Archive))
         {
-            throw new FileNotFoundException(
-                $"Ingest job '{job.TableName}' SQL targets archive '{job.Archive}' " +
-                $"but the file '{archivePath}' is missing after download.",
-                archivePath);
+            string archivePath = Path.Combine(rawDir, job.Archive);
+            if (!File.Exists(archivePath))
+            {
+                throw new FileNotFoundException(
+                    $"Ingest job '{job.TableName}' SQL targets archive '{job.Archive}' " +
+                    $"but the file '{archivePath}' is missing after download.",
+                    archivePath);
+            }
+            parameters["archive"] = new StringParameter(archivePath);
+            // Only bind $archive_stem if the recipe references it — the
+            // ParameterBinder rejects unreferenced parameters as a typo guard,
+            // and folder-of-classes recipes (EuroSAT, Oxford Pets) don't need
+            // a stem since the class lives inside the path, not the archive
+            // basename. Substring check is good enough — the token is unique.
+            if (sql.Contains("$archive_stem", StringComparison.Ordinal))
+            {
+                string archiveStem = StripCompoundArchiveExtensions(job.Archive);
+                parameters["archive_stem"] = new StringParameter(archiveStem);
+            }
         }
-
-        string archiveStem = StripCompoundArchiveExtensions(job.Archive!);
-
-        // The parameter values are short strings — bind via the no-arena
-        // overload so the executor's binding doesn't depend on the
-        // download service holding an arena.
-        Dictionary<string, ParameterValue> parameters = new(StringComparer.Ordinal)
+        else
         {
-            ["archive"]      = new StringParameter(archivePath),
-            ["archive_stem"] = new StringParameter(archiveStem),
-        };
+            // Multi-archive shape — manifest validator guarantees Archives
+            // is non-null and non-empty when Archive is absent.
+            foreach ((string paramName, string archiveRel) in job.Archives!)
+            {
+                string archivePath = Path.Combine(rawDir, archiveRel);
+                if (!File.Exists(archivePath))
+                {
+                    throw new FileNotFoundException(
+                        $"Ingest job '{job.TableName}' SQL targets archives['{paramName}'] = " +
+                        $"'{archiveRel}' but the file '{archivePath}' is missing after download.",
+                        archivePath);
+                }
+                parameters[paramName] = new StringParameter(archivePath);
+            }
+        }
 
         string destPath = Path.Combine(ingestedDir, $"{job.TableName}.datum");
         // Fan the executor's row-count callback out to the reporter so the

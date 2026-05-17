@@ -145,6 +145,32 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
+    /// Returns <paramref name="join"/> unchanged when its source genuinely
+    /// correlates to an outer scope, otherwise strips the
+    /// <see cref="JoinClause.IsLateral"/> flag. The parser promotes every
+    /// <c>JOIN &lt;fn&gt;(...)</c> with a <see cref="FunctionSource"/> to
+    /// LATERAL (PG-style implicit lateral) because the function arguments
+    /// <em>may</em> reference outer columns; when none of them do the
+    /// promotion is purely a performance penalty (right side re-executed
+    /// per outer row instead of a single hash/merge join).
+    /// </summary>
+    private static JoinClause DemoteUncorrelatedLateral(JoinClause join)
+    {
+        if (!join.IsLateral || join.Source is not FunctionSource fs)
+        {
+            return join;
+        }
+        foreach (Expression argument in fs.Arguments)
+        {
+            if (ColumnReferenceCollector.Collect(argument).Count > 0)
+            {
+                return join;
+            }
+        }
+        return join with { IsLateral = false };
+    }
+
+    /// <summary>
     /// Plans the given query expression with cost-based late materialization of expensive columns.
     /// Dispatches to the appropriate planning method based on whether the query
     /// is a single SELECT or a compound set operation.
@@ -482,7 +508,14 @@ public sealed class QueryPlanner
                 QueryOperator rightSide = _sourcePlanner.PlanSource(join.Source, allReferencedColumns, hasJoins, commonTableExpressionOperators);
                 HashSet<string> rightAliases = new(StringComparer.OrdinalIgnoreCase);
                 SourceAliases.CollectSourceAliases(join.Source, rightAliases);
-                plannedJoins.Add((join, rightSide, rightAliases));
+                // Demote implicit-LATERAL when the FunctionSource has no column
+                // references in its arguments — semantically identical to a
+                // non-lateral join, but a regular hash join is O(N+M) where the
+                // lateral path is O(N*M) (right side re-executed per outer row).
+                // The parser conservatively flags every `JOIN <fn>(...)` as
+                // lateral; this strips the flag for genuinely uncorrelated TVF
+                // calls so JoinReorderer + the hash/merge join planner kick in.
+                plannedJoins.Add((DemoteUncorrelatedLateral(join), rightSide, rightAliases));
             }
 
             // When ORDER BY has a single qualified column reference, check whether

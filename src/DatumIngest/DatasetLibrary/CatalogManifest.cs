@@ -165,12 +165,23 @@ public sealed record CatalogDatasetVersion(
 //     …). Used by image-bag and one-file-per-table datasets.
 //
 //   * "SQL" shape — SqlFile names a .sql script (relative to the manifest
-//     directory) that produces the ingested rows. Archive names the source
-//     file the script primarily targets (relative to raw cache); its
-//     absolute path is bound as the $archive parameter, and its base name
-//     stripped of compound extensions (e.g. `LJSpeech-1.1.tar.gz` →
-//     `LJSpeech-1.1`) is bound as $archive_stem so SQL can reference the
-//     top-level dir inside the archive without hard-coding it.
+//     directory) that produces the ingested rows. The script's raw-cache
+//     inputs are declared via one of two shapes:
+//
+//       - Archive (single) — the file the script primarily targets
+//         (relative to raw cache); its absolute path is bound as
+//         $archive and its base name stripped of compound extensions
+//         (e.g. `LJSpeech-1.1.tar.gz` → `LJSpeech-1.1`) is bound as
+//         $archive_stem. Used by single-file recipes like LJSpeech.
+//
+//       - Archives (named map) — multiple raw-cache files keyed by a
+//         caller-chosen logical name. Each entry binds an absolute path
+//         to the parameter $&lt;name&gt; (e.g. `archives: { "images": "...",
+//         "labels": "..." }` binds $images and $labels). Used by recipes
+//         that need to JOIN across two or more source files at install
+//         time, e.g. MNIST images-IDX + labels-IDX. $archive_stem is not
+//         bound in this shape — recipes that need per-file stems compute
+//         them with SQL string functions.
 //
 // TableName is the file stem of the produced `.datum` in either shape and
 // follows the single-job / multi-job naming rule the binder uses when
@@ -179,4 +190,5 @@ public sealed record CatalogIngestJob(
     string TableName,
     string? SourcePath = null,
     string? SqlFile = null,
-    string? Archive = null);
+    string? Archive = null,
+    IReadOnlyDictionary<string, string>? Archives = null);

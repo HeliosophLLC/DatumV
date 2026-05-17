@@ -831,6 +831,7 @@ public sealed class FunctionRegistry
 
         // Image
         registry.RegisterScalar<Scalar.Image.ImageDecodeFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageEncodeFunction>();
         registry.RegisterScalar<Scalar.Image.CreateImageRgbFunction>();
         registry.RegisterScalar<Scalar.Image.VideoFrameToImageFunction>();
         registry.RegisterScalar<Scalar.Image.YoloxPreprocessFunction>();
@@ -1113,6 +1114,10 @@ public sealed class FunctionRegistry
         registry.RegisterTableValued<TableValued.OpenFolderFunction>();
         registry.RegisterTableValued<TableValued.ListFolderFunction>();
         registry.RegisterTableValued<TableValued.ReadCsvFunction>();
+        registry.RegisterTableValued<TableValued.OpenIdxImagesFunction>();
+        registry.RegisterTableValued<TableValued.OpenIdxLabelsFunction>();
+        registry.RegisterTableValued<TableValued.OpenCifar10Function>();
+        registry.RegisterTableValued<TableValued.OpenCifar100Function>();
 
         // Inference toolkit. Lives in its own `inference` schema so the
         // introspection surface (onnx_inspect, devices, ...) doesn't

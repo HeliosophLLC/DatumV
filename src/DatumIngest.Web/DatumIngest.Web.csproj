@@ -81,11 +81,10 @@
     TypeScript client into ClientApp/src/api/generated/openapi-client.ts.
 
     nswag.json drives both stages. NSwag boots Program.CreateHostBuilder (in
-    Program.cs) to resolve IDocumentProvider. Runs after Build so $(TargetPath)
-    is current; also invokable manually via /t:GenerateOpenApi.
+    Program.cs) to resolve IDocumentProvider. Manual only — invoke via
+    /t:GenerateOpenApi (or the /t:GenerateApi umbrella).
   -->
   <Target Name="GenerateOpenApi"
-          AfterTargets="Build"
           Inputs="$(TargetPath);nswag.json"
           Outputs="ClientApp/src/api/generated/openapi-client.ts">
     <Exec Command="$(NSwagExe_Net80) run nswag.json /variables:Configuration=$(Configuration)"
@@ -106,10 +105,9 @@
   <!--
     Hub codegen via TypedSignalR.Client.TypeScript.Generator. Reflects Hub<T>
     classes + their client interfaces, emits typed HubConnection wrappers.
-    Runs after GenerateOpenApi so any shared DTOs are emitted first.
+    Manual only — invoke via /t:GenerateHubTypes (or the /t:GenerateApi umbrella).
   -->
   <Target Name="GenerateHubTypes"
-          AfterTargets="GenerateOpenApi"
           DependsOnTargets="ToolRestore"
           Inputs="$(TargetPath)"
           Outputs="ClientApp/src/api/generated/hubs/TypedSignalR.Client/index.ts">

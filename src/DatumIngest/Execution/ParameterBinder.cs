@@ -291,21 +291,57 @@ public static class ParameterBinder
             orderBy = new OrderByClause(orderItems);
         }
 
-        return new SelectStatement(
-            columns,
-            from,
-            statement.Into,
-            joins,
-            where,
-            groupBy,
-            having,
-            qualify,
-            statement.Assertions,
-            statement.Pivot,
-            statement.Unpivot,
-            orderBy,
-            statement.Limit,
-            statement.Offset);
+        // Recurse into CTE bodies and LET binding expressions so $parameters
+        // inside them substitute too. Without this, `WITH foo AS (… $archive …)`
+        // would leave the parameter unbound and trip the planner.
+        IReadOnlyList<CommonTableExpression>? commonTableExpressions = null;
+        if (statement.CommonTableExpressions is not null)
+        {
+            CommonTableExpression[] bound = new CommonTableExpression[statement.CommonTableExpressions.Count];
+            for (int i = 0; i < statement.CommonTableExpressions.Count; i++)
+            {
+                CommonTableExpression cte = statement.CommonTableExpressions[i];
+                bound[i] = cte with
+                {
+                    Body = BindQueryExpression(cte.Body, parameters),
+                    RecursiveQuery = cte.RecursiveQuery is not null
+                        ? BindStatement(cte.RecursiveQuery, parameters)
+                        : null,
+                };
+            }
+            commonTableExpressions = bound;
+        }
+
+        IReadOnlyList<LetBinding>? letBindings = null;
+        if (statement.LetBindings is not null)
+        {
+            LetBinding[] bound = new LetBinding[statement.LetBindings.Count];
+            for (int i = 0; i < statement.LetBindings.Count; i++)
+            {
+                LetBinding binding = statement.LetBindings[i];
+                bound[i] = binding with { Expression = BindExpression(binding.Expression, parameters) };
+            }
+            letBindings = bound;
+        }
+
+        // `with` preserves fields ParameterBinder doesn't touch (Distinct,
+        // CrossValidate, …). A positional ctor here would silently drop
+        // trailing record fields whenever the AST grows — historical instance:
+        // WITH-clause CTEs vanished post-bind because the positional call
+        // passed only the leading 13 args.
+        return statement with
+        {
+            Columns = columns,
+            From = from,
+            Joins = joins,
+            Where = where,
+            GroupBy = groupBy,
+            Having = having,
+            Qualify = qualify,
+            OrderBy = orderBy,
+            CommonTableExpressions = commonTableExpressions,
+            LetBindings = letBindings,
+        };
     }
 
     private static IReadOnlyList<SelectColumn> BindSelectColumns(

@@ -423,6 +423,571 @@
           ]
         }
       ]
+    },
+    {
+      "name": "MNIST",
+      "summary": "70,000 hand-written digits, 28×28 grayscale, paired with 0–9 labels. The reference small-scale image-classification corpus — most ML tutorials and many recipe smoke-tests reach for it first.",
+      "description": "Released by LeCun, Cortes, and Burges in 1998, MNIST is built from a subset of NIST's handwriting database, normalized to 28×28 grayscale and split into 60,000 training and 10,000 test images. Every variant ships as a pair of MNIST-style IDX files — one rank-3 ubyte file of pixel data, one rank-1 ubyte file of class labels — and the install pipeline joins them on item index so each row lands with both an `image` cell and a `label` cell. Use it to validate the image pipeline end-to-end on a corpus small enough to download and ingest in under a minute on any laptop, and to sanity-check classifier training loops before scaling up to harder data.",
+      "cardFile": "cards/mnist/index.md",
+      "heroImageFile": "cards/mnist/hero.jpg",
+      "modalities": ["Image"],
+      "licenseIds": ["cc-by-4.0"],
+      "attributions": [
+        "Yann LeCun, Corinna Cortes, Christopher J.C. Burges (MNIST, 1998)",
+        "NIST (Special Database 19, source handwriting samples)"
+      ],
+      "suitableForTasks": [
+        "ImageClassifier",
+        "LabeledImageClassifier",
+        "ImageEmbedder"
+      ],
+      "variants": [
+        {
+          "id": "mnist_train",
+          "displayName": "train (60k)",
+          "summary": "60,000 training images + labels. The standard training cut used by every introductory image-classification recipe. Each row: 28×28 grayscale PNG plus the integer class label (0–9).",
+          "approxArchiveBytes": 9920000,
+          "approxIngestedBytes": 35721216,
+          "expectedRowCounts": { "images": 60000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://ossci-datasets.s3.amazonaws.com/mnist/train-images-idx3-ubyte.gz",
+                      "destFile": "train-images-idx3-ubyte.gz"
+                    },
+                    {
+                      "url": "https://ossci-datasets.s3.amazonaws.com/mnist/train-labels-idx1-ubyte.gz",
+                      "destFile": "train-labels-idx1-ubyte.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "mnist/split.sql",
+                  "archives": {
+                    "images": "train-images-idx3-ubyte.gz",
+                    "labels": "train-labels-idx1-ubyte.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "mnist_test",
+          "displayName": "test (10k)",
+          "summary": "10,000 test images + labels. The standard held-out evaluation slice — accuracy / error-rate numbers in the literature are reported against this split.",
+          "approxArchiveBytes": 1650000,
+          "approxIngestedBytes": 5947392,
+          "expectedRowCounts": { "images": 10000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://ossci-datasets.s3.amazonaws.com/mnist/t10k-images-idx3-ubyte.gz",
+                      "destFile": "t10k-images-idx3-ubyte.gz"
+                    },
+                    {
+                      "url": "https://ossci-datasets.s3.amazonaws.com/mnist/t10k-labels-idx1-ubyte.gz",
+                      "destFile": "t10k-labels-idx1-ubyte.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "mnist/split.sql",
+                  "archives": {
+                    "images": "t10k-images-idx3-ubyte.gz",
+                    "labels": "t10k-labels-idx1-ubyte.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Fashion-MNIST",
+      "summary": "70,000 28×28 grayscale clothing thumbnails labelled with one of ten garment categories. Drop-in replacement for MNIST — same shape, harder task.",
+      "description": "Released in 2017 by Zalando Research as a more challenging counterpart to MNIST. Identical layout — two IDX files per split (rank-3 ubyte images + rank-1 ubyte labels), 60k train / 10k test, 28×28 grayscale — so any recipe / model / training loop written against MNIST runs on Fashion-MNIST unchanged. The accuracy ceiling is considerably lower (~95% test for strong CNNs vs. ~99.7% on MNIST), which makes it a better smoke-test for whether a classifier is actually learning anything. Labels 0–9 are: T-shirt/top, Trouser, Pullover, Dress, Coat, Sandal, Shirt, Sneaker, Bag, Ankle boot.",
+      "cardFile": "cards/fashion_mnist/index.md",
+      "heroImageFile": "cards/fashion_mnist/hero.jpg",
+      "modalities": ["Image"],
+      "licenseIds": ["mit"],
+      "attributions": [
+        "Han Xiao, Kashif Rasul, Roland Vollgraf (Fashion-MNIST, Zalando Research, 2017)"
+      ],
+      "suitableForTasks": [
+        "ImageClassifier",
+        "LabeledImageClassifier",
+        "ImageEmbedder"
+      ],
+      "variants": [
+        {
+          "id": "fashion_mnist_train",
+          "displayName": "train (60k)",
+          "summary": "60,000 training images + labels. Same shape as MNIST train — 28×28 grayscale PNG per row plus integer garment-class label.",
+          "approxArchiveBytes": 26500000,
+          "approxIngestedBytes": 74336239,
+          "expectedRowCounts": { "images": 60000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/train-images-idx3-ubyte.gz",
+                      "destFile": "train-images-idx3-ubyte.gz"
+                    },
+                    {
+                      "url": "http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/train-labels-idx1-ubyte.gz",
+                      "destFile": "train-labels-idx1-ubyte.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "fashion_mnist/split.sql",
+                  "archives": {
+                    "images": "train-images-idx3-ubyte.gz",
+                    "labels": "train-labels-idx1-ubyte.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "fashion_mnist_test",
+          "displayName": "test (10k)",
+          "summary": "10,000 test images + labels. Held-out evaluation slice paired with the 60k train split.",
+          "approxArchiveBytes": 4500000,
+          "approxIngestedBytes": 12443405,
+          "expectedRowCounts": { "images": 10000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/t10k-images-idx3-ubyte.gz",
+                      "destFile": "t10k-images-idx3-ubyte.gz"
+                    },
+                    {
+                      "url": "http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/t10k-labels-idx1-ubyte.gz",
+                      "destFile": "t10k-labels-idx1-ubyte.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "fashion_mnist/split.sql",
+                  "archives": {
+                    "images": "t10k-images-idx3-ubyte.gz",
+                    "labels": "t10k-labels-idx1-ubyte.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "KMNIST",
+      "summary": "70,000 cursive Hiragana characters, 28×28 grayscale, paired with 0–9 labels. The cursive-Japanese counterpart to MNIST — drop-in replacement that swaps Latin digits for Kuzushiji characters.",
+      "description": "Released in 2018 by the ROIS-CODH Center for Open Data in the Humanities (Tokyo), KMNIST takes ten Hiragana characters from pre-modern Japanese woodblock-printed books and renders 70,000 28×28 grayscale samples in the same IDX layout as MNIST. The same recipe / model / training loop written for MNIST runs on KMNIST unchanged. The challenge is qualitatively harder than MNIST — cursive Hiragana characters share more visual similarity than Latin digits — and benchmarks typically report ~95–97% test accuracy vs. ~99.7% for MNIST, making KMNIST a useful smoke-test for whether a classifier is actually learning structure rather than memorising digit shapes.",
+      "cardFile": "cards/kmnist/index.md",
+      "heroImageFile": "cards/kmnist/hero.jpg",
+      "modalities": ["Image"],
+      "licenseIds": ["cc-by-sa-4.0"],
+      "attributions": [
+        "Tarin Clanuwat, Mikel Bober-Irizar, Asanobu Kitamoto, Alex Lamb, Kazuaki Yamamoto, David Ha (KMNIST, 2018)",
+        "ROIS Center for Open Data in the Humanities, Tokyo (data hosting)"
+      ],
+      "suitableForTasks": [
+        "ImageClassifier",
+        "LabeledImageClassifier",
+        "ImageEmbedder"
+      ],
+      "variants": [
+        {
+          "id": "kmnist_train",
+          "displayName": "train (60k)",
+          "summary": "60,000 training images + labels. Identical IDX layout to MNIST train — 28×28 grayscale PNG per row plus integer Hiragana-class label (0–9).",
+          "approxArchiveBytes": 18000000,
+          "approxIngestedBytes": 61854173,
+          "expectedRowCounts": { "images": 60000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "http://codh.rois.ac.jp/kmnist/dataset/kmnist/train-images-idx3-ubyte.gz",
+                      "destFile": "train-imgs.gz"
+                    },
+                    {
+                      "url": "http://codh.rois.ac.jp/kmnist/dataset/kmnist/train-labels-idx1-ubyte.gz",
+                      "destFile": "train-labels.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "kmnist/split.sql",
+                  "archives": {
+                    "images": "train-imgs.gz",
+                    "labels": "train-labels.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "kmnist_test",
+          "displayName": "test (10k)",
+          "summary": "10,000 test images + labels. Held-out evaluation slice paired with the 60k train split.",
+          "approxArchiveBytes": 3000000,
+          "approxIngestedBytes": 10301440,
+          "expectedRowCounts": { "images": 10000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "http://codh.rois.ac.jp/kmnist/dataset/kmnist/t10k-images-idx3-ubyte.gz",
+                      "destFile": "t10k-imgs.gz"
+                    },
+                    {
+                      "url": "http://codh.rois.ac.jp/kmnist/dataset/kmnist/t10k-labels-idx1-ubyte.gz",
+                      "destFile": "t10k-labels.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "kmnist/split.sql",
+                  "archives": {
+                    "images": "t10k-imgs.gz",
+                    "labels": "t10k-labels.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "EuroSAT",
+      "summary": "27,000 64×64 RGB satellite tiles from Sentinel-2 over Europe, labelled with one of ten land-use / land-cover classes. The reach-for small benchmark for remote-sensing image classification.",
+      "description": "Released in 2017 by Helber et al., EuroSAT samples Sentinel-2 imagery across 34 European countries and crops it into 27,000 64×64 patches across ten classes — AnnualCrop, Forest, HerbaceousVegetation, Highway, Industrial, Pasture, PermanentCrop, Residential, River, SeaLake. The dataset ships in two forms: a 13-band multispectral version (the full Sentinel-2 sensor stack) and a 3-band RGB version. This variant ingests the RGB JPEGs. State-of-the-art models reach ~98–99% accuracy, so EuroSAT plays a similar role to MNIST in the remote-sensing space — large enough to be non-trivial, small enough to iterate on, easy enough to converge. Land cover is balanced (~2,000–3,000 samples per class) so a plain accuracy number is a reasonable headline metric.",
+      "cardFile": "cards/eurosat/index.md",
+      "heroImageFile": "cards/eurosat/hero.jpg",
+      "modalities": ["Image"],
+      "licenseIds": ["mit"],
+      "attributions": [
+        "Patrick Helber, Benjamin Bischke, Andreas Dengel, Damian Borth (EuroSAT, 2017)",
+        "European Space Agency (Sentinel-2 source imagery, Copernicus open-data terms)"
+      ],
+      "suitableForTasks": [
+        "ImageClassifier",
+        "LabeledImageClassifier",
+        "ImageEmbedder"
+      ],
+      "variants": [
+        {
+          "id": "eurosat_rgb",
+          "displayName": "RGB (27k)",
+          "summary": "27,000 64×64 RGB tiles across ten land-cover classes. Each row carries the decoded JPEG image plus the class name extracted from the source folder ('Forest', 'River', …).",
+          "approxArchiveBytes": 94000000,
+          "approxIngestedBytes": 110000000,
+          "expectedRowCounts": { "images": 27000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://madm.dfki.de/files/sentinel/EuroSAT.zip",
+                      "destFile": "EuroSAT.zip"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "eurosat/rgb.sql",
+                  "archive": "EuroSAT.zip"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Oxford-IIIT Pets",
+      "summary": "7,349 photographs of cats and dogs across 37 breeds (~200 images per breed), with the breed encoded in each filename. The reach-for small fine-grained-classification benchmark.",
+      "description": "Released in 2012 by Parkhi, Vedaldi, Zisserman, and Jawahar from Oxford's VGG group, the Oxford-IIIT Pets dataset pairs ~200 photographs per breed across 25 dog breeds and 12 cat breeds. Images vary in pose, lighting, and scale — non-trivial enough that even modern fine-grained classifiers report ~95% accuracy rather than saturating, but small enough to fit a training loop on a laptop. Filenames follow the convention <breed>_<index>.jpg; cat breeds start with a capital letter ('Abyssinian_42.jpg') and dog breeds are lowercase ('basset_hound_17.jpg'), so a single character check derives the species. The sibling annotations.tar.gz ships bounding boxes and trimap segmentation masks but is skipped by this variant — extend the recipe to a multi-archive job if you want them.",
+      "cardFile": "cards/oxford_pets/index.md",
+      "heroImageFile": "cards/oxford_pets/hero.jpg",
+      "modalities": ["Image"],
+      "licenseIds": ["cc-by-sa-4.0"],
+      "attributions": [
+        "Omkar M. Parkhi, Andrea Vedaldi, Andrew Zisserman, C. V. Jawahar (Oxford-IIIT Pet Dataset, 2012)",
+        "Oxford Visual Geometry Group (data hosting)"
+      ],
+      "suitableForTasks": [
+        "ImageClassifier",
+        "LabeledImageClassifier",
+        "ImageEmbedder"
+      ],
+      "variants": [
+        {
+          "id": "oxford_pets_images",
+          "displayName": "images (37 breeds)",
+          "summary": "7,349 photographs across 37 cat + dog breeds. Each row carries the decoded JPEG plus the breed name extracted from the filename. ~800 MB tar.gz — by far the heaviest variant on this list.",
+          "approxArchiveBytes": 791918080,
+          "approxIngestedBytes": 850000000,
+          "expectedRowCounts": { "images": 7349 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.robots.ox.ac.uk/~vgg/data/pets/data/images.tar.gz",
+                      "destFile": "images.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "oxford_pets/images.sql",
+                  "archive": "images.tar.gz"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CIFAR-10",
+      "summary": "60,000 32×32 RGB photographs labelled with one of ten everyday categories (airplane / automobile / bird / cat / deer / dog / frog / horse / ship / truck). The reach-for small-color benchmark after MNIST.",
+      "description": "Released in 2009 by Alex Krizhevsky as part of the Tiny Images project at the University of Toronto. 60,000 32×32 RGB images split 50,000 train / 10,000 test, with exactly 6,000 images per class — so plain accuracy is a sensible headline metric. CIFAR-10 fills the slot in the benchmark ladder between MNIST (greyscale digits, ~99.7% saturated) and ImageNet (1.3 M images, multi-GPU territory): small enough to iterate on a laptop, hard enough that a strong CNN reports ~94–97% test accuracy and there's still headroom for architectural experiments. The binary distribution ships as a tar.gz containing five 10,000-record training batches and one 10,000-record test batch; each record is a 1-byte label followed by 3,072 planar RGB pixel bytes. The recipe pulls those bytes straight out of the archive via open_archive + open_cifar10 — no separate extraction step touches the raw cache.",
+      "cardFile": "cards/cifar10/index.md",
+      "heroImageFile": "cards/cifar10/hero.jpg",
+      "modalities": ["Image"],
+      "licenseIds": ["mit"],
+      "attributions": [
+        "Alex Krizhevsky (CIFAR-10, Learning Multiple Layers of Features from Tiny Images, 2009)",
+        "Antonio Torralba, Rob Fergus, William T. Freeman (Tiny Images dataset, source pool)"
+      ],
+      "suitableForTasks": [
+        "ImageClassifier",
+        "LabeledImageClassifier",
+        "ImageEmbedder"
+      ],
+      "variants": [
+        {
+          "id": "cifar10_train",
+          "displayName": "train (50k)",
+          "summary": "50,000 training images + labels assembled from five 10,000-record binary batches. Each row carries a PNG-encoded 32×32 RGB image plus the integer class label (0–9).",
+          "approxArchiveBytes": 170052171,
+          "approxIngestedBytes": 130267333,
+          "expectedRowCounts": { "images": 50000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz",
+                      "destFile": "cifar-10-binary.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "cifar10/train.sql",
+                  "archive": "cifar-10-binary.tar.gz"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "cifar10_test",
+          "displayName": "test (10k)",
+          "summary": "10,000 test images + labels from the single test_batch.bin inside the upstream tar.gz. Held-out evaluation slice paired with the 50k train split.",
+          "approxArchiveBytes": 170052171,
+          "approxIngestedBytes": 26099712,
+          "expectedRowCounts": { "images": 10000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz",
+                      "destFile": "cifar-10-binary.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "cifar10/test.sql",
+                  "archive": "cifar-10-binary.tar.gz"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CIFAR-100",
+      "summary": "60,000 32×32 RGB photographs labelled with one of 100 fine-grained classes (and one of 20 coarse-grained superclasses). The harder sibling of CIFAR-10 — same image distribution, finer label space.",
+      "description": "Released alongside CIFAR-10 by Alex Krizhevsky in 2009. 60,000 32×32 RGB images split 50,000 train / 10,000 test, with exactly 600 images per fine class and a two-level taxonomy: 100 fine-grained classes grouped under 20 coarse superclasses (e.g. fine 'rose' / 'tulip' / 'sunflower' / 'orchid' / 'poppy' under coarse 'flowers'). Useful when CIFAR-10 saturates or when you want a small benchmark for hierarchical / multi-task classification. The binary distribution puts each split in a single train.bin / test.bin file; each record is 1 byte coarse label + 1 byte fine label + 3,072 planar RGB pixel bytes. The recipe surfaces both label columns so callers pick the task at query time.",
+      "cardFile": "cards/cifar100/index.md",
+      "heroImageFile": "cards/cifar100/hero.jpg",
+      "modalities": ["Image"],
+      "licenseIds": ["mit"],
+      "attributions": [
+        "Alex Krizhevsky (CIFAR-100, Learning Multiple Layers of Features from Tiny Images, 2009)",
+        "Antonio Torralba, Rob Fergus, William T. Freeman (Tiny Images dataset, source pool)"
+      ],
+      "suitableForTasks": [
+        "ImageClassifier",
+        "LabeledImageClassifier",
+        "ImageEmbedder"
+      ],
+      "variants": [
+        {
+          "id": "cifar100_train",
+          "displayName": "train (50k)",
+          "summary": "50,000 training images + paired (coarse, fine) labels from train.bin. Each row carries a PNG-encoded 32×32 RGB image, the 0–19 coarse-superclass label, and the 0–99 fine-class label.",
+          "approxArchiveBytes": 169001437,
+          "approxIngestedBytes": 100000000,
+          "expectedRowCounts": { "images": 50000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.cs.toronto.edu/~kriz/cifar-100-binary.tar.gz",
+                      "destFile": "cifar-100-binary.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "cifar100/train.sql",
+                  "archive": "cifar-100-binary.tar.gz"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "cifar100_test",
+          "displayName": "test (10k)",
+          "summary": "10,000 test images + paired (coarse, fine) labels from test.bin. Held-out evaluation slice paired with the 50k train split.",
+          "approxArchiveBytes": 169001437,
+          "approxIngestedBytes": 20000000,
+          "expectedRowCounts": { "images": 10000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://www.cs.toronto.edu/~kriz/cifar-100-binary.tar.gz",
+                      "destFile": "cifar-100-binary.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "cifar100/test.sql",
+                  "archive": "cifar-100-binary.tar.gz"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

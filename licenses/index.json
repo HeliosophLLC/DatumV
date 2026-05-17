@@ -38,6 +38,14 @@
       "summary": "Permissive license. Allows commercial use, modification, and redistribution. Requires attribution to the original author.",
       "requiresAcceptance": false
     },
+    "cc-by-sa-4.0": {
+      "title": "Creative Commons Attribution-ShareAlike 4.0 International",
+      "spdx": "CC-BY-SA-4.0",
+      "canonicalUrl": "https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+      "textFile": "cc-by-sa-4.0.txt",
+      "summary": "Permissive copyleft license. Allows commercial use, modification, and redistribution. Requires attribution to the original author AND that redistributed or modified copies of the dataset itself carry the same license. Models trained on the dataset are generally not considered derivative works.",
+      "requiresAcceptance": false
+    },
     "public-domain": {
       "title": "Public Domain",
       "spdx": "CC-PDDC",
