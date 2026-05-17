@@ -1,5 +1,4 @@
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -57,9 +56,8 @@ internal sealed class ScalarSubqueryOperator : QueryOperator
     /// <inheritdoc/>
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
-        Pool pool = context.Pool;
         ColumnLookup? outputLookup = null;
-        RowBatch? outputBatch = null;
+        RowAugmentingOutputWriter output = new(context);
 
         try
         {
@@ -138,22 +136,12 @@ internal sealed class ScalarSubqueryOperator : QueryOperator
                             outputLookup = new ColumnLookup(outputNames);
                         }
 
-                        DataValue[] values = pool.RentDataValues(outerFieldCount + 1);
-                        for (int index = 0; index < outerFieldCount; index++)
-                        {
-                            values[index] = outerRow[index];
-                        }
+                        (DataValue[] values, _) = output.BeginRow(
+                            outputLookup, outerRow, inputBatch.Arena, outerFieldCount);
                         values[outerFieldCount] = scalarResult;
 
-                        outputBatch ??= context.RentRowBatch(outputLookup);
-                        outputBatch.Add(values);
-
-                        if (outputBatch.IsFull)
-                        {
-                            RowBatch toYield = outputBatch;
-                            outputBatch = null;
-                            yield return toYield;
-                        }
+                        RowBatch? full = output.Commit(outputLookup, values);
+                        if (full is not null) yield return full;
                     }
                 }
                 finally
@@ -162,19 +150,13 @@ internal sealed class ScalarSubqueryOperator : QueryOperator
                 }
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
+            RowBatch? trailing = output.Flush();
+            if (trailing is not null) yield return trailing;
         }
         finally
         {
-            if (outputBatch is not null)
-            {
-                context.ReturnRowBatch(outputBatch);
-            }
+            RowBatch? leftover = output.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 }

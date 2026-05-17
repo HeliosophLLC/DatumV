@@ -1,6 +1,5 @@
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -103,82 +102,72 @@ public sealed class RowEnricherOperator : QueryOperator
     {
         CancellationToken cancellationToken = context.CancellationToken;
         ExpressionEvaluator evaluator = context.CreateEvaluator();
-        Pool pool = context.Pool;
         ColumnLookup? outputLookup = null;
-        int[]? sourceCopySlots = null;
+        int sourceColumnCount = 0;
+        RowAugmentingOutputWriter output = new(context);
 
-        await foreach (RowBatch sourceBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (sourceBatch.Count == 0)
+            await foreach (RowBatch sourceBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                context.ReturnRowBatch(sourceBatch);
-                continue;
-            }
+                cancellationToken.ThrowIfCancellationRequested();
 
-            // First batch: build the augmented column lookup once. Hidden columns
-            // append after the source columns; planner-generated names are
-            // collision-free (`__cse_N` prefix) so they don't shadow user columns.
-            if (outputLookup is null || sourceCopySlots is null)
-            {
-                BuildColumnLookup(sourceBatch.ColumnLookup, out outputLookup, out sourceCopySlots);
-            }
+                if (sourceBatch.Count == 0)
+                {
+                    context.ReturnRowBatch(sourceBatch);
+                    continue;
+                }
 
-            int rowsThisBatch = sourceBatch.Count;
-            RowBatch outputBatch = context.RentRowBatch(outputLookup, rowsThisBatch);
+                // First batch: build the augmented column lookup once. Hidden columns
+                // append after the source columns; planner-generated names are
+                // collision-free (`__cse_N` prefix) so they don't shadow user columns.
+                if (outputLookup is null)
+                {
+                    BuildColumnLookup(sourceBatch.ColumnLookup, out outputLookup);
+                    sourceColumnCount = sourceBatch.ColumnLookup.Count;
+                }
 
-            try
-            {
-                for (int rowIdx = 0; rowIdx < rowsThisBatch; rowIdx++)
+                for (int rowIdx = 0; rowIdx < sourceBatch.Count; rowIdx++)
                 {
                     Row sourceRow = sourceBatch[rowIdx];
+
+                    (DataValue[] outValues, RowBatch current) = output.BeginRow(
+                        outputLookup, sourceRow, sourceBatch.Arena, sourceColumnCount);
+
                     EvaluationFrame frame = new(
                         sourceRow,
                         sourceBatch.Arena,
-                        outputBatch.Arena,
+                        current.Arena,
                         context,
                         context.OuterRow);
-
-                    DataValue[] outValues = pool.RentDataValues(outputLookup.Count);
-
-                    // Copy source columns, stabilising arena-backed payloads
-                    // into the output batch's arena so they survive the source
-                    // batch returning to the pool.
-                    for (int slot = 0; slot < sourceCopySlots.Length; slot++)
-                    {
-                        outValues[slot] = DataValueRetention.Stabilize(
-                            sourceRow[sourceCopySlots[slot]],
-                            sourceBatch.Arena,
-                            outputBatch.Arena);
-                    }
 
                     // Append the enrichment results. Each expression evaluates
                     // against the source row; results write into the output
                     // arena via the evaluator's normal target-store routing.
-                    int hiddenSlotBase = sourceCopySlots.Length;
                     for (int i = 0; i < _enrichments.Count; i++)
                     {
-                        outValues[hiddenSlotBase + i] = await evaluator.EvaluateAsync(
+                        outValues[sourceColumnCount + i] = await evaluator.EvaluateAsync(
                             _enrichments[i].Expression, frame, context.CancellationToken).ConfigureAwait(false);
                     }
 
-                    outputBatch.Add(outValues);
+                    RowBatch? full = output.Commit(outputLookup, outValues);
+                    if (full is not null) yield return full;
                 }
-            }
-            catch
-            {
-                context.ReturnRowBatch(outputBatch);
+
                 context.ReturnRowBatch(sourceBatch);
-                throw;
             }
 
-            context.ReturnRowBatch(sourceBatch);
-            yield return outputBatch;
+            RowBatch? trailing = output.Flush();
+            if (trailing is not null) yield return trailing;
+        }
+        finally
+        {
+            RowBatch? leftover = output.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 
-    private void BuildColumnLookup(ColumnLookup sourceLookup, out ColumnLookup outputLookup, out int[] sourceCopySlots)
+    private void BuildColumnLookup(ColumnLookup sourceLookup, out ColumnLookup outputLookup)
     {
         int sourceCount = sourceLookup.Count;
         string[] outputNames = new string[sourceCount + _enrichments.Count];
@@ -211,12 +200,6 @@ public sealed class RowEnricherOperator : QueryOperator
         }
 
         outputLookup = new ColumnLookup(outputNames, nameIndex);
-
-        sourceCopySlots = new int[sourceCount];
-        for (int i = 0; i < sourceCopySlots.Length; i++)
-        {
-            sourceCopySlots[i] = i;
-        }
     }
 }
 

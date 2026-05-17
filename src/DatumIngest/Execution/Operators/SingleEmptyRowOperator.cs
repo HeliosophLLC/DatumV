@@ -8,6 +8,11 @@ namespace DatumIngest.Execution.Operators;
 /// </summary>
 internal sealed class SingleEmptyRowOperator : QueryOperator
 {
+    /// <summary>
+    /// Creates a single empty row operator.
+    /// </summary>
+    public SingleEmptyRowOperator() : base(false) { }
+
     /// <inheritdoc/>
     protected override OperatorPlanDescription DescribeForExplainImpl()
     {
@@ -20,10 +25,21 @@ internal sealed class SingleEmptyRowOperator : QueryOperator
     /// <inheritdoc/>
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
-        RowBatch outputBatch = context.RentRowBatch(ColumnLookup.Empty, 1);
+        OutputBatchAccumulator output = new(context);
 
-        outputBatch.Add([]);
+        try
+        {
+            Row row = new(ColumnLookup.Empty, []);
+            RowBatch? full = output.Adopt(ColumnLookup.Empty, row);
+            if (full is not null) yield return full;
 
-        yield return outputBatch;
+            RowBatch? trailing = output.Flush();
+            if (trailing is not null) yield return trailing;
+        }
+        finally
+        {
+            RowBatch? leftover = output.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
+        }
     }
 }

@@ -221,6 +221,7 @@ public sealed class ModelInvocationOperator : QueryOperator
         ColumnLookup? outputLookup = null;
         int[]? sourceCopySlots = null;
         int[]? invocationOutputSlots = null;
+        OutputBatchAccumulator output = new(context);
 
         // Per-invocation element-struct TypeId cache for dynamic-shape
         // models (notably SQL-defined bodies). The model's OutputFields
@@ -243,288 +244,304 @@ public sealed class ModelInvocationOperator : QueryOperator
 
         IModelInvocationTracer? tracer = context.ModelTracer;
 
-        await foreach (RowBatch sourceBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (sourceBatch.Count == 0)
+            await foreach (RowBatch sourceBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                context.ReturnRowBatch(sourceBatch);
-                continue;
-            }
+                cancellationToken.ThrowIfCancellationRequested();
 
-            if (rowLimit.HasValue && yieldedRows >= rowLimit.Value)
-            {
-                context.ReturnRowBatch(sourceBatch);
-                yield break;
-            }
-
-            // Trim work to the rows we still need. LIMIT 5 over a 64-row
-            // source batch with 3 already produced → process the next 2
-            // and drop the rest of this source batch. Saves N expensive
-            // dispatches per LIMIT.
-            int rowsThisBatch = sourceBatch.Count;
-            if (rowLimit.HasValue)
-            {
-                int remaining = rowLimit.Value - yieldedRows;
-                if (remaining < rowsThisBatch) rowsThisBatch = remaining;
-            }
-
-            // First-batch lazy initialization. Output schema = source
-            // columns followed by one column per invocation; slot tables
-            // let the per-batch loop copy/write at known indices without
-            // name lookups.
-            if (outputLookup is null || sourceCopySlots is null || invocationOutputSlots is null ||
-                elementStructTypeIds is null || arrayOfStructTypeIds is null)
-            {
-                BuildColumnLookup(
-                    sourceBatch.ColumnLookup,
-                    out outputLookup,
-                    out sourceCopySlots,
-                    out invocationOutputSlots,
-                    out elementStructTypeIds,
-                    out arrayOfStructTypeIds);
-            }
-
-            RowBatch outputBatch = InitializeOutputBatch(
-                context,
-                outputLookup,
-                sourceBatch,
-                rowsThisBatch,
-                sourceCopySlots,
-                invocationOutputSlots);
-
-            // Stage 2: run each invocation in order, releasing the lease
-            // between invocations so the residency manager can evict the
-            // prior model when the next needs the VRAM. Inputs evaluate
-            // against the in-progress outputBatch so later invocations
-            // see earlier ones' outputs as regular columns.
-            for (int invIdx = 0; invIdx < _invocations.Count; invIdx++)
-            {
-                Invocation invocation = _invocations[invIdx];
-                int outputSlot = invocationOutputSlots![invIdx];
-
-                using Activity? span = _invocations.Count > 1
-                    ? DatumActivity.Operators.StartActivity(
-                        $"model-invocation.{invocation.ModelName}(rows={rowsThisBatch})")
-                    : null;
-
-                // Auto-trigger calibration before the first dispatch of
-                // an uncalibrated model. Trigger short-circuits when the
-                // model is already calibrated, no probe is available, or
-                // the registry isn't wired. For invocation N>0, the
-                // working outputBatch already has invocation N-1's
-                // output column populated, so input expressions that
-                // reference it resolve correctly during the sample-input
-                // evaluation step.
-                await Models.Calibration.CalibrationTrigger.EnsureCalibratedAsync(
-                    context,
-                    invocation.ModelName,
-                    invocation.InputExpressions,
-                    invocation.OptionalExpressions,
-                    sampleBatch: outputBatch,
-                    evaluator,
-                    cancellationToken).ConfigureAwait(false);
-
-                using ModelLease lease = await context.Models
-                    .AcquireAsync(invocation.ModelName, cancellationToken)
-                    .ConfigureAwait(false);
-                IModel model = lease.Model;
-                if (model.InputKinds.Count != invocation.InputExpressions.Count)
+                if (sourceBatch.Count == 0)
                 {
-                    context.ReturnRowBatch(outputBatch);
                     context.ReturnRowBatch(sourceBatch);
-                    throw new InvalidOperationException(
-                        $"Model '{invocation.ModelName}' expects {model.InputKinds.Count} input(s) " +
-                        $"but invocation supplies {invocation.InputExpressions.Count}.");
+                    continue;
                 }
 
-                // Intern the element-struct TypeId for this invocation's
-                // declared output shape. OutputFields describes the
-                // *element* struct's fields; the per-row value may be
-                // either that struct or an Array<Struct> of it. The
-                // array TypeId is interned lazily on first array sight
-                // inside the scatter loop.
-                if (elementStructTypeIds![invIdx] == 0 && model.OutputFields is { } outputFields)
+                if (rowLimit.HasValue && yieldedRows >= rowLimit.Value)
                 {
-                    elementStructTypeIds[invIdx] =
-                        (ushort)context.Types.InternStructFromColumnInfoFields(outputFields);
+                    context.ReturnRowBatch(sourceBatch);
+                    yield break;
                 }
 
-                IBatchSizePolicy policy = context.Catalog.Models?.BatchSizePolicy
-                    ?? StaticBatchSizePolicy.Instance;
-
-                ValueRef[] emptyOverrideRow = [];
-                int chunkStart = 0;
-                while (chunkStart < rowsThisBatch)
+                // Trim work to the rows we still need. LIMIT 5 over a 64-row
+                // source batch with 3 already produced → process the next 2
+                // and drop the rest of this source batch. Saves N expensive
+                // dispatches per LIMIT.
+                int rowsThisBatch = sourceBatch.Count;
+                if (rowLimit.HasValue)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    int remaining = rowLimit.Value - yieldedRows;
+                    if (remaining < rowsThisBatch) rowsThisBatch = remaining;
+                }
 
-                    int rowsRemaining = rowsThisBatch - chunkStart;
-                    int chunkSize = policy.ChooseBatchSize(model, rowsRemaining);
-                    if (chunkSize <= 0 || chunkSize > rowsRemaining) chunkSize = rowsRemaining;
+                // First-batch lazy initialization. Output schema = source
+                // columns followed by one column per invocation; slot tables
+                // let the per-batch loop copy/write at known indices without
+                // name lookups.
+                if (outputLookup is null || sourceCopySlots is null || invocationOutputSlots is null ||
+                    elementStructTypeIds is null || arrayOfStructTypeIds is null)
+                {
+                    BuildColumnLookup(
+                        sourceBatch.ColumnLookup,
+                        out outputLookup,
+                        out sourceCopySlots,
+                        out invocationOutputSlots,
+                        out elementStructTypeIds,
+                        out arrayOfStructTypeIds);
+                }
 
-                    // Evaluate inputs for THIS chunk against the
-                    // in-progress output batch. Reading from outputBatch
-                    // (not sourceBatch) is the load-bearing detail —
-                    // it's how invocation N+1 sees invocation N's output
-                    // column as a regular cell.
-                    ValueRef[][] chunkInputs = new ValueRef[chunkSize][];
-                    ValueRef[][] chunkOverrides = new ValueRef[chunkSize][];
-                    for (int i = 0; i < chunkSize; i++)
+                RowBatch outputBatch = InitializeOutputBatch(
+                    output,
+                    context,
+                    outputLookup,
+                    sourceBatch,
+                    rowsThisBatch,
+                    sourceCopySlots,
+                    invocationOutputSlots);
+
+                // Stage 2: run each invocation in order, releasing the lease
+                // between invocations so the residency manager can evict the
+                // prior model when the next needs the VRAM. Inputs evaluate
+                // against the in-progress outputBatch so later invocations
+                // see earlier ones' outputs as regular columns.
+                for (int invIdx = 0; invIdx < _invocations.Count; invIdx++)
+                {
+                    Invocation invocation = _invocations[invIdx];
+                    int outputSlot = invocationOutputSlots![invIdx];
+
+                    using Activity? span = _invocations.Count > 1
+                        ? DatumActivity.Operators.StartActivity(
+                            $"model-invocation.{invocation.ModelName}(rows={rowsThisBatch})")
+                        : null;
+
+                    // Auto-trigger calibration before the first dispatch of
+                    // an uncalibrated model. Trigger short-circuits when the
+                    // model is already calibrated, no probe is available, or
+                    // the registry isn't wired. For invocation N>0, the
+                    // working outputBatch already has invocation N-1's
+                    // output column populated, so input expressions that
+                    // reference it resolve correctly during the sample-input
+                    // evaluation step.
+                    await Models.Calibration.CalibrationTrigger.EnsureCalibratedAsync(
+                        context,
+                        invocation.ModelName,
+                        invocation.InputExpressions,
+                        invocation.OptionalExpressions,
+                        sampleBatch: outputBatch,
+                        evaluator,
+                        cancellationToken).ConfigureAwait(false);
+
+                    using ModelLease lease = await context.Models
+                        .AcquireAsync(invocation.ModelName, cancellationToken)
+                        .ConfigureAwait(false);
+                    IModel model = lease.Model;
+                    if (model.InputKinds.Count != invocation.InputExpressions.Count)
                     {
-                        int rowIdx = chunkStart + i;
-                        Row row = outputBatch[rowIdx];
-                        EvaluationFrame frame = new(
-                            row, outputBatch.Arena, context, context.OuterRow);
-
-                        ValueRef[] rowInputs = new ValueRef[invocation.InputExpressions.Count];
-                        for (int argIdx = 0; argIdx < invocation.InputExpressions.Count; argIdx++)
-                        {
-                            ValueRef raw = await evaluator
-                                .EvaluateAsValueRefAsync(invocation.InputExpressions[argIdx], frame, cancellationToken)
-                                .ConfigureAwait(false);
-                            rowInputs[argIdx] = CoerceToDeclaredKind(
-                                raw, model.InputKinds[argIdx], invocation.ModelName, argIdx);
-                        }
-                        chunkInputs[i] = rowInputs;
-
-                        if (invocation.OptionalExpressions.Count == 0)
-                        {
-                            chunkOverrides[i] = emptyOverrideRow;
-                        }
-                        else
-                        {
-                            ValueRef[] rowOverrides = new ValueRef[invocation.OptionalExpressions.Count];
-                            for (int j = 0; j < invocation.OptionalExpressions.Count; j++)
-                            {
-                                rowOverrides[j] = await evaluator
-                                    .EvaluateAsValueRefAsync(invocation.OptionalExpressions[j], frame, cancellationToken)
-                                    .ConfigureAwait(false);
-                            }
-                            chunkOverrides[i] = rowOverrides;
-                        }
-                    }
-
-                    // Tracer hook + VRAM/timing measurements. Null-checked
-                    // once per chunk; cost when tracing is off is a single
-                    // branch.
-                    tracer?.OnDispatchStarted(invocation.ModelName, chunkSize, chunkInputs, chunkOverrides);
-                    long vramBefore = VramProbe.TryGetUsage(out long usedBefore, out _) ? usedBefore : -1;
-                    long startTimestamp = Stopwatch.GetTimestamp();
-
-                    IReadOnlyList<ValueRef> modelOutputs;
-                    try
-                    {
-                        modelOutputs = await model
-                            .InferBatchAsync(chunkInputs, chunkOverrides, context.Types, cancellationToken)
-                            .ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        tracer?.OnDispatchFailed(
-                            invocation.ModelName,
-                            chunkSize,
-                            Stopwatch.GetElapsedTime(startTimestamp),
-                            ex);
-                        throw;
-                    }
-
-                    long vramAfter = VramProbe.TryGetUsage(out long usedAfter, out _) ? usedAfter : -1;
-                    TimeSpan dispatchElapsed = Stopwatch.GetElapsedTime(startTimestamp);
-                    policy.RecordDispatch(model, chunkSize, vramBefore, vramAfter, dispatchElapsed.TotalMilliseconds);
-
-                    tracer?.OnDispatchCompleted(invocation.ModelName, chunkSize, dispatchElapsed);
-
-                    if (modelOutputs.Count != chunkSize)
-                    {
-                        context.ReturnRowBatch(outputBatch);
+                        // outputBatch returned via outer finally's output.Flush().
                         context.ReturnRowBatch(sourceBatch);
                         throw new InvalidOperationException(
-                            $"Model '{invocation.ModelName}' returned {modelOutputs.Count} outputs " +
-                            $"for a {chunkSize}-row chunk.");
+                            $"Model '{invocation.ModelName}' expects {model.InputKinds.Count} input(s) " +
+                            $"but invocation supplies {invocation.InputExpressions.Count}.");
                     }
 
-                    // Parallel pre-encode of managed Image outputs.
-                    // depth_map_to_image and similar return SKBitmap-
-                    // backed ValueRefs; the default ToDataValue path PNG-
-                    // encodes during the sequential scatter below, which
-                    // serialises ~20 ms-per-image of CPU work and was
-                    // measured at 635 ms / 32-row chunk in profiling. Pre-
-                    // encoding here amortises the PNG/JPEG step across
-                    // CPU cores; the scatter then memcpy's already-
-                    // encoded byte[]s into the arena. When no Image
-                    // outputs are present, a single linear scan returns
-                    // the list unchanged with no allocations.
-                    modelOutputs = await PreEncodeImageOutputsAsync(
-                        modelOutputs, cancellationToken).ConfigureAwait(false);
-
-                    // Scatter — for each row in the chunk, stamp the
-                    // model output into the invocation's column slot.
-                    // For Array<Struct> outputs the per-row TypeId must
-                    // be the *array* shape, not the element struct —
-                    // ToDataValue looks up `desc.ElementTypeId` on the
-                    // array's descriptor to propagate field TypeIds to
-                    // inner rows. Stamping the element TypeId directly
-                    // on the array's DataValue would short-circuit that
-                    // hop and rerun the f0..fN regression. Intern the
-                    // array TypeId lazily on first sight of an array
-                    // result.
-                    ushort elementStructTypeId = elementStructTypeIds[invIdx];
-                    for (int i = 0; i < chunkSize; i++)
+                    // Intern the element-struct TypeId for this invocation's
+                    // declared output shape. OutputFields describes the
+                    // *element* struct's fields; the per-row value may be
+                    // either that struct or an Array<Struct> of it. The
+                    // array TypeId is interned lazily on first array sight
+                    // inside the scatter loop.
+                    if (elementStructTypeIds![invIdx] == 0 && model.OutputFields is { } outputFields)
                     {
-                        ValueRef rowValue = modelOutputs[i];
-                        ushort rowTypeId;
-                        if (rowValue.IsArray && elementStructTypeId != 0)
-                        {
-                            if (arrayOfStructTypeIds![invIdx] == 0)
-                            {
-                                arrayOfStructTypeIds[invIdx] = (ushort)context.Types.InternArrayType(
-                                    DataKind.Struct, elementTypeId: elementStructTypeId);
-                            }
-                            rowTypeId = arrayOfStructTypeIds[invIdx];
-                        }
-                        else
-                        {
-                            // No static schema (model.OutputFields is
-                            // null) — dynamic-shape producer like a
-                            // SQL-defined body via
-                            // ProceduralModelAdapter. ToDataValue's
-                            // BuildStructArray path falls back to
-                            // reading the first element's TypeId when
-                            // rowTypeId is 0, so dynamic-shape
-                            // Array<Struct> outputs still get their
-                            // per-element struct stamps. Primitive
-                            // outputs have TypeId 0 anyway and lose
-                            // nothing.
-                            //
-                            // For scalar struct outputs (e.g. RETURNS
-                            // ScoredLabel from a SQL-defined classifier)
-                            // the body already stamped a TypeId on the
-                            // inline carrier — prefer that over
-                            // elementStructTypeId so the cell's shape
-                            // resolves through the per-query registry.
-                            rowTypeId = elementStructTypeId != 0
-                                ? elementStructTypeId
-                                : rowValue.TypeId;
-                        }
-                        DataValue stamped = rowValue.ToDataValue(
-                            outputBatch.Arena, rowTypeId, context.Types);
-                        outputBatch[chunkStart + i].RawValues[outputSlot] = stamped;
+                        elementStructTypeIds[invIdx] =
+                            (ushort)context.Types.InternStructFromColumnInfoFields(outputFields);
                     }
 
-                    chunkStart += chunkSize;
+                    IBatchSizePolicy policy = context.Catalog.Models?.BatchSizePolicy
+                        ?? StaticBatchSizePolicy.Instance;
+
+                    ValueRef[] emptyOverrideRow = [];
+                    int chunkStart = 0;
+                    while (chunkStart < rowsThisBatch)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        int rowsRemaining = rowsThisBatch - chunkStart;
+                        int chunkSize = policy.ChooseBatchSize(model, rowsRemaining);
+                        if (chunkSize <= 0 || chunkSize > rowsRemaining) chunkSize = rowsRemaining;
+
+                        // Evaluate inputs for THIS chunk against the
+                        // in-progress output batch. Reading from outputBatch
+                        // (not sourceBatch) is the load-bearing detail —
+                        // it's how invocation N+1 sees invocation N's output
+                        // column as a regular cell.
+                        ValueRef[][] chunkInputs = new ValueRef[chunkSize][];
+                        ValueRef[][] chunkOverrides = new ValueRef[chunkSize][];
+                        for (int i = 0; i < chunkSize; i++)
+                        {
+                            int rowIdx = chunkStart + i;
+                            Row row = outputBatch[rowIdx];
+                            EvaluationFrame frame = new(
+                                row, outputBatch.Arena, context, context.OuterRow);
+
+                            ValueRef[] rowInputs = new ValueRef[invocation.InputExpressions.Count];
+                            for (int argIdx = 0; argIdx < invocation.InputExpressions.Count; argIdx++)
+                            {
+                                ValueRef raw = await evaluator
+                                    .EvaluateAsValueRefAsync(invocation.InputExpressions[argIdx], frame, cancellationToken)
+                                    .ConfigureAwait(false);
+                                rowInputs[argIdx] = CoerceToDeclaredKind(
+                                    raw, model.InputKinds[argIdx], invocation.ModelName, argIdx);
+                            }
+                            chunkInputs[i] = rowInputs;
+
+                            if (invocation.OptionalExpressions.Count == 0)
+                            {
+                                chunkOverrides[i] = emptyOverrideRow;
+                            }
+                            else
+                            {
+                                ValueRef[] rowOverrides = new ValueRef[invocation.OptionalExpressions.Count];
+                                for (int j = 0; j < invocation.OptionalExpressions.Count; j++)
+                                {
+                                    rowOverrides[j] = await evaluator
+                                        .EvaluateAsValueRefAsync(invocation.OptionalExpressions[j], frame, cancellationToken)
+                                        .ConfigureAwait(false);
+                                }
+                                chunkOverrides[i] = rowOverrides;
+                            }
+                        }
+
+                        // Tracer hook + VRAM/timing measurements. Null-checked
+                        // once per chunk; cost when tracing is off is a single
+                        // branch.
+                        tracer?.OnDispatchStarted(invocation.ModelName, chunkSize, chunkInputs, chunkOverrides);
+                        long vramBefore = VramProbe.TryGetUsage(out long usedBefore, out _) ? usedBefore : -1;
+                        long startTimestamp = Stopwatch.GetTimestamp();
+
+                        IReadOnlyList<ValueRef> modelOutputs;
+                        try
+                        {
+                            modelOutputs = await model
+                                .InferBatchAsync(chunkInputs, chunkOverrides, context.Types, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            tracer?.OnDispatchFailed(
+                                invocation.ModelName,
+                                chunkSize,
+                                Stopwatch.GetElapsedTime(startTimestamp),
+                                ex);
+                            throw;
+                        }
+
+                        long vramAfter = VramProbe.TryGetUsage(out long usedAfter, out _) ? usedAfter : -1;
+                        TimeSpan dispatchElapsed = Stopwatch.GetElapsedTime(startTimestamp);
+                        policy.RecordDispatch(model, chunkSize, vramBefore, vramAfter, dispatchElapsed.TotalMilliseconds);
+
+                        tracer?.OnDispatchCompleted(invocation.ModelName, chunkSize, dispatchElapsed);
+
+                        if (modelOutputs.Count != chunkSize)
+                        {
+                            // outputBatch returned via outer finally's output.Flush().
+                            context.ReturnRowBatch(sourceBatch);
+                            throw new InvalidOperationException(
+                                $"Model '{invocation.ModelName}' returned {modelOutputs.Count} outputs " +
+                                $"for a {chunkSize}-row chunk.");
+                        }
+
+                        // Parallel pre-encode of managed Image outputs.
+                        // depth_map_to_image and similar return SKBitmap-
+                        // backed ValueRefs; the default ToDataValue path PNG-
+                        // encodes during the sequential scatter below, which
+                        // serialises ~20 ms-per-image of CPU work and was
+                        // measured at 635 ms / 32-row chunk in profiling. Pre-
+                        // encoding here amortises the PNG/JPEG step across
+                        // CPU cores; the scatter then memcpy's already-
+                        // encoded byte[]s into the arena. When no Image
+                        // outputs are present, a single linear scan returns
+                        // the list unchanged with no allocations.
+                        modelOutputs = await PreEncodeImageOutputsAsync(
+                            modelOutputs, cancellationToken).ConfigureAwait(false);
+
+                        // Scatter — for each row in the chunk, stamp the
+                        // model output into the invocation's column slot.
+                        // For Array<Struct> outputs the per-row TypeId must
+                        // be the *array* shape, not the element struct —
+                        // ToDataValue looks up `desc.ElementTypeId` on the
+                        // array's descriptor to propagate field TypeIds to
+                        // inner rows. Stamping the element TypeId directly
+                        // on the array's DataValue would short-circuit that
+                        // hop and rerun the f0..fN regression. Intern the
+                        // array TypeId lazily on first sight of an array
+                        // result.
+                        ushort elementStructTypeId = elementStructTypeIds[invIdx];
+                        for (int i = 0; i < chunkSize; i++)
+                        {
+                            ValueRef rowValue = modelOutputs[i];
+                            ushort rowTypeId;
+                            if (rowValue.IsArray && elementStructTypeId != 0)
+                            {
+                                if (arrayOfStructTypeIds![invIdx] == 0)
+                                {
+                                    arrayOfStructTypeIds[invIdx] = (ushort)context.Types.InternArrayType(
+                                        DataKind.Struct, elementTypeId: elementStructTypeId);
+                                }
+                                rowTypeId = arrayOfStructTypeIds[invIdx];
+                            }
+                            else
+                            {
+                                // No static schema (model.OutputFields is
+                                // null) — dynamic-shape producer like a
+                                // SQL-defined body via
+                                // ProceduralModelAdapter. ToDataValue's
+                                // BuildStructArray path falls back to
+                                // reading the first element's TypeId when
+                                // rowTypeId is 0, so dynamic-shape
+                                // Array<Struct> outputs still get their
+                                // per-element struct stamps. Primitive
+                                // outputs have TypeId 0 anyway and lose
+                                // nothing.
+                                //
+                                // For scalar struct outputs (e.g. RETURNS
+                                // ScoredLabel from a SQL-defined classifier)
+                                // the body already stamped a TypeId on the
+                                // inline carrier — prefer that over
+                                // elementStructTypeId so the cell's shape
+                                // resolves through the per-query registry.
+                                rowTypeId = elementStructTypeId != 0
+                                    ? elementStructTypeId
+                                    : rowValue.TypeId;
+                            }
+                            DataValue stamped = rowValue.ToDataValue(
+                                outputBatch.Arena, rowTypeId, context.Types);
+                            outputBatch[chunkStart + i].RawValues[outputSlot] = stamped;
+                        }
+
+                        chunkStart += chunkSize;
+                    }
+                }
+
+                context.ReturnRowBatch(sourceBatch);
+                yieldedRows += rowsThisBatch;
+                // Detach the populated batch from the accumulator before yielding so
+                // the next source batch's InitializeOutputBatch rents a fresh batch
+                // rather than re-touching the just-yielded one.
+                RowBatch toYield = output.Flush()
+                    ?? throw new InvalidOperationException("ModelInvocationOperator: accumulator missing in-flight batch at yield.");
+                yield return toYield;
+
+                if (rowLimit.HasValue && yieldedRows >= rowLimit.Value)
+                {
+                    yield break;
                 }
             }
-
-            context.ReturnRowBatch(sourceBatch);
-            yieldedRows += rowsThisBatch;
-            yield return outputBatch;
-
-            if (rowLimit.HasValue && yieldedRows >= rowLimit.Value)
-            {
-                yield break;
-            }
+        }
+        finally
+        {
+            // Catches early-disposal / unhandled-throw paths where a populated
+            // batch is still held by the accumulator.
+            RowBatch? leftover = output.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 
@@ -570,6 +587,7 @@ public sealed class ModelInvocationOperator : QueryOperator
     }
 
     private RowBatch InitializeOutputBatch(
+        OutputBatchAccumulator output,
         ExecutionContext context,
         ColumnLookup outputLookup,
         RowBatch sourceBatch,
@@ -591,8 +609,13 @@ public sealed class ModelInvocationOperator : QueryOperator
         // (which shouldn't happen but isn't actively prevented)
         // benefits from typeless-null SQL semantics rather than a
         // wrongly-stamped Int32/String null.
+        //
+        // The batch is rented through the accumulator (one chokepoint for all
+        // RowBatch rentals across the operator pipeline); the capacity hint
+        // preserves the one-source-batch-to-one-output-batch sizing the
+        // scatter loop assumes.
 
-        RowBatch outputBatch = context.RentRowBatch(outputLookup, rowsThisBatch);
+        RowBatch outputBatch = output.EnsureRentedAndGetCurrent(outputLookup, rowsThisBatch);
 
         for (int rowIdx = 0; rowIdx < rowsThisBatch; rowIdx++)
         {

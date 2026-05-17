@@ -41,6 +41,7 @@ internal sealed class DmlReturningOperator : QueryOperator
         IReadOnlyList<SelectColumn> returningColumns,
         string operatorName,
         string explainDetails)
+        : base(false)
     {
         _catalog = catalog;
         _applyAsync = applyAsync;

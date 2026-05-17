@@ -17,7 +17,7 @@ public sealed class InstrumentedOperator : QueryOperator
     /// Creates an instrumented wrapper around the given operator.
     /// </summary>
     /// <param name="inner">The operator to instrument.</param>
-    public InstrumentedOperator(QueryOperator inner)
+    public InstrumentedOperator(QueryOperator inner) : base(false)
     {
         _inner = inner;
     }

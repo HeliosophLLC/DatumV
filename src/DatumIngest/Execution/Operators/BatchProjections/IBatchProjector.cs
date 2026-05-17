@@ -1,3 +1,4 @@
+using DatumIngest.Execution.Operators;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 
@@ -28,22 +29,20 @@ namespace DatumIngest.Execution.Operators.BatchProjections;
 internal interface IBatchProjector
 {
     /// <summary>
-    /// Projects every row of <paramref name="inputBatch"/> through this
-    /// projector. Output rows land in <paramref name="currentOutput"/> via
-    /// <see cref="RowBatch.Add(DataValue[])"/>; full output batches are
-    /// detached into <paramref name="readyBatches"/> and the slot is replenished
-    /// from <paramref name="context"/>.
+    /// Projects every row of <paramref name="inputBatch"/> through this projector.
+    /// Output rows land in <paramref name="output"/>'s in-progress batch; full output
+    /// batches are detached into <paramref name="readyBatches"/> as they fill.
     /// </summary>
     /// <param name="inputBatch">The batch to project.</param>
-    /// <param name="context">Execution context used to rent fresh output batches when one fills mid-loop.</param>
+    /// <param name="context">Execution context (cancellation, pool access).</param>
     /// <param name="outputLookup">Column lookup for any newly-rented output batch.</param>
-    /// <param name="currentOutput">In-progress output batch — may carry over from a prior input batch. Replaced when full.</param>
+    /// <param name="output">Output accumulator holding the in-progress batch across input batches.</param>
     /// <param name="readyBatches">Receives detached full output batches in the order they fill.</param>
     void Project(
         RowBatch inputBatch,
         ExecutionContext context,
         ColumnLookup outputLookup,
-        ref RowBatch? currentOutput,
+        OutputBatchAccumulator output,
         List<RowBatch> readyBatches);
 }
 
@@ -72,7 +71,7 @@ internal sealed class CopyOnlyBatchProjector : IBatchProjector
         RowBatch inputBatch,
         ExecutionContext context,
         ColumnLookup outputLookup,
-        ref RowBatch? currentOutput,
+        OutputBatchAccumulator output,
         List<RowBatch> readyBatches)
     {
         int width = _sourceOrdinals.Length;
@@ -82,8 +81,8 @@ internal sealed class CopyOnlyBatchProjector : IBatchProjector
 
         for (int r = 0; r < n; r++)
         {
-            currentOutput ??= context.RentRowBatch(outputLookup);
-            IValueStore destArena = currentOutput.Arena;
+            RowBatch current = output.EnsureRentedAndGetCurrent(outputLookup);
+            IValueStore destArena = current.Arena;
 
             DataValue[] outputRow = pool.RentDataValues(width);
             Row src = inputBatch[r];
@@ -91,12 +90,12 @@ internal sealed class CopyOnlyBatchProjector : IBatchProjector
             {
                 outputRow[c] = DataValueRetention.Stabilize(src[_sourceOrdinals[c]], sourceArena, destArena);
             }
-            currentOutput.Add(outputRow);
+            current.Add(outputRow);
 
-            if (currentOutput.IsFull)
+            RowBatch? full = output.TakeIfFull();
+            if (full is not null)
             {
-                readyBatches.Add(currentOutput);
-                currentOutput = null;
+                readyBatches.Add(full);
             }
         }
     }

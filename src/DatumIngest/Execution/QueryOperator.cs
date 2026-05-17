@@ -15,10 +15,23 @@ public abstract class QueryOperator
     /// <summary>
     /// Initializes a new <see cref="QueryOperator"/> instance.
     /// </summary>
-    public QueryOperator()
+    public QueryOperator() : this(hasOwnContext: false)
     {
+        
     }
 
+    /// <summary>
+    /// Initializes a new <see cref="QueryOperator"/> instance.
+    /// </summary>
+    public QueryOperator(bool hasOwnContext)
+    {
+        HasOwnContext = hasOwnContext;
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether this operator has its own execution context.
+    /// </summary>
+    public bool HasOwnContext { get; }
 
     /// <summary>
     /// Executes this operator and streams row batches asynchronously. Every

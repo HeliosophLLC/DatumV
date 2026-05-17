@@ -139,12 +139,7 @@ public sealed class ProjectOperator : QueryOperator
         Pool pool = context.Pool;
         AssertionDiagnostics? assertionDiagnostics = context.AssertionDiagnostics;
 
-        // Invariant: outputBatch != null ⟺ producer still owns it. Yielding transfers
-        // ownership, so we null the local *before* yield. The outer finally cleans up
-        // only the not-yet-yielded leftover, subsuming the previous bespoke per-row catch
-        // (which only covered exceptions inside the projection block — an upstream throw
-        // during the next MoveNextAsync would still have leaked the in-flight outputBatch).
-        RowBatch? outputBatch = null;
+        OutputBatchAccumulator output = new(context);
 
         // Reused across input batches to hold output batches that filled mid-loop in
         // the fast path. Cleared after each yield-drain. Capacity 4 covers typical
@@ -180,42 +175,43 @@ public sealed class ProjectOperator : QueryOperator
                         // no per-row async state machine. Full output batches detached
                         // mid-loop land in readyBatches and are yielded after the input
                         // batch has been returned to the pool.
-                        batchProjector.Project(inputBatch, context, outputLookup!, ref outputBatch, readyBatches);
+                        batchProjector.Project(inputBatch, context, outputLookup!, output, readyBatches);
                     }
                     else
                     {
-                        // Fallback: per-row evaluator path. Identical to pre-batch shape.
-                        // Source arena: where the input row's non-inline values live (input batch).
-                        // Target arena: the OUTPUT batch's arena. Projected expression results
-                        // (e.g. blur(image), substr(s, 1, 5)) materialize here so their offsets
-                        // resolve against the same arena consumers see when they read batch.Arena.
+                        // Fallback: per-row evaluator path. Source arena: where the input
+                        // row's non-inline values live (input batch). Target arena: the
+                        // OUTPUT batch's arena. Projected expression results
+                        // (e.g. blur(image), substr(s, 1, 5)) materialize here so their
+                        // offsets resolve against the same arena consumers see when they
+                        // read batch.Arena.
                         IValueStore sourceArena = inputBatch.Arena;
 
                         for (int index = 0; index < inputBatch.Count; index++)
                         {
                             Row row = inputBatch[index];
-                            outputBatch ??= context.RentRowBatch(outputLookup!);
+                            RowBatch current = output.EnsureRentedAndGetCurrent(outputLookup!);
 
-                            EvaluationFrame frame = new(row, sourceArena, outputBatch.Arena, context, context.OuterRow);
+                            EvaluationFrame frame = new(row, sourceArena, current.Arena, context, context.OuterRow);
 
                             DataValue[]? projected = await schema!.ProjectAsync(
                                 frame,
                                 evaluator,
                                 pool,
                                 inputBatch.Arena,
-                                outputBatch.Arena,
+                                current.Arena,
                                 assertionDiagnostics,
                                 context.CancellationToken).ConfigureAwait(false);
 
                             if (projected is null)
                                 continue; // Row was skipped due to ASSERT … ON FAIL SKIP
 
-                            outputBatch.Add(projected);
+                            current.Add(projected);
 
-                            if (outputBatch.IsFull)
+                            RowBatch? full = output.TakeIfFull();
+                            if (full is not null)
                             {
-                                readyBatches.Add(outputBatch);
-                                outputBatch = null;
+                                readyBatches.Add(full);
                             }
                         }
                     }
@@ -235,18 +231,15 @@ public sealed class ProjectOperator : QueryOperator
                 readyBatches.Clear();
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
+            RowBatch? trailing = output.Flush();
+            if (trailing is not null) yield return trailing;
         }
         finally
         {
-            if (outputBatch is not null)
+            RowBatch? leftover = output.Flush();
+            if (leftover is not null)
             {
-                context.ReturnRowBatch(outputBatch);
+                context.ReturnRowBatch(leftover);
             }
         }
     }

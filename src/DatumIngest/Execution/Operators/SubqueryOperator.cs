@@ -17,7 +17,7 @@ public sealed class SubqueryOperator : QueryOperator
     /// </summary>
     /// <param name="innerOperator">The operator tree for the inner SELECT.</param>
     /// <param name="alias">The alias for this derived table.</param>
-    public SubqueryOperator(QueryOperator innerOperator, string alias)
+    public SubqueryOperator(QueryOperator innerOperator, string alias) : base(false)
     {
         _innerOperator = innerOperator;
         _alias = alias;
@@ -45,11 +45,31 @@ public sealed class SubqueryOperator : QueryOperator
     /// <inheritdoc/>
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
-        // The inner operator already produces correctly-named rows.
-        // Pass them through without copying.
-        await foreach (RowBatch batch in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
+        ColumnLookup? columnLookup = null;
+        RowCopyOutputWriter writer = new(context);
+
+        try
         {
-            yield return batch;
+            await foreach (RowBatch inputBatch in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
+            {
+                for (int i = 0; i < inputBatch.Count; i++)
+                {
+                    columnLookup ??= inputBatch.ColumnLookup;
+
+                    RowBatch? full = writer.Add(columnLookup, inputBatch, i);
+                    if (full is not null) yield return full;
+                }
+
+                context.ReturnRowBatch(inputBatch);
+            }
+
+            RowBatch? trailing = writer.Flush();
+            if (trailing is not null) yield return trailing;
+        }
+        finally
+        {
+            RowBatch? leftover = writer.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 }

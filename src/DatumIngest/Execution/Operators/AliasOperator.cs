@@ -1,5 +1,4 @@
 using DatumIngest.Model;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -46,44 +45,33 @@ public sealed class AliasOperator : QueryOperator
     /// <inheritdoc/>
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
-        Pool pool = context.Pool;
         AliasSchema? schema = null;
         ColumnLookup? columnLookup = null;
+        RowCopyOutputWriter writer = new(context);
 
-
-        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
+        try
         {
-            if (inputBatch.Count == 0)
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
+                for (int i = 0; i < inputBatch.Count; i++)
+                {
+                    schema ??= AliasSchema.Build(_alias, inputBatch[i]);
+                    columnLookup ??= schema.GetColumnLookup();
+
+                    RowBatch? full = writer.Add(columnLookup, inputBatch, i);
+                    if (full is not null) yield return full;
+                }
+
                 context.ReturnRowBatch(inputBatch);
-                continue;
-            }
-            
-            RowBatch? outputBatch = null;
-            try {
-                schema ??= AliasSchema.Build(_alias, inputBatch[0]);
-                columnLookup ??= schema.GetColumnLookup();
-                outputBatch = pool.RebindRowBatch(inputBatch, columnLookup);
-            }
-            catch
-            {
-                if (outputBatch != null)
-                {
-                    context.ReturnRowBatch(outputBatch);
-                }
-
-                if (!inputBatch.Disposed)
-                {
-                    context.ReturnRowBatch(inputBatch);
-                }
-
-                throw;
             }
 
-            if (outputBatch != null)
-            {
-                yield return outputBatch;
-            }
+            RowBatch? trailing = writer.Flush();
+            if (trailing is not null) yield return trailing;
+        }
+        finally
+        {
+            RowBatch? leftover = writer.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
         }
     }
 

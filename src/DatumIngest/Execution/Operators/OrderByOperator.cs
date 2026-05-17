@@ -159,7 +159,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                 -comparer.Compare(
                     left.Keys, context.Store, sidecarRegistry,
                     right.Keys, context.Store, sidecarRegistry)));
-        RowBatch? outputBatch = null;
+        OutputBatchAccumulator output = new(context);
 
         try
         {
@@ -238,27 +238,16 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
             for (int i = 0; i < sorted.Count; i++)
             {
                 Row row = sorted[i].Row;
-                outputBatch ??= context.RentRowBatch(schema!);
-                DataValue[] outValues = pool.RentDataValues(row.FieldCount);
-                row.RawValues.CopyTo(outValues);
-                outputBatch.Add(outValues);
-                pool.ReturnRow(row);                // sorted's row is consumed; clear the slot
                 sorted[i] = default;
-
-                if (outputBatch.IsFull)
-                {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
-                }
+                // Heap rows already live in context.Store with pool-rented arrays.
+                // Adopt transfers ownership to the output batch — no copy, no
+                // separate pool.ReturnRow (batch recycle reclaims the array).
+                RowBatch? full = output.Adopt(schema!, row);
+                if (full is not null) yield return full;
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
+            RowBatch? trailing = output.Flush();
+            if (trailing is not null) yield return trailing;
         }
         finally
         {
@@ -267,7 +256,8 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
             {
                 pool.ReturnRow(heap.Dequeue().Row);
             }
-            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
+            RowBatch? leftover = output.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
             // No bufferArena release: heap rows lived in context.Store, owned by the query.
         }
     }
@@ -292,7 +282,7 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
         SidecarRegistry? sidecarRegistry = context.SidecarRegistry;
         ColumnLookup? schema = null;
         List<KeyedRow> buffer = [];
-        RowBatch? outputBatch = null;
+        OutputBatchAccumulator output = new(context);
 
         try
         {
@@ -387,25 +377,15 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                 for (int i = 0; i < buffer.Count; i++)
                 {
                     Row row = buffer[i].Row;
-                    outputBatch ??= context.RentRowBatch(schema!);
                     DataValue[] outValues = pool.RentAndCopyDataValues(
                         row.RawValues, bufferArena!, context.Store);
-                    outputBatch.Add(outValues);
-
-                    if (outputBatch.IsFull)
-                    {
-                        RowBatch toYield = outputBatch;
-                        outputBatch = null;
-                        yield return toYield;
-                    }
+                    Row stableRow = new(schema!, outValues);
+                    RowBatch? full = output.Adopt(schema!, stableRow);
+                    if (full is not null) yield return full;
                 }
 
-                if (outputBatch is not null)
-                {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
-                }
+                RowBatch? trailing = output.Flush();
+                if (trailing is not null) yield return trailing;
                 yield break;
             }
 
@@ -459,7 +439,8 @@ public sealed class OrderByOperator : QueryOperator, IDisposable
                 context.Accountant.NotifyReleased(residentBytesNotified);
             }
 
-            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
+            RowBatch? leftover = output.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
             spiller.Dispose();
             if (bufferArena is not null) pool.ReturnArena(bufferArena);
         }

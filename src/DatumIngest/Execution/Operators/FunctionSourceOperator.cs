@@ -18,7 +18,7 @@ public sealed class FunctionSourceOperator : QueryOperator
     /// </summary>
     /// <param name="function">The table-valued function to invoke.</param>
     /// <param name="arguments">The argument expressions to evaluate.</param>
-    public FunctionSourceOperator(ITableValuedFunction function, IReadOnlyList<Expression> arguments)
+    public FunctionSourceOperator(ITableValuedFunction function, IReadOnlyList<Expression> arguments) : base(false)
     {
         _function = function;
         _arguments = arguments;

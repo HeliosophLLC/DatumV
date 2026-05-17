@@ -80,7 +80,7 @@ public sealed class FoldScanOperator : QueryOperator
     {
         Pool pool = context.Pool;
         using MaterializedInput input = new(context, "FOLD/SCAN");
-        RowBatch? outputBatch = null;
+        OutputBatchAccumulator output = new(context);
 
         try
         {
@@ -163,27 +163,18 @@ public sealed class FoldScanOperator : QueryOperator
                     values[inputFieldCount + j] = scanResults[rowIndex][j];
                 }
 
-                outputBatch ??= context.RentRowBatch(outputLookup);
-                outputBatch.Add(values);
-
-                if (outputBatch.IsFull)
-                {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
-                }
+                Row outputRow = new(outputLookup, values);
+                RowBatch? full = output.Adopt(outputLookup, outputRow);
+                if (full is not null) yield return full;
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
+            RowBatch? trailing = output.Flush();
+            if (trailing is not null) yield return trailing;
         }
         finally
         {
-            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
+            RowBatch? leftover = output.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
             // MaterializedInput's using-Dispose releases source-row rentals + accountant.
         }
     }

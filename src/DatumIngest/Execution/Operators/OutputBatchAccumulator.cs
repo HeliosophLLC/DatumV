@@ -31,14 +31,14 @@ namespace DatumIngest.Execution.Operators;
 /// (the assertion is structurally cheap when not violated).
 /// </para>
 /// </remarks>
-internal abstract class OutputBatchAccumulator
+internal class OutputBatchAccumulator
 {
     private readonly ExecutionContext _context;
     private readonly Pool _pool;
     private ColumnLookup? _rentedLookup;
     private RowBatch? _current;
 
-    protected OutputBatchAccumulator(ExecutionContext context)
+    public OutputBatchAccumulator(ExecutionContext context)
     {
         _context = context;
         _pool = context.Pool;
@@ -62,12 +62,21 @@ internal abstract class OutputBatchAccumulator
     /// Rents an output batch with <paramref name="lookup"/> if none is open,
     /// or returns the in-progress batch. Throws if the in-progress batch's
     /// lookup reference does not equal <paramref name="lookup"/>.
+    /// <para>
+    /// When <paramref name="capacityHint"/> is supplied and a new batch must
+    /// be rented, it is passed through to <c>context.RentRowBatch</c> so the
+    /// batch is sized for the caller's known row count (operators that map
+    /// one input batch to one output batch — model invocation, etc.). The
+    /// hint is ignored when an in-progress batch is already open.
+    /// </para>
     /// </summary>
-    protected RowBatch EnsureRentedAndGetCurrent(ColumnLookup lookup)
+    public RowBatch EnsureRentedAndGetCurrent(ColumnLookup lookup, int? capacityHint = null)
     {
         if (_current is null)
         {
-            _current = _context.RentRowBatch(lookup);
+            _current = capacityHint is int c
+                ? _context.RentRowBatch(lookup, c)
+                : _context.RentRowBatch(lookup);
             _rentedLookup = lookup;
             return _current;
         }
@@ -86,7 +95,7 @@ internal abstract class OutputBatchAccumulator
     /// every emit method so callers can <c>yield return</c> the full batch
     /// without losing ownership.
     /// </summary>
-    protected RowBatch? TakeIfFull()
+    public RowBatch? TakeIfFull()
     {
         if (_current is { IsFull: true } ready)
         {

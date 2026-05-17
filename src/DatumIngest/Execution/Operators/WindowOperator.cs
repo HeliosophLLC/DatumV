@@ -3,7 +3,6 @@ using DatumIngest.Execution.Operators.Windows;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -73,10 +72,9 @@ public sealed class WindowOperator : QueryOperator
     /// <inheritdoc/>
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
-        Pool pool = context.Pool;
         ExpressionEvaluator evaluator = context.CreateEvaluator();
         using MaterializedInput input = new(context, "WINDOW");
-        RowBatch? outputBatch = null;
+        RowAugmentingOutputWriter output = new(context);
 
         try
         {
@@ -131,44 +129,33 @@ public sealed class WindowOperator : QueryOperator
             ColumnLookup outputLookup = new(outputNames);
 
             // Emit rows in original input order, augmented with window columns.
+            // Source rows live in context.Store (MaterializedInput stabilises on
+            // collect), so BeginRow's stabilise pass against context.Store is the
+            // honest source arena even though the current batch's arena is also
+            // context.Store today.
             for (int rowIndex = 0; rowIndex < input.Rows.Count; rowIndex++)
             {
                 Row sourceRow = input.Rows[rowIndex];
 
-                DataValue[] values = pool.RentDataValues(totalFieldCount);
-                for (int field = 0; field < inputFieldCount; field++)
-                {
-                    values[field] = sourceRow[field];
-                }
+                (DataValue[] values, _) = output.BeginRow(
+                    outputLookup, sourceRow, context.Store, inputFieldCount);
+
                 for (int windowColumnIndex = 0; windowColumnIndex < _windowColumns.Count; windowColumnIndex++)
                 {
                     values[inputFieldCount + windowColumnIndex] = windowResults[rowIndex][windowColumnIndex];
                 }
 
-                outputBatch ??= context.RentRowBatch(outputLookup);
-                outputBatch.Add(values);
-
-                if (outputBatch.IsFull)
-                {
-                    RowBatch toYield = outputBatch;
-                    outputBatch = null;
-                    yield return toYield;
-                }
+                RowBatch? full = output.Commit(outputLookup, values);
+                if (full is not null) yield return full;
             }
 
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
+            RowBatch? trailing = output.Flush();
+            if (trailing is not null) yield return trailing;
         }
         finally
         {
-            if (outputBatch is not null)
-            {
-                context.ReturnRowBatch(outputBatch);
-            }
+            RowBatch? leftover = output.Flush();
+            if (leftover is not null) context.ReturnRowBatch(leftover);
             // MaterializedInput's using-Dispose releases source-row rentals + accountant.
         }
     }
