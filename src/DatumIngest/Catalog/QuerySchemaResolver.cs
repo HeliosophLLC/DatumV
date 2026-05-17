@@ -519,8 +519,11 @@ public sealed class QuerySchemaResolver
     /// <summary>
     /// Resolves a table-valued function source by calling
     /// <see cref="ITableValuedFunction.ValidateArguments"/> with the inferred
-    /// argument kinds. Returns an empty column list if the function is unknown
-    /// or if argument validation fails.
+    /// argument kinds and constant-folded literal values for any argument that
+    /// is a literal (in source or post-<c>ParameterBinder</c> substitution).
+    /// Returns an empty column list if the function is unknown, if argument
+    /// validation fails, or if the TVF's plan-time peek raises an IO/format
+    /// exception against the resolved file.
     /// </summary>
     private IReadOnlyList<ResolvedColumn> ResolveFunctionSource(FunctionSource functionSource)
     {
@@ -530,25 +533,68 @@ public sealed class QuerySchemaResolver
             return [];
         }
 
-        // Resolve argument kinds from literal expressions where possible.
-        DataKind[] argumentKinds = new DataKind[functionSource.Arguments.Count];
-        for (int index = 0; index < functionSource.Arguments.Count; index++)
+        int argCount = functionSource.Arguments.Count;
+        DataKind[] argumentKinds = new DataKind[argCount];
+        DataValue?[] constantArguments = new DataValue?[argCount];
+
+        // Per-call store backing any constant DataValue (long file paths,
+        // dataset names) surfaced to the TVF for this single ValidateArguments
+        // call. ByteArrayValueStore — a plain managed byte[] — is right-sized
+        // for the throwaway use case: no VA reservation, no refcount, no
+        // IDisposable. The TVF's returned Schema references only ColumnInfo
+        // (name + kind + nullability), so the store falls out of scope and
+        // gets GC'd as soon as we return. ITableValuedFunction.ValidateArguments
+        // documents that implementations must not retain the constant
+        // references past the call.
+        ByteArrayValueStore constantStore = new();
+
+        // For each argument: resolve the kind (used by all TVFs), and try to
+        // surface the constant-folded value (used by TVFs whose output schema
+        // depends on the data they're about to read — open_fits_table,
+        // open_h5_dataset). LiteralExpression includes $parameter references
+        // after ParameterBinder substitution, so this path fires for both
+        // literal-in-source and bound-parameter calls.
+        for (int index = 0; index < argCount; index++)
         {
-            // Use an empty schema — function source arguments are typically
-            // literals, not column references.
+            Expression argument = functionSource.Arguments[index];
+
             Schema emptySchema = new([new ColumnInfo("_placeholder", DataKind.Float32, nullable: false)]);
             DataKind? kind = ExpressionTypeResolver.ResolveType(
-                functionSource.Arguments[index], emptySchema, _functionRegistry);
+                argument, emptySchema, _functionRegistry);
             argumentKinds[index] = kind ?? DataKind.Float32;
+
+            if (LiteralHoister.TryGetConstantValue(argument, constantStore, out DataValue constantValue))
+            {
+                constantArguments[index] = constantValue;
+            }
         }
 
         try
         {
-            Schema outputSchema = function.ValidateArguments(argumentKinds);
+            Schema outputSchema = function.ValidateArguments(
+                argumentKinds,
+                constantArguments,
+                cancellationToken: default);
             string sourceIdentifier = functionSource.Alias ?? functionSource.FunctionName;
             return ToResolvedColumns(outputSchema, sourceIdentifier);
         }
         catch (FunctionArgumentException)
+        {
+            return [];
+        }
+        // TVFs that peek files at plan time (open_fits_table, open_h5_dataset)
+        // can raise IO/format exceptions before they can produce a fallback
+        // schema. Swallow those here so a broken file makes the source resolve
+        // to "no columns known" rather than blowing up the whole resolution
+        // (which would also kill column completion for unrelated sources in
+        // the same query). Runtime execution will surface the underlying
+        // failure with a real diagnostic when the TVF actually runs.
+        catch (Exception ex) when (
+            ex is IOException
+            or UnauthorizedAccessException
+            or FormatException
+            or InvalidDataException
+            or NotSupportedException)
         {
             return [];
         }

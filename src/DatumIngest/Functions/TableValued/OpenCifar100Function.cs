@@ -56,7 +56,10 @@ public sealed class OpenCifar100Function : ITableValuedFunctionMetadata, ITableV
     string ITableValuedFunction.Name => Name;
 
     /// <inheritdoc />
-    public Schema ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
+    public Schema ValidateArguments(
+        ReadOnlySpan<DataKind> argumentKinds,
+        ReadOnlySpan<DataValue?> constantArguments,
+        CancellationToken cancellationToken)
     {
         if (argumentKinds.Length != 1)
         {

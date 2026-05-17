@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Functions;
 /// </summary>
 public sealed class VideoUnnestFramesFunctionTests : ServiceTestBase
 {
-    private readonly VideoUnnestFramesFunction _function = new();
+    private readonly ITableValuedFunction _function = new VideoUnnestFramesFunction();
 
     private static string SpikeVideoPath() => Path.Combine(
         AppContext.BaseDirectory, "Fixtures", "spike.mp4");

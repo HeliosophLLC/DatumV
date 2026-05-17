@@ -88,7 +88,10 @@ public sealed class ListFolderFunction : ITableValuedFunctionMetadata, ITableVal
     string ITableValuedFunction.Name => Name;
 
     /// <inheritdoc />
-    public Schema ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
+    public Schema ValidateArguments(
+        ReadOnlySpan<DataKind> argumentKinds,
+        ReadOnlySpan<DataValue?> constantArguments,
+        CancellationToken cancellationToken)
     {
         if (argumentKinds.Length is < 1 or > 3)
         {

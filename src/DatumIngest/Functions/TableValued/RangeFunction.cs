@@ -48,7 +48,10 @@ public sealed class RangeFunction : ITableValuedFunctionMetadata, ITableValuedFu
     string ITableValuedFunction.Name => Name;
 
     /// <inheritdoc />
-    public Schema ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
+    public Schema ValidateArguments(
+        ReadOnlySpan<DataKind> argumentKinds,
+        ReadOnlySpan<DataValue?> constantArguments,
+        CancellationToken cancellationToken)
     {
         if (argumentKinds.Length is not (2 or 3))
         {

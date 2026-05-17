@@ -10,6 +10,22 @@ namespace DatumIngest.Execution;
 /// the optimizer sees only literal values and all existing optimizations
 /// (predicate pushdown, index seek, statistics pruning) work unchanged.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Load-bearing invariant: bind before plan.</strong> Several
+/// pieces of infrastructure assume that by the time the planner / resolver
+/// runs, every <c>$parameter</c> has already been rewritten into a
+/// <see cref="LiteralExpression"/>. Most visibly, the constant-aware
+/// <c>ITableValuedFunction.ValidateArguments</c> overload (used by TVFs
+/// whose output schema is determined by argument values — FITS bintables,
+/// HDF5 datasets, etc.) treats <c>$archive</c> and <c>'path/to/foo.h5'</c>
+/// uniformly because both are LiteralExpressions after this pass runs. If
+/// a future change introduces plan caching across multiple bind-and-execute
+/// calls (so the same plan is reused with different parameter values), the
+/// TVF constant-args path must either opt out of caching or key its
+/// per-call peek on the bound values.
+/// </para>
+/// </remarks>
 public static class ParameterBinder
 {
     /// <summary>

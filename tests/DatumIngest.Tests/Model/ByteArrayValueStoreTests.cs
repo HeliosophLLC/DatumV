@@ -9,7 +9,7 @@ namespace DatumIngest.Tests.Model;
 /// but drives the store through the <see cref="IValueStore"/> surface so the same shape of
 /// asserts also validates the interface contract.
 /// </summary>
-public class ByteArrayValueStoreTests
+public class ByteArrayValueStoreTests : ServiceTestBase
 {
     [Fact]
     public void StoreAndRetrieveString()

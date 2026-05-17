@@ -19,6 +19,42 @@ namespace DatumIngest.Execution;
 public static class LiteralHoister
 {
     /// <summary>
+    /// Returns the <see cref="DataValue"/> carried by <paramref name="expression"/>
+    /// if it is a plan-time-known constant — i.e. a top-level
+    /// <see cref="LiteralExpression"/> (substituted from a <c>$parameter</c> by
+    /// <see cref="ParameterBinder"/>, or written as a literal in source) or an
+    /// already-hoisted <see cref="LiteralValueExpression"/>. Returns <c>false</c>
+    /// for column references, function calls, binary expressions over literals
+    /// (no constant-folding of compound expressions), and anything else.
+    /// </summary>
+    /// <remarks>
+    /// Used by callers that need plan-time access to a literal's value without
+    /// rewriting the whole subtree — most notably TVF schema resolution, where
+    /// <c>open_h5_dataset('foo.h5', '/x')</c> wants the two path strings to
+    /// peek the file's schema. <paramref name="store"/> is consulted only when
+    /// the expression is a <see cref="LiteralExpression"/> whose payload needs
+    /// arena allocation (long strings, binary parameters).
+    /// </remarks>
+    public static bool TryGetConstantValue(
+        Expression expression,
+        IValueStore store,
+        out DataValue value)
+    {
+        switch (expression)
+        {
+            case LiteralExpression literal:
+                value = HoistLiteral(literal, store).Value;
+                return true;
+            case LiteralValueExpression hoisted:
+                value = hoisted.Value;
+                return true;
+            default:
+                value = default;
+                return false;
+        }
+    }
+
+    /// <summary>
     /// Recursively rewrites <paramref name="expression"/> so every contained
     /// <see cref="LiteralExpression"/> becomes a <see cref="LiteralValueExpression"/>.
     /// Nodes with no literals are returned unchanged.
