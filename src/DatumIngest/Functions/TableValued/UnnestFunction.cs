@@ -86,6 +86,7 @@ public sealed class UnnestFunction : ITableValuedFunctionMetadata, ITableValuedF
     public Schema ValidateArguments(
         ReadOnlySpan<DataKind> argumentKinds,
         ReadOnlySpan<DataValue?> constantArguments,
+        IValueStore constantStore,
         CancellationToken cancellationToken)
     {
         if (argumentKinds.Length != 1)

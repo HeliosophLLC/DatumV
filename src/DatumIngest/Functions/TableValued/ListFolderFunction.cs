@@ -91,6 +91,7 @@ public sealed class ListFolderFunction : ITableValuedFunctionMetadata, ITableVal
     public Schema ValidateArguments(
         ReadOnlySpan<DataKind> argumentKinds,
         ReadOnlySpan<DataValue?> constantArguments,
+        IValueStore constantStore,
         CancellationToken cancellationToken)
     {
         if (argumentKinds.Length is < 1 or > 3)

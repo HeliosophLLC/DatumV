@@ -35,6 +35,14 @@ public interface ITableValuedFunction
     /// this call — implementations must not retain references past
     /// return.
     /// </param>
+    /// <param name="constantStore">
+    /// The <see cref="IValueStore"/> backing any byte-content payloads
+    /// inside <paramref name="constantArguments"/> — long strings,
+    /// arena-stored arrays. TVFs that need to read a constant string
+    /// argument call <c>constants[i].Value.AsString(constantStore)</c>;
+    /// short inline strings also work through the same call. TVFs that
+    /// don't read constants ignore this parameter.
+    /// </param>
     /// <param name="cancellationToken">
     /// Cancellation token for any plan-time I/O (file peek, schema
     /// introspection). TVFs that don't do plan-time work can ignore it.
@@ -46,6 +54,7 @@ public interface ITableValuedFunction
     Schema ValidateArguments(
         ReadOnlySpan<DataKind> argumentKinds,
         ReadOnlySpan<DataValue?> constantArguments,
+        IValueStore constantStore,
         CancellationToken cancellationToken);
 
     /// <summary>

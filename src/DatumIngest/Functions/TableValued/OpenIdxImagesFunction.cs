@@ -75,6 +75,7 @@ public sealed class OpenIdxImagesFunction : ITableValuedFunctionMetadata, ITable
     public Schema ValidateArguments(
         ReadOnlySpan<DataKind> argumentKinds,
         ReadOnlySpan<DataValue?> constantArguments,
+        IValueStore constantStore,
         CancellationToken cancellationToken)
     {
         if (argumentKinds.Length != 1)

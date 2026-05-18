@@ -71,6 +71,7 @@ public sealed class VideoUnnestFramesFunction : ITableValuedFunctionMetadata, IT
     public Schema ValidateArguments(
         ReadOnlySpan<DataKind> argumentKinds,
         ReadOnlySpan<DataValue?> constantArguments,
+        IValueStore constantStore,
         CancellationToken cancellationToken)
     {
         if (argumentKinds.Length is < 1 or > 4)

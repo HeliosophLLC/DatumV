@@ -51,6 +51,7 @@ public sealed class RangeFunction : ITableValuedFunctionMetadata, ITableValuedFu
     public Schema ValidateArguments(
         ReadOnlySpan<DataKind> argumentKinds,
         ReadOnlySpan<DataValue?> constantArguments,
+        IValueStore constantStore,
         CancellationToken cancellationToken)
     {
         if (argumentKinds.Length is not (2 or 3))

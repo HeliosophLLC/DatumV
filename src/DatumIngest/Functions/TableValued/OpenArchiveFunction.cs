@@ -103,6 +103,7 @@ public sealed class OpenArchiveFunction : ITableValuedFunctionMetadata, ITableVa
     public Schema ValidateArguments(
         ReadOnlySpan<DataKind> argumentKinds,
         ReadOnlySpan<DataValue?> constantArguments,
+        IValueStore constantStore,
         CancellationToken cancellationToken)
     {
         if (argumentKinds.Length is not (1 or 2))

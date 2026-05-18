@@ -574,6 +574,7 @@ public sealed class QuerySchemaResolver
             Schema outputSchema = function.ValidateArguments(
                 argumentKinds,
                 constantArguments,
+                constantStore,
                 cancellationToken: default);
             string sourceIdentifier = functionSource.Alias ?? functionSource.FunctionName;
             return ToResolvedColumns(outputSchema, sourceIdentifier);
