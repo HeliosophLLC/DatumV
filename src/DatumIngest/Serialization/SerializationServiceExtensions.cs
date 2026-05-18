@@ -1,5 +1,6 @@
 using DatumIngest.Serialization;
 using DatumIngest.Serialization.Csv;
+using DatumIngest.Serialization.Fits;
 using DatumIngest.Serialization.Idx;
 using DatumIngest.Serialization.Json;
 using DatumIngest.Serialization.Tar;
@@ -26,6 +27,7 @@ public static class SerializationServiceExtensions
         //services.AddTransient<IFileFormat, ParquetFileFormat>();
         //services.AddTransient<IFileFormat, Hdf5FileFormat>();
         services.AddTransient<IFileFormat, IdxFileFormat>();
+        services.AddTransient<IFileFormat, FitsFileFormat>();
         services.AddTransient<IFileFormat, ZipFileFormat>();
         services.AddTransient<IFileFormat, TarFileFormat>();
 

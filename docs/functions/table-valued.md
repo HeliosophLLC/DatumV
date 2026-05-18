@@ -217,6 +217,132 @@ FROM read_csv(:tsv_bytes, delimiter := '\t')
 WHERE fields[1] != 'client_id'
 ```
 
+### open_fits_hdus
+
+`open_fits_hdus(path)` -> Rows
+
+Opens a FITS file and yields **one row per Header-Data Unit (HDU)** with its parsed metadata. The interrogation TVF — call this first to see what's inside an unfamiliar FITS file before deciding whether to pull pixel data with `open_fits_images` or table rows with `open_fits_table`.
+
+A FITS file is a sequence of HDUs. Each HDU has a header section (2880-byte blocks of 80-char ASCII "cards") describing its contents, followed by an optional data section. The data can be one of three shapes: an N-dimensional **image** (pixel array), a **binary table** (typed rows × columns), or an **ASCII table** (rare). A single file commonly mixes multiple kinds — a JWST L2 product, for example, might bundle a header-only primary HDU plus `SCI`/`ERR`/`DQ` image extensions plus a binary-table extension with per-pixel variance.
+
+Output columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `hdu_index` | `INT64` | 0 = primary, 1+ = extensions |
+| `kind` | `STRING` | `'primary'`, `'image'`, `'bintable'`, `'asciitable'`, or `'unknown'` |
+| `extname` | `STRING?` | `EXTNAME` card value, e.g. `'SCI'`, `'ERR'`, `'CATALOG'` |
+| `extver` | `INT32?` | `EXTVER` card value |
+| `bitpix` | `INT32?` | Pixel format selector: `8/16/32/64` (integer), `-32/-64` (IEEE float) |
+| `naxis` | `INT32` | Dimension count (`0` for header-only HDUs) |
+| `naxisn` | `INT32[]` | `[NAXIS1, NAXIS2, …]` — fast-axis first |
+| `nrows` | `INT64?` | `NAXIS2` for `bintable` HDUs; `NULL` for image HDUs |
+| `ncols` | `INT32?` | `TFIELDS` for `bintable` HDUs; `NULL` for image HDUs |
+| `header` | `JSON` | Full card list as an array of `{key, value, comment}` objects, file order |
+
+Transparent `.fits.gz` support: pass the gzipped path directly and the file is decompressed in memory.
+
+The `header` column is the doorway to the rich, instrument-specific metadata that doesn't get its own typed column — observation IDs, filter names, exposure times, WCS keywords, telescope identification, processing history. Query it with JSON path operators just like any other JSON-valued column.
+
+```sql
+-- Survey a file: what kinds of HDUs does it contain?
+SELECT hdu_index, kind, extname, bitpix, naxisn, nrows, ncols
+FROM open_fits_hdus('/data/jw01234.fits');
+
+-- Pull a specific keyword's value out of the header for every HDU
+SELECT
+    hdu_index,
+    extname,
+    (SELECT card->>'value' FROM jsonb_array_elements(header) AS card
+     WHERE card->>'key' = 'EXPTIME') AS exposure_seconds
+FROM open_fits_hdus('/data/jw01234.fits');
+```
+
+### open_fits_images
+
+`open_fits_images(path)` -> Rows
+
+Opens a FITS file and yields **one row per image HDU**, surfacing both a displayable PNG preview and the scientific Float32 pixel array. Binary-table and header-only HDUs are skipped — they have no image to project.
+
+Output columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `hdu_index` | `INT64` | Source HDU index (preserved across skipped non-image HDUs) |
+| `extname` | `STRING?` | `EXTNAME` card value |
+| `image` | `IMAGE?` | PNG-encoded grayscale preview, min/max-stretched. Populated only when `NAXIS == 2`. NULL for 1-D spectra and higher-rank cubes. |
+| `sci` | `FLOAT32[]?` | Per-pixel scientific value with BSCALE/BZERO applied. Populated whenever the HDU has pixel data. Shape is flat — read NAXIS / NAXISn from the `header` column to reshape. |
+| `header` | `JSON` | Full card list, same shape as `open_fits_hdus` |
+
+**`image` vs `sci`.** Two columns, two audiences. The `image` column is a browser-displayable thumbnail — handy for chat UIs, dataset previews, sanity checks. The `sci` column carries the *actual* per-pixel scientific values in physical units (BSCALE/BZERO applied during decode), suitable for SQL math, NaN masks, per-pixel filtering, statistics. A query that just wants to look at a frame reads `image`; a query that wants to compute on the pixels reads `sci`.
+
+**BITPIX decode (v1).** Each pixel is read big-endian per the FITS standard, then linearly rescaled to Float32 as `physical = BZERO + BSCALE * raw`:
+
+| BITPIX | On-disk format |
+|---|---|
+| `8` | unsigned 8-bit integer |
+| `16` | signed 16-bit integer |
+| `32` | signed 32-bit integer |
+| `64` | signed 64-bit integer |
+| `-32` | IEEE 754 single-precision float |
+| `-64` | IEEE 754 double-precision float |
+
+NaN pixels become `0` (black) in the displayable preview; the `sci` column carries them through verbatim so per-pixel masking still works.
+
+```sql
+-- Browse the image HDUs in a file
+SELECT hdu_index, extname, image FROM open_fits_images('/data/jw01234.fits');
+
+-- Compute a per-frame median (assumes sci is reshapable from NAXIS)
+SELECT extname, array_median(sci) AS median_flux
+FROM open_fits_images('/data/jw01234.fits')
+WHERE sci IS NOT NULL;
+```
+
+### open_fits_table
+
+`open_fits_table(path, ext)` -> Rows
+
+Opens a FITS **binary-table HDU** and yields its rows with one output column per declared `TTYPEn`/`TFORMn` — typed, named columns matching what the file itself says it contains. Use this for catalogs (DESI redshift tables, SDSS source catalogs), event lists (Chandra X-ray events), and time-series data.
+
+`ext` selects which HDU to read:
+- **STRING** — case-insensitive match against the `EXTNAME` card (recommended; recipes that key on EXTNAME survive file-layout changes).
+- **INT64** — HDU index, where 0 is the primary HDU. Throws if the indexed HDU isn't a binary table.
+
+**Plan-time schema peek.** Both arguments must be constants at plan time (literals in source, or `$parameter` references that the parameter binder has substituted). The validator opens the file, walks to the target HDU, and reads the `TTYPEn`/`TFORMn` cards to produce a real `Schema` — so `SELECT TARGETID, RA, DEC FROM open_fits_table(...)` type-checks against the actual catalog columns. Calling with a non-constant argument (e.g. a column reference inside a JOIN) throws — recipe writers must inline the path/ext or pass them as bound parameters.
+
+**Supported `TFORM` types (v1).**
+
+| TFORM | DataKind | Notes |
+|---|---|---|
+| `L` | `BOOLEAN` | logical |
+| `B` | `UINT8` | byte |
+| `I` | `INT16` | big-endian |
+| `J` | `INT32` | big-endian |
+| `K` | `INT64` | big-endian |
+| `E` | `FLOAT32` | big-endian |
+| `D` | `FLOAT64` | big-endian |
+| `A`*(n)* | `STRING` | fixed-width ASCII, right-trimmed of spaces |
+| *r*`E` / *r*`J` / *r*`I` / ... | `FLOAT32[]` / `INT32[]` / `INT16[]` / ... | `repeat > 1` numeric forms emit a typed array column |
+
+Variable-length array columns (`TFORM` `P` and `Q`), complex (`C`, `M`), and bit arrays (`X`) throw `NotSupportedException` — catalogs that need them land via a follow-up that walks the BINTABLE heap region.
+
+```sql
+-- Pull rows from a named extension
+SELECT TARGETID, RA, DEC, Z
+FROM open_fits_table('/data/redrock-sv1-bright-12345.fits', 'REDSHIFTS')
+WHERE ZWARN = 0;
+
+-- Pull by HDU index (rarer; only when EXTNAME isn't set)
+SELECT * FROM open_fits_table('/data/catalog.fits', 1);
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT *
+FROM open_fits_table($archive, 'CATALOG');
+```
+
+**Ingest path.** Dropping a `.fits` file into the dataset pipeline lands it through `FitsFileFormat`, which emits the same shape `open_fits_hdus` does — the most informative default for an unknown file. Recipes that want pixel previews or catalog rows directly should use the corresponding TVF inside an SQL recipe.
+
 ## See Also
 
 - [Aggregate Functions](aggregate.md) -- grouping and reduction functions

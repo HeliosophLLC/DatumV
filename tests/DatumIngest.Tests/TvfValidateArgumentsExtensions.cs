@@ -19,6 +19,11 @@ internal static class TvfValidateArgumentsExtensions
         ReadOnlySpan<DataKind> argumentKinds)
     {
         DataValue?[] noConstants = new DataValue?[argumentKinds.Length];
-        return function.ValidateArguments(argumentKinds, noConstants, cancellationToken: default);
+        // Tests that go through this overload don't pass constants, so the
+        // store is never read — handing in a fresh ByteArrayValueStore is
+        // strictly defensive against future TVFs that might dereference it
+        // regardless of whether constants populate.
+        ByteArrayValueStore noopStore = new();
+        return function.ValidateArguments(argumentKinds, noConstants, noopStore, cancellationToken: default);
     }
 }

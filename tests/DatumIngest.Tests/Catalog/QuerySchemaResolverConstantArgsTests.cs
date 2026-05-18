@@ -260,6 +260,7 @@ public sealed class QuerySchemaResolverConstantArgsTests : ServiceTestBase, IDis
         public Schema ValidateArguments(
             ReadOnlySpan<DataKind> argumentKinds,
             ReadOnlySpan<DataValue?> constantArguments,
+            IValueStore constantStore,
             CancellationToken cancellationToken)
         {
             LastKinds = argumentKinds.ToArray();

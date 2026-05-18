@@ -1118,6 +1118,9 @@ public sealed class FunctionRegistry
         registry.RegisterTableValued<TableValued.OpenIdxLabelsFunction>();
         registry.RegisterTableValued<TableValued.OpenCifar10Function>();
         registry.RegisterTableValued<TableValued.OpenCifar100Function>();
+        registry.RegisterTableValued<TableValued.OpenFitsHdusFunction>();
+        registry.RegisterTableValued<TableValued.OpenFitsImagesFunction>();
+        registry.RegisterTableValued<TableValued.OpenFitsTableFunction>();
 
         // Inference toolkit. Lives in its own `inference` schema so the
         // introspection surface (onnx_inspect, devices, ...) doesn't
