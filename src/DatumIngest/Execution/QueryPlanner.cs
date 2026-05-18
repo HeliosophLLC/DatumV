@@ -283,7 +283,12 @@ public sealed class QueryPlanner
         // so expensive per-row work in those wrappers only runs for the rows
         // that survive LIMIT/OFFSET. Must follow CSE so the rewrite sees the
         // final wrapper chain.
-        return LimitPushdown.Push(afterCse);
+        QueryOperator afterLimitPush = LimitPushdown.Push(afterCse);
+        // Lifts a chain of row-preserving column-adders above a LIMIT+ORDER BY
+        // pair when the sort keys don't reference any column the chain introduces.
+        // Handles the case LimitPushdown can't reach because OrderBy sits between
+        // LIMIT and the chain.
+        return SortLimitLift.Lift(afterLimitPush);
     }
 
     /// <summary>

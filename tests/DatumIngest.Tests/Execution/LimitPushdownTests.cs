@@ -77,13 +77,30 @@ public sealed class LimitPushdownTests : ServiceTestBase
     }
 
     [Fact]
-    public void LimitWithOrderBy_DoesNotPushBelowOrderBy()
+    public void LimitWithOrderBy_LiftsProjectAboveSortAndLimit()
     {
-        // OrderBy is not row-preserving from LIMIT's perspective — pushing
-        // LIMIT below an OrderBy would change which rows are emitted.
+        // ORDER BY references a source column ('a') that the projection does
+        // not redefine. SortLimitLift moves the Project above LIMIT/OrderBy so
+        // the expensive concat(a, b) only evaluates for the surviving row.
         TableCatalog catalog = Catalog2Cols();
         QueryOperator plan = PlanQuery(
             "SELECT concat(a, b) FROM t ORDER BY a LIMIT 1",
+            catalog);
+
+        ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+        LimitOperator limit = Assert.IsType<LimitOperator>(project.Source);
+        OrderByOperator orderBy = Assert.IsType<OrderByOperator>(limit.Source);
+        Assert.IsType<ScanOperator>(orderBy.Source);
+    }
+
+    [Fact]
+    public void LimitWithOrderBy_OnProjectAlias_DoesNotLift()
+    {
+        // ORDER BY references the Project's alias 'c' — the column doesn't
+        // exist below Project, so the lift would break the sort.
+        TableCatalog catalog = Catalog2Cols();
+        QueryOperator plan = PlanQuery(
+            "SELECT concat(a, b) AS c FROM t ORDER BY c LIMIT 1",
             catalog);
 
         LimitOperator limit = Assert.IsType<LimitOperator>(plan);
